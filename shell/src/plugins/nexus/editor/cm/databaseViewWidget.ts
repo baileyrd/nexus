@@ -25,6 +25,7 @@ import type {
   EditorKernelClient,
   ExecuteDatabaseViewResponse,
 } from '../kernelClient'
+import { formatCell, lookupFieldDef } from './databaseViewFormat'
 
 /** Public dependencies the widget needs — injected so unit tests can
  *  swap in a mock kernel client without standing up the full editor. */
@@ -92,7 +93,7 @@ export class DatabaseViewWidget extends WidgetType {
 
     const cached = cache.peek(this.key)
     if (cached?.response) {
-      body.replaceChildren(renderApplied(cached.response))
+      body.replaceChildren(renderApplied(cached.response, this.viewConfig))
       return wrap
     }
     if (cached?.error) {
@@ -108,7 +109,7 @@ export class DatabaseViewWidget extends WidgetType {
     void promise.then(
       (resp) => {
         if (!body.isConnected) return
-        body.replaceChildren(renderApplied(resp))
+        body.replaceChildren(renderApplied(resp, this.viewConfig))
       },
       (err) => {
         if (!body.isConnected) return
@@ -374,15 +375,41 @@ function removeAt(
   return { ...config, [field]: next }
 }
 
-/** Internal: build the resolved-state DOM for an `AppliedView`. */
-function renderApplied(resp: ExecuteDatabaseViewResponse): HTMLElement {
+/** Internal: build the resolved-state DOM for an `AppliedView`.
+ *  Dispatches on `applied.view_type` first so Kanban / Calendar /
+ *  Gallery get layout-specific renderers; falls back to the
+ *  layout-shape switch when the view type is one we don't have a
+ *  dedicated renderer for (List, Timeline, Custom). The original
+ *  `viewConfig` is threaded through so layout-specific metadata
+ *  (`column_by`, `date_field`, `title_field`) survives the trip
+ *  through `apply_view`'s minimal `BaseView` projection. */
+function renderApplied(
+  resp: ExecuteDatabaseViewResponse,
+  viewConfig: DatabaseViewConfig,
+): HTMLElement {
   const layout = resp.applied.layout
   const fields = effectiveFields(resp)
-  switch (layout.kind) {
-    case 'flat':
-      return renderFlat(fields, layout.records)
-    case 'grouped':
-      return renderGrouped(fields, layout.groups)
+  const schema = resp.schema.fields
+  switch (resp.applied.view_type) {
+    case 'kanban':
+      return layout.kind === 'grouped'
+        ? renderKanban(fields, layout.groups, schema, viewConfig)
+        : renderFlat(fields, layout.records, schema)
+    case 'calendar':
+      return layout.kind === 'grouped'
+        ? renderCalendar(fields, layout.groups, schema, viewConfig)
+        : renderFlat(fields, layout.records, schema)
+    case 'gallery':
+      return layout.kind === 'flat'
+        ? renderGallery(fields, layout.records, schema, viewConfig)
+        : renderGrouped(fields, layout.groups, schema)
+    case 'table':
+    case 'list':
+    case 'timeline':
+    default:
+      return layout.kind === 'flat'
+        ? renderFlat(fields, layout.records, schema)
+        : renderGrouped(fields, layout.groups, schema)
   }
 }
 
@@ -406,13 +433,17 @@ function renderError(err: Error): HTMLElement {
   return box
 }
 
-function renderFlat(fields: string[], records: AppliedRecord[]): HTMLElement {
+function renderFlat(
+  fields: string[],
+  records: AppliedRecord[],
+  schema: Record<string, unknown>,
+): HTMLElement {
   const table = document.createElement('table')
   table.className = 'cm-md-dbview-table'
   table.appendChild(buildHeader(fields))
   const tbody = document.createElement('tbody')
   for (const record of records) {
-    tbody.appendChild(buildRow(fields, record))
+    tbody.appendChild(buildRow(fields, record, schema))
   }
   if (records.length === 0) {
     const empty = document.createElement('div')
@@ -426,7 +457,11 @@ function renderFlat(fields: string[], records: AppliedRecord[]): HTMLElement {
   return table
 }
 
-function renderGrouped(fields: string[], groups: AppliedGroup[]): HTMLElement {
+function renderGrouped(
+  fields: string[],
+  groups: AppliedGroup[],
+  schema: Record<string, unknown>,
+): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'cm-md-dbview-grouped'
   for (const group of groups) {
@@ -441,13 +476,216 @@ function renderGrouped(fields: string[], groups: AppliedGroup[]): HTMLElement {
     table.appendChild(buildHeader(fields))
     const tbody = document.createElement('tbody')
     for (const record of group.records) {
-      tbody.appendChild(buildRow(fields, record))
+      tbody.appendChild(buildRow(fields, record, schema))
     }
     table.appendChild(tbody)
     section.appendChild(table)
     wrap.appendChild(section)
   }
   return wrap
+}
+
+/** Kanban — horizontal row of columns, one per group key. Each
+ *  column has a heading (group value + count) and a vertical stack
+ *  of compact cards. The card title is derived from the first
+ *  text-typed field that isn't the group_by field; remaining
+ *  visible fields render as labeled rows. Drag-to-reorder + write
+ *  back is a deferred BL-069 follow-up. */
+export function renderKanban(
+  fields: string[],
+  groups: AppliedGroup[],
+  schema: Record<string, unknown>,
+  viewConfig: DatabaseViewConfig,
+): HTMLElement {
+  const board = document.createElement('div')
+  board.className = 'cm-md-dbview-kanban'
+  const groupField =
+    viewConfig.view_type.kind === 'kanban'
+      ? viewConfig.view_type.column_by
+      : viewConfig.group_by ?? null
+  const cardFields = fields.filter((f) => f !== groupField)
+  for (const group of groups) {
+    const column = document.createElement('section')
+    column.className = 'cm-md-dbview-kanban-column'
+    column.dataset.groupKey = group.key
+    const heading = document.createElement('header')
+    heading.className = 'cm-md-dbview-kanban-heading'
+    const label = document.createElement('span')
+    label.className = 'cm-md-dbview-kanban-label'
+    label.textContent = group.key
+    const count = document.createElement('span')
+    count.className = 'cm-md-dbview-kanban-count'
+    count.textContent = String(group.records.length)
+    heading.append(label, count)
+    column.appendChild(heading)
+    for (const record of group.records) {
+      column.appendChild(buildCard(record, cardFields, schema, /*titleField*/ null))
+    }
+    if (group.records.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'cm-md-dbview-kanban-empty'
+      empty.textContent = '—'
+      column.appendChild(empty)
+    }
+    board.appendChild(column)
+  }
+  return board
+}
+
+/** Calendar — month grid (7×N rows) bucketing groups by ISO date.
+ *  The visible month is derived from the median date in the data so
+ *  the user lands on the densest area without a navigation control
+ *  (deferred). Records appear as compact pill buttons inside each
+ *  day cell; an "undated" bucket sits below the grid for `(none)`
+ *  groups (the `MISSING_GROUP_KEY` sentinel from the database
+ *  engine). */
+export function renderCalendar(
+  fields: string[],
+  groups: AppliedGroup[],
+  schema: Record<string, unknown>,
+  viewConfig: DatabaseViewConfig,
+): HTMLElement {
+  void schema // unused — date pills don't render full cells
+  void fields
+  const wrap = document.createElement('div')
+  wrap.className = 'cm-md-dbview-calendar'
+
+  const dateField =
+    viewConfig.view_type.kind === 'calendar'
+      ? viewConfig.view_type.date_field
+      : null
+  const dated: Array<{ date: Date; group: AppliedGroup }> = []
+  const undated: AppliedGroup[] = []
+  for (const g of groups) {
+    const d = parseIsoDate(g.key)
+    if (d) dated.push({ date: d, group: g })
+    else undated.push(g)
+  }
+
+  if (dated.length === 0 && undated.length === 0) {
+    wrap.appendChild(emptyState('No records.'))
+    return wrap
+  }
+
+  // Pick the visible month from the median date so the grid lands
+  // on the densest area regardless of outliers.
+  const sortedDates = [...dated.map((d) => d.date)].sort(
+    (a, b) => a.getTime() - b.getTime(),
+  )
+  const visibleAnchor =
+    sortedDates.length > 0 ? sortedDates[Math.floor(sortedDates.length / 2)] : new Date()
+  const year = visibleAnchor.getUTCFullYear()
+  const month = visibleAnchor.getUTCMonth()
+
+  const monthLabel = document.createElement('header')
+  monthLabel.className = 'cm-md-dbview-calendar-month'
+  monthLabel.textContent = `${monthName(month)} ${year}${
+    dateField ? ` · ${dateField}` : ''
+  }`
+  wrap.appendChild(monthLabel)
+
+  const grid = document.createElement('div')
+  grid.className = 'cm-md-dbview-calendar-grid'
+  for (const dow of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) {
+    const head = document.createElement('div')
+    head.className = 'cm-md-dbview-calendar-dow'
+    head.textContent = dow
+    grid.appendChild(head)
+  }
+
+  // Build a (year-month-day) → group map for fast cell lookup.
+  const byKey = new Map<string, AppliedGroup>()
+  for (const { date, group } of dated) {
+    byKey.set(toIsoYmd(date), group)
+  }
+
+  // Anchor the grid at the Sunday on or before the 1st of the
+  // visible month, and run for 6 weeks (42 cells) so months that
+  // wrap stay covered.
+  const firstOfMonth = new Date(Date.UTC(year, month, 1))
+  const startOffset = firstOfMonth.getUTCDay()
+  const gridStart = new Date(
+    Date.UTC(year, month, 1 - startOffset),
+  )
+  for (let i = 0; i < 42; i++) {
+    const cellDate = new Date(
+      Date.UTC(
+        gridStart.getUTCFullYear(),
+        gridStart.getUTCMonth(),
+        gridStart.getUTCDate() + i,
+      ),
+    )
+    const cell = document.createElement('div')
+    cell.className = 'cm-md-dbview-calendar-cell'
+    if (cellDate.getUTCMonth() !== month) {
+      cell.classList.add('cm-md-dbview-calendar-cell--other-month')
+    }
+    const num = document.createElement('span')
+    num.className = 'cm-md-dbview-calendar-day'
+    num.textContent = String(cellDate.getUTCDate())
+    cell.appendChild(num)
+    const ymd = toIsoYmd(cellDate)
+    const group = byKey.get(ymd)
+    if (group) {
+      for (const record of group.records) {
+        const pill = document.createElement('div')
+        pill.className = 'cm-md-dbview-calendar-pill'
+        pill.dataset.recordId = record.id
+        pill.textContent = recordTitle(record, schema, /*titleField*/ null)
+        cell.appendChild(pill)
+      }
+    }
+    grid.appendChild(cell)
+  }
+  wrap.appendChild(grid)
+
+  if (undated.length > 0) {
+    const undatedSection = document.createElement('section')
+    undatedSection.className = 'cm-md-dbview-calendar-undated'
+    const heading = document.createElement('h4')
+    heading.textContent = 'Undated'
+    undatedSection.appendChild(heading)
+    for (const g of undated) {
+      for (const record of g.records) {
+        const pill = document.createElement('div')
+        pill.className = 'cm-md-dbview-calendar-pill cm-md-dbview-calendar-pill--undated'
+        pill.dataset.recordId = record.id
+        pill.textContent = recordTitle(record, schema, /*titleField*/ null)
+        undatedSection.appendChild(pill)
+      }
+    }
+    wrap.appendChild(undatedSection)
+  }
+
+  return wrap
+}
+
+/** Gallery — flat record list rendered as cards. Uses the
+ *  configured `title_field` when present (Gallery view stores it on
+ *  the view-type variant); otherwise the first non-id text field
+ *  wins, matching the kanban / calendar fallback. Body fields are
+ *  capped at 5 per card to keep the gallery scannable. */
+export function renderGallery(
+  fields: string[],
+  records: AppliedRecord[],
+  schema: Record<string, unknown>,
+  viewConfig: DatabaseViewConfig,
+): HTMLElement {
+  const grid = document.createElement('div')
+  grid.className = 'cm-md-dbview-gallery'
+  const titleField =
+    viewConfig.view_type.kind === 'gallery'
+      ? viewConfig.view_type.title_field
+      : null
+  if (records.length === 0) {
+    grid.appendChild(emptyState('No records.'))
+    return grid
+  }
+  const bodyFields = fields.filter((f) => f !== titleField)
+  for (const record of records) {
+    grid.appendChild(buildCard(record, bodyFields, schema, titleField))
+  }
+  return grid
 }
 
 function buildHeader(fields: string[]): HTMLElement {
@@ -462,16 +700,132 @@ function buildHeader(fields: string[]): HTMLElement {
   return thead
 }
 
-function buildRow(fields: string[], record: AppliedRecord): HTMLElement {
+function buildRow(
+  fields: string[],
+  record: AppliedRecord,
+  schema: Record<string, unknown>,
+): HTMLElement {
   const tr = document.createElement('tr')
   tr.dataset.recordId = record.id
   for (const f of fields) {
     const td = document.createElement('td')
     const value = record[f]
-    td.textContent = formatCell(value)
+    td.textContent = formatCell(value, lookupFieldDef(schema, f))
     tr.appendChild(td)
   }
   return tr
+}
+
+/** Build a single record card used by Kanban + Gallery. The card's
+ *  title comes from `titleField` when it points at a present field,
+ *  otherwise the first non-empty text field from `bodyFields` wins,
+ *  otherwise the record id. Body shows up to 5 labeled rows. */
+function buildCard(
+  record: AppliedRecord,
+  bodyFields: string[],
+  schema: Record<string, unknown>,
+  titleField: string | null,
+): HTMLElement {
+  const card = document.createElement('article')
+  card.className = 'cm-md-dbview-card'
+  card.dataset.recordId = record.id
+
+  const title = document.createElement('header')
+  title.className = 'cm-md-dbview-card-title'
+  title.textContent = recordTitle(record, schema, titleField)
+  card.appendChild(title)
+
+  const body = document.createElement('div')
+  body.className = 'cm-md-dbview-card-body'
+  const remaining = titleField
+    ? bodyFields.filter((f) => f !== titleField)
+    : bodyFields
+  let shown = 0
+  const MAX_BODY_FIELDS = 5
+  for (const f of remaining) {
+    if (shown >= MAX_BODY_FIELDS) break
+    const value = record[f]
+    if (value === null || value === undefined) continue
+    const formatted = formatCell(value, lookupFieldDef(schema, f))
+    if (formatted === '') continue
+    const row = document.createElement('div')
+    row.className = 'cm-md-dbview-card-row'
+    const label = document.createElement('span')
+    label.className = 'cm-md-dbview-card-label'
+    label.textContent = f
+    const v = document.createElement('span')
+    v.className = 'cm-md-dbview-card-value'
+    v.textContent = formatted
+    row.append(label, v)
+    body.appendChild(row)
+    shown += 1
+  }
+  card.appendChild(body)
+  return card
+}
+
+/** Pick a human title for a record. Strategy: explicit `titleField`
+ *  if present and non-empty → first text-shaped field on the
+ *  record → the id. Exported so tests can pin the precedence. */
+export function recordTitle(
+  record: AppliedRecord,
+  schema: Record<string, unknown>,
+  titleField: string | null,
+): string {
+  if (titleField) {
+    const raw = record[titleField]
+    if (raw != null) {
+      const s = formatCell(raw, lookupFieldDef(schema, titleField))
+      if (s !== '') return s
+    }
+  }
+  for (const k of Object.keys(record)) {
+    if (k === 'id' || k === 'deletedAt') continue
+    const raw = record[k]
+    if (typeof raw !== 'string' || raw.length === 0) continue
+    return raw
+  }
+  return record.id
+}
+
+function emptyState(message: string): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'cm-md-dbview-empty'
+  el.textContent = message
+  return el
+}
+
+function parseIsoDate(s: string): Date | null {
+  // The database engine emits group keys as `YYYY-MM-DD`. Anything
+  // else (typically the `(none)` sentinel) routes to the undated
+  // bucket.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null
+  const d = new Date(`${s}T00:00:00Z`)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+function toIsoYmd(d: Date): string {
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function monthName(month: number): string {
+  return [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ][month] ?? ''
 }
 
 /** Field list for the rendered grid. The view's explicit `fields`
@@ -491,20 +845,6 @@ export function effectiveFields(resp: ExecuteDatabaseViewResponse): string[] {
       : layout.groups.find((g) => g.records.length > 0)?.records[0]
   if (!first) return []
   return Object.keys(first).filter((k) => k !== 'id' && k !== 'deletedAt')
-}
-
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  // Arrays / objects — JSON, but bounded so a large list doesn't
-  // blow up the cell. Real type-aware formatting lands in split 5.
-  try {
-    const json = JSON.stringify(value)
-    return json.length > 200 ? `${json.slice(0, 197)}…` : json
-  } catch {
-    return ''
-  }
 }
 
 /** Stable comparison key for a (path, config) pair. Pure-function;

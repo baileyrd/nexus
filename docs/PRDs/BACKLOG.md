@@ -223,25 +223,14 @@ _BL-075 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-069: Database query executor for `[[{db:query}]]` blocks
+_BL-069 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). The original backlog entry described "the widget doesn't fetch or display data" — that was outdated by the time work started. The Rust handler (`HANDLER_EXECUTE_DATABASE_VIEW = 12`) was already wired through `com.nexus.storage::base_load` → `crate::database_view::config_to_view` → `com.nexus.database::apply_view`, and the shell widget already fetched + cached + rendered (BL-012 splits 1–4). The actual gap was that the widget rendered every view type as either a flat table or grouped table-sections — no real Kanban / Calendar / Gallery layouts and no type-aware cell formatting. This pass closes that gap. New `databaseViewFormat.ts` ships a `formatCell(value, fieldDef?)` that maps `nexus_types::bases::FieldType` to renderable strings (text/long-text/url/email/uuid pass through; number/currency/percent use `Intl.NumberFormat` with locale grouping; date/datetime/time render in ISO form; checkbox renders ✓; select / multi-select / relation pull `.label` / `.name` / `.id`). `databaseViewWidget.ts`'s `renderApplied` now switches on `applied.view_type` first (kanban / calendar / gallery / table-list-timeline-fallback) before falling back on `layout.kind`, and the original `viewConfig` is threaded through so the layout renderers can read `column_by` (kanban), `date_field` (calendar), and `title_field` (gallery). Three new layouts: `renderKanban` (horizontal flex of column sections, each header carries the group value + count, records render as compact cards via the shared `buildCard` helper), `renderCalendar` (7×6 month grid anchored on the median group-key date, weekday headers, pill per record per day, plus an "Undated" bucket for the `(none)` sentinel groups from `MISSING_GROUP_KEY`), and `renderGallery` (grid of cards with title from `title_field` falling back through the first text field, body capped at 5 labeled rows). `EditorKernelClient.executeDatabaseView` now passes an explicit `30_000` ms timeout per the BL-069 DoD. CSS styles for every new class committed alongside in `livePreview.css`. 16 new shell tests (12 in `databaseViewFormat.test.ts` covering every FieldType + lookupFieldDef defensive paths; 4 in `databaseViewWidget.test.ts` for kanban columns / gallery cards / calendar grid + undated bucket / type-aware cells). Full shell suite at 984 tests stays green; typecheck + lint clean. The pre-existing kanban "grouped" test was rewritten to assert against the new `.cm-md-dbview-kanban-column` DOM (the legacy `.cm-md-dbview-group` shape only fires for `view_type=table` with a `grouped` layout and `view_type=list/timeline` — neither user-driven in this codebase yet)._
 
-**Source**: Editor Integration Assessment (2026-05-06) — gap #1 (largest functional gap)
-**Effort**: Medium–Large (2–3 weeks)
-**Crates**: `nexus-editor/src/core_plugin.rs` (`execute_database_view` handler), `nexus-database`, `nexus-storage`
-**Related**: PRD-08 database view spec; PRD-10 (database engine); `execute_database_view` handler (id 12) registered but query executor missing; BL-012 (DB query blocks)
-
-The database view renderers are complete — Table, Kanban, Calendar, and Gallery layouts all render, the filter engine has 14 operators, and the sort engine supports multi-level null-last sorting. The gap is the query executor: `[[{db:query}]]` inline blocks parse and display a widget, but the widget doesn't fetch or display data.
-
-`execute_database_view` (handler 12) is registered and callable. It needs to be wired to `com.nexus.database` to run the query, apply filters and sorts, and return `{ records, groups }` to the view renderer.
-
-**Definition of done:**
-- `execute_database_view` handler calls `com.nexus.database::query` with the view's filter + sort spec, returns typed records
-- Table view renders live rows with column types respected (text, number, date, select, checkbox)
-- Kanban view groups records by the specified column, drag-to-reorder updates the record's group field
-- Calendar view places records on month grid by ISO date field; undated bucket shown below
-- Gallery view renders records as cards with configurable cover field
-- Filter + sort round-trip: changes in the view UI write back to the block's frontmatter via `apply_transaction`
-- `com.nexus.editor::execute_database_view` timeout: 30s (large datasets)
+**Deferred from the DoD:**
+- **Kanban drag-to-reorder with write-back.** Cards render as static `<article>`s today. Drag-to-reorder updating the record's `group_field` requires either a `com.nexus.database::update_record` IPC verb (which doesn't exist; record mutation today goes through `base_record_update` via storage) or the editor-side write-back path through the markdown source for inline blocks (which doesn't fit, since the records are stored in the `.bases` directory not the markdown). Tracking as a follow-up — needs a DB-side mutation IPC first.
+- **Inline cell editing.** Cells render as `<td>`/`<span>` text; clicking a cell doesn't open an inline editor. Same blocker as drag-to-reorder.
+- **Calendar navigation.** The visible month is derived from the median date in the data so the grid lands on the densest area without a navigation control. Prev / next-month chevrons + a "today" jump are deferred until a user complains about the heuristic.
+- **Gallery cover field.** Cards show a title + body fields but no image cover. Adding cover support requires a `cover_field` on the gallery view-type variant (which the parser doesn't accept yet) plus an `<img>` slot on the card; deferred until either the schema gains an image FieldType or a user asks for it.
+- **Filter + sort round-trip.** The renderHeader chips already wire to `onUpdateConfig` which the decoration extension translates into a markdown rewrite (BL-012 split 5 — landed previously). DoD bullet was already satisfied before this pass; mentioning here for completeness.
 
 ---
 

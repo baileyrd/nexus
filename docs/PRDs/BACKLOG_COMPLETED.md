@@ -8,6 +8,42 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-069: Database query executor — Kanban / Calendar / Gallery layouts + type-aware cells ✅ (2026-05-07)
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #1
+**Files**: new `shell/src/plugins/nexus/editor/cm/databaseViewFormat.ts`; new `shell/src/plugins/nexus/editor/cm/databaseViewFormat.test.ts`; new `shell/tests/database-view-format.test.ts` (re-export wrapper); `shell/src/plugins/nexus/editor/cm/databaseViewWidget.ts` (view-type dispatch + 3 new layouts); `shell/src/plugins/nexus/editor/cm/databaseViewWidget.test.ts` (rewrote 1 kanban test, +4 new layout tests); `shell/src/plugins/nexus/editor/kernelClient.ts` (explicit 30s timeout); `shell/src/plugins/nexus/editor/livePreview.css` (Kanban / Calendar / Gallery styles)
+**Related**: PRD-08 (database view spec), PRD-10 (database engine), BL-012 (DB query blocks splits 1–5 — landed previously and provided the foundation)
+
+The original BL-069 entry described "the widget doesn't fetch or display data," which was outdated by the time the work started. The Rust handler (`HANDLER_EXECUTE_DATABASE_VIEW = 12` in `nexus-editor::core_plugin`) was already wired end-to-end through `com.nexus.storage::base_load` → `crate::database_view::config_to_view` → `com.nexus.database::apply_view`; the shell widget already fetched + cached + rendered through the BL-012 splits 1–4 work. The remaining gap was layout fidelity: every view type rendered as either a flat HTML `<table>` or a stack of grouped table-sections — no real Kanban columns, no Calendar grid, no Gallery cards, and cells were rendered with a type-blind stringify-and-truncate.
+
+This pass closes the layout gap.
+
+- **Type-aware cell formatter (`databaseViewFormat.ts`).** `formatCell(value, fieldDef?)` maps every `nexus_types::bases::FieldType` to a renderable string. `text` / `long-text` / `url` / `email` / `uuid` pass through. `number` / `currency` / `percent` go through `Intl.NumberFormat` with `locale` + `currency` overrides honoured from the schema; percent appends `%` *without* `style: percent`'s implicit ×100 (records store the displayable value already — 45 means 45%, not 4500%). `date` / `time` / `datetime` render in ISO form so calendar bucketing and sort comparisons stay deterministic. `checkbox` renders `✓` for `true`, empty for `false`. `select` pulls `.label` / `.name` / `.id` from object selectors; `multi-select` joins with `,`; `relation` does the same with array support. Missing field def falls back to the legacy primitive-or-stringify (capped at 200 chars) so widgets without schema metadata wired through don't regress.
+- **View-type dispatch in `renderApplied`.** Switches on `applied.view_type` first (`kanban` / `calendar` / `gallery` / `table` / `list` / `timeline`), with the original `viewConfig` threaded through so layout renderers can read the variant-specific fields (`column_by`, `date_field`, `title_field`) that get erased in the apply_view projection. Falls back to the layout-shape switch when the view type is one we don't have a dedicated renderer for.
+- **Kanban (`renderKanban`).** Horizontal flex of `<section.cm-md-dbview-kanban-column>` elements, one per group key. Each column's header carries the group value plus a count badge; records render as compact `<article.cm-md-dbview-card>` instances via the shared `buildCard` helper. Empty columns show an em-dash placeholder.
+- **Calendar (`renderCalendar`).** 7×6 month grid anchored on the median group-key date so the visible month lands on the densest area in the data without a navigation control (deferred). Weekday headers (Sun–Sat); each cell labels the day-of-month and lists matching records as pills; cells from the previous / next month are dimmed via `--other-month`. The `MISSING_GROUP_KEY` sentinel (`"(none)"`) routes to a separate "Undated" bucket below the grid.
+- **Gallery (`renderGallery`).** CSS grid of cards (`auto-fill` columns, `minmax(200px, 1fr)`). Title comes from `view_type.title_field` when set, falling back through `recordTitle`'s precedence (explicit field → first text-shaped field → `record.id`). Body shows up to 5 labeled rows of remaining fields; missing / empty values are skipped so a sparse record doesn't render padded blanks.
+- **`buildCard` + `recordTitle` shared helpers.** Both Kanban and Gallery render their records through the same card builder so the title-resolution precedence stays consistent across layouts. `recordTitle` is exported for tests to pin.
+- **Explicit 30 s IPC timeout.** `EditorKernelClient.executeDatabaseView` now passes `30_000` ms to `kernel.invoke` per the BL-069 DoD bullet. The kernel default is also 30 s but the spec wanted an explicit value so a future default change can't silently tighten the budget.
+- **CSS.** All new classes (`cm-md-dbview-kanban` / `-column` / `-heading` / `-label` / `-count` / `-empty`; `cm-md-dbview-card` / `-title` / `-body` / `-row` / `-label` / `-value`; `cm-md-dbview-gallery`; `cm-md-dbview-calendar` / `-month` / `-grid` / `-dow` / `-cell` / `-cell--other-month` / `-day` / `-pill` / `-pill--undated` / `-undated`) styled in `livePreview.css` against the existing `--background-*` / `--divider-color` / `--interactive-accent` token palette so themes can re-skin without code changes.
+
+**Pre-existing test rewrite.** The `grouped layout renders one section per group with record counts in the heading` test in `databaseViewWidget.test.ts` was asserting against the legacy `.cm-md-dbview-group` table-section DOM that BL-012 split 3 produced. With the view-type dispatch landing, an `applied.view_type === 'kanban'` response now drives the new Kanban renderer instead — so the test was rewritten to assert against `.cm-md-dbview-kanban-column` / `-label` / `-count` / `-card`. The legacy grouped DOM still fires, just for `view_type=list` / `view_type=timeline` (neither user-driven in this codebase yet) and as the last-resort fallback for a `grouped` layout under `view_type=table` (which `apply_view` wouldn't actually produce — Table emits `Flat`).
+
+**Tested**: `pnpm --filter nexus-shell test` 984/984 pass (was 968, +16 across the new tests); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean for the new files; `cargo test -p nexus-editor` clean (no new Rust tests — the backend was untouched).
+
+**Definition of done coverage**:
+- ✅ `execute_database_view` returns `{ records, groups }` via `com.nexus.database::apply_view` (was already true; pre-existing BL-012 split 1)
+- ✅ Table view renders live rows with column types respected (text, number, date, select, checkbox — every FieldType has a formatter case + test)
+- ✅ Kanban view groups records by the specified column with one column per bucket
+- ✅ Calendar view places records on a month grid by ISO date field; undated bucket shown below
+- ✅ Gallery view renders records as cards with a configurable title field
+- ✅ Filter + sort round-trip via the existing renderHeader chips → `onUpdateConfig` → markdown rewrite (BL-012 split 5 — landed previously, no new code in this pass; mentioning so the DoD coverage is honest)
+- ✅ `com.nexus.editor::execute_database_view` timeout: 30s, passed explicitly
+- ⏸ Kanban drag-to-reorder updating the record's group field (needs a DB-side record-mutation IPC first; defer)
+- ⏸ Inline cell editing (same blocker)
+- ⏸ Calendar navigation (prev/next-month + today jump; defer until a user asks)
+- ⏸ Gallery cover field (needs schema support for image FieldType + a card-cover slot; defer)
+
 ### BL-077: CM6 LSP client extension ✅ (2026-05-07)
 
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)

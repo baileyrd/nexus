@@ -302,7 +302,11 @@ test('widget renders an error box and routes to onError when the IPC rejects', a
   document.body.removeChild(root)
 })
 
-test('grouped layout renders one section per group with record counts in the heading', async () => {
+test('kanban view renders one column per group with the group value + count in the header', async () => {
+  // BL-069: an `applied.view_type === 'kanban'` response now drives
+  // the new column-shaped renderer (`.cm-md-dbview-kanban-column`)
+  // rather than the legacy `.cm-md-dbview-group` table-section
+  // grouped layout the BL-012 split 3 widget produced.
   const grouped: ExecuteDatabaseViewResponse = {
     applied: {
       view_name: 'board',
@@ -335,12 +339,19 @@ test('grouped layout renders one section per group with record counts in the hea
   await Promise.resolve()
   await Promise.resolve()
 
-  const sections = root.querySelectorAll('section.cm-md-dbview-group')
-  assert.equal(sections.length, 2)
-  const headings = Array.from(sections).map(
-    (s) => s.querySelector('.cm-md-dbview-group-heading')?.textContent,
+  const columns = root.querySelectorAll('.cm-md-dbview-kanban-column')
+  assert.equal(columns.length, 2)
+  const labels = Array.from(columns).map(
+    (c) => c.querySelector('.cm-md-dbview-kanban-label')?.textContent,
   )
-  assert.deepEqual(headings, ['Doing (1)', 'Done (2)'])
+  assert.deepEqual(labels, ['Doing', 'Done'])
+  const counts = Array.from(columns).map(
+    (c) => c.querySelector('.cm-md-dbview-kanban-count')?.textContent,
+  )
+  assert.deepEqual(counts, ['1', '2'])
+  // Each record renders as a card inside its column.
+  assert.equal(columns[0].querySelectorAll('.cm-md-dbview-card').length, 1)
+  assert.equal(columns[1].querySelectorAll('.cm-md-dbview-card').length, 2)
 
   document.body.removeChild(root)
 })
@@ -429,4 +440,168 @@ test('two widgets with the same key are .eq()', () => {
   })
   assert.equal(w1.eq(w2), true)
   assert.equal(w1.eq(w3), false)
+})
+
+// ── BL-069 — Gallery / Calendar layout renderers ─────────────────────────────
+
+test('gallery view renders flat records as cards keyed by title_field', async () => {
+  const resp: ExecuteDatabaseViewResponse = {
+    applied: {
+      view_name: 'inline',
+      view_type: 'gallery',
+      fields: ['name', 'status'],
+      layout: {
+        kind: 'flat',
+        records: [
+          { id: 'r1', name: 'Acme Co.', status: 'Active' },
+          { id: 'r2', name: 'Globex', status: 'Lapsed' },
+        ],
+      },
+    },
+    schema: { version: '1.0', fields: { name: { type: 'text' }, status: { type: 'select' } } },
+  }
+  const { client } = makeClient(resp)
+  const widget = new DatabaseViewWidget(
+    'Customers.bases',
+    { ...TABLE_CONFIG, view_type: { kind: 'gallery', title_field: 'name' } },
+    { client, cache: new DatabaseViewCache() },
+  )
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  await Promise.resolve()
+  await Promise.resolve()
+
+  const grid = root.querySelector('.cm-md-dbview-gallery')
+  assert.ok(grid, 'gallery wrapper rendered')
+  const cards = grid!.querySelectorAll('.cm-md-dbview-card')
+  assert.equal(cards.length, 2)
+  // Title comes from `title_field`.
+  const titles = Array.from(cards).map(
+    (c) => c.querySelector('.cm-md-dbview-card-title')?.textContent,
+  )
+  assert.deepEqual(titles, ['Acme Co.', 'Globex'])
+  // The title field is excluded from the body rows; only `status`
+  // shows up as a labeled row.
+  const labels = Array.from(
+    cards[0].querySelectorAll('.cm-md-dbview-card-label'),
+  ).map((el) => el.textContent)
+  assert.deepEqual(labels, ['status'])
+
+  document.body.removeChild(root)
+})
+
+test('calendar view renders a 7×6 month grid with date-keyed pills + an undated bucket', async () => {
+  const resp: ExecuteDatabaseViewResponse = {
+    applied: {
+      view_name: 'inline',
+      view_type: 'calendar',
+      fields: ['title'],
+      layout: {
+        kind: 'grouped',
+        groups: [
+          { key: '2026-05-07', records: [{ id: 'r1', title: 'Standup' }] },
+          {
+            key: '2026-05-08',
+            records: [
+              { id: 'r2', title: 'Demo' },
+              { id: 'r3', title: 'Retro' },
+            ],
+          },
+          // The MISSING_GROUP_KEY sentinel — bucket below the grid.
+          { key: '(none)', records: [{ id: 'r4', title: 'Inbox' }] },
+        ],
+      },
+    },
+    schema: { version: '1.0', fields: { title: { type: 'text' } } },
+  }
+  const { client } = makeClient(resp)
+  const widget = new DatabaseViewWidget(
+    'Cal.bases',
+    { ...TABLE_CONFIG, view_type: { kind: 'calendar', date_field: 'due' } },
+    { client, cache: new DatabaseViewCache() },
+  )
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  await Promise.resolve()
+  await Promise.resolve()
+
+  const month = root.querySelector('.cm-md-dbview-calendar-month')
+  // Median of [2026-05-07, 2026-05-08] is 2026-05-08 (UTC), so
+  // the visible month is May 2026; the field name is appended.
+  assert.match(month?.textContent ?? '', /May 2026 · due/)
+  // 7 weekday headers + 42 day cells = 49 grid children.
+  const grid = root.querySelector('.cm-md-dbview-calendar-grid')!
+  assert.equal(grid.children.length, 49)
+  // Pills land in the right cells.
+  const pills = root.querySelectorAll('.cm-md-dbview-calendar-pill')
+  // 1 standup + 2 demo/retro + 1 undated = 4
+  assert.equal(pills.length, 4)
+  // Undated bucket exists.
+  const undated = root.querySelector('.cm-md-dbview-calendar-undated')
+  assert.ok(undated, 'undated bucket rendered')
+  assert.equal(
+    undated!.querySelector('.cm-md-dbview-calendar-pill--undated')?.textContent,
+    'Inbox',
+  )
+
+  document.body.removeChild(root)
+})
+
+test('table view continues to render a flat table for view_type=table', async () => {
+  // Regression guard: making sure Kanban/Gallery/Calendar dispatch
+  // didn't accidentally redirect table views away from the table
+  // renderer.
+  const resp = flatResp([
+    { id: 'r1', title: 'Hello', status: 'Active' },
+    { id: 'r2', title: 'World', status: 'Active' },
+  ])
+  const { client } = makeClient(resp)
+  const widget = new DatabaseViewWidget('T.bases', TABLE_CONFIG, {
+    client,
+    cache: new DatabaseViewCache(),
+  })
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.ok(root.querySelector('table.cm-md-dbview-table'))
+  assert.equal(root.querySelectorAll('tbody tr').length, 2)
+
+  document.body.removeChild(root)
+})
+
+test('cells render type-aware values (BL-069 type-aware formatter wired through)', async () => {
+  const resp: ExecuteDatabaseViewResponse = {
+    applied: {
+      view_name: 'inline',
+      view_type: 'table',
+      fields: ['count', 'done'],
+      layout: {
+        kind: 'flat',
+        records: [{ id: 'r1', count: 1234, done: true }],
+      },
+    },
+    schema: {
+      version: '1.0',
+      fields: { count: { type: 'number' }, done: { type: 'checkbox' } },
+    },
+  }
+  const { client } = makeClient(resp)
+  const widget = new DatabaseViewWidget('T.bases', TABLE_CONFIG, {
+    client,
+    cache: new DatabaseViewCache(),
+  })
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  await Promise.resolve()
+  await Promise.resolve()
+
+  const cells = root.querySelectorAll('tbody td')
+  assert.equal(cells.length, 2)
+  // Number gets locale grouping; checkbox renders the ✓ glyph.
+  assert.equal(cells[0].textContent, '1,234')
+  assert.equal(cells[1].textContent, '✓')
+
+  document.body.removeChild(root)
 })

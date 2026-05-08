@@ -142,10 +142,15 @@ export class EditorKernelClient {
     databasePath: string,
     viewConfig: DatabaseViewConfig,
   ): Promise<ExecuteDatabaseViewResponse> {
+    // BL-069 DoD: explicit 30 s budget for large datasets. The
+    // default kernel timeout is also 30 s, but the spec calls for
+    // an explicit value so a future default change can't silently
+    // tighten the budget under the renderer.
     return this.api.invoke<ExecuteDatabaseViewResponse>(
       EDITOR_PLUGIN_ID,
       CMD.executeDatabaseView,
       { database_path: databasePath, view_config: viewConfig },
+      30_000,
     )
   }
 
