@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-066 follow-up: Spawn / Stop / Restart icons on SavedCommandsView ✅ (2026-05-08)
+
+**Source**: BL-066 closure note (2026-05-06) — explicit deferral: "Stop / Restart / Dismiss deferred until BL-055 lands a `run_saved` handler with managed-session state"
+**Files**: `shell/src/icons/index.tsx` (new `stop` filled-Square icon entry); `shell/src/plugins/nexus/terminal/savedCommandsStore.ts` (new `extractRunningSavedSessions` pure helper + `fetchRunningSavedSessions` / `spawnSavedSession` / `stopSavedSession` / `restartSavedSession` IPC wrappers + `SAVED_SESSION_NAME_PREFIX` const + `RunningSessionRow` wire-shape type); `shell/src/plugins/nexus/terminal/SavedCommandsView.tsx` (running-state polling effect, refresh helper, three new lifecycle handlers, three new buttons in the icon row, running-indicator dot in the row title); `shell/src/plugins/nexus/terminal/savedCommandsStore.test.ts` (+10 unit tests covering the new helpers); `shell/src/plugins/nexus/terminal/terminal.css` (new `.nexus-saved-command-running-dot` rule)
+**Related**: BL-055 (`run_saved` handler that spawns `saved:<slug>`-named sessions), BL-056 (cemented the `saved:<slug>` naming convention through workflow `terminal` step)
+
+The BL-066 closure note flagged Stop / Restart / Dismiss as deferred because there was no managed-session backend — the existing Run button sends to the active terminal via `send_input`, which doesn't yield a tracked session id. BL-055 + BL-056 shipped that backend (`run_saved` spawns a fresh PTY session named `saved:<slug>`; `list_sessions` returns every live session's name; `close_session` terminates by id), so the gating is now resolved.
+
+- **Polling cadence: 2 s.** Matches the legacy panel and keeps the spawn → "● running" indicator lag below human perception. The poller auto-cancels on unmount so collapsing the sidebar leaf stops the IPC churn. Errors during a poll tick are swallowed — a missing / restarting terminal plugin is the common case and a flickering error pane every 2 s would be worse than a stale indicator.
+- **`extractRunningSavedSessions` helper.** Pure function that walks a `list_sessions` reply and buckets every row whose name starts with `saved:` into a `Record<slug, sessionId[]>` map. Multiple matches per slug are preserved (a workflow + a user can spawn the same slug twice); Stop closes every id. Empty-name / non-string-name / empty-slug rows are skipped defensively.
+- **Three new buttons in the icon row.** Spawn (⚡, always visible) routes to `run_saved`. Stop (■, only when running) closes every matching session. Restart (↻, only when running) sequences `close_session` over every matching id, then `run_saved` — the user-visible session count cleanly transitions through 0. The existing Run button keeps its `send_input` semantics; tooltip clarifies "Run in active terminal" vs. "Spawn managed session".
+- **Running indicator dot.** Small green `●` glyph in the row's name area when at least one `saved:<slug>` session is live; the aria-label / title carry the running count for screen readers. Mirrors what every modern process-manager surface provides.
+- **Optimistic refresh after each lifecycle action.** Spawn / Stop / Restart all kick a manual refresh of the running map before returning so the icons flip immediately on success rather than waiting for the next 2 s tick.
+- **Dismiss intentionally not implemented.** The closure note's deferral list named Stop / Restart / Dismiss together, but Dismiss has no clear semantic in this UI: a `saved:<slug>` session is either live (in `list_sessions`) or it's not. The running indicator naturally clears when the kernel reaps the exited session, so a separate Dismiss affordance would have nothing to do.
+
+**Tested**: `pnpm --filter nexus-shell test` 1089/1089 (was 1079, +10); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (preexisting warnings only). The 10 new unit tests cover:
+- `extractRunningSavedSessions` — buckets `saved:<slug>` rows, skips empty / malformed names, empty input → empty map (3 tests).
+- `fetchRunningSavedSessions` — routes through `list_sessions` and buckets the reply, null reply → empty map without throwing (2 tests).
+- `spawnSavedSession` — single `run_saved` call with the slug (1 test).
+- `stopSavedSession` — sequential `close_session` per id, empty list → no IPC issued (2 tests).
+- `restartSavedSession` — every existing session closes before the spawn fires; close failure short-circuits before the spawn (2 tests).
+
+---
+
 ### BL-079 follow-up: click-on-gutter Revert via `discard_hunks` ✅ (2026-05-08)
 
 **Source**: BL-079 closure note (2026-05-07) — explicit deferral: "Click-on-gutter Revert (needs a new `discard_hunks` IPC verb)"

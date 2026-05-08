@@ -135,6 +135,17 @@
   margin-bottom: 2px;
 }
 
+/* BL-066 follow-up — small green dot before the saved-command name
+   when one or more `saved:<slug>` PTY sessions are live. The icon
+   row shows Stop / Restart at the same time. */
+.nexus-saved-command-running-dot {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-green, #2ea043);
+}
+
 .nexus-saved-command-cmd {
   display: block;
   font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);

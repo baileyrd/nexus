@@ -25,6 +25,10 @@ import { useTerminalStore } from './terminalStore'
 const CMD_SAVE_NOTIFICATION_MS = 3000
 const CMD_COPIED_NOTIFICATION_MS = 1800
 import {
+  fetchRunningSavedSessions,
+  restartSavedSession,
+  spawnSavedSession,
+  stopSavedSession,
   useSavedCommandsStore,
   type SavedCommand,
   type SavedCommandDraft,
@@ -38,6 +42,12 @@ const CMD_SEND_INPUT = 'send_input'
 // saved command's `working_dir` off to the user's preferred external
 // terminal emulator.
 const CMD_OPEN_IN_TERMINAL = 'open_in_terminal'
+
+// BL-066 follow-up — interval (ms) the running-session poller uses to
+// refresh the slug → session-id map from `list_sessions`. Two seconds
+// matches the legacy panel's polling cadence and keeps the spawn → "●
+// running" lag below human perception without burning the kernel.
+const RUNNING_POLL_INTERVAL_MS = 2_000
 
 interface SavedCommandsViewProps {
   kernel: KernelAPI
@@ -90,6 +100,11 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
 
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' })
   const [localError, setLocalError] = useState<string | null>(null)
+  // BL-066 follow-up — slug → live `saved:<slug>` session ids. Empty
+  // (or missing) means the saved command has no managed session
+  // currently running, in which case the row's Stop / Restart icons
+  // stay hidden and only Spawn is visible.
+  const [running, setRunning] = useState<Record<string, string[]>>({})
 
   // Hydrate on first mount (and any subsequent re-mount after the leaf
   // was torn down). Cheap if already loaded — `saved_list` returns from
@@ -97,6 +112,31 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
   useEffect(() => {
     if (!loaded) void loadSaved(kernel)
   }, [loaded, loadSaved, kernel])
+
+  // BL-066 follow-up — poll `list_sessions` so the row icons can
+  // surface live state ("● running" + Stop / Restart). Unconditional
+  // poll on mount + every `RUNNING_POLL_INTERVAL_MS` ms, cleared on
+  // unmount so the leaf doesn't burn IPC after the user collapses
+  // the sidebar.
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const map = await fetchRunningSavedSessions(kernel)
+        if (!cancelled) setRunning(map)
+      } catch {
+        // Swallow — a missing / restarting terminal plugin is the
+        // common no-op case and shouldn't flicker the UI's error
+        // pane every 2 s.
+      }
+    }
+    void refresh()
+    const handle = window.setInterval(() => void refresh(), RUNNING_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(handle)
+    }
+  }, [kernel])
 
   const slugSet = useMemo(() => new Set(commands.map((c) => c.slug)), [commands])
 
@@ -150,6 +190,88 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
       }
     },
     [kernel, notifications, focusTerminal, cmdSaveMs, cmdCopiedMs],
+  )
+
+  // BL-066 follow-up — refresh the live `saved:<slug>` map immediately
+  // after a lifecycle action so the icons flip without waiting for the
+  // next 2 s poll tick. Best-effort; failure leaves the next poll to
+  // converge.
+  const refreshRunning = useCallback(async () => {
+    try {
+      const map = await fetchRunningSavedSessions(kernel)
+      setRunning(map)
+    } catch {
+      // ignore — the periodic poller will pick up the change.
+    }
+  }, [kernel])
+
+  // BL-066 follow-up — spawn a fresh managed PTY session via BL-055's
+  // `run_saved`. Distinct from the existing Run button (which sends
+  // the command line into the *active* terminal via `send_input`):
+  // this affordance is for long-running services the user wants to
+  // Stop / Restart later.
+  const spawnManaged = useCallback(
+    async (cmd: SavedCommand) => {
+      setLocalError(null)
+      try {
+        await spawnSavedSession(kernel, cmd.slug)
+        notifications.show({
+          message: `Spawned managed session for "${cmd.name}"`,
+          type: 'success',
+          duration: cmdCopiedMs ?? CMD_COPIED_NOTIFICATION_MS,
+        })
+        await refreshRunning()
+      } catch (err) {
+        setLocalError(String(err))
+      }
+    },
+    [kernel, notifications, cmdCopiedMs, refreshRunning],
+  )
+
+  // BL-066 follow-up — close every PTY session whose name matches
+  // `saved:<slug>`. Concurrent spawns are rare but not impossible
+  // (workflow + user-driven), so the helper iterates ids rather than
+  // assuming a single match.
+  const stopManaged = useCallback(
+    async (cmd: SavedCommand) => {
+      setLocalError(null)
+      const ids = running[cmd.slug] ?? []
+      if (ids.length === 0) return
+      try {
+        await stopSavedSession(kernel, ids)
+        notifications.show({
+          message: `Stopped managed session for "${cmd.name}"`,
+          type: 'info',
+          duration: cmdCopiedMs ?? CMD_COPIED_NOTIFICATION_MS,
+        })
+        await refreshRunning()
+      } catch (err) {
+        setLocalError(String(err))
+      }
+    },
+    [kernel, notifications, running, cmdCopiedMs, refreshRunning],
+  )
+
+  // BL-066 follow-up — Stop + spawn. The store helper sequences the
+  // close before the new spawn so the user-visible "● running" pip
+  // cleanly transitions through 0 between attempts.
+  const restartManaged = useCallback(
+    async (cmd: SavedCommand) => {
+      setLocalError(null)
+      const ids = running[cmd.slug] ?? []
+      try {
+        await restartSavedSession(kernel, cmd.slug, ids)
+        notifications.show({
+          message: `Restarted managed session for "${cmd.name}"`,
+          type: 'success',
+          duration: cmdCopiedMs ?? CMD_COPIED_NOTIFICATION_MS,
+        })
+        await refreshRunning()
+      } catch (err) {
+        setLocalError(String(err))
+      }
+    },
+    [kernel, notifications, running, cmdCopiedMs, refreshRunning],
   )
 
   // BL-059 — open the saved command's working directory in the user's
@@ -283,7 +405,10 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
       )}
 
       <ul className="nexus-saved-commands-list">
-        {commands.map((cmd, idx) => (
+        {commands.map((cmd, idx) => {
+          const runningIds = running[cmd.slug] ?? []
+          const isRunning = runningIds.length > 0
+          return (
           <li key={cmd.slug} className="nexus-saved-command">
             <button
               type="button"
@@ -291,7 +416,29 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
               onClick={() => void runCommand(cmd)}
               title="Run in active terminal"
             >
-              <div className="nexus-saved-command-name">{cmd.name}</div>
+              <div className="nexus-saved-command-name">
+                {/* BL-066 follow-up — green dot when one or more
+                    `saved:<slug>` sessions are live. Driven by the
+                    `running` poll above. */}
+                {isRunning && (
+                  <span
+                    className="nexus-saved-command-running-dot"
+                    aria-label={
+                      runningIds.length === 1
+                        ? '1 managed session running'
+                        : `${runningIds.length} managed sessions running`
+                    }
+                    title={
+                      runningIds.length === 1
+                        ? '1 managed session running'
+                        : `${runningIds.length} managed sessions running`
+                    }
+                  >
+                    {'●'}
+                  </span>
+                )}
+                {cmd.name}
+              </div>
               <code className="nexus-saved-command-cmd">{cmd.shell_cmd}</code>
               {(cmd.shell || cmd.working_dir) && (
                 <div className="nexus-saved-command-meta">
@@ -300,12 +447,12 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
                 </div>
               )}
             </button>
-            {/* BL-066: hover-revealed icon row. The whole-row body
-                click (line above) is still the primary "run" affordance,
-                but the explicit play icon mirrors what every modern
-                process-manager surface provides — see the closure
-                notes for why Stop / Restart / Dismiss are deferred
-                until BL-055 lands a managed-session backend. */}
+            {/* BL-066: hover-revealed icon row. Run sends to the active
+                terminal (send_input); Spawn / Stop / Restart manage a
+                fresh PTY session named `saved:<slug>` via BL-055's
+                run_saved + the standard list_sessions / close_session
+                verbs. Stop and Restart only render when at least one
+                matching session is currently live. */}
             <div className="nexus-saved-command-actions">
               <button
                 type="button"
@@ -315,6 +462,34 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
               >
                 <Icon name="play" size={12} />
               </button>
+              <button
+                type="button"
+                onClick={() => void spawnManaged(cmd)}
+                aria-label={`Spawn managed session for ${cmd.name}`}
+                title="Spawn managed session"
+              >
+                <Icon name="bolt" size={12} />
+              </button>
+              {isRunning && (
+                <button
+                  type="button"
+                  onClick={() => void stopManaged(cmd)}
+                  aria-label={`Stop managed session for ${cmd.name}`}
+                  title="Stop managed session"
+                >
+                  <Icon name="stop" size={10} />
+                </button>
+              )}
+              {isRunning && (
+                <button
+                  type="button"
+                  onClick={() => void restartManaged(cmd)}
+                  aria-label={`Restart managed session for ${cmd.name}`}
+                  title="Restart managed session"
+                >
+                  <Icon name="refresh" size={12} />
+                </button>
+              )}
               {cmd.working_dir && (
                 <button
                   type="button"
@@ -375,7 +550,8 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
               </button>
             </div>
           </li>
-        ))}
+          )
+        })}
       </ul>
     </div>
   )

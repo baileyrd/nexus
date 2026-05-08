@@ -82,6 +82,26 @@ const CMD_CREATE = 'saved_create'
 const CMD_UPDATE = 'saved_update'
 const CMD_DELETE = 'saved_delete'
 const CMD_REORDER = 'saved_reorder'
+// BL-066 follow-up — managed-session lifecycle verbs. `run_saved`
+// (BL-055) spawns a fresh PTY session named `saved:<slug>`;
+// `list_sessions` + `close_session` are the standard terminal verbs.
+const CMD_LIST_SESSIONS = 'list_sessions'
+const CMD_CLOSE_SESSION = 'close_session'
+const CMD_RUN_SAVED = 'run_saved'
+
+/** BL-066 follow-up — convention from BL-055's `run_saved` handler:
+ *  every session it spawns is named `saved:<slug>`. The shell-side
+ *  poller relies on this string being stable to attribute live
+ *  sessions back to their originating saved command. */
+export const SAVED_SESSION_NAME_PREFIX = 'saved:'
+
+/** Wire shape of a single row from `com.nexus.terminal::list_sessions`.
+ *  Mirrors `crates/nexus-terminal/src/server.rs::SessionInfo`; only the
+ *  fields the running-state poller cares about are kept here. */
+export interface RunningSessionRow {
+  id: string
+  name: string
+}
 
 const AUTO_RESTART_DELAY_MS = 2_000
 const DEFAULT_ICON = 'terminal'
@@ -223,3 +243,80 @@ export const useSavedCommandsStore = create<SavedCommandsState>((set, get) => ({
 
   reset: () => set({ commands: [], loaded: false, error: null }),
 }))
+
+// ── BL-066 follow-up — running-session tracking + lifecycle helpers ──────────
+
+/**
+ * Walk a list of `list_sessions` rows and bucket every
+ * `saved:<slug>`-named session into a `Record<slug, sessionId[]>` map.
+ * Rows whose name doesn't carry the prefix or whose slug is empty are
+ * skipped. Multiple sessions for the same slug are preserved in
+ * encounter order — the Stop button operates on every id, the Restart
+ * button operates on the last (most recent) one.
+ *
+ * Pure function — exported for unit tests so the routing matrix
+ * stays nailed without standing up a full kernel mock.
+ */
+export function extractRunningSavedSessions(
+  sessions: ReadonlyArray<RunningSessionRow>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const row of sessions) {
+    if (typeof row?.name !== 'string') continue
+    if (!row.name.startsWith(SAVED_SESSION_NAME_PREFIX)) continue
+    const slug = row.name.slice(SAVED_SESSION_NAME_PREFIX.length)
+    if (!slug) continue
+    ;(out[slug] ??= []).push(row.id)
+  }
+  return out
+}
+
+/** BL-066 follow-up — fetch the live `list_sessions` snapshot and bucket
+ *  it by slug. Errors are surfaced to the caller; the view's poller
+ *  catches and ignores them so a transient kernel hiccup doesn't
+ *  flicker the UI. */
+export async function fetchRunningSavedSessions(
+  api: SavedKernelAPI,
+): Promise<Record<string, string[]>> {
+  const sessions = await api.invoke<RunningSessionRow[]>(
+    PLUGIN_ID,
+    CMD_LIST_SESSIONS,
+  )
+  return extractRunningSavedSessions(sessions ?? [])
+}
+
+/** BL-066 follow-up — spawn a fresh managed PTY session for a saved
+ *  command. Routes through BL-055's `run_saved`; the kernel names the
+ *  session `saved:<slug>` so the next poll picks it up via
+ *  {@link extractRunningSavedSessions}. */
+export async function spawnSavedSession(
+  api: SavedKernelAPI,
+  slug: string,
+): Promise<void> {
+  await api.invoke(PLUGIN_ID, CMD_RUN_SAVED, { slug })
+}
+
+/** BL-066 follow-up — close every PTY session whose name matches
+ *  `saved:<slug>`. Closes are issued sequentially (cheap; the slug's
+ *  session count is tiny in practice) so a partial failure is
+ *  observable through the rejection. */
+export async function stopSavedSession(
+  api: SavedKernelAPI,
+  sessionIds: ReadonlyArray<string>,
+): Promise<void> {
+  for (const id of sessionIds) {
+    await api.invoke(PLUGIN_ID, CMD_CLOSE_SESSION, { id })
+  }
+}
+
+/** BL-066 follow-up — Stop + spawn. The stop step waits for every
+ *  matching session to close before the new one is requested so the
+ *  user-visible session count cleanly transitions from N → 0 → 1. */
+export async function restartSavedSession(
+  api: SavedKernelAPI,
+  slug: string,
+  sessionIds: ReadonlyArray<string>,
+): Promise<void> {
+  await stopSavedSession(api, sessionIds)
+  await spawnSavedSession(api, slug)
+}

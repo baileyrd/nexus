@@ -149,6 +149,7 @@ const ICON_MAP = {
 
   // Filled glyphs
   play:        { component: Play, filled: true },
+  stop:        { component: Square, filled: true },
   ember:       { component: Flame, filled: true },
 } as const satisfies Record<string, IconEntry>
 

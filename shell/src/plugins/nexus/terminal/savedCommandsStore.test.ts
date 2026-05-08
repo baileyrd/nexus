@@ -11,6 +11,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  extractRunningSavedSessions,
+  fetchRunningSavedSessions,
+  restartSavedSession,
+  spawnSavedSession,
+  stopSavedSession,
   useSavedCommandsStore,
   type SavedCommand,
   type SavedKernelAPI,
@@ -268,4 +273,110 @@ test('reset: clears cache + loaded flag (workspace:closed contract)', async () =
   assert.equal(after.loaded, false)
   assert.equal(after.commands.length, 0)
   assert.equal(after.error, null)
+})
+
+// ── BL-066 follow-up — running-session helpers ──────────────────────────────
+
+test('extractRunningSavedSessions: buckets `saved:<slug>` rows by slug', () => {
+  const map = extractRunningSavedSessions([
+    { id: 'sess-1', name: 'saved:dev-server' },
+    { id: 'sess-2', name: 'saved:other' },
+    { id: 'sess-3', name: 'unrelated' },
+    { id: 'sess-4', name: 'saved:dev-server' },
+  ])
+  assert.deepEqual(map['dev-server'], ['sess-1', 'sess-4'])
+  assert.deepEqual(map['other'], ['sess-2'])
+  assert.equal(map['unrelated'], undefined)
+  assert.equal(Object.keys(map).length, 2)
+})
+
+test('extractRunningSavedSessions: skips empty / malformed names', () => {
+  const map = extractRunningSavedSessions([
+    { id: 'a', name: 'saved:' },
+    // @ts-expect-error: testing runtime defensive paths
+    { id: 'b', name: null },
+    // @ts-expect-error: testing runtime defensive paths
+    { id: 'c', name: undefined },
+    { id: 'd', name: '' },
+  ])
+  assert.equal(Object.keys(map).length, 0)
+})
+
+test('extractRunningSavedSessions: empty input → empty map', () => {
+  assert.deepEqual(extractRunningSavedSessions([]), {})
+})
+
+test('fetchRunningSavedSessions: routes through list_sessions and buckets reply', async () => {
+  const { api, calls, responses } = makeKernel()
+  responses['list_sessions'] = [[
+    { id: 'sess-1', name: 'saved:dev-server' },
+    { id: 'sess-2', name: 'foo' },
+  ]]
+  const map = await fetchRunningSavedSessions(api)
+  assert.deepEqual(map, { 'dev-server': ['sess-1'] })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].pluginId, 'com.nexus.terminal')
+  assert.equal(calls[0].command, 'list_sessions')
+})
+
+test('fetchRunningSavedSessions: missing reply (null) → empty map without throwing', async () => {
+  const { api, responses } = makeKernel()
+  responses['list_sessions'] = [null]
+  const map = await fetchRunningSavedSessions(api)
+  assert.deepEqual(map, {})
+})
+
+test('spawnSavedSession: invokes run_saved with the slug', async () => {
+  const { api, calls } = makeKernel()
+  await spawnSavedSession(api, 'dev-server')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].command, 'run_saved')
+  assert.deepEqual(calls[0].args, { slug: 'dev-server' })
+})
+
+test('stopSavedSession: closes every passed session id sequentially', async () => {
+  const { api, calls } = makeKernel()
+  await stopSavedSession(api, ['sess-1', 'sess-2'])
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].command, 'close_session')
+  assert.deepEqual(calls[0].args, { id: 'sess-1' })
+  assert.equal(calls[1].command, 'close_session')
+  assert.deepEqual(calls[1].args, { id: 'sess-2' })
+})
+
+test('stopSavedSession: empty id list → no IPC issued', async () => {
+  const { api, calls } = makeKernel()
+  await stopSavedSession(api, [])
+  assert.equal(calls.length, 0)
+})
+
+test('restartSavedSession: stops every existing session before spawning a fresh one', async () => {
+  const { api, calls } = makeKernel()
+  await restartSavedSession(api, 'dev-server', ['sess-1', 'sess-2'])
+  assert.equal(calls.length, 3)
+  assert.equal(calls[0].command, 'close_session')
+  assert.deepEqual(calls[0].args, { id: 'sess-1' })
+  assert.equal(calls[1].command, 'close_session')
+  assert.deepEqual(calls[1].args, { id: 'sess-2' })
+  assert.equal(calls[2].command, 'run_saved')
+  assert.deepEqual(calls[2].args, { slug: 'dev-server' })
+})
+
+test('restartSavedSession: stop failure short-circuits before spawn', async () => {
+  let callCount = 0
+  const api: SavedKernelAPI = {
+    invoke: async (_pluginId, command) => {
+      callCount += 1
+      if (command === 'close_session') {
+        throw new Error('close failed')
+      }
+      return null
+    },
+  }
+  await assert.rejects(
+    () => restartSavedSession(api, 'dev-server', ['sess-1']),
+    /close failed/,
+  )
+  // The close_session attempt counts; run_saved must NOT have fired.
+  assert.equal(callCount, 1)
 })
