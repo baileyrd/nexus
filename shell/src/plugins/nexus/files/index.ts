@@ -15,6 +15,7 @@ import {
 } from './kernelClient'
 import { setApi } from './runtime'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
+import { useStatusStore } from '../status/statusStore'
 
 const VIEW_ID = 'nexus.files.tree'
 const COMMAND_FOCUS = 'nexus.files.focus'
@@ -410,6 +411,11 @@ export const filesPlugin: Plugin = {
       if (paths.length === 0) return
       const parents = new Set(paths.map(parentRelpath))
       for (const parent of parents) refreshParent(parent)
+      // BL-053 Phase 4 — invalidate the per-path status cache so
+      // the file-tree dot picks up frontmatter changes the next
+      // time the row asks for it.
+      const store = useStatusStore.getState()
+      for (const path of paths) store.invalidate(path)
     }
 
     let fsUnsubs: Array<() => void> = []

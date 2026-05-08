@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReadFrontmatterResult",
+  "description": "Reply for `com.nexus.storage::read_frontmatter`.",
+  "type": "object",
+  "properties": {
+    "fields": {
+      "description": "Remaining frontmatter keys, keyed by YAML field name. Lists\nare joined with `, `; nested objects render via debug.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "description": "Value of the `status:` frontmatter key, or `null` when absent.\nThe value passes through verbatim — the shell maps the known\nstatus set (`info` / `warn` / `risk` / `ok`) to themed pills\nand renders unknown values as plain chips.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "fields"
+  ]
+}

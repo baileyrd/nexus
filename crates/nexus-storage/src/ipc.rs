@@ -270,3 +270,153 @@ pub struct StorageListDirResult {
     /// Entries in the requested directory. Order is filesystem-dependent.
     pub entries: Vec<StorageListDirEntry>,
 }
+
+// ── BL-053 Phase 4 — read_frontmatter ────────────────────────────────────────
+//
+// Args: forge-relative path to a markdown file.
+// Returns:
+//   - `status`  — the value of the `status:` frontmatter key (single
+//     string), or `null` when the key is absent / the file has no
+//     frontmatter / the file doesn't exist. Empty / unrecognised
+//     values are passed through verbatim so the shell can render
+//     them as plain text chips.
+//   - `fields`  — flat string-valued map of the remaining frontmatter
+//     keys. Lists are joined with `, `; nested objects render via
+//     debug. Keeps the wire shape stable for ts-rs without forcing
+//     callers to deal with `unknown`-typed values.
+
+/// Args for `com.nexus.storage::read_frontmatter` (handler 59).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageReadFrontmatterArgs {
+    /// Forge-relative path to the markdown file.
+    pub path: String,
+}
+
+/// Reply for `com.nexus.storage::read_frontmatter`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReadFrontmatterResult {
+    /// Value of the `status:` frontmatter key, or `null` when absent.
+    /// The value passes through verbatim — the shell maps the known
+    /// status set (`info` / `warn` / `risk` / `ok`) to themed pills
+    /// and renders unknown values as plain chips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// Remaining frontmatter keys, keyed by YAML field name. Lists
+    /// are joined with `, `; nested objects render via debug.
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
+/// Parse a markdown source's YAML frontmatter into a
+/// [`ReadFrontmatterResult`]. Exported for unit tests and for the
+/// `read_frontmatter` IPC dispatch in [`crate::core_plugin`]. Files
+/// without a leading `---` block (or with a malformed one) yield
+/// the default empty result.
+#[must_use]
+pub fn frontmatter_from_source(content: &str) -> ReadFrontmatterResult {
+    let after_open = if let Some(s) = content.strip_prefix("---\r\n") {
+        s
+    } else if let Some(s) = content.strip_prefix("---\n") {
+        s
+    } else {
+        return ReadFrontmatterResult::default();
+    };
+    let close_pattern = "\n---";
+    let Some(close_pos) = after_open.find(close_pattern) else {
+        return ReadFrontmatterResult::default();
+    };
+    let yaml_src = &after_open[..close_pos];
+    let Ok(yaml) = serde_yml::from_str::<serde_yml::Value>(yaml_src) else {
+        return ReadFrontmatterResult::default();
+    };
+    let mut out = ReadFrontmatterResult::default();
+    if let serde_yml::Value::Mapping(map) = yaml {
+        for (k, v) in map {
+            let key = match k {
+                serde_yml::Value::String(s) => s,
+                other => format!("{other:?}"),
+            };
+            let stringified = stringify_yaml_value(&v);
+            if key == "status" {
+                let trimmed = stringified.trim().to_string();
+                if !trimmed.is_empty() {
+                    out.status = Some(trimmed);
+                }
+                continue;
+            }
+            out.fields.insert(key, stringified);
+        }
+    }
+    out
+}
+
+fn stringify_yaml_value(v: &serde_yml::Value) -> String {
+    match v {
+        serde_yml::Value::Null => String::new(),
+        serde_yml::Value::Bool(b) => b.to_string(),
+        serde_yml::Value::Number(n) => n.to_string(),
+        serde_yml::Value::String(s) => s.clone(),
+        serde_yml::Value::Sequence(seq) => seq
+            .iter()
+            .map(stringify_yaml_value)
+            .collect::<Vec<_>>()
+            .join(", "),
+        serde_yml::Value::Mapping(_) | serde_yml::Value::Tagged(_) => format!("{v:?}"),
+    }
+}
+
+#[cfg(test)]
+mod read_frontmatter_tests {
+    use super::*;
+
+    #[test]
+    fn returns_default_when_no_frontmatter() {
+        let out = frontmatter_from_source("# heading\n\nbody text\n");
+        assert!(out.status.is_none());
+        assert!(out.fields.is_empty());
+    }
+
+    #[test]
+    fn parses_status_and_other_fields() {
+        let src = "---\nstatus: info\ntitle: Hello\ntags:\n  - rust\n  - shell\n---\n\nbody\n";
+        let out = frontmatter_from_source(src);
+        assert_eq!(out.status.as_deref(), Some("info"));
+        assert_eq!(out.fields.get("title").map(String::as_str), Some("Hello"));
+        assert_eq!(
+            out.fields.get("tags").map(String::as_str),
+            Some("rust, shell"),
+        );
+    }
+
+    #[test]
+    fn empty_status_treated_as_absent() {
+        let src = "---\nstatus:\n---\nbody\n";
+        let out = frontmatter_from_source(src);
+        assert!(out.status.is_none());
+    }
+
+    #[test]
+    fn unterminated_frontmatter_returns_default() {
+        let src = "---\nstatus: info\nbody without closing fence\n";
+        let out = frontmatter_from_source(src);
+        assert!(out.status.is_none());
+    }
+
+    #[test]
+    fn invalid_yaml_returns_default() {
+        let src = "---\nkey: : :\n---\nbody\n";
+        let out = frontmatter_from_source(src);
+        assert!(out.status.is_none());
+    }
+}

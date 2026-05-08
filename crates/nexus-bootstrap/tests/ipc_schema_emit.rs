@@ -30,9 +30,10 @@ use nexus_ai::ipc::{
 use nexus_ai::{Citation, RagResponse};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
-    StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
-    StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult, StorageSearchArgs,
-    StorageSearchHit, StorageSearchResult, StorageWriteFileArgs, StorageWriteFileResult,
+    ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
+    StorageNoteAppendArgs, StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult,
+    StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
+    StorageWriteFileArgs, StorageWriteFileResult,
 };
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
 // brought into the schema generator outside the original storage / ai
@@ -171,6 +172,10 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageListDirArgs>("com_nexus_storage__list_dir", "args");
     write_schema::<StorageListDirEntry>("com_nexus_storage__list_dir", "entry");
     write_schema::<StorageListDirResult>("com_nexus_storage__list_dir", "result");
+
+    // ── com.nexus.storage::read_frontmatter (BL-053 Phase 4) ─────────────
+    write_schema::<StorageReadFrontmatterArgs>("com_nexus_storage__read_frontmatter", "args");
+    write_schema::<ReadFrontmatterResult>("com_nexus_storage__read_frontmatter", "result");
 
     // ── com.nexus.ai::stream_ask ─────────────────────────────────────────
     write_schema::<AiStreamAskArgs>("com_nexus_ai__stream_ask", "args");

@@ -8,6 +8,33 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-053 Phase 4: status pills + tree dots ✅ (2026-05-07)
+
+**Source**: Forge Color System mockup — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)
+**Files**: new `crates/nexus-storage/src/ipc.rs` (additions for read_frontmatter); `crates/nexus-storage/src/core_plugin.rs`; `crates/nexus-bootstrap/src/lib.rs`; `crates/nexus-bootstrap/tests/ipc_schema_emit.rs`; new schemas `com_nexus_storage__read_frontmatter_{args,result}.json`; new TS bindings `StorageReadFrontmatterArgs.ts` + `ReadFrontmatterResult.ts`; new `shell/src/plugins/nexus/status/{StatusPill.tsx, statusStore.ts, useFileStatus.ts, StatusPill.test.ts, statusStore.test.ts}`; new `shell/tests/status-pill.test.ts`; `shell/src/plugins/core/editorArea/MarkdownDoc.tsx`; `shell/src/plugins/nexus/files/{kernelClient.ts, FilesTree.tsx, index.ts}`
+**Related**: BL-053 Phases 1–3 (shipped earlier; this completes the visual target track), Phase 3's callout palette (status pills share the `--cool` / `--warn` / `--risk` / `--ok` tokens)
+
+The Phase 4 product decision (open question 2 in the BL-053 doc) was settled in favor of **frontmatter as the canonical status source**. Each markdown file's `status:` YAML key drives both the metadata-bar pill in the rendered document and the dot in the file-tree row. Status set ships as `info` / `warn` / `risk` / `ok`, mirroring the BL-053 Phase 3 callout palette so callouts and pills with the same type share the same accent.
+
+- **`com.nexus.storage::read_frontmatter` IPC handler (id 59).** New entry on the storage core plugin. Args `{ path }`; returns `{ status: string?, fields: Record<string, string> }` where `fields` is a flat string-valued map of the remaining frontmatter keys (lists joined with `, `; nested objects rendered via debug). Missing files / non-markdown / unreadable bytes / malformed YAML / unterminated frontmatter all collapse to the empty result so the shell can branch on `status` without a separate existence probe. The handler reuses the parser logic from `crate::parser::extract_frontmatter` via a new `frontmatter_from_source` helper exported from the same `crate::ipc` module — keeps the parsing pinned to the existing well-tested pattern. 5 unit tests cover the matrix.
+- **Bootstrap registration + drift.** Wired through `nexus-bootstrap` with `read_frontmatter` as the IPC command name. ts-rs / schemars bindings emit `StorageReadFrontmatterArgs` + `ReadFrontmatterResult` under the `ts-export` feature, picked up by `ipc_schema_emit.rs` and committed to the generated trees.
+- **`StatusPill` + `StatusDot` components.** Pure shell components in `shell/src/plugins/nexus/status/StatusPill.tsx`. `statusAccentVar(status)` maps the four canonical statuses to their `--cool` / `--warn` / `--risk` / `--ok` CSS variables; unknown values fall back to `--text-faint` so a `status: foo` renders as a neutral chip rather than crashing. Both variants are exported: `StatusPill` (label + dot, used in the metadata bar) and `StatusDot` (dot only, used in the file-tree row at the right edge).
+- **FrontmatterBar integration.** `MarkdownDoc.tsx`'s metadata bar reads `frontmatter.status` and renders the pill alongside the existing `category` / `tags` / `updated` chips. The bar still hides itself entirely when none of the four keys are populated so plain documents stay uncluttered.
+- **`statusStore` — per-path cache.** Zustand-backed map from forge-relative path to `CachedStatus = string | null` (where `null` is the distinct "fetched, no status" sentinel; absence means "unfetched"). `fetchStatus` is read-through with in-flight coalescing — concurrent callers for the same path share one IPC. Errors cache as `null` so a transient failure doesn't keep re-firing on every row scroll. Bounded at 256 entries with FIFO eviction. `invalidate(relpath)` drops both the cached value and any in-flight promise so a `files:saved`-driven invalidation can race a stale fetch and win.
+- **File-tree dots.** `FilesTree.tsx` ' s `Row` gains a sibling `RowStatusDot` that calls the new `useFileStatus` hook (lazy fetch on mount for markdown rows; subscribes to the store's `revision` so a cache mutation re-renders the right rows even when the map identity flipped). The dot renders at the right edge of the row via `marginLeft: auto`. Non-markdown rows skip the fetch entirely (extension check up front).
+- **FS-event invalidation.** Hooked into the existing `nexus.files` `handleFsEvent` — every `com.nexus.storage.file_{created,modified,deleted,renamed}` payload's paths are funneled through `useStatusStore.invalidate` so an external save or rename flushes the dot's cached value the next time it's asked for.
+- **Tests.** Backend: 5 in `nexus-storage::ipc::read_frontmatter_tests` (no-frontmatter / parses-status-and-fields / empty-status-as-absent / unterminated / invalid-YAML). Shell: 9 (3 `StatusPill` helper tests + 6 `statusStore` tests covering read-through caching, in-flight coalescing, error-as-null, invalidate-and-refetch, FIFO eviction, null-status sentinel). 1007/1007 shell tests pass; 348/348 nexus-storage tests pass.
+
+**Tested**: `cargo test -p nexus-storage --lib` 348/348; `pnpm --filter nexus-shell test` 1007/1007 (was 998, +9 across the new suite); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean for the new files; `scripts/check_ipc_drift.sh` regenerates with only the expected new files added.
+
+**Definition of done coverage**:
+- ✅ Status pills (`info` / `warn` / `risk` / `ok`) render in the document frontmatter metadata bar
+- ✅ File-tree rows show a status dot for markdown files with a `status:` frontmatter key
+- ✅ Frontmatter `status:` is the source of truth (Phase 4 product decision)
+- ✅ FS events invalidate the per-path status cache so saves / renames flow through
+- ⏸ Inline `[!status:info]` body syntax for embedding pills outside the frontmatter bar (not in the original Phase 4 DoD; the frontmatter-bar pill covers the mockup's metaline use case — track as a follow-up if a forge wants pills mid-body)
+- ⏸ Bases column type for status (the Q2 decision picked frontmatter, not Bases — this option is still available as a follow-up if a Base wants to project a `status` column into kanban / table views; the BL-069 type-aware formatter would need a `status` FieldType case to render pills inline in DB tables)
+
 ### BL-067 Phase 1: Shell View Builder — programmatic save/switch/delete + sidebar panel ✅ (2026-05-07)
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)

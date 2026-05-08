@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageReadFrontmatterArgs",
+  "description": "Args for `com.nexus.storage::read_frontmatter` (handler 59).",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path to the markdown file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

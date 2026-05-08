@@ -15,6 +15,16 @@ export function setKernel(api: KernelAPI) {
   kernel = api
 }
 
+/** Read-only accessor for plugins that piggyback on `nexus.files`'s
+ *  kernel handle (e.g. the BL-053 Phase 4 status-dot hook reaches
+ *  through here so the FilesTree row can fetch a single value
+ *  without re-threading the API through every prop level).
+ *  Returns `null` between `workspace:closed` and the next
+ *  `workspace:opened`. */
+export function getKernel(): KernelAPI | null {
+  return kernel
+}
+
 /**
  * List the immediate children of a directory inside the active forge.
  *

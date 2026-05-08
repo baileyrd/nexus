@@ -259,6 +259,22 @@ pub const HANDLER_FIND_IN_FILES: u32 = 57;
 /// abort the batch. See [`crate::replace_in_files`].
 pub const HANDLER_REPLACE_IN_FILES: u32 = 58;
 
+/// BL-053 Phase 4 — `read_frontmatter`. Args:
+/// `{ "path": String }`; Returns
+/// [`crate::ipc::ReadFrontmatterResult`] — `{ status, fields }`
+/// where `fields` is a flat string-valued map of the file's parsed
+/// frontmatter (lists collapsed to comma-separated joins; nested
+/// objects rendered via debug). Returns `{ status: null, fields: {} }`
+/// for paths that don't exist or aren't markdown so the shell can
+/// distinguish "no status" from a real error without a separate
+/// existence check.
+///
+/// Read-only — does not touch the search index or emit events. The
+/// status pill / file-tree-dot consumer reads through this; the
+/// engine's full parser is not exposed because most consumers only
+/// need a few well-known scalar keys.
+pub const HANDLER_READ_FRONTMATTER: u32 = 59;
+
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
 ///
@@ -1130,6 +1146,18 @@ impl CorePlugin for StorageCorePlugin {
                 }
                 to_value(&report, "replace_in_files")
             }
+            HANDLER_READ_FRONTMATTER => {
+                // BL-053 Phase 4 — read a markdown file's YAML
+                // frontmatter and return it as a flat string-valued
+                // map. Lists collapse to comma-joined strings; nested
+                // objects render via debug. Missing files / unreadable
+                // bytes / non-markdown all return `{ status: null,
+                // fields: {} }` so callers can branch on `status`
+                // without a separate existence check.
+                let path = path_arg(args, "read_frontmatter")?;
+                let result = read_frontmatter_for_path(&self.forge_root, &path);
+                to_value(&result, "read_frontmatter")
+            }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
     }
@@ -1236,6 +1264,23 @@ fn build_appended(existing: &str, snippet: &str) -> String {
     // of how the previous write ended.
     let base = existing.trim_end_matches('\n');
     format!("{base}\n\n{snippet_trimmed_end}\n")
+}
+
+// ── BL-053 Phase 4 — read_frontmatter ───────────────────────────────────────
+
+/// Read a markdown file's YAML frontmatter and shape it for the
+/// `read_frontmatter` IPC. Missing files / non-markdown / unreadable
+/// bytes all collapse to the empty result so the shell can branch on
+/// `status` without a separate existence probe.
+fn read_frontmatter_for_path(
+    forge_root: &std::path::Path,
+    path: &str,
+) -> crate::ipc::ReadFrontmatterResult {
+    let abs = forge_root.join(path);
+    let Ok(content) = std::fs::read_to_string(&abs) else {
+        return crate::ipc::ReadFrontmatterResult::default();
+    };
+    crate::ipc::frontmatter_from_source(&content)
 }
 
 // ── Config handlers ──────────────────────────────────────────────────────────

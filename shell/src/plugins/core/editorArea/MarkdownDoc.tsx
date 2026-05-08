@@ -7,6 +7,7 @@
 // is added, swap this file's implementation behind the same props.
 
 import { useEffect, useMemo, useRef } from 'react'
+import { StatusPill } from '../../nexus/status/StatusPill'
 
 export interface Heading {
   id: string
@@ -75,15 +76,21 @@ export function MarkdownDoc({ source, title, onHeadings, onActiveHeading }: Prop
 }
 
 /** Renders a `.metaline` row below the H1 with the BL-053-spec'd
- *  fields (`category`, `tags`, `updated`). Returns null when none of
- *  those keys are populated so plain documents stay uncluttered. */
+ *  fields (`category`, `tags`, `updated`, `status`). Returns null
+ *  when none of those keys are populated so plain documents stay
+ *  uncluttered. */
 function FrontmatterBar({ frontmatter }: { frontmatter: Frontmatter }) {
   const category = stringValue(frontmatter['category'])
   const tags = listValue(frontmatter['tags'])
   const updated = stringValue(frontmatter['updated'])
-  if (!category && tags.length === 0 && !updated) return null
+  // BL-053 Phase 4 — `status:` renders as a themed pill (info / warn
+  // / risk / ok mirror the callout palette; unknown values render
+  // with a neutral accent).
+  const status = stringValue(frontmatter['status'])
+  if (!category && tags.length === 0 && !updated && !status) return null
   return (
     <div className="metaline">
+      {status && <StatusPill status={status} />}
       {category && <span className="chip">{category}</span>}
       {tags.map((t) => <span key={t} className="chip">{t}</span>)}
       {updated && <span>Updated {updated}</span>}

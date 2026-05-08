@@ -3,7 +3,9 @@ import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
 import { clientLogger } from '../../../clientLogger'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useEditorStore } from '../editor/editorStore'
-import { createDir, createFile, loadChildren, renameEntry } from './kernelClient'
+import { createDir, createFile, getKernel, loadChildren, renameEntry } from './kernelClient'
+import { StatusDot } from '../status/StatusPill'
+import { useFileStatus } from '../status/useFileStatus'
 import { Icon } from '../../../icons'
 import { getFileIcon } from './fileIcon'
 import { getApi } from './runtime'
@@ -925,6 +927,22 @@ function Row({
       <span className={`tree-item-inner ${contentClass}`}>
         <span className="tree-item-inner-text">{entry.name}</span>
       </span>
+      <RowStatusDot entry={entry} />
     </button>
+  )
+}
+
+/** BL-053 Phase 4 — status dot rendered at the right edge of each
+ *  markdown row when the file's `status:` frontmatter is set.
+ *  Pulled into a dedicated component so the parent `Row` doesn't
+ *  re-render on every cache mutation — only this child does, and
+ *  only when its own status flips. */
+function RowStatusDot({ entry }: { entry: FilesDirEntry }) {
+  const status = useFileStatus(entry.relpath, entry.isDir, entry.name, getKernel())
+  if (status == null) return null
+  return (
+    <span style={{ marginLeft: 'auto', paddingLeft: 6, display: 'inline-flex' }}>
+      <StatusDot status={status} />
+    </span>
   )
 }
