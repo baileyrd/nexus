@@ -314,7 +314,9 @@ The theme system already has live reload; the only new backend work is a `previe
 >
 > **Phase 2a + 2d closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Catalog became click-to-add (per-row inline `left | right | bottom | main` picker dispatching `workspace.ensureLeafOfType` + `revealLeaf`); per-leaf `×` close button on every snapshot row routing through `workspace.detachLeaf`; saved-layout rows gained an **Export** action that writes `manifest.toml` + `index.ts` + `<slug>.layout.json` + `README.md` under `<forge>/.forge/exports/<slug>/`. The emitted index.ts is a first-party-style shell-plugin source (re-applies the snapshot via `api.workspace.applySnapshot`); the README documents both install paths (drop the layout JSON into a forge to import via the View Builder UI vs. drop the directory into `shell/src/plugins/nexus/` for a baked-in build). Community-plugin / marketplace install (option C in the README) is gated on WI-44.
 >
-> **Phase 2b + 2c (deferred)**: per-panel options UI (move-between-docks, dock size/collapse on the snapshot rows) and the full WYSIWYG drag-drop canvas with drag-divider resize. Both need new `workspace.moveLeafToDock`-class mutators and pointer-event plumbing across docks.
+> **Phase 2b closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `workspace.moveLeafToDock(leaf, side)` mutator (leaf is unmounted from its source Tabs, pushed onto the destination dock's first Tabs, parent pointer rewritten, view instance preserved). View Builder snapshot rows gain a per-leaf `↔` "Move to" affordance with four target buttons (left / right / bottom / main) and per-dock collapse-toggle + −/+ size step controls in the section heading. The existing `setSidedockSize` / `setSidedockCollapsed` mutators carry the size/collapse work; the new code is the move surface plus the UI plumbing.
+>
+> **Phase 2c (deferred)**: full WYSIWYG drag-drop canvas with drag-divider resize. Needs pointer-event plumbing across docks; deferred since the click-button surface ships the same capability.
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
 **Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b + 2c ~1 week (deferred)
@@ -329,8 +331,8 @@ Every panel, sidebar, and pane in the Nexus shell is a registered plugin contrib
 - ✅ Plugin-contribution palette as an interactive add-panel surface (Phase 2a)
 - ✅ Per-leaf close affordances on the live snapshot (Phase 2a)
 - ✅ "Export as plugin" code generator that emits `manifest.toml` + `index.ts` + layout JSON + README (Phase 2d)
+- ✅ Per-panel configuration UI — move-between-docks + dock size/collapse (Phase 2b — shipped 2026-05-08)
 - ⬜ WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize (Phase 2c — deferred)
-- ⬜ Per-panel configuration UI (default size, dock side, float vs docked) (Phase 2b — deferred)
 
 ---
 

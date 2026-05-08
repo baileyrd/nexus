@@ -8,6 +8,29 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-067 phase 2b: per-panel options UI on View Builder snapshot rows ✅ (2026-05-08)
+
+**Source**: BL-067 phase 2 deferral list — phase 2a (catalog click-to-add + per-leaf close) and phase 2d (export-as-plugin) shipped 2026-05-07; phase 2b (move-between-docks, dock size/collapse) deferred behind "needs new `workspace.moveLeafToDock`-class mutators"
+**Files**: `shell/src/workspace/workspaceStore.ts` (new `moveLeafToDock(leaf, side)` mutator + `containsTabs` helper; surfaced on the `workspace` facade alongside the existing `setSidedockSize` / `setSidedockCollapsed`); `shell/src/plugins/nexus/viewBuilder/ViewBuilderView.tsx` (per-leaf `↔` "Move to" affordance with four target buttons + per-dock collapse-toggle / size-step controls in the section heading; new `moveLeafById` / `nudgeDockSize` helpers and `sidedockControlsFor` renderer); new `shell/tests/move-leaf-to-dock.test.ts` (7 tests covering relocate, no-op-when-already-there, main-routes-to-root, collapsed-destination-auto-expand, active-leaf-preserved, source-activeIndex-clamped, view-instance-preserved)
+**Related**: BL-067 phases 1 + 2a + 2d (already shipped); BL-067 phase 2c (WYSIWYG canvas, still deferred)
+
+The BL-067 phase 2 split named two pieces as deferred: 2b (per-panel options UI — move-between-docks, dock size/collapse on snapshot rows) and 2c (full WYSIWYG drag-drop canvas with drag-divider resize). Both were gated on a new `workspace.moveLeafToDock`-class mutator. This pass ships 2b — the click-button surface for the same capability — and lets 2c stay deferred since 2b already moves panels around without the pointer-event canvas work.
+
+- **`workspace.moveLeafToDock(leaf, side)`.** New mutator that unmounts a leaf from its current Tabs and pushes it onto the destination dock's first Tabs (creating one if the dock has none). Crucially, the leaf's *view instance is preserved* — `onOpen` already ran in the source mount, the host's `LeafHost` re-mounts the existing DOM container in the destination dock, no `detach()` is called. Just a parent-pointer rewrite plus the source/destination splice.
+- **No-op when already in the destination dock.** A new `containsTabs(node, target)` walker checks whether the current parent Tabs is reachable as a descendant of the destination dock root. If so, the call returns silently — the View Builder UI can dispatch unconditionally without checking the side first. The `layout-change` emit is skipped on a no-op so subscribers don't churn.
+- **Auto-expand collapsed destination dock.** When the destination is a sidedock and that dock is collapsed, `moveLeafToDock` flips `dock.collapsed = false` so the moved leaf is immediately visible (parallels `revealLeaf`'s expand-on-reveal behaviour). The `main` destination skips this — the root split has no collapsed state.
+- **Source activeIndex clamping.** The source Tabs's `activeIndex` is clamped to `Math.max(0, leaves.length - 1)` after the splice, matching `detachLeaf`'s convention. Tests pin that the clamped value stays inside `leaves[]` so the source tab strip never points at a non-existent index.
+- **Active-leaf preservation.** If the moved leaf was the active one, `setActiveLeaf` is called after the tree mutation so `activeLeafId` stays consistent and the active-leaf bridge fires once.
+- **View Builder UI — per-leaf "Move to" affordance.** The leaf row in `LeafRow` now collapses by default; clicking the new `↔` icon expands a row of four buttons (`left` / `right` / `bottom` / `main`). Picking one calls `moveLeafToDock` and collapses the action row. The existing close button stays at its rightmost position.
+- **View Builder UI — per-dock collapse + size controls.** The section heading for left / right / bottom (in `NodeBlock`) gains an inline strip: collapse toggle (▾ / ▸), `−` step, current size readout (e.g. `300px` with `tabular-nums`), `+` step. Steps are ±50px; the existing `setSidedockSize` 150px floor handles the lower clamp. The main split label has no controls (no side / no size).
+
+**Tested**: `pnpm --filter nexus-shell test` 1072/1072 (was 1065, +7); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` 0 errors (pre-existing 53 warnings, none from changed files). Tests live in `shell/tests/move-leaf-to-dock.test.ts` rather than `shell/src/workspace/workspaceStore.test.ts` because the default test glob (`tests/*.test.ts`) only sees the top-level dir — same pattern as `tests/set-split-sizes.test.ts`. The 7 tests cover: (1) relocate root → left works; (2) already-in-destination is a silent no-op (zero `layout-change` events); (3) `main` routes to the root split; (4) collapsed destination dock auto-expands; (5) active leaf stays active; (6) source `activeIndex` clamps; (7) view instance survives the move.
+
+**Definition of done coverage** (against the BL-067 phase 2b deferral):
+- ✅ Move-between-docks via the snapshot row.
+- ✅ Dock size/collapse on the snapshot heading.
+- ⏸ WYSIWYG canvas with drag-divider resize (phase 2c) — pointer-event plumbing across docks; the click-button surface ships the same capability with much less complexity, so 2c stays deferred unless a user asks specifically for the visual-drag UX.
+
 ### BL-093 follow-up: `event_bus_queue_depth` gauge ✅ (2026-05-08)
 
 **Source**: BL-093 closure note (2026-05-06) — first of three deferrals (the others are the Prometheus scrape endpoint and the shell health panel)

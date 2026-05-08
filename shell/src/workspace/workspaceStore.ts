@@ -698,6 +698,96 @@ async function detachLeaf(leaf: Leaf): Promise<void> {
   emitInternal('layout-change')
 }
 
+/**
+ * BL-067 phase 2b — relocate `leaf` to a different dock side without
+ * tearing down its View. Removes the leaf from its current Tabs and
+ * pushes it onto the destination dock's first Tabs (creating one if
+ * the dock has none yet). If the leaf is already inside the
+ * destination dock, the call is a silent no-op so the View Builder
+ * UI can dispatch unconditionally.
+ *
+ * Side effects:
+ *  - Source Tabs has the leaf removed; `activeIndex` clamps to the
+ *    new length (matches `detachLeaf`'s splice convention).
+ *  - Destination Tabs gains the leaf at the end; `activeIndex`
+ *    advances to the new leaf so the user sees their move.
+ *  - `leaf.parent` is rewritten to the destination Tabs.
+ *  - When the destination is a sidedock and that dock is collapsed,
+ *    the dock auto-expands so the moved leaf is visible (parallels
+ *    `revealLeaf`).
+ *  - If the moved leaf was active, it stays active in its new home.
+ *  - One `layout-change` emit covers the full tree mutation.
+ *
+ * Unlike `detachLeaf`, the leaf's view is *not* disposed — `onOpen`
+ * already ran in the source mount and the host re-uses the existing
+ * DOM container as the LeafHost re-mounts in the destination dock.
+ * `containerEl` survives the move; only the parent pointer changes.
+ */
+function moveLeafToDock(
+  leaf: Leaf,
+  side: 'left' | 'right' | 'bottom' | 'main',
+): void {
+  const sourceTabs = leaf.parent
+  if (!sourceTabs || sourceTabs.kind !== 'tabs') return
+
+  const destRoot: WorkspaceParent =
+    side === 'main' ? state().rootSplit : dockForSide(side)
+  if (containsTabs(destRoot, sourceTabs)) return
+
+  let destTabs = findFirstTabs(destRoot)
+  if (!destTabs) {
+    destTabs = makeTabs()
+    if (destRoot.kind === 'split') {
+      destRoot.children.push(destTabs)
+    } else {
+      // Defensive: dock roots are always split-shaped at the top
+      // level (rootSplit / leftSplit / rightSplit / bottomSplit).
+      // If we ever land here it's a corrupted layout and a no-op
+      // is the safest exit.
+      return
+    }
+  }
+
+  const wasActive = state().activeLeafId === leaf.id
+
+  // Remove from source Tabs.
+  const idx = sourceTabs.leaves.findIndex((l) => l.id === leaf.id)
+  if (idx >= 0) {
+    sourceTabs.leaves.splice(idx, 1)
+    if (sourceTabs.activeIndex >= sourceTabs.leaves.length) {
+      sourceTabs.activeIndex = Math.max(0, sourceTabs.leaves.length - 1)
+    }
+  }
+
+  // Insert into destination Tabs and rewrite parent pointer.
+  destTabs.leaves.push(leaf)
+  destTabs.activeIndex = destTabs.leaves.length - 1
+  leaf.parent = destTabs
+
+  // If the destination is a collapsed sidedock, expand it so the
+  // moved leaf is visible. Skip for `main` since the root split is
+  // never "collapsed".
+  if (side !== 'main') {
+    const dock = dockForSide(side)
+    if (dock.collapsed) dock.collapsed = false
+  }
+
+  emitInternal('layout-change')
+  if (wasActive) setActiveLeaf(leaf)
+}
+
+/** True if `target` (a Tabs node) is reachable as a descendant of
+ *  `node`. Used by `moveLeafToDock`'s already-in-dock guard. */
+function containsTabs(node: WorkspaceParent, target: Tabs): boolean {
+  if (node.kind === 'tabs') return node.id === target.id
+  if (node.kind === 'split') {
+    return node.children.some((c) => containsTabs(c, target))
+  }
+  const withChild = node as { child?: WorkspaceParent }
+  if (withChild.child) return containsTabs(withChild.child, target)
+  return false
+}
+
 function on(event: string, listener: Listener): () => void {
   const listeners = new Map(state().listeners)
   const existing = listeners.get(event) ?? new Set<Listener>()
@@ -1073,6 +1163,7 @@ export const workspace = {
   setTabActiveIndex,
   reorderLeaves,
   detachLeaf,
+  moveLeafToDock,
   // BL-029
   popoutLeaf,
   closeFloatingWindow,

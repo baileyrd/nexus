@@ -114,6 +114,26 @@ async function closeLeafById(leafId: string): Promise<boolean> {
   return true
 }
 
+/** BL-067 phase 2b — relocate a live Leaf by serialized id to the
+ *  named dock. Returns `false` for a stale snapshot id (same race
+ *  posture as `closeLeafById`). */
+function moveLeafById(leafId: string, side: DockSide): boolean {
+  const leaf = workspace.leaves.get(leafId)
+  if (!leaf) return false
+  workspace.moveLeafToDock(leaf, side)
+  return true
+}
+
+/** Step the named sidedock's size by `delta` pixels (clamped at the
+ *  store's 150px floor by `setSidedockSize` itself). */
+function nudgeDockSize(
+  side: 'left' | 'right' | 'bottom',
+  current: number,
+  delta: number,
+): void {
+  workspace.setSidedockSize(side, current + delta)
+}
+
 // ── Current layout ──────────────────────────────────────────────────────────
 
 function CurrentLayoutSection(): ReactElement {
@@ -148,11 +168,80 @@ function CurrentLayoutSection(): ReactElement {
 }
 
 function NodeBlock({ label, node }: { label: string; node: SerializedNode }): ReactElement {
+  // BL-067 phase 2b — surface dock collapse + size controls when the
+  // root of this section is a sidedock (left / right / bottom). The
+  // root split has no `side`, so `main` skips the controls cleanly.
+  const dockControls = sidedockControlsFor(label, node)
   return (
     <div>
-      <div style={{ fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontWeight: 600 }}>{label}</span>
+        {dockControls}
+      </div>
       <NodeTree node={node} depth={1} />
     </div>
+  )
+}
+
+/** Render the per-dock controls (collapse toggle, size readout +
+ *  -50/+50 step buttons) when `node` is a sidedock. Returns `null`
+ *  for the main split / leafs / floating containers. */
+function sidedockControlsFor(label: string, node: SerializedNode): ReactElement | null {
+  if (node.kind !== 'split') return null
+  const split = node as SerializedSplit
+  const side = split.side
+  if (!side) return null
+  const collapsed = split.collapsed === true
+  const size = split.size ?? 0
+  // The label and the side should agree (the section heading is
+  // hard-coded to 'left' / 'right' / 'bottom'); preserve the label
+  // for tooltip clarity but bind mutators to `side` from the snapshot
+  // so a mismatched layout still routes correctly.
+  void label
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        marginLeft: 'auto',
+        fontFamily: 'var(--font-interface)',
+        fontWeight: 400,
+      }}
+    >
+      <button
+        type="button"
+        title={collapsed ? 'Expand dock' : 'Collapse dock'}
+        aria-pressed={collapsed}
+        onClick={() => workspace.setSidedockCollapsed(side, !collapsed)}
+        style={subtleButton}
+      >
+        {collapsed ? '▸' : '▾'}
+      </button>
+      <button
+        type="button"
+        title="Decrease dock size"
+        aria-label="Decrease dock size"
+        onClick={() => nudgeDockSize(side, size, -50)}
+        style={subtleButton}
+      >
+        −
+      </button>
+      <span
+        style={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.85em', minWidth: 50, textAlign: 'right' }}
+      >
+        {size}px
+      </span>
+      <button
+        type="button"
+        title="Increase dock size"
+        aria-label="Increase dock size"
+        onClick={() => nudgeDockSize(side, size, 50)}
+        style={subtleButton}
+      >
+        +
+      </button>
+    </span>
   )
 }
 
@@ -209,41 +298,83 @@ function LeafRow({
   active: boolean
 }): ReactElement {
   const [busy, setBusy] = useState(false)
+  // BL-067 phase 2b — collapsed-by-default dock-move dropdown. The
+  // four target buttons appear inline when the user clicks "Move".
+  // Inline rather than a popover to keep the snapshot scrollable
+  // single-column UX intact (no DOM overflow tricks needed).
+  const [showMove, setShowMove] = useState(false)
   return (
     <div
       style={{
         paddingLeft: depth * 12,
         display: 'flex',
-        alignItems: 'center',
-        gap: 6,
+        flexDirection: 'column',
+        gap: 2,
       }}
     >
-      <span
-        style={{
-          flex: 1,
-          color: active ? 'var(--interactive-accent)' : 'inherit',
-        }}
-      >
-        {leaf.viewState.type}
-        {active ? ' ●' : ''}
-      </span>
-      <button
-        type="button"
-        title="Close panel"
-        aria-label={`Close ${leaf.viewState.type}`}
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true)
-          try {
-            await closeLeafById(leaf.id)
-          } finally {
-            setBusy(false)
-          }
-        }}
-        style={leafCloseButton}
-      >
-        ×
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span
+          style={{
+            flex: 1,
+            color: active ? 'var(--interactive-accent)' : 'inherit',
+          }}
+        >
+          {leaf.viewState.type}
+          {active ? ' ●' : ''}
+        </span>
+        <button
+          type="button"
+          title="Move to a different dock"
+          aria-expanded={showMove}
+          onClick={() => setShowMove((v) => !v)}
+          style={leafActionButton}
+        >
+          {showMove ? '▾' : '↔'}
+        </button>
+        <button
+          type="button"
+          title="Close panel"
+          aria-label={`Close ${leaf.viewState.type}`}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              await closeLeafById(leaf.id)
+            } finally {
+              setBusy(false)
+            }
+          }}
+          style={leafCloseButton}
+        >
+          ×
+        </button>
+      </div>
+      {showMove && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            paddingLeft: 4,
+            fontFamily: 'var(--font-interface)',
+          }}
+        >
+          {(['left', 'right', 'bottom', 'main'] as const).map((side) => (
+            <button
+              key={side}
+              type="button"
+              onClick={() => {
+                if (moveLeafById(leaf.id, side)) {
+                  setShowMove(false)
+                }
+              }}
+              style={subtleButton}
+              aria-label={`Move ${leaf.viewState.type} to ${side}`}
+            >
+              {side}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -633,6 +764,17 @@ const leafCloseButton: React.CSSProperties = {
   border: 0,
   padding: '0 4px',
   fontSize: '1em',
+  lineHeight: 1,
+  color: 'var(--text-muted)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-interface)',
+}
+
+const leafActionButton: React.CSSProperties = {
+  background: 'transparent',
+  border: 0,
+  padding: '0 4px',
+  fontSize: '0.85em',
   lineHeight: 1,
   color: 'var(--text-muted)',
   cursor: 'pointer',
