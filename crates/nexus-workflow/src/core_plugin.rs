@@ -99,6 +99,11 @@ pub const HANDLER_TEMPLATES_GET: u32 = 9;
 /// `{ written: true, path }`. Refuses to clobber an existing file
 /// unless `overwrite = true`.
 pub const HANDLER_TEMPLATES_INIT: u32 = 10;
+/// BL-054 Phase 4 follow-up — `next_fire`: compute the next scheduled
+/// fire time for cron-triggered workflows. Args: `{ name?: String }`
+/// (omitted → all cron workflows). Returns
+/// `[{ name, expression, next_fire_at: RFC3339 | null }]`.
+pub const HANDLER_NEXT_FIRE: u32 = 12;
 
 // ── IPC arg types (audit P1-3 #113 — lifted from inline) ─────────────────────
 
@@ -149,6 +154,28 @@ pub struct RunHistoryArgs {
     /// the full in-memory ring (≤ `RUN_HISTORY_CAP`) is returned.
     #[serde(default)]
     pub limit: Option<u32>,
+}
+
+/// Args for `com.nexus.workflow::next_fire` (handler id `12`,
+/// BL-054 Phase 4 follow-up). When `name` is set, the response
+/// returns at most one row matching that workflow; when omitted,
+/// every cron-triggered workflow is included. Manual / file_event
+/// / git_event / mcp_event / webhook workflows are skipped.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct NextFireArgs {
+    /// Optional workflow-name filter; when set, only that workflow
+    /// is included (and only if it carries a cron trigger).
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Args for `com.nexus.workflow::get` (handler id `2`).
@@ -1496,6 +1523,7 @@ impl CorePlugin for WorkflowCorePlugin {
             HANDLER_TEMPLATES_GET => Self::dispatch_templates_get(args),
             HANDLER_TEMPLATES_INIT => self.dispatch_templates_init(args),
             HANDLER_RUN_HISTORY => self.dispatch_run_history(args),
+            HANDLER_NEXT_FIRE => self.dispatch_next_fire(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -2153,6 +2181,49 @@ impl WorkflowCorePlugin {
         to_value(&rows, "run_history")
     }
 
+    /// BL-054 Phase 4 follow-up — compute next-fire for cron
+    /// workflows. Walks the registry, picks `trigger_type == "cron"`
+    /// (optionally filtering by `name`), parses the `schedule`
+    /// expression, and asks `next_after(Utc::now())`. Workflows whose
+    /// expression fails to parse contribute a row with
+    /// `next_fire_at: null` so the UI can render them with a
+    /// "schedule unparseable" hint rather than disappearing them.
+    fn dispatch_next_fire(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: NextFireArgs = parse(args, "next_fire")?;
+        let now = chrono::Utc::now();
+        let reg = self.registry.lock().map_err(poisoned)?;
+        let rows: Vec<serde_json::Value> = reg
+            .iter()
+            .filter(|(_, wf)| wf.trigger.trigger_type == "cron")
+            .filter(|(name, _)| a.name.as_deref().is_none_or(|n| n == *name))
+            .map(|(name, wf)| {
+                let expr = wf
+                    .trigger
+                    .extra
+                    .get("schedule")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let next = if expr.is_empty() {
+                    None
+                } else {
+                    match crate::cron::CronSchedule::parse(expr) {
+                        Ok(s) => s.next_after(now),
+                        Err(_) => None,
+                    }
+                };
+                serde_json::json!({
+                    "name": name,
+                    "expression": expr,
+                    "next_fire_at": next.map(|t| t.to_rfc3339()),
+                })
+            })
+            .collect();
+        Ok(serde_json::Value::Array(rows))
+    }
+
     fn dispatch_validate(
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
@@ -2623,6 +2694,68 @@ path = "journal/today.md"
             .unwrap();
         assert_eq!(v["workflow"]["name"], "Daily");
     }
+
+    #[test]
+    fn next_fire_returns_a_row_per_cron_workflow() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "daily.workflow.toml", WF);
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        let v = plugin
+            .dispatch(HANDLER_NEXT_FIRE, &serde_json::json!({}))
+            .unwrap();
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "Daily");
+        assert_eq!(arr[0]["expression"], "0 9 * * *");
+        // RFC3339-shaped UTC timestamp; non-empty + parseable.
+        let next = arr[0]["next_fire_at"].as_str().expect("next_fire_at");
+        chrono::DateTime::parse_from_rfc3339(next).expect("parses RFC3339");
+    }
+
+    #[test]
+    fn next_fire_filters_to_named_workflow() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "daily.workflow.toml", WF);
+        // Manual workflow alongside — should not appear in the
+        // unfiltered output and definitely not when name is set.
+        let manual = r#"
+[workflow]
+name = "Manual"
+description = "manual fire"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "file_create"
+path = "x.md"
+"#;
+        write(tmp.path(), "manual.workflow.toml", manual);
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+
+        let unfiltered = plugin
+            .dispatch(HANDLER_NEXT_FIRE, &serde_json::json!({}))
+            .unwrap();
+        let arr = unfiltered.as_array().unwrap();
+        assert_eq!(arr.len(), 1, "manual trigger excluded");
+        assert_eq!(arr[0]["name"], "Daily");
+
+        let filtered = plugin
+            .dispatch(
+                HANDLER_NEXT_FIRE,
+                &serde_json::json!({ "name": "Manual" }),
+            )
+            .unwrap();
+        let arr = filtered.as_array().unwrap();
+        assert_eq!(arr.len(), 0, "non-cron workflow filtered out by name");
+    }
+
+    // Note: the parse-time `validate_trigger` rejects unparseable
+    // cron expressions (see `trigger_validation.rs`), so the
+    // registry never holds a workflow whose `schedule` would fail
+    // CronSchedule::parse. The `dispatch_next_fire` defensive
+    // null-fallback path is intentionally unreachable through normal
+    // load — kept as belt-and-braces for in-memory mutation cases.
 
     #[test]
     fn file_event_spec_parses_all_fields() {

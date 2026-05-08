@@ -62,6 +62,10 @@ interface ObservabilityState {
   /** BL-054 Phase 4 follow-up — last persisted run per workflow
    *  name. Empty for workflows that haven't run yet. */
   automationLastRun: Record<string, WorkflowRunRecord>
+  /** BL-054 Phase 4 follow-up — next-fire timestamp per cron workflow.
+   *  RFC-3339 UTC; `null` when the schedule fails to parse, missing
+   *  when the workflow isn't a cron trigger. */
+  automationNextFire: Record<string, string | null>
 
   // ── Vault feed ───────────────────────────────────────────────────
   vaultEntries: VaultFeedEntry[]
@@ -74,6 +78,7 @@ interface ObservabilityState {
   setAutomationError(e: string | null): void
   setAutomations(entries: AutomationEntry[]): void
   setAutomationLastRun(byName: Record<string, WorkflowRunRecord>): void
+  setAutomationNextFire(byName: Record<string, string | null>): void
   prependVault(entry: VaultFeedEntry): void
   reset(): void
 }
@@ -91,6 +96,7 @@ const INITIAL: Pick<
   | 'automationError'
   | 'automationWorkflows'
   | 'automationLastRun'
+  | 'automationNextFire'
   | 'vaultEntries'
 > = {
   activeTab: 'usage',
@@ -102,6 +108,7 @@ const INITIAL: Pick<
   automationError: null,
   automationWorkflows: [],
   automationLastRun: {},
+  automationNextFire: {},
   vaultEntries: [],
 }
 
@@ -118,6 +125,7 @@ export const useObservabilityStore = create<ObservabilityState>((set) => ({
   setAutomations: (entries) =>
     set({ automationLoading: false, automationError: null, automationWorkflows: entries }),
   setAutomationLastRun: (byName) => set({ automationLastRun: byName }),
+  setAutomationNextFire: (byName) => set({ automationNextFire: byName }),
   prependVault: (entry) =>
     set((s) => {
       // Dedup by id — the dual-topic publish (BL-052) means a single

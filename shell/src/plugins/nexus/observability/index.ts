@@ -132,6 +132,33 @@ export const osObservabilityPlugin: Plugin = {
             err,
           )
         }
+        // BL-054 Phase 4 follow-up — fetch next-fire timestamps for
+        // every cron-triggered workflow.
+        try {
+          const rawNext = await api.kernel.invoke<unknown>(
+            WORKFLOW_PLUGIN_ID,
+            'next_fire',
+            {},
+          )
+          const rows = Array.isArray(rawNext) ? rawNext : []
+          const nextByName: Record<string, string | null> = {}
+          for (const item of rows) {
+            if (!item || typeof item !== 'object') continue
+            const r = item as Record<string, unknown>
+            const name = typeof r.name === 'string' ? r.name : null
+            if (!name) continue
+            nextByName[name] =
+              typeof r.next_fire_at === 'string' ? r.next_fire_at : null
+          }
+          useObservabilityStore.getState().setAutomationNextFire(nextByName)
+        } catch (err) {
+          // Non-fatal: workflow plugin may be older than the
+          // next_fire handler.
+          clientLogger.debug(
+            '[nexus.osObservability] next_fire fetch failed:',
+            err,
+          )
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         useObservabilityStore.getState().setAutomationError(msg)

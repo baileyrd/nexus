@@ -262,6 +262,7 @@ function AutomationTab({
   const error = useObservabilityStore((s) => s.automationError)
   const all = useObservabilityStore((s) => s.automationWorkflows)
   const lastRun = useObservabilityStore((s) => s.automationLastRun)
+  const nextFire = useObservabilityStore((s) => s.automationNextFire)
   // Foundation workflows — those whose trigger fires automatically.
   const foundations = all.filter(
     (w) => w.triggerType === 'cron' || w.triggerType === 'file_event',
@@ -359,18 +360,65 @@ function AutomationTab({
                 </span>
                 <span>·</span>
                 <LastRun record={run} />
+                {wf.triggerType === 'cron' && (
+                  <>
+                    <span>·</span>
+                    <NextFire iso={nextFire[wf.name] ?? null} />
+                  </>
+                )}
               </div>
             </div>
           )
         })}
       </div>
-      <Footnote>
-        Next-fire column deferred — would require the cron scheduler to
-        publish its computed next-fire time. Today the trigger spec
-        chip is the closest signal.
-      </Footnote>
     </div>
   )
+}
+
+/**
+ * BL-054 Phase 4 follow-up — render the next computed fire time for
+ * cron-triggered workflows. The kernel returns RFC-3339 UTC; we
+ * surface a humanised relative form ("in 3 hours") plus an absolute
+ * `<time>` tooltip so the user can read either form.
+ */
+function NextFire({ iso }: { iso: string | null }) {
+  if (!iso) {
+    return (
+      <span style={{ color: 'var(--text-faint)' }} title="schedule unparseable">
+        next: —
+      </span>
+    )
+  }
+  const dt = new Date(iso)
+  if (Number.isNaN(dt.getTime())) {
+    return <span style={{ color: 'var(--text-faint)' }}>next: —</span>
+  }
+  const now = Date.now()
+  const deltaMs = dt.getTime() - now
+  return (
+    <time
+      dateTime={iso}
+      title={dt.toLocaleString()}
+      style={{ color: 'var(--text-muted)' }}
+    >
+      next: {formatRelative(deltaMs)}
+    </time>
+  )
+}
+
+function formatRelative(ms: number): string {
+  if (!Number.isFinite(ms)) return '—'
+  const absMs = Math.abs(ms)
+  const future = ms >= 0
+  const minutes = Math.round(absMs / 60_000)
+  if (minutes < 1) return future ? 'in <1m' : 'just now'
+  if (minutes < 60) return future ? `in ${minutes}m` : `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days < 30) return future ? `in ${days}d` : `${days}d ago`
+  const months = Math.round(days / 30)
+  return future ? `in ${months}mo` : `${months}mo ago`
 }
 
 function LastRun({

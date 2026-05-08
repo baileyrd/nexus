@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NextFireArgs",
+  "description": "Args for `com.nexus.workflow::next_fire` (handler id `12`,\nBL-054 Phase 4 follow-up). When `name` is set, the response\nreturns at most one row matching that workflow; when omitted,\nevery cron-triggered workflow is included. Manual / file_event\n/ git_event / mcp_event / webhook workflows are skipped.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Optional workflow-name filter; when set, only that workflow\nis included (and only if it carries a cron trigger).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false
+}

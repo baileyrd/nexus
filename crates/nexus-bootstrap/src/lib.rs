@@ -1136,6 +1136,13 @@ fn register_core_plugins(
                         "run_history",
                         nexus_workflow::HANDLER_RUN_HISTORY,
                     ),
+                    // BL-054 Phase 4 follow-up — next-fire timestamp
+                    // for cron-triggered workflows so the Automation
+                    // tab can render an actual schedule preview.
+                    (
+                        "next_fire",
+                        nexus_workflow::core_plugin::HANDLER_NEXT_FIRE,
+                    ),
                 ]),
             ),
             forge_root,
