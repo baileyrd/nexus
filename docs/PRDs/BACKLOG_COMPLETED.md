@@ -8,6 +8,28 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-052 follow-up: `legacyPluginIds` catalog support + activityTimeline → activity rename ✅ (2026-05-08)
+
+**Source**: BL-052 deferral list — "Plugin-id rename `nexus.activityTimeline` → `nexus.activity`. The catalog has no `legacyPluginIds` field, so a rename without a migration shim would orphan any user who'd toggled the plugin off."
+**Files**: `shell/src/plugins/catalog.ts` (new `legacyPluginIds?: readonly string[]` field on `PluginEntry`, new exported `buildLegacyIdAliases` helper, catalog entry id changed from `nexus.activityTimeline` to `nexus.activity` with `legacyPluginIds: ['nexus.activityTimeline']`); `shell/src/plugins/nexus/activityTimeline/index.ts` (manifest id + display name updated to `nexus.activity` / `'Activity'`); `shell/src/main.tsx` (boot-time migration map now merges hardcoded renames with `buildLegacyIdAliases(ALL_PLUGINS)`); `shell/src/plugins/catalog.test.ts` + `shell/tests/catalog.test.ts` (+8 unit tests).
+**Related**: BL-052 (universal activity timeline), the BL-052 phase A closure note that named this rename as deferred
+
+The original BL-052 closure flagged the rename as deferred because the catalog had no `legacyPluginIds` field — an in-place id change would orphan any user who'd toggled the plugin's enable state, since `plugins.enabled` is keyed off the catalog id. This pass closes the gap by adding the missing field, wiring it into the boot-time migration, and performing the rename.
+
+- **`PluginEntry.legacyPluginIds` field.** Optional `readonly string[]`; lets a catalog entry declare ids it has been known by historically. The canonical id is the entry's `id`; legacy ids should be removed once enough release cycles pass that no on-disk config could still carry the old value.
+- **`buildLegacyIdAliases(entries)` helper.** Pure function that flattens every entry's `legacyPluginIds` into a `Record<legacyId, canonicalId>` map. Throws on conflict (two entries claiming the same legacy id, or a legacy id equal to its own canonical id) so the catalog can't get into an inconsistent state. Exported for unit tests.
+- **Boot-time migration in `main.tsx`.** The hardcoded `CATALOG_ID_RENAMES` map (which previously carried two ad-hoc renames from before this field existed) now merges with `buildLegacyIdAliases(ALL_PLUGINS)`. Old hardcoded entries stay for users whose persisted state predates the field; new renames go in `legacyPluginIds` on the catalog entry. The `plugins.enabled` config list is rewritten in place when any id maps through the merged table — same idempotent shape as before.
+- **The actual rename.** Catalog id `nexus.activityTimeline` → `nexus.activity` with `legacyPluginIds: ['nexus.activityTimeline']`; manifest `id` + display `name` follow. Internal command / view / activity-bar ids deliberately keep the `nexus.activityTimeline.*` prefix — these are persisted in saved workspace layouts and user keybindings, and renaming them would break hydration / muscle memory for negligible cosmetic gain.
+
+**Tested**: `pnpm --filter nexus-shell test` 1110/1110 (was 1102, +8); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (0 errors). The 8 new unit tests cover:
+- `buildLegacyIdAliases` — empty entries → empty map, entries without `legacyPluginIds` → empty map, legacy → canonical roundtrip with multiple legacy ids per entry, throws on conflict, throws on self-alias, idempotent on duplicate identical declarations (6 tests).
+- `ALL_PLUGINS` round-trips through `buildLegacyIdAliases` without throwing — sanity guard against future renames declaring colliding aliases (1 test).
+- The `nexus.activity` catalog entry exists and declares `legacyPluginIds: ['nexus.activityTimeline']` — pins the rename so a future drop-of-the-legacy can't delete it accidentally (1 test).
+
+**Definition of done coverage**: ✅ catalog now has `legacyPluginIds` alias support; ✅ `nexus.activityTimeline` → `nexus.activity` rename shipped end-to-end with users' enable/disable state preserved.
+
+---
+
 ### BL-093 follow-up: shell health panel ✅ (2026-05-08)
 
 **Source**: BL-093 closure note (2026-05-06) — explicit deferral: "Prometheus scrape endpoint and shell health panel still deferred"

@@ -51,9 +51,11 @@ import sandboxRuntimeSource from 'virtual:sandbox-runtime'
 // them. Each dynamic import becomes a separate Vite chunk (vendor libs are
 // grouped via manualChunks in vite.config.ts).
 import {
+  ALL_PLUGINS,
   DEFAULT_ON_PLUGINS,
   DEFAULT_OFF_PLUGINS,
   PLUGINS_ENABLED_CONFIG_KEY,
+  buildLegacyIdAliases,
 } from './plugins/catalog'
 import { useConfigStore } from './stores/configStore'
 import { keybindingOverrideStorage } from './registry/keybindingOverrideStorage'
@@ -171,9 +173,22 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   // One-time migration: catalog IDs were corrected to match their plugin
   // manifest IDs. Remap any stale stored IDs so existing users keep
   // their enabled-plugin selections after the rename.
-  const CATALOG_ID_RENAMES: Record<string, string> = {
+  //
+  // Two sources contribute to the migration map:
+  //   - Hardcoded renames preserved from before the catalog grew a
+  //     `legacyPluginIds` field. Kept for users who upgraded before
+  //     the field landed; new renames should declare
+  //     `legacyPluginIds` on the catalog entry instead.
+  //   - BL-052 follow-up — every entry's `legacyPluginIds` flows
+  //     through `buildLegacyIdAliases` so the catalog itself
+  //     declares its own back-compat aliases.
+  const HARDCODED_RENAMES: Record<string, string> = {
     'nexus.graphGlobal': 'nexus.graph.global',
     'nexus.mermaid':     'community.mermaid',
+  }
+  const CATALOG_ID_RENAMES: Record<string, string> = {
+    ...HARDCODED_RENAMES,
+    ...buildLegacyIdAliases(ALL_PLUGINS),
   }
   const rawEnabledIds = useConfigStore.getState().get<string[]>(PLUGINS_ENABLED_CONFIG_KEY, [])
   const migratedEnabledIds = rawEnabledIds.map(id => CATALOG_ID_RENAMES[id] ?? id)

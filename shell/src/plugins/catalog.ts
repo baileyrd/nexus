@@ -30,7 +30,53 @@ export interface PluginEntry {
    * shell does not render. Absent/true means the plugin runs in popouts.
    */
   readonly popoutCompatible?: boolean
+  /**
+   * BL-052 follow-up — historical ids this entry has been known by.
+   * Read at boot to migrate the persisted `plugins.enabled` list when
+   * a plugin id is renamed; lets users keep their enable/disable
+   * state across the rename without manual intervention.
+   *
+   * The canonical id is the entry's `id` field; legacy ids should be
+   * removed from this list once the rename has been in production
+   * long enough that no on-disk config could still carry the old
+   * value.
+   */
+  readonly legacyPluginIds?: readonly string[]
   load(): Promise<Plugin>
+}
+
+/**
+ * BL-052 follow-up — collect every `legacyPluginIds` declaration in
+ * the catalog into a flat `legacy → canonical` map. Used by `boot()`
+ * to migrate the persisted `plugins.enabled` list across a plugin id
+ * rename. Pure function — exported for unit tests.
+ *
+ * Throws when a legacy id is claimed by more than one canonical
+ * entry, so the catalog can't get into an inconsistent state. Same
+ * legacy id pointing back at its own canonical id is also rejected
+ * (a typo, almost certainly).
+ */
+export function buildLegacyIdAliases(
+  entries: ReadonlyArray<PluginEntry>,
+): Record<string, string> {
+  const aliases: Record<string, string> = {}
+  for (const entry of entries) {
+    for (const legacy of entry.legacyPluginIds ?? []) {
+      if (legacy === entry.id) {
+        throw new Error(
+          `catalog: legacy id '${legacy}' on entry '${entry.id}' must differ from the canonical id`,
+        )
+      }
+      const existing = aliases[legacy]
+      if (existing && existing !== entry.id) {
+        throw new Error(
+          `catalog: legacy id '${legacy}' is claimed by both '${existing}' and '${entry.id}'`,
+        )
+      }
+      aliases[legacy] = entry.id
+    }
+  }
+  return aliases
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -320,8 +366,9 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/processes').then(m => m.processesPlugin),
   },
   {
-    id: 'nexus.activityTimeline', name: 'Activity Timeline',
+    id: 'nexus.activity', name: 'Activity',
     version: '0.2.0', core: false, activationEvents: ['onStartup'],
+    legacyPluginIds: ['nexus.activityTimeline'],
     description: 'Chronological feed of every observable side effect — AI calls, file writes, git commits, terminal sessions, workflow runs.',
     load: () => import('./nexus/activityTimeline').then(m => m.activityTimelinePlugin),
   },

@@ -25,9 +25,12 @@
 //      empties the local store. The on-disk JSONL is truncated; bus
 //      entries from non-AI emitters re-populate as new events arrive.
 //
-// BL-052 plugin-id rename was deferred — see the comment on
-// `PLUGIN_ID` below. The user-facing strings rename to plain
-// "Activity" (no longer AI-only).
+// BL-052 — user-facing strings renamed to plain "Activity" (no longer
+// AI-only). BL-052 follow-up — plugin id renamed from
+// `nexus.activityTimeline` to `nexus.activity` once the catalog grew
+// a `legacyPluginIds` field; users with the prior id stored in their
+// `plugins.enabled` config get migrated transparently at boot via
+// `buildLegacyIdAliases` in `catalog.ts`.
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
@@ -39,15 +42,11 @@ import {
   type ActivityEntry,
 } from './activityTimelineStore'
 
-// BL-052 — kept the existing plugin id (`nexus.activityTimeline`) to
-// avoid a settings-state migration for users who already enabled /
-// disabled the panel. The user-facing strings rename to "Activity"
-// (plain, since it now covers more than AI). The settings-key
-// migration shim referenced in the BL-052 DoD is deferred — there
-// are no per-plugin settings keyed off this id today, so a rename
-// would only be cosmetic in `settings.json`. Track as a future cleanup
-// when the catalog grows a `legacyPluginIds` field.
-const PLUGIN_ID = 'nexus.activityTimeline'
+const PLUGIN_ID = 'nexus.activity'
+// Internal command / view / activity-bar ids deliberately keep the
+// `nexus.activityTimeline.*` prefix — these are persisted in saved
+// layouts and user keybindings, and renaming them would break
+// hydration / muscle memory for negligible cosmetic gain.
 const VIEW_ID = 'nexus.activityTimeline.view'
 const ACTIVITY_ITEM_ID = 'nexus.activityTimeline.activityItem'
 const COMMAND_SHOW = 'nexus.activityTimeline.show'
@@ -115,7 +114,7 @@ async function clearTimeline(api: PluginAPI): Promise<void> {
 export const activityTimelinePlugin: Plugin = {
   manifest: {
     id: PLUGIN_ID,
-    name: 'Activity Timeline',
+    name: 'Activity',
     version: '0.2.0',
     core: false,
     activationEvents: ['onStartup'],
