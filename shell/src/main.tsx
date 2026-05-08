@@ -13,6 +13,7 @@ import { setRegistry } from './host/shellRegistry'
 import { setHost } from './host/shellHost'
 import { installBodyClasses } from './host/bodyClasses'
 import { eventBus } from './host/EventBus'
+import { PLUGIN_LIST_CHANGED_EVENT } from './host/pluginActivation'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { uriHandlerRegistry } from './registry/UriHandlerRegistry'
@@ -344,6 +345,15 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   // even when some are disabled — useful for the Plugins modal footer.
   reg.registerService('builtinPluginTotal', DEFAULT_ON_PLUGINS.length + DEFAULT_OFF_PLUGINS.length)
 
+  // Plugins activate during `host.loadAll` *before* the four services
+  // above are registered, so any subscriber that reads them from
+  // `activate()` sees an empty registry. Fire the change event now to
+  // give activate-time consumers (nexus.pluginsMgmt, nexus.processes,
+  // settings) a single chance to seed their views from the now-complete
+  // registry. `refreshPluginServices` emits the same event later when
+  // mid-session enable/disable mutates the lists.
+  eventBus.emit(PLUGIN_LIST_CHANGED_EVENT, null)
+
   const { useSlotStore } = await import('./registry/SlotRegistry')
   const slotSummary = Object.entries(useSlotStore.getState().slots)
     .map(([k, v]) => `${k}:${(v as any[]).length}`)
@@ -427,7 +437,24 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
 // SH-018: global unhandled-error / unhandled-rejection handlers.
 // Forward to clientLogger so errors survive page reload in the ring
 // buffer and reach the Rust log when append_shell_log is available.
+//
+// `ResizeObserver loop completed with undelivered notifications` is a
+// benign WebKit/Chromium warning emitted when a ResizeObserver callback
+// schedules another layout pass that doesn't finish in the same frame.
+// It carries no `event.error` (only `event.message`) and the spec
+// guarantees the next frame will deliver the notifications, so the
+// loop self-recovers. Filtering it here keeps the log signal-rich
+// without hiding real errors — anything with a stack still surfaces.
+const RESIZE_OBSERVER_NOISE =
+  /^ResizeObserver loop /
 window.addEventListener('error', (event) => {
+  if (!event.error && RESIZE_OBSERVER_NOISE.test(event.message ?? '')) {
+    // preventDefault() also stops the browser's own console.error
+    // emit, otherwise xterm/Monaco resize loops will still spam
+    // DevTools as `(localhost, line 0)` lines we don't control.
+    event.preventDefault()
+    return
+  }
   clientLogger.error(
     '[Global] Uncaught error',
     event.error ?? event.message,

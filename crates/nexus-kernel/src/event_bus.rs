@@ -43,6 +43,22 @@ pub fn type_id_in_namespace(type_id: &str, plugin_id: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('.'))
 }
 
+/// Topics that any plugin may publish to even though they don't lie in
+/// the caller's namespace. These are kernel-owned shared channels for
+/// cross-plugin fan-out (the activity timeline is the canonical case —
+/// terminal, git, storage, ai, workflow all append to it). The kernel
+/// still populates `emitting_plugin` and `metadata.source_plugin_id`
+/// from the caller, so subscribers can attribute each entry to its
+/// real source; spoofing the topic name doesn't spoof attribution.
+const KERNEL_OWNED_SHARED_TOPICS: &[&str] =
+    &[nexus_types::activity::ACTIVITY_APPENDED_TOPIC];
+
+/// Return true iff `type_id` is one of the [`KERNEL_OWNED_SHARED_TOPICS`].
+#[doc(hidden)]
+pub fn is_kernel_owned_shared_topic(type_id: &str) -> bool {
+    KERNEL_OWNED_SHARED_TOPICS.contains(&type_id)
+}
+
 impl EventBus {
     /// Create a new bus with the given ring buffer capacity.
     ///
@@ -85,7 +101,9 @@ impl EventBus {
     ) -> Result<()> {
         use crate::error::BusError;
 
-        if !type_id_in_namespace(type_id, source_plugin_id) {
+        if !type_id_in_namespace(type_id, source_plugin_id)
+            && !is_kernel_owned_shared_topic(type_id)
+        {
             return Err(BusError::TypeIdNamespaceMismatch {
                 plugin_id: source_plugin_id.to_string(),
                 type_id: type_id.to_string(),
@@ -498,6 +516,37 @@ mod tests {
             serde_json::json!({}),
         )
         .expect("bare plugin_id as type_id is unambiguously the plugin's");
+    }
+
+    #[tokio::test]
+    async fn publish_plugin_allows_kernel_owned_shared_topic() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::All);
+        bus.publish_plugin(
+            "com.nexus.terminal",
+            nexus_types::activity::ACTIVITY_APPENDED_TOPIC,
+            serde_json::json!({"surface": "process"}),
+        )
+        .expect("kernel-owned shared topic is publishable from any plugin");
+
+        let published = sub.recv().await.unwrap();
+        assert_eq!(published.metadata.source_plugin_id, "com.nexus.terminal");
+        match &published.event {
+            NexusEvent::Custom {
+                type_id,
+                emitting_plugin,
+                ..
+            } => {
+                assert_eq!(
+                    type_id,
+                    nexus_types::activity::ACTIVITY_APPENDED_TOPIC
+                );
+                // Attribution still tracks the real caller — the shared
+                // topic is not an anonymity escape hatch.
+                assert_eq!(emitting_plugin, "com.nexus.terminal");
+            }
+            _ => panic!("expected Custom event"),
+        }
     }
 
     #[test]
