@@ -89,11 +89,36 @@ impl GitEngine {
             _ => RepoState::Clean,
         };
 
+        // BL-052 follow-up — track the upstream branch's SHA so the
+        // poller can detect fetch / push without the user changing
+        // local HEAD. `find_branch(name, Local).upstream()` returns
+        // `refs/remotes/<remote>/<branch>`; the short oid + name
+        // ride alongside `head_oid` for the activity emitter.
+        let (tracking_oid, upstream) = match branch.as_deref() {
+            Some(name) => match self.repo.find_branch(name, git2::BranchType::Local) {
+                Ok(local) => match local.upstream() {
+                    Ok(up) => {
+                        let oid = up
+                            .get()
+                            .target()
+                            .map(|o| o.to_string()[..7].to_string());
+                        let up_name = up.name().ok().flatten().map(String::from);
+                        (oid, up_name)
+                    }
+                    Err(_) => (None, None),
+                },
+                Err(_) => (None, None),
+            },
+            None => (None, None),
+        };
+
         Ok(GitState {
             branch,
             head_oid,
             is_dirty,
             repo_state,
+            tracking_oid,
+            upstream,
         })
     }
 

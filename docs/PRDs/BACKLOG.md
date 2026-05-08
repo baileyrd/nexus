@@ -379,7 +379,7 @@ _BL-052 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 - **Plugin-id rename `nexus.activityTimeline` → `nexus.activity`** — the catalog has no `legacyPluginIds` field, so a rename without a migration shim would orphan any user who'd toggled the plugin off. User-visible strings ("Activity", "Activity Timeline") and category ("Activity") were renamed; the internal id stays `nexus.activityTimeline`. Track as a future cleanup once the catalog gains alias support.
 - **Per-emitter opt-out config** — none of the emitters ships a knob today; the topic is fire-and-forget. Add a `nexus.activity.disabledEmitters` setting once a noisy emitter actually exists in the wild.
 - **Shared privacy redactor** — `nexus-ai`'s `Redactor` (PRD-12 §privacy) applies only to the AI-recorder path. Lifting it to a shared crate touches every emitter and adds a config surface; deferred. Each non-AI emitter today produces short structured prompts (`"renamed a → b"`, `"commit abcdef on main"`) that don't carry user-secret content, so the immediate risk surface is low. Track when an emitter starts surfacing free-form user input.
-- **Push/pull git events** — the existing git poller only watches HEAD; remote-side push/pull aren't observed yet. The auto-committer side is fully covered.
+- ✅ **Push/pull git events** — shipped 2026-05-08 via tracking-branch SHA observation in the existing git poller; closure note in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 **Why this matters:** transparency parity — agents (AIG-02) can dispatch tools that span all subsystems, and the user now sees every effect in one pane, not five separate logs._
 

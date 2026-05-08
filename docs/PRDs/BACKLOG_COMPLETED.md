@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-052 follow-up: push/pull git events ✅ (2026-05-08)
+
+**Source**: BL-052 deferral list — "the existing git poller only watches HEAD; remote-side push/pull aren't observed yet"
+**Files**: `crates/nexus-git/src/types.rs` (new `tracking_oid: Option<String>` + `upstream: Option<String>` fields on `GitState`); `crates/nexus-git/src/engine.rs` (`state()` now reads `Branch::upstream()` and pulls the short SHA + upstream name into `GitState`); `crates/nexus-git/src/core_plugin.rs` (`publish_changes` adds a tracking-OID diff branch that fires `com.nexus.git.remote_changed` + a universal-activity entry; tracking + upstream now ride alongside the initial-state event payload; existing test fixtures updated for the new `GitState` fields; +3 new tests)
+**Related**: BL-052 (universal activity timeline), `com.nexus.git.commit` event (BL-052 phase A)
+
+The BL-052 phase A closure landed file / git / workflow / terminal emitters onto the universal activity topic, but the git emitter only fired on HEAD changes. That misses two important user actions:
+- `fetch` — downloads commits into `refs/remotes/<remote>/<branch>`; doesn't touch local HEAD.
+- `push` — sends commits up; modern git updates the local copy of `refs/remotes/<remote>/<branch>` to reflect what was sent, again without touching HEAD.
+
+This pass closes the gap by polling the upstream tracking branch's SHA and emitting on the diff. Both events flow through the same observation point because both update the same ref.
+
+- **`GitState.tracking_oid` + `GitState.upstream`.** The engine resolves the active branch's upstream via libgit2's `Branch::upstream()`, reads the upstream ref's target OID, and pulls the short hex (7 chars) + the upstream name (e.g. `"origin/main"`) into `GitState`. Stays `None` for: detached HEAD, branches without an upstream configured, or branches whose upstream ref isn't present locally yet (fresh clone before the first fetch). Production callers don't need to handle the `None` case specially — the diff branch in `publish_changes` skips it.
+- **`com.nexus.git.remote_changed` event.** Fires when `prev.tracking_oid != curr.tracking_oid` AND `prev.tracking_oid` was non-None (skip first-observation noise). Payload carries branch / upstream / head / tracking / prev_tracking so subscribers can attribute the change to the right remote and tell whether the user fetched (curr OID is new) or rewound (prev OID is gone — e.g. force-push by another collaborator). The activity-timeline emitter publishes a sibling entry with `kind = "remote_changed"` so the universal timeline surfaces the event in the same pane as commit / file / workflow activity.
+- **Why a single observation point catches both fetch and push.** `git fetch` updates `refs/remotes/origin/main` from the remote's reply. `git push` updates the same local ref to reflect what the remote acknowledged (modern git, post-1.6). Polling that ref's SHA catches both with one read; we don't need to distinguish fetch from push to surface "the remote-tracking ref moved", and the prompt format (`"remote_changed <sha7> on origin/main"`) reads sensibly for either action.
+- **Skip-first-observation rule.** Without a `prev.tracking_oid`, a `Some` curr value just means "we noticed an upstream existed", not "the upstream changed". Firing remote_changed on the first poll would burst-fan-out one event per branch with an upstream the moment the plugin starts, which adds nothing to the timeline.
+
+**Tested**: `cargo test -p nexus-git --lib` 65/65 (was 62, +3); `cargo clippy -p nexus-git --all-targets` no new warnings on changed files; `cargo check --workspace` clean. The 3 new tests:
+- `publish_changes_emits_remote_changed_on_tracking_oid_advance` — prev / curr fixture with the same head_oid but different tracking_oid; asserts the `com.nexus.git.remote_changed` payload carries prev_tracking + tracking + upstream, and a parallel universal-activity entry lands with prompt `"remote_changed <sha> on origin/main"`.
+- `publish_changes_skips_remote_changed_on_first_observation` — prev has `tracking_oid: None`, curr has `Some`; asserts no remote_changed event fires (the change is just "the upstream was discovered").
+- `state_populates_tracking_oid_when_upstream_is_configured` — engine-level: `git init` + commit + `git remote add origin file:///tmp/<fake>` (libgit2 requires the remote to exist in `remote.<name>.url` or `Branch::upstream()` rejects) + `git update-ref refs/remotes/origin/main HEAD` + `branch.main.remote/merge` config. Asserts `state().tracking_oid` and `state().upstream` populate. The fake URL never gets a real fetch — the test seeds the remote-tracking ref by hand to keep the assertion deterministic and offline-safe.
+
+**Definition of done coverage**: ✅ remote-side push / fetch surface as activity entries. The BL-052 deferral list's only git-poller item is now closed.
+
 ### BL-079 follow-up: click-on-gutter Stage ✅ (2026-05-08)
 
 **Source**: BL-079 closure note (2026-05-07) — first of two click-on-gutter deferrals (Stage now lands; Revert + side-by-side `MergeView` stay deferred)

@@ -15,6 +15,19 @@ pub struct GitState {
     pub is_dirty: bool,
     /// Current repo operation state.
     pub repo_state: RepoState,
+    /// BL-052 follow-up — short hex of the upstream tracking branch's
+    /// commit, when the current branch has an `upstream`. The poller
+    /// compares this across ticks: a change means the user fetched
+    /// or pushed (push usually updates the local tracking ref). Stays
+    /// `None` for detached HEAD, branches without an upstream, or
+    /// when the upstream ref is missing locally (e.g. after a fresh
+    /// clone before the first fetch).
+    pub tracking_oid: Option<String>,
+    /// BL-052 follow-up — name of the upstream branch (e.g.
+    /// `"origin/main"`) when one is configured. Pairs with
+    /// `tracking_oid` so subscribers attribute the change to the
+    /// right remote.
+    pub upstream: Option<String>,
 }
 
 /// Repository operation state.

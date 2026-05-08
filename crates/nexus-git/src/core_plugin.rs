@@ -842,6 +842,8 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
                 "head": curr.head_oid,
                 "is_dirty": curr.is_dirty,
                 "repo_state": format!("{:?}", curr.repo_state),
+                "tracking": curr.tracking_oid,
+                "upstream": curr.upstream,
             }),
         );
         return;
@@ -889,6 +891,42 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
                 "branch": curr.branch,
                 "head": curr.head_oid,
             }),
+        );
+    }
+
+    // BL-052 follow-up — detect remote-side push / fetch via the
+    // upstream tracking branch's SHA. A change here without a local
+    // HEAD change means either the user fetched (new commits on the
+    // remote arrived locally as `refs/remotes/<remote>/<branch>`)
+    // or pushed (modern git updates the local tracking ref to
+    // reflect what was just sent). Either way the activity timeline
+    // wants to know.
+    //
+    // Skip the first observation (`prev.tracking_oid` is `None`):
+    // detecting a "change" against a missing prior is just saying
+    // "the upstream existed all along", which isn't a meaningful
+    // event.
+    if prev.tracking_oid != curr.tracking_oid && prev.tracking_oid.is_some() {
+        let _ = bus.publish_plugin(
+            PLUGIN_ID,
+            "com.nexus.git.remote_changed",
+            json!({
+                "branch": curr.branch,
+                "upstream": curr.upstream,
+                "head": curr.head_oid,
+                "tracking": curr.tracking_oid,
+                "prev_tracking": prev.tracking_oid,
+            }),
+        );
+        let head_for_activity = curr
+            .tracking_oid
+            .as_deref()
+            .unwrap_or(curr.head_oid.as_str());
+        publish_git_activity(
+            bus,
+            "remote_changed",
+            head_for_activity,
+            curr.upstream.as_deref().or(curr.branch.as_deref()),
         );
     }
 }
@@ -1134,6 +1172,8 @@ mod tests {
             head_oid: "abc1234".to_string(),
             is_dirty: false,
             repo_state: crate::RepoState::Clean,
+            tracking_oid: None,
+            upstream: None,
         };
         publish_changes(&bus, None, &state);
         let ev = sub.try_recv().unwrap().unwrap();
@@ -1156,12 +1196,16 @@ mod tests {
             head_oid: "abc1234".to_string(),
             is_dirty: false,
             repo_state: crate::RepoState::Clean,
+            tracking_oid: None,
+            upstream: None,
         };
         let curr = GitState {
             branch: Some("feature".to_string()),
             head_oid: "abc1234".to_string(),
             is_dirty: false,
             repo_state: crate::RepoState::Clean,
+            tracking_oid: None,
+            upstream: None,
         };
         publish_changes(&bus, Some(&prev), &curr);
         let ev = sub.try_recv().unwrap().unwrap();
@@ -1172,6 +1216,168 @@ mod tests {
             }
             _ => panic!("expected Custom event"),
         }
+    }
+
+    /// BL-052 follow-up — when the upstream tracking-branch SHA
+    /// changes between polls (a fetch or push happened externally),
+    /// the poller emits `com.nexus.git.remote_changed` and an
+    /// activity entry. Both prev and curr have the same head_oid so
+    /// this test isolates the new branch.
+    #[test]
+    fn publish_changes_emits_remote_changed_on_tracking_oid_advance() {
+        use nexus_types::activity::ACTIVITY_APPENDED_TOPIC;
+        let bus = Arc::new(EventBus::new(16));
+        let mut sub_git = bus.subscribe(nexus_kernel::EventFilter::CustomPrefix(
+            "com.nexus.git.".to_string(),
+        ));
+        let mut sub_activity = bus.subscribe(nexus_kernel::EventFilter::CustomPrefix(
+            ACTIVITY_APPENDED_TOPIC.to_string(),
+        ));
+        let prev = GitState {
+            branch: Some("main".to_string()),
+            head_oid: "abc1234".to_string(),
+            is_dirty: false,
+            repo_state: crate::RepoState::Clean,
+            tracking_oid: Some("aaaaaaa".to_string()),
+            upstream: Some("origin/main".to_string()),
+        };
+        let curr = GitState {
+            branch: Some("main".to_string()),
+            head_oid: "abc1234".to_string(),
+            is_dirty: false,
+            repo_state: crate::RepoState::Clean,
+            tracking_oid: Some("bbbbbbb".to_string()),
+            upstream: Some("origin/main".to_string()),
+        };
+        publish_changes(&bus, Some(&prev), &curr);
+
+        // remote_changed event with prev + curr tracking SHAs.
+        let mut saw_remote_changed = false;
+        while let Ok(Some(ev)) = sub_git.try_recv() {
+            if let nexus_kernel::NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+                if type_id == "com.nexus.git.remote_changed" {
+                    saw_remote_changed = true;
+                    assert_eq!(payload["upstream"], "origin/main");
+                    assert_eq!(payload["tracking"], "bbbbbbb");
+                    assert_eq!(payload["prev_tracking"], "aaaaaaa");
+                }
+            }
+        }
+        assert!(saw_remote_changed, "expected com.nexus.git.remote_changed");
+
+        // Activity entry with kind "remote_changed".
+        let mut saw_activity = false;
+        while let Ok(Some(ev)) = sub_activity.try_recv() {
+            if let nexus_kernel::NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+                if type_id == ACTIVITY_APPENDED_TOPIC {
+                    let prompt = payload["prompt"].as_str().unwrap_or("");
+                    assert!(prompt.starts_with("remote_changed"), "got: {prompt}");
+                    assert!(prompt.contains("origin/main"), "got: {prompt}");
+                    saw_activity = true;
+                }
+            }
+        }
+        assert!(saw_activity, "expected universal-activity entry");
+    }
+
+    /// First observation never emits remote_changed — without a prior
+    /// tracking_oid the change is "the upstream existed all along",
+    /// which isn't a meaningful event.
+    #[test]
+    fn publish_changes_skips_remote_changed_on_first_observation() {
+        let bus = Arc::new(EventBus::new(16));
+        let mut sub = bus.subscribe(nexus_kernel::EventFilter::CustomPrefix(
+            "com.nexus.git.".to_string(),
+        ));
+        let prev = GitState {
+            branch: Some("main".to_string()),
+            head_oid: "abc1234".to_string(),
+            is_dirty: false,
+            repo_state: crate::RepoState::Clean,
+            tracking_oid: None,
+            upstream: None,
+        };
+        let curr = GitState {
+            branch: Some("main".to_string()),
+            head_oid: "abc1234".to_string(),
+            is_dirty: false,
+            repo_state: crate::RepoState::Clean,
+            tracking_oid: Some("bbbbbbb".to_string()),
+            upstream: Some("origin/main".to_string()),
+        };
+        publish_changes(&bus, Some(&prev), &curr);
+        while let Ok(Some(ev)) = sub.try_recv() {
+            if let nexus_kernel::NexusEvent::Custom { type_id, .. } = &ev.event {
+                assert_ne!(type_id, "com.nexus.git.remote_changed");
+            }
+        }
+    }
+
+    /// State inspection: the engine populates `tracking_oid` +
+    /// `upstream` for a branch with a configured upstream. Backed by
+    /// a tempdir repo with a fake remote-tracking ref so the assertion
+    /// doesn't require network access.
+    #[test]
+    fn state_populates_tracking_oid_when_upstream_is_configured() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        let _ = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .status();
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        let _ = Command::new("git")
+            .args(["add", "a.txt"])
+            .current_dir(dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .status();
+        // Rename the active branch to "main" if it isn't already.
+        let _ = Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .status();
+        // Register a fake `origin` remote — libgit2's
+        // `Branch::upstream()` walks the config to resolve the
+        // tracking branch, and rejects branches that name a remote
+        // not in `remote.<name>.url`. URL doesn't have to be
+        // reachable; nothing here actually fetches.
+        let _ = Command::new("git")
+            .args(["remote", "add", "origin", "file:///tmp/nexus-test-origin"])
+            .current_dir(dir.path())
+            .status();
+        // Fake a remote-tracking ref pointing at the same commit.
+        // `git update-ref refs/remotes/origin/main HEAD` is the
+        // minimal way to seed an upstream without a real fetch.
+        let _ = Command::new("git")
+            .args(["update-ref", "refs/remotes/origin/main", "HEAD"])
+            .current_dir(dir.path())
+            .status();
+        // Wire `branch.main.remote` + `branch.main.merge` so libgit2
+        // recognizes the upstream relationship.
+        let _ = Command::new("git")
+            .args(["config", "branch.main.remote", "origin"])
+            .current_dir(dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "branch.main.merge", "refs/heads/main"])
+            .current_dir(dir.path())
+            .status();
+
+        let engine = crate::GitEngine::open(dir.path()).expect("open");
+        let st = engine.state().expect("state");
+        assert_eq!(st.branch.as_deref(), Some("main"));
+        assert!(
+            st.tracking_oid.is_some(),
+            "tracking_oid should populate when upstream is configured",
+        );
+        assert_eq!(st.upstream.as_deref(), Some("origin/main"));
     }
 
     /// BL-079 — `blame` handler returns one entry per committed
