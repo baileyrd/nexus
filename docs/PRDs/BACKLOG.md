@@ -228,7 +228,7 @@ _BL-069 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 **Deferred from the DoD:**
 - ✅ **Kanban drag-to-reorder with write-back** — shipped 2026-05-08; closure note in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 - ✅ **Inline cell editing** — shipped 2026-05-08; closure note in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Click-to-edit on typed cells across table / kanban-card / gallery-card layouts; Enter commits, Escape restores, blur commits, checkbox toggles directly.
-- **Calendar navigation.** The visible month is derived from the median date in the data so the grid lands on the densest area without a navigation control. Prev / next-month chevrons + a "today" jump are deferred until a user complains about the heuristic.
+- ✅ **Calendar navigation** — shipped 2026-05-08; closure note in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `‹` / Today / `›` controls layered over the median-of-data initial anchor.
 - **Gallery cover field.** Cards show a title + body fields but no image cover. Adding cover support requires a `cover_field` on the gallery view-type variant (which the parser doesn't accept yet) plus an `<img>` slot on the card; deferred until either the schema gains an image FieldType or a user asks for it.
 - **Multi-select / relation inline editing.** Currently read-only — `isEditableType` excludes them. A picker UI for these is its own scope (tag chips with autocomplete for multi-select; search-with-create-new for relations).
 - **Filter + sort round-trip.** The renderHeader chips already wire to `onUpdateConfig` which the decoration extension translates into a markdown rewrite (BL-012 split 5 — landed previously). DoD bullet was already satisfied before this pass; mentioning here for completeness.

@@ -307,9 +307,37 @@
   gap: 6px;
 }
 .cm-content .cm-md-dbview-calendar-month {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
   font-size: 0.95em;
   padding: 2px 4px;
+}
+.cm-content .cm-md-dbview-calendar-month-label {
+  flex: 1 1 auto;
+}
+.cm-content .cm-md-dbview-calendar-nav {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--divider-color);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1;
+}
+.cm-content .cm-md-dbview-calendar-nav:hover {
+  background: var(--background-secondary);
+}
+.cm-content .cm-md-dbview-calendar-nav--prev,
+.cm-content .cm-md-dbview-calendar-nav--next {
+  font-size: 1.1em;
+  min-width: 24px;
+}
+.cm-content .cm-md-dbview-calendar-nav--today {
+  font-size: 0.85em;
+  font-weight: 500;
 }
 .cm-content .cm-md-dbview-calendar-grid {
   display: grid;

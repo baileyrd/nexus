@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import type {
+  AppliedGroup,
   DatabaseViewConfig,
   EditorKernelClient,
   ExecuteDatabaseViewResponse,
@@ -15,6 +16,7 @@ import {
   applyKanbanDrop,
   DatabaseViewCache,
   DatabaseViewWidget,
+  deriveCalendarAnchor,
   effectiveFields,
   isEditableType,
   KANBAN_DRAG_MIME,
@@ -22,7 +24,9 @@ import {
   MISSING_GROUP_KEY,
   parseCellInput,
   readKanbanDragPayload,
+  renderCalendar,
   renderKanban,
+  stepMonth,
   widgetKey,
   type KanbanDragPayload,
   type MutationDeps,
@@ -1152,5 +1156,171 @@ test('renderKanban: drop event fires applyKanbanDrop end-to-end (cross-column)',
   await Promise.resolve()
   assert.deepEqual(calls, [{ id: 'r1', fields: { status: 'Done' } }])
   assert.equal(refreshes, 1)
+  document.body.removeChild(root)
+})
+
+// ── BL-069 follow-up: calendar navigation ───────────────────────────────────
+
+test('deriveCalendarAnchor: median date wins; empty falls back to now', () => {
+  const dates = [
+    new Date('2026-01-15T00:00:00Z'),
+    new Date('2026-05-08T00:00:00Z'),
+    new Date('2026-09-20T00:00:00Z'),
+  ]
+  // Median of an odd-length sorted set lands on the middle element.
+  const a = deriveCalendarAnchor(dates, new Date('2030-01-01T00:00:00Z'))
+  assert.deepEqual(a, { year: 2026, month: 4 }) // May (0-indexed)
+
+  // Empty data — `now` wins. Pass a deterministic local-shaped Date.
+  const fallback = new Date(2027, 6, 4) // July 4 2027 local
+  const b = deriveCalendarAnchor([], fallback)
+  assert.deepEqual(b, { year: 2027, month: 6 })
+})
+
+test('stepMonth: forward and backward, wraps year boundary', () => {
+  assert.deepEqual(stepMonth(2026, 4, 1), { year: 2026, month: 5 })
+  assert.deepEqual(stepMonth(2026, 4, -1), { year: 2026, month: 3 })
+  // December → January next year.
+  assert.deepEqual(stepMonth(2026, 11, 1), { year: 2027, month: 0 })
+  // January → December previous year.
+  assert.deepEqual(stepMonth(2026, 0, -1), { year: 2025, month: 11 })
+  // Multi-step also wraps.
+  assert.deepEqual(stepMonth(2026, 0, -3), { year: 2025, month: 9 })
+  assert.deepEqual(stepMonth(2026, 11, 4), { year: 2027, month: 3 })
+})
+
+function calendarFixtureGroups(): AppliedGroup[] {
+  return [
+    { key: '2026-05-07', records: [{ id: 'r1', title: 'Standup' }] },
+    {
+      key: '2026-05-08',
+      records: [
+        { id: 'r2', title: 'Demo' },
+        { id: 'r3', title: 'Retro' },
+      ],
+    },
+    { key: MISSING_GROUP_KEY, records: [{ id: 'r4', title: 'Inbox' }] },
+  ]
+}
+
+const CAL_CONFIG: DatabaseViewConfig = {
+  view_type: { kind: 'calendar', date_field: 'due' },
+  filters: [],
+  sorts: [],
+  group_by: null,
+  hidden_columns: [],
+}
+
+test('renderCalendar header includes prev / today / next buttons', () => {
+  const root = renderCalendar(
+    ['title'],
+    calendarFixtureGroups(),
+    { title: { type: 'text' } },
+    CAL_CONFIG,
+    new Date(2026, 4, 8),
+  )
+  document.body.appendChild(root)
+  const header = root.querySelector('.cm-md-dbview-calendar-month')!
+  assert.ok(header.querySelector('.cm-md-dbview-calendar-nav--prev'))
+  assert.ok(header.querySelector('.cm-md-dbview-calendar-nav--today'))
+  assert.ok(header.querySelector('.cm-md-dbview-calendar-nav--next'))
+  // Label text retained (BL-069 split rendered it inside a dedicated
+  // .cm-md-dbview-calendar-month-label span).
+  const label = header.querySelector('.cm-md-dbview-calendar-month-label')
+  assert.match(label?.textContent ?? '', /May 2026 · due/)
+  document.body.removeChild(root)
+})
+
+test('renderCalendar: clicking next advances to the following month', () => {
+  const root = renderCalendar(
+    ['title'],
+    calendarFixtureGroups(),
+    { title: { type: 'text' } },
+    CAL_CONFIG,
+    new Date(2026, 4, 8),
+  )
+  document.body.appendChild(root)
+  const next = root.querySelector('.cm-md-dbview-calendar-nav--next') as HTMLButtonElement
+  next.click()
+  assert.match(
+    root.querySelector('.cm-md-dbview-calendar-month-label')?.textContent ?? '',
+    /June 2026 · due/,
+  )
+  // Click again — wraps the visible month forward, doesn't error.
+  next.click()
+  assert.match(
+    root.querySelector('.cm-md-dbview-calendar-month-label')?.textContent ?? '',
+    /July 2026 · due/,
+  )
+  // Pills for May 2026 (the data) shouldn't appear in the July grid.
+  const julyPills = Array.from(root.querySelectorAll('.cm-md-dbview-calendar-grid .cm-md-dbview-calendar-pill'))
+  assert.equal(julyPills.length, 0, 'pills should not appear when navigating off the data range')
+  // Undated bucket is unaffected by month navigation.
+  assert.ok(root.querySelector('.cm-md-dbview-calendar-undated'))
+  document.body.removeChild(root)
+})
+
+test('renderCalendar: clicking prev steps back', () => {
+  const root = renderCalendar(
+    ['title'],
+    calendarFixtureGroups(),
+    { title: { type: 'text' } },
+    CAL_CONFIG,
+    new Date(2026, 4, 8),
+  )
+  document.body.appendChild(root)
+  const prev = root.querySelector('.cm-md-dbview-calendar-nav--prev') as HTMLButtonElement
+  prev.click()
+  assert.match(
+    root.querySelector('.cm-md-dbview-calendar-month-label')?.textContent ?? '',
+    /April 2026 · due/,
+  )
+  document.body.removeChild(root)
+})
+
+test('renderCalendar: clicking Today snaps to now\'s month', () => {
+  // Initial visible month is May 2026 (from data median).
+  const now = new Date(2027, 9, 12) // October 2027 local
+  const root = renderCalendar(
+    ['title'],
+    calendarFixtureGroups(),
+    { title: { type: 'text' } },
+    CAL_CONFIG,
+    now,
+  )
+  document.body.appendChild(root)
+  // Today's reading reflects `now`, not the data median.
+  const today = root.querySelector('.cm-md-dbview-calendar-nav--today') as HTMLButtonElement
+  today.click()
+  assert.match(
+    root.querySelector('.cm-md-dbview-calendar-month-label')?.textContent ?? '',
+    /October 2027 · due/,
+  )
+  document.body.removeChild(root)
+})
+
+test('renderCalendar: dated pills reappear when navigating back to the data month', () => {
+  // Round-trip: next → next → prev → prev should land back on May
+  // 2026 with all three dated pills + the undated pill present.
+  const root = renderCalendar(
+    ['title'],
+    calendarFixtureGroups(),
+    { title: { type: 'text' } },
+    CAL_CONFIG,
+    new Date(2026, 4, 8),
+  )
+  document.body.appendChild(root)
+  const next = root.querySelector('.cm-md-dbview-calendar-nav--next') as HTMLButtonElement
+  const prev = root.querySelector('.cm-md-dbview-calendar-nav--prev') as HTMLButtonElement
+  next.click()
+  next.click()
+  prev.click()
+  prev.click()
+  assert.match(
+    root.querySelector('.cm-md-dbview-calendar-month-label')?.textContent ?? '',
+    /May 2026 · due/,
+  )
+  // 3 dated + 1 undated pill back in the DOM.
+  assert.equal(root.querySelectorAll('.cm-md-dbview-calendar-pill').length, 4)
   document.body.removeChild(root)
 })

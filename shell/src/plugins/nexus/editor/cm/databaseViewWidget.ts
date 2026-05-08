@@ -712,19 +712,23 @@ export async function applyKanbanDrop(
 }
 
 /** Calendar — month grid (7×N rows) bucketing groups by ISO date.
- *  The visible month is derived from the median date in the data so
- *  the user lands on the densest area without a navigation control
- *  (deferred). Records appear as compact pill buttons inside each
- *  day cell; an "undated" bucket sits below the grid for `(none)`
- *  groups (the `MISSING_GROUP_KEY` sentinel from the database
- *  engine). */
+ *  The visible month starts at the median date in the data (lands the
+ *  user on the densest area for free) and can then be navigated via
+ *  the header's `‹` / Today / `›` controls. Records appear as compact
+ *  pill buttons inside each day cell; an "undated" bucket sits below
+ *  the grid for `(none)` groups (the `MISSING_GROUP_KEY` sentinel
+ *  from the database engine).
+ *
+ *  `now` is injected for testability; production callers omit it and
+ *  the renderer reads `new Date()` so the Today button reflects the
+ *  user's actual current month. */
 export function renderCalendar(
   fields: string[],
   groups: AppliedGroup[],
   schema: Record<string, unknown>,
   viewConfig: DatabaseViewConfig,
+  now: Date = new Date(),
 ): HTMLElement {
-  void schema // unused — date pills don't render full cells
   void fields
   const wrap = document.createElement('div')
   wrap.className = 'cm-md-dbview-calendar'
@@ -746,23 +750,137 @@ export function renderCalendar(
     return wrap
   }
 
-  // Pick the visible month from the median date so the grid lands
-  // on the densest area regardless of outliers.
-  const sortedDates = [...dated.map((d) => d.date)].sort(
-    (a, b) => a.getTime() - b.getTime(),
-  )
-  const visibleAnchor =
-    sortedDates.length > 0 ? sortedDates[Math.floor(sortedDates.length / 2)] : new Date()
-  const year = visibleAnchor.getUTCFullYear()
-  const month = visibleAnchor.getUTCMonth()
+  const initial = deriveCalendarAnchor(dated.map((d) => d.date), now)
+  let currentYear = initial.year
+  let currentMonth = initial.month
 
-  const monthLabel = document.createElement('header')
-  monthLabel.className = 'cm-md-dbview-calendar-month'
-  monthLabel.textContent = `${monthName(month)} ${year}${
-    dateField ? ` · ${dateField}` : ''
-  }`
-  wrap.appendChild(monthLabel)
+  // Build a (year-month-day) → group map for fast cell lookup. The
+  // map is independent of the visible month, so we build it once and
+  // share across navigation rebuilds.
+  const byKey = new Map<string, AppliedGroup>()
+  for (const { date, group } of dated) {
+    byKey.set(toIsoYmd(date), group)
+  }
 
+  const undatedSection = undated.length > 0 ? buildUndatedSection(undated, schema) : null
+
+  const render = (): void => {
+    wrap.replaceChildren()
+    wrap.appendChild(
+      buildCalendarHeader(currentYear, currentMonth, dateField, {
+        onPrev: () => {
+          const m = stepMonth(currentYear, currentMonth, -1)
+          currentYear = m.year
+          currentMonth = m.month
+          render()
+        },
+        onToday: () => {
+          currentYear = now.getFullYear()
+          currentMonth = now.getMonth()
+          render()
+        },
+        onNext: () => {
+          const m = stepMonth(currentYear, currentMonth, 1)
+          currentYear = m.year
+          currentMonth = m.month
+          render()
+        },
+      }),
+    )
+    wrap.appendChild(buildCalendarGrid(currentYear, currentMonth, byKey, schema))
+    if (undatedSection) wrap.appendChild(undatedSection)
+  }
+  render()
+
+  return wrap
+}
+
+/** Initial visible (year, month) for the calendar layout. The
+ *  median dated record wins so the grid lands on the densest area.
+ *  When nothing is dated, fall back to `now` so Today is the
+ *  default. Exported for unit tests. */
+export function deriveCalendarAnchor(
+  dates: Date[],
+  now: Date,
+): { year: number; month: number } {
+  if (dates.length === 0) {
+    return { year: now.getFullYear(), month: now.getMonth() }
+  }
+  const sorted = [...dates].sort((a, b) => a.getTime() - b.getTime())
+  const median = sorted[Math.floor(sorted.length / 2)]
+  return { year: median.getUTCFullYear(), month: median.getUTCMonth() }
+}
+
+/** Step the visible (year, month) by `delta` months, wrapping the
+ *  year boundary. Exported for unit tests. */
+export function stepMonth(
+  year: number,
+  month: number,
+  delta: number,
+): { year: number; month: number } {
+  const total = year * 12 + month + delta
+  return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 }
+}
+
+interface CalendarNavHandlers {
+  onPrev: () => void
+  onToday: () => void
+  onNext: () => void
+}
+
+function buildCalendarHeader(
+  year: number,
+  month: number,
+  dateField: string | null,
+  nav: CalendarNavHandlers,
+): HTMLElement {
+  const header = document.createElement('header')
+  header.className = 'cm-md-dbview-calendar-month'
+
+  const prev = document.createElement('button')
+  prev.type = 'button'
+  prev.className = 'cm-md-dbview-calendar-nav cm-md-dbview-calendar-nav--prev'
+  prev.title = 'Previous month'
+  prev.textContent = '‹'
+  prev.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    nav.onPrev()
+  })
+
+  const label = document.createElement('span')
+  label.className = 'cm-md-dbview-calendar-month-label'
+  label.textContent = `${monthName(month)} ${year}${dateField ? ` · ${dateField}` : ''}`
+
+  const today = document.createElement('button')
+  today.type = 'button'
+  today.className = 'cm-md-dbview-calendar-nav cm-md-dbview-calendar-nav--today'
+  today.title = 'Jump to today'
+  today.textContent = 'Today'
+  today.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    nav.onToday()
+  })
+
+  const next = document.createElement('button')
+  next.type = 'button'
+  next.className = 'cm-md-dbview-calendar-nav cm-md-dbview-calendar-nav--next'
+  next.title = 'Next month'
+  next.textContent = '›'
+  next.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    nav.onNext()
+  })
+
+  header.append(prev, label, today, next)
+  return header
+}
+
+function buildCalendarGrid(
+  year: number,
+  month: number,
+  byKey: Map<string, AppliedGroup>,
+  schema: Record<string, unknown>,
+): HTMLElement {
   const grid = document.createElement('div')
   grid.className = 'cm-md-dbview-calendar-grid'
   for (const dow of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) {
@@ -771,21 +889,12 @@ export function renderCalendar(
     head.textContent = dow
     grid.appendChild(head)
   }
-
-  // Build a (year-month-day) → group map for fast cell lookup.
-  const byKey = new Map<string, AppliedGroup>()
-  for (const { date, group } of dated) {
-    byKey.set(toIsoYmd(date), group)
-  }
-
   // Anchor the grid at the Sunday on or before the 1st of the
   // visible month, and run for 6 weeks (42 cells) so months that
   // wrap stay covered.
   const firstOfMonth = new Date(Date.UTC(year, month, 1))
   const startOffset = firstOfMonth.getUTCDay()
-  const gridStart = new Date(
-    Date.UTC(year, month, 1 - startOffset),
-  )
+  const gridStart = new Date(Date.UTC(year, month, 1 - startOffset))
   for (let i = 0; i < 42; i++) {
     const cellDate = new Date(
       Date.UTC(
@@ -816,27 +925,28 @@ export function renderCalendar(
     }
     grid.appendChild(cell)
   }
-  wrap.appendChild(grid)
+  return grid
+}
 
-  if (undated.length > 0) {
-    const undatedSection = document.createElement('section')
-    undatedSection.className = 'cm-md-dbview-calendar-undated'
-    const heading = document.createElement('h4')
-    heading.textContent = 'Undated'
-    undatedSection.appendChild(heading)
-    for (const g of undated) {
-      for (const record of g.records) {
-        const pill = document.createElement('div')
-        pill.className = 'cm-md-dbview-calendar-pill cm-md-dbview-calendar-pill--undated'
-        pill.dataset.recordId = record.id
-        pill.textContent = recordTitle(record, schema, /*titleField*/ null)
-        undatedSection.appendChild(pill)
-      }
+function buildUndatedSection(
+  groups: AppliedGroup[],
+  schema: Record<string, unknown>,
+): HTMLElement {
+  const section = document.createElement('section')
+  section.className = 'cm-md-dbview-calendar-undated'
+  const heading = document.createElement('h4')
+  heading.textContent = 'Undated'
+  section.appendChild(heading)
+  for (const g of groups) {
+    for (const record of g.records) {
+      const pill = document.createElement('div')
+      pill.className = 'cm-md-dbview-calendar-pill cm-md-dbview-calendar-pill--undated'
+      pill.dataset.recordId = record.id
+      pill.textContent = recordTitle(record, schema, /*titleField*/ null)
+      section.appendChild(pill)
     }
-    wrap.appendChild(undatedSection)
   }
-
-  return wrap
+  return section
 }
 
 /** Gallery — flat record list rendered as cards. Uses the

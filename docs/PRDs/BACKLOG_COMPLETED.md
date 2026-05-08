@@ -8,6 +8,29 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-069 follow-up: calendar navigation ✅ (2026-05-08)
+
+**Source**: BL-069 closure note (2026-05-07) — third of the four record-mutation / UX deferrals; sibling of the kanban drag-to-reorder + inline cell editing follow-ups that landed earlier the same day
+**Files**: `shell/src/plugins/nexus/editor/cm/databaseViewWidget.ts` (new exported `deriveCalendarAnchor` + `stepMonth` helpers; `renderCalendar` factored into `buildCalendarHeader` / `buildCalendarGrid` / `buildUndatedSection` and now owns mutable visible-month state with `‹` / Today / `›` controls; new optional `now: Date` arg for test determinism); `shell/src/plugins/nexus/editor/cm/databaseViewWidget.test.ts` (+7 tests covering anchor derivation, month stepping, header DOM shape, and prev / next / today / round-trip behaviour); `shell/src/plugins/nexus/editor/livePreview.css` (header becomes a flex row with prev / label / today / next children; `.cm-md-dbview-calendar-nav` button styling)
+**Related**: BL-069 follow-up: inline cell editing ✅ 2026-05-08; BL-069 follow-up: kanban drag-to-reorder write-back ✅ 2026-05-08; BL-069 (DB query executor — calendar layout shipped without nav)
+
+The original BL-069 closure note framed calendar navigation as "deferred until a user complains about the heuristic" — the median-of-data anchor lands the user on the densest area without any controls, but exposes no way to walk forward or back. This pass adds the controls without changing the default-anchor behaviour.
+
+- **`deriveCalendarAnchor(dates, now)` and `stepMonth(year, month, delta)`.** Two pure helpers carved out of the original inline math. `deriveCalendarAnchor` returns the median `{year, month}` from the dated record list, falling back to `now` when nothing is dated (so an empty calendar still has a sensible Today). `stepMonth` walks the visible month forward / backward, wrapping the year boundary cleanly using arithmetic on `year * 12 + month` (no `Date` math, no DST surprises). Both exported for unit tests.
+- **`renderCalendar` carries mutable visible-month state.** The function still returns a single `HTMLElement`, but inside the closure `currentYear` / `currentMonth` are mutable; a local `render()` rebuilds the wrapper's contents (`replaceChildren(header, grid, undated?)`) on each navigation event. The dated → group `Map` is computed once outside `render()` because it doesn't depend on the visible month — a navigation rebuild is cheap.
+- **Header is now a three-button flex row.** `‹` (prev), the existing month + date_field label, "Today", `›` (next). Each button is a `<button type=button>` so it can't accidentally submit a form; click handlers `stopPropagation` so a click inside the editor decoration doesn't escape into CM6's selection logic. CSS layers a hover background and a small border-radius — they read as buttons in both ember themes without committing to a specific accent.
+- **`now: Date = new Date()` is injected for testability.** Production callers pass nothing and pick up the current local date; the test suite passes deterministic dates so the Today-button assertion doesn't depend on wall-clock state. The choice to use local-shaped `new Date()` (vs. UTC) is deliberate: the user thinks of "today" in their timezone; the grid math itself stays UTC-anchored to keep `parseIsoDate` round-trips clean.
+- **Undated bucket survives navigation.** Built once outside `render()`; appended on every rebuild. So a March 2026 → April 2026 step doesn't make the Inbox bucket flicker out and back in.
+
+**Tested**: `pnpm --filter nexus-shell test` 1065/1065 (was 1058, +7); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` 0 errors. New tests cover `deriveCalendarAnchor` (median-wins + empty-fallback-to-now), `stepMonth` (forward / backward / December→Jan year wrap / January→Dec year wrap / multi-step wrap), header DOM (prev / today / next buttons present + label still carries the date_field annotation), prev click steps back, next click advances (twice, off the data range, undated bucket unaffected), Today snaps to `now`'s month even when initial visible month is the data median, and a four-step round-trip (next/next/prev/prev) restores all four pills (3 dated + 1 undated). The pre-existing calendar grid-shape test (`grid.children.length === 49`) keeps passing because the grid layout is unchanged.
+
+**Definition of done coverage** (against the BL-069 closure note's deferral list):
+- ✅ Calendar navigation — prev / today / next chevrons land; visible month becomes piece of widget state.
+- ✅ Inline cell editing (sibling pass earlier 2026-05-08).
+- ✅ Kanban drag-to-reorder with write-back (sibling pass earlier 2026-05-08).
+- ⏸ Gallery cover field — schema gain (image FieldType + `cover_field` on the gallery view-type variant) is the prerequisite; deferred.
+- ⏸ Multi-select / relation cells — read-only by design; an inline picker UI is its own scope.
+
 ### BL-069 follow-up: inline cell editing ✅ (2026-05-08)
 
 **Source**: BL-069 closure note (2026-05-07) — second of two record-mutation deferrals; sibling of the kanban drag-to-reorder follow-up that landed earlier the same day
