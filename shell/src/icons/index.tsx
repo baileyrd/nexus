@@ -1,5 +1,6 @@
 import type { ReactElement, SVGProps } from 'react'
 import {
+  Activity,
   Archive,
   ArrowDownUp,
   ArrowLeft,
@@ -10,6 +11,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Clock,
+  Compass,
   CornerDownLeft,
   CornerUpRight,
   Crosshair,
@@ -134,6 +136,12 @@ const ICON_MAP = {
   clock:       { component: Clock },
   star:        { component: Star },
   template:    { component: LayoutTemplate },
+  // Used by activity-bar items in nexus.observability and
+  // nexus.osArchitecture. Were referenced before they were registered
+  // here, which threw `entry.component` is undefined and crashed the
+  // whole activity-bar slot via the ErrorBoundary at App.tsx:201.
+  activity:    { component: Activity },
+  compass:     { component: Compass },
 
   // Editing / sort
   sortAZ:      { component: ArrowDownUp },
@@ -161,14 +169,38 @@ interface IconProps extends Omit<LucideProps, 'size' | 'ref'> {
   size?: number
 }
 
+/** Rendered when a caller passes an icon name that isn't in
+ *  `ICON_MAP`. Generic info glyph keeps the surrounding chrome
+ *  (activity bar items, action buttons) rendering instead of
+ *  bubbling up into the parent ErrorBoundary. */
+const FALLBACK_ENTRY: IconEntry = { component: Info }
+
+/** Names that have already been logged-warn'd this session — keeps
+ *  the dev console quiet while still surfacing the typo on first
+ *  hit. */
+const warnedNames = new Set<string>()
+
 /**
  * Render any named icon at a given size. Icons use `currentColor` so
  * they inherit `color` from the surrounding text style.
  *
  *   <Icon name="folder" size={14} />
+ *
+ * Unknown names render the generic `info` glyph and emit a one-shot
+ * `console.warn`; we deliberately fail soft because an icon lookup
+ * lives deep inside chrome (activity-bar items, button labels) and a
+ * throw bubbles through the ErrorBoundary and blanks the whole slot.
  */
 export function Icon({ name, size = 16, ...rest }: IconProps): ReactElement {
-  const entry = ICON_MAP[name] as IconEntry
+  let entry = ICON_MAP[name] as IconEntry | undefined
+  if (!entry) {
+    if (!warnedNames.has(name)) {
+      warnedNames.add(name)
+      // eslint-disable-next-line no-console
+      console.warn(`[Icon] unknown name "${name}" — rendering fallback`)
+    }
+    entry = FALLBACK_ENTRY
+  }
   const Component = entry.component
   const filled = entry.filled === true
   // Don't pass fill/stroke unless the icon is explicitly filled — passing
