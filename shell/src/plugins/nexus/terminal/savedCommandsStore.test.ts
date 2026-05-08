@@ -138,6 +138,7 @@ test('createSaved: posts saved_create then refreshes via saved_list', async () =
     shell_cmd: 'npm run build',
     working_dir: null,
     icon: 'terminal',
+    env_vars: {},
   })
 
   const after = useSavedCommandsStore.getState()
@@ -187,6 +188,7 @@ test('updateSaved: merges draft onto cached row, preserves env + auto_restart', 
     shell_cmd: 'npm run build',
     working_dir: null,
     icon: 'terminal',
+    env_vars: { CI: '1' },
   })
 
   const after = useSavedCommandsStore.getState()

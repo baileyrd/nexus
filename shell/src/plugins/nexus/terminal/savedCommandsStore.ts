@@ -61,11 +61,13 @@ export interface SavedCommand {
 }
 
 /** Fields the editor form mutates. The rest of `SavedCommand` is either
- *  derived (timestamps), defaulted (auto_restart_*, env_*) or owned by
- *  the reorder path (sidebar_order). */
+ *  derived (timestamps), defaulted (auto_restart_*, env_file) or owned by
+ *  the reorder path (sidebar_order). `env_vars` was added to the form
+ *  surface in the BL-059 follow-up so users can pin per-command
+ *  environment variables without dropping into the SQLite store. */
 export type SavedCommandDraft = Pick<
   SavedCommand,
-  'slug' | 'name' | 'shell' | 'shell_cmd' | 'working_dir' | 'icon'
+  'slug' | 'name' | 'shell' | 'shell_cmd' | 'working_dir' | 'icon' | 'env_vars'
 >
 
 /** Subset of PluginAPI we actually need. Typed structurally so the store
@@ -144,7 +146,7 @@ function draftToRow(draft: SavedCommandDraft): SavedCommand {
     shell: draft.shell,
     shell_cmd: draft.shell_cmd,
     working_dir: draft.working_dir,
-    env_vars: {},
+    env_vars: draft.env_vars,
     env_file: null,
     icon: draft.icon || DEFAULT_ICON,
     auto_restart: false,
@@ -166,6 +168,7 @@ function mergeDraft(existing: SavedCommand, draft: SavedCommandDraft): SavedComm
     shell: draft.shell,
     shell_cmd: draft.shell_cmd,
     working_dir: draft.working_dir,
+    env_vars: draft.env_vars,
     icon: draft.icon || existing.icon || DEFAULT_ICON,
     updated_at: Math.floor(Date.now() / 1000),
   }

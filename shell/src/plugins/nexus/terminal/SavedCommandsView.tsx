@@ -65,6 +65,41 @@ const EMPTY_DRAFT: SavedCommandDraft = {
   shell_cmd: '',
   working_dir: null,
   icon: 'terminal',
+  env_vars: {},
+}
+
+/**
+ * BL-059 follow-up — encode an `env_vars` map as one `KEY=VALUE`
+ * line per pair for the editor textarea. Keys sort alphabetically
+ * so a save / reopen cycle stays stable.
+ */
+export function envVarsToText(env: Record<string, string>): string {
+  return Object.keys(env)
+    .sort()
+    .map((k) => `${k}=${env[k]}`)
+    .join('\n')
+}
+
+/**
+ * BL-059 follow-up — parse the editor textarea back into an
+ * `env_vars` map. Empty / whitespace-only / comment (`#`) lines are
+ * skipped; the first `=` splits key from value; the value is taken
+ * verbatim (no quote-stripping — Bash interprets quoted env values
+ * as literal text and we match that). Lines without `=` are dropped
+ * with the rest of the noise.
+ */
+export function parseEnvVars(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    if (!key) continue
+    out[key] = line.slice(eq + 1)
+  }
+  return out
 }
 
 type EditorState =
@@ -565,6 +600,7 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
                       shell_cmd: cmd.shell_cmd,
                       working_dir: cmd.working_dir,
                       icon: cmd.icon,
+                      env_vars: cmd.env_vars,
                     },
                   })
                 }
@@ -663,6 +699,17 @@ function CommandForm(props: CommandFormProps) {
             onChange({ working_dir: e.target.value.trim() || null })
           }
           placeholder="/path/to/repo"
+        />
+      </label>
+      <label>
+        Env vars (one per line, KEY=VALUE)
+        <textarea
+          value={envVarsToText(draft.env_vars)}
+          onChange={(e) => onChange({ env_vars: parseEnvVars(e.target.value) })}
+          placeholder="DEBUG=1\nNODE_ENV=development"
+          rows={3}
+          spellCheck={false}
+          style={{ fontFamily: 'var(--font-monospace)', fontSize: 12 }}
         />
       </label>
       <div className="nexus-saved-command-form-actions">
