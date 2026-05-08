@@ -16,6 +16,9 @@ importers:
 
   shell:
     dependencies:
+      '@codemirror/autocomplete':
+        specifier: ^6.18.0
+        version: 6.20.1
       '@codemirror/commands':
         specifier: ^6.8.0
         version: 6.10.3
@@ -43,6 +46,9 @@ importers:
       '@codemirror/legacy-modes':
         specifier: ^6.5.2
         version: 6.5.2
+      '@codemirror/lint':
+        specifier: ^6.8.0
+        version: 6.9.5
       '@codemirror/search':
         specifier: ^6.5.0
         version: 6.7.0

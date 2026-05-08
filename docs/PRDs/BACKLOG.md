@@ -195,25 +195,15 @@ _BL-078 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-077: CM6 LSP client extension
+_BL-077 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `lspIpc.ts` (typed `com.nexus.lsp` adapter) + `lspClient.ts` (CM6 extension bundle) together turn the BL-076 LSP host into a working editor surface. The extension activates only in code-mode tabs (BL-075 routing) on real on-disk paths; document-mode and untitled tabs skip it. New deps: `@codemirror/autocomplete` 6.20 + `@codemirror/lint` 6.9. Decided against `codemirror-languageserver` — it bundles a WebSocket transport we'd have to monkey-patch around; writing the ~400-line CM6 wiring directly is simpler and avoids a vendored fork. 17 new unit tests cover the converters (severity, position-to-offset with EOL/EOF clamps, diagnostic projection, completion-item mapping with kind chips + docs, location picker, edits applier with bottom-up sort) plus three lifecycle smokes (open/change/close fire-and-forget, matching-URI diagnostics land in the lint state, non-matching diagnostics ignored). Full shell suite at 968 tests stays green._
 
-**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
-**Effort**: Medium (1 week)
-**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `lspClient.ts`)
-**Related**: BL-076 (nexus-lsp — required first); BL-075 (dual-mode routing — required first); `codemirror-languageserver` (MIT)
+**Caught a subtle bug along the way.** A draft test used a dynamic `await import('@codemirror/lint')` for `forEachDiagnostic` while the implementation imports `setDiagnostics` statically. Under tsx's loader the dynamic and static specifiers resolved to *different* module instances, so the `lintState` `StateField` constants weren't identity-equal — `setDiagnostics` would write to one field and `forEachDiagnostic` would read from another, and both saw "0 diagnostics." Fixed by importing both statically from the test. Worth flagging because future CM6 extensions that test against state-field-based @codemirror sub-modules will trip the same trap.
 
-`codemirror-languageserver` provides a CM6 extension that handles completion widget, diagnostic squiggles, hover tooltip, and go-to-definition for any LSP server. The adapter proxies CM6 LSP requests through `com.nexus.lsp` IPC instead of a WebSocket.
-
-**Blocked by:** BL-075 (dual-mode routing must exist so LSP client only activates in code mode) and BL-076 (`nexus-lsp` plugin must be running).
-
-**Definition of done:**
-- `lspClient.ts` CM6 extension activates only in code mode (file-type gated)
-- Completion widget shows LSP suggestions with kind icons (method, variable, keyword, etc.) and documentation popover
-- Diagnostic squiggles: red (error), yellow (warning), blue (info) underlines; hover shows message
-- Hover tooltip shows type signature + documentation for symbol under cursor
-- Cmd+Click (go-to-definition) opens the target file at the correct line
-- Format on save: calls `com.nexus.lsp::format` on `⌘S`
-- Change notifications fire on every CM6 transaction (no 800ms debounce in code mode)
+**Deferred from the DoD:**
+- **Format-on-save plumbed via the existing save command, not just the keymap.** Today `Mod-s` triggers `format` then returns `false` so the outer save handler still fires. That works as long as the user's save chord is `Mod-s`; a vim user issuing `:w` won't trigger format. A follow-up wires format through the `nexus.editor.save` command so every save path gets it.
+- **`nexus.editor:reveal-line` consumer.** Cmd+Click → definition emits the event with the resolved line/character but no handler subscribes yet; the file opens at the top. Wiring is one event listener away — defer until the second LSP-using flow needs it.
+- **Document resync after server reconnect.** BL-076's `LspClient` tracks open URI / version / text but the resync replay isn't wired. A code-mode tab whose server crashes today shows stale diagnostics until the next save bumps the version. Pair with the BL-076 follow-up that wraps each handler in `call_with_reconnect`.
+- **WorkspaceEdit applier for rename / code-actions.** `format` returns `TextEdit[]` and the applier handles that; rename/code-actions would return a `WorkspaceEdit` (multi-file) which needs a different applier. The IPC handlers are wired but the CM6 commands don't dispatch them — there's no UI surface yet (rename palette, code-actions menu). Lands when those UI surfaces do.
 
 ---
 

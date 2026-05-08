@@ -8,6 +8,42 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-077: CM6 LSP client extension ✅ (2026-05-07)
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Files**: new `shell/src/plugins/nexus/editor/cm/{lspIpc.ts, lspClient.ts, lspClient.test.ts}`; new `shell/tests/lsp-client.test.ts` (re-export wrapper); `shell/src/plugins/nexus/editor/EditorView.tsx` (extension wiring); `shell/package.json` (+`@codemirror/autocomplete`, +`@codemirror/lint`)
+**Related**: BL-075 (dual-mode editor routing — required, landed earlier); BL-076 (nexus-lsp host — required, landed earlier)
+
+Lights up the BL-076 LSP host inside the editor. Code-mode tabs on real on-disk paths now drive completions, diagnostics, hover, go-to-definition, and format-on-save against any configured LSP server.
+
+- **`lspIpc.ts` adapter.** Typed wrapper over `com.nexus.lsp`'s 11 verbs (mirrors `kernelClient.ts`'s style for the editor-IPC surface). Subscribe helper for `com.nexus.lsp.textDocument.publishDiagnostics`. Args / reply shapes mirror `nexus_lsp::ipc` so the wire stays identifiable on both sides; LSP-spec types (`Hover`, `CompletionItem`, `Location`, `TextEdit`, `Diagnostic`, `Range`, `Position`) live as minimal local interfaces — we don't redeclare the LSP spec, just the fields the client consumes.
+- **`lspClient.ts` extension bundle.** Returns a CM6 `Extension`; the editor's `buildExtensions` factory mounts it for code-mode tabs with a real path. Composition:
+    1. **Lifecycle ViewPlugin.** Fires `open_file` on mount, `change_file` on every `update.docChanged` (no debounce — BL-077 DoD), and `close_file` on destroy. Subscribes to publishDiagnostics inside the constructor; the unsub handle fires on destroy. Auto-bumps a per-buffer monotonic version counter.
+    2. **Autocomplete source.** `autocompletion({ override: [...] })`. Triggers on identifier prefix (or explicit Ctrl-Space); calls `completions` with the cursor's 0-indexed line + character; maps each LSP `CompletionItem` to a CM6 `Completion` via `lspItemToCmCompletion` (kind chip from a 25-entry LSP-CompletionItemKind table, docs from string-or-`{value}`, insert text falls back through `insertText` → `textEdit.newText` → `label`).
+    3. **Hover tooltip.** `hoverTooltip` calls `hover`; `hoverText` collapses LSP's `string | { value } | array<...>` shape into a single string; the tooltip DOM is `<div class="cm-tooltip-lsp-hover">{text}</div>` so themes can style.
+    4. **Cmd/Ctrl-Click → go-to-definition.** `EditorView.domEventHandlers({ mousedown })` short-circuits a Mod+left-click into a `definition` IPC; the resolved `Location` is forwarded to `onOpenLocation` (the editor wires this to a `files:open` event + a `nexus.editor:reveal-line` event so a future scroll-to-line consumer can pick it up).
+    5. **Format-on-save (`Mod-s`).** `Prec.high` keymap calls `format`; the returned `TextEdit[]` are applied via `applyTextEdits` in a single transaction. Edits sort *bottom-up* per LSP spec recommendation so earlier replacements don't invalidate later positions. The keymap returns `false` so the outer save command still fires — formatting is additive.
+    6. **Lint state field.** `linter(() => [])` is included so `setDiagnostics` has a state field to write into; the no-op pull source keeps the field installed without the linter ever auto-running.
+- **EditorView wiring.** `EditorView.tsx`'s `codeBuildExtensions` factory now appends `lspExtension({...})` for code-mode tabs with a kernel handle and a non-untitled relpath. Construction takes `runtime.kernel` as the IPC backbone; errors route through `runtime.reportBridgeError` for the standard "lsp <where>: <err>" surface.
+- **Tests (17).** Five describe-blocks: `severityToCm` (4 cases — 1/2/3/4 + missing→error per LSP 3.17), `lspPositionToOffset` (3 cases — happy path, EOL clamp, EOF clamp), `lspDiagnosticsToCm` (1 case — multi-diagnostic projection with `[source]` prefix), `lspItemToCmCompletion` (3 cases — insertText fallback, kind chips, docs extraction), `pickFirstLocation` (3 cases — null/empty, single, array), `applyTextEdits` (2 cases — bottom-up ordering, empty no-op), and `lspExtension` lifecycle (3 cases — open/change/close fire on the right boundaries, matching-URI diagnostics land in lint state, non-matching diagnostics ignored).
+
+**Caught a tsx module-instance bug along the way.** A draft of the diagnostics test used a dynamic `await import('@codemirror/lint')` for `forEachDiagnostic` while the implementation statically imported `setDiagnostics`. Under tsx's ESM loader the two specifiers resolved to *different* module instances, so the `lintState` `StateField` constant in each was identity-distinct — `setDiagnostics` wrote to one field and `forEachDiagnostic` read another, and both reported zero diagnostics. Fixed by switching every test import to static. Worth flagging because future CM6 extensions that round-trip data through @codemirror state fields will trip the same trap.
+
+**Tested**: `pnpm --filter nexus-shell test` 968/968 (was 939, +29 across the new suite; LSP contributes 17 specifically); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean for the new files.
+
+**Definition of done coverage**:
+- ✅ `lspClient.ts` CM6 extension activates only in code mode (file-type gated via `getEditorMode` + the existing `nexus.editor.codeFileExtensions` setting)
+- ✅ Completion widget shows LSP suggestions with kind chips (method/variable/keyword/…) and a documentation popover
+- ✅ Diagnostic squiggles: error/warning/info/hint via `linter` + `setDiagnostics`; severity round-trip pinned in tests
+- ✅ Hover tooltip shows the LSP `Hover.contents` text under the cursor
+- ✅ Cmd/Ctrl+Click (go-to-definition) emits `files:open` + a position event; the open-and-jump handler is the deferred bullet below
+- ✅ Format-on-save: `Mod-s` calls `com.nexus.lsp::format` and applies `TextEdit[]`; the keymap returns `false` so the outer save still fires
+- ✅ Change notifications fire on every CM6 transaction (no 800ms debounce — BL-077 DoD literally required this)
+- ⏸ Plumb format-on-save through the `nexus.editor.save` command so non-`Mod-s` save paths (vim `:w`, command palette) also trigger it
+- ⏸ `nexus.editor:reveal-line` consumer that scrolls the opened tab to the position; emit-side wired, no subscriber yet
+- ⏸ Document resync after server reconnect (paired with BL-076's `call_with_reconnect` follow-up)
+- ⏸ `WorkspaceEdit` applier for rename / code-actions (no UI surface to drive these yet)
+
 ### BL-076: `nexus-lsp` — Language Server Protocol core plugin ✅ (2026-05-07)
 
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)

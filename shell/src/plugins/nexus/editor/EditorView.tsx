@@ -12,6 +12,8 @@ import { transactionBridge } from './cm/transactionBridge'
 import { getEditorMode, pickLanguageExtension } from './codeMode'
 import { gitGutterExt } from './cm/gitGutter'
 import { gitBlameExt } from './cm/gitBlame'
+import { lspExtension } from './cm/lspClient'
+import { LspIpc } from './cm/lspIpc'
 import { useEditorBlameStore } from './blameStore'
 import './cm/gitGutter.css'
 import { slashCommandExt } from './cm/slashCommand'
@@ -993,11 +995,52 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               runtime?.reportBridgeError?.('git blame', err),
           })
         : null
+    // BL-077 — code-mode tabs with a kernel handle and a real path
+    // (not untitled) get the LSP client extension. The host is
+    // pass-through: if no language server is configured for this
+    // file's extension, every IPC reply is JSON `null` and the
+    // extension is a quiet no-op. Untitled tabs are excluded — they
+    // have no on-disk path for the server to resolve.
+    const lspClientExtension =
+      editorMode === 'code' && runtime?.kernel && !isUntitled(tab.relpath)
+        ? lspExtension({
+            relpath: tab.relpath,
+            ipc: new LspIpc(runtime.kernel),
+            onOpenLocation: (loc) => {
+              // Forward go-to-definition to the tab opener. Strip
+              // the `file://` prefix the server emits; the tab
+              // store keys by relpath. The line/character live in
+              // `loc.range.start` — we route through the existing
+              // `files:open` event the link-suggest extension uses.
+              const path = loc.uri.startsWith('file://')
+                ? loc.uri.slice('file://'.length)
+                : loc.uri
+              const name =
+                path
+                  .split(/[\\/]/)
+                  .filter((s) => s.length > 0)
+                  .pop() ?? path
+              eventBus.emit('files:open', { relpath: path, name })
+              // The receiving tab can subscribe to `nexus.editor:reveal-line`
+              // (parallels block-link nav). No consumer wired today —
+              // the line/character lands on the bus and a future
+              // BL-077 follow-up will scroll-to. Best-effort.
+              eventBus.emit('nexus.editor:reveal-line', {
+                relpath: path,
+                line: loc.range.start.line,
+                character: loc.range.start.character,
+              })
+            },
+            onError: (where, err) =>
+              runtime?.reportBridgeError?.(`lsp ${where}`, err),
+          })
+        : null
     const codeBuildExtensions = (() => {
       const base: import('@codemirror/state').Extension[] = []
       if (languageExtension !== null) base.push(languageExtension)
       if (gitGutterExtension !== null) base.push(gitGutterExtension)
       if (gitBlameExtension !== null) base.push(gitBlameExtension)
+      if (lspClientExtension !== null) base.push(lspClientExtension)
       if (tab.mode === 'live' && languageExtension === null) {
         base.push(livePreviewExt())
       }
