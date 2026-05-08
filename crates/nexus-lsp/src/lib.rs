@@ -29,7 +29,7 @@ pub mod ipc;
 pub mod pool;
 mod transport;
 
-pub use client::{LspClient, LspClientError};
+pub use client::{LspClient, LspClientError, OpenDocument};
 pub use config::{LspHostConfig, LspServerSpec, LspConfigError};
 pub use core_plugin::LspCorePlugin;
 pub use pool::{ConnectionPool, PoolConfig};

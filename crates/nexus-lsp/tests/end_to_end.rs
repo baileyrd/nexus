@@ -16,7 +16,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use nexus_lsp::{LspClient, LspServerSpec};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use nexus_lsp::pool::{ConnectionPool, PoolConfig};
+use nexus_lsp::{LspClient, LspClientError, LspHostConfig, LspServerSpec};
 use serde_json::json;
 use tokio::time::timeout;
 
@@ -223,4 +228,143 @@ async fn handshake_request_and_diagnostic_round_trip() {
 
     // Graceful shutdown — drop the client; kill_on_drop reaps the child.
     drop(client);
+}
+
+#[tokio::test]
+async fn documents_snapshot_returns_open_set() {
+    if !python_available() {
+        eprintln!("python3 not available — skipping");
+        return;
+    }
+    let (_dir, script) = write_mock_server();
+    let forge_dir = tempfile::tempdir().unwrap();
+    let spec = LspServerSpec {
+        name: "mock".to_string(),
+        command: "python3".to_string(),
+        args: vec![script.to_string_lossy().into_owned()],
+        file_types: vec!["mock".to_string()],
+        root_markers: vec![],
+        disabled: false,
+        env: Default::default(),
+    };
+    let client = timeout(
+        Duration::from_secs(15),
+        LspClient::connect("mock", &spec, forge_dir.path().to_path_buf()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    // Empty before any did_open.
+    assert!(client.documents_snapshot().await.is_empty());
+
+    client
+        .did_open("file:///a.mock", "mock", 1, "hello")
+        .await
+        .unwrap();
+    client
+        .did_open("file:///b.mock", "mock", 1, "world")
+        .await
+        .unwrap();
+
+    let snap = client.documents_snapshot().await;
+    assert_eq!(snap.len(), 2);
+    let mut by_uri: HashMap<String, _> = HashMap::new();
+    for d in snap {
+        by_uri.insert(d.uri.clone(), d);
+    }
+    assert_eq!(by_uri["file:///a.mock"].text, "hello");
+    assert_eq!(by_uri["file:///b.mock"].text, "world");
+    assert_eq!(by_uri["file:///a.mock"].language_id, "mock");
+
+    // did_close removes the entry from the snapshot set.
+    client.did_close("file:///a.mock").await.unwrap();
+    let snap = client.documents_snapshot().await;
+    assert_eq!(snap.len(), 1);
+    assert_eq!(snap[0].uri, "file:///b.mock");
+
+    drop(client);
+}
+
+#[tokio::test]
+async fn call_with_reconnect_replays_open_documents_after_transient_failure() {
+    if !python_available() {
+        eprintln!("python3 not available — skipping");
+        return;
+    }
+    let (_dir, script) = write_mock_server();
+    let forge_dir = tempfile::tempdir().unwrap();
+    let spec = LspServerSpec {
+        name: "mock".to_string(),
+        command: "python3".to_string(),
+        args: vec![script.to_string_lossy().into_owned()],
+        file_types: vec!["mock".to_string()],
+        root_markers: vec![],
+        disabled: false,
+        env: Default::default(),
+    };
+
+    // Stand up a host config the pool can route by name.
+    let mut servers = HashMap::new();
+    servers.insert("mock".to_string(), spec.clone());
+    let cfg = LspHostConfig { servers };
+
+    // Tight backoff so the test stays under a second.
+    let pool_cfg = PoolConfig {
+        backoff: vec![std::time::Duration::from_millis(50)],
+    };
+    let pool = ConnectionPool::new(pool_cfg, forge_dir.path().to_path_buf());
+
+    // Connect once and seed a tracked open document on the original
+    // client. This simulates the user having opened a tab before
+    // the server crashes.
+    {
+        let client = pool.get_or_connect("mock", &cfg).await.unwrap();
+        let lock = client.lock().await;
+        lock.did_open("file:///x.mock", "mock", 1, "hello")
+            .await
+            .unwrap();
+        // Sanity: the seeded open doc shows up in the snapshot.
+        assert_eq!(lock.documents_snapshot().await.len(), 1);
+    }
+
+    // Drive `call_with_reconnect` against an op closure that fails
+    // transiently on the first attempt and observes the document
+    // set on the second attempt — that second attempt is running
+    // against a *fresh* connection (the failure dropped the
+    // entry), so the only way docs_snapshot sees the open doc is
+    // if the pool replayed it during reconnect.
+    let attempt = Arc::new(AtomicUsize::new(0));
+    let resync_count = Arc::new(AtomicUsize::new(0));
+    let attempt_for_op = Arc::clone(&attempt);
+    let resync_for_op = Arc::clone(&resync_count);
+    let _ = pool
+        .call_with_reconnect("mock", &cfg, move |client| {
+            let attempt = Arc::clone(&attempt_for_op);
+            let resync = Arc::clone(&resync_for_op);
+            Box::pin(async move {
+                let n = attempt.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    // Force a transient classification — RequestTimeout
+                    // is in `is_transient`'s match list, so the pool
+                    // will drop the entry, snapshot docs, and replay
+                    // them against the next client.
+                    return Err(LspClientError::RequestTimeout {
+                        method: "test".to_string(),
+                        ms: 0,
+                    });
+                }
+                let lock = client.lock().await;
+                resync.store(lock.documents_snapshot().await.len(), Ordering::SeqCst);
+                Ok(serde_json::Value::Null)
+            })
+        })
+        .await
+        .expect("retry succeeded");
+
+    // Two attempts: first failed transiently, second succeeded.
+    assert_eq!(attempt.load(Ordering::SeqCst), 2);
+    // After the reconnect, the new client has had the open doc
+    // replayed via did_open; documents_snapshot reflects it.
+    assert_eq!(resync_count.load(Ordering::SeqCst), 1);
 }

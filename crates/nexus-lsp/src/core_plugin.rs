@@ -256,18 +256,21 @@ impl CorePlugin for LspCorePlugin {
                     let server_name = server.name.clone();
                     let lang = language_id.unwrap_or_else(|| infer_language_id(&path));
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    {
-                        let lock = client.lock().await;
-                        lock.did_open(&uri, &lang, version, &content)
-                            .await
-                            .map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                    }
-                    Ok(json!({ "uri": uri, "server": server_name }))
+                    pool.call_with_reconnect(&server_name, &cfg, move |client| {
+                        let bus = bus.clone();
+                        let uri = uri.clone();
+                        let lang = lang.clone();
+                        let content = content.clone();
+                        Box::pin(async move {
+                            let lock = client.lock().await;
+                            lock.did_open(&uri, &lang, version, &content).await?;
+                            republish_pending(&lock, bus.as_ref()).await;
+                            Ok(())
+                        })
+                    })
+                    .await
+                    .map_err(map_client_err)?;
+                    Ok(json!({ "uri": file_uri_from_path(&path), "server": server_name }))
                 }))
             }
 
@@ -280,15 +283,18 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    {
-                        let lock = client.lock().await;
-                        lock.did_close(&uri).await.map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                    }
+                    pool.call_with_reconnect(&server_name, &cfg, move |client| {
+                        let bus = bus.clone();
+                        let uri = uri.clone();
+                        Box::pin(async move {
+                            let lock = client.lock().await;
+                            lock.did_close(&uri).await?;
+                            republish_pending(&lock, bus.as_ref()).await;
+                            Ok(())
+                        })
+                    })
+                    .await
+                    .map_err(map_client_err)?;
                     Ok(json!({ "ok": true }))
                 }))
             }
@@ -304,17 +310,19 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    {
-                        let lock = client.lock().await;
-                        lock.did_change(&uri, version, &content)
-                            .await
-                            .map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                    }
+                    pool.call_with_reconnect(&server_name, &cfg, move |client| {
+                        let bus = bus.clone();
+                        let uri = uri.clone();
+                        let content = content.clone();
+                        Box::pin(async move {
+                            let lock = client.lock().await;
+                            lock.did_change(&uri, version, &content).await?;
+                            republish_pending(&lock, bus.as_ref()).await;
+                            Ok(())
+                        })
+                    })
+                    .await
+                    .map_err(map_client_err)?;
                     Ok(json!({ "ok": true }))
                 }))
             }
@@ -351,27 +359,21 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    let result = {
-                        let lock = client.lock().await;
-                        let r = lock
-                            .send_request(
-                                "textDocument/references",
-                                json!({
-                                    "textDocument": { "uri": uri },
-                                    "position": { "line": line, "character": character },
-                                    "context": { "includeDeclaration": include_declaration },
-                                }),
-                            )
-                            .await
-                            .map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                        r
-                    };
-                    Ok(result)
+                    let payload = json!({
+                        "textDocument": { "uri": uri },
+                        "position": { "line": line, "character": character },
+                        "context": { "includeDeclaration": include_declaration },
+                    });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "textDocument/references",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
                 }))
             }
             HANDLER_RENAME => {
@@ -386,27 +388,21 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    let result = {
-                        let lock = client.lock().await;
-                        let r = lock
-                            .send_request(
-                                "textDocument/rename",
-                                json!({
-                                    "textDocument": { "uri": uri },
-                                    "position": { "line": line, "character": character },
-                                    "newName": new_name,
-                                }),
-                            )
-                            .await
-                            .map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                        r
-                    };
-                    Ok(result)
+                    let payload = json!({
+                        "textDocument": { "uri": uri },
+                        "position": { "line": line, "character": character },
+                        "newName": new_name,
+                    });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "textDocument/rename",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
                 }))
             }
             HANDLER_CODE_ACTIONS => {
@@ -424,27 +420,21 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    let result = {
-                        let lock = client.lock().await;
-                        let r = lock
-                            .send_request(
-                                "textDocument/codeAction",
-                                json!({
-                                    "textDocument": { "uri": uri },
-                                    "range": range,
-                                    "context": { "diagnostics": [] },
-                                }),
-                            )
-                            .await
-                            .map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                        r
-                    };
-                    Ok(result)
+                    let payload = json!({
+                        "textDocument": { "uri": uri },
+                        "range": range,
+                        "context": { "diagnostics": [] },
+                    });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "textDocument/codeAction",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
                 }))
             }
             HANDLER_FORMAT => {
@@ -456,29 +446,23 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let uri = file_uri_from_path(&path);
-                    let client = pool
-                        .get_or_connect(&server_name, &cfg)
-                        .await
-                        .map_err(map_client_err)?;
-                    let result = {
-                        let lock = client.lock().await;
-                        let r = lock
-                            .send_request(
-                                "textDocument/formatting",
-                                json!({
-                                    "textDocument": { "uri": uri },
-                                    "options": {
-                                        "tabSize": 4,
-                                        "insertSpaces": true,
-                                    },
-                                }),
-                            )
-                            .await
-                            .map_err(map_client_err)?;
-                        republish_pending(&lock, bus.as_ref()).await;
-                        r
-                    };
-                    Ok(result)
+                    let payload = json!({
+                        "textDocument": { "uri": uri },
+                        "options": {
+                            "tabSize": 4,
+                            "insertSpaces": true,
+                        },
+                    });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "textDocument/formatting",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
                 }))
             }
             _ => None,
@@ -505,27 +489,41 @@ fn proxy_position_request(
         };
         let server_name = server.name.clone();
         let uri = file_uri_from_path(&path);
-        let client = pool
-            .get_or_connect(&server_name, &cfg)
+        let payload = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+        });
+        proxy_request(&pool, &cfg, &server_name, bus, method, payload)
             .await
-            .map_err(map_client_err)?;
-        let result = {
-            let lock = client.lock().await;
-            let r = lock
-                .send_request(
-                    method,
-                    json!({
-                        "textDocument": { "uri": uri },
-                        "position": { "line": line, "character": character },
-                    }),
-                )
-                .await
-                .map_err(map_client_err)?;
-            republish_pending(&lock, bus.as_ref()).await;
-            r
-        };
-        Ok(result)
+            .map_err(map_client_err)
     }))
+}
+
+/// Send an LSP request through the pool's reconnect loop. The
+/// closure body is called once per attempt; transient failures
+/// drop the entry and trigger a fresh connect with document
+/// resync handled by the pool. Notifications drained per attempt
+/// so server-pushed diagnostics still fan out even when an
+/// earlier attempt failed mid-flight.
+async fn proxy_request(
+    pool: &ConnectionPool,
+    cfg: &LspHostConfig,
+    server_name: &str,
+    bus: Option<Arc<EventBus>>,
+    method: &'static str,
+    payload: Value,
+) -> Result<Value, LspClientError> {
+    pool.call_with_reconnect(server_name, cfg, move |client| {
+        let bus = bus.clone();
+        let payload = payload.clone();
+        Box::pin(async move {
+            let lock = client.lock().await;
+            let r = lock.send_request(method, payload).await?;
+            republish_pending(&lock, bus.as_ref()).await;
+            Ok(r)
+        })
+    })
+    .await
 }
 
 /// Drain any server-pushed notifications and republish them on the

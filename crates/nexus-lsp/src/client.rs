@@ -134,6 +134,19 @@ struct DocumentState {
     text: String,
 }
 
+/// Snapshot of one open document, exported for the
+/// `ConnectionPool`'s resync path. Mirrors the private
+/// [`DocumentState`] but lives in the public surface so the pool
+/// can carry replay state across a reconnect without holding a
+/// reference to the dropped client.
+#[derive(Debug, Clone)]
+pub struct OpenDocument {
+    pub uri: String,
+    pub language_id: String,
+    pub version: i64,
+    pub text: String,
+}
+
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>>>;
 
 /// Live connection to one LSP server.
@@ -554,6 +567,26 @@ impl LspClient {
             json!({ "textDocument": { "uri": uri } }),
         )
         .await
+    }
+
+    /// Snapshot every open document this client is tracking. Used
+    /// by [`crate::pool::ConnectionPool`] to replay `didOpen`
+    /// against a fresh connection after a transient failure
+    /// triggers a reconnect — without this the new server starts
+    /// with an empty document set and stale-diagnostic / no-completions
+    /// behaviour persists until the user re-opens each tab.
+    pub async fn documents_snapshot(&self) -> Vec<OpenDocument> {
+        self.documents
+            .lock()
+            .await
+            .values()
+            .map(|d| OpenDocument {
+                uri: d.uri.clone(),
+                language_id: d.language_id.clone(),
+                version: d.version,
+                text: d.text.clone(),
+            })
+            .collect()
     }
 
     /// Server name from the config.

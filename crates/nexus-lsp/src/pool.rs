@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use tokio::sync::{Mutex, RwLock};
 
-use crate::client::{LspClient, LspClientError};
+use crate::client::{LspClient, LspClientError, OpenDocument};
 use crate::config::LspHostConfig;
 
 /// Default backoff schedule (matches `nexus-mcp`).
@@ -148,9 +148,37 @@ impl ConnectionPool {
             -> Pin<Box<dyn std::future::Future<Output = Result<T, LspClientError>> + Send + 'a>>,
     {
         let mut last_err: Option<LspClientError> = None;
+        // Documents to replay against the next freshly-connected
+        // client. Populated from the broken client's snapshot
+        // before we drop the entry; consumed after the next
+        // `get_or_connect` returns. Stays `None` on the first
+        // attempt and on any successful retry chain.
+        let mut pending_resync: Option<Vec<OpenDocument>> = None;
         let total_attempts = 1 + self.cfg.backoff.len();
         for attempt in 0..total_attempts {
             let client = self.get_or_connect(server_name, cfg).await?;
+            // Replay any open documents we captured from the
+            // previously-broken client. Replay errors are logged
+            // and ignored — the next `op` call will surface a
+            // fresh transient error if the new server is also
+            // unhealthy, and we'd rather not burn the retry budget
+            // here on resync hiccups.
+            if let Some(docs) = pending_resync.take() {
+                let lock = client.lock().await;
+                for doc in &docs {
+                    if let Err(err) = lock
+                        .did_open(&doc.uri, &doc.language_id, doc.version, &doc.text)
+                        .await
+                    {
+                        tracing::warn!(
+                            server = %server_name,
+                            uri = %doc.uri,
+                            error = %err,
+                            "lsp resync did_open failed — continuing"
+                        );
+                    }
+                }
+            }
             match op(&client).await {
                 Ok(v) => return Ok(v),
                 Err(e) if !e.is_transient() => return Err(e),
@@ -161,8 +189,17 @@ impl ConnectionPool {
                         error = %e,
                         "lsp transient failure — will reconnect"
                     );
-                    // Drop the broken entry so the next get_or_connect
-                    // spawns a fresh child.
+                    // Snapshot the broken client's document set
+                    // *before* removing the entry — once dropped
+                    // the LspClient is gone, taking its `documents`
+                    // map with it. The snapshot is what the next
+                    // attempt replays.
+                    let docs = client.lock().await.documents_snapshot().await;
+                    if !docs.is_empty() {
+                        pending_resync = Some(docs);
+                    }
+                    // Drop the broken entry so the next
+                    // get_or_connect spawns a fresh child.
                     self.entries.write().await.remove(server_name);
                     last_err = Some(e);
                     if let Some(delay) = self.cfg.backoff.get(attempt) {
