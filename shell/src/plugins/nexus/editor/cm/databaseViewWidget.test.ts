@@ -12,10 +12,17 @@ import type {
   ExecuteDatabaseViewResponse,
 } from '../kernelClient.ts'
 import {
+  applyKanbanDrop,
   DatabaseViewCache,
   DatabaseViewWidget,
   effectiveFields,
+  KANBAN_DRAG_MIME,
+  MISSING_GROUP_KEY,
+  readKanbanDragPayload,
+  renderKanban,
   widgetKey,
+  type KanbanDragPayload,
+  type MutationDeps,
 } from './databaseViewWidget.ts'
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
@@ -603,5 +610,231 @@ test('cells render type-aware values (BL-069 type-aware formatter wired through)
   assert.equal(cells[0].textContent, '1,234')
   assert.equal(cells[1].textContent, '✓')
 
+  document.body.removeChild(root)
+})
+
+// ── BL-069 follow-up: kanban drag-to-reorder ────────────────────────────────
+
+test('readKanbanDragPayload: parses well-formed JSON and rejects junk', () => {
+  assert.deepEqual(
+    readKanbanDragPayload('{"record_id":"r1","source_group_key":"Doing"}'),
+    { record_id: 'r1', source_group_key: 'Doing' },
+  )
+  // Wrong types — rejected, no throw.
+  assert.equal(readKanbanDragPayload('{"record_id":42}'), null)
+  assert.equal(readKanbanDragPayload('not json'), null)
+  assert.equal(readKanbanDragPayload(''), null)
+  assert.equal(readKanbanDragPayload(null), null)
+  assert.equal(readKanbanDragPayload(undefined), null)
+})
+
+test('applyKanbanDrop: same-column drop is a no-op', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async (recordId, fields) => {
+      calls.push({ id: recordId, fields })
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  const result = await applyKanbanDrop(
+    { record_id: 'r1', source_group_key: 'Doing' },
+    'Doing',
+    'status',
+    mutate,
+  )
+  assert.deepEqual(result, { updated: false })
+  assert.equal(calls.length, 0)
+  assert.equal(refreshes, 0)
+})
+
+test('applyKanbanDrop: cross-column drop patches group_field and refreshes', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async (recordId, fields) => {
+      calls.push({ id: recordId, fields })
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  const result = await applyKanbanDrop(
+    { record_id: 'r1', source_group_key: 'Doing' },
+    'Done',
+    'status',
+    mutate,
+  )
+  assert.deepEqual(result, { updated: true })
+  assert.deepEqual(calls, [{ id: 'r1', fields: { status: 'Done' } }])
+  assert.equal(refreshes, 1)
+})
+
+test('applyKanbanDrop: drop into the (none) bucket clears the field via JSON null', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  const mutate: MutationDeps = {
+    update: async (recordId, fields) => {
+      calls.push({ id: recordId, fields })
+    },
+    refresh: () => {},
+  }
+  await applyKanbanDrop(
+    { record_id: 'r1', source_group_key: 'Doing' },
+    MISSING_GROUP_KEY,
+    'status',
+    mutate,
+  )
+  // Sentinel maps to null so the storage layer clears the field
+  // rather than writing the literal "(none)" string.
+  assert.deepEqual(calls, [{ id: 'r1', fields: { status: null } }])
+})
+
+test('applyKanbanDrop: update failure propagates and refresh is not called', async () => {
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async () => {
+      throw new Error('storage offline')
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  await assert.rejects(
+    () =>
+      applyKanbanDrop(
+        { record_id: 'r1', source_group_key: 'Doing' },
+        'Done',
+        'status',
+        mutate,
+      ),
+    /storage offline/,
+  )
+  assert.equal(refreshes, 0)
+})
+
+test('renderKanban: cards are draggable when mutate + groupField are present', () => {
+  const calls: Array<unknown> = []
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {},
+  }
+  const root = renderKanban(
+    ['title', 'status'],
+    [
+      { key: 'Doing', records: [{ id: 'r1', title: 'A', status: 'Doing' }] },
+      { key: 'Done', records: [{ id: 'r2', title: 'B', status: 'Done' }] },
+    ],
+    { title: {}, status: {} },
+    {
+      view_type: { kind: 'kanban', column_by: 'status' },
+      filters: [],
+      sorts: [],
+      group_by: null,
+      hidden_columns: [],
+    },
+    mutate,
+  )
+  document.body.appendChild(root)
+  const cards = root.querySelectorAll('.cm-md-dbview-card')
+  assert.equal(cards.length, 2)
+  for (const card of cards) {
+    const html = card as HTMLElement
+    assert.equal(html.draggable, true)
+    assert.ok(html.classList.contains('cm-md-dbview-card--draggable'))
+    assert.ok(typeof html.dataset.recordId === 'string')
+    assert.ok(typeof html.dataset.sourceGroupKey === 'string')
+  }
+  document.body.removeChild(root)
+})
+
+test('renderKanban: cards are NOT draggable when mutate is absent (read-only)', () => {
+  const root = renderKanban(
+    ['title', 'status'],
+    [{ key: 'Doing', records: [{ id: 'r1', title: 'A', status: 'Doing' }] }],
+    { title: {}, status: {} },
+    {
+      view_type: { kind: 'kanban', column_by: 'status' },
+      filters: [],
+      sorts: [],
+      group_by: null,
+      hidden_columns: [],
+    },
+    // mutate omitted
+  )
+  document.body.appendChild(root)
+  const card = root.querySelector('.cm-md-dbview-card') as HTMLElement | null
+  assert.ok(card)
+  // The renderer doesn't set `draggable` at all in read-only mode,
+  // so we assert via the absence of the marker class + the
+  // attribute (which the renderer would have set to `'true'` in
+  // DnD mode). happy-dom's default `HTMLElement.draggable` getter
+  // can differ from the browser's, so we don't compare it to a
+  // boolean directly.
+  assert.equal(card.getAttribute('draggable'), null)
+  assert.ok(!card.classList.contains('cm-md-dbview-card--draggable'))
+  document.body.removeChild(root)
+})
+
+test('renderKanban: drop event fires applyKanbanDrop end-to-end (cross-column)', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  const root = renderKanban(
+    ['title', 'status'],
+    [
+      { key: 'Doing', records: [{ id: 'r1', title: 'A', status: 'Doing' }] },
+      { key: 'Done', records: [] },
+    ],
+    { title: {}, status: {} },
+    {
+      view_type: { kind: 'kanban', column_by: 'status' },
+      filters: [],
+      sorts: [],
+      group_by: null,
+      hidden_columns: [],
+    },
+    mutate,
+  )
+  document.body.appendChild(root)
+  const columns = root.querySelectorAll('.cm-md-dbview-kanban-column')
+  const doneColumn = columns[1] as HTMLElement
+  // Build a synthetic drop event with a populated transfer payload.
+  // happy-dom doesn't ship a writable `DataTransfer`, so we attach
+  // a duck-typed object shaped like the parts the renderer touches.
+  const payload: KanbanDragPayload = {
+    record_id: 'r1',
+    source_group_key: 'Doing',
+  }
+  const fakeTransfer = {
+    types: [KANBAN_DRAG_MIME],
+    getData(mime: string): string {
+      return mime === KANBAN_DRAG_MIME ? JSON.stringify(payload) : ''
+    },
+    dropEffect: 'none' as const,
+    effectAllowed: 'move' as const,
+  }
+  const dropEvent = new Event('drop', { bubbles: true, cancelable: true })
+  Object.defineProperty(dropEvent, 'dataTransfer', {
+    value: fakeTransfer,
+    enumerable: true,
+  })
+  doneColumn.dispatchEvent(dropEvent)
+  // The renderer fires the IPC fire-and-forget — flush the
+  // microtask queue so the awaited update + refresh both complete.
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(calls, [{ id: 'r1', fields: { status: 'Done' } }])
+  assert.equal(refreshes, 1)
   document.body.removeChild(root)
 })

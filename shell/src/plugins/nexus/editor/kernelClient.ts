@@ -12,6 +12,12 @@ import type { EditorSnapshot, Transaction } from './types.ts'
 /** Reverse-DNS id of the editor core plugin (see `core_plugin.rs:38`). */
 export const EDITOR_PLUGIN_ID = 'com.nexus.editor'
 
+/** Reverse-DNS id of the storage core plugin. The editor client
+ *  mostly talks to `com.nexus.editor`, but a handful of read/write
+ *  paths reach for storage directly — `update_base_record` (record
+ *  mutation from the inline `[[{db:…}]]` widget) is the first. */
+const STORAGE_PLUGIN_ID = 'com.nexus.storage'
+
 // Command strings exposed by the bootstrap manifest.
 const CMD = {
   open: 'open',
@@ -171,6 +177,33 @@ export class EditorKernelClient {
       CMD.resolveBlockLink,
       { file_relpath: fileRelpath, block_id: blockId },
     )
+  }
+
+  /**
+   * Update a single record's fields inside a `.bases` directory
+   * (`databasePath`) — wraps `com.nexus.storage::base_record_update`
+   * (handler 41). Used by the BL-069 inline database-view widget for
+   * kanban drag-to-reorder + (future) cell editing; the widget
+   * already has this client injected, so threading through a
+   * separate bases-plugin client would be churn.
+   *
+   * `fields` is a sparse field map: any key listed here replaces the
+   * existing value, omitted keys keep their previous value. The
+   * storage handler returns the full updated `BaseRecord`; we type
+   * the response as `unknown` because the editor's renderer doesn't
+   * need the typed shape — the widget invalidates its cache and
+   * re-fetches via `executeDatabaseView` to get the freshest layout.
+   */
+  updateBaseRecord(
+    databasePath: string,
+    recordId: string,
+    fields: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.api.invoke<unknown>(STORAGE_PLUGIN_ID, 'base_record_update', {
+      path: databasePath,
+      record_id: recordId,
+      fields,
+    })
   }
 }
 

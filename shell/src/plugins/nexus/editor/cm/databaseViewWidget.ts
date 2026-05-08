@@ -27,6 +27,20 @@ import type {
 } from '../kernelClient'
 import { formatCell, lookupFieldDef } from './databaseViewFormat'
 
+/** Mutation handle threaded into layout renderers that support
+ *  write-back (kanban drag-to-reorder is the first). `update`
+ *  patches one record's fields via `com.nexus.storage::base_record_update`;
+ *  `refresh` invalidates the widget's cached layout and replays the
+ *  fetch so the freshly-mutated record renders in its new bucket.
+ *  Renderers without write-back ignore this argument. */
+export interface MutationDeps {
+  update: (
+    recordId: string,
+    fields: Record<string, unknown>,
+  ) => Promise<void>
+  refresh: () => void
+}
+
 /** Public dependencies the widget needs — injected so unit tests can
  *  swap in a mock kernel client without standing up the full editor. */
 export interface DatabaseViewWidgetDeps {
@@ -103,13 +117,48 @@ export class DatabaseViewWidget extends WidgetType {
 
     body.replaceChildren(renderPending())
 
+    // Mutation surface threaded into renderApplied so layouts that
+    // support write-back (kanban drag-to-reorder is the first) can
+    // update a record and trigger a re-fetch without the renderer
+    // knowing about IPC plumbing or the cache. `refresh` is a thin
+    // closure over the same fetch path the initial render uses.
+    const databasePath = this.databasePath
+    const viewConfig = this.viewConfig
+    const client = this.deps.client
+    const refresh = () => {
+      cache.invalidate(this.key)
+      if (!body.isConnected) return
+      body.replaceChildren(renderPending())
+      const p = cache.run(this.key, () =>
+        client.executeDatabaseView(databasePath, viewConfig),
+      )
+      void p.then(
+        (resp) => {
+          if (!body.isConnected) return
+          body.replaceChildren(renderApplied(resp, viewConfig, mutate))
+        },
+        (err) => {
+          if (!body.isConnected) return
+          const error = err instanceof Error ? err : new Error(String(err))
+          onError('execute_database_view failed', error)
+          body.replaceChildren(renderError(error))
+        },
+      )
+    }
+    const mutate: MutationDeps = {
+      update: async (recordId, fields) => {
+        await client.updateBaseRecord(databasePath, recordId, fields)
+      },
+      refresh,
+    }
+
     const promise = cache.run(this.key, () =>
-      this.deps.client.executeDatabaseView(this.databasePath, this.viewConfig),
+      client.executeDatabaseView(databasePath, viewConfig),
     )
     void promise.then(
       (resp) => {
         if (!body.isConnected) return
-        body.replaceChildren(renderApplied(resp, this.viewConfig))
+        body.replaceChildren(renderApplied(resp, viewConfig, mutate))
       },
       (err) => {
         if (!body.isConnected) return
@@ -386,6 +435,7 @@ function removeAt(
 function renderApplied(
   resp: ExecuteDatabaseViewResponse,
   viewConfig: DatabaseViewConfig,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const layout = resp.applied.layout
   const fields = effectiveFields(resp)
@@ -393,7 +443,7 @@ function renderApplied(
   switch (resp.applied.view_type) {
     case 'kanban':
       return layout.kind === 'grouped'
-        ? renderKanban(fields, layout.groups, schema, viewConfig)
+        ? renderKanban(fields, layout.groups, schema, viewConfig, mutate)
         : renderFlat(fields, layout.records, schema)
     case 'calendar':
       return layout.kind === 'grouped'
@@ -496,6 +546,7 @@ export function renderKanban(
   groups: AppliedGroup[],
   schema: Record<string, unknown>,
   viewConfig: DatabaseViewConfig,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const board = document.createElement('div')
   board.className = 'cm-md-dbview-kanban'
@@ -504,6 +555,12 @@ export function renderKanban(
       ? viewConfig.view_type.column_by
       : viewConfig.group_by ?? null
   const cardFields = fields.filter((f) => f !== groupField)
+  // Drag-to-reorder is gated on having both a mutation surface and
+  // a known group field — without `groupField` the writer wouldn't
+  // know which key to patch, and without `mutate` there's nowhere
+  // to write to. The renderer falls back to static cards in either
+  // case (the legacy pre-BL-069-tail behaviour).
+  const dndEnabled = mutate != null && groupField != null
   for (const group of groups) {
     const column = document.createElement('section')
     column.className = 'cm-md-dbview-kanban-column'
@@ -519,7 +576,31 @@ export function renderKanban(
     heading.append(label, count)
     column.appendChild(heading)
     for (const record of group.records) {
-      column.appendChild(buildCard(record, cardFields, schema, /*titleField*/ null))
+      const card = buildCard(record, cardFields, schema, /*titleField*/ null)
+      if (dndEnabled) {
+        card.draggable = true
+        card.dataset.recordId = record.id
+        card.dataset.sourceGroupKey = group.key
+        card.classList.add('cm-md-dbview-card--draggable')
+        card.addEventListener('dragstart', (ev) => {
+          if (!ev.dataTransfer) return
+          ev.dataTransfer.effectAllowed = 'move'
+          // Encode payload so cross-board drags (multiple kanbans
+          // on the same page) can't accidentally swap records.
+          ev.dataTransfer.setData(
+            KANBAN_DRAG_MIME,
+            JSON.stringify({
+              record_id: record.id,
+              source_group_key: group.key,
+            }),
+          )
+          card.classList.add('cm-md-dbview-card--dragging')
+        })
+        card.addEventListener('dragend', () => {
+          card.classList.remove('cm-md-dbview-card--dragging')
+        })
+      }
+      column.appendChild(card)
     }
     if (group.records.length === 0) {
       const empty = document.createElement('div')
@@ -527,9 +608,105 @@ export function renderKanban(
       empty.textContent = '—'
       column.appendChild(empty)
     }
+    if (dndEnabled) {
+      column.addEventListener('dragover', (ev) => {
+        // Default behaviour rejects drops; preventing it signals we
+        // accept the drag. effectAllowed/dropEffect keep the cursor
+        // honest about what's about to happen.
+        if (!ev.dataTransfer) return
+        if (!ev.dataTransfer.types.includes(KANBAN_DRAG_MIME)) return
+        ev.preventDefault()
+        ev.dataTransfer.dropEffect = 'move'
+        column.classList.add('cm-md-dbview-kanban-column--drop-target')
+      })
+      column.addEventListener('dragleave', () => {
+        column.classList.remove('cm-md-dbview-kanban-column--drop-target')
+      })
+      column.addEventListener('drop', (ev) => {
+        column.classList.remove('cm-md-dbview-kanban-column--drop-target')
+        if (!ev.dataTransfer) return
+        const payload = readKanbanDragPayload(
+          ev.dataTransfer.getData(KANBAN_DRAG_MIME),
+        )
+        if (!payload) return
+        ev.preventDefault()
+        // Fire-and-forget the IPC; on success refresh re-fetches
+        // and the new layout replaces this DOM. On failure the
+        // renderer leaves the DOM unchanged and surfaces via a
+        // console warning — a toast surface lands when BL-069's
+        // mutation UI grows past kanban.
+        void applyKanbanDrop(payload, group.key, groupField as string, mutate!).catch(
+          (err) => {
+            console.warn('[nexus.editor] kanban drop update failed:', err)
+          },
+        )
+      })
+    }
     board.appendChild(column)
   }
   return board
+}
+
+/** Custom MIME type for the kanban drag payload. Picking a Nexus-
+ *  specific type keeps the widget's drop logic from accepting
+ *  arbitrary text drags from outside the board. */
+export const KANBAN_DRAG_MIME = 'application/x-nexus-dbview-kanban'
+
+/** Sentinel string the database engine uses for records that have
+ *  no value in the group_by field. Mirrors `MISSING_GROUP_KEY` in
+ *  `nexus-database`; surfaces as the "(none)" / "Undated" bucket
+ *  in the rendered layouts. We map it to a JSON `null` on
+ *  drop-back-to-none so the storage layer clears the field rather
+ *  than writing the literal string `"(none)"`. */
+export const MISSING_GROUP_KEY = '(none)'
+
+/** Payload exchanged through `dataTransfer` for a kanban card drag. */
+export interface KanbanDragPayload {
+  record_id: string
+  source_group_key: string
+}
+
+/** Parse a drop event's transfer payload. Returns `null` for
+ *  unrelated MIMEs, malformed JSON, or missing fields — the caller
+ *  treats `null` as "no-op" so a misfired drop never panics the
+ *  widget. */
+export function readKanbanDragPayload(raw: string | null | undefined): KanbanDragPayload | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<KanbanDragPayload>
+    if (typeof parsed.record_id !== 'string') return null
+    if (typeof parsed.source_group_key !== 'string') return null
+    return { record_id: parsed.record_id, source_group_key: parsed.source_group_key }
+  } catch {
+    return null
+  }
+}
+
+/** Apply a kanban drop: if the card actually moved between groups,
+ *  patch the record's `group_field` value and refresh. The
+ *  "moved-to-the-undated-bucket" case maps the `MISSING_GROUP_KEY`
+ *  sentinel to a JSON `null` so the storage layer clears the
+ *  field rather than writing the literal `"(none)"` string.
+ *
+ *  Returns the mutation result for tests / callers that want to
+ *  observe completion: `{ updated: true }` after a successful
+ *  patch + refresh, `{ updated: false }` when the drop landed in
+ *  the same column (early-return). Errors propagate so the
+ *  caller decides whether to surface them. */
+export async function applyKanbanDrop(
+  payload: KanbanDragPayload,
+  destinationGroupKey: string,
+  groupField: string,
+  mutate: MutationDeps,
+): Promise<{ updated: boolean }> {
+  if (payload.source_group_key === destinationGroupKey) {
+    return { updated: false }
+  }
+  const nextValue: unknown =
+    destinationGroupKey === MISSING_GROUP_KEY ? null : destinationGroupKey
+  await mutate.update(payload.record_id, { [groupField]: nextValue })
+  mutate.refresh()
+  return { updated: true }
 }
 
 /** Calendar — month grid (7×N rows) bucketing groups by ISO date.

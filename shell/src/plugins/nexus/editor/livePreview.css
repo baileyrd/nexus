@@ -193,6 +193,28 @@
   font-size: 0.85em;
   padding: 4px 0;
 }
+.cm-content .cm-md-dbview-kanban-column--drop-target {
+  /* Active drop target during a drag — highlight the destination
+   * column without shifting any sibling layout (no border-width
+   * change, no padding change). The accent ring + tinted bg signal
+   * "release here". */
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+  background: color-mix(
+    in oklab,
+    var(--background-secondary) 80%,
+    var(--interactive-accent) 20%
+  );
+}
+.cm-content .cm-md-dbview-card--draggable {
+  cursor: grab;
+}
+.cm-content .cm-md-dbview-card--draggable:active {
+  cursor: grabbing;
+}
+.cm-content .cm-md-dbview-card--dragging {
+  opacity: 0.45;
+}
 
 .cm-content .cm-md-dbview-card {
   background: var(--background-primary);
