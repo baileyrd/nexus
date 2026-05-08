@@ -169,9 +169,37 @@ pub struct MetricsSnapshot {
     pub capability_checks_total: HashMap<String, u64>,
     /// `plugin_lifecycle_duration{plugin_id, hook}` histograms.
     pub plugin_lifecycle_duration: HashMap<String, HistogramSnapshot>,
+    /// `event_bus_queue_depth` — instantaneous broadcast-channel
+    /// buffer occupancy, sampled after every `publish_*`. The
+    /// snapshot returns the most-recent reading (the gauge
+    /// semantic — last-set wins). 0 means no backpressure; high
+    /// values mean a slow subscriber is about to get a `Lagged`
+    /// error from `tokio::sync::broadcast`. Cap is the bus capacity
+    /// from `KernelConfig` (default 1024).
+    pub event_bus_queue_depth: u64,
     /// Sentinel — number of metric writes dropped because a
     /// per-metric key cap was hit.
     pub metrics_dropped_total: u64,
+}
+
+/// A single-slot gauge backed by [`AtomicU64`]. Cheap to read /
+/// write under contention; the snapshot reads the last value
+/// stored. Used for instantaneous samples whose history isn't
+/// useful (e.g. broadcast channel queue depth, where only the
+/// current reading is actionable).
+#[derive(Default)]
+struct Gauge {
+    value: AtomicU64,
+}
+
+impl Gauge {
+    fn set(&self, v: u64) {
+        self.value.store(v, Ordering::Relaxed);
+    }
+
+    fn get(&self) -> u64 {
+        self.value.load(Ordering::Relaxed)
+    }
 }
 
 #[derive(Default)]
@@ -250,6 +278,7 @@ pub struct KernelMetrics {
     event_bus_published_total: CounterMap,
     capability_checks_total: CounterMap,
     plugin_lifecycle_duration: HistogramMap,
+    event_bus_queue_depth: Gauge,
     metrics_dropped_total: AtomicU64,
 }
 
@@ -285,6 +314,15 @@ impl KernelMetrics {
     pub fn record_event_publish(&self, plugin_id: &str) {
         self.event_bus_published_total
             .incr(plugin_id.to_string(), &self.metrics_dropped_total);
+    }
+
+    /// Set the `event_bus_queue_depth` gauge to a fresh sample.
+    /// `EventBus::publish_*` calls this with `sender.len()` after
+    /// every publish — the gauge reflects the latest reading; an
+    /// earlier sample is overwritten without history. Last-write
+    /// wins (typical gauge semantic).
+    pub fn record_event_bus_queue_depth(&self, depth: u64) {
+        self.event_bus_queue_depth.set(depth);
     }
 
     /// Record one capability check.
@@ -334,6 +372,7 @@ impl KernelMetrics {
             event_bus_published_total: self.event_bus_published_total.snapshot(),
             capability_checks_total: self.capability_checks_total.snapshot(),
             plugin_lifecycle_duration: self.plugin_lifecycle_duration.snapshot(),
+            event_bus_queue_depth: self.event_bus_queue_depth.get(),
             metrics_dropped_total: self.metrics_dropped_total.load(Ordering::Relaxed),
         }
     }
@@ -410,6 +449,39 @@ mod tests {
         let h = &s.plugin_lifecycle_duration["com.x::init"];
         assert_eq!(h.count, 2);
         assert_eq!(h.sum_ns, 11_000_000);
+    }
+
+    #[test]
+    fn event_bus_queue_depth_gauge_records_latest_value() {
+        // BL-093 follow-up — gauge semantics: each set() overwrites
+        // the previous reading. snapshot() returns the most-recent
+        // value, not an aggregate.
+        let m = KernelMetrics::new();
+        // Default reading is 0.
+        assert_eq!(m.snapshot().event_bus_queue_depth, 0);
+        m.record_event_bus_queue_depth(7);
+        assert_eq!(m.snapshot().event_bus_queue_depth, 7);
+        m.record_event_bus_queue_depth(3);
+        // Last write wins — not 7+3=10.
+        assert_eq!(m.snapshot().event_bus_queue_depth, 3);
+        m.record_event_bus_queue_depth(0);
+        // Resets cleanly to 0 (a normal "no backpressure" state).
+        assert_eq!(m.snapshot().event_bus_queue_depth, 0);
+    }
+
+    #[test]
+    fn event_bus_queue_depth_independent_of_publish_counter() {
+        // The gauge moves on a different cadence than the publish
+        // counter (the counter is monotone across the run; the gauge
+        // is point-in-time). This test pins that they don't share
+        // state — recording one doesn't perturb the other.
+        let m = KernelMetrics::new();
+        m.record_event_publish("com.x");
+        m.record_event_publish("com.x");
+        m.record_event_bus_queue_depth(42);
+        let s = m.snapshot();
+        assert_eq!(s.event_bus_queue_depth, 42);
+        assert_eq!(s.event_bus_published_total["com.x"], 2);
     }
 
     #[test]

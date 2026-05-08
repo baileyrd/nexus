@@ -8,6 +8,29 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-093 follow-up: `event_bus_queue_depth` gauge ✅ (2026-05-08)
+
+**Source**: BL-093 closure note (2026-05-06) — first of three deferrals (the others are the Prometheus scrape endpoint and the shell health panel)
+**Files**: `crates/nexus-kernel/src/metrics.rs` (new internal `Gauge` type — single `AtomicU64` slot with last-write-wins semantics; `event_bus_queue_depth: u64` field on `MetricsSnapshot`; `event_bus_queue_depth: Gauge` field on `KernelMetrics`; new `record_event_bus_queue_depth(depth)` method; +2 tests); `crates/nexus-kernel/src/event_bus.rs` (`publish_plugin` / `publish_core` / `publish_kernel` each sample `self.sender.len()` after a successful send and call the new gauge recorder when the global metrics registry is installed)
+**Related**: BL-093 (kernel time-series metrics — counter + histogram registry), tokio `broadcast::Sender::len()` (added in tokio 1.41; the workspace runs 1.51)
+
+The BL-093 phase A closure landed counter + histogram metrics for IPC, event-bus, capability, and lifecycle recording. `event_bus_queue_depth` was carved out as a follow-up because it needs a third metric *kind* (gauge — instantaneous reading, last-write-wins) that the original phase didn't introduce. This pass ships it.
+
+- **Why a gauge, not a counter or histogram.** Counters monotone-increase; histograms preserve a per-call distribution. Neither is right for "how full is the broadcast buffer right now?" — that's a single instantaneous value where only the latest reading is actionable. A gauge is just a slot.
+- **`Gauge` type — `AtomicU64` with `set` / `get`.** Cheap to write under contention (single relaxed store); the snapshot reads through the same atomic. No mutex, no allocations. Module-internal so it doesn't grow the public API surface — the `event_bus_queue_depth` accessor on `KernelMetrics` is the only escape hatch.
+- **Sampling site is `EventBus::publish_*`.** After every send (`publish_plugin` / `publish_core` / `publish_kernel`), the bus calls `m.record_event_bus_queue_depth(self.sender.len() as u64)` when the global metrics registry is installed. `tokio::sync::broadcast::Sender::len()` reports the number of items in the channel buffer that haven't been received by every subscriber yet — exactly the backpressure signal the gauge is meant to surface. 0 means no backpressure; rising values mean a slow subscriber is about to receive a `Lagged` error.
+- **Capacity context.** The bus capacity comes from `KernelConfig::event_bus_capacity` (default 1024). Operators reading the gauge compare against that ceiling to spot saturation.
+- **No-global-registry fallback.** All three publish paths gate the metrics call on `crate::metrics::global()` — when no registry is installed (unit tests, embedded use), the gauge update is silently skipped. Same posture as the existing `record_event_publish` counter.
+
+**Tested**: `cargo test -p nexus-kernel --lib` 71/71 (was 69, +2 metrics gauge tests); `cargo clippy -p nexus-kernel --all-targets` clean for new code (no new warnings on `metrics.rs` / `event_bus.rs`); `cargo check --workspace` clean. Two new tests:
+- `event_bus_queue_depth_gauge_records_latest_value` — pins gauge semantics: each `record_event_bus_queue_depth` overwrites the previous reading; `snapshot.event_bus_queue_depth` returns the most-recent value, not an aggregate. Default 0; sequential 7 → 3 → 0 readings round-trip correctly.
+- `event_bus_queue_depth_independent_of_publish_counter` — regression guard that the gauge and the existing `event_bus_published_total` counter don't share state. Recording one doesn't perturb the other.
+
+**Definition of done coverage** (against the BL-093 closure note's deferral list):
+- ✅ `event_bus_queue_depth` gauge.
+- ⏸ Prometheus scrape endpoint — deferred. Trade-off note: the existing `com.nexus.security::metrics_snapshot` IPC handler already exposes a JSON snapshot of the full registry (gauge included), which is a perfectly serviceable readout for an operator running `nexus security metrics-snapshot`. A Prometheus endpoint adds a network listener + format converter on top; lands when there's an actual metrics aggregator wired up downstream.
+- ⏸ Shell health panel — deferred. The metrics-snapshot IPC is reachable from any plugin including a future shell-side `nexus.healthPanel`; that's a UI build rather than a kernel build and tracks separately.
+
 ### BL-091 follow-up: Git LFS write-path through `git lfs clean` ✅ (2026-05-08)
 
 **Source**: BL-091 closure note (2026-05-06) — single explicit deferral ("write-path routing through `git lfs clean` on `stage_file` deferred")

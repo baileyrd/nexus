@@ -126,6 +126,7 @@ impl EventBus {
         let _ = self.sender.send(published);
         if let Some(m) = crate::metrics::global() {
             m.record_event_publish(source_plugin_id);
+            m.record_event_bus_queue_depth(self.sender.len() as u64);
         }
         Ok(())
     }
@@ -156,6 +157,7 @@ impl EventBus {
         let _ = self.sender.send(published);
         if let Some(m) = crate::metrics::global() {
             m.record_event_publish(plugin_id);
+            m.record_event_bus_queue_depth(self.sender.len() as u64);
         }
         Ok(())
     }
@@ -177,6 +179,9 @@ impl EventBus {
         // broadcast::Sender::send returns the number of active receivers,
         // or an error if there are none — that's not an error condition for us.
         let _ = self.sender.send(published);
+        if let Some(m) = crate::metrics::global() {
+            m.record_event_bus_queue_depth(self.sender.len() as u64);
+        }
         Ok(())
     }
 
