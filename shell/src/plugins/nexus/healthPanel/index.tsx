@@ -15,7 +15,7 @@
 // Default-off in the catalog — typical users don't need this; ops
 // surface targeted at developers triaging a slow / chatty plugin.
 
-import { createElement, useEffect, useState } from 'react'
+import { createElement, useCallback, useEffect, useRef, useState } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
 import { createRoot, type Root } from 'react-dom/client'
@@ -53,39 +53,49 @@ function HealthPanelView({ api }: HealthPanelViewProps) {
   const [snapshot, setSnapshot] = useState<MetricsSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastFetchMs, setLastFetchMs] = useState<number | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  // The unmount-flag survives across renders so the long-lived
+  // interval and the button-driven refresh share the same cancel
+  // signal — a manual refresh that completes after unmount won't
+  // call setState.
+  const cancelledRef = useRef(false)
 
-  useEffect(() => {
-    let cancelled = false
-    const refresh = async () => {
-      let available = false
-      try {
-        available = await api.kernel.available()
-      } catch {
-        available = false
-      }
-      if (cancelled || !available) return
-      try {
-        const data = await api.kernel.invoke<MetricsSnapshot>(
-          SECURITY_PLUGIN_ID,
-          CMD_METRICS_SNAPSHOT,
-          {},
-        )
-        if (cancelled) return
-        setSnapshot(data)
-        setError(null)
-        setLastFetchMs(Date.now())
-      } catch (err) {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-      }
+  const fetchOnce = useCallback(async () => {
+    let available = false
+    try {
+      available = await api.kernel.available()
+    } catch {
+      available = false
     }
-    void refresh()
-    const handle = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(handle)
+    if (cancelledRef.current || !available) return
+    setIsRefreshing(true)
+    try {
+      const data = await api.kernel.invoke<MetricsSnapshot>(
+        SECURITY_PLUGIN_ID,
+        CMD_METRICS_SNAPSHOT,
+        {},
+      )
+      if (cancelledRef.current) return
+      setSnapshot(data)
+      setError(null)
+      setLastFetchMs(Date.now())
+    } catch (err) {
+      if (cancelledRef.current) return
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (!cancelledRef.current) setIsRefreshing(false)
     }
   }, [api])
+
+  useEffect(() => {
+    cancelledRef.current = false
+    void fetchOnce()
+    const handle = window.setInterval(() => void fetchOnce(), POLL_INTERVAL_MS)
+    return () => {
+      cancelledRef.current = true
+      clearInterval(handle)
+    }
+  }, [fetchOnce])
 
   return (
     <div
@@ -98,17 +108,46 @@ function HealthPanelView({ api }: HealthPanelViewProps) {
         height: '100%',
       }}
     >
-      <header style={{ marginBottom: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 13 }}>Kernel Health</h3>
-        <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>
-          {error ? (
-            <span style={{ color: 'var(--color-red, #cf222e)' }}>{error}</span>
-          ) : lastFetchMs ? (
-            `Last refresh: ${new Date(lastFetchMs).toLocaleTimeString()}`
-          ) : (
-            'Loading…'
-          )}
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+          gap: 8,
+        }}
+      >
+        <div>
+          <h3 style={{ margin: 0, fontSize: 13 }}>Kernel Health</h3>
+          <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>
+            {error ? (
+              <span style={{ color: 'var(--color-red, #cf222e)' }}>{error}</span>
+            ) : lastFetchMs ? (
+              `Last refresh: ${new Date(lastFetchMs).toLocaleTimeString()}`
+            ) : (
+              'Loading…'
+            )}
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => void fetchOnce()}
+          disabled={isRefreshing}
+          aria-label="Refresh kernel metrics snapshot"
+          title="Refresh now"
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--background-modifier-border)',
+            borderRadius: 4,
+            cursor: isRefreshing ? 'progress' : 'pointer',
+            opacity: isRefreshing ? 0.6 : 1,
+          }}
+        >
+          {isRefreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
       </header>
 
       {snapshot && <HealthBody snapshot={snapshot} />}

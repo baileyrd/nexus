@@ -403,8 +403,6 @@ Capabilities described in legacy `app/` documentation that were not carried over
 ### Open
 
 - [ ] **OI-05: Rust dep duplication** — Blocked on upstream. 34 crates with duplicated versions all trace through `wasmtime 42` (toml/sha2/digest/rand_core/reqwest/rustix/nix/hashbrown) or `portable-pty → filedescriptor` (`thiserror 1`). Revisit after the next wasmtime major release.
-- [ ] **OI-15: Manifest signature / provenance** — Optional `manifest.toml.sig` Ed25519 over manifest bytes, verified against trusted-publisher keyring. Marketplace prerequisite (paired with WI-44).
-- [ ] **OI-18: Snippet trigger collision detection** — Same hazard as OI-10 but for snippets; emit `plugins:snippet-conflict` and surface a "which plugin wins" control. **Blocked: no snippet registry exists yet.** `Snippet` type + `editor.registerSnippet` are declared in [`@nexus/extension-api`](../../packages/nexus-extension-api/src/index.ts#L101) but never implemented in the shell — every existing "snippet" reference is the unrelated CSS theme-snippet system. Doing this properly means building the script-plugin code-snippet registry first; closer to OI-15 than OI-10 in scope. Reopen when `registerSnippet` lands.
 
 ### Resolved (preserved here for cross-reference; full notes in [../OPEN-ITEMS.md](../OPEN-ITEMS.md))
 
@@ -426,6 +424,8 @@ Capabilities described in legacy `app/` documentation that were not carried over
 - [x] OI-14 — `api.workspace.forgeRoot()` + `api.editor.active()/onChange()` exposed via `@nexus/extension-api` _(2026-04-26)_
 - [x] OI-19 — Deferred createRoot/unmount in `TerminalPaneView` + `EmptyView`; React 18 commit-phase warnings on drawer collapse + StrictMode double-mount cleared _(2026-04-27)_
 - [x] OI-22 — `com.nexus.git` passive-mode crash: `HANDLER_STATUS` now returns JSON null instead of `Err(ExecutionFailed)` so the IPC layer no longer wraps it as `PluginCrashedDuringCall`; shell handles null silently _(2026-05-01)_
+- [x] OI-15 — Manifest signature / provenance — `ed25519-dalek` verification of `plugin.json.sig` against a trusted public-key list; `VerificationStatus` enum + `verify_plugin_signature` in `shell/src-tauri/src/lib.rs`; untrusted/invalid plugins filtered at scan time; "verified" / "unsigned" pill in Settings → Plugins. `TRUSTED_PUBLIC_KEYS` is empty pre-marketplace; populate when the marketplace CA exists _(2026-05-01)_
+- [x] OI-18 — Snippet trigger collision detection — `SnippetRegistry` with `getConflicts()`, `plugins:snippets-conflict` event, Settings → Snippets tab with conflict banner + per-row badge; `editor.registerSnippet` API + `contributes.snippets` manifest path landed alongside _(2026-05-01)_
 
 ---
 
