@@ -167,6 +167,13 @@ pub const HANDLER_MERGE: u32 = 35;
 /// commit. Drives the editor's inline-blame toggle so users see
 /// "who last touched this line" without leaving the buffer.
 pub const HANDLER_BLAME: u32 = 36;
+/// BL-079 follow-up IPC handler: discard the selected working-tree
+/// hunks of a file, restoring those line ranges to HEAD. Args:
+/// [`crate::ipc::GitHunkArgs`] (same shape as `stage_hunks` /
+/// `unstage_hunks`). The hunk indices match what
+/// `com.nexus.git::diff_file` returned. Drives the editor gutter's
+/// click-to-Revert affordance.
+pub const HANDLER_DISCARD_HUNKS: u32 = 37;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -468,6 +475,12 @@ impl CorePlugin for GitCorePlugin {
                 let path = path_arg(args, &self.forge_root)?;
                 let indices = hunk_indices_arg(args)?;
                 h.with(move |e| e.unstage_hunks(&path, &indices)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_DISCARD_HUNKS => {
+                let path = path_arg(args, &self.forge_root)?;
+                let indices = hunk_indices_arg(args)?;
+                h.with(move |e| e.discard_hunks(&path, &indices)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
             HANDLER_STASH_PUSH => {

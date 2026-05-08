@@ -47,6 +47,7 @@ import {
 const PLUGIN_ID = 'com.nexus.git'
 const CMD_DIFF_FILE = 'diff_file'
 const CMD_STAGE_HUNKS = 'stage_hunks'
+const CMD_DISCARD_HUNKS = 'discard_hunks'
 
 /// Mirror of `crates/nexus-git/src/ipc.rs::GitDiffLine`.
 interface GitDiffLine {
@@ -97,11 +98,13 @@ const gutterStateField = StateField.define<GutterState>({
   },
 })
 
+const MARKER_TITLE_HINT = ' — click to stage, Alt+click to revert'
+
 class AddedMarker extends GutterMarker {
   toDOM() {
     const el = document.createElement('div')
     el.className = 'nexus-git-gutter-marker nexus-git-gutter-added'
-    el.title = 'Added'
+    el.title = `Added${MARKER_TITLE_HINT}`
     return el
   }
 }
@@ -109,7 +112,7 @@ class ModifiedMarker extends GutterMarker {
   toDOM() {
     const el = document.createElement('div')
     el.className = 'nexus-git-gutter-marker nexus-git-gutter-modified'
-    el.title = 'Modified'
+    el.title = `Modified${MARKER_TITLE_HINT}`
     return el
   }
 }
@@ -117,7 +120,7 @@ class DeletionMarker extends GutterMarker {
   toDOM() {
     const el = document.createElement('div')
     el.className = 'nexus-git-gutter-marker nexus-git-gutter-deletion'
-    el.title = 'Deletion below'
+    el.title = `Deletion below${MARKER_TITLE_HINT}`
     return el
   }
 }
@@ -341,10 +344,11 @@ export function gitGutterExt(deps: GitGutterDeps): Extension {
   // and the error routes through the same `onError` path the diff
   // fetch uses.
   //
-  // Revert / discard-hunks intentionally not wired here — `nexus-git`
-  // doesn't expose a "discard hunks" verb yet, and silently falling
-  // back to `unstage_hunks` (which doesn't restore working-tree
-  // bytes) would be misleading. Tracked as a deferred follow-up.
+  // Alt/Option + click discards the hunk via
+  // `com.nexus.git::discard_hunks` instead — restoring those line
+  // ranges to HEAD. Picked Alt over Shift because Shift is already
+  // CodeMirror's standard "extend selection" modifier on click and
+  // would conflict with users dragging the gutter to select.
   const stageHunkAt = async (view: EditorView, lineNumber: number): Promise<boolean> => {
     const state = view.state.field(gutterStateField, false)
     if (!state) return false
@@ -352,6 +356,24 @@ export function gitGutterExt(deps: GitGutterDeps): Extension {
     if (!marker) return false
     try {
       await deps.kernel.invoke(PLUGIN_ID, CMD_STAGE_HUNKS, {
+        path: deps.relpath,
+        hunk_indices: [marker.hunkIndex],
+      })
+    } catch (err) {
+      deps.onError?.(err)
+      return false
+    }
+    void fetchAndDispatch(view)
+    return true
+  }
+
+  const discardHunkAt = async (view: EditorView, lineNumber: number): Promise<boolean> => {
+    const state = view.state.field(gutterStateField, false)
+    if (!state) return false
+    const marker = state.byLine.get(lineNumber)
+    if (!marker) return false
+    try {
+      await deps.kernel.invoke(PLUGIN_ID, CMD_DISCARD_HUNKS, {
         path: deps.relpath,
         hunk_indices: [marker.hunkIndex],
       })
@@ -385,14 +407,20 @@ export function gitGutterExt(deps: GitGutterDeps): Extension {
       },
       initialSpacer: () => ADDED,
       domEventHandlers: {
-        click(view, blockInfo) {
+        click(view, blockInfo, event) {
           const lineObj = view.state.doc.lineAt(blockInfo.from)
           const state = view.state.field(gutterStateField, false)
           if (!state) return false
           if (!state.byLine.has(lineObj.number)) return false
-          // Fire-and-forget; resolved value tracked for tests via
-          // the deps surface.
-          void stageHunkAt(view, lineObj.number)
+          // Alt/Option modifier → discard the hunk. Plain click →
+          // stage. Both are fire-and-forget; resolved value tracked
+          // for tests via the deps surface.
+          const e = event as MouseEvent | undefined
+          if (e?.altKey) {
+            void discardHunkAt(view, lineObj.number)
+          } else {
+            void stageHunkAt(view, lineObj.number)
+          }
           return true
         },
       },
@@ -415,6 +443,30 @@ export async function stageHunkForLine(
   if (!marker) return false
   try {
     await deps.kernel.invoke(PLUGIN_ID, CMD_STAGE_HUNKS, {
+      path: deps.relpath,
+      hunk_indices: [marker.hunkIndex],
+    })
+  } catch (err) {
+    deps.onError?.(err)
+    return false
+  }
+  refresh()
+  return true
+}
+
+/** BL-079 follow-up — companion of {@link stageHunkForLine} that
+ *  routes the marker's hunk through `com.nexus.git::discard_hunks`
+ *  instead. Reverts the working-tree line ranges of that hunk to
+ *  HEAD; staged content (if any) is left alone. Same return /
+ *  refresh / `onError` semantics as the stage path. */
+export async function discardHunkForLine(
+  deps: GitGutterDeps,
+  marker: { hunkIndex: number } | undefined,
+  refresh: () => void,
+): Promise<boolean> {
+  if (!marker) return false
+  try {
+    await deps.kernel.invoke(PLUGIN_ID, CMD_DISCARD_HUNKS, {
       path: deps.relpath,
       hunk_indices: [marker.hunkIndex],
     })

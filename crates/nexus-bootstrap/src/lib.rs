@@ -1364,6 +1364,7 @@ fn register_core_plugins(
                     ("conflict_versions", nexus_git::core_plugin::HANDLER_CONFLICT_VERSIONS),
                     ("merge", nexus_git::core_plugin::HANDLER_MERGE),
                     ("blame", nexus_git::core_plugin::HANDLER_BLAME),
+                    ("discard_hunks", nexus_git::core_plugin::HANDLER_DISCARD_HUNKS),
                 ]),
             ),
             forge_root,

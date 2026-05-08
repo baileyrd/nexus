@@ -8,6 +8,28 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-079 follow-up: click-on-gutter Revert via `discard_hunks` ✅ (2026-05-08)
+
+**Source**: BL-079 closure note (2026-05-07) — explicit deferral: "Click-on-gutter Revert (needs a new `discard_hunks` IPC verb)"
+**Files**: `crates/nexus-git/src/engine.rs` (new `GitEngine::discard_hunks` method, +3 tests); `crates/nexus-git/src/core_plugin.rs` (new `HANDLER_DISCARD_HUNKS = 37` + dispatch arm); `crates/nexus-bootstrap/src/lib.rs` (registry entry `("discard_hunks", HANDLER_DISCARD_HUNKS)`); `shell/src/plugins/nexus/editor/cm/gitGutter.ts` (Alt-click branch in the gutter click handler + new `discardHunkForLine` exported helper); `shell/src/plugins/nexus/editor/cm/gitGutter.test.ts` (+3 tests covering the new helper)
+**Related**: BL-079 (the gutter itself), the `stage_hunks` / `unstage_hunks` family
+
+The original BL-079 closure note flagged Revert as deferred because silently falling back to `unstage_hunks` (which only moves the hunk from the index back to the working tree — it does not restore working-tree bytes) would be misleading. This pass closes that gap by adding a real "discard the working-tree hunk" verb and wiring it to the gutter as Alt+click.
+
+- **`GitEngine::discard_hunks`** — mirrors `unstage_hunks`'s shape but runs the reverse partial patch through `ApplyLocation::WorkDir` instead of `Index`. Hunk indices are interpreted against `diff_file` (HEAD vs workdir-with-index), the same shape the gutter's `buildLineMarkers` already threads onto each marker. Picked WorkDir over Both because applying a HEAD→workdir-reverse patch to the index fails the libgit2 pre-image check ("does not match index") for the common case where the change is purely unstaged — the index still equals HEAD. The semantics match `git checkout -- <file>` (workdir reverts to index): if the user has already staged part of the change, the staged content survives; they can unstage first if they want it gone.
+- **IPC handler id 37**, slotted next to the existing hunk verbs. Reuses the existing `GitHunkArgs` (`{ path, hunk_indices }`) and `GitOk` reply types, so the IPC drift script stays clean — no new generated bindings.
+- **Alt+click in the gutter triggers Revert; plain click still stages.** The CM6 `domEventHandlers.click` arrow now reads `event.altKey`. Picked Alt over Shift because Shift is CodeMirror's standard "extend selection" modifier on click and would conflict with users dragging the gutter to select. Marker tooltips updated from `"Added"` / `"Modified"` / `"Deletion below"` to include `" — click to stage, Alt+click to revert"` so the affordance is discoverable.
+- **`discardHunkForLine` exported helper** — companion of `stageHunkForLine` with the same return / refresh / `onError` contract. Lets tests drive the discard path without standing up a full CM6 view.
+
+**Tested**: `cargo test -p nexus-git` clean (was 84, +3 new engine tests); `pnpm --filter nexus-shell test` 1079/1079 (was 1076, +3); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (preexisting warnings only); `scripts/check_ipc_drift.sh` OK. The 3 new engine tests:
+- `discard_hunks_reverts_only_selected_hunk_in_workdir` — two-edit fixture in non-adjacent line ranges; discard hunk 0 reverts the first edit and leaves the second; only one hunk remains in `diff_file` afterwards.
+- `discard_hunks_with_all_indices_clears_workdir_diff` — single-hunk file; discard reverts the workdir to HEAD; `diff_file` returns empty.
+- `discard_hunks_with_out_of_range_index_is_noop` — out-of-range indices are silently skipped, mirroring the existing `stage_hunks` / `unstage_hunks` behaviour; the workdir stays put.
+
+The 3 new shell tests cover the helper's success / no-marker-given / IPC-failure paths against a stub kernel — same shape as the existing `stageHunkForLine` tests for parity.
+
+---
+
 ### BL-098 follow-up: capability grant/revoke emitter (runtime path) ✅ (2026-05-08)
 
 **Source**: BL-052 deferral list — "would need to thread the universal topic through the kernel security path; scoped out as a follow-up because the security audit log already lives in SQLite (`nexus-security` audit table) and a non-trivial subset of grants happens before the bus is fully wired"

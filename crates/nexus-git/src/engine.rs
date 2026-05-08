@@ -443,6 +443,38 @@ impl GitEngine {
         Ok(())
     }
 
+    /// BL-079 follow-up — discard specific hunks of a file's
+    /// working-tree changes, restoring those line ranges to the HEAD
+    /// (or staged-index) version. The selection mirrors what
+    /// [`Self::diff_file`] returns (HEAD vs workdir-with-index), so
+    /// callers reading the gutter's `hunkIndex` markers can pass
+    /// them through verbatim.
+    ///
+    /// Builds a reversed partial patch and applies it to the working
+    /// tree only (`ApplyLocation::WorkDir`). If the change is
+    /// purely unstaged, the workdir reverts to HEAD for those line
+    /// ranges. If part of the change was staged, the index is left
+    /// alone (mirroring `git checkout -- file` — `--` for the
+    /// workdir, not `HEAD --` which also touches the index): the
+    /// caller unstages first if they want the staged content gone.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure or invalid hunk
+    /// index. If the patch fails to apply (e.g. concurrent edit
+    /// landed between the diff fetch and the discard) the working
+    /// tree is left untouched.
+    pub fn discard_hunks(&self, path: &Path, hunk_indices: &[usize]) -> Result<(), GitError> {
+        let hunks = self.diff_file(path)?;
+        let patch = build_patch_for_hunks(path, &hunks, hunk_indices, true);
+        if patch.is_empty() {
+            return Ok(());
+        }
+        let diff = git2::Diff::from_buffer(&patch)?;
+        self.repo.apply(&diff, ApplyLocation::WorkDir, None)?;
+        Ok(())
+    }
+
     /// Create a commit from the current index with the given message.
     ///
     /// Returns the short hex hash of the new commit.
@@ -1820,5 +1852,88 @@ mod tests {
             after.is_empty() || after.iter().all(|(_, hs)| hs.is_empty()),
             "expected empty staged diff after unstage_hunks"
         );
+    }
+
+    /// BL-079 follow-up — `discard_hunks` reverts only the selected
+    /// working-tree hunk and leaves untouched ones in place. Two
+    /// edits in non-adjacent line ranges produce two diff hunks; the
+    /// caller picks one to discard, the other survives.
+    #[test]
+    fn discard_hunks_reverts_only_selected_hunk_in_workdir() {
+        let (dir, engine) = init_repo();
+        fs::write(
+            dir.path().join("file.txt"),
+            "line1\nline2\nline3\n\n\n\n\nline8\nline9\nline10\n",
+        )
+        .unwrap();
+        make_commit(&engine, "initial");
+
+        // Modify both sections.
+        fs::write(
+            dir.path().join("file.txt"),
+            "CHANGED1\nline2\nline3\n\n\n\n\nline8\nCHANGED9\nline10\n",
+        )
+        .unwrap();
+
+        let path = Path::new("file.txt");
+        let hunks_before = engine.diff_file(path).unwrap();
+        assert_eq!(hunks_before.len(), 2, "expected 2 hunks before discard");
+
+        // Discard hunk 0 — the first edit reverts; the second edit
+        // stays.
+        engine.discard_hunks(path, &[0]).unwrap();
+
+        let after_text = fs::read_to_string(dir.path().join("file.txt")).unwrap();
+        assert!(after_text.starts_with("line1\n"), "hunk 0 should be reverted: got {after_text:?}");
+        assert!(after_text.contains("CHANGED9"), "hunk 1 should survive: got {after_text:?}");
+
+        let hunks_after = engine.diff_file(path).unwrap();
+        assert_eq!(
+            hunks_after.len(),
+            1,
+            "expected exactly one remaining hunk after discard, got {hunks_after:?}",
+        );
+    }
+
+    /// BL-079 follow-up — discarding all hunks leaves the workdir
+    /// matching HEAD; no follow-up diff entry remains.
+    #[test]
+    fn discard_hunks_with_all_indices_clears_workdir_diff() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "alpha\n").unwrap();
+        make_commit(&engine, "initial");
+
+        fs::write(dir.path().join("file.txt"), "beta\n").unwrap();
+        let path = Path::new("file.txt");
+        let hunks = engine.diff_file(path).unwrap();
+        assert_eq!(hunks.len(), 1);
+
+        engine.discard_hunks(path, &[0]).unwrap();
+
+        let restored = fs::read_to_string(dir.path().join("file.txt")).unwrap();
+        assert_eq!(restored, "alpha\n", "workdir should match HEAD after full discard");
+        let after = engine.diff_file(path).unwrap();
+        assert!(
+            after.is_empty(),
+            "expected empty workdir diff after discarding every hunk, got {after:?}",
+        );
+    }
+
+    /// BL-079 follow-up — out-of-range hunk indices are silently
+    /// skipped, mirroring the existing stage/unstage behaviour. With
+    /// no valid index selected the engine is a no-op and the workdir
+    /// stays put.
+    #[test]
+    fn discard_hunks_with_out_of_range_index_is_noop() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "alpha\n").unwrap();
+        make_commit(&engine, "initial");
+
+        fs::write(dir.path().join("file.txt"), "beta\n").unwrap();
+        let path = Path::new("file.txt");
+        engine.discard_hunks(path, &[42]).unwrap();
+
+        let unchanged = fs::read_to_string(dir.path().join("file.txt")).unwrap();
+        assert_eq!(unchanged, "beta\n", "out-of-range discard must not touch the workdir");
     }
 }

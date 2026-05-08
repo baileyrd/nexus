@@ -7,7 +7,7 @@
 
 import { describe, it, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildLineMarkers, stageHunkForLine } from './gitGutter.ts'
+import { buildLineMarkers, discardHunkForLine, stageHunkForLine } from './gitGutter.ts'
 
 describe('buildLineMarkers', () => {
   it('returns empty when no hunks', () => {
@@ -268,4 +268,72 @@ test('stageHunkForLine: surfaces IPC failure via onError without refreshing', as
   assert.equal(errors.length, 1)
   assert.match(String(errors[0]), /not a git repo/)
   assert.equal(refreshes.length, 0, 'no refresh after a failed stage')
+})
+
+// ── BL-079 follow-up — discardHunkForLine ───────────────────────────────────
+
+test('discardHunkForLine: invokes com.nexus.git::discard_hunks with the marker hunkIndex', async () => {
+  const calls: Array<{ pluginId: string; cmd: string; args?: unknown }> = []
+  const refreshes: number[] = []
+  const deps = {
+    relpath: 'src/bar.ts',
+    kernel: {
+      invoke<T = unknown>(pluginId: string, cmd: string, args?: unknown): Promise<T> {
+        calls.push({ pluginId, cmd, args })
+        return Promise.resolve(null as T)
+      },
+    },
+  }
+  const ok = await discardHunkForLine(deps, { hunkIndex: 4 }, () => {
+    refreshes.push(1)
+  })
+  assert.equal(ok, true)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]!.pluginId, 'com.nexus.git')
+  assert.equal(calls[0]!.cmd, 'discard_hunks')
+  assert.deepEqual(calls[0]!.args, { path: 'src/bar.ts', hunk_indices: [4] })
+  assert.equal(refreshes.length, 1, 'refresh fires after a successful discard')
+})
+
+test('discardHunkForLine: returns false when no marker is given (no IPC, no refresh)', async () => {
+  const calls: number[] = []
+  const refreshes: number[] = []
+  const deps = {
+    relpath: 'src/bar.ts',
+    kernel: {
+      invoke<T = unknown>(): Promise<T> {
+        calls.push(1)
+        return Promise.resolve(null as T)
+      },
+    },
+  }
+  const ok = await discardHunkForLine(deps, undefined, () => {
+    refreshes.push(1)
+  })
+  assert.equal(ok, false)
+  assert.equal(calls.length, 0)
+  assert.equal(refreshes.length, 0)
+})
+
+test('discardHunkForLine: surfaces IPC failure via onError without refreshing', async () => {
+  const errors: unknown[] = []
+  const refreshes: number[] = []
+  const deps = {
+    relpath: 'src/bar.ts',
+    kernel: {
+      invoke<T = unknown>(): Promise<T> {
+        return Promise.reject(new Error('apply failed'))
+      },
+    },
+    onError: (err: unknown) => {
+      errors.push(err)
+    },
+  }
+  const ok = await discardHunkForLine(deps, { hunkIndex: 0 }, () => {
+    refreshes.push(1)
+  })
+  assert.equal(ok, false)
+  assert.equal(errors.length, 1)
+  assert.match(String(errors[0]), /apply failed/)
+  assert.equal(refreshes.length, 0, 'no refresh after a failed discard')
 })
