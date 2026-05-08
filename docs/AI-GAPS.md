@@ -114,7 +114,7 @@
 
 ### Follow-up (not blocking)
 - The original DOD line 1 ("Feature compiled in by default with a fallback path — pulls on first use") would force fastembed + ort-load-dynamic into every Rust build, requiring `libonnxruntime.{so,dylib,dll}` to be resolvable at runtime for *all* users. The model-pull side is already lazy (fastembed downloads to `~/.cache/fastembed/<model>/` on first call), but the ORT system dependency isn't. Defaulting on would break clean builds for users without onnxruntime installed. Better tradeoff: wire the IPC + UI toggle (this work) and keep the cargo feature opt-in until either a) onnxruntime is bundled (adds ~50 MB to binaries), or b) fastembed gains an alternative runtime.
-- The settings tab can't currently introspect "is `local-embeddings` compiled in?" — the kernel reports a clear error if the user picks `local` on a build without the feature, but a soft preflight that hides the option in unsupported builds would be nicer.
+- ✅ **Build-feature surface in `nexus ai status`** — shipped 2026-05-08. `handle_status` now returns `local_embeddings_supported: bool` (`cfg!(feature = "local-embeddings")`) so an operator can read it directly with `nexus ai status` ("Local Embeddings  : compiled-in" / "not built (rebuild with --features local-embeddings)"). Hiding the option from the shell-side dropdown dynamically would require rebuilding the configuration manifest at activation time on top of a kernel round-trip — out of scope for this follow-up; the existing description text still flags the feature gate, and the kernel's set_config rejection on an unsupported build is loud enough.
 
 ---
 

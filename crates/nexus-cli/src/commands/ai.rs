@@ -117,10 +117,23 @@ pub fn status(app: &mut App) -> Result<()> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
+    let local_embeddings_supported = response
+        .get("local_embeddings_supported")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     println!("AI Provider       : {ai_provider} ({ai_model})");
     println!("Embedding Provider: {embed_provider}");
     println!("Indexed Chunks    : {indexed}");
     println!("TLS Pinned        : {}", if tls_pinned { "yes" } else { "no" });
+    println!(
+        "Local Embeddings  : {}",
+        if local_embeddings_supported {
+            "compiled-in"
+        } else {
+            "not built (rebuild with --features local-embeddings)"
+        }
+    );
 
     // FU-10 — surface the BL-041 indexing-daemon snapshot so a
     // headless `nexus ai status` reads as well as the shell badge.

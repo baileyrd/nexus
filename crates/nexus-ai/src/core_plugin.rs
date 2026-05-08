@@ -743,6 +743,7 @@ async fn handle_status(
     let embedding_model = embed_cfg.as_ref().and_then(resolve_embedding_model);
     let embedding_dimension = embed_cfg.as_ref().and_then(resolve_embedding_dimension);
     let tls_pinned = tls_pinning_effective(ai_cfg.as_ref());
+    let local_embeddings_supported = cfg!(feature = "local-embeddings");
     Ok(serde_json::json!({
         "ai_provider": ai_cfg.as_ref().map(|c| c.provider.clone()),
         "ai_model": ai_cfg.as_ref().and_then(|c| c.model.clone()),
@@ -751,6 +752,7 @@ async fn handle_status(
         "embedding_dimension": embedding_dimension,
         "indexed_chunks": count,
         "tls_pinned": tls_pinned,
+        "local_embeddings_supported": local_embeddings_supported,
     }))
 }
 
