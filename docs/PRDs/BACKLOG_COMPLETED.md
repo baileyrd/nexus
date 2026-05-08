@@ -8,6 +8,32 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-079 follow-up: click-on-gutter Stage ✅ (2026-05-08)
+
+**Source**: BL-079 closure note (2026-05-07) — first of two click-on-gutter deferrals (Stage now lands; Revert + side-by-side `MergeView` stay deferred)
+**Files**: `shell/src/plugins/nexus/editor/cm/gitGutter.ts` (`LineMarker` gains `hunkIndex`; `buildLineMarkers` threads the index through every marker; `gutter()` config gains `domEventHandlers.click` that routes to a new `stageHunkAt` closure; new exported `stageHunkForLine` helper for unit tests; new `CMD_STAGE_HUNKS` constant); `shell/src/plugins/nexus/editor/cm/gitGutter.css` (clickable cursor + hover-glow on cells that carry a marker); `shell/src/plugins/nexus/editor/cm/gitGutter.test.ts` (+4 tests covering `hunkIndex` threading + the `stageHunkForLine` happy path / no-marker path / IPC-failure path)
+**Related**: BL-079 (gutter + tooltip + modal); `com.nexus.git::stage_hunks` (handler 17, BL-012-era hunk staging)
+
+The BL-079 closure note framed click-on-gutter Stage and Revert as a single deferral — both gated on UX wiring rather than missing IPC. Stage can land today against the existing `stage_hunks` handler (id 17); Revert needs a new "discard hunks" engine + IPC verb that nobody's written. This pass ships Stage and tracks Revert as still-deferred.
+
+- **`hunkIndex` on every marker.** `LineMarker` gains a `hunkIndex: number` field; `buildLineMarkers` walks the input `GitDiffHunk[]` with an outer index counter and stamps every `byLine` entry with the index of the hunk that produced it. Without this the click handler couldn't tell `stage_hunks` which hunk to send. The +1 unit test pins `hunkIndex` for both pure-add (hunk 0) and modified (hunk 1) markers in a two-hunk fixture.
+- **`gutter().domEventHandlers.click`.** CM6's gutter API exposes a per-cell event handler that fires when the user clicks anywhere in the gutter slot. The handler reads the line number via `view.state.doc.lineAt(blockInfo.from)`, looks up the marker in the existing `gutterStateField`, and fires-and-forgets `stageHunkAt`. Returning `true` consumes the click so it doesn't bubble into CM's selection logic.
+- **`stageHunkAt` — IPC + refresh.** Calls `kernel.invoke('com.nexus.git', 'stage_hunks', { path, hunk_indices: [marker.hunkIndex] })`, then schedules a fresh `diff_file` fetch so the gutter reflects the post-stage diff (the staged hunk drops out of working-tree → HEAD-via-index). On failure the `onError` callback gets the error and the gutter stays put — same posture as the existing `fetchAndDispatch` error path.
+- **`stageHunkForLine` exported helper.** Pulled out as a reusable function so the unit suite can drive the IPC + refresh sequence without standing up a CM6 view + DOM event. Same shape as the click handler's body (early-return on no marker, `onError` on failure, refresh on success).
+- **CSS — clickable cursor + hover-glow.** `.cm-gutterElement.nexus-git-gutter:has(.nexus-git-gutter-marker)` flips `cursor: pointer` and a subtle `background: var(--background-modifier-hover)` so the click target is visible. Without these the gutter looks ornamental — a user wouldn't know to click. The hover targets the cell (~6px), not the inner marker stripe (3px), so the click target reads as larger than the visual marker.
+- **Why not Revert.** Revert needs to discard working-tree changes for specific hunks — there's no `nexus-git` IPC verb for that today. Routing to `unstage_hunks` would silently *not* restore the working-tree bytes (it just rewrites the index entry back to HEAD, leaving the working file edited). That mismatch is the kind of footgun that earns angry bug reports, so Revert stays unwired until a real `discard_hunks` engine + IPC + bindings round trip lands.
+
+**Tested**: `pnpm --filter nexus-shell test` 1076/1076 (was 1072, +4); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` 0 errors. The 4 new tests:
+- `buildLineMarkers threads hunkIndex onto every marker` — two-hunk fixture; line 1 gets `hunkIndex: 0`, line 11 gets `hunkIndex: 1`.
+- `stageHunkForLine: invokes com.nexus.git::stage_hunks with the marker hunkIndex` — happy path; asserts the IPC plugin/cmd/args shape and that `refresh()` fires after success.
+- `stageHunkForLine: returns false when no marker is given` — guard for clicks on lines outside any hunk.
+- `stageHunkForLine: surfaces IPC failure via onError without refreshing` — error path; `onError` called with the rejected error, no `refresh()` fired.
+
+**Definition of done coverage** (against the BL-079 closure note's deferral list):
+- ✅ Click-on-gutter Stage — clicking a gutter marker stages the underlying hunk via `stage_hunks`.
+- ⏸ Click-on-gutter Revert — needs a new `discard_hunks` engine + IPC verb that doesn't exist yet. Tracked as a future BL.
+- ⏸ Side-by-side `MergeView` — would add `@codemirror/merge` for marginal value over the existing diff modal; stays deferred unless a user asks specifically for the visual-side-by-side UX.
+
 ### BL-067 phase 2b: per-panel options UI on View Builder snapshot rows ✅ (2026-05-08)
 
 **Source**: BL-067 phase 2 deferral list — phase 2a (catalog click-to-add + per-leaf close) and phase 2d (export-as-plugin) shipped 2026-05-07; phase 2b (move-between-docks, dock size/collapse) deferred behind "needs new `workspace.moveLeafToDock`-class mutators"

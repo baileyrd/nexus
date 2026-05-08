@@ -14,6 +14,19 @@
   background: transparent;
 }
 
+/* BL-079 follow-up — clickable gutter cells stage the underlying
+ * hunk via `com.nexus.git::stage_hunks`. The cursor + hover-glow
+ * tell the user the marker is actionable; without these the click
+ * target is invisible. The `:hover` selector on the cell (not the
+ * inner marker) gives ~6px of click target rather than the 3px
+ * marker stripe. */
+.cm-gutterElement.nexus-git-gutter:has(.nexus-git-gutter-marker) {
+  cursor: pointer;
+}
+.cm-gutterElement.nexus-git-gutter:has(.nexus-git-gutter-marker):hover {
+  background: var(--background-modifier-hover, rgba(127, 127, 127, 0.12));
+}
+
 .nexus-git-gutter-marker {
   width: 3px;
   height: 100%;

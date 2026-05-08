@@ -46,6 +46,7 @@ import {
 
 const PLUGIN_ID = 'com.nexus.git'
 const CMD_DIFF_FILE = 'diff_file'
+const CMD_STAGE_HUNKS = 'stage_hunks'
 
 /// Mirror of `crates/nexus-git/src/ipc.rs::GitDiffLine`.
 interface GitDiffLine {
@@ -67,10 +68,14 @@ interface GitDiffHunk {
 type LineKind = 'added' | 'modified' | 'deletion-above'
 
 /// Annotation a line carries — kind plus, for modifications /
-/// deletions, the original `Removed` content shown in tooltip.
+/// deletions, the original `Removed` content shown in tooltip,
+/// plus the 0-based index of the hunk this line belongs to so the
+/// click-to-stage path knows which hunk to send to
+/// `com.nexus.git::stage_hunks`.
 interface LineMarker {
   kind: LineKind
   removed: string[]
+  hunkIndex: number
 }
 
 interface GutterState {
@@ -137,7 +142,8 @@ const DELETION = new DeletionMarker()
  */
 export function buildLineMarkers(hunks: GitDiffHunk[]): Map<number, LineMarker> {
   const byLine = new Map<number, LineMarker>()
-  for (const hunk of hunks) {
+  for (let hunkIndex = 0; hunkIndex < hunks.length; hunkIndex++) {
+    const hunk = hunks[hunkIndex]!
     let newLine = hunk.new_start
     let pendingRemoved: string[] = []
     let lastNewLine = newLine - 1
@@ -151,6 +157,7 @@ export function buildLineMarkers(hunks: GitDiffHunk[]): Map<number, LineMarker> 
           byLine.set(anchor, {
             kind: 'deletion-above',
             removed: pendingRemoved,
+            hunkIndex,
           })
           pendingRemoved = []
         }
@@ -161,10 +168,11 @@ export function buildLineMarkers(hunks: GitDiffHunk[]): Map<number, LineMarker> 
           byLine.set(newLine, {
             kind: 'modified',
             removed: pendingRemoved,
+            hunkIndex,
           })
           pendingRemoved = []
         } else {
-          byLine.set(newLine, { kind: 'added', removed: [] })
+          byLine.set(newLine, { kind: 'added', removed: [], hunkIndex })
         }
         lastNewLine = newLine
         newLine += 1
@@ -181,6 +189,7 @@ export function buildLineMarkers(hunks: GitDiffHunk[]): Map<number, LineMarker> 
       byLine.set(anchor, {
         kind: 'deletion-above',
         removed: pendingRemoved,
+        hunkIndex,
       })
     }
   }
@@ -323,6 +332,37 @@ export function gitGutterExt(deps: GitGutterDeps): Extension {
     }
   })
 
+  // BL-079 follow-up — click a gutter marker to stage the hunk it
+  // belongs to. Routes through `com.nexus.git::stage_hunks` with the
+  // hunk index threaded onto the line marker by `buildLineMarkers`.
+  // After a successful stage, schedule a re-fetch so the gutter
+  // reflects the post-stage diff (the staged hunk drops out of
+  // working-tree → HEAD-via-index). On failure the gutter stays put
+  // and the error routes through the same `onError` path the diff
+  // fetch uses.
+  //
+  // Revert / discard-hunks intentionally not wired here — `nexus-git`
+  // doesn't expose a "discard hunks" verb yet, and silently falling
+  // back to `unstage_hunks` (which doesn't restore working-tree
+  // bytes) would be misleading. Tracked as a deferred follow-up.
+  const stageHunkAt = async (view: EditorView, lineNumber: number): Promise<boolean> => {
+    const state = view.state.field(gutterStateField, false)
+    if (!state) return false
+    const marker = state.byLine.get(lineNumber)
+    if (!marker) return false
+    try {
+      await deps.kernel.invoke(PLUGIN_ID, CMD_STAGE_HUNKS, {
+        path: deps.relpath,
+        hunk_indices: [marker.hunkIndex],
+      })
+    } catch (err) {
+      deps.onError?.(err)
+      return false
+    }
+    void fetchAndDispatch(view)
+    return true
+  }
+
   return [
     gutterStateField,
     watcher,
@@ -344,9 +384,46 @@ export function gitGutterExt(deps: GitGutterDeps): Extension {
         }
       },
       initialSpacer: () => ADDED,
+      domEventHandlers: {
+        click(view, blockInfo) {
+          const lineObj = view.state.doc.lineAt(blockInfo.from)
+          const state = view.state.field(gutterStateField, false)
+          if (!state) return false
+          if (!state.byLine.has(lineObj.number)) return false
+          // Fire-and-forget; resolved value tracked for tests via
+          // the deps surface.
+          void stageHunkAt(view, lineObj.number)
+          return true
+        },
+      },
     }),
     tooltip,
   ]
+}
+
+/** BL-079 follow-up — exported for unit tests so the suite can drive
+ *  the click path without standing up a full CM6 view + DOM event.
+ *  Thin wrapper over the same IPC + refresh sequence the gutter's
+ *  click handler runs. Returns `true` on success (IPC + refresh
+ *  scheduled), `false` when the line has no marker or the IPC
+ *  rejected. */
+export async function stageHunkForLine(
+  deps: GitGutterDeps,
+  marker: { hunkIndex: number } | undefined,
+  refresh: () => void,
+): Promise<boolean> {
+  if (!marker) return false
+  try {
+    await deps.kernel.invoke(PLUGIN_ID, CMD_STAGE_HUNKS, {
+      path: deps.relpath,
+      hunk_indices: [marker.hunkIndex],
+    })
+  } catch (err) {
+    deps.onError?.(err)
+    return false
+  }
+  refresh()
+  return true
 }
 
 /// BL-079 — public re-export so the editor view can install its
