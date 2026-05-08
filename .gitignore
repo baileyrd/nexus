@@ -27,3 +27,4 @@ plugins/*/settings.json
 node_modules/
 shell/dist/
 packages/*/dist/
+.gitnexus
