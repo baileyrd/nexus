@@ -8,6 +8,34 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-095 follow-up: continue with degraded plugin set + bus event ✅ (2026-05-08)
+
+**Source**: BL-095 closure note (2026-05-06) — the only deferral on a single-deferral list ("'continue with degraded plugin set' + bus event are deferred")
+**Files**: `crates/nexus-bootstrap/src/lib.rs` (new private `RegisterCoreResultExt` trait with `or_lifecycle_skip(event_bus, label)` impl on `Result<PluginInfo, PluginError>`; 17 in-tree `register_core` call sites converted from `.context("failed to register …")?` to `.or_lifecycle_skip(event_bus, …)?`; new `or_lifecycle_skip_tests` module with +2 tests)
+**Related**: BL-095 (the lifecycle watchdog itself), BL-052 (universal activity timeline, which a future emitter can hook off the new bus event)
+
+The BL-095 phase A closure landed the watchdog: `register_core` runs each lifecycle hook under a 30s deadline (configurable via `KernelConfig::lifecycle_timeout_secs`). When a hook hangs, the loader returns `PluginError::LifecycleTimeout` and bootstrap's `?` operator propagates that all the way up — aborting the whole shell. The note explicitly framed the deferred work as "continue with degraded plugin set" + bus event so a single buggy plugin can't take the editor down with it.
+
+This pass closes that gap.
+
+- **`RegisterCoreResultExt::or_lifecycle_skip`.** New private extension trait on `Result<PluginInfo, PluginError>`. Three branches:
+  - `Ok(_)` → `Ok(())` (happy path).
+  - `Err(LifecycleTimeout { plugin_id, hook, timeout_secs })` → log a `tracing::warn!` carrying the three fields, publish `com.nexus.kernel.plugin_lifecycle_timeout` on the bus with the same payload, return `Ok(())` so the boot loop continues with the rest of the plugin set.
+  - `Err(_)` (any other error) → wrap with the existing `failed to register {label}` anyhow context and return `Err`. Manifest-invalid, duplicate-id, or a real lifecycle-hook failure are programming bugs, not "slow plugin" we should silently skip past — keeping the skip path narrow on purpose.
+- **17 in-tree `register_core` call sites converted.** The pattern was uniform: every site changes from `.context("failed to register com.nexus.X")?` to `.or_lifecycle_skip(event_bus, "com.nexus.X")?`. Plugins covered: security, storage, database, editor, theme, ai, skills, templates, formats, workflow, linkpreview, comments, agent, mcp.host, lsp, git, terminal. The invoker (CLI/TUI/shell) registration in `build_runtime_with_invoker` deliberately stays on the hard-fail path — without an invoker plugin to hold the IPC dispatch tables there's nothing for the rest of the system to talk to, so its failure really IS fatal.
+- **Bus event surface.** Topic is `com.nexus.kernel.plugin_lifecycle_timeout`; source-plugin-id is the synthetic `com.nexus.kernel` (anchor-only — there's no real plugin with that id, but the bus's namespace anti-spoof check is purely string-based, and the topic lies inside that string namespace so the publish succeeds). Payload carries `{ plugin_id, hook, timeout_secs }` so a subscriber can render `"<plugin>'s on_init() hook hit the 30s deadline; continuing without it"`. The shell's plugin-status pane is the obvious consumer; wiring it is a separate UX-side pass.
+- **Why all plugins, not just non-essential ones.** A timeout on `security` or `storage` is technically "the system can't boot" — every downstream IPC will fail. But the user gets a clearer story from `"Storage failed to start (init timed out at 30s)"` followed by cascading IPC failures than from the current "boot returned an error" abort. The skip-and-continue posture prefers visible breakage over silent hang regardless of which plugin is involved.
+
+**Tested**: `cargo test -p nexus-bootstrap --lib` 17/17 (was 15, +2); `cargo check --workspace` clean; `cargo clippy -p nexus-bootstrap --all-targets` no new warnings on changed code. The 2 new tests:
+- `lifecycle_timeout_skips_and_publishes_bus_event` — fakes a `LifecycleTimeout` error, calls `or_lifecycle_skip`, asserts the result is `Ok(())` and that a `com.nexus.kernel.plugin_lifecycle_timeout` event lands on the bus with `plugin_id` / `hook` / `timeout_secs` fields populated.
+- `non_timeout_errors_still_propagate` — fakes a `DuplicatePlugin` error, calls `or_lifecycle_skip`, asserts the call returns `Err` with the `"failed to register …"` anyhow context attached.
+
+**Definition of done coverage** (against the BL-095 closure note's deferral list):
+- ✅ Continue with degraded plugin set — a single plugin's lifecycle timeout no longer aborts the whole boot.
+- ✅ Bus event — `com.nexus.kernel.plugin_lifecycle_timeout` carries plugin_id + hook + timeout for every skip.
+
+The BL-095 closure note's deferral list is now empty.
+
 ### BL-052 follow-up: push/pull git events ✅ (2026-05-08)
 
 **Source**: BL-052 deferral list — "the existing git poller only watches HEAD; remote-side push/pull aren't observed yet"

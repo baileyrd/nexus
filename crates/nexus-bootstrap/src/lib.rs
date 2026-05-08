@@ -407,6 +407,66 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     })
 }
 
+/// BL-095 follow-up — extension trait that converts a single
+/// plugin's `LifecycleTimeout` from a fatal boot error into a
+/// "skip and continue" signal. Other `register_core` errors
+/// (manifest invalid, duplicate id, downstream lifecycle hook
+/// returning a real error) still abort boot — the watchdog only
+/// catches the case where a hook *hangs*, which is the recoverable
+/// failure mode where the rest of the plugin set is still useful.
+///
+/// Each skip publishes `com.nexus.kernel.plugin_lifecycle_timeout`
+/// onto the event bus so the shell (or any subscriber) can render
+/// a "<plugin> failed to start" notice. The synthetic `com.nexus.kernel`
+/// source-plugin-id is anchor-only — bus's namespace anti-spoof
+/// check passes since the topic lies inside that string namespace.
+trait RegisterCoreResultExt {
+    fn or_lifecycle_skip(
+        self,
+        event_bus: &EventBus,
+        label: &str,
+    ) -> Result<()>;
+}
+
+impl RegisterCoreResultExt
+    for std::result::Result<nexus_plugins::PluginInfo, PluginError>
+{
+    fn or_lifecycle_skip(
+        self,
+        event_bus: &EventBus,
+        label: &str,
+    ) -> Result<()> {
+        match self {
+            Ok(_) => Ok(()),
+            Err(PluginError::LifecycleTimeout {
+                plugin_id,
+                hook,
+                timeout_secs,
+            }) => {
+                tracing::warn!(
+                    plugin_id = %plugin_id,
+                    ?hook,
+                    timeout_secs,
+                    "BL-095: plugin lifecycle hook timed out — continuing with degraded plugin set",
+                );
+                let _ = event_bus.publish_plugin(
+                    "com.nexus.kernel",
+                    "com.nexus.kernel.plugin_lifecycle_timeout",
+                    serde_json::json!({
+                        "plugin_id": plugin_id,
+                        "hook": format!("{:?}", hook),
+                        "timeout_secs": timeout_secs,
+                    }),
+                );
+                Ok(())
+            }
+            Err(e) => {
+                Err(anyhow::Error::new(e).context(format!("failed to register {label}")))
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn register_core_plugins(
     loader: &mut PluginLoader,
@@ -454,7 +514,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(SecurityCorePlugin::new(Some(Arc::clone(event_bus)))),
         )
-        .context("failed to register com.nexus.security")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.security")?;
 
     // Storage is the pilot for ADR 0021 (handler versioning). Every
     // command below is registered under both `<command>` and
@@ -684,7 +744,7 @@ fn register_core_plugins(
                 Arc::clone(event_bus),
             )),
         )
-        .context("failed to register com.nexus.storage")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.storage")?;
 
     // `nexus-database` is a pure-logic library (types, validation, formulas,
     // CSV import/export). Its core plugin surfaces only those pure helpers
@@ -720,7 +780,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(nexus_database::DatabaseCorePlugin::new()),
         )
-        .context("failed to register com.nexus.database")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.database")?;
 
     loader
         .register_core(
@@ -771,7 +831,7 @@ fn register_core_plugins(
                 Arc::clone(event_bus),
             )),
         )
-        .context("failed to register com.nexus.editor")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.editor")?;
 
     // Theme engine — registered as a core plugin so (a) other plugins can
     // call `ipc_call("com.nexus.theme", …)` and subscribe to
@@ -828,7 +888,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(ThemeCorePlugin::with_builtins(Some(Arc::clone(event_bus)))),
         )
-        .context("failed to register com.nexus.theme")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.theme")?;
 
     loader
         .register_core(
@@ -942,7 +1002,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(AiCorePlugin::new()),
         )
-        .context("failed to register com.nexus.ai")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.ai")?;
 
     // Skills — PRD-13 scaffold. Read-mostly surface over
     // `.forge/skills/`. Agents + UI consult it over IPC so no
@@ -988,7 +1048,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(SkillsCorePlugin::open(skills_dir)),
         )
-        .context("failed to register com.nexus.skills")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.skills")?;
 
     // Templates — page-template subsystem. Holds the forge root and
     // serves list/get/render/apply/reload over IPC. Built-ins are
@@ -1011,7 +1071,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(TemplatesCorePlugin::open(forge_root.to_path_buf())),
         )
-        .context("failed to register com.nexus.templates")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.templates")?;
 
     // Formats — Notion zip-import / format-export. Wraps the
     // pure-library converters in `nexus-formats::notion` behind two
@@ -1031,7 +1091,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(FormatsCorePlugin::open(forge_root.to_path_buf())),
         )
-        .context("failed to register com.nexus.formats")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.formats")?;
 
     // Workflow — PRD-16 scaffold. Read-mostly surface over
     // `.workflows/` TOML files. Library stays kernel-free; this
@@ -1085,7 +1145,7 @@ fn register_core_plugins(
                 load_webhook_config(forge_root),
             )),
         )
-        .context("failed to register com.nexus.workflow")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.workflow")?;
 
     // Link preview — outbound HTTP fetcher that backs the canvas
     // link-node overlay in the shell. Stateless; the shell owns the
@@ -1102,7 +1162,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(LinkPreviewCorePlugin::new()),
         )
-        .context("failed to register com.nexus.linkpreview")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.linkpreview")?;
 
     // Comments — BL-050. Side-margin comment threads anchored to
     // stable block ids (ADR 0017). Storage in
@@ -1145,7 +1205,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(CommentsCorePlugin::new(forge_root)),
         )
-        .context("failed to register com.nexus.comments")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.comments")?;
 
     // Agent system — PRD-15 scaffold. Thin dispatch surface over
     // `nexus-agent::{LlmAgent, PlanExecutor}`; bridges to `com.nexus.ai`
@@ -1175,7 +1235,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(AgentCorePlugin::new()),
         )
-        .context("failed to register com.nexus.agent")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.agent")?;
 
     // MCP Host orchestrator — loads mcp.toml, lazily connects to external MCP
     // servers, exposes list_tools / call_tool / list_resources / list_prompts
@@ -1216,7 +1276,7 @@ fn register_core_plugins(
                 Some(Arc::clone(event_bus)),
             )),
         )
-        .context("failed to register com.nexus.mcp.host")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.mcp.host")?;
 
     // LSP host orchestrator — loads `<forge>/.forge/lsp.toml`, lazily spawns
     // configured language servers, and proxies LSP requests over IPC. Push
@@ -1252,7 +1312,7 @@ fn register_core_plugins(
                 Some(Arc::clone(event_bus)),
             )),
         )
-        .context("failed to register com.nexus.lsp")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.lsp")?;
 
     // Git integration — wraps GitWorker behind IPC and publishes bus events
     // (branch_changed, commit, dirty_changed) for any plugin or UI that
@@ -1312,7 +1372,7 @@ fn register_core_plugins(
                 Some(Arc::clone(event_bus)),
             )),
         )
-        .context("failed to register com.nexus.git")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.git")?;
 
     // Terminal & process manager — PRD-09. Pure-library crate wrapped
     // behind `com.nexus.terminal` so UI / script plugins reach it over
@@ -1483,7 +1543,7 @@ fn register_core_plugins(
             forge_root,
             Box::new(terminal_plugin),
         )
-        .context("failed to register com.nexus.terminal")?;
+        .or_lifecycle_skip(event_bus, "com.nexus.terminal")?;
 
     Ok(())
 }
@@ -1805,4 +1865,72 @@ mod with_v1_aliases_tests {
             "bare and .v1 must point at the same handler id (alias semantics)"
         );
     }
+}
+
+#[cfg(test)]
+mod or_lifecycle_skip_tests {
+    use std::sync::Arc;
+
+    use nexus_kernel::{EventBus, EventFilter, NexusEvent};
+    use nexus_plugins::PluginError;
+
+    use super::RegisterCoreResultExt;
+
+    /// BL-095 follow-up — a `LifecycleTimeout` error is converted to
+    /// `Ok(())` and a `com.nexus.kernel.plugin_lifecycle_timeout`
+    /// event lands on the bus carrying the plugin id, the hook name,
+    /// and the timeout value. The shell can subscribe to this and
+    /// surface a "<plugin> failed to start" notice.
+    #[test]
+    fn lifecycle_timeout_skips_and_publishes_bus_event() {
+        let bus = Arc::new(EventBus::new(16));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            "com.nexus.kernel.".to_string(),
+        ));
+        let result: Result<nexus_plugins::PluginInfo, PluginError> =
+            Err(PluginError::LifecycleTimeout {
+                plugin_id: "com.nexus.test".to_string(),
+                hook: "init".to_string(),
+                timeout_secs: 30,
+            });
+        let outcome = result.or_lifecycle_skip(&bus, "com.nexus.test");
+        assert!(outcome.is_ok(), "lifecycle timeout should be swallowed, got {outcome:?}");
+        let ev = sub
+            .try_recv()
+            .expect("bus alive")
+            .expect("expected one published event");
+        match &ev.event {
+            NexusEvent::Custom { type_id, payload, .. } => {
+                assert_eq!(type_id, "com.nexus.kernel.plugin_lifecycle_timeout");
+                assert_eq!(payload["plugin_id"], "com.nexus.test");
+                assert_eq!(payload["hook"], "\"init\"");
+                assert_eq!(payload["timeout_secs"], 30);
+            }
+            other => panic!("expected Custom event, got {other:?}"),
+        }
+    }
+
+    /// Non-timeout errors still abort with the original anyhow
+    /// context attached. The skip path is narrow on purpose: a
+    /// manifest-invalid or duplicate-id error is a programming bug,
+    /// not a "slow plugin" we should silently skip past.
+    #[test]
+    fn non_timeout_errors_still_propagate() {
+        let bus = Arc::new(EventBus::new(16));
+        let result: Result<nexus_plugins::PluginInfo, PluginError> =
+            Err(PluginError::DuplicatePlugin("com.nexus.test".to_string()));
+        let outcome = result.or_lifecycle_skip(&bus, "com.nexus.test");
+        let err = outcome.expect_err("duplicate-id should propagate");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("failed to register com.nexus.test"),
+            "context label missing in {msg}",
+        );
+    }
+
+    // The non-error path is exercised live by every other test in
+    // the bootstrap suite (every successful boot routes through
+    // `or_lifecycle_skip`); a synthetic `Ok(PluginInfo)` test would
+    // have to fabricate a real `PluginInfo` whose constructor isn't
+    // public, so we skip it here.
 }

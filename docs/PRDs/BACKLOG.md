@@ -73,7 +73,7 @@ _BL-096 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-_BL-095 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Watchdog ships for the `register_core` path with default 30s deadline; “continue with degraded plugin set” + bus event are deferred (bootstrap currently aborts boot with a clear `LifecycleTimeout` error, which is a strict improvement over hanging silently)._
+_BL-095 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Watchdog ships for the `register_core` path with default 30s deadline. "Continue with degraded plugin set" + bus event shipped as a follow-up 2026-05-08 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md): a per-plugin `LifecycleTimeout` is now logged, the plugin skipped, and `com.nexus.kernel.plugin_lifecycle_timeout` published on the bus so the shell can surface a "<plugin> failed to start" notice._
 
 ---
 
