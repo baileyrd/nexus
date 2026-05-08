@@ -309,30 +309,22 @@ The theme system already has live reload; the only new backend work is a `previe
 
 ### BL-067: Shell View Builder — visual layout composer for plugin panels
 
+> **Phase 1 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Programmatic save / switch / delete of named workspace layouts under `<forge>/.forge/layouts/<name>.layout.json`, a sidebar panel that lists saved layouts + the live layout snapshot + the registered viewType inventory, and three commands (`nexus.viewBuilder.show` / `.saveLayoutAs` / `.switchLayout`). The full WYSIWYG drag-drop canvas + "Export as plugin" code generator are deferred to Phase 2.
+
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
-**Effort**: ~1.5–2 weeks (1d introspection API + 5–7d drag-drop UI + 1d export-as-plugin template)
+**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2 (canvas + export) ~1.5 weeks (deferred)
 **Crates**: `ExtensionHost` (JS introspection API), new `shell/src/plugins/nexus/viewBuilder/`
 **Related**: ADR 0011 (plugin-first shell), BL-053 (forge visual target), BL-054 (Nexus OS Mode)
 
-Every panel, sidebar, and pane in the Nexus shell is a registered plugin contribution loaded by `ExtensionHost`. Arranging them today requires editing TypeScript. The View Builder exposes that composition layer as a visual drag-and-drop tool — move panels, resize splits, configure options — and saves the result as a layout definition file (`.forge/layouts/<name>.layout.toml`) the shell already knows how to read.
+Every panel, sidebar, and pane in the Nexus shell is a registered plugin contribution loaded by `ExtensionHost`. The original BL-067 plan was a WYSIWYG drag-drop canvas + a per-panel options surface + an "Export as plugin" code generator on top of a layout introspection API.
 
-The output is immediately usable and optionally exportable as a redistributable shell plugin.
+**Phase 1 closed.** The introspection API was already there — `workspace.serialize()` produces a `WorkspaceJSON` and `workspace.hydrate(json)` round-trips it cleanly — so the bottleneck was a programmatic save/load surface, not new infrastructure. The View Builder ships as `nexus.viewBuilder` (default-on) with a sidebar panel that lists saved layouts, surfaces the live layout snapshot, and lists every registered viewType in a read-only inventory. `workspace.layoutSnapshot()` and `workspace.applySnapshot(json)` are the documented introspection / write-back surface.
 
-**Key surfaces:**
-- Live canvas showing current layout alongside the actual shell — drag to reorder, drag dividers to resize
-- Plugin contribution palette — searchable list of all registered `contributes.views` entries
-- Per-panel configuration (default size, dock side, float vs. docked)
-- Named layouts saved to forge and switchable from the command palette
-- "Export as plugin" — generates a valid `manifest.toml` + contribution block
-
-**One prerequisite:** `ExtensionHost` needs a read-only JS introspection API exposing the current contribution layout as a structured snapshot. Currently implicit; must be explicit before the UI can read it.
-
-**Definition of done:**
-- `ExtensionHost.getLayoutSnapshot()` returns current panel arrangement as a typed structure
-- Builder plugin opens from command palette, renders editable layout canvas
-- Drag-and-drop repositioning updates the live shell in real time
-- Named layouts persist to `.forge/layouts/` and restore on forge open
-- "Export as plugin" generates a runnable plugin directory
+**Phase 2 (deferred):**
+- WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize
+- Per-panel configuration UI (default size, dock side, float vs docked)
+- "Export as plugin" code generator that emits a `manifest.toml` + `index.ts` contribution block
+- Plugin-contribution palette as an interactive add-panel surface (today the inventory is read-only)
 
 ---
 

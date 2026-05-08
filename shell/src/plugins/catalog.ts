@@ -405,6 +405,12 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     description: 'Three-tab observability panel — usage rollup over the AI activity log, foundation-workflow status with manual run, and a vault-feed of file activity under raw/, wiki/, output/ (BL-054 Phase 4).',
     load: () => import('./nexus/observability').then(m => m.osObservabilityPlugin),
   },
+  {
+    id: 'nexus.viewBuilder', name: 'View Builder',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Save / switch / delete named workspace layouts under .forge/layouts/. Read-only inventory of registered view types. Drag-drop canvas + export-as-plugin are deferred follow-ups (BL-067 Phase 1).',
+    load: () => import('./nexus/viewBuilder').then(m => m.viewBuilderPlugin),
+  },
 ]
 
 /**

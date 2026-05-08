@@ -8,6 +8,39 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-067 Phase 1: Shell View Builder — programmatic save/switch/delete + sidebar panel ✅ (2026-05-07)
+
+**Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
+**Files**: new `shell/src/plugins/nexus/viewBuilder/{index.ts, ViewBuilderView.tsx, ViewBuilderPaneView.tsx, layoutsStore.ts, layoutsStore.test.ts}`; new `shell/tests/view-builder.test.ts`; `shell/src/plugins/catalog.ts`; `shell/src/workspace/workspaceStore.ts`
+**Related**: ADR 0011 (plugin-first shell), BL-053 (visual target), BL-054 (OS Mode)
+
+The original BL-067 plan called for a WYSIWYG drag-drop canvas, per-panel options UI, and an "Export as plugin" code generator on top of a layout introspection API. Phase 1 ships the programmatic save/load half so a user can capture and switch between layouts today; the canvas + export generator are deferred to Phase 2.
+
+- **Introspection / write-back surface (`workspace.layoutSnapshot()` / `workspace.applySnapshot(json)`).** Both are thin wrappers over the existing `serialize()` / `hydrate()` round-trip — the infrastructure was there, just not surfaced under names that read clearly at the call site. Same `WorkspaceJSON` shape the persisted `.forge/workspace.json` uses, so a layout you save is structurally a snapshot you can apply right back.
+- **`layoutsStore.ts` — the saved-layouts data layer.** Reads `<forge>/.forge/layouts/*.layout.json` via `com.nexus.storage::list_dir`, decodes JSON via `read_file`, persists via `write_file` (with a defensive `create_dir` first), and deletes via `delete_file`. Every operation is fronted by a typed wrapper that maps the storage plugin's `NotFound` / `AlreadyExists` `IpcError` variants to "treat as empty" / "treat as success" so a fresh forge with no layouts dir doesn't surface as an error. `nameToRelpath` / `relpathToName` keep the on-disk names round-trip stable; `normaliseName` enforces a safe charset (letters / digits / dashes / underscores / spaces, ≤ 80 chars) so a typed name can't escape the layouts directory.
+- **`refreshLayouts(kernel)` + Zustand store.** Drives the panel — `useLayoutsStore` exposes `{ layouts, loading, error }`. The contract on a failed refresh is that the previous list is *cleared* (rather than retained as stale truth) and the error surfaces inline; pinned in a test so a future change is conscious.
+- **`viewBuilderPlugin` (`nexus.viewBuilder`).** Activates on startup, registers a `viewBuilder` view type, mounts a sidebar leaf via `viewBuilderPaneViewCreator`, registers an activity-bar item (icon `template`, priority 60), and three commands:
+    - `nexus.viewBuilder.show` — open the panel
+    - `nexus.viewBuilder.saveLayoutAs` — open the panel (the inline "Save current as…" form is the canonical save path; the shell command palette doesn't expose a free-text prompt today)
+    - `nexus.viewBuilder.switchLayout` — open the panel (saved-layouts list is the canonical switcher; a future palette extension that supports a sub-picker would fit here)
+- **The panel.** Three sections in a single sidebar leaf: (1) **Current layout** — `workspace.layoutSnapshot()` rendered as an indented tree (split / tabs / leaf summary with view-type and active marker); (2) **Saved layouts** — list of `.forge/layouts/*.layout.json` files with Apply / Delete buttons + an inline "Save current as…" form with name validation, success / error feedback inline; (3) **Registered views** — read-only catalog of every viewType currently in `ViewRegistry` (sorted, monospace), with a note that drag-to-add and per-panel options are deferred.
+- **Activation lifecycle.** `workspace:opened` triggers a `refreshLayouts`; `workspace:closed` resets the store so an intermediate empty state doesn't show stale rows from the previous forge.
+- **Catalog entry.** Default-off (`core: false`, activates on startup) — once a user enables the plugin, it becomes available across forges. Description in the catalog calls out the deferred bullets so the disabled / enabled state is self-documenting.
+
+**Tested**: `pnpm --filter nexus-shell test` 998/998 pass (was 984, +14 across the new suite); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean for the new files. The 14 new tests cover the path helpers (`nameToRelpath` / `relpathToName` round-trip, rejection cases for non-layout paths, `normaliseName` against empty / disallowed / overlong inputs), the IPC operations against a fake `KernelAPI` (`listLayouts` filters by suffix and dir + sorts by name; treats `NotFound` as empty; re-throws other errors. `saveLayout` writes UTF-8-encoded JSON to the right path; tolerates `AlreadyExists` from `create_dir`. `loadLayout` decodes UTF-8 + JSON-parses + rejects malformed JSON with a path-bearing message. `deleteLayout` returns `false` on `NotFound`, `true` on success, re-throws other errors), and the store contract (`refreshLayouts` populates rows on success, records the error string and clears stale rows on failure).
+
+**Pre-existing test affected**: none — the new `viewBuilder/layoutsStore.ts` initially imported `clientLogger` directly from `host/clientLogger` and trip the `plugin-import-hygiene.test.ts` rule that plugins can't reach into shell host internals. Fixed by routing through the existing `shell/src/clientLogger.ts` re-export, matching the convention every other plugin uses.
+
+**Definition of done coverage**:
+- ✅ `ExtensionHost.getLayoutSnapshot()` returns current panel arrangement as a typed structure (shipped as `workspace.layoutSnapshot()` — the `ExtensionHost` per-se isn't the right home; the live layout lives on the workspace store)
+- ✅ Builder plugin opens from command palette
+- ✅ Named layouts persist to `.forge/layouts/<name>.layout.json` and apply via `workspace.applySnapshot`
+- ⏸ Drag-and-drop repositioning updates the live shell in real time (Phase 2 — needs a WYSIWYG canvas surface)
+- ⏸ Plugin-contribution palette as an interactive add-panel surface (Phase 2 — today the registered-views list is read-only)
+- ⏸ Per-panel configuration UI for default size / dock side / float vs docked (Phase 2)
+- ⏸ "Export as plugin" generates a runnable plugin directory (Phase 2 — needs a `manifest.toml` + `index.ts` template)
+- ⏸ TOML format on disk per the original spec (using JSON instead — the `WorkspaceJSON` shape is JSON-native and TOML would round-trip through a converter for no operational gain; the spec was permissive: `.forge/layouts/<name>.layout.toml` *or* a shell plugin's `manifest.toml` contribution block)
+
 ### BL-069: Database query executor — Kanban / Calendar / Gallery layouts + type-aware cells ✅ (2026-05-07)
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #1

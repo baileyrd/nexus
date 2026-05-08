@@ -1083,6 +1083,19 @@ export const workspace = {
   serialize,
   hydrate,
   resetToDefault,
+  // BL-067 — typed read/write of the live layout for the View Builder
+  // and any future layout-management surface. Aliases of `serialize`
+  // and `hydrate` with names that read clearly at the call site
+  // ("snapshot the layout" / "apply this snapshot") so authoring
+  // code doesn't have to reach for the persistence-flavored verbs.
+  /** Take a JSON-safe snapshot of the live layout. Same shape as the
+   *  one persisted to `.forge/workspace.json`. */
+  layoutSnapshot: (): WorkspaceJSON => serialize(),
+  /** Replace the live layout with a snapshot taken via
+   *  [`layoutSnapshot`] (or restored from disk). Wraps `hydrate`
+   *  so the View Builder can swap between named layouts without
+   *  going through the file-system path. */
+  applySnapshot: (json: WorkspaceJSON): Promise<void> => hydrate(json),
   // Raw accessors — handy for tests and future callers that want to walk
   // the tree without subscribing to Zustand directly.
   get rootSplit(): Split {
