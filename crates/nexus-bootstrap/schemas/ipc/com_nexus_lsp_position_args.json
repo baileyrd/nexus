@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspPositionArgs",
+  "description": "Args for `completions` / `hover` / `definition` (handlers `5`/`6`/`7`).",
+  "type": "object",
+  "properties": {
+    "character": {
+      "description": "Zero-indexed character offset within the line (UTF-16 code\nunits per the LSP spec).",
+      "type": "integer",
+      "format": "int64"
+    },
+    "line": {
+      "description": "Zero-indexed line number.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "path": {
+      "description": "Filesystem path of the open document.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "line",
+    "character"
+  ]
+}

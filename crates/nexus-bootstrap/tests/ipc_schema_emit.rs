@@ -52,6 +52,12 @@ use nexus_mcp::ipc::{
     McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply,
     McpPromptEntry, McpResourceEntry, McpServerArgs, McpServerEntry, McpToolEntry,
 };
+// nexus-lsp uses a wire-mirror module — the handlers emit ad-hoc
+// `serde_json::json!` and accept `Value` in (BL-076).
+use nexus_lsp::ipc::{
+    LspChangeFileArgs, LspCodeActionsArgs, LspOk, LspOpenFileArgs, LspOpenFileReply,
+    LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRenameArgs, LspServerEntry,
+};
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
 use nexus_agent::{Plan, Step, ToolCall};
 use nexus_comments::core_plugin::{
@@ -127,6 +133,23 @@ fn out_dir() -> PathBuf {
 
 #[test]
 fn emit_pilot_ipc_schemas() {
+    emit_all_schemas();
+}
+
+/// Idempotent under parallel-test contention: the strict-objects and
+/// per-handler tests both call this, but cargo runs `#[test]` fns in
+/// parallel so without a guard each call would re-truncate the same
+/// JSON files concurrently and the strict-objects pass would observe
+/// a half-written EOF. The `OnceLock` ensures we emit exactly once
+/// per test-binary invocation.
+fn emit_all_schemas() {
+    use std::sync::OnceLock;
+    static EMITTED: OnceLock<()> = OnceLock::new();
+    EMITTED.get_or_init(emit_all_schemas_impl);
+}
+
+#[allow(clippy::too_many_lines)] // 100+ schema emits — splitting hurts readability
+fn emit_all_schemas_impl() {
     // ── com.nexus.storage::search ────────────────────────────────────────
     write_schema::<StorageSearchArgs>("com_nexus_storage__search", "args");
     write_schema::<StorageSearchHit>("com_nexus_storage__search", "hit");
@@ -223,6 +246,19 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<McpConnectReply>("com_nexus_mcp_host__connect", "reply");
     write_schema::<McpDisconnectMissReply>("com_nexus_mcp_host__disconnect", "miss_reply");
     write_schema::<McpCallToolReply>("com_nexus_mcp_host__call_tool", "reply");
+
+    // ── com.nexus.lsp (BL-076) ───────────────────────────────────────────
+    // Wire-mirror types — the impl emits ad-hoc `serde_json::json!`.
+    write_schema::<LspServerEntry>("com_nexus_lsp__list_servers", "entry");
+    write_schema::<LspOpenFileArgs>("com_nexus_lsp__open_file", "args");
+    write_schema::<LspOpenFileReply>("com_nexus_lsp__open_file", "reply");
+    write_schema::<LspPathArgs>("com_nexus_lsp", "path_args");
+    write_schema::<LspChangeFileArgs>("com_nexus_lsp__change_file", "args");
+    write_schema::<LspPositionArgs>("com_nexus_lsp", "position_args");
+    write_schema::<LspReferencesArgs>("com_nexus_lsp__references", "args");
+    write_schema::<LspRenameArgs>("com_nexus_lsp__rename", "args");
+    write_schema::<LspCodeActionsArgs>("com_nexus_lsp__code_actions", "args");
+    write_schema::<LspOk>("com_nexus_lsp", "ok");
 
     // ── com.nexus.agent (P1-3 #113) ──────────────────────────────────────
     write_schema::<GoalArgs>("com_nexus_agent__plan", "args");
@@ -335,7 +371,7 @@ fn emit_pilot_ipc_schemas() {
 #[test]
 fn every_object_schema_denies_additional_properties() {
     // Re-run emission so this test is independent of ordering.
-    emit_pilot_ipc_schemas();
+    emit_all_schemas();
 
     let mut violations: Vec<String> = Vec::new();
     for entry in fs::read_dir(out_dir()).expect("read schemas/ipc") {
@@ -416,7 +452,7 @@ fn check_strict_objects(
 #[test]
 fn every_pilot_handler_has_args_and_result() {
     // Re-run emission so this test is independent of ordering.
-    emit_pilot_ipc_schemas();
+    emit_all_schemas();
 
     let handlers = [
         "com_nexus_storage__search",

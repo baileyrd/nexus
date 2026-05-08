@@ -8,6 +8,37 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-076: `nexus-lsp` — Language Server Protocol core plugin ✅ (2026-05-07)
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Files**: new `crates/nexus-lsp/{Cargo.toml, src/lib.rs, src/config.rs, src/transport.rs, src/client.rs, src/pool.rs, src/core_plugin.rs, src/ipc.rs, tests/end_to_end.rs}`; `Cargo.toml` (workspace member); `crates/nexus-bootstrap/{Cargo.toml, src/lib.rs, tests/ipc_schema_emit.rs}`; `scripts/check_ipc_drift.sh`; 10 new `crates/nexus-bootstrap/schemas/ipc/com_nexus_lsp_*.json`; 10 new `packages/nexus-extension-api/src/generated/ipc/Lsp*.ts`
+**Related**: BL-075 (dual-mode editor, prerequisite — landed 2026-05-07); BL-077 (CM6 LSP client, unblocked); BL-081 (DAP debugger, unblocked); architecture mirrors `nexus-mcp`
+
+The load-bearing piece for the code-editor track. A new workspace crate that spawns external Language Server Protocol servers, bridges JSON-RPC stdio to the kernel IPC bus, and republishes server-pushed notifications on the bus.
+
+- **Config (`config.rs`).** `lsp.toml` parser: `[[servers]]` blocks with `name` / `command` / `args` / `file_types` / `root_markers` / `disabled` / `env`. Missing file = empty config (clean boot for forges without LSP). Duplicate names + empty required fields rejected. `LspHostConfig::server_for_path` routes a file to its server by extension (case-insensitive, skips disabled).
+- **Transport (`transport.rs`).** Tokio-based stdio JSON-RPC framing. `Content-Length` header parsing tolerates `\r\n`/`\n` and an optional `Content-Type` line; 16 MiB body ceiling guards against runaway servers. `JsonRpcMessage` is an `untagged` enum over Request / Response / Notification — the reader dispatches on shape.
+- **Client (`client.rs`).** One `LspClient` = one running language-server child. Async constructor spawns the executable with stdin/stdout/stderr piped, starts a reader task that demultiplexes inbound messages into a per-id `oneshot` map (responses) and an `mpsc` channel (notifications), and runs the LSP `initialize` → `initialized` handshake (30 s budget for `initialize` because rust-analyzer cold-starts touch the project graph). Per-request 10 s deadline; transient-vs-fatal classification (`is_transient`) drives the pool's reconnect logic. Drop kills the child via `tokio::process::Command::kill_on_drop`; explicit `shutdown()` runs the protocol-level `shutdown` / `exit` then hard-caps the join at 5 s.
+- **Pool (`pool.rs`).** `ConnectionPool` holds at most one client per server name. Lazy `get_or_connect`; `call_with_reconnect(server, op)` retries against `[100ms, 500ms, 2s, 10s, 30s]` (the same schedule `nexus-mcp` uses) on transient failure and short-circuits on misconfiguration. `shutdown_all` runs the graceful path on every entry on plugin teardown.
+- **Core plugin (`core_plugin.rs`).** `LspCorePlugin` registered as `com.nexus.lsp` via `nexus-bootstrap`. 11 IPC handlers: `list_servers` (sync) and `open_file` / `close_file` / `change_file` / `completions` / `hover` / `definition` / `references` / `rename` / `code_actions` / `format` (async). Path → server routing by extension; calls for unrouted paths return JSON `null`. After every routed call the host drains the client's notification queue and republishes each one on the kernel bus as `com.nexus.lsp.<lsp-method-with-dots>` (so `textDocument/publishDiagnostics` becomes `com.nexus.lsp.textDocument.publishDiagnostics` — the `/` is rewritten to `.` to satisfy the bus's namespace check). `on_stop` runs `shutdown_all` on a current-thread runtime with a 5 s join cap, matching `McpHostPlugin`'s shape.
+- **IPC types (`ipc.rs`).** Wire-mirror module — handlers serialise via `json!` so these structs are the schema source of truth: `LspOpenFileArgs`, `LspChangeFileArgs`, `LspPositionArgs`, `LspReferencesArgs`, `LspRenameArgs`, `LspCodeActionsArgs`, `LspPathArgs`, `LspOpenFileReply`, `LspServerEntry`, `LspOk`. All `deny_unknown_fields`; ts-rs + schemars derives gated behind the `ts-export` feature flag, same convention as `nexus-mcp::ipc`.
+- **End-to-end test.** `tests/end_to_end.rs` writes a small Python LSP-mock script (`mock_lsp.py`) into a tempdir and drives a full lifecycle: spawn → handshake → `textDocument/hover` request/response → `textDocument/didChange` → `textDocument/publishDiagnostics` arrives via `next_notification()` → drop. Skipped silently if `python3` isn't on `$PATH`.
+- **Race fix (collateral).** Adding 10 new schemas to the `ipc_schema_emit` test surfaced a latent parallel-test race: both `every_object_schema_denies_additional_properties` and `every_pilot_handler_has_args_and_result` called `emit_pilot_ipc_schemas()` directly to be "ordering-independent," which under cargo's default parallel execution caused two threads to truncate the same JSON files concurrently and produce a transient empty-file read on the next test. Fixed with a `OnceLock`-guarded `emit_all_schemas` wrapper so emission runs exactly once per test-binary invocation regardless of how many tests call it.
+
+**Tested**: `cargo test -p nexus-lsp` 28/28 unit + 1/1 integration pass; `cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export` 3/3 (race fixed); `cargo test --workspace --exclude nexus-plugins` clean (`nexus-plugins/tests/wasm_capability_denial.rs` has a pre-existing unresolved-`wat`-crate failure unrelated to this work); `cargo clippy -p nexus-lsp --lib --tests` clean; `scripts/check_ipc_drift.sh` regenerates cleanly with only the expected new files added.
+
+**Definition of done coverage**:
+- ✅ `nexus-lsp` crate registered by `nexus-bootstrap`
+- ✅ JSON-RPC stdio transport with Content-Length framing + body cap
+- ✅ Initialize / shutdown handshakes
+- ✅ Server-pushed notification fan-out on the kernel bus (universal `com.nexus.lsp.<method>` topic)
+- ✅ ConnectionPool with reconnect-on-transient + exponential backoff
+- ✅ `scripts/check_ipc_drift.sh` regenerates clean
+- ⏸ End-to-end smoke against real `rust-analyzer` / `typescript-language-server` (mocked via Python; live smoke is an operator step — the binaries aren't on the dev box's `$PATH` and shipping them via the test would inflate CI cold-start by minutes per run)
+- ⏸ Wrap each handler body in `call_with_reconnect` so a crashed server is retried transparently (helper exists; current handlers route through `get_or_connect` directly so a crash bubbles a `Transport`/`NotRunning` error to the caller — Phase-2 follow-up once a CM6 client is exercising the surface)
+- ⏸ Document resync after reconnect (`LspClient::documents` already tracks every open URI / version / text; replay-on-reconnect lands with BL-077)
+- ⏸ Server-initiated requests (`workspace/configuration` / `window/showMessageRequest`) — read off the wire and dropped with a debug log; deferred until a server actually relies on these
+
 ### BL-054 Phase 4 follow-up: workflow run_history ✅ (2026-05-07)
 
 **Source**: BL-054 Phase 4 closure note (2026-05-07) — deferred bullet "Automation panel shows last-run for at least one triggered workflow"

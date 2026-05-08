@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspChangeFileArgs",
+  "description": "Args for `change_file` (handler `4`).",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "New full file contents (full-sync mode).",
+      "type": "string"
+    },
+    "path": {
+      "description": "Filesystem path of the document being updated.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Monotonic version counter — must strictly increase per file.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "content",
+    "version"
+  ]
+}

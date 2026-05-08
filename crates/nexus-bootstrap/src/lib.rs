@@ -423,6 +423,7 @@ fn register_core_plugins(
     use nexus_workflow::WorkflowCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
+    use nexus_lsp::LspCorePlugin;
     use nexus_mcp::McpHostPlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
@@ -1212,6 +1213,42 @@ fn register_core_plugins(
             )),
         )
         .context("failed to register com.nexus.mcp.host")?;
+
+    // LSP host orchestrator — loads `<forge>/.forge/lsp.toml`, lazily spawns
+    // configured language servers, and proxies LSP requests over IPC. Push
+    // notifications (e.g. `publishDiagnostics`) fan out on the kernel bus
+    // as `com.nexus.lsp.<method>`. BL-076.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.lsp",
+                "LSP Host",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: true,
+                    on_stop: true,
+                },
+                &with_v1_aliases(&[
+                    ("list_servers", nexus_lsp::core_plugin::HANDLER_LIST_SERVERS),
+                    ("open_file", nexus_lsp::core_plugin::HANDLER_OPEN_FILE),
+                    ("close_file", nexus_lsp::core_plugin::HANDLER_CLOSE_FILE),
+                    ("change_file", nexus_lsp::core_plugin::HANDLER_CHANGE_FILE),
+                    ("completions", nexus_lsp::core_plugin::HANDLER_COMPLETIONS),
+                    ("hover", nexus_lsp::core_plugin::HANDLER_HOVER),
+                    ("definition", nexus_lsp::core_plugin::HANDLER_DEFINITION),
+                    ("references", nexus_lsp::core_plugin::HANDLER_REFERENCES),
+                    ("rename", nexus_lsp::core_plugin::HANDLER_RENAME),
+                    ("code_actions", nexus_lsp::core_plugin::HANDLER_CODE_ACTIONS),
+                    ("format", nexus_lsp::core_plugin::HANDLER_FORMAT),
+                ]),
+            ),
+            forge_root,
+            Box::new(LspCorePlugin::new(
+                forge_root.to_path_buf(),
+                Some(Arc::clone(event_bus)),
+            )),
+        )
+        .context("failed to register com.nexus.lsp")?;
 
     // Git integration — wraps GitWorker behind IPC and publishes bus events
     // (branch_changed, commit, dirty_changed) for any plugin or UI that

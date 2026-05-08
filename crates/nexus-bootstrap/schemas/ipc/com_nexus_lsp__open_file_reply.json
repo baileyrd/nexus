@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspOpenFileReply",
+  "description": "Reply from `open_file` when a server is routed (the call returns\nJSON `null` for paths that don't match any server).",
+  "type": "object",
+  "properties": {
+    "server": {
+      "description": "Server name that owns this file.",
+      "type": "string"
+    },
+    "uri": {
+      "description": "Resolved `file://` URI passed to the server.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "uri",
+    "server"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspReferencesArgs",
+  "description": "Args for `references` (handler `8`).",
+  "type": "object",
+  "properties": {
+    "character": {
+      "description": "Zero-indexed character.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "include_declaration": {
+      "description": "Include the symbol's own declaration in the result list.\nDefaults to `true`.",
+      "type": "boolean"
+    },
+    "line": {
+      "description": "Zero-indexed line.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "path": {
+      "description": "Filesystem path of the open document.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "line",
+    "character"
+  ]
+}

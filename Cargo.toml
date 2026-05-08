@@ -11,6 +11,7 @@ members = [
     "crates/nexus-plugins",
     "crates/nexus-ai",
     "crates/nexus-mcp",
+    "crates/nexus-lsp",
     "crates/nexus-cli",
     "crates/nexus-tui",
     "crates/nexus-git",

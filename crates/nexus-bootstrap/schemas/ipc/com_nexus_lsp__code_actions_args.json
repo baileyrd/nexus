@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspCodeActionsArgs",
+  "description": "Args for `code_actions` (handler `10`).",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Filesystem path of the open document.",
+      "type": "string"
+    },
+    "range": {
+      "description": "LSP `Range` (`{ start: {line, character}, end: {line, character} }`).\nForwarded verbatim; schema is intentionally untyped here so we\ndon't have to mirror every LSP nested struct."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "range"
+  ]
+}

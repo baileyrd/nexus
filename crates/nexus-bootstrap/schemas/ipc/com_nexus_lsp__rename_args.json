@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspRenameArgs",
+  "description": "Args for `rename` (handler `9`).",
+  "type": "object",
+  "properties": {
+    "character": {
+      "description": "Zero-indexed character of the symbol being renamed.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "line": {
+      "description": "Zero-indexed line of the symbol being renamed.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "new_name": {
+      "description": "Replacement identifier.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Filesystem path of the open document.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "line",
+    "character",
+    "new_name"
+  ]
+}

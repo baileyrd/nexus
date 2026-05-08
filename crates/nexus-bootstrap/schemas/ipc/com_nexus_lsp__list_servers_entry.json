@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspServerEntry",
+  "description": "One entry in the `list_servers` response array.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Process arguments.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Executable path or name.",
+      "type": "string"
+    },
+    "disabled": {
+      "description": "`true` if disabled in `lsp.toml`.",
+      "type": "boolean"
+    },
+    "file_types": {
+      "description": "File extensions this server handles.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "description": "Configured server name.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "command",
+    "args",
+    "file_types",
+    "disabled"
+  ]
+}

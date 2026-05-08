@@ -41,6 +41,9 @@ cargo test -p nexus-git --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (audit P1-3: mcp) …"
 cargo test -p nexus-mcp --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (BL-076: lsp) …"
+cargo test -p nexus-lsp --features ts-export --quiet --tests
+
 echo "[drift] regenerating IPC TS bindings (audit P1-3: agent) …"
 cargo test -p nexus-agent --features ts-export --quiet --tests
 

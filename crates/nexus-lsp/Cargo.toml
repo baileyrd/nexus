@@ -1,0 +1,28 @@
+[package]
+name = "nexus-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus LSP host — spawns external Language Server Protocol servers and bridges JSON-RPC to the kernel IPC bus"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+
+[features]
+# Mirror nexus-mcp / nexus-storage: TS bindings + JSON Schema export gated
+# behind a feature so the production build doesn't pull ts-rs.
+ts-export = ["dep:ts-rs"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

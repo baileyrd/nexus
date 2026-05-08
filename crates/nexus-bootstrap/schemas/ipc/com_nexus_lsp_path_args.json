@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspPathArgs",
+  "description": "Args for `close_file` (handler `3`).",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Filesystem path of the affected document.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

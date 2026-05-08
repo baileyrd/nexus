@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspOpenFileArgs",
+  "description": "Args for `open_file` (handler `2`). The `language_id` defaults to\nthe inferred id from the path extension if absent; `version`\ndefaults to `1`.",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "File contents at version 1 (full text — LSP requires the\ninitial sync to ship the document body).",
+      "type": "string"
+    },
+    "language_id": {
+      "description": "LSP `languageId` (`\"rust\"`, `\"typescript\"`, …). When `None`,\nthe handler infers it from the extension.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "description": "Filesystem path of the file being opened.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Optional starting version. Servers expect a monotonic counter\nacross `didChange` notifications; default `1`.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "content"
+  ]
+}
