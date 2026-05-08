@@ -228,6 +228,49 @@ export function filterProposal(
   }
 }
 
+/**
+ * AIG-06 follow-up — partial-field selection. When the user
+ * deselects individual tags or related links in the accept gate,
+ * the gate builds a custom proposal with the chosen subset and
+ * dispatches it through this helper. Empty arrays / empty summary
+ * are preserved-by-`merge_frontmatter` per its preserve-on-empty
+ * semantics, so a `{ tags: subset, summary: "", related: [] }`
+ * payload applies exactly the picked tags without disturbing the
+ * existing summary or related list.
+ */
+export async function applyCustomProposal(
+  api: PluginAPI,
+  proposal: EnrichmentProposal,
+  description: string,
+): Promise<void> {
+  const state = useEnrichStore.getState()
+  const head = state.pending.values().next().value
+  if (!head) return
+  state.setApplying(true)
+  try {
+    const raw = await api.kernel.invoke(AI_PLUGIN, COMMAND_ENRICH_APPLY, {
+      proposal,
+    })
+    const result = raw as { applied: boolean; reason?: string | null }
+    if (result.applied) {
+      useEnrichStore.getState().dismiss(head.path)
+      api.notifications.show({
+        type: 'info',
+        message: `${description} ${head.path}`,
+      })
+    } else {
+      useEnrichStore.getState().setError(
+        result.reason ?? 'enrich_apply rejected the proposal',
+      )
+      useEnrichStore.getState().setApplying(false)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    useEnrichStore.getState().setError(msg)
+    useEnrichStore.getState().setApplying(false)
+  }
+}
+
 function messageForFields(fields: EnrichFieldSelection, path: string): string {
   switch (fields) {
     case 'tags':

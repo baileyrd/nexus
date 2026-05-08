@@ -9,8 +9,14 @@
 // pending slot). Errors are surfaced inline; the user can dismiss
 // either way without affecting the underlying file.
 
+import { useEffect, useState } from 'react'
+
 import { headPending, useEnrichStore } from './enrichStore'
-import { applyPending, type EnrichFieldSelection } from './enrichRuntime'
+import {
+  applyPending,
+  applyCustomProposal,
+  type EnrichFieldSelection,
+} from './enrichRuntime'
 import { getEnrichApi } from './enrichApi'
 import { zIndex } from '../../../shell/zIndex'
 
@@ -29,14 +35,73 @@ export function EnrichAcceptGate() {
   const pending = headPending({ pending: pendingMap })
   const queueSize = pendingMap.size
 
+  // AIG-06 follow-up — per-item selection state. Both maps default
+  // to "all selected" (empty deselection set); the user can click
+  // an individual chip to opt it out before applying. Reset
+  // whenever the head proposal flips to a different file.
+  const [deselectedTags, setDeselectedTags] = useState<Set<string>>(new Set())
+  const [deselectedRelated, setDeselectedRelated] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setDeselectedTags(new Set())
+    setDeselectedRelated(new Set())
+  }, [pending?.path, pending?.body_hash])
+
   if (!pending && !error) return null
 
+  const tagsSelected = pending
+    ? pending.tags.filter((t) => !deselectedTags.has(t))
+    : []
+  const relatedSelected = pending
+    ? pending.related.filter((r) => !deselectedRelated.has(r))
+    : []
+  const tagsHasSubset = pending != null && deselectedTags.size > 0
+  const relatedHasSubset = pending != null && deselectedRelated.size > 0
+  const isPartial = tagsHasSubset || relatedHasSubset
+
   const onAccept = (fields: EnrichFieldSelection = 'all') => {
+    if (!pending) return
     const api = getEnrichApi()
-    void applyPending(api, fields)
+    if (!isPartial) {
+      void applyPending(api, fields)
+      return
+    }
+    // Build a custom proposal honoring the per-item deselections.
+    // Empty fields are preserved by `merge_frontmatter`.
+    const customProposal = {
+      ...pending,
+      tags: fields === 'summary' ? [] : tagsSelected,
+      summary: fields === 'tags' || fields === 'related' ? '' : pending.summary,
+      related: fields === 'tags' || fields === 'summary' ? [] : relatedSelected,
+    }
+    const desc =
+      fields === 'tags'
+        ? 'Applied tags to'
+        : fields === 'summary'
+          ? 'Applied summary to'
+          : fields === 'related'
+            ? 'Applied related links to'
+            : 'Enriched'
+    void applyCustomProposal(api, customProposal, desc)
   }
 
-  const hasTags = (pending?.tags.length ?? 0) > 0
+  const toggleTag = (t: string) => {
+    setDeselectedTags((prev) => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t)
+      else next.add(t)
+      return next
+    })
+  }
+  const toggleRelated = (r: string) => {
+    setDeselectedRelated((prev) => {
+      const next = new Set(prev)
+      if (next.has(r)) next.delete(r)
+      else next.add(r)
+      return next
+    })
+  }
+
+  const hasTags = tagsSelected.length > 0
   const hasSummary = (pending?.summary ?? '').length > 0
   // Per-field buttons appear only when both tags AND summary are
   // proposed — otherwise "Apply" already does the right thing for
@@ -90,28 +155,74 @@ export function EnrichAcceptGate() {
           )}
           {pending.tags.length > 0 && (
             <div style={{ marginBottom: 6 }}>
-              <span style={{ color: 'var(--text-muted)' }}>tags:</span>{' '}
-              {pending.tags.map((t, i) => (
-                <span
-                  key={t}
-                  style={{
-                    display: 'inline-block',
-                    marginRight: 4,
-                    padding: '1px 6px',
-                    background: 'var(--interactive-accent-soft)',
-                    borderRadius: 4,
-                    fontSize: 12,
-                  }}
-                >
-                  #{t}
-                  {i < pending.tags.length - 1 ? '' : ''}
-                </span>
-              ))}
+              <span style={{ color: 'var(--text-muted)' }}>
+                tags{tagsHasSubset ? ` (${tagsSelected.length}/${pending.tags.length})` : ''}:
+              </span>{' '}
+              {pending.tags.map((t) => {
+                const off = deselectedTags.has(t)
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => toggleTag(t)}
+                    title={off ? 'Click to include this tag' : 'Click to skip this tag'}
+                    aria-pressed={!off}
+                    data-testid={`enrich-tag-${t}`}
+                    style={{
+                      display: 'inline-block',
+                      marginRight: 4,
+                      padding: '1px 6px',
+                      background: off
+                        ? 'transparent'
+                        : 'var(--interactive-accent-soft)',
+                      border: '1px solid',
+                      borderColor: off
+                        ? 'var(--background-modifier-border)'
+                        : 'transparent',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      color: off ? 'var(--text-muted)' : 'inherit',
+                      textDecoration: off ? 'line-through' : 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    #{t}
+                  </button>
+                )
+              })}
             </div>
           )}
           {pending.related.length > 0 && (
             <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-              related: {pending.related.join(', ')}
+              related{relatedHasSubset ? ` (${relatedSelected.length}/${pending.related.length})` : ''}:{' '}
+              {pending.related.map((r, i) => {
+                const off = deselectedRelated.has(r)
+                return (
+                  <span key={r}>
+                    <button
+                      type="button"
+                      onClick={() => toggleRelated(r)}
+                      title={off ? 'Click to include this link' : 'Click to skip this link'}
+                      aria-pressed={!off}
+                      data-testid={`enrich-related-${r}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        font: 'inherit',
+                        cursor: 'pointer',
+                        color: off ? 'var(--text-faint)' : 'inherit',
+                        textDecoration: off ? 'line-through' : 'none',
+                      }}
+                    >
+                      {r}
+                    </button>
+                    {i < pending.related.length - 1 ? ', ' : ''}
+                  </span>
+                )
+              })}
             </div>
           )}
         </>
@@ -170,7 +281,7 @@ export function EnrichAcceptGate() {
             <button
               type="button"
               onClick={() => onAccept('tags')}
-              disabled={applying}
+              disabled={applying || tagsSelected.length === 0}
               title="Apply only the suggested tags; leave summary and related untouched."
               style={{
                 padding: '4px 10px',
@@ -178,7 +289,9 @@ export function EnrichAcceptGate() {
                 color: 'var(--text-normal)',
                 border: '1px solid var(--background-modifier-border)',
                 borderRadius: 4,
-                cursor: applying ? 'not-allowed' : 'pointer',
+                cursor:
+                  applying || tagsSelected.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: tagsSelected.length === 0 ? 0.5 : 1,
               }}
               data-testid="enrich-accept-tags"
             >
@@ -218,7 +331,13 @@ export function EnrichAcceptGate() {
             }}
             data-testid="enrich-accept-all"
           >
-            {applying ? 'Applying…' : showFieldButtons ? 'Apply all' : 'Apply'}
+            {applying
+              ? 'Applying…'
+              : isPartial
+                ? 'Apply selected'
+                : showFieldButtons
+                  ? 'Apply all'
+                  : 'Apply'}
           </button>
         )}
       </div>

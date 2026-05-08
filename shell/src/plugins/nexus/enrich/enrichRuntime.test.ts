@@ -14,6 +14,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  applyCustomProposal,
   applyPending,
   filterProposal,
   forceEnrichActiveFile,
@@ -265,4 +266,70 @@ test('filterProposal "related" zeroes tags + summary, keeps related', () => {
   assert.deepEqual(filtered.tags, [])
   assert.equal(filtered.summary, '')
   assert.deepEqual(filtered.related, ['[[r1]]', '[[r2]]'])
+})
+
+// ── AIG-06 follow-up — applyCustomProposal partial-tag flow ─────────
+
+test('applyCustomProposal: forwards the caller-built proposal verbatim', async () => {
+  const head: EnrichmentProposal = {
+    path: 'a.md',
+    body_hash: 'h',
+    tags: ['keep1', 'drop', 'keep2'],
+    summary: 'unchanged',
+    related: [],
+  }
+  useEnrichStore.getState().setPending(head)
+
+  const { api, calls } = stubApi({})
+  const customProposal: EnrichmentProposal = {
+    ...head,
+    tags: ['keep1', 'keep2'],
+  }
+  await applyCustomProposal(api, customProposal, 'Applied tags to')
+
+  const apply = calls.find((c) => c.commandId === 'enrich_apply')
+  assert.ok(apply)
+  assert.deepEqual(
+    (apply!.args.proposal as EnrichmentProposal).tags,
+    ['keep1', 'keep2'],
+  )
+  // Head was popped because the kernel reported `applied: true` (stub default).
+  assert.equal(useEnrichStore.getState().pending.size, 0)
+})
+
+test('applyCustomProposal: rejection keeps the head proposal queued', async () => {
+  const head: EnrichmentProposal = {
+    path: 'a.md',
+    body_hash: 'h',
+    tags: ['t1'],
+    summary: 's',
+    related: [],
+  }
+  useEnrichStore.getState().setPending(head)
+
+  const { api } = stubApi({
+    applyImpl: async () => ({ applied: false, reason: 'drift' }),
+  })
+  await applyCustomProposal(api, { ...head, tags: [] }, 'Enriched')
+
+  const state = useEnrichStore.getState()
+  assert.equal(state.pending.size, 1)
+  assert.equal(state.error, 'drift')
+  assert.equal(state.applying, false)
+})
+
+test('applyCustomProposal: no-op when no head proposal is queued', async () => {
+  const { api, calls } = stubApi({})
+  await applyCustomProposal(
+    api,
+    {
+      path: 'ghost.md',
+      body_hash: 'gone',
+      tags: [],
+      summary: '',
+      related: [],
+    },
+    'Enriched',
+  )
+  assert.equal(calls.length, 0, 'no enrich_apply call when there is no head')
 })
