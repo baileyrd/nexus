@@ -25,7 +25,7 @@ import type {
   EditorKernelClient,
   ExecuteDatabaseViewResponse,
 } from '../kernelClient'
-import { formatCell, lookupFieldDef } from './databaseViewFormat'
+import { formatCell, lookupFieldDef, type FieldDef } from './databaseViewFormat'
 
 /** Mutation handle threaded into layout renderers that support
  *  write-back (kanban drag-to-reorder is the first). `update`
@@ -444,22 +444,22 @@ function renderApplied(
     case 'kanban':
       return layout.kind === 'grouped'
         ? renderKanban(fields, layout.groups, schema, viewConfig, mutate)
-        : renderFlat(fields, layout.records, schema)
+        : renderFlat(fields, layout.records, schema, mutate)
     case 'calendar':
       return layout.kind === 'grouped'
         ? renderCalendar(fields, layout.groups, schema, viewConfig)
-        : renderFlat(fields, layout.records, schema)
+        : renderFlat(fields, layout.records, schema, mutate)
     case 'gallery':
       return layout.kind === 'flat'
-        ? renderGallery(fields, layout.records, schema, viewConfig)
-        : renderGrouped(fields, layout.groups, schema)
+        ? renderGallery(fields, layout.records, schema, viewConfig, mutate)
+        : renderGrouped(fields, layout.groups, schema, mutate)
     case 'table':
     case 'list':
     case 'timeline':
     default:
       return layout.kind === 'flat'
-        ? renderFlat(fields, layout.records, schema)
-        : renderGrouped(fields, layout.groups, schema)
+        ? renderFlat(fields, layout.records, schema, mutate)
+        : renderGrouped(fields, layout.groups, schema, mutate)
   }
 }
 
@@ -487,13 +487,14 @@ function renderFlat(
   fields: string[],
   records: AppliedRecord[],
   schema: Record<string, unknown>,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const table = document.createElement('table')
   table.className = 'cm-md-dbview-table'
   table.appendChild(buildHeader(fields))
   const tbody = document.createElement('tbody')
   for (const record of records) {
-    tbody.appendChild(buildRow(fields, record, schema))
+    tbody.appendChild(buildRow(fields, record, schema, mutate))
   }
   if (records.length === 0) {
     const empty = document.createElement('div')
@@ -511,6 +512,7 @@ function renderGrouped(
   fields: string[],
   groups: AppliedGroup[],
   schema: Record<string, unknown>,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'cm-md-dbview-grouped'
@@ -526,7 +528,7 @@ function renderGrouped(
     table.appendChild(buildHeader(fields))
     const tbody = document.createElement('tbody')
     for (const record of group.records) {
-      tbody.appendChild(buildRow(fields, record, schema))
+      tbody.appendChild(buildRow(fields, record, schema, mutate))
     }
     table.appendChild(tbody)
     section.appendChild(table)
@@ -576,7 +578,7 @@ export function renderKanban(
     heading.append(label, count)
     column.appendChild(heading)
     for (const record of group.records) {
-      const card = buildCard(record, cardFields, schema, /*titleField*/ null)
+      const card = buildCard(record, cardFields, schema, /*titleField*/ null, mutate)
       if (dndEnabled) {
         card.draggable = true
         card.dataset.recordId = record.id
@@ -847,6 +849,7 @@ export function renderGallery(
   records: AppliedRecord[],
   schema: Record<string, unknown>,
   viewConfig: DatabaseViewConfig,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const grid = document.createElement('div')
   grid.className = 'cm-md-dbview-gallery'
@@ -860,7 +863,7 @@ export function renderGallery(
   }
   const bodyFields = fields.filter((f) => f !== titleField)
   for (const record of records) {
-    grid.appendChild(buildCard(record, bodyFields, schema, titleField))
+    grid.appendChild(buildCard(record, bodyFields, schema, titleField, mutate))
   }
   return grid
 }
@@ -881,13 +884,19 @@ function buildRow(
   fields: string[],
   record: AppliedRecord,
   schema: Record<string, unknown>,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const tr = document.createElement('tr')
   tr.dataset.recordId = record.id
   for (const f of fields) {
     const td = document.createElement('td')
     const value = record[f]
-    td.textContent = formatCell(value, lookupFieldDef(schema, f))
+    const def = lookupFieldDef(schema, f)
+    if (mutate && isEditableType(def?.type)) {
+      td.appendChild(makeEditableCell(record, f, value, def, mutate))
+    } else {
+      td.textContent = formatCell(value, def)
+    }
     tr.appendChild(td)
   }
   return tr
@@ -902,6 +911,7 @@ function buildCard(
   bodyFields: string[],
   schema: Record<string, unknown>,
   titleField: string | null,
+  mutate?: MutationDeps,
 ): HTMLElement {
   const card = document.createElement('article')
   card.className = 'cm-md-dbview-card'
@@ -923,22 +933,304 @@ function buildCard(
     if (shown >= MAX_BODY_FIELDS) break
     const value = record[f]
     if (value === null || value === undefined) continue
-    const formatted = formatCell(value, lookupFieldDef(schema, f))
+    const def = lookupFieldDef(schema, f)
+    const formatted = formatCell(value, def)
     if (formatted === '') continue
     const row = document.createElement('div')
     row.className = 'cm-md-dbview-card-row'
     const label = document.createElement('span')
     label.className = 'cm-md-dbview-card-label'
     label.textContent = f
-    const v = document.createElement('span')
-    v.className = 'cm-md-dbview-card-value'
-    v.textContent = formatted
-    row.append(label, v)
+    if (mutate && isEditableType(def?.type)) {
+      const editable = makeEditableCell(record, f, value, def, mutate)
+      editable.classList.add('cm-md-dbview-card-value')
+      row.append(label, editable)
+    } else {
+      const v = document.createElement('span')
+      v.className = 'cm-md-dbview-card-value'
+      v.textContent = formatted
+      row.append(label, v)
+    }
     body.appendChild(row)
     shown += 1
   }
   card.appendChild(body)
   return card
+}
+
+// ── Inline cell editing (BL-069 follow-up) ──────────────────────────────────
+
+/** Field types that the inline editor knows how to edit. Anything
+ *  outside this set renders read-only — an undefined `def.type` also
+ *  routes here so legacy schemas without type metadata don't pop a
+ *  text editor over what could be structured data. The list mirrors
+ *  the editable subset of `nexus_types::bases::FieldType`. */
+const EDITABLE_TYPES = new Set([
+  'text',
+  'long-text',
+  'url',
+  'email',
+  'uuid',
+  'number',
+  'currency',
+  'percent',
+  'checkbox',
+  'date',
+  'time',
+  'datetime',
+  'select',
+])
+
+/** Whether a field with this `def.type` should render as an editable
+ *  cell. Exported so the test suite can pin the exact set without
+ *  duplicating the list. */
+export function isEditableType(type: string | undefined): boolean {
+  if (!type) return false
+  return EDITABLE_TYPES.has(type)
+}
+
+/** Render the click-to-edit cell. The default state is a `<span>`
+ *  carrying the formatted text; a click swaps it for a type-aware
+ *  editor (input / select / etc). Commit (Enter / blur / change for
+ *  selects + checkbox) calls `mutate.update` then `mutate.refresh`;
+ *  Escape restores the read-only display without firing the IPC.
+ *
+ *  The cell registers a `data-field` attribute on the wrapper so the
+ *  test harness can target a specific cell without having to walk
+ *  the DOM by index. */
+export function makeEditableCell(
+  record: AppliedRecord,
+  field: string,
+  value: unknown,
+  def: FieldDef | undefined,
+  mutate: MutationDeps,
+): HTMLElement {
+  const wrap = document.createElement('span')
+  wrap.className = 'cm-md-dbview-cell'
+  wrap.dataset.field = field
+  wrap.dataset.recordId = record.id
+
+  // Checkbox is special: no popover, click toggles directly. The
+  // formatted glyph (✓ / empty) doubles as the affordance.
+  if (def?.type === 'checkbox') {
+    renderCheckbox(wrap, record, field, value === true, mutate)
+    return wrap
+  }
+
+  const display = document.createElement('span')
+  display.className = 'cm-md-dbview-cell-display'
+  display.textContent = formatCell(value, def)
+  wrap.appendChild(display)
+  wrap.classList.add('cm-md-dbview-cell--editable')
+  wrap.title = 'Click to edit'
+
+  display.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    swapToEditor(wrap, display, record, field, value, def, mutate)
+  })
+
+  return wrap
+}
+
+function renderCheckbox(
+  wrap: HTMLElement,
+  record: AppliedRecord,
+  field: string,
+  checked: boolean,
+  mutate: MutationDeps,
+): void {
+  wrap.classList.add('cm-md-dbview-cell--checkbox')
+  wrap.classList.add('cm-md-dbview-cell--editable')
+  wrap.title = 'Click to toggle'
+  const glyph = document.createElement('span')
+  glyph.className = 'cm-md-dbview-cell-display'
+  glyph.textContent = checked ? '✓' : ''
+  wrap.appendChild(glyph)
+  wrap.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    void commitCellMutation(wrap, record.id, field, !checked, mutate)
+  })
+}
+
+function swapToEditor(
+  wrap: HTMLElement,
+  display: HTMLElement,
+  record: AppliedRecord,
+  field: string,
+  value: unknown,
+  def: FieldDef | undefined,
+  mutate: MutationDeps,
+): void {
+  const editor = buildEditorControl(value, def)
+  if (!editor) return
+  wrap.classList.add('cm-md-dbview-cell--editing')
+  display.replaceWith(editor)
+  if (editor instanceof HTMLInputElement || editor instanceof HTMLSelectElement) {
+    editor.focus()
+    if (editor instanceof HTMLInputElement && typeof editor.select === 'function') {
+      editor.select()
+    }
+  }
+
+  let settled = false
+  const restore = (): void => {
+    if (settled) return
+    settled = true
+    wrap.classList.remove('cm-md-dbview-cell--editing')
+    editor.replaceWith(display)
+  }
+  const commit = (raw: string): void => {
+    if (settled) return
+    const parsed = parseCellInput(raw, def)
+    if (parsed === SAME_VALUE) {
+      restore()
+      return
+    }
+    // Skip the IPC when the parsed value matches what's already on
+    // the record — Enter / blur on an unchanged input is a no-op.
+    if (parsed === value || (parsed === null && value == null)) {
+      restore()
+      return
+    }
+    settled = true
+    wrap.classList.remove('cm-md-dbview-cell--editing')
+    void commitCellMutation(wrap, record.id, field, parsed, mutate).finally(() => {
+      // refresh() rebuilds the layout from scratch on success, so
+      // this DOM is about to be replaced. On failure we restore the
+      // pre-edit display so the user sees what was there before.
+      if (editor.isConnected) editor.replaceWith(display)
+    })
+  }
+
+  editor.addEventListener('keydown', (ev: Event) => {
+    const ke = ev as KeyboardEvent
+    if (ke.key === 'Enter') {
+      ev.preventDefault()
+      commit(readEditorValue(editor))
+    } else if (ke.key === 'Escape') {
+      ev.preventDefault()
+      restore()
+    }
+  })
+  editor.addEventListener('blur', () => {
+    commit(readEditorValue(editor))
+  })
+  // <select> commits on change so a single click → pick → commit
+  // works without leaving the cell focused.
+  if (editor instanceof HTMLSelectElement) {
+    editor.addEventListener('change', () => {
+      commit(readEditorValue(editor))
+    })
+  }
+}
+
+function buildEditorControl(
+  value: unknown,
+  def: FieldDef | undefined,
+): HTMLInputElement | HTMLSelectElement | null {
+  const type = def?.type
+  if (type === 'select') {
+    const select = document.createElement('select')
+    select.className = 'cm-md-dbview-cell-editor'
+    // Render an explicit empty option so the user can clear the field.
+    const empty = document.createElement('option')
+    empty.value = ''
+    empty.textContent = '—'
+    select.appendChild(empty)
+    const current = formatCell(value, def)
+    for (const opt of def?.options ?? []) {
+      const optionEl = document.createElement('option')
+      const label = typeof opt === 'string' ? opt : (opt.label ?? opt.name ?? opt.id ?? '')
+      const v = typeof opt === 'string' ? opt : (opt.id ?? opt.label ?? opt.name ?? '')
+      optionEl.value = String(v)
+      optionEl.textContent = String(label)
+      select.appendChild(optionEl)
+    }
+    select.value = current
+    return select
+  }
+  const input = document.createElement('input')
+  input.className = 'cm-md-dbview-cell-editor'
+  switch (type) {
+    case 'number':
+    case 'currency':
+    case 'percent':
+      input.type = 'number'
+      input.value = value == null ? '' : String(value)
+      break
+    case 'date':
+      input.type = 'date'
+      input.value = formatCell(value, def)
+      break
+    case 'time':
+      input.type = 'time'
+      input.value = formatCell(value, def)
+      break
+    case 'datetime':
+      input.type = 'datetime-local'
+      // <input type=datetime-local> wants `YYYY-MM-DDTHH:MM`, not the
+      // formatter's space-separated form.
+      input.value = formatCell(value, def).replace(' ', 'T')
+      break
+    default:
+      input.type = 'text'
+      input.value = typeof value === 'string' ? value : formatCell(value, def)
+      break
+  }
+  return input
+}
+
+function readEditorValue(editor: HTMLInputElement | HTMLSelectElement): string {
+  return editor.value
+}
+
+/** Sentinel returned by `parseCellInput` when the parsed value is
+ *  identical to the original — the caller short-circuits the IPC and
+ *  just restores the display. */
+const SAME_VALUE = Symbol('SAME_VALUE')
+
+/** Parse the raw string from the editor control into the wire-shape
+ *  value that `update_record` expects. Empty / whitespace-only inputs
+ *  collapse to JSON null so the storage layer clears the field
+ *  rather than writing the literal empty string. Numbers parse via
+ *  `Number()`; non-finite results bail out (caller treats `NaN` as a
+ *  no-op via the SAME_VALUE sentinel). Exported for unit tests. */
+export function parseCellInput(
+  raw: string,
+  def: FieldDef | undefined,
+): unknown {
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  switch (def?.type) {
+    case 'number':
+    case 'currency':
+    case 'percent': {
+      const n = Number(trimmed)
+      if (!Number.isFinite(n)) return SAME_VALUE
+      return n
+    }
+    default:
+      return trimmed
+  }
+}
+
+async function commitCellMutation(
+  wrap: HTMLElement,
+  recordId: string,
+  field: string,
+  parsed: unknown,
+  mutate: MutationDeps,
+): Promise<void> {
+  if (parsed === SAME_VALUE) return
+  wrap.classList.add('cm-md-dbview-cell--saving')
+  try {
+    await mutate.update(recordId, { [field]: parsed })
+    mutate.refresh()
+  } catch (err) {
+    wrap.classList.remove('cm-md-dbview-cell--saving')
+    wrap.classList.add('cm-md-dbview-cell--error')
+    console.warn('[nexus.editor] cell update failed:', err)
+  }
 }
 
 /** Pick a human title for a record. Strategy: explicit `titleField`

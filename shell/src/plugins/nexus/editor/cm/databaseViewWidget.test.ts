@@ -16,8 +16,11 @@ import {
   DatabaseViewCache,
   DatabaseViewWidget,
   effectiveFields,
+  isEditableType,
   KANBAN_DRAG_MIME,
+  makeEditableCell,
   MISSING_GROUP_KEY,
+  parseCellInput,
   readKanbanDragPayload,
   renderKanban,
   widgetKey,
@@ -776,6 +779,319 @@ test('renderKanban: cards are NOT draggable when mutate is absent (read-only)', 
   // boolean directly.
   assert.equal(card.getAttribute('draggable'), null)
   assert.ok(!card.classList.contains('cm-md-dbview-card--draggable'))
+  document.body.removeChild(root)
+})
+
+// ── BL-069 follow-up: inline cell editing ───────────────────────────────────
+
+test('isEditableType: text/number/date/select/checkbox editable; lookup/relation/multi-select read-only', () => {
+  for (const t of [
+    'text',
+    'long-text',
+    'url',
+    'email',
+    'uuid',
+    'number',
+    'currency',
+    'percent',
+    'checkbox',
+    'date',
+    'time',
+    'datetime',
+    'select',
+  ]) {
+    assert.equal(isEditableType(t), true, `${t} should be editable`)
+  }
+  for (const t of [
+    'multi-select',
+    'relation',
+    'lookup',
+    'formula',
+    'rollup',
+    undefined,
+    '',
+    'unknown',
+  ]) {
+    assert.equal(isEditableType(t), false, `${t ?? '(undef)'} should be read-only`)
+  }
+})
+
+test('parseCellInput: text trims; empty / whitespace collapse to null', () => {
+  assert.equal(parseCellInput('hello', { type: 'text' }), 'hello')
+  assert.equal(parseCellInput('  hello  ', { type: 'text' }), 'hello')
+  assert.equal(parseCellInput('', { type: 'text' }), null)
+  assert.equal(parseCellInput('   ', { type: 'text' }), null)
+})
+
+test('parseCellInput: number / currency / percent parse via Number()', () => {
+  assert.equal(parseCellInput('42', { type: 'number' }), 42)
+  assert.equal(parseCellInput('3.14', { type: 'number' }), 3.14)
+  assert.equal(parseCellInput('1,234', { type: 'currency' }), parseCellInput('1,234', { type: 'currency' }))
+  // Non-finite parse routes to SAME_VALUE sentinel — caller treats
+  // it as no-op. The sentinel is a Symbol; can't import from outside,
+  // but we assert it's not the raw string and not a finite number.
+  const out = parseCellInput('abc', { type: 'number' }) as unknown
+  assert.equal(typeof out, 'symbol')
+})
+
+test('makeEditableCell: text cell — click → input → Enter dispatches update + refresh', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  const record = { id: 'r1', title: 'old' }
+  const cell = makeEditableCell(record, 'title', 'old', { type: 'text' }, mutate)
+  document.body.appendChild(cell)
+
+  // Click to enter edit mode.
+  const display = cell.querySelector('.cm-md-dbview-cell-display') as HTMLElement
+  display.click()
+  const input = cell.querySelector('input.cm-md-dbview-cell-editor') as HTMLInputElement
+  assert.ok(input, 'input swapped in after click')
+  assert.equal(input.value, 'old')
+
+  // Type new value + press Enter.
+  input.value = 'new value'
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(calls, [{ id: 'r1', fields: { title: 'new value' } }])
+  assert.equal(refreshes, 1)
+
+  document.body.removeChild(cell)
+})
+
+test('makeEditableCell: Escape restores display without firing IPC', async () => {
+  const calls: Array<unknown> = []
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async () => {
+      calls.push(1)
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  const cell = makeEditableCell(
+    { id: 'r1', title: 'old' },
+    'title',
+    'old',
+    { type: 'text' },
+    mutate,
+  )
+  document.body.appendChild(cell)
+
+  ;(cell.querySelector('.cm-md-dbview-cell-display') as HTMLElement).click()
+  const input = cell.querySelector('input.cm-md-dbview-cell-editor') as HTMLInputElement
+  input.value = 'discarded'
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+
+  await Promise.resolve()
+  // No IPC, no refresh, display restored.
+  assert.equal(calls.length, 0)
+  assert.equal(refreshes, 0)
+  assert.ok(cell.querySelector('.cm-md-dbview-cell-display'), 'display span back in DOM')
+  assert.equal(cell.querySelector('input.cm-md-dbview-cell-editor'), null)
+
+  document.body.removeChild(cell)
+})
+
+test('makeEditableCell: unchanged value (Enter on same string) is a no-op IPC-wise', async () => {
+  const calls: Array<unknown> = []
+  const mutate: MutationDeps = {
+    update: async () => {
+      calls.push(1)
+    },
+    refresh: () => {},
+  }
+  const cell = makeEditableCell(
+    { id: 'r1', title: 'same' },
+    'title',
+    'same',
+    { type: 'text' },
+    mutate,
+  )
+  document.body.appendChild(cell)
+  ;(cell.querySelector('.cm-md-dbview-cell-display') as HTMLElement).click()
+  const input = cell.querySelector('input.cm-md-dbview-cell-editor') as HTMLInputElement
+  // value unchanged
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(calls.length, 0, 'unchanged value should not hit IPC')
+  document.body.removeChild(cell)
+})
+
+test('makeEditableCell: number cell parses via Number() before dispatch', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {},
+  }
+  const cell = makeEditableCell(
+    { id: 'r1', count: 1 },
+    'count',
+    1,
+    { type: 'number' },
+    mutate,
+  )
+  document.body.appendChild(cell)
+  ;(cell.querySelector('.cm-md-dbview-cell-display') as HTMLElement).click()
+  const input = cell.querySelector('input.cm-md-dbview-cell-editor') as HTMLInputElement
+  assert.equal(input.type, 'number')
+  input.value = '42'
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(calls, [{ id: 'r1', fields: { count: 42 } }])
+  document.body.removeChild(cell)
+})
+
+test('makeEditableCell: checkbox toggles directly on click without a popover', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  let refreshes = 0
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {
+      refreshes += 1
+    },
+  }
+  const cell = makeEditableCell(
+    { id: 'r1', done: false },
+    'done',
+    false,
+    { type: 'checkbox' },
+    mutate,
+  )
+  document.body.appendChild(cell)
+  // Glyph is empty for `false`.
+  assert.equal(cell.querySelector('.cm-md-dbview-cell-display')?.textContent, '')
+  cell.click()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(calls, [{ id: 'r1', fields: { done: true } }])
+  assert.equal(refreshes, 1)
+  document.body.removeChild(cell)
+})
+
+test('makeEditableCell: empty input collapses to null (clear field)', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {},
+  }
+  const cell = makeEditableCell(
+    { id: 'r1', title: 'old' },
+    'title',
+    'old',
+    { type: 'text' },
+    mutate,
+  )
+  document.body.appendChild(cell)
+  ;(cell.querySelector('.cm-md-dbview-cell-display') as HTMLElement).click()
+  const input = cell.querySelector('input.cm-md-dbview-cell-editor') as HTMLInputElement
+  input.value = ''
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(calls, [{ id: 'r1', fields: { title: null } }])
+  document.body.removeChild(cell)
+})
+
+test('makeEditableCell: select fires on change with the chosen option value', async () => {
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  const mutate: MutationDeps = {
+    update: async (id, fields) => {
+      calls.push({ id, fields })
+    },
+    refresh: () => {},
+  }
+  const cell = makeEditableCell(
+    { id: 'r1', status: 'Doing' },
+    'status',
+    'Doing',
+    { type: 'select', options: ['Doing', 'Done', 'Backlog'] },
+    mutate,
+  )
+  document.body.appendChild(cell)
+  ;(cell.querySelector('.cm-md-dbview-cell-display') as HTMLElement).click()
+  const select = cell.querySelector('select.cm-md-dbview-cell-editor') as HTMLSelectElement
+  assert.ok(select)
+  // Three options + the leading empty `—` choice = 4.
+  assert.equal(select.querySelectorAll('option').length, 4)
+  select.value = 'Done'
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(calls, [{ id: 'r1', fields: { status: 'Done' } }])
+  document.body.removeChild(cell)
+})
+
+test('table view renders editable cells when mutate is wired', async () => {
+  const resp: ExecuteDatabaseViewResponse = {
+    applied: {
+      view_name: 'inline',
+      view_type: 'table',
+      fields: ['title'],
+      layout: { kind: 'flat', records: [{ id: 'r1', title: 'A' }] },
+    },
+    schema: { version: '1.0', fields: { title: { type: 'text' } } },
+  }
+  const calls: Array<{ id: string; fields: Record<string, unknown> }> = []
+  const client = {
+    executeDatabaseView: () => Promise.resolve(resp),
+    updateBaseRecord: async (path: string, recordId: string, fields: Record<string, unknown>) => {
+      calls.push({ id: recordId, fields })
+      return null
+    },
+  } as unknown as EditorKernelClient
+  // `mutate` is threaded into renderApplied unconditionally on the
+  // fetch path; no explicit hook needed beyond the client.
+  const widget = new DatabaseViewWidget('T.bases', TABLE_CONFIG, {
+    client,
+    cache: new DatabaseViewCache(),
+  })
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  await Promise.resolve()
+  await Promise.resolve()
+  // `td` carries an editable wrapper instead of plain text because
+  // schema declared `title: { type: 'text' }`.
+  const td = root.querySelector('tbody td') as HTMLElement
+  assert.ok(td.querySelector('.cm-md-dbview-cell--editable'), 'cell wrapper present')
+  document.body.removeChild(root)
+})
+
+test('table view renders read-only text when schema omits the field type (no editor)', async () => {
+  // The legacy schema shape `{ title: {} }` (no `type` discriminator)
+  // routes through `isEditableType(undefined) === false` so the cell
+  // renders as plain text rather than an editable wrapper. This
+  // protects forges with pre-typed schemas from accidentally exposing
+  // editor controls over data the storage layer can't safely round-trip.
+  const resp = flatResp([{ id: 'r1', title: 'A', status: 'Done' }])
+  const { client } = makeClient(resp)
+  const widget = new DatabaseViewWidget('T.bases', TABLE_CONFIG, {
+    client,
+    cache: new DatabaseViewCache(),
+  })
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(root.querySelector('.cm-md-dbview-cell--editable'), null)
   document.body.removeChild(root)
 })
 

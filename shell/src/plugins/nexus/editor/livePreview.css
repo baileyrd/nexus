@@ -216,6 +216,56 @@
   opacity: 0.45;
 }
 
+/* Inline cell editing (BL-069 follow-up). The cell wrapper is a
+ * span so it can layer in either a <td> (table view) or a card row
+ * (kanban / gallery) without changing block flow. The editing /
+ * saving / error states are visual hints only — the JS owns the
+ * actual lifecycle. */
+.cm-content .cm-md-dbview-cell {
+  display: inline-block;
+  min-width: 1ch;
+}
+.cm-content .cm-md-dbview-cell--editable {
+  cursor: text;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.cm-content .cm-md-dbview-cell--editable:hover {
+  background: color-mix(
+    in oklab,
+    var(--background-secondary) 70%,
+    var(--interactive-accent) 30%
+  );
+}
+.cm-content .cm-md-dbview-cell--checkbox {
+  cursor: pointer;
+  user-select: none;
+}
+.cm-content .cm-md-dbview-cell--editing {
+  background: var(--background-primary);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+  padding: 0;
+}
+.cm-content .cm-md-dbview-cell--saving {
+  opacity: 0.6;
+}
+.cm-content .cm-md-dbview-cell--error {
+  outline: 2px solid var(--text-error, #c0392b);
+  outline-offset: -2px;
+}
+.cm-content .cm-md-dbview-cell-editor {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  margin: 0;
+  min-width: 4ch;
+  width: 100%;
+  outline: none;
+}
+
 .cm-content .cm-md-dbview-card {
   background: var(--background-primary);
   border: 1px solid var(--divider-color);
