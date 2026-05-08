@@ -14,8 +14,12 @@ import {
 } from './riskClassifier.ts'
 import {
   diffLines,
+  diffWords,
+  enrichWordDiff,
   extractWriteFileArgs,
+  tokenize,
   DIFF_MAX_LINES,
+  type DiffLine,
 } from './diffPreview.ts'
 import { useAgentSessionStore } from './sessionStore.ts'
 
@@ -96,6 +100,91 @@ test('diffLines: truncates at DIFF_MAX_LINES', () => {
   const r = diffLines(before, after)
   assert.equal(r.truncated, true)
   assert.ok(r.lines.length <= DIFF_MAX_LINES)
+})
+
+// ── word-level diff (AIG-02 follow-up) ────────────────────────────────
+
+test('tokenize: splits on words / whitespace / punctuation', () => {
+  assert.deepEqual(tokenize('foo bar'), ['foo', ' ', 'bar'])
+  assert.deepEqual(tokenize('foo, bar!'), ['foo', ',', ' ', 'bar', '!'])
+  assert.deepEqual(tokenize(''), [])
+})
+
+test('diffWords: identifies single-word edit', () => {
+  const r = diffWords('the quick brown fox', 'the slow brown fox')
+  // Common prefix `the ` and suffix ` brown fox` should be
+  // recognised; only `quick` / `slow` should be tagged.
+  const removed = r.before.filter((s) => s.kind === 'remove').map((s) => s.text).join('')
+  const added = r.after.filter((s) => s.kind === 'add').map((s) => s.text).join('')
+  assert.equal(removed, 'quick')
+  assert.equal(added, 'slow')
+})
+
+test('diffWords: coalesces adjacent same-kind segments', () => {
+  const r = diffWords('foo bar baz', 'foo qux quux baz')
+  // No two consecutive segments share the same kind.
+  for (const segs of [r.before, r.after]) {
+    for (let i = 1; i < segs.length; i++) {
+      assert.notEqual(segs[i].kind, segs[i - 1].kind)
+    }
+  }
+})
+
+test('diffWords: identical inputs produce only common segments', () => {
+  const r = diffWords('hello world', 'hello world')
+  assert.ok(r.before.every((s) => s.kind === 'common'))
+  assert.ok(r.after.every((s) => s.kind === 'common'))
+})
+
+test('enrichWordDiff: pairs remove+add lines and tags segments', () => {
+  const lines: DiffLine[] = [
+    { kind: 'context', text: 'unchanged' },
+    { kind: 'remove', text: 'the quick brown fox' },
+    { kind: 'add', text: 'the slow brown fox' },
+    { kind: 'context', text: 'tail' },
+  ]
+  enrichWordDiff(lines)
+  assert.ok(lines[1].segments, 'remove line should carry segments')
+  assert.ok(lines[2].segments, 'add line should carry segments')
+  assert.equal(lines[0].segments, undefined)
+  assert.equal(lines[3].segments, undefined)
+  const removed = lines[1].segments!.filter((s) => s.kind === 'remove').map((s) => s.text).join('')
+  const added = lines[2].segments!.filter((s) => s.kind === 'add').map((s) => s.text).join('')
+  assert.equal(removed, 'quick')
+  assert.equal(added, 'slow')
+})
+
+test('enrichWordDiff: skips pairs with no shared content', () => {
+  const lines: DiffLine[] = [
+    { kind: 'remove', text: 'aaaaaaaaaa' },
+    { kind: 'add', text: 'bbbbbbbbbb' },
+  ]
+  enrichWordDiff(lines)
+  // Below the 20% common-char threshold; both lines stay flat.
+  assert.equal(lines[0].segments, undefined)
+  assert.equal(lines[1].segments, undefined)
+})
+
+test('enrichWordDiff: leaves unmatched tail flat (3 removes vs 1 add)', () => {
+  const lines: DiffLine[] = [
+    { kind: 'remove', text: 'one quick fox' },
+    { kind: 'remove', text: 'two' },
+    { kind: 'remove', text: 'three' },
+    { kind: 'add', text: 'one slow fox' },
+  ]
+  enrichWordDiff(lines)
+  assert.ok(lines[0].segments, 'first pair gets segmented')
+  assert.ok(lines[3].segments, 'add side of pair gets segmented')
+  assert.equal(lines[1].segments, undefined)
+  assert.equal(lines[2].segments, undefined)
+})
+
+test('diffLines: emits segments on simple word replace', () => {
+  const r = diffLines('alpha beta gamma\n', 'alpha BETA gamma\n')
+  const removeLine = r.lines.find((l) => l.kind === 'remove')
+  const addLine = r.lines.find((l) => l.kind === 'add')
+  assert.ok(removeLine?.segments, 'remove line should be segmented')
+  assert.ok(addLine?.segments, 'add line should be segmented')
 })
 
 test('extractWriteFileArgs: pulls path + contents, rejects malformed', () => {

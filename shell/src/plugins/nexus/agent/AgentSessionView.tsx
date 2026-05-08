@@ -559,7 +559,21 @@ function DiffLineRow({ line }: { line: DiffLine }): JSX.Element {
   const sigil = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '
   return (
     <span className={`agent-approval__diff-line agent-approval__diff-line--${line.kind}`}>
-      {sigil} {line.text}
+      {sigil}{' '}
+      {line.segments
+        ? line.segments.map((seg, i) =>
+            seg.kind === 'common' ? (
+              <span key={i}>{seg.text}</span>
+            ) : (
+              <span
+                key={i}
+                className={`agent-approval__diff-word agent-approval__diff-word--${seg.kind}`}
+              >
+                {seg.text}
+              </span>
+            ),
+          )
+        : line.text}
       {'\n'}
     </span>
   )

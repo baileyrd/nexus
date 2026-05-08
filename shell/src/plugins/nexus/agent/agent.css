@@ -436,6 +436,28 @@
   color: var(--text-muted);
 }
 
+/* AIG-02 follow-up — word-level highlighting inside paired
+ * remove/add lines. Saturates the changed token against the
+ * line's existing colour wash. */
+.agent-approval__diff-word {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.agent-approval__diff-word--add {
+  background: color-mix(in srgb, var(--ok, #2e7d32) 28%, transparent);
+  color: var(--ok, #2e7d32);
+  font-weight: 600;
+}
+
+.agent-approval__diff-word--remove {
+  background: color-mix(in srgb, var(--risk, #b3261e) 28%, transparent);
+  color: var(--risk, #b3261e);
+  font-weight: 600;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
 .agent-approval__diff-truncated {
   padding: 4px 8px;
   border-top: 1px solid var(--background-modifier-border);

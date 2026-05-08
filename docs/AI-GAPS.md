@@ -44,7 +44,7 @@
 
 ### Follow-up (not blocking)
 - Rust-side `StepPolicy`: a kernel-enforced policy would let headless `nexus agent run` honour the same modes the shell does. Today `nexus agent run --auto-approve true` is the only headless option.
-- Diff renderer is whole-line LCS — adequate for forge markdown but could grow word-level highlighting if users complain about replace-blocks reading as remove+add.
+- ✅ **Word-level highlighting on paired remove+add lines** — shipped 2026-05-08. New `tokenize` / `diffWords` / `enrichWordDiff` helpers in `shell/src/plugins/nexus/agent/diffPreview.ts` walk the line-level output, detect contiguous remove-then-add blocks, line them up 1:1, and decorate each pair with `WordSegment[]` (`common` / `add` / `remove` runs, coalesced). The 20%-shared-character floor in `segmentsAreInformative` skips wholesale rewrites where the highlight would be visual noise. `DiffLineRow` renders segments inline with a saturated tint over the existing line wash (line-through on removed words). 8 new tests pin tokenization, single-word edits, segment coalescing, identical-input fast path, paired enrichment, dissimilar-line skip, unmatched-tail handling, and the `diffLines` end-to-end seam.
 - `Approve & continue` is session-scoped (lives in the store's `stepPolicy`) — surviving the session means the picker resets to `ask_on_risky` next run, which is the safer default.
 
 ---
