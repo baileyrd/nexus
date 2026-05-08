@@ -1095,11 +1095,18 @@ impl TuiApp {
         }
     }
 
-    /// Submit the current prompt to `com.nexus.ai::ask`. Blocks the
-    /// render loop on the IPC call (see [`AiPanelState::in_flight`]
+    /// Submit the current prompt to `com.nexus.ai::stream_ask`. Blocks
+    /// the render loop on the IPC call (see [`AiPanelState::in_flight`]
     /// for the limitation note). Same pattern as the storage /
     /// terminal helpers — long-running calls freeze the UI until
     /// they complete or the timeout fires.
+    ///
+    /// AIG-07 follow-up: the call passes the full transcript through
+    /// `stream_ask`'s `messages` field so the model sees prior turns;
+    /// the kernel handler treats the last `user` message as the RAG
+    /// retrieval question. We keep the synchronous `block_on` shape —
+    /// streaming token feedback is a separate follow-up that wants an
+    /// `Arc<KernelPluginContext>` refactor.
     pub fn submit_ai(&mut self) {
         let question = self.ai.input.trim().to_string();
         if question.is_empty() || self.ai.in_flight {
@@ -1116,6 +1123,21 @@ impl TuiApp {
         // Auto-pin to the bottom whenever a new turn lands.
         self.ai.scroll = u16::MAX;
 
+        let messages: Vec<serde_json::Value> = self
+            .ai
+            .messages
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "role": match m.role {
+                        AiRole::User => "user",
+                        AiRole::Assistant => "assistant",
+                    },
+                    "content": m.text,
+                })
+            })
+            .collect();
+
         // Generous timeout — same ceiling the shell uses for chat
         // calls.
         let timeout = Duration::from_secs(180);
@@ -1124,13 +1146,13 @@ impl TuiApp {
                 .context
                 .ipc_call(
                     "com.nexus.ai",
-                    "ask",
-                    serde_json::json!({ "question": question }),
+                    "stream_ask",
+                    serde_json::json!({ "messages": messages }),
                     timeout,
                 )
                 .await
                 .map_err(|e| e.to_string())
-                .and_then(|value| extract_ask_answer(&value))
+                .and_then(|value| extract_stream_ask_text(&value))
         });
         self.ai.in_flight = false;
         match result {
@@ -1148,21 +1170,23 @@ impl TuiApp {
     }
 }
 
-/// AIG-07 — pull the answer string out of a `com.nexus.ai::ask`
-/// response. The handler returns a serialised `RagResponse` whose
-/// `answer` field carries the model's reply; the rest (citations,
-/// scores) we don't render in the TUI v1.
-fn extract_ask_answer(value: &serde_json::Value) -> Result<String, String> {
+/// AIG-07 follow-up — pull the assistant text out of a
+/// `com.nexus.ai::stream_ask` final result. Mirrors the
+/// `AiStreamAskResult.text` shape; falls back to the legacy `answer`
+/// field (so a one-shot `ask` response still parses) and to a bare
+/// string for kernel error paths that surface the message verbatim.
+fn extract_stream_ask_text(value: &serde_json::Value) -> Result<String, String> {
+    if let Some(s) = value.get("text").and_then(|v| v.as_str()) {
+        return Ok(s.to_string());
+    }
     if let Some(s) = value.get("answer").and_then(|v| v.as_str()) {
         return Ok(s.to_string());
     }
-    // Some kernel error paths return a bare string; treat that as
-    // the answer for forward compat.
     if let Some(s) = value.as_str() {
         return Ok(s.to_string());
     }
     Err(format!(
-        "ask: unrecognised response shape ({})",
+        "stream_ask: unrecognised response shape ({})",
         value
     ))
 }
@@ -1171,33 +1195,51 @@ fn extract_ask_answer(value: &serde_json::Value) -> Result<String, String> {
 mod aig07_tests {
     use super::*;
 
-    // ── extract_ask_answer ─────────────────────────────────────────
+    // ── extract_stream_ask_text ────────────────────────────────────
 
     #[test]
-    fn extract_ask_answer_pulls_answer_field() {
+    fn extract_stream_ask_text_pulls_text_field() {
         let v = serde_json::json!({
-            "answer": "the model said this",
-            "citations": []
+            "session_id": "abc",
+            "text": "the model said this",
+            "sources": []
         });
         assert_eq!(
-            extract_ask_answer(&v).unwrap(),
+            extract_stream_ask_text(&v).unwrap(),
             "the model said this".to_string(),
         );
     }
 
     #[test]
-    fn extract_ask_answer_falls_back_to_bare_string() {
+    fn extract_stream_ask_text_falls_back_to_legacy_answer_field() {
+        // Forward-compat: an old `ask` response shape still parses,
+        // so the TUI doesn't break if it hits a legacy plugin build.
+        let v = serde_json::json!({
+            "answer": "legacy reply",
+            "citations": []
+        });
+        assert_eq!(
+            extract_stream_ask_text(&v).unwrap(),
+            "legacy reply".to_string(),
+        );
+    }
+
+    #[test]
+    fn extract_stream_ask_text_falls_back_to_bare_string() {
         // Forward-compat: some kernel error paths return a string
         // directly. The TUI surfaces it as the answer rather than
         // an "unrecognised shape" error.
         let v = serde_json::Value::String("plain reply".into());
-        assert_eq!(extract_ask_answer(&v).unwrap(), "plain reply".to_string());
+        assert_eq!(
+            extract_stream_ask_text(&v).unwrap(),
+            "plain reply".to_string(),
+        );
     }
 
     #[test]
-    fn extract_ask_answer_rejects_unknown_shape() {
+    fn extract_stream_ask_text_rejects_unknown_shape() {
         let v = serde_json::json!({ "foo": 1 });
-        let err = extract_ask_answer(&v).unwrap_err();
+        let err = extract_stream_ask_text(&v).unwrap_err();
         assert!(err.contains("unrecognised"), "got: {err}");
     }
 

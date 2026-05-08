@@ -69,7 +69,7 @@ fn render_transcript(frame: &mut Frame, app: &TuiApp, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if app.ai.messages.is_empty() {
         lines.push(Line::from(Span::styled(
-            "Press `i` to start typing. The model uses RAG-grounded retrieval (`com.nexus.ai::ask`) so questions are answered against your forge.",
+            "Press `i` to start typing. The model uses RAG-grounded retrieval (`com.nexus.ai::stream_ask`) with the full transcript, so questions are answered against your forge and prior turns.",
             Style::default().fg(Color::DarkGray),
         )));
     } else {
