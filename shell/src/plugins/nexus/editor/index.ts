@@ -14,6 +14,7 @@ import { useEditorBlameStore } from './blameStore'
 import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
 import { revealBlockInView } from './cm/blockLinkNav'
+import { revealLineInView } from './cm/revealLine'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
 import { DEFAULT_CODE_EXTENSIONS } from './codeMode'
@@ -26,6 +27,7 @@ import {
 import { createBlockRefDragBridge } from './blockRefDragBridge'
 import { installInlineToolbarStyles } from './cm/inlineToolbar'
 import { installMarginSuggestStyles } from './cm/marginSuggestions'
+import { runSaveFormatHook } from './cm/saveFormatHooks'
 import { createCommentsApi } from '../comments/commentsApi'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
@@ -896,6 +898,58 @@ export const editorPlugin: Plugin = {
       setTimeout(() => tryReveal(payload.relpath), 250)
     })
 
+    // BL-077 follow-up — `nexus.editor:reveal-line` consumer.
+    // Cmd+Click → definition emits the event after `files:open`
+    // raises the destination tab. Mirror the reveal-block staging
+    // — when the receiving tab's CM view isn't mounted yet, queue
+    // the (line, character) and replay on the next tick. The
+    // queue is keyed by relpath so a second click for the same
+    // file overwrites the pending entry rather than queueing
+    // both.
+    const pendingLineReveals = new Map<
+      string,
+      { line: number; character: number }
+    >()
+    const tryRevealLine = (relpath: string) => {
+      const target = pendingLineReveals.get(relpath)
+      if (!target) return
+      // Defer one tick so the EditorView has a chance to mount
+      // its CM instance via the active-tab effect (same rationale
+      // as `tryReveal` above).
+      queueMicrotask(() => {
+        const cm = getActiveCmView()
+        if (!cm) return
+        // Match the active relpath against the queued target so a
+        // racing tab switch doesn't scroll the wrong file. We don't
+        // have the cm view's relpath directly here, so cross-check
+        // via the editor store.
+        if (useEditorStore.getState().activeRelpath !== relpath) return
+        revealLineInView(cm, target.line, target.character)
+        pendingLineReveals.delete(relpath)
+      })
+    }
+    api.events.on<{
+      relpath: string
+      line: number
+      character: number
+    }>('nexus.editor:reveal-line', (payload) => {
+      if (!payload?.relpath) return
+      if (typeof payload.line !== 'number' || typeof payload.character !== 'number') {
+        return
+      }
+      pendingLineReveals.set(payload.relpath, {
+        line: payload.line,
+        character: payload.character,
+      })
+      // Same backoff schedule as block-reveal — one immediate
+      // attempt covers the already-open case, the deferred attempts
+      // cover the just-loaded-via-files:open case where the new
+      // CM view mounts a few frames later.
+      tryRevealLine(payload.relpath)
+      setTimeout(() => tryRevealLine(payload.relpath), 80)
+      setTimeout(() => tryRevealLine(payload.relpath), 250)
+    })
+
     // BL-050 Phase 3 — block-handle "Comment" affordance. The bridge
     // resolves the kernel block_id for the CM-block index, stamps it
     // for stable cross-session anchoring (ADR 0017), prompts for the
@@ -1101,10 +1155,32 @@ export const editorPlugin: Plugin = {
           return
         }
 
-        // Non-markdown named file — same storage-write as pre-Phase-6.
-        await writeStorageFile(tab.relpath, tab.content)
-        useEditorStore.getState().markSaved(tab.relpath)
-        api.events.emit('files:saved', { relpath: tab.relpath })
+        // Non-markdown named file — code-mode tab. Run any
+        // registered LSP format-on-save hook *before* writing so
+        // `tab.content` reflects the post-format buffer (the hook
+        // applies edits to the live CM6 view, which the editor
+        // store mirrors via the existing change-tracking
+        // pipeline). Hook errors are swallowed by `runSaveFormatHook`;
+        // we surface them via the bridge-error channel so a broken
+        // formatter doesn't silently no-op.
+        await runSaveFormatHook(tab.relpath, (err) => {
+          api.notifications.show({
+            type: 'warning',
+            message: `Format-on-save failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          })
+        })
+        // Re-read tab.content after format — the hook may have
+        // mutated the view, and `useEditorStore` updates its
+        // `content` mirror via the editor's change pipeline before
+        // returning. Look up the freshest snapshot rather than
+        // closing over the stale `tab` reference.
+        const fresh =
+          useEditorStore.getState().tabs.find((t) => t.relpath === tab.relpath) ?? tab
+        await writeStorageFile(fresh.relpath, fresh.content)
+        useEditorStore.getState().markSaved(fresh.relpath)
+        api.events.emit('files:saved', { relpath: fresh.relpath })
       } catch (err) {
         api.notifications.show({
           type: 'error',

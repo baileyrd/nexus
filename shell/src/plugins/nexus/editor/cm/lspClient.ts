@@ -48,6 +48,7 @@ import type {
   LspRange,
   PublishDiagnosticsParams,
 } from './lspIpc.ts'
+import { registerSaveFormatHook } from './saveFormatHooks.ts'
 
 /** Shape of an LSP `Location` — minimal subset we forward. */
 export interface LspLocation {
@@ -260,6 +261,7 @@ export function lspExtension(opts: LspExtensionOptions) {
       private readonly view: EditorView
       private readonly state: PluginState
       private destroyed = false
+      private saveFormatDisposer: (() => void) | null = null
 
       constructor(view: EditorView) {
         this.view = view
@@ -268,6 +270,14 @@ export function lspExtension(opts: LspExtensionOptions) {
           uri: inferUri(opts.relpath),
           diagnosticsUnsub: null,
         }
+        // Register the save-format hook so vim `:w`, the shell's
+        // `nexus.editor.save` command, and any future save chord
+        // run format through the same path the `Mod-s` keymap
+        // uses.
+        this.saveFormatDisposer = registerSaveFormatHook(
+          opts.relpath,
+          () => runFormatNow(this.view),
+        )
         // didOpen — fire & forget; no-op when the host has no server
         // routed for this extension (returns null).
         void opts.ipc
@@ -322,6 +332,8 @@ export function lspExtension(opts: LspExtensionOptions) {
       destroy() {
         this.destroyed = true
         this.state.diagnosticsUnsub?.()
+        this.saveFormatDisposer?.()
+        this.saveFormatDisposer = null
         void opts.ipc
           .closeFile(opts.relpath)
           .catch((err) => onError('closeFile', err))
@@ -430,19 +442,32 @@ export function lspExtension(opts: LspExtensionOptions) {
     },
   })
 
-  // ── Format-on-save (Mod-s) ──
+  // ── Format-on-save ──
+  // The format request is shared across two trigger points: the
+  // CM6 `Mod-s` keymap (covers users who save with the chord
+  // directly) and the save-format-hook registry (covers vim-mode
+  // `:w`, custom save chords, and the shell's `nexus.editor.save`
+  // command). The hook is registered from inside the lifecycle
+  // ViewPlugin's constructor so it can capture the live `view`;
+  // the keymap entry just delegates here.
+  const runFormatNow = async (view: EditorView): Promise<void> => {
+    let raw: unknown
+    try {
+      raw = await opts.ipc.format(opts.relpath)
+    } catch (err) {
+      onError('format', err)
+      return
+    }
+    const edits = raw as LspTextEdit[] | null
+    if (!edits || edits.length === 0) return
+    applyTextEdits(view, edits)
+  }
+
   const formatKey = keymap.of([
     {
       key: 'Mod-s',
       run: (view) => {
-        void opts.ipc
-          .format(opts.relpath)
-          .then((raw) => {
-            const edits = raw as LspTextEdit[] | null
-            if (!edits || edits.length === 0) return
-            applyTextEdits(view, edits)
-          })
-          .catch((err) => onError('format', err))
+        void runFormatNow(view)
         // Return false so the *outer* save handler still fires —
         // formatting is additive, not a replacement for the save
         // pipeline. Code mode's save lives in EditorView.tsx's
