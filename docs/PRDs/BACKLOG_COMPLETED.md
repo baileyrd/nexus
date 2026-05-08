@@ -8,6 +8,26 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-061 follow-up: per-saved-command memory_limit_mb override ✅ (2026-05-08)
+
+**Source**: BL-061 closure note (2026-05-07) — single explicit deferral ("the field exists on the struct but isn't routed yet")
+**Files**: `crates/nexus-terminal/src/core_plugin.rs` (new `pending_overrides: HashMap<String, MemoryLimits>` field on `MemoryState`; `dispatch_run_saved` stages the override after `create_session` and race-proofs by direct `monitor.set_limits` if the poller already tracked the pid; `memory_poller_round` consumes the override on first-track and orphan-sweeps via `retain` against the `live` id set); `crates/nexus-bootstrap/src/lib.rs` (refresh the inline TODO comment to point at the shipped follow-up)
+**Related**: BL-061 (Phase R memory monitor), BL-055 (`run_saved` IPC handler), PRD-09 §7.3 (memory limit defaults)
+
+The BL-061 phase R closure landed the bootstrap-wide memory monitor with PRD-09 §7.3 defaults (250 MB soft / 500 MB hard) but explicitly deferred per-saved-command overrides — the `SavedCommand.memory_limit_mb` field has existed on the struct since BL-055 phase O but wasn't routed. This pass closes that gap.
+
+- **`MemoryState.pending_overrides`.** New `HashMap<String, MemoryLimits>` keyed by session id. `dispatch_run_saved` stages an entry whenever the saved command carries `memory_limit_mb`, and the memory poller drains it on the first cycle that the session's pid lands in `session_pid`. The single-knob saved-command field maps to `MemoryLimits { soft_mb: None, hard_mb: Some(n) }` — when a user sets a per-command limit they're being explicit about the kill threshold; a soft warning at half doesn't add value (and the existing soft-then-hard pattern remains the bootstrap default for ad-hoc sessions).
+- **Race-proofing.** Between `create_session` returning the id and `dispatch_run_saved` staging the override, the poller could race in and call `monitor.track(pid, default_limits)` against the bootstrap default. To prevent the wrong defaults from killing a session before the override applies, `dispatch_run_saved` also checks `session_pid` after staging — if the poller already tracked, it calls `monitor.set_limits(pid, new_limits)` directly. Either way the right limits land before the next sample.
+- **Orphan sweep.** `memory_poller_round` now `retain`s `pending_overrides` against the live-id set at the start of every cycle. Catches the `create_session` → immediate-exit edge case where the override never gets consumed by the track loop. The track loop itself still removes the entry on first sight, so the sweep is just the safety net.
+- **No-monitor no-op.** When `TerminalCorePlugin` is built without `with_memory_monitor`, a saved command carrying `memory_limit_mb` is silently a no-op — there's no monitor to track against. Matches pre-BL-061 behaviour for plugins built without the monitor.
+
+**Tested**: `cargo test -p nexus-terminal --lib` 317/317 (was 314, +3); `cargo clippy -p nexus-terminal --all-targets` clean for the new code (no new warnings on `core_plugin.rs`); `cargo check -p nexus-bootstrap` clean (downstream consumer unaffected). Three new tests:
+- `run_saved_with_memory_limit_stages_pending_override_unix` — disables the real poller (60 s interval) so the test owns the observation window, runs a saved command with `memory_limit_mb = 128`, asserts `pending_overrides[id] = { soft_mb: None, hard_mb: Some(128) }`.
+- `run_saved_with_memory_limit_silently_skips_when_no_monitor_unix` — saved command carries `memory_limit_mb = 256`, plugin built without `with_memory_monitor`, run_saved still spawns a session and `self.memory` stays `None`.
+- `run_saved_without_memory_limit_does_not_stage_override_unix` — control: a saved command without `memory_limit_mb` doesn't populate `pending_overrides`, so the poller falls back to the bootstrap-wide default.
+
+**Definition of done coverage**: ✅ per-saved-command overrides via `SavedCommand.memory_limit_mb`. The BL-061 closure note's only explicit deferral is now closed.
+
 ### BL-069 follow-up: calendar navigation ✅ (2026-05-08)
 
 **Source**: BL-069 closure note (2026-05-07) — third of the four record-mutation / UX deferrals; sibling of the kanban drag-to-reorder + inline cell editing follow-ups that landed earlier the same day

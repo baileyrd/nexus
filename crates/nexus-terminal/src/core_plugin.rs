@@ -843,6 +843,14 @@ struct MemoryState {
     /// session id from `latest_rss`. We can't read pid from a closed
     /// session, so cache it here at track-time.
     session_pid: HashMap<String, u32>,
+    /// BL-061 follow-up — per-session memory-limit overrides staged
+    /// by `dispatch_run_saved` (or any other handler that wants to
+    /// pin a saved command's `memory_limit_mb` onto a freshly-spawned
+    /// session). Keys are session ids; the poller drains an entry the
+    /// first cycle the session's pid lands in `session_pid`. Stale
+    /// entries (sessions that never reached the poller's `live` set)
+    /// get retained via the per-round live-id sweep.
+    pending_overrides: HashMap<String, MemoryLimits>,
 }
 
 impl MemoryState {
@@ -851,6 +859,7 @@ impl MemoryState {
             monitor: MemoryMonitor::with_history(history),
             latest_rss: HashMap::new(),
             session_pid: HashMap::new(),
+            pending_overrides: HashMap::new(),
         }
     }
 }
@@ -1339,11 +1348,27 @@ fn memory_poller_round(
             }
             mem.latest_rss.remove(id);
         }
-        // Track newly seen pids.
+        // BL-061 follow-up — sweep orphaned overrides whose session
+        // never reached `live`. The "track newly seen pids" loop
+        // below otherwise drains the override entry on first sight,
+        // so this only catches the create_session-then-immediate-exit
+        // edge case. Keys missing from `live` (any pid state) are
+        // dropped — the session won't reappear.
+        let live_ids: std::collections::HashSet<&str> =
+            live.iter().map(|(id, _)| id.as_str()).collect();
+        mem.pending_overrides
+            .retain(|id, _| live_ids.contains(id.as_str()));
+        // Track newly seen pids. A pending override (BL-061 follow-up)
+        // wins over the bootstrap-wide default; the entry is consumed
+        // so a closed-and-respawned id starts fresh.
         for (id, pid) in &live {
             if let Some(pid) = pid {
                 if !mem.session_pid.contains_key(id.as_str()) {
-                    mem.monitor.track(*pid, limits);
+                    let effective = mem
+                        .pending_overrides
+                        .remove(id.as_str())
+                        .unwrap_or(limits);
+                    mem.monitor.track(*pid, effective);
                     mem.session_pid.insert(id.as_str().to_string(), *pid);
                 }
             }
@@ -2444,6 +2469,36 @@ impl TerminalCorePlugin {
             .map_err(poisoned)?
             .create_session(cfg)
             .map_err(crate_err)?;
+
+        // BL-061 follow-up — pin the saved command's memory_limit_mb
+        // onto this freshly-spawned session before the poller's next
+        // round. The single-knob saved-command field maps to the
+        // hard kill threshold (no separate soft warn — when a user
+        // sets a per-command limit they're being explicit; a soft
+        // warning at half doesn't add value). Applies only when both
+        // the limit is set AND a memory monitor is wired; without the
+        // monitor there's nothing to track against and the override
+        // is silently a no-op (matches pre-BL-061 behaviour for
+        // plugins built without `with_memory_monitor`).
+        if let (Some(limit_mb), Some(memory)) = (saved.memory_limit_mb, self.memory.as_ref()) {
+            let new_limits = MemoryLimits {
+                soft_mb: None,
+                hard_mb: Some(limit_mb),
+            };
+            let mut mem = memory.lock().map_err(poisoned)?;
+            mem.pending_overrides
+                .insert(id.as_str().to_string(), new_limits);
+            // Race-proof: the poller may have already tracked this
+            // session under the bootstrap-wide default (the override
+            // was staged after `create_session` returned). If so,
+            // update the live monitor entry in place so the wrong
+            // defaults don't kill the session before our override
+            // applies on the next round.
+            if let Some(&pid) = mem.session_pid.get(id.as_str()) {
+                mem.monitor.set_limits(pid, new_limits);
+            }
+        }
+
         to_value(
             &CreateSessionResponse {
                 id: id.as_str().to_string(),
@@ -3474,6 +3529,121 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    // ── BL-061 follow-up — per-saved-command memory_limit_mb override ───
+
+    fn seed_saved_with_memory_limit(
+        store: &SqliteSavedCommandStore,
+        slug: &str,
+        shell: &str,
+        cmd: &str,
+        memory_limit_mb: u32,
+    ) {
+        let mut row = SavedCommand::new(slug, slug, shell, cmd);
+        row.working_dir = None;
+        row.memory_limit_mb = Some(memory_limit_mb);
+        store.create(&row).expect("seed saved");
+    }
+
+    /// `dispatch_run_saved` stages the saved command's
+    /// `memory_limit_mb` into `MemoryState.pending_overrides` so the
+    /// next poller round applies it instead of the bootstrap-wide
+    /// default. Verified by inspecting state directly — running a
+    /// poller in the test would race with the real-PTY spawn timing.
+    #[test]
+    fn run_saved_with_memory_limit_stages_pending_override_unix() {
+        if !unix_only("run_saved_with_memory_limit_stages_pending_override_unix") {
+            return;
+        }
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        seed_saved_with_memory_limit(&saved, "capped", "/bin/sh", "sleep 5", 128);
+        let bus = Arc::new(EventBus::new(8));
+        // Disable the real poller so the test owns the pending_overrides
+        // observation window — `with_memory_poll_interval` would spawn
+        // a thread that consumes the entry between create_session and
+        // the assertion.
+        let mut p = TerminalCorePlugin::new()
+            .with_saved_store(saved)
+            .with_memory_monitor(TestMemoryLimits::default_recommended())
+            .with_memory_poll_interval(Duration::from_secs(60))
+            .with_event_bus(Arc::clone(&bus));
+
+        let resp = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "capped" }))
+            .expect("run_saved");
+        let body: CreateSessionResponse = serde_json::from_value(resp).expect("decode");
+
+        // Inspect MemoryState directly: either the override is staged
+        // in `pending_overrides` (if the poller hasn't run) OR
+        // `monitor.set_limits` was already called (if the poller raced
+        // ahead). The 60s poll interval makes the former the
+        // overwhelmingly common branch in this test.
+        let memory = p.memory.as_ref().expect("monitor wired");
+        let mem = memory.lock().expect("memory lock");
+        let staged = mem.pending_overrides.get(body.id.as_str());
+        assert!(
+            staged.is_some(),
+            "pending override should be staged for the saved command",
+        );
+        let limits = staged.expect("staged");
+        assert_eq!(limits.hard_mb, Some(128));
+        assert_eq!(
+            limits.soft_mb, None,
+            "single-knob saved-command field maps to hard only — no soft warn",
+        );
+    }
+
+    /// Without `with_memory_monitor`, a saved command carrying a
+    /// `memory_limit_mb` is silently a no-op — the override has
+    /// nowhere to land but `run_saved` still spawns the session.
+    #[test]
+    fn run_saved_with_memory_limit_silently_skips_when_no_monitor_unix() {
+        if !unix_only("run_saved_with_memory_limit_silently_skips_when_no_monitor_unix") {
+            return;
+        }
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        seed_saved_with_memory_limit(&saved, "capped", "/bin/sh", "printf hi", 256);
+        // No `with_memory_monitor` here — `self.memory` stays `None`.
+        let mut p = TerminalCorePlugin::new().with_saved_store(saved);
+
+        let resp = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "capped" }))
+            .expect("run_saved");
+        let body: CreateSessionResponse = serde_json::from_value(resp).expect("decode");
+        assert!(!body.id.is_empty());
+        assert!(p.memory.is_none(), "monitor should not be silently created");
+    }
+
+    /// Without a `memory_limit_mb` on the saved command, the
+    /// pending_overrides map stays empty so the poller falls back to
+    /// the bootstrap-wide default.
+    #[test]
+    fn run_saved_without_memory_limit_does_not_stage_override_unix() {
+        if !unix_only("run_saved_without_memory_limit_does_not_stage_override_unix") {
+            return;
+        }
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        // Use the existing helper — no memory_limit_mb on this row.
+        seed_saved(&saved, "uncapped", "/bin/sh", "sleep 5");
+        let bus = Arc::new(EventBus::new(8));
+        let mut p = TerminalCorePlugin::new()
+            .with_saved_store(saved)
+            .with_memory_monitor(TestMemoryLimits::default_recommended())
+            .with_memory_poll_interval(Duration::from_secs(60))
+            .with_event_bus(Arc::clone(&bus));
+
+        let resp = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "uncapped" }))
+            .expect("run_saved");
+        let body: CreateSessionResponse = serde_json::from_value(resp).expect("decode");
+
+        let memory = p.memory.as_ref().expect("monitor wired");
+        let mem = memory.lock().expect("memory lock");
+        assert!(
+            !mem.pending_overrides.contains_key(body.id.as_str()),
+            "no override should be staged when memory_limit_mb is None",
+        );
     }
 
     #[test]

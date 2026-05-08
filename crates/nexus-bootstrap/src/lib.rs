@@ -1349,11 +1349,13 @@ fn register_core_plugins(
     // recommended limits (250 MB soft / 500 MB hard). The poller is
     // spawned alongside the byte-stream drainer in `with_event_bus`;
     // the order here matters so `with_event_bus` sees the configured
-    // monitor and starts the poller. Operators that want measure-only
-    // semantics (RSS chip but no auto-kill) can override per-saved-
-    // command via `SavedCommand.memory_limit_mb` — that plumbing
-    // lands separately; today every session uses the bootstrap-wide
-    // default.
+    // monitor and starts the poller. BL-061 follow-up (2026-05-08)
+    // wired per-saved-command overrides via `SavedCommand.memory_limit_mb`:
+    // `dispatch_run_saved` stages the override so the next poller
+    // round applies it instead of the bootstrap-wide default.
+    // Operators that want measure-only semantics for ad-hoc sessions
+    // (RSS chip but no auto-kill) still ride this default — saved
+    // commands with an explicit limit are the per-session path.
     let terminal_plugin =
         terminal_plugin.with_memory_monitor(nexus_terminal::MemoryLimits::default_recommended());
     // BL-062 — install an eviction persister that durably stashes
