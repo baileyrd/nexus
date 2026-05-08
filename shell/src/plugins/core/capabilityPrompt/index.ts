@@ -71,3 +71,12 @@ export {
   kernelStringsToCaps,
   CAPABILITY_TO_KERNEL_STRING,
 } from './capabilityMapping'
+export {
+  applyCapabilityChange,
+  diffRevokedCapabilities,
+} from './applyCapabilityChange'
+export type {
+  ApplyCapabilityInvoker,
+  ApplyCapabilityChangeArgs,
+  ApplyCapabilityChangeResult,
+} from './applyCapabilityChange'

@@ -37,8 +37,8 @@ import {
 } from '../../nexus/pluginsMgmt/capabilityInfo'
 import {
   requestModalConsent,
-  capsToKernelStrings,
   kernelStringsToCaps,
+  applyCapabilityChange,
   type PriorGrant,
 } from '../capabilityPrompt'
 import type { SnippetEntry, SnippetConflict } from '../../../registry/SnippetRegistry'
@@ -3222,11 +3222,27 @@ function CommunityPluginRow({
       reason: 'capability-change',
     })
     try {
-      await invoke('set_plugin_granted_capabilities', {
-        pluginDir: manifest.dir,
-        version: manifest.version,
-        capabilities: result === null ? [] : capsToKernelStrings(result),
-      })
+      // BL-096 follow-up — applyCapabilityChange persists the new
+      // set AND issues `revoke_plugin_capability` for any cap that
+      // was previously granted but is no longer in `result`. Live
+      // revoke means the running plugin loses access immediately;
+      // pre-fix, the disk write only took effect at next boot.
+      const { revokeErrors } = await applyCapabilityChange(
+        { invoke: invoke as never },
+        {
+          pluginId: manifest.id,
+          pluginDir: manifest.dir,
+          version: manifest.version,
+          prior,
+          next: result,
+        },
+      )
+      for (const { capability, error } of revokeErrors) {
+        clientLogger.warn(
+          `[settings] live-revoke failed for ${capability}:`,
+          error,
+        )
+      }
     } catch (err) {
       clientLogger.warn('[settings] set_granted failed:', err)
     }

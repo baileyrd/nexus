@@ -69,7 +69,7 @@ _BL-097 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-_BL-096 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Live runtime revocation, persistence, audit, bus event, and a `nexus plugin revoke` CLI verb shipped. Dedicated kernel-internal IPC handler + shell "Revoke" button deferred — the existing `set_plugin_granted_capabilities` Tauri command already covers the persisted-grant write path; live-mutation through the shell is a follow-up._
+_BL-096 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Live runtime revocation, persistence, audit, bus event, and a `nexus plugin revoke` CLI verb shipped. Shell-side live-revoke shipped as a follow-up 2026-05-08 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `revoke_plugin_capability` Tauri command routes through `SharedPluginLoader::revoke_capability`; new `applyCapabilityChange` helper sequences the existing `set_plugin_granted_capabilities` file-write with one `revoke_plugin_capability` per cap removed by the consent modal, so unchecking a cap in Settings → Plugins now mutates the running plugin's wired context immediately rather than waiting for next boot._
 
 ---
 

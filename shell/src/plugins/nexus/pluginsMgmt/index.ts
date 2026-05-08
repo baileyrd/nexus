@@ -329,16 +329,31 @@ export const pluginsMgmtPlugin: Plugin = {
         reason: 'capability-change',
       })
 
-      // Translate Capability[] back to kernel strings and persist.
-      const { capsToKernelStrings } = await import(
+      // BL-096 follow-up — applyCapabilityChange persists the new
+      // set AND issues `revoke_plugin_capability` for any cap that
+      // was previously granted but is no longer in `result`. Live
+      // revoke means the running plugin loses access immediately;
+      // pre-fix the disk write only took effect at next boot.
+      const { applyCapabilityChange } = await import(
         '../../core/capabilityPrompt'
       )
       try {
-        await invoke('set_plugin_granted_capabilities', {
-          pluginDir: row.dir,
-          version: row.version,
-          capabilities: result === null ? [] : capsToKernelStrings(result),
-        })
+        const { revokeErrors } = await applyCapabilityChange(
+          { invoke: invoke as never },
+          {
+            pluginId,
+            pluginDir: row.dir,
+            version: row.version,
+            prior,
+            next: result,
+          },
+        )
+        for (const { capability, error } of revokeErrors) {
+          clientLogger.warn(
+            `[nexus.pluginsMgmt] live-revoke failed for ${pluginId} ${capability}:`,
+            error,
+          )
+        }
       } catch (err) {
         clientLogger.warn(
           `[nexus.pluginsMgmt] set_granted failed for ${pluginId}:`,

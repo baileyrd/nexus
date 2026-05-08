@@ -660,6 +660,7 @@ pub fn run() {
             bridge::init_forge,
             bridge::boot_kernel,
             bridge::shutdown_kernel,
+            bridge::revoke_plugin_capability,
             bridge::kernel_invoke,
             bridge::kernel_subscribe,
             bridge::kernel_unsubscribe,

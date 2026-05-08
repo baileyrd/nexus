@@ -8,6 +8,28 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-096 follow-up: shell-side live-revoke through the consent modal ✅ (2026-05-08)
+
+**Source**: BL-096 closure note (2026-05-06) — "Dedicated kernel-internal IPC handler + shell 'Revoke' button deferred — the existing `set_plugin_granted_capabilities` Tauri command already covers the persisted-grant write path; live-mutation through the shell is a follow-up."
+**Files**: `shell/src-tauri/src/bridge.rs` (new `KernelRuntime::revoke_plugin_capability` method + `revoke_plugin_capability` Tauri command); `shell/src-tauri/src/lib.rs` (registers the new command in `invoke_handler`); `shell/src/plugins/core/capabilityPrompt/applyCapabilityChange.ts` (new helper module); `shell/src/plugins/core/capabilityPrompt/index.ts` (re-exports the new helper); `shell/src/plugins/core/settings/SettingsPanelView.tsx` + `shell/src/plugins/nexus/pluginsMgmt/index.ts` (both consent-review call sites switched to the new helper); `shell/src/plugins/core/capabilityPrompt/applyCapabilityChange.test.ts` + `shell/tests/apply-capability-change.test.ts` (+9 unit tests)
+**Related**: BL-096 (the live-revoke kernel API), the BL-098 follow-up that added the matching grant-side bus emitter
+
+The original BL-096 work shipped the kernel-side primitive (`PluginLoader::revoke_capability`) plus a CLI verb; the deferral named on the closure was "shell Revoke button" — the renderer-side path that had no way to call into the live revoke. Pre-fix, when a user opened the consent modal in Settings → Plugins and unchecked a cap, only `set_plugin_granted_capabilities` fired (file-only write); the running plugin kept the cap in its wired context until next boot. This pass closes that gap.
+
+- **`revoke_plugin_capability` Tauri command.** Added to `bridge.rs` as a host-intrinsic command (per CLAUDE.md "shell-management commands are OK if intrinsic to the host"; this one calls into `SharedPluginLoader` which is kernel-private and can't be reached via a service-plugin IPC). Validates the capability string via `Capability::from_str` before touching the loader so a buggy frontend can't spam the audit log with garbage. Drops the runtime mutex before calling the loader's `revoke_capability` (which does its own internal locking), matching the `kernel_invoke` shape.
+- **`applyCapabilityChange` helper.** New module under `shell/src/plugins/core/capabilityPrompt/`. Sequences `set_plugin_granted_capabilities` (file write) → `revoke_plugin_capability` per cap in `prior \ next` (live revoke). Returns `{ revoked, revokeErrors }` so callers can surface a warning when a live revoke fails (e.g. plugin not loaded) without aborting the persisted-write step. The disk write is the authoritative store; live revoke is best-effort layered on top.
+- **`diffRevokedCapabilities` pure helper.** Set difference over capability values, computed via the kernel-string form so equality is value-based not object-identity. Exported for unit tests; used internally by `applyCapabilityChange`.
+- **Both consent-review call sites switched to the helper.** Settings → Plugins → "Review capabilities" + the standalone PluginsMgmt panel both used the same `set_plugin_granted_capabilities` write pattern; now they both call `applyCapabilityChange`. Result: unchecking a cap in either UI surface kicks the plugin's wired context immediately, the kernel publishes `com.nexus.kernel.capability_revoked` (BL-098 follow-up wired the activity-timeline emitter), and the next boot stays consistent because the file write happened first.
+- **Why not a per-cap row "Revoke" button?** The existing consent modal already supports per-cap revoke (uncheck the box), and the helper makes the live mutation transparent. A separate one-click button without the modal review would short-circuit the audit-trail rationale that the consent UI is designed around. If a future flow wants raw revocation without the modal it can call `applyCapabilityChange` with `prior` from a fresh `get_plugin_granted_capabilities` read and `next = prior.filter(c => c !== removed)`.
+
+**Tested**: `pnpm --filter nexus-shell test` 1119/1119 (was 1110, +9); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (0 errors); `cargo check --workspace` clean. The 9 new unit tests cover:
+- `diffRevokedCapabilities` — prior \ next basic case, empty prior → empty diff, identical sets → empty diff, no next → all of prior is removed (4 tests).
+- `applyCapabilityChange` — happy path (file write before revoke, kernel-string form on both args, single revoke per removed cap), `next=null` persists empty + revokes everything, identical prior+next → file write only / zero revokes, a failing revoke is captured in `revokeErrors` without aborting siblings, a failing file write throws and no revoke is attempted (5 tests).
+
+**Definition of done coverage**: ✅ shell-side live-revoke verb shipped through the existing consent modal. The only piece intentionally not built is a one-click per-cap revoke button divorced from the consent modal — see "Why not" above.
+
+---
+
 ### BL-052 follow-up: `legacyPluginIds` catalog support + activityTimeline → activity rename ✅ (2026-05-08)
 
 **Source**: BL-052 deferral list — "Plugin-id rename `nexus.activityTimeline` → `nexus.activity`. The catalog has no `legacyPluginIds` field, so a rename without a migration shim would orphan any user who'd toggled the plugin off."

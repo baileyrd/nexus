@@ -141,6 +141,53 @@ impl KernelRuntime {
         Ok(())
     }
 
+    /// BL-096 follow-up — live-revoke a previously-granted HIGH-risk
+    /// capability from a loaded plugin. Routes through
+    /// `SharedPluginLoader::revoke_capability` which mutates the
+    /// running plugin's wired context cap set, persists to
+    /// `granted_caps.json`, audits, and publishes
+    /// `com.nexus.kernel.capability_revoked` on the bus.
+    ///
+    /// The capability is parsed from the dotted kernel form
+    /// (`fs.read`, `process.spawn`, …); unknown strings are rejected
+    /// before the loader is touched so a buggy frontend can't spam
+    /// the audit log with garbage.
+    ///
+    /// Returns the kind / message of any [`PluginError`] as a string —
+    /// matching the rest of the Tauri-command surface, which renders
+    /// `Result<_, String>` rather than typed envelopes for the host
+    /// commands. Caller branches on the message when it needs to
+    /// distinguish "plugin not loaded" from "non-revocable
+    /// capability"; the loader's error variants are preserved in the
+    /// rendered `Display`.
+    pub async fn revoke_plugin_capability(
+        &self,
+        plugin_id: &str,
+        capability: &str,
+    ) -> Result<(), String> {
+        let cap = nexus_plugin_api::Capability::from_str(capability).map_err(|_| {
+            format!(
+                "revoke_plugin_capability: '{capability}' is not a recognised \
+                 capability — wire form is the dotted kernel name (e.g. 'fs.read', \
+                 'process.spawn')."
+            )
+        })?;
+        let loader = {
+            let guard = self.inner.lock().await;
+            let Some(booted) = guard.as_ref() else {
+                return Err("kernel not booted".to_string());
+            };
+            Arc::clone(&booted.loader)
+        };
+        // `SharedPluginLoader::revoke_capability` takes `&self` and
+        // does its own internal locking; we drop the runtime guard
+        // before calling so concurrent kernel work doesn't serialise
+        // on the outer mutex.
+        loader
+            .revoke_capability(plugin_id, cap)
+            .map_err(|e| format!("{e}"))
+    }
+
     /// Drain the runtime: pull it out of the slot, abort every active
     /// subscription forwarder, call `kernel.shutdown().await`, then unload
     /// every plugin.
@@ -272,6 +319,35 @@ pub async fn shutdown_kernel(
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<(), String> {
     runtime.shutdown().await
+}
+
+/// BL-096 follow-up — live-revoke a HIGH-risk capability from a
+/// loaded plugin. Routes through
+/// [`KernelRuntime::revoke_plugin_capability`] which mutates the
+/// running plugin's wired context cap set, persists to
+/// `granted_caps.json`, audits, and publishes
+/// `com.nexus.kernel.capability_revoked` on the kernel bus.
+///
+/// Companion to the existing file-only `set_plugin_granted_capabilities`
+/// (which writes `granted_caps.json` without touching the live kernel
+/// state, so the change only takes effect at next boot). The "Revoke"
+/// button in the shell calls *this* verb when a kernel is booted so
+/// the plugin loses the cap immediately, falling back to the
+/// file-write command when no kernel is around.
+///
+/// SECURITY: routes through `Capability::from_str` for input
+/// validation — same posture as `set_plugin_granted_capabilities`.
+/// Non-HIGH-risk caps are silently no-ops at the loader layer
+/// (auto-granted from manifest, can't be revoked at runtime).
+#[tauri::command]
+pub async fn revoke_plugin_capability(
+    plugin_id: String,
+    capability: String,
+    runtime: tauri::State<'_, KernelRuntime>,
+) -> Result<(), String> {
+    runtime
+        .revoke_plugin_capability(&plugin_id, &capability)
+        .await
 }
 
 /// Invoke a kernel plugin command through `context.ipc_call`.
