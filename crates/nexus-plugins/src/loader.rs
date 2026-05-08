@@ -1372,7 +1372,26 @@ impl PluginLoader {
         }
         let plugin_dir = lp.plugin_dir.clone();
         let version = lp.manifest.version.clone();
-        write_grant(plugin_id, &plugin_dir, &version, cap, true)
+        write_grant(plugin_id, &plugin_dir, &version, cap, true)?;
+
+        // BL-098 follow-up — audit log + bus event mirror the
+        // `revoke_capability` shape so observers see grants and
+        // revokes through the same lens. Live mutation isn't
+        // applicable here (the grant takes effect on next plugin
+        // load); the persisted JSON is the source of truth.
+        nexus_kernel::audit::log_capability_granted(plugin_id, cap.as_str());
+        if let Some(bus) = &self.event_bus {
+            let _ = bus.publish_plugin(
+                "com.nexus.kernel",
+                "com.nexus.kernel.capability_granted",
+                serde_json::json!({
+                    "plugin_id": plugin_id,
+                    "capability": cap.as_str(),
+                }),
+            );
+            publish_capability_activity(bus, "granted", plugin_id, cap.as_str());
+        }
+        Ok(())
     }
 
     /// Revoke a previously-persisted capability grant for `plugin_id`
@@ -1424,6 +1443,11 @@ impl PluginLoader {
                     "capability": cap.as_str(),
                 }),
             );
+            // BL-098 follow-up — also fan out to the universal
+            // activity timeline so the same surfaces that watch
+            // file / git / workflow / terminal activity see a
+            // capability revocation too.
+            publish_capability_activity(bus, "revoked", plugin_id, cap.as_str());
         }
         Ok(())
     }
@@ -1935,6 +1959,47 @@ fn load_granted_high_risk_caps(
 /// version-mismatched existing files are replaced wholesale — the new grant
 /// pins to the current version.
 ///
+/// BL-098 follow-up — fan a capability grant or revoke out to the
+/// universal activity timeline so the same surfaces that observe
+/// file / git / workflow / terminal activity see capability mutations
+/// alongside. `kind` is `"granted"` or `"revoked"`; the prompt reads
+/// `"<kind> <cap> for <plugin>"`. `ActivityOrigin::Capability` and
+/// `ActivitySurface::Capability` already exist on the wire-format
+/// shipped in BL-052; this just emits at the call site.
+fn publish_capability_activity(
+    bus: &nexus_kernel::EventBus,
+    kind: &str,
+    plugin_id: &str,
+    capability: &str,
+) {
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
+        ACTIVITY_APPENDED_TOPIC,
+    };
+    let mut entry = ActivityEntry::now(
+        format!("cap:{plugin_id}:{capability}"),
+        ActivitySurface::Capability,
+        ActivityOrigin::Capability,
+    );
+    entry.outcome = ActivityOutcome::Ok;
+    entry.prompt = format!("{kind} {capability} for {plugin_id}");
+    if let Ok(payload) = serde_json::to_value(&entry) {
+        if let Err(err) = bus.publish_plugin(
+            "com.nexus.kernel",
+            ACTIVITY_APPENDED_TOPIC,
+            payload,
+        ) {
+            tracing::debug!(
+                %err,
+                kind,
+                plugin_id,
+                capability,
+                "BL-098: failed to publish capability activity",
+            );
+        }
+    }
+}
+
 /// BL-101: when the OS keyring is reachable the rewritten file is an
 /// AEAD ciphertext blob (`grants_crypto`); otherwise (or when
 /// `NEXUS_NO_KEYRING=1`) it falls back to plain JSON with a
