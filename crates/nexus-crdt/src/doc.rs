@@ -37,12 +37,14 @@ use crate::text::{RgaText, RgaTextOp};
 /// Per-block annotation tracking which op last touched it. This is the
 /// minimal state needed to detect "two sites wrote here without seeing
 /// each other".
+///
+/// Public so [`CrdtState`] can serialize it for Phase 4 persistence.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct BlockMeta {
+pub struct BlockMeta {
     /// Op id of the last *applied* op that mutated this block.
-    last_writer: Option<OpId>,
+    pub last_writer: Option<OpId>,
     /// Whether the block has been deleted by a tombstone op.
-    deleted_by: Option<OpId>,
+    pub deleted_by: Option<OpId>,
 }
 
 /// CRDT-aware document: the [`BlockTree`] plus its op log, conflict
@@ -197,6 +199,54 @@ impl CrdtDoc {
     #[must_use]
     pub fn block_rga(&self, block_id: BlockId) -> Option<&RgaText> {
         self.rga.get(&block_id)
+    }
+
+    /// Snapshot the persistent CRDT state for Phase 4 on-disk
+    /// persistence. The resulting [`crate::CrdtState`] omits the block
+    /// tree (which is rebuilt from markdown source on load).
+    #[must_use]
+    pub fn state(&self) -> crate::state::CrdtState {
+        crate::state::CrdtState {
+            site: self.site,
+            lamport: self.lamport,
+            log: self.log.clone(),
+            block_meta: self.block_meta.clone(),
+            rga: self.rga.clone(),
+        }
+    }
+
+    /// Reconstruct a [`CrdtDoc`] from a freshly-parsed `tree` and a
+    /// previously-snapshotted [`crate::CrdtState`]. The caller is
+    /// responsible for verifying the state's content hash matches the
+    /// markdown source — see [`crate::state::PersistedCrdt`].
+    ///
+    /// Blocks present in `tree` but missing from `state.rga` get a
+    /// fresh RGA mirror materialised from their content. Blocks
+    /// present in `state.rga` but absent from `tree` are dropped.
+    /// Both branches handle the case where the markdown source
+    /// changed compatibly (e.g., a new block was added externally
+    /// while the saved state was authored against the old tree).
+    #[must_use]
+    pub fn from_state(tree: BlockTree, state: crate::state::CrdtState) -> Self {
+        let mut rga = state.rga;
+        let mut block_meta = state.block_meta;
+        // Materialise missing RGAs from fresh tree content.
+        for (&block_id, block) in &tree.blocks {
+            rga.entry(block_id)
+                .or_insert_with(|| materialize_rga(block_id, &block.content));
+            block_meta.entry(block_id).or_default();
+        }
+        // Drop RGAs / meta for blocks no longer in the tree.
+        rga.retain(|id, _| tree.blocks.contains_key(id));
+        block_meta.retain(|id, _| tree.blocks.contains_key(id));
+        Self {
+            site: state.site,
+            lamport: state.lamport,
+            tree,
+            log: state.log,
+            block_meta,
+            rga,
+        }
     }
 
     /// Look at every block this op affects and decide whether it
@@ -757,6 +807,67 @@ mod tests {
         for s in ["alpha", "beta", "gamma", "Z"] {
             assert!(r0.contains(s), "lost {s}: {r0}");
         }
+    }
+
+    #[test]
+    fn state_round_trips_through_json() {
+        // Author a few ops, snapshot, encode-decode JSON, restore: the
+        // restored doc must match local state and converge with peers.
+        let s = SiteId::new();
+        let (tree, b) = tree_with_block_content("baseline ");
+        let mut doc = CrdtDoc::new(s, tree.clone());
+        doc.apply_local(&insert_text_op(b, 9, "+local")).unwrap();
+
+        let pre_content = doc.tree().get(b).unwrap().content.clone();
+        let pre_log_len = doc.log().len();
+
+        let snapshot = doc.state();
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored: crate::state::CrdtState = serde_json::from_str(&json).unwrap();
+
+        // Reconstruct from a freshly-parsed tree (file-as-truth).
+        let restored_doc = CrdtDoc::from_state(tree.clone(), restored);
+        // The fresh tree from markdown is empty-content, but the
+        // restored state should have re-materialised the RGA from
+        // *that* tree — the persisted RGA was for the post-edit state
+        // (rendered as `pre_content`). Verify the RGA is preserved.
+        let expected_render = restored_doc
+            .block_rga(b)
+            .map(crate::text::RgaText::render)
+            .unwrap_or_default();
+        // Note: tree.get(b).content here is the original baseline (the
+        // tree we passed into from_state). The restored RGA carries
+        // the post-edit state because we persisted it that way.
+        assert_eq!(
+            expected_render, pre_content,
+            "restored RGA must reproduce the post-edit text"
+        );
+        assert_eq!(restored_doc.log().len(), pre_log_len);
+        assert_eq!(restored_doc.site(), s);
+    }
+
+    #[test]
+    fn from_state_drops_orphan_blocks_and_seeds_new_ones() {
+        // Snapshot doc1 with block A, then restore against a tree
+        // containing block B (markdown was edited externally to
+        // remove A, add B). The restore should not panic and should
+        // produce a doc covering only B.
+        let s = SiteId::new();
+        let mut tree_old = empty_tree();
+        let block_a = Block::new(BlockType::Paragraph);
+        let a_id = block_a.id;
+        tree_old.insert(block_a, None, 0).unwrap();
+        let doc = CrdtDoc::new(s, tree_old);
+
+        // Different tree: only block B.
+        let mut tree_new = empty_tree();
+        let block_b = Block::new(BlockType::Paragraph);
+        let b_id = block_b.id;
+        tree_new.insert(block_b, None, 0).unwrap();
+
+        let restored = CrdtDoc::from_state(tree_new, doc.state());
+        assert!(restored.block_rga(b_id).is_some(), "B got fresh RGA");
+        assert!(restored.block_rga(a_id).is_none(), "A's RGA was dropped");
     }
 
     #[test]

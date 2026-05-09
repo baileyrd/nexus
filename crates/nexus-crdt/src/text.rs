@@ -62,7 +62,7 @@ impl RgaTextOp {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Node {
     ch: char,
     tombstone: bool,
@@ -72,11 +72,39 @@ struct Node {
 
 /// In-memory state for the RGA sequence CRDT for a single piece of
 /// text (e.g., one block's `content`).
-#[derive(Clone, Debug, Default)]
+///
+/// Serialized form represents `nodes` as a `Vec<(OpId, Node)>` because
+/// JSON object keys must be strings — `OpId` is a struct.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RgaText {
+    #[serde(with = "rga_nodes_vec")]
     nodes: HashMap<OpId, Node>,
     /// Top-level nodes (parent == None), sorted descending by `OpId`.
     roots: Vec<OpId>,
+}
+
+mod rga_nodes_vec {
+    use std::collections::HashMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::Node;
+    use crate::id::OpId;
+
+    pub(super) fn serialize<S: Serializer>(
+        map: &HashMap<OpId, Node>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let v: Vec<(OpId, &Node)> = map.iter().map(|(k, v)| (*k, v)).collect();
+        v.serialize(s)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<HashMap<OpId, Node>, D::Error> {
+        let v: Vec<(OpId, Node)> = Vec::deserialize(d)?;
+        Ok(v.into_iter().collect())
+    }
 }
 
 impl RgaText {
