@@ -174,6 +174,50 @@ fn git_config(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// One-shot enabler for the BL-007 git-CRDT transport. Runs both
+/// pieces of setup that have to happen in the user's working tree:
+///
+/// 1. Write `.forge/.gitignore` (if missing) so the rebuildable
+///    indexes / per-machine SQLite stores stay out of git, while the
+///    CRDT state files at `.forge/.editor/crdt/*.json` ride through
+///    by default.
+/// 2. Register the merge driver in `.gitattributes` + `.git/config`
+///    via [`install_merge_driver(true)`].
+///
+/// Both steps are idempotent — re-running this command on a forge
+/// that's already configured is a no-op.
+///
+/// # Errors
+///
+/// Propagates filesystem and `git` errors from either step.
+pub fn enable_transport(forge_root: &Path) -> Result<()> {
+    println!("BL-007 git-CRDT transport — enabling on {}", forge_root.display());
+    println!();
+
+    let forge = nexus_storage::Forge::new(forge_root);
+    let wrote = forge
+        .write_default_gitignore()
+        .map_err(|e| anyhow!("write .forge/.gitignore: {e}"))?;
+    if wrote {
+        println!(
+            "✓ Wrote default .forge/.gitignore (excludes rebuildable indexes / per-machine state)"
+        );
+    } else {
+        println!("✓ .forge/.gitignore already exists — left untouched");
+    }
+    println!();
+
+    install_merge_driver(true)?;
+    println!();
+    println!("Next steps:");
+    println!("  1. Commit `.forge/.gitignore` and `.gitattributes`.");
+    println!("  2. As you edit files, `.forge/.editor/crdt/<sha>.json` will appear");
+    println!("     under `.forge/`. Commit those alongside your markdown.");
+    println!("  3. Push, and pull on each peer — the merge driver runs automatically");
+    println!("     during pulls that touch the state files.");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -222,6 +266,31 @@ mod tests {
         // Merged log holds both authors' single ops (each was authored
         // independently from a fresh doc).
         assert_eq!(merged.state.log.len(), 2);
+    }
+
+    #[test]
+    fn enable_transport_writes_gitignore_and_is_idempotent() {
+        // The merge-driver step needs a git repo to run `git config`,
+        // which `enable_transport` calls. We can't easily fake that
+        // from a unit test without a real `git init`. Test the
+        // gitignore-writing half here; the merge-driver half is
+        // already covered by `install_merge_driver`'s existing
+        // surface (and an end-to-end git smoke test would belong in
+        // a separate integration suite).
+        let dir = tempfile::tempdir().unwrap();
+        let forge = nexus_storage::Forge::new(dir.path());
+        // First call from a bare directory: writes gitignore.
+        let wrote = forge.write_default_gitignore().unwrap();
+        assert!(wrote);
+        let body = std::fs::read_to_string(forge.forge_gitignore_path()).unwrap();
+        assert!(body.contains("index.db"));
+
+        // Second call is a no-op (idempotent — `enable_transport`
+        // can be re-run safely on an already-configured forge).
+        let wrote_again = forge.write_default_gitignore().unwrap();
+        assert!(!wrote_again);
+        let body_after = std::fs::read_to_string(forge.forge_gitignore_path()).unwrap();
+        assert_eq!(body, body_after, "second call must not alter the file");
     }
 
     #[test]

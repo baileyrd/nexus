@@ -24,6 +24,7 @@ nexus-tui = { path = "../nexus-tui" }
 nexus-panic-log = { path = "../nexus-panic-log" }
 nexus-formats = { path = "../nexus-formats" }
 nexus-templates = { path = "../nexus-templates" }
+nexus-storage = { path = "../nexus-storage" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -40,6 +41,5 @@ tracing-appender = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
-nexus-storage = { path = "../nexus-storage" }
 nexus-editor = { path = "../nexus-editor" }
 tempfile = { workspace = true }

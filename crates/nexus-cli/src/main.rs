@@ -1123,6 +1123,13 @@ enum CrdtCommand {
         #[arg(long = "apply")]
         apply: bool,
     },
+    /// One-shot enabler for the BL-007 git-CRDT transport on an
+    /// existing forge. Writes a default `.forge/.gitignore` if
+    /// missing (so the rebuildable indexes / per-machine SQLite
+    /// stores stay out of git, while `.forge/.editor/crdt/*.json`
+    /// rides through), then registers the merge driver via
+    /// `install-merge-driver --apply`. Both steps are idempotent.
+    EnableTransport,
 }
 
 // ---------------------------------------------------------------------------
@@ -1830,6 +1837,9 @@ fn main() {
             }
             CrdtCommand::InstallMergeDriver { apply } => {
                 commands::crdt::install_merge_driver(apply)
+            }
+            CrdtCommand::EnableTransport => {
+                commands::crdt::enable_transport(app.forge_root())
             }
         },
 

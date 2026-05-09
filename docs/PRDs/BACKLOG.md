@@ -168,7 +168,7 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 
 **Open follow-ups:**
 - Op-log compaction *wiring* — `OpLog::prune_dominated` ships as a primitive but no code calls it. Needs a stable-VV oracle: after a successful pull-and-push round-trip the post-merge VV is "what every participant has acknowledged", but the publisher doesn't currently track per-peer ack state. Cheapest first cut: prune on close to whatever VV is on disk, accepting that single-replica forges will compact aggressively and multi-peer forges will keep ops longer.
-- State-file git-tracking policy — `.forge/.editor/crdt/*.json` files have to be committed for the transport to actually run. Forges typically `.gitignore` `.forge/`. Need either a default `.forge/.gitignore` that re-includes `.editor/crdt/`, or a CLI helper (`nexus crdt enable-transport`) that registers the merge driver and patches gitignore.
+- ~~State-file git-tracking policy~~ — shipped 2026-05-09. `Forge::init` writes a default `.forge/.gitignore` that excludes the rebuildable / per-machine state and leaves `.forge/.editor/crdt/*.json` tracked. `nexus crdt enable-transport` runs the same gitignore step and `install-merge-driver --apply` for forges created before this change. Both steps idempotent.
 - Conflict UI shell consumer — kernel side ships now (`com.nexus.editor.crdt.conflict.<relpath>` event with `ConflictEnvelope` payload, fired from `reload_after_external_change`). Shell-side toast / modal still needed; route through a `nexus.editor.crdt-conflict` plugin under `shell/src/plugins/nexus/`.
 - Reparenting / move-loop detection — pre-existing CRDT limitation, separate from BL-074.
 
@@ -182,6 +182,7 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 - BL-007 pull-landing primitive (`CrdtPublisher::reload_after_external_change` — re-reads merged state file, applies absorbed remote ops via `apply_remote`, publishes envelopes on the ops topic, surfaces structural conflicts) ✓ (2026-05-08)
 - BL-007 pull-landing bus wiring (`start_pull_landing_subscriber` thread, subscribes to `com.nexus.git.commit`, drains every event into per-relpath reloads; thread holds a `Weak<Inner>` and self-exits when the publisher drops) ✓ (2026-05-08)
 - BL-007 conflict surface (`com.nexus.editor.crdt.conflict.<relpath>` topic + `ConflictEnvelope` wire type; `reload_after_external_change` publishes when conflicts are non-empty so the shell can render a resolver UI by subscribing) ✓ (2026-05-09)
+- BL-007 state-file git-tracking policy (`Forge::init` writes a default `.forge/.gitignore` that excludes rebuildable / per-machine state; `.forge/.editor/crdt/*.json` rides through and feeds the merge driver. `nexus crdt enable-transport` does the same setup for pre-existing forges plus runs `install-merge-driver --apply`) ✓ (2026-05-09)
 - Op-log compaction primitive (`OpLog::prune_dominated`) ✓ (2026-05-08)
 - Tauri popout-window ops forwarding ✓ (was already covered by `bridge::kernel_subscribe` per-window scoping)
 - Structural conflicts surface as a user-resolvable dialog — detected in Phase 1; UI surfacing remains a UX follow-up
