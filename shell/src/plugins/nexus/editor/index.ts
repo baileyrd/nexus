@@ -835,7 +835,7 @@ export const editorPlugin: Plugin = {
       kind?: string
       disabled?: { reason: string }
       edit?: LspWorkspaceEdit
-      command?: { title: string; command: string }
+      command?: { title: string; command: string; arguments?: unknown[] }
     }
     api.commands.register(COMMAND_LSP_CODE_ACTIONS, async () => {
       const view = getActiveCmView()
@@ -884,11 +884,12 @@ export const editorPlugin: Plugin = {
       }
       const pickItems = actions.map((action) => {
         const hasEdit = action.edit != null
-        const isDisabled = action.disabled != null || (!hasEdit && action.command != null)
+        const hasCommand = action.command != null
+        const isDisabled = action.disabled != null
         const detail = action.disabled?.reason
           ? `disabled — ${action.disabled.reason}`
-          : !hasEdit && action.command != null
-            ? `requires workspace command (not yet supported)`
+          : !hasEdit && hasCommand
+            ? `runs server command \`${action.command!.command}\``
             : action.kind
         return {
           label: action.title,
@@ -905,18 +906,44 @@ export const editorPlugin: Plugin = {
       if (picked.isDisabled) {
         api.notifications.show({
           type: 'warning',
-          message: picked.action.disabled?.reason
-            ? `Action disabled: ${picked.action.disabled.reason}`
-            : 'Action requires workspace command support, which is not wired yet.',
+          message: `Action disabled: ${picked.action.disabled?.reason ?? 'no reason given'}`,
         })
         return
       }
       const edit = picked.action.edit
       if (!edit) {
-        api.notifications.show({
-          type: 'info',
-          message: 'Selected action did not return any edits.',
-        })
+        // No `edit` — fall through to `workspace/executeCommand` if
+        // the action carries a `command`. Server-driven side effect
+        // (apply-import, generate-bindings, etc.); the server may
+        // also send a follow-up `workspace/applyEdit` request which
+        // the host doesn't yet handle (server-initiated requests are
+        // a separate BL-076 follow-up). Today we surface a concise
+        // "command dispatched" toast and let the user re-load the
+        // file via the watcher if the server modified anything.
+        const command = picked.action.command
+        if (!command) {
+          api.notifications.show({
+            type: 'info',
+            message: 'Selected action did not return any edits.',
+          })
+          return
+        }
+        try {
+          await lspIpc.executeCommand({
+            path: relpath,
+            command: command.command,
+            arguments: command.arguments ?? [],
+          })
+          api.notifications.show({
+            type: 'info',
+            message: `Dispatched server command "${command.title}".`,
+          })
+        } catch (err) {
+          api.notifications.show({
+            type: 'error',
+            message: `Server command failed: ${err instanceof Error ? err.message : String(err)}`,
+          })
+        }
         return
       }
 

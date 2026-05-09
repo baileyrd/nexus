@@ -178,6 +178,37 @@ pub struct LspCodeActionsArgs {
     pub range: serde_json::Value,
 }
 
+/// Args for `execute_command` (handler `12`). BL-077 follow-up —
+/// powers code actions whose `edit` field is missing but whose
+/// `command` field carries a server-side action name (`"rust-analyzer.applyActionGroup"` etc.).
+///
+/// `path` is a routing hint: it picks the configured server the
+/// command runs against. The command itself is server-defined and
+/// opaque to the host.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LspExecuteCommandArgs {
+    /// Filesystem path used to route the call to the right configured
+    /// server (the command itself is not file-scoped).
+    pub path: String,
+    /// Server-defined command name from `CodeAction.command.command`.
+    pub command: String,
+    /// Server-defined argument array from `CodeAction.command.arguments`.
+    /// Forwarded verbatim; the LSP spec types these as `LSPAny[]`,
+    /// shape varies per server.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown[]"))]
+    #[serde(default)]
+    pub arguments: Vec<serde_json::Value>,
+}
+
 // ── Replies ──────────────────────────────────────────────────────────────────
 
 /// One entry in the `list_servers` response array.

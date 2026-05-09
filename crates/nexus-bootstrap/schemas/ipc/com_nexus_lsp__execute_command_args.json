@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspExecuteCommandArgs",
+  "description": "Args for `execute_command` (handler `12`). BL-077 follow-up —\npowers code actions whose `edit` field is missing but whose\n`command` field carries a server-side action name (`\"rust-analyzer.applyActionGroup\"` etc.).\n\n`path` is a routing hint: it picks the configured server the\ncommand runs against. The command itself is server-defined and\nopaque to the host.",
+  "type": "object",
+  "properties": {
+    "arguments": {
+      "description": "Server-defined argument array from `CodeAction.command.arguments`.\nForwarded verbatim; the LSP spec types these as `LSPAny[]`,\nshape varies per server.",
+      "type": "array",
+      "default": [],
+      "items": true
+    },
+    "command": {
+      "description": "Server-defined command name from `CodeAction.command.command`.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Filesystem path used to route the call to the right configured\nserver (the command itself is not file-scoped).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "command"
+  ]
+}

@@ -56,6 +56,17 @@ export interface LspCodeActionsArgs {
   }
 }
 
+/** Args for `execute_command` (handler 12). BL-077 follow-up —
+ *  drives `workspace/executeCommand` for code actions whose `edit`
+ *  field is missing but whose `command` field carries a server-side
+ *  action name. `path` is the routing hint used to pick the
+ *  configured server. */
+export interface LspExecuteCommandArgs {
+  path: string
+  command: string
+  arguments?: unknown[]
+}
+
 /** Reply mirror for `open_file` — `null` when no server is routed for the path. */
 export interface LspOpenFileReply {
   uri: string
@@ -165,6 +176,14 @@ export class LspIpc {
 
   codeActions(args: LspCodeActionsArgs): Promise<unknown> {
     return this.api.invoke(LSP_PLUGIN_ID, 'code_actions', args)
+  }
+
+  /**
+   * BL-077 follow-up — `workspace/executeCommand`. Reply is whatever
+   * the server returns for the named command (often `null`).
+   */
+  executeCommand(args: LspExecuteCommandArgs): Promise<unknown> {
+    return this.api.invoke(LSP_PLUGIN_ID, 'execute_command', args)
   }
 
   format(path: string): Promise<unknown> {

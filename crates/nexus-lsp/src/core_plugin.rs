@@ -19,10 +19,12 @@
 //! | 9 | `rename` | `{path, line, character, new_name}` |
 //! | 10 | `code_actions` | `{path, range}` |
 //! | 11 | `format` | `{path}` |
+//! | 12 | `execute_command` | `{path, command, arguments?}` |
 //!
-//! Handlers 2..=11 require the file path to map to a configured server
+//! Handlers 2..=12 require the file path to map to a configured server
 //! via [`LspHostConfig::server_for_path`]; calls for an unrouted path
-//! return JSON `null`.
+//! return JSON `null`. The path is the *routing* hint — `execute_command`
+//! itself targets the server-side command registry, not a document.
 //!
 //! # Bus events
 //!
@@ -71,6 +73,12 @@ pub const HANDLER_RENAME: u32 = 9;
 pub const HANDLER_CODE_ACTIONS: u32 = 10;
 /// Async — request formatting.
 pub const HANDLER_FORMAT: u32 = 11;
+/// Async — `workspace/executeCommand`. Targets the server routed for
+/// the supplied `path` (so the editor can dispatch a command-only
+/// code action against the same server that produced it). Powers
+/// the BL-077 follow-up: code actions whose `edit` field is missing
+/// but whose `command` field carries a server-side action name.
+pub const HANDLER_EXECUTE_COMMAND: u32 = 12;
 
 /// Core plugin that manages connections to LSP servers.
 pub struct LspCorePlugin {
@@ -218,7 +226,8 @@ impl CorePlugin for LspCorePlugin {
             | HANDLER_REFERENCES
             | HANDLER_RENAME
             | HANDLER_CODE_ACTIONS
-            | HANDLER_FORMAT => Err(PluginError::ExecutionFailed {
+            | HANDLER_FORMAT
+            | HANDLER_EXECUTE_COMMAND => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("handler_id {handler_id} requires dispatch_async"),
             }),
@@ -459,6 +468,39 @@ impl CorePlugin for LspCorePlugin {
                         &server_name,
                         bus,
                         "textDocument/formatting",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
+                }))
+            }
+            HANDLER_EXECUTE_COMMAND => {
+                let path = str_arg(args, "path")?;
+                let command = str_arg(args, "command")?;
+                // Optional. LSP spec is `LSPAny[]`; we forward the
+                // shape the caller supplied verbatim. Default to the
+                // empty array so a server that requires the field
+                // doesn't reject the call.
+                let arguments = args
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new()));
+                Some(Box::pin(async move {
+                    let cfg = config_or_err(config.as_ref())?;
+                    let Some(server) = cfg.server_for_path(&path) else {
+                        return Ok(Value::Null);
+                    };
+                    let server_name = server.name.clone();
+                    let payload = json!({
+                        "command": command,
+                        "arguments": arguments,
+                    });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "workspace/executeCommand",
                         payload,
                     )
                     .await

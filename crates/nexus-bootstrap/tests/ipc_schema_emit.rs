@@ -56,8 +56,9 @@ use nexus_mcp::ipc::{
 // nexus-lsp uses a wire-mirror module — the handlers emit ad-hoc
 // `serde_json::json!` and accept `Value` in (BL-076).
 use nexus_lsp::ipc::{
-    LspChangeFileArgs, LspCodeActionsArgs, LspOk, LspOpenFileArgs, LspOpenFileReply,
-    LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRenameArgs, LspServerEntry,
+    LspChangeFileArgs, LspCodeActionsArgs, LspExecuteCommandArgs, LspOk, LspOpenFileArgs,
+    LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRenameArgs,
+    LspServerEntry,
 };
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
 use nexus_agent::{Plan, Step, ToolCall};
@@ -263,6 +264,7 @@ fn emit_all_schemas_impl() {
     write_schema::<LspReferencesArgs>("com_nexus_lsp__references", "args");
     write_schema::<LspRenameArgs>("com_nexus_lsp__rename", "args");
     write_schema::<LspCodeActionsArgs>("com_nexus_lsp__code_actions", "args");
+    write_schema::<LspExecuteCommandArgs>("com_nexus_lsp__execute_command", "args");
     write_schema::<LspOk>("com_nexus_lsp", "ok");
 
     // ── com.nexus.agent (P1-3 #113) ──────────────────────────────────────
