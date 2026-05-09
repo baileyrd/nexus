@@ -28,6 +28,11 @@ import { createBlockRefDragBridge } from './blockRefDragBridge'
 import { installInlineToolbarStyles } from './cm/inlineToolbar'
 import { installMarginSuggestStyles } from './cm/marginSuggestions'
 import { runSaveFormatHook } from './cm/saveFormatHooks'
+import { LspIpc } from './cm/lspIpc'
+import {
+  applyWorkspaceEdit,
+  type LspWorkspaceEdit,
+} from './cm/workspaceEdit'
 import { createCommentsApi } from '../comments/commentsApi'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
@@ -68,6 +73,11 @@ const COMMAND_TOGGLE_BLAME = 'nexus.editor.toggleBlame'
 // BL-079 — open the modal diff viewer for the active tab. Reads
 // `com.nexus.git::diff_file` and renders the hunks unified.
 const COMMAND_OPEN_DIFF = 'nexus.editor.openDiff'
+// BL-077 follow-up — LSP rename. Cursor-position rename across every
+// file the symbol appears in; multi-file `WorkspaceEdit` applies via
+// `applyWorkspaceEdit` (active tab through the live CM view, every
+// other file through `com.nexus.storage::write_file`).
+const COMMAND_LSP_RENAME = 'nexus.editor.lsp.rename'
 
 // Tab-actions menu placeholders. Each one shows a "Coming soon"
 // notification so users get feedback instead of a dead disabled row.
@@ -180,6 +190,7 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
         { id: COMMAND_TOGGLE_BLAME, title: 'Toggle Inline Git Blame', category: 'Editor' },
         { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
+        { id: COMMAND_LSP_RENAME, title: 'Rename Symbol (LSP)', category: 'Editor' },
         ...STUB_COMMANDS.map((s) => ({ id: s.id, title: s.title, category: 'Editor' })),
       ],
       keybindings: [
@@ -194,6 +205,14 @@ export const editorPlugin: Plugin = {
           key: 'ctrl+s',
           mac: 'cmd+s',
           when: CONTEXT_KEY_ACTIVE_TAB_DIRTY,
+        },
+        // BL-077 follow-up — VS Code muscle memory. F2 has no
+        // platform-specific override (mac uses Fn+F2 by default but
+        // the bare `F2` is the convention even on macOS).
+        {
+          command: COMMAND_LSP_RENAME,
+          key: 'F2',
+          when: CONTEXT_KEY_HAS_ACTIVE_TAB,
         },
       ],
       contextKeys: [
@@ -655,6 +674,137 @@ export const editorPlugin: Plugin = {
       }
       view.focus()
       openSearchPanel(view)
+    })
+
+    // BL-077 follow-up — LSP rename. Bound to F2 on every focused
+    // editor; gracefully degrades when the active tab isn't a
+    // code-mode CM6 view, when the LSP server doesn't support
+    // `textDocument/rename`, or when the cursor isn't on a renamable
+    // symbol. The applier handles multi-file edits transparently.
+    const lspIpc = new LspIpc(api.kernel)
+    api.commands.register(COMMAND_LSP_RENAME, async () => {
+      const view = getActiveCmView()
+      const relpath = activeTabRelpath()
+      if (!view || !relpath) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Rename requires a code-mode editor tab.',
+        })
+        return
+      }
+      const sel = view.state.selection.main
+      const lineInfo = view.state.doc.lineAt(sel.head)
+      const line = lineInfo.number - 1
+      const character = sel.head - lineInfo.from
+
+      // Pre-fill the prompt with the word at cursor — saves a
+      // round-trip to `prepareRename` and matches user expectation
+      // (VS Code does the same when the LSP server doesn't return a
+      // prepare result).
+      const wordRegex = /[A-Za-z_$][\w$]*/
+      let defaultName = ''
+      const beforeOnLine = view.state.doc
+        .sliceString(lineInfo.from, sel.head)
+        .match(/[A-Za-z_$][\w$]*$/)
+      const afterOnLine = view.state.doc
+        .sliceString(sel.head, lineInfo.to)
+        .match(/^[\w$]*/)
+      if (beforeOnLine || afterOnLine) {
+        defaultName = `${beforeOnLine?.[0] ?? ''}${afterOnLine?.[0] ?? ''}`
+      }
+
+      const newName = await api.input.prompt(
+        defaultName ? `Rename "${defaultName}" to:` : 'Rename symbol to:',
+        defaultName,
+      )
+      if (!newName || !wordRegex.test(newName)) {
+        if (newName != null) {
+          api.notifications.show({
+            type: 'warning',
+            message: 'Rename cancelled — the new name is not a valid identifier.',
+          })
+        }
+        return
+      }
+
+      let raw: unknown
+      try {
+        raw = await lspIpc.rename({
+          path: relpath,
+          line,
+          character,
+          new_name: newName,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      if (!raw) {
+        api.notifications.show({
+          type: 'info',
+          message: 'No rename available at this position.',
+        })
+        return
+      }
+
+      const forgeRoot = useWorkspaceStore.getState().rootPath
+      if (!forgeRoot) {
+        api.notifications.show({
+          type: 'error',
+          message: 'Rename failed: no workspace open.',
+        })
+        return
+      }
+
+      try {
+        const result = await applyWorkspaceEdit(raw as LspWorkspaceEdit, {
+          forgeRoot,
+          activeView: view,
+          activeRelpath: relpath,
+          readFile: async (p) => {
+            const resp = await api.kernel.invoke<ReadFileResponse>(
+              STORAGE_PLUGIN_ID,
+              READ_FILE_COMMAND,
+              { path: p },
+            )
+            return decodeUtf8(resp.bytes ?? [])
+          },
+          writeFile: writeStorageFile,
+          onSkip: (uri, reason) => {
+            clientLogger.warn(
+              '[nexus.editor.lsp.rename] skipped URI outside forge:',
+              uri,
+              reason,
+            )
+          },
+        })
+        const total = result.liveViewFiles + result.storageFiles
+        if (total === 0 && result.skipped.length === 0) {
+          api.notifications.show({
+            type: 'info',
+            message: 'Rename returned no edits.',
+          })
+          return
+        }
+        const skipNote =
+          result.skipped.length > 0
+            ? ` (${result.skipped.length} outside-forge URI${
+                result.skipped.length === 1 ? '' : 's'
+              } skipped)`
+            : ''
+        api.notifications.show({
+          type: 'info',
+          message: `Renamed in ${total} file${total === 1 ? '' : 's'}${skipNote}.`,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Rename apply failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
     })
 
     api.commands.register(COMMAND_COPY_REL_PATH, async () => {
