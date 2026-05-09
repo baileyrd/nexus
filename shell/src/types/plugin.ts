@@ -467,9 +467,28 @@ export interface ActivityBarAPI {
   removeItem(id: string): void
 }
 
+export interface PickItem<T = unknown> {
+  label: string
+  description?: string
+  detail?: string
+  value: T
+}
+
+export interface PickOptions {
+  placeholder?: string
+  title?: string
+}
+
 export interface InputAPI {
   prompt(message: string, placeholder?: string): Promise<string | null>
   confirm(message: string): Promise<boolean>
+  /**
+   * Show a list-picker modal and resolve with the picked item's
+   * `value` (or `null` on cancel / dismiss). Empty `items` resolves
+   * immediately with `null` so callers don't need to guard. Backed
+   * by the `nexus.pick` plugin's overlay modal.
+   */
+  pick<T = unknown>(items: PickItem<T>[], options?: PickOptions): Promise<T | null>
 }
 
 export interface InternalAPI {

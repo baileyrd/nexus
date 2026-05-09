@@ -571,6 +571,16 @@ export function buildPluginAPI(
         const { requestConfirm } = await import('../plugins/nexus/confirm/confirmStore')
         return requestConfirm(message)
       },
+      async pick(items, options) {
+        // Same lazy-import pattern as confirm — `requestPick` only
+        // touches the pick store. The store / modal live in the
+        // `nexus.pick` plugin and load on first use; if it isn't
+        // enabled, the modal never mounts and the request hangs
+        // until cancelled by the caller. Runtime enables nexus.pick
+        // at startup so this is unobservable in practice.
+        const { requestPick } = await import('../plugins/nexus/pick/pickStore')
+        return requestPick(items, options)
+      },
     },
   }
 

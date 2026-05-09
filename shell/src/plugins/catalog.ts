@@ -230,6 +230,12 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/confirm').then(m => m.confirmPlugin),
   },
   {
+    id: 'nexus.pick', name: 'Pick',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'BL-077 follow-up — list-picker modal exposed to plugins via api.input.pick. Backs LSP code-actions, future quick-pick surfaces.',
+    load: () => import('./nexus/pick').then(m => m.pickPlugin),
+  },
+  {
     id: 'nexus.paneMode', name: 'Pane Mode',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
