@@ -42,6 +42,35 @@ const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.editor";
 
+/// Observer that the editor calls on session lifecycle and successful
+/// transactions. Used by `nexus-bootstrap`'s `CrdtPublisher` (BL-074
+/// editor wiring) to mirror every session into a `CrdtDoc`, publish
+/// per-op events on the kernel bus, and persist CRDT state on close.
+///
+/// Lives in `nexus-editor` (rather than `nexus-crdt`) to avoid a
+/// circular dependency — `nexus-crdt` already deps on `nexus-editor`,
+/// so the trait must be defined here and *implemented* in a third
+/// crate that pulls both. The trait is intentionally narrow: only the
+/// raw `Operation`s and the relpath cross the boundary.
+pub trait OpObserver: Send + Sync {
+    /// Called when a session is created (open or `sync_content`
+    /// reset). The observer should construct or re-construct any
+    /// per-relpath state from the supplied tree + canonical-markdown
+    /// `source_bytes`. May be called more than once for the same
+    /// `relpath` if the session is reset by `sync_content`.
+    fn on_session_opened(&self, relpath: &str, tree: &crate::BlockTree, source_bytes: &[u8]);
+
+    /// Called immediately before a session is removed from the map.
+    /// The observer's last chance to flush per-relpath state to disk.
+    fn on_session_closed(&self, relpath: &str);
+
+    /// Called after a transaction has applied successfully. The ops
+    /// are in their applied order; the observer must NOT re-apply
+    /// them to any tree the editor owns — its own internal state is
+    /// the only thing it should mutate.
+    fn on_apply_transaction(&self, relpath: &str, ops: &[crate::Operation]);
+}
+
 /// Prefix for per-session mutation events. Each mutation handler
 /// emits a `NexusEvent::Custom` with `type_id` of the form
 /// `com.nexus.editor.changed.<relpath>` so shell subscribers can
@@ -224,6 +253,11 @@ pub struct EditorCorePlugin {
     /// successful mutation. `None` for unit tests that drive the
     /// plugin without a full runtime — events are silently dropped.
     event_bus: Option<Arc<EventBus>>,
+    /// Lifecycle observer (BL-074 editor wiring). When set, fires on
+    /// every session open/close and successful transaction. `None`
+    /// for unit tests and any runtime that hasn't opted into CRDT
+    /// publishing.
+    op_observer: Option<Arc<dyn OpObserver>>,
 }
 
 impl EditorCorePlugin {
@@ -237,6 +271,7 @@ impl EditorCorePlugin {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             context: None,
             event_bus: None,
+            op_observer: None,
         }
     }
 
@@ -250,7 +285,16 @@ impl EditorCorePlugin {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             context: None,
             event_bus: Some(event_bus),
+            op_observer: None,
         }
+    }
+
+    /// Install a session/transaction observer. Called by the bootstrap
+    /// after construction (BL-074 editor wiring) — separating the
+    /// observer from the constructor avoids piling more positional
+    /// arguments onto an already-overloaded fixture surface.
+    pub fn set_op_observer(&mut self, observer: Arc<dyn OpObserver>) {
+        self.op_observer = Some(observer);
     }
 }
 
@@ -273,22 +317,33 @@ impl CorePlugin for EditorCorePlugin {
 
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
-            HANDLER_OPEN => handle_open_sync(&self.forge_root, &self.sessions, args),
+            HANDLER_OPEN => handle_open_sync(
+                &self.forge_root,
+                &self.sessions,
+                self.op_observer.as_ref(),
+                args,
+            ),
             // BL-072: persistent undo writes happen on the async path
             // (storage IPC). The sync entry point still drops the
             // session — unit tests use it directly.
-            HANDLER_CLOSE => handle_close(&self.sessions, args),
+            HANDLER_CLOSE => handle_close(&self.sessions, self.op_observer.as_ref(), args),
             HANDLER_GET_TREE => handle_get_tree(&self.sessions, args),
             HANDLER_SAVE => handle_save_sync(&self.forge_root, &self.sessions, args),
-            HANDLER_APPLY_TRANSACTION => {
-                handle_apply_transaction(&self.sessions, self.event_bus.as_ref(), args)
-            }
+            HANDLER_APPLY_TRANSACTION => handle_apply_transaction(
+                &self.sessions,
+                self.event_bus.as_ref(),
+                self.op_observer.as_ref(),
+                args,
+            ),
             HANDLER_UNDO => handle_undo(&self.sessions, self.event_bus.as_ref(), args),
             HANDLER_REDO => handle_redo(&self.sessions, self.event_bus.as_ref(), args),
             HANDLER_LIST_OPEN => handle_list_open(&self.sessions),
-            HANDLER_SYNC_CONTENT => {
-                handle_sync_content(&self.sessions, self.event_bus.as_ref(), args)
-            }
+            HANDLER_SYNC_CONTENT => handle_sync_content(
+                &self.sessions,
+                self.event_bus.as_ref(),
+                self.op_observer.as_ref(),
+                args,
+            ),
             HANDLER_GET_MARKDOWN => handle_get_markdown(&self.sessions, args),
             HANDLER_STAMP_BLOCK => {
                 handle_stamp_block(&self.sessions, self.event_bus.as_ref(), args)
@@ -326,12 +381,17 @@ impl CorePlugin for EditorCorePlugin {
         let sessions = Arc::clone(&self.sessions);
         let ctx = self.context.clone();
         let event_bus = self.event_bus.clone();
+        let observer = self.op_observer.clone();
         let args = args.clone();
 
         Some(Box::pin(async move {
             match handler_id {
-                HANDLER_OPEN => handle_open_async(&forge_root, sessions, ctx, &args).await,
-                HANDLER_CLOSE => handle_close_async(sessions, ctx, &args).await,
+                HANDLER_OPEN => {
+                    handle_open_async(&forge_root, sessions, ctx, observer.as_ref(), &args).await
+                }
+                HANDLER_CLOSE => {
+                    handle_close_async(sessions, ctx, observer.as_ref(), &args).await
+                }
                 HANDLER_SAVE => handle_save_async(&forge_root, sessions, ctx, &args).await,
                 HANDLER_EXECUTE_DATABASE_VIEW => {
                     handle_execute_database_view(ctx, &args).await
@@ -364,10 +424,11 @@ impl CorePlugin for EditorCorePlugin {
 /// into the session map. Shared tail of the sync + async `open` paths.
 fn finish_open(
     sessions: &Mutex<HashMap<String, Session>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     relpath: &str,
     source: &str,
 ) -> Result<Value, PluginError> {
-    finish_open_with_undo(sessions, relpath, source, None)
+    finish_open_with_undo(sessions, observer, relpath, source, None)
 }
 
 /// Like [`finish_open`], but installs `restored_undo` (typically from
@@ -377,6 +438,7 @@ fn finish_open(
 /// a serialized cross-session sequence.
 fn finish_open_with_undo(
     sessions: &Mutex<HashMap<String, Session>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     relpath: &str,
     source: &str,
     restored_undo: Option<UndoTree>,
@@ -388,6 +450,14 @@ fn finish_open_with_undo(
     let tree = parser
         .parse(source)
         .map_err(|e| exec_err(format!("open: parse '{relpath}': {e}")))?;
+
+    // BL-074 hook: notify the observer *before* the session goes into
+    // the map so it can fail fast if it cares to. The observer cannot
+    // mutate the session — it's a read-only signal carrying tree +
+    // canonical source.
+    if let Some(obs) = observer {
+        obs.on_session_opened(relpath, &tree, source.as_bytes());
+    }
 
     let session = Session {
         tree,
@@ -404,19 +474,21 @@ fn finish_open_with_undo(
 fn handle_open_sync(
     forge_root: &Path,
     sessions: &Mutex<HashMap<String, Session>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "open")?;
     let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
     let source = fs::read_to_string(&abs)
         .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?;
-    finish_open(sessions, &relpath, &source)
+    finish_open(sessions, observer, &relpath, &source)
 }
 
 async fn handle_open_async(
     forge_root: &Path,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     ctx: Option<Arc<KernelPluginContext>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "open")?;
@@ -463,14 +535,18 @@ async fn handle_open_async(
         None
     };
 
-    finish_open_with_undo(&sessions, &relpath, &source, restored_undo)
+    finish_open_with_undo(&sessions, observer, &relpath, &source, restored_undo)
 }
 
 fn handle_close(
     sessions: &Mutex<HashMap<String, Session>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "close")?;
+    if let Some(obs) = observer {
+        obs.on_session_closed(&relpath);
+    }
     let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
     guard.remove(&relpath);
     Ok(serde_json::json!({}))
@@ -683,9 +759,17 @@ async fn persist_undo(
 async fn handle_close_async(
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     ctx: Option<Arc<KernelPluginContext>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "close")?;
+
+    // BL-074 hook: fire BEFORE the session is removed so the observer
+    // can flush per-relpath state. Mirrors the BL-072 undo persistence
+    // pattern where the side-effect runs alongside session teardown.
+    if let Some(obs) = observer {
+        obs.on_session_closed(&relpath);
+    }
 
     // Capture the session's tree + undo before removing it so the
     // persistence write happens against a consistent snapshot but the
@@ -1023,6 +1107,7 @@ async fn handle_resolve_block_link_async(
 fn handle_apply_transaction(
     sessions: &Mutex<HashMap<String, Session>>,
     event_bus: Option<&Arc<EventBus>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "apply_transaction")?;
@@ -1051,7 +1136,7 @@ fn handle_apply_transaction(
         .map_err(|e| exec_err(format!("apply_transaction: invalid transaction: {e}")))?;
     let tx_id = tx.id;
 
-    let (value, revision) = {
+    let (value, revision, applied_ops) = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
         let s = guard.get_mut(&relpath).ok_or_else(|| {
             exec_err(format!(
@@ -1063,7 +1148,8 @@ fn handle_apply_transaction(
         // auto-stamp inbound-link targets. The post-apply scan reads
         // the freshly-mutated block content (wikilink fragments live in
         // the source text, not the annotation payload), so it has to
-        // run after `execute` returns.
+        // run after `execute` returns. BL-074: same captured `ops` is
+        // handed to the observer (out of band from the lock).
         let ops = tx.operations.clone();
         s.undo
             .execute(tx, &mut s.tree)
@@ -1072,8 +1158,11 @@ fn handle_apply_transaction(
         s.revision = s.revision.saturating_add(1);
         let rev = s.revision;
         let val = snapshot_to_value(&snapshot_of(s), "apply_transaction")?;
-        (val, rev)
+        (val, rev, ops)
     };
+    if let Some(obs) = observer {
+        obs.on_apply_transaction(&relpath, &applied_ops);
+    }
     publish_changed(event_bus, &relpath, revision, Some(tx_id));
     Ok(value)
 }
@@ -1248,6 +1337,7 @@ fn handle_list_open(sessions: &Mutex<HashMap<String, Session>>) -> Result<Value,
 fn handle_sync_content(
     sessions: &Mutex<HashMap<String, Session>>,
     event_bus: Option<&Arc<EventBus>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "sync_content")?;
@@ -1262,6 +1352,14 @@ fn handle_sync_content(
     let tree = parser
         .parse(content)
         .map_err(|e| exec_err(format!("sync_content: parse '{relpath}': {e}")))?;
+
+    // BL-074 hook: a sync_content reset is observable as a fresh
+    // session-open from the observer's perspective. Fire the hook
+    // *outside* the session lock so the observer can do disk I/O
+    // without deadlocking against future apply_transaction calls.
+    if let Some(obs) = observer {
+        obs.on_session_opened(&relpath, &tree, content.as_bytes());
+    }
 
     let revision = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;

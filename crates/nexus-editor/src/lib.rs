@@ -34,4 +34,4 @@ pub use undo_tree::UndoTree;
 
 pub use markdown::{MarkdownParser, MarkdownSerializer, ParseOptions};
 
-pub use core_plugin::{EditorCorePlugin, EditorSnapshot, PLUGIN_ID as EDITOR_PLUGIN_ID};
+pub use core_plugin::{EditorCorePlugin, EditorSnapshot, OpObserver, PLUGIN_ID as EDITOR_PLUGIN_ID};

@@ -41,6 +41,7 @@ nexus-storage = { path = "../nexus-storage" }
 nexus-database = { path = "../nexus-database" }
 nexus-ai = { path = "../nexus-ai" }
 nexus-editor = { path = "../nexus-editor" }
+nexus-crdt = { path = "../nexus-crdt" }
 nexus-terminal = { path = "../nexus-terminal" }
 nexus-theme = { path = "../nexus-theme" }
 nexus-git = { path = "../nexus-git" }

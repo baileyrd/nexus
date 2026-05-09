@@ -38,6 +38,7 @@ use nexus_plugins::{
 pub mod agent;
 pub mod forge_template;
 mod audit_sqlite;
+pub mod crdt_publisher;
 pub mod database;
 pub mod storage;
 pub mod terminal;
@@ -826,10 +827,23 @@ fn register_core_plugins(
                 ]),
             ),
             forge_root,
-            Box::new(EditorCorePlugin::with_event_bus(
-                forge_root.to_path_buf(),
-                Arc::clone(event_bus),
-            )),
+            {
+                let mut plugin = EditorCorePlugin::with_event_bus(
+                    forge_root.to_path_buf(),
+                    Arc::clone(event_bus),
+                );
+                // BL-074 editor wiring: each apply_transaction routes
+                // through the publisher, which mirrors the session in
+                // a CrdtDoc, publishes per-op envelopes on
+                // `com.nexus.editor.ops.<relpath>`, and persists to
+                // `.forge/.editor/crdt/<sha>.json` on close.
+                let publisher = Arc::new(crdt_publisher::CrdtPublisher::new(
+                    forge_root.to_path_buf(),
+                    Arc::clone(event_bus),
+                ));
+                plugin.set_op_observer(publisher);
+                Box::new(plugin)
+            },
         )
         .or_lifecycle_skip(event_bus, "com.nexus.editor")?;
 
