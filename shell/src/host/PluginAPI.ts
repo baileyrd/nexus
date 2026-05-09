@@ -557,9 +557,14 @@ export function buildPluginAPI(
     // ─── Input ─────────────────────────────────────────────────────────────
     input: {
       async prompt(message, placeholder) {
-        // Simple browser prompt fallback — replace with custom modal UI
-        const result = window.prompt(message, placeholder ?? '')
-        return result
+        // Routes into nexus.prompt's overlay modal so users get a
+        // styled dialog instead of the platform `window.prompt`
+        // (which looks out of place in a styled app and doesn't
+        // work well inside iframe-sandboxed plugins). Lazy import
+        // breaks the circular host → plugin dep — same pattern as
+        // confirm / pick.
+        const { requestPrompt } = await import('../plugins/nexus/prompt/promptStore')
+        return requestPrompt(message, placeholder)
       },
       async confirm(message) {
         // Routes into nexus.confirm's overlay modal so users get a

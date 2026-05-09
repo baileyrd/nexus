@@ -236,6 +236,12 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/pick').then(m => m.pickPlugin),
   },
   {
+    id: 'nexus.prompt', name: 'Prompt',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Styled prompt modal exposed to plugins via api.input.prompt — replaces the platform window.prompt fallback.',
+    load: () => import('./nexus/prompt').then(m => m.promptPlugin),
+  },
+  {
     id: 'nexus.paneMode', name: 'Pane Mode',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
