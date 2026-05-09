@@ -23,3 +23,5 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# AIG-07: stream session ids generated on submit_ai.
+uuid = { workspace = true }

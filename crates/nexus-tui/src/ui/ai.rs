@@ -107,8 +107,15 @@ fn render_transcript(frame: &mut Frame, app: &TuiApp, area: Rect) {
 
 fn render_status_line(frame: &mut Frame, app: &TuiApp, area: Rect) {
     let line = if app.ai.in_flight {
+        // AIG-07 — once the first chunk lands, swap the indicator
+        // from "thinking…" to "streaming…" so the user knows tokens
+        // are flowing rather than stalled mid-call.
+        let label = match &app.ai.streaming {
+            Some(s) if s.started => "  streaming…  ",
+            _ => "  thinking…  ",
+        };
         Line::from(Span::styled(
-            "  thinking…  ",
+            label,
             Style::default()
                 .bg(Color::Blue)
                 .fg(Color::Black)

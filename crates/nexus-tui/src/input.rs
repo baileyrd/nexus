@@ -435,10 +435,10 @@ fn handle_ai_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             app.mode = Mode::Normal;
             return Ok(());
         }
-        // Submit on Enter. The blocking `submit_ai` call freezes
-        // the render loop until the model responds — same pattern
-        // as the storage / terminal helpers; documented in the
-        // AiPanelState::in_flight field comment.
+        // AIG-07 — non-blocking submit. `submit_ai` spawns the IPC
+        // call as a tokio task, subscribes to the chunk topic, and
+        // returns immediately. `pump_ai` (in the render loop) drains
+        // chunks between frames so the user sees tokens stream in.
         (KeyModifiers::NONE, KeyCode::Enter) => {
             app.submit_ai();
             return Ok(());

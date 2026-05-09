@@ -29,6 +29,7 @@ use ratatui::DefaultTerminal;
 
 mod app;
 mod input;
+mod streaming;
 mod ui;
 
 use app::TuiApp;
@@ -146,6 +147,14 @@ fn run(terminal: &mut DefaultTerminal, app: &mut TuiApp) -> Result<()> {
         // session doesn't slow the render loop.
         if app.terminal.active {
             app.pump_terminal();
+        }
+
+        // AIG-07 — drain any pending stream chunks into the active
+        // assistant message. No-op when there's no live session;
+        // bounded work otherwise (try_recv until empty, plus an
+        // is_finished check on the IPC join handle).
+        if app.ai.streaming.is_some() {
+            app.pump_ai();
         }
 
         if app.should_quit {

@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -13,9 +14,15 @@ use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRec
 use nexus_bootstrap::terminal as term_ipc;
 use nexus_bootstrap::terminal::OutputLine;
 use nexus_bootstrap::{build_tui_runtime, Runtime};
-use nexus_kernel::PluginContext;
+use nexus_kernel::{EventFilter, EventSubscription, NexusEvent, PluginContext};
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
+use tokio::task::JoinHandle;
+
+use crate::streaming::{
+    matches_start_event, parse_chunk_event, parse_done_event, STREAM_CHUNK_TOPIC,
+    STREAM_DONE_TOPIC, STREAM_START_TOPIC,
+};
 
 // ── Mode / Focus ──────────────────────────────────────────────────────────────
 
@@ -525,11 +532,31 @@ pub enum AiRole {
     Assistant,
 }
 
-/// State of the right-pane AI chat surface (AIG-07). The TUI uses
-/// `com.nexus.ai::ask` for one-shot RAG-grounded chat — same
-/// retrieval path the shell's `stream_ask` uses, just collected
-/// into a single response since the TUI doesn't subscribe to the
-/// kernel bus for token-level streaming.
+/// In-flight streaming session — one per active AI submit. The pump
+/// drains the subscription between renders, appending each chunk to
+/// the placeholder assistant message so the user sees the reply
+/// arrive in real time. AIG-07 follow-up.
+pub struct StreamingSession {
+    /// Session id passed to `stream_ask` and matched against
+    /// `session_id` on incoming bus events. Distinct from any other
+    /// concurrent session that might publish on the same topics.
+    pub session_id: String,
+    /// Subscription to the chunk topic (kernel-owned shared topic).
+    /// Drained via `try_recv` from the main thread on every pump tick.
+    pub subscription: EventSubscription,
+    /// Tokio task driving the IPC call. `is_finished` is polled non-
+    /// blocking; the result is harvested only when `true`.
+    pub join: JoinHandle<Result<serde_json::Value, String>>,
+    /// Index into `messages` of the placeholder assistant message
+    /// that streaming chunks are appended to. Captured at submit
+    /// time so the pump can locate the buffer without a linear scan.
+    pub placeholder_idx: usize,
+    /// Flips to `true` once the first chunk lands so the status line
+    /// can switch from "thinking…" to "streaming…".
+    pub started: bool,
+}
+
+/// State of the right-pane AI chat surface (AIG-07).
 pub struct AiPanelState {
     /// True when the panel is visible. Toggled with `a` in Normal
     /// mode.
@@ -560,6 +587,9 @@ pub struct AiPanelState {
     /// panel-Normal mode adjust it; auto-pinned to the bottom when
     /// a new message arrives.
     pub scroll: u16,
+    /// AIG-07 — active streaming session, if any. `Some` between
+    /// `submit_ai` and the pump observing the IPC task's completion.
+    pub streaming: Option<StreamingSession>,
 }
 
 impl AiPanelState {
@@ -574,6 +604,7 @@ impl AiPanelState {
             last_error: None,
             provider_status: None,
             scroll: 0,
+            streaming: None,
         }
     }
 
@@ -640,7 +671,12 @@ pub struct TuiApp {
     pub status_info: StatusInfo,
     /// Nexus runtime providing the kernel plugin context used for all storage
     /// operations. Held behind `runtime.context.ipc_call`.
-    pub runtime: Runtime,
+    ///
+    /// AIG-07 — wrapped in `Arc` so the streaming pump can hand a clone
+    /// to the spawned IPC task without a borrow-checker fight; every
+    /// existing helper that takes `&Runtime` still works via
+    /// `&*self.runtime`.
+    pub runtime: Arc<Runtime>,
     /// Tokio runtime used to block on async `ipc_call`s from the sync event
     /// loop. A multi-threaded runtime is required for `spawn_blocking` tasks
     /// inside the kernel's ipc dispatcher.
@@ -664,8 +700,10 @@ impl TuiApp {
             .enable_all()
             .build()
             .context("failed to start tokio runtime")?;
-        let runtime = build_tui_runtime(forge_root.clone())
-            .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
+        let runtime = Arc::new(
+            build_tui_runtime(forge_root.clone())
+                .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?,
+        );
 
         let mut app = Self {
             mode: Mode::Normal,
@@ -1095,18 +1133,18 @@ impl TuiApp {
         }
     }
 
-    /// Submit the current prompt to `com.nexus.ai::stream_ask`. Blocks
-    /// the render loop on the IPC call (see [`AiPanelState::in_flight`]
-    /// for the limitation note). Same pattern as the storage /
-    /// terminal helpers — long-running calls freeze the UI until
-    /// they complete or the timeout fires.
+    /// Submit the current prompt to `com.nexus.ai::stream_ask`.
     ///
-    /// AIG-07 follow-up: the call passes the full transcript through
-    /// `stream_ask`'s `messages` field so the model sees prior turns;
-    /// the kernel handler treats the last `user` message as the RAG
-    /// retrieval question. We keep the synchronous `block_on` shape —
-    /// streaming token feedback is a separate follow-up that wants an
-    /// `Arc<KernelPluginContext>` refactor.
+    /// AIG-07 — non-blocking. Subscribes to the chunk topic, spawns
+    /// the IPC call onto `self.rt`, inserts a placeholder assistant
+    /// message, and returns immediately. The render loop's
+    /// [`Self::pump_ai`] drains chunks between frames and harvests
+    /// the IPC result when the spawned task completes.
+    ///
+    /// The full transcript is passed through `stream_ask`'s
+    /// `messages` field so the model sees prior turns; the kernel
+    /// handler treats the last `user` message as the RAG retrieval
+    /// question.
     pub fn submit_ai(&mut self) {
         let question = self.ai.input.trim().to_string();
         if question.is_empty() || self.ai.in_flight {
@@ -1138,32 +1176,167 @@ impl TuiApp {
             })
             .collect();
 
-        // Generous timeout — same ceiling the shell uses for chat
-        // calls.
+        // Insert a placeholder assistant message that pump_ai will
+        // grow as chunks arrive. Captured by index because the vec
+        // can't grow under it before pump_ai sees the final result
+        // (other turns are blocked on `in_flight`).
+        self.ai.messages.push(AiMessage {
+            role: AiRole::Assistant,
+            text: String::new(),
+        });
+        let placeholder_idx = self.ai.messages.len() - 1;
+
+        // Subscribe BEFORE firing the call so chunks published
+        // between the spawn and our first pump still reach us
+        // (broadcast channels drop pre-subscription events).
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let subscription = self.runtime.kernel.event_bus().subscribe(
+            EventFilter::CustomPrefix("com.nexus.ai.stream_".to_string()),
+        );
+
+        // Spawn the IPC call on the multi-threaded tokio runtime.
+        // The future captures `runtime` (Arc clone) by move so it
+        // owns its borrow for its full lifetime.
+        let runtime = Arc::clone(&self.runtime);
+        let sid_for_call = session_id.clone();
         let timeout = Duration::from_secs(180);
-        let result = self.rt.block_on(async {
-            self.runtime
+        let join = self.rt.spawn(async move {
+            runtime
                 .context
                 .ipc_call(
                     "com.nexus.ai",
                     "stream_ask",
-                    serde_json::json!({ "messages": messages }),
+                    serde_json::json!({
+                        "messages": messages,
+                        "session_id": sid_for_call,
+                    }),
                     timeout,
                 )
                 .await
                 .map_err(|e| e.to_string())
-                .and_then(|value| extract_stream_ask_text(&value))
         });
+
+        self.ai.streaming = Some(StreamingSession {
+            session_id,
+            subscription,
+            join,
+            placeholder_idx,
+            started: false,
+        });
+    }
+
+    /// AIG-07 — drain any pending stream events into the placeholder
+    /// assistant message and harvest the IPC result if the spawned
+    /// task has completed.
+    ///
+    /// Called from the render loop on every tick (cheap when no
+    /// streaming session is active). Non-blocking: uses `try_recv`
+    /// on the subscription and `is_finished` on the join handle.
+    /// Only blocks (briefly) when the join handle is already
+    /// finished, to harvest the final value.
+    pub fn pump_ai(&mut self) {
+        let Some(session) = self.ai.streaming.as_mut() else {
+            return;
+        };
+
+        // Drain pending bus events. We try-recv until empty so a
+        // burst of chunks lands in one frame rather than dripping
+        // out one-per-tick (which would feel laggy).
+        loop {
+            match session.subscription.try_recv() {
+                Ok(Some(event)) => {
+                    let NexusEvent::Custom { type_id, payload, .. } = &event.event else {
+                        continue;
+                    };
+                    if type_id == STREAM_START_TOPIC
+                        && matches_start_event(payload, &session.session_id)
+                    {
+                        session.started = true;
+                        continue;
+                    }
+                    if type_id == STREAM_CHUNK_TOPIC {
+                        if let Some(chunk) = parse_chunk_event(payload, &session.session_id) {
+                            session.started = true;
+                            if let Some(msg) = self.ai.messages.get_mut(session.placeholder_idx) {
+                                msg.text.push_str(&chunk);
+                            }
+                            self.ai.scroll = u16::MAX;
+                        }
+                        continue;
+                    }
+                    if type_id == STREAM_DONE_TOPIC {
+                        if let Some(text) = parse_done_event(payload, &session.session_id) {
+                            // The done event carries the final
+                            // post-processed text. Replacing the
+                            // accumulated chunks here keeps the
+                            // visible text in sync with whatever
+                            // `trim` / `stop` the kernel applied.
+                            if let Some(msg) = self.ai.messages.get_mut(session.placeholder_idx) {
+                                msg.text = text;
+                            }
+                            self.ai.scroll = u16::MAX;
+                        }
+                        continue;
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    tracing::debug!(error = %err, "ai stream subscription drain error");
+                    break;
+                }
+            }
+        }
+
+        // Harvest the IPC result if the task has completed. The
+        // result drives error reporting and ensures the placeholder
+        // is reconciled against the IPC's authoritative response
+        // shape (covers the case where the bus never delivered a
+        // `stream_done` — kernel error, transport drop, etc.).
+        if !session.join.is_finished() {
+            return;
+        }
+        // Take the session out so we drop the subscription before
+        // any UI mutation; the join harvest can't observe pre-take
+        // state because we're the only mutator.
+        let mut session = self.ai.streaming.take().expect("checked Some above");
+        let join_result = self
+            .rt
+            .block_on(async { (&mut session.join).await });
         self.ai.in_flight = false;
-        match result {
+
+        let outcome = match join_result {
+            Ok(Ok(value)) => extract_stream_ask_text(&value),
+            Ok(Err(msg)) => Err(msg),
+            Err(join_err) => Err(format!("ai task join: {join_err}")),
+        };
+        match outcome {
             Ok(answer) => {
-                self.ai.messages.push(AiMessage {
-                    role: AiRole::Assistant,
-                    text: answer,
-                });
+                if let Some(msg) = self.ai.messages.get_mut(session.placeholder_idx) {
+                    // Use the IPC's final text as the source of
+                    // truth — chunk events alone may have produced a
+                    // pre-trim version. If the placeholder was empty
+                    // (provider never streamed), this is the only
+                    // text the user will see.
+                    if !answer.is_empty() {
+                        msg.text = answer;
+                    } else if msg.text.is_empty() {
+                        // Empty IPC + empty chunks → drop the
+                        // placeholder rather than leave a blank
+                        // bubble in the transcript.
+                        self.ai.messages.remove(session.placeholder_idx);
+                    }
+                }
                 self.ai.scroll = u16::MAX;
             }
             Err(err) => {
+                // Error path: drop the placeholder and surface the
+                // error in the status line so the transcript stays
+                // clean.
+                if let Some(msg) = self.ai.messages.get(session.placeholder_idx) {
+                    if msg.text.is_empty() {
+                        self.ai.messages.remove(session.placeholder_idx);
+                    }
+                }
                 self.ai.last_error = Some(err);
             }
         }
