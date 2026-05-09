@@ -1,8 +1,10 @@
 # ADR 0026: Collaborative Editing CRDT Layer
 
 **Date:** 2026-05-08
-**Status:** Accepted (Phase 1). Phases 2–4 deferred — see "Phase plan"
-below.
+**Status:** Accepted. Phases 1–4 of the `nexus-crdt` library shipped
+2026-05-08; editor adoption (per-session `CrdtDoc` + ops publishing
++ on-open/on-close persistence) is the deferred follow-up — see
+"Editor wiring" below.
 **Related:** BL-074 (CRDT layer), BL-007 (CRDT-over-Git transport),
 ADR 0017 (block-id stability), PRD-08 §8 (collaborative editing).
 
@@ -59,40 +61,95 @@ domination, idempotency (log + RGA), gossip slicing, three convergence
 scenarios (different blocks, same site sequential, three-site
 interleaving), structural delete-edit, and concurrent-edit surfacing.
 
-### Phase 2 (deferred — silent text merge)
+### Phase 2 (shipped — silent text merge)
 
-Wire `text::RgaText` into `CrdtDoc::detect_conflict`: when a remote
-text op (`InsertText` / `DeleteText`) is concurrent with a local op on
-the same block, replay both as `RgaTextOp` sequences against the
-block's `RgaText` snapshot, then rebuild `block.content` from
-`RgaText::render()`. The conflict surface narrows to structural
-delete-edit only.
+`CrdtDoc` now eagerly maintains a per-block `text::RgaText` mirror
+materialised at construction from baseline content using
+deterministic synthetic `OpId`s (`merge::baseline_op_id`,
+`merge::subop_id`). Both peers materialise identical RGAs from
+equal `BlockTree`s, so concurrent ops gossiped between them
+converge.
 
-This requires a per-block initialisation step: when a block first sees
-a concurrent text edit, the doc must materialise an `RgaText` from the
-current `block.content` (each character gets a synthetic OpId derived
-from the block's last writer + position). The synthetic IDs need to be
-deterministic across sites so two peers initialising independently
-land on the same RGA state — keying on `(last_writer_op_id, position)`
-works because both peers have the same `last_writer_op_id` by the time
-they start diverging.
+`CrdtOp` gained an `rga_ops: Vec<RgaTextOp>` field carrying the
+position-free RGA translation authored at `apply_local` time. On
+`apply_remote` for concurrent text ops, the doc replays `rga_ops`
+on the local RGA and rebuilds `block.content` from `rga.render()`
+— the editor op's byte-positional payload is stale and is skipped.
+Causally-ordered text ops still apply through the editor and use
+`rga_ops` to keep the mirror in sync.
 
-### Phase 3 (deferred — sync loop)
+The conflict surface narrows: `Conflict::ConcurrentBlockEdit` now
+only surfaces for whole-block replacements (`UpdateBlockContent` /
+`UpdateAnnotations`) that the RGA can't merge;
+`Conflict::StructuralDeleteEdit` always surfaces.
 
-A new event-bus topic `com.nexus.editor.ops.<relpath>` carries
-`CrdtOp` payloads between sessions. The editor `core_plugin` publishes
-on every `apply_transaction`; a new `nexus-crdt::SyncLoop` subscribes
-and drives `CrdtDoc::apply_remote`. The Tauri shell forwards the same
-topic across windows so popouts (ADR 0020) stay in sync.
+### Phase 3 (shipped — sync infrastructure)
 
-### Phase 4 (deferred — persistence, BL-007)
+`nexus_crdt::wire`: per-file topic `com.nexus.editor.ops.<relpath>`
+plus `OpEnvelope { op: CrdtOp }` JSON payload. `nexus_crdt::sync`:
+`DocHandle` (cloneable `Arc<Mutex<CrdtDoc>>`) and `SyncLoop` that
+owns a kernel `EventSubscription` and drains it into
+`CrdtDoc::apply_remote`. Self-echo ops (`op.id.site ==
+doc.site()`) are dropped so a single bus shared by author and
+receiver in the same process doesn't loop.
 
-The op log persists alongside the markdown source so reopening a file
-restores CRDT state. We serialise the `OpLog` + per-block `RgaText`
-snapshots as JSON in `<forge>/.forge/.editor/crdt/<sha>.json`. On
-git push the file is committed; on pull with conflict, the file's
-own conflict markers are resolved by `OpLog::merge` (idempotent
-union) before any markdown reconciliation runs.
+The shipped infrastructure is what the `EditorCorePlugin` will
+publish into and what cross-process / cross-window peers consume.
+Editor adoption (per-session `CrdtDoc` shadow + per-op publish on
+`apply_transaction`) is part of the deferred "Editor wiring" tail
+below — it's blocked on adding an `OpObserver` callback hook in
+`nexus-editor` because `nexus-crdt` already depends on
+`nexus-editor` and a direct reverse-dep would cycle. The
+orchestration belongs in `nexus-bootstrap`, which already pulls
+both crates.
+
+### Phase 4 (shipped — persistence + git merge primitive)
+
+`nexus_crdt::state::PersistedCrdt`: schema-versioned envelope around
+a `CrdtState` snapshot (site, lamport, op log, per-block meta,
+per-block RGA — no tree, since the tree comes from the markdown
+source on load). Helpers: `crdt_state_path(relpath)` lays out
+files at `<forge>/.forge/.editor/crdt/<sha-of-relpath>.json`
+(matching the BL-072 undo-state convention), and
+`content_hash_hex(bytes)` is the SHA-256 integrity tag the editor
+will check on load to detect external markdown edits.
+
+`OpLog::merge(other)` is the idempotent-union primitive the BL-007
+git merge driver registers as the conflict resolver for the
+state file: replaying the merged log on a fresh `CrdtDoc` produces
+the same state regardless of which side merged into which.
+
+`CrdtDoc::state()` / `from_state(tree, state)` is the snapshot/restore
+pair. `from_state` tolerates tree drift — blocks added externally
+get a fresh RGA, removed blocks have their RGA dropped — so a
+session can survive a compatible markdown edit without losing
+CRDT continuity.
+
+JSON-format detail: `RgaText.nodes` and `OpLog.ops` are
+`HashMap<OpId, …>`, but JSON map keys must be strings, so the
+on-disk form serialises both as `Vec<(OpId, …)>` via serde shims.
+
+### Editor wiring (deferred follow-up)
+
+Three pieces remain on top of the shipped library:
+
+1. `nexus-editor` exposes an `OpObserver` callback trait. The
+   `EditorCorePlugin` invokes it from
+   `handle_apply_transaction` after a successful tx commit and from
+   `finish_open` / `handle_sync_content` / `handle_close` so the
+   observer can manage per-session lifecycle.
+2. `nexus-bootstrap` registers a `CrdtPublisher` observer that
+   maintains a `HashMap<relpath, CrdtDoc>` + `SiteId`, calls
+   `crdt.apply_local` for each tx op, and publishes each resulting
+   `CrdtOp` on `wire::ops_topic(relpath)` via the shared `EventBus`.
+3. Open/close flow loads `state::PersistedCrdt` if the
+   `<sha>.json` exists and its `content_hash` matches the source;
+   close flow writes the latest snapshot (`CrdtDoc::state()`).
+   Hash-mismatched state is ignored; a stale-age cap mirrors the
+   BL-072 undo-state policy.
+
+These follow-ups don't change any wire format or library API; they
+land cleanly on top of the shipped crates.
 
 ## Consequences
 
@@ -143,13 +200,25 @@ union) before any markdown reconciliation runs.
 
 ## Open follow-ups
 
-- BL-074 Phase 2 — wire `RgaText` into `CrdtDoc::detect_conflict`.
-- BL-074 Phase 3 — `com.nexus.editor.ops.<path>` event topic +
-  `SyncLoop` subscriber + Tauri-window forwarding.
-- BL-074 Phase 4 / BL-007 — persist `OpLog` to
-  `<forge>/.forge/.editor/crdt/<sha>.json`, define git merge driver.
-- Reparenting / move-loop detection. Phase 1 conflict detection is
+- **Editor wiring** (see "Editor wiring" above) — `OpObserver`
+  callback in `nexus-editor`; `CrdtPublisher` observer in
+  `nexus-bootstrap`; open/close persistence via
+  `state::PersistedCrdt`. The library API is stable; this is
+  pure orchestration.
+- **Tauri popout window forwarding** (ADR 0020) — the shell
+  currently doesn't relay `com.nexus.editor.ops.<relpath>` between
+  popout windows, so two popouts on the same file in the same
+  process won't gossip without the editor wiring above.
+- **BL-007 git merge driver registration** — wire
+  `OpLog::merge` (already shipped) as the git merge driver for
+  `.forge/.editor/crdt/*.json` so `git pull` conflicts auto-resolve
+  by idempotent log union before markdown reconciliation runs.
+- **Reparenting / move-loop detection.** Conflict detection is still
   silent on concurrent reparents — two sites moving the same block
   to different parents will *both* apply, and the second op wins by
-  causal ordering. This is acceptable while reparent is rare; revisit
-  if collaborative outlining becomes a primary use case.
+  causal ordering. This is acceptable while reparent is rare;
+  revisit if collaborative outlining becomes a primary use case.
+- **Op log compaction.** The log grows unbounded in this
+  revision. Collapsing ops superseded by later ones with no
+  concurrent peers, or pruning ops dominated by every active
+  site's VV, is left to a follow-up.

@@ -132,9 +132,9 @@ _BL-082 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 ### BL-074: Collaborative editing — CRDT layer
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #5
-**Effort**: Large (4–6 weeks; broken into four phases — see ADR 0026)
-**Status**: Phase 1 shipped 2026-05-08. Phases 2–4 open.
-**Crates**: `nexus-crdt` (new — Phase 1 ✓), `nexus-editor` (sync loop — Phase 3), `nexus-storage` (conflict merge — Phase 4)
+**Effort**: Large (broken into four phases — see ADR 0026)
+**Status**: Phases 1–4 of the `nexus-crdt` library shipped 2026-05-08. Editor wiring (`OpObserver` callback in `nexus-editor`, `CrdtPublisher` in `nexus-bootstrap`, on-open/on-close persistence) and Tauri popout-window forwarding remain open.
+**Crates**: `nexus-crdt` ✓, `nexus-editor` (observer hook — pending), `nexus-bootstrap` (publisher orchestrator — pending)
 **Related**: BL-007 (CRDT-over-Git transport); PRD-08 collaborative editing spec; stable block IDs (ADR 0017) were built for this; ADR 0026 documents the phase plan
 
 The block model was designed with collaboration in mind — stable IDs survive upstream edits, annotation ranges adjust on insert/delete, and the transaction system is invertible. The CRDT merge semantics are documented in the spec. What's missing is the live sync loop: a mechanism for two sessions on the same forge to exchange operations and converge.
@@ -143,25 +143,37 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 
 **Phase 1 — CRDT foundation (shipped 2026-05-08):**
 - `nexus-crdt` crate with `SiteId` / `Lamport` / `OpId` / `VersionVector`, `OpLog` (idempotent by `OpId`, with gossip slicing via `missing_for`), and `CrdtDoc` (`apply_local` / `apply_remote` over `nexus_editor::Operation` with vector-clock causality).
-- `text::RgaText` — full RGA sequence CRDT for in-block text, tested standalone. Phase 2 wires it into `CrdtDoc`'s text-conflict path.
-- Conflict surface: `ConcurrentBlockEdit` (Phase 1 surfaces; Phase 2 silences for pure text overlap) and `StructuralDeleteEdit` (always surfaces).
-- 21 unit tests covering lamport ordering, VV domination, idempotency, gossip slicing, and convergence scenarios (different blocks, sequential post-gossip, three-site RGA interleaving, structural delete-edit, concurrent same-block edit).
+- `text::RgaText` — full RGA sequence CRDT for in-block text, tested standalone.
+- Conflict surface: `ConcurrentBlockEdit` and `StructuralDeleteEdit`.
 
-**Phase 2 — silent text merge (open):**
-- Wire `text::RgaText` into `CrdtDoc::detect_conflict` so concurrent `InsertText` / `DeleteText` on the same block converge silently. Per-block RGA initialisation keyed on `(last_writer_op_id, position)` so two peers materialise identical state independently.
+**Phase 2 — silent text merge (shipped 2026-05-08):**
+- `CrdtDoc` eagerly maintains a per-block `RgaText` mirror materialised at construction from baseline content using deterministic synthetic `OpId`s (`merge::baseline_op_id`, `merge::subop_id`). Both peers materialise identical RGAs from equal `BlockTree`s, so concurrent ops gossiped between them converge.
+- `CrdtOp` gained `rga_ops: Vec<RgaTextOp>` carrying the position-free RGA translation authored at `apply_local` time. Concurrent text ops replay `rga_ops` on the local RGA and rebuild `block.content` from `rga.render()` — `Conflict::ConcurrentBlockEdit` now only surfaces for whole-block replacements (`UpdateBlockContent` / `UpdateAnnotations`) the RGA can't merge.
 
-**Phase 3 — live sync loop (open):**
-- New event-bus topic `com.nexus.editor.ops.<relpath>`; the editor `core_plugin` publishes on every `apply_transaction`; a new `nexus-crdt::SyncLoop` subscribes and drives `CrdtDoc::apply_remote`. Tauri shell forwards across popout windows (ADR 0020).
+**Phase 3 — sync infrastructure (shipped 2026-05-08):**
+- `wire` module with topic `com.nexus.editor.ops.<relpath>` and `OpEnvelope { op: CrdtOp }` JSON payload.
+- `sync` module with `DocHandle` (`Arc<Mutex<CrdtDoc>>`) and `SyncLoop` that owns a kernel `EventSubscription` and drains it into `CrdtDoc::apply_remote`. Self-echo ops dropped.
 
-**Phase 4 — persistence (BL-007):**
-- Persist `OpLog` + per-block `RgaText` snapshots to `<forge>/.forge/.editor/crdt/<sha>.json`. Git merge driver resolves conflict markers in that file via idempotent log union before any markdown reconciliation.
+**Phase 4 — persistence + git merge primitive (shipped 2026-05-08):**
+- `state::PersistedCrdt` schema-versioned envelope around `CrdtState` (site, lamport, log, per-block meta, RGA — no tree). Path layout: `<forge>/.forge/.editor/crdt/<sha-of-relpath>.json`. `content_hash_hex` integrity tag.
+- `CrdtDoc::state()` / `from_state(tree, state)` snapshot/restore pair. `from_state` tolerates compatible markdown drift.
+- `OpLog::merge` idempotent-union primitive — what BL-007's git merge driver registers as the conflict resolver for the state file.
+- Total: 43 unit tests across the crate.
+
+**Editor wiring (open):**
+- `nexus-editor` exposes an `OpObserver` callback trait. `EditorCorePlugin` invokes it from `handle_apply_transaction` after a successful tx commit and from `finish_open` / `handle_sync_content` / `handle_close` for session lifecycle.
+- `nexus-bootstrap` registers a `CrdtPublisher` observer maintaining `HashMap<relpath, CrdtDoc>` + `SiteId`, calls `crdt.apply_local` for each tx op, publishes each `CrdtOp` on `wire::ops_topic(relpath)` via the shared `EventBus`.
+- Open/close flow loads `state::PersistedCrdt` if present and `content_hash` matches; close flow writes `CrdtDoc::state()`. Hash-mismatched state ignored.
+- Tauri popout-window forwarding of the ops topic across windows (ADR 0020).
 
 **Definition of done (full):**
 - `nexus-crdt` crate implements operation-based CRDT over the `Operation` type from `nexus-editor` ✓ (Phase 1)
-- Two sessions opening the same file exchange operations via the kernel event bus (`com.nexus.editor.ops.<path>`) — Phase 3
-- Merge conflicts (concurrent edits to the same block) resolve via CRDT semantics; no user intervention needed for text edits — Phase 2
-- Structural conflicts (concurrent delete + edit of same block) surface as a user-resolvable dialog ✓ (detected in Phase 1; UI in Phase 3)
-- BL-007 (CRDT-over-Git) becomes the persistence layer for async collaboration — Phase 4
+- Merge conflicts (concurrent edits to the same block) resolve via CRDT semantics; no user intervention needed for text edits ✓ (Phase 2)
+- Structural conflicts (concurrent delete + edit of same block) surface as a user-resolvable dialog ✓ (detected in Phase 1; UI surfacing remains a UX follow-up)
+- Sync infrastructure (`com.nexus.editor.ops.<path>` topic + `SyncLoop`) ✓ (Phase 3)
+- Persistence primitives (`PersistedCrdt`, `crdt_state_path`, `OpLog::merge`) ✓ (Phase 4)
+- Two sessions opening the same file exchange operations and converge — pending editor wiring
+- BL-007 (CRDT-over-Git) becomes the persistence layer for async collaboration — pending merge-driver registration
 
 ---
 
