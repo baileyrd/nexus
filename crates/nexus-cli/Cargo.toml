@@ -24,7 +24,6 @@ nexus-tui = { path = "../nexus-tui" }
 nexus-panic-log = { path = "../nexus-panic-log" }
 nexus-formats = { path = "../nexus-formats" }
 nexus-templates = { path = "../nexus-templates" }
-nexus-storage = { path = "../nexus-storage" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -42,4 +41,10 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 nexus-editor = { path = "../nexus-editor" }
+# Used only by `commands/crdt.rs::tests` which exercises
+# `nexus_storage::Forge::new` + `write_default_gitignore` directly,
+# bypassing IPC. Runtime CLI code routes through `bootstrap::storage::
+# write_default_gitignore` per the dep_invariants test in
+# `nexus-bootstrap/tests/dep_invariants.rs`.
+nexus-storage = { path = "../nexus-storage" }
 tempfile = { workspace = true }

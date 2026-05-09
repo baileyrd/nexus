@@ -499,6 +499,29 @@ pub fn config_reset(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<
     Ok(())
 }
 
+/// BL-007 — write `.forge/.gitignore` with the default exclusion list
+/// if the file does not already exist. Returns `true` when a fresh
+/// file was written, `false` when the file was already there
+/// (idempotent re-run).
+///
+/// `nexus crdt enable-transport` calls this so forges created before
+/// BL-007 shipped get the gitignore policy that lets the CRDT state
+/// files at `.forge/.editor/crdt/*.json` ride through to peers via
+/// git while rebuildable / per-machine state stays excluded.
+pub fn write_default_gitignore(runtime: &Runtime, rt: &TokioRuntime) -> Result<bool> {
+    #[derive(Deserialize)]
+    struct Resp {
+        wrote: bool,
+    }
+    let resp: Resp = call(
+        runtime,
+        rt,
+        "write_default_gitignore",
+        serde_json::json!({}),
+    )?;
+    Ok(resp.wrote)
+}
+
 /// Return paths of files within `depth` link hops of `path`.
 pub fn graph_neighbors(
     runtime: &Runtime,

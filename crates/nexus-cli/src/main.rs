@@ -1839,7 +1839,7 @@ fn main() {
                 commands::crdt::install_merge_driver(apply)
             }
             CrdtCommand::EnableTransport => {
-                commands::crdt::enable_transport(app.forge_root())
+                commands::crdt::enable_transport(&mut app)
             }
         },
 

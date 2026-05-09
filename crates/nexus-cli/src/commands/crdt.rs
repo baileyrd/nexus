@@ -23,6 +23,8 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use nexus_crdt::PersistedCrdt;
 
+use crate::app::App;
+
 /// Three-way merge driver for `.forge/.editor/crdt/<sha>.json`. See
 /// the [`crate::commands::crdt`] module docs for the protocol.
 pub fn merge_driver(base: &Path, ours: &Path, theirs: &Path) -> Result<()> {
@@ -180,7 +182,10 @@ fn git_config(args: &[&str]) -> Result<()> {
 /// 1. Write `.forge/.gitignore` (if missing) so the rebuildable
 ///    indexes / per-machine SQLite stores stay out of git, while the
 ///    CRDT state files at `.forge/.editor/crdt/*.json` ride through
-///    by default.
+///    by default. Routed through `com.nexus.storage::write_default_gitignore`
+///    rather than calling `nexus_storage::Forge` directly — the
+///    `dep_invariants` test forbids the CLI from depending on the
+///    storage crate at runtime.
 /// 2. Register the merge driver in `.gitattributes` + `.git/config`
 ///    via [`install_merge_driver(true)`].
 ///
@@ -189,14 +194,16 @@ fn git_config(args: &[&str]) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Propagates filesystem and `git` errors from either step.
-pub fn enable_transport(forge_root: &Path) -> Result<()> {
+/// Propagates filesystem and `git` errors from either step. The
+/// gitignore step also propagates IPC errors from the storage
+/// runtime.
+pub fn enable_transport(app: &mut App) -> Result<()> {
+    let forge_root = app.forge_root().to_path_buf();
     println!("BL-007 git-CRDT transport — enabling on {}", forge_root.display());
     println!();
 
-    let forge = nexus_storage::Forge::new(forge_root);
-    let wrote = forge
-        .write_default_gitignore()
+    let (runtime, rt) = app.runtime()?;
+    let wrote = nexus_bootstrap::storage::write_default_gitignore(runtime, rt)
         .map_err(|e| anyhow!("write .forge/.gitignore: {e}"))?;
     if wrote {
         println!(

@@ -560,6 +560,10 @@ fn register_core_plugins(
                         nexus_storage::core_plugin::HANDLER_READ_FRONTMATTER,
                     ),
                     (
+                        "write_default_gitignore",
+                        nexus_storage::core_plugin::HANDLER_WRITE_DEFAULT_GITIGNORE,
+                    ),
+                    (
                         "query_tasks",
                         nexus_storage::core_plugin::HANDLER_QUERY_TASKS,
                     ),

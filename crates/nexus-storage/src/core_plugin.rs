@@ -275,6 +275,18 @@ pub const HANDLER_REPLACE_IN_FILES: u32 = 58;
 /// need a few well-known scalar keys.
 pub const HANDLER_READ_FRONTMATTER: u32 = 59;
 
+/// BL-007 — `write_default_gitignore`. No args. Returns
+/// `{ "wrote": bool }` — `true` if a fresh `.forge/.gitignore` was
+/// written, `false` if the file already existed (idempotent re-runs
+/// are a no-op). Forge-root operation; doesn't need the engine.
+///
+/// `nexus crdt enable-transport` calls this to bootstrap the
+/// gitignore policy on forges created before BL-007 shipped, so the
+/// CRDT state files at `.forge/.editor/crdt/*.json` ride through to
+/// peers via git while rebuildable / per-machine state stays
+/// excluded.
+pub const HANDLER_WRITE_DEFAULT_GITIGNORE: u32 = 60;
+
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
 ///
@@ -415,6 +427,13 @@ impl CorePlugin for StorageCorePlugin {
         match handler_id {
             HANDLER_CONFIG_READ => return dispatch_config_read(&self.forge_root, args),
             HANDLER_CONFIG_RESET => return dispatch_config_reset(&self.forge_root, args),
+            HANDLER_WRITE_DEFAULT_GITIGNORE => {
+                let forge = crate::Forge::new(&self.forge_root);
+                let wrote = forge
+                    .write_default_gitignore()
+                    .map_err(|e| exec_err(format!("write_default_gitignore: {e}")))?;
+                return Ok(serde_json::json!({ "wrote": wrote }));
+            }
             _ => {}
         }
 
@@ -1571,6 +1590,7 @@ mod tests {
             ("HANDLER_OBSIDIAN_BASE_QUERY", HANDLER_OBSIDIAN_BASE_QUERY),
             ("HANDLER_NOTE_APPEND", HANDLER_NOTE_APPEND),
             ("HANDLER_BACKLINKS_TO_BLOCK", HANDLER_BACKLINKS_TO_BLOCK),
+            ("HANDLER_WRITE_DEFAULT_GITIGNORE", HANDLER_WRITE_DEFAULT_GITIGNORE),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {
@@ -1750,6 +1770,42 @@ mod tests {
             .expect("dispatch succeeds with documented args");
         assert!(resp.is_array(), "response must be a JSON array");
         assert_eq!(resp.as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn write_default_gitignore_dispatches_and_is_idempotent() {
+        // BL-007 — the IPC dispatch path must produce the same on-disk
+        // outcome as `Forge::write_default_gitignore`. This test pins
+        // the JSON shape (`{ "wrote": bool }`) the bootstrap helper
+        // and the CLI's `enable_transport` rely on, plus the
+        // idempotent re-run contract.
+        //
+        // `boot_plugin` calls `StorageEngine::init` which already runs
+        // `Forge::init` (and therefore the gitignore write) — that's
+        // the post-BL-007 behaviour for fresh forges. To exercise the
+        // "old forge bootstrapped via enable-transport" path, delete
+        // the file before dispatching so the first call reports
+        // `wrote: true`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+        let path = dir.path().join(".forge").join(".gitignore");
+        let _ = std::fs::remove_file(&path);
+        assert!(!path.exists(), "test setup: file must be absent before dispatch");
+
+        let resp = plugin
+            .dispatch(HANDLER_WRITE_DEFAULT_GITIGNORE, &serde_json::json!({}))
+            .expect("write_default_gitignore dispatch");
+        assert_eq!(resp.get("wrote").and_then(serde_json::Value::as_bool), Some(true));
+        assert!(path.exists(), "fresh write must create the file");
+
+        let resp_again = plugin
+            .dispatch(HANDLER_WRITE_DEFAULT_GITIGNORE, &serde_json::json!({}))
+            .expect("write_default_gitignore second dispatch");
+        assert_eq!(
+            resp_again.get("wrote").and_then(serde_json::Value::as_bool),
+            Some(false),
+            "re-run must report no-op"
+        );
     }
 
     #[test]
