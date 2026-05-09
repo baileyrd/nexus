@@ -54,6 +54,11 @@ interface ThemePickerState {
   builderDarkOverrides: Record<string, string>
   builderHueLock: boolean
   builderActiveColumn: 'light' | 'dark'
+  /** BL-068 Phase 4 — when true, renders the split-view preview pane
+   *  alongside the variable editor. Persisted in the store (rather
+   *  than as local React state) so ThemePicker can widen the modal
+   *  to match. */
+  builderShowPreview: boolean
 
   open(tab?: PickerTab): void
   close(): void
@@ -75,6 +80,7 @@ interface ThemePickerState {
   clearBuilderDarkOverride(key: string): void
   setBuilderHueLock(on: boolean): void
   setBuilderActiveColumn(col: 'light' | 'dark'): void
+  setBuilderShowPreview(on: boolean): void
 }
 
 export const useThemePickerStore = create<ThemePickerState>((set) => ({
@@ -94,6 +100,7 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
   builderDarkOverrides: {},
   builderHueLock: false,
   builderActiveColumn: 'light',
+  builderShowPreview: false,
 
   open: (tab = 'themes') => set({ visible: true, activeTab: tab, query: '', categoryFilter: 'all' }),
   close: () => set({ visible: false }),
@@ -137,4 +144,5 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
     }),
   setBuilderHueLock: (on) => set({ builderHueLock: on }),
   setBuilderActiveColumn: (col) => set({ builderActiveColumn: col }),
+  setBuilderShowPreview: (on) => set({ builderShowPreview: on }),
 }))

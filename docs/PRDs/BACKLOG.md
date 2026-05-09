@@ -333,7 +333,7 @@ _BL-055 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ### BL-068: Theme Builder — visual token editor with live preview
 
-> **Fully shipped 2026-05-06.** BL-105 (contrast checker) and BL-106 (light/dark dual mode + hue-lock) both closed. Original spec: [BL-067-068-builders.md](BL-067-068-builders.md).
+> **Fully shipped 2026-05-06.** BL-105 (contrast checker) and BL-106 (light/dark dual mode + hue-lock) both closed. Phase 4 split-view preview (the last DoD item that was previously deferred to "uses live shell as preview instead") shipped 2026-05-09. Original spec: [BL-067-068-builders.md](BL-067-068-builders.md).
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
 **Effort**: ~1 week (0.5d `preview_override` handler + 4d UI + 0.5d export)
@@ -348,11 +348,13 @@ The theme system already has live reload; the only new backend work is a `previe
 - Token palette grouped by category (Surface, Text, Accent, Border, Editor/Syntax) with color pickers and sliders ✅ shipped
 - Base theme selector — start from any installed theme, write only the delta ✅ shipped
 - Export writes `.theme.toml` to `.forge/themes/` and activates via hot-reload ✅ shipped (save-to-disk + `reload` handler call)
-- Live split-view preview against a representative forge document ⬜ not built (uses live shell as preview instead)
+- Live split-view preview against a representative forge document ✅ shipped 2026-05-09
 - Per-token WCAG AA/AAA contrast pass/fail ✅ BL-105 closed 2026-05-06
 - Light/dark side-by-side when theme supports both modes ✅ BL-106 closed 2026-05-06
 
 **Definition of done:** ✅ All items shipped.
+
+**Phase 4 — split-view preview (shipped 2026-05-09).** New `BuilderPreview` component (`shell/src/plugins/nexus/themePicker/BuilderPreview.tsx`) renders a representative forge document — H1/H2/H3 prose, body paragraph with link + inline code + secondary/tertiary text, syntax-coloured Rust code block, callout, table, and primary/secondary/muted button row — inside a CSS-variable scope. The wrapper applies `composeOverridesForPreview(baseVars, overrides)` as inline `style={{...}}` so every `var(--nx-*)` reference inside resolves against the user's current edits, independent of the live shell's kernel-mode setting. Pure helper lives in `builderPreview.ts` (`PREVIEW_SCOPED_KEYS` covers all 24 tokens edited by `BUILDER_GROUPS`; a test pins the contract so a new builder-group token without a preview projection rule fails the suite). `builderModalWidth(activeTab, dual, preview)` (also pure) widens the picker modal to 1100 (single + preview) / 1300 (dual + preview) when the preview is on, and the existing 660 / 960 sizes when off. New `builderShowPreview` store flag toggled by a "Preview" checkbox in the existing build-tab controls row. Dual mode renders both light + dark preview snippets stacked vertically, each scoped to its own per-mode override map. 12 tests across composer + modal-width helper.
 
 ---
 

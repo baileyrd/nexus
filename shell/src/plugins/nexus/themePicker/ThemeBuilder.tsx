@@ -3,6 +3,7 @@ import { useThemeStore, THEME_PLUGIN_ID } from '../../../stores/themeStore'
 import { useThemePickerStore } from './themePickerStore'
 import { getPickerApi } from './pickerRuntime'
 import { contrastRatio, applyHueSatDelta } from './contrast'
+import { BuilderPreview } from './BuilderPreview'
 
 // ── Variable group manifest ───────────────────────────────────────────────────
 
@@ -197,6 +198,8 @@ export function ThemeBuilderPanel() {
   const setHueLock      = useThemePickerStore((s) => s.setBuilderHueLock)
   const activeColumn    = useThemePickerStore((s) => s.builderActiveColumn)
   const setActiveColumn = useThemePickerStore((s) => s.setBuilderActiveColumn)
+  const showPreview     = useThemePickerStore((s) => s.builderShowPreview)
+  const setShowPreview  = useThemePickerStore((s) => s.setBuilderShowPreview)
 
   const effectiveBaseId = builderBaseThemeId ?? activeThemeId ?? ''
 
@@ -355,7 +358,21 @@ export function ThemeBuilderPanel() {
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      {/* ── Editor column ── */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          // When the preview is showing, the editor column gets a
+          // fixed-ish width so the preview gets the rest of the
+          // widened modal. Otherwise it fills the whole panel as
+          // before.
+          flex: showPreview ? '0 0 660px' : 1,
+          overflow: 'hidden',
+          borderRight: showPreview ? '1px solid var(--background-modifier-border)' : 'none',
+        }}
+      >
       {/* ── Scrollable editor ── */}
       <div style={{ flex: 1, overflow: dualMode ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
 
@@ -423,6 +440,20 @@ export function ThemeBuilderPanel() {
                 </span>
               </label>
             )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showPreview}
+                onChange={(e) => setShowPreview(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span
+                title="Render a representative forge document alongside the editor so token edits are visible without scrolling the live shell."
+                style={{ fontFamily: 'var(--font-interface)', fontSize: 11, color: 'var(--text-muted)' }}
+              >
+                Preview
+              </span>
+            </label>
             {baseThemeName && !dualMode && (
               <span style={{ fontFamily: 'var(--font-interface)', fontSize: 11, color: 'var(--text-faint)', marginLeft: 'auto' }}>
                 Based on <em>{baseThemeName}</em>
@@ -573,6 +604,25 @@ export function ThemeBuilderPanel() {
           {applied ? 'Applied ✓' : dualMode ? `Apply ${activeColumn}` : 'Apply now'}
         </button>
       </div>
+      </div>{/* /editor column */}
+
+      {/* ── Preview pane (BL-068 Phase 4) ── */}
+      {showPreview && (
+        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          {dualMode ? (
+            <BuilderPreview
+              baseVars={baseVars}
+              overrides={builderOverrides}
+              dualOverrides={{ light: lightOverrides, dark: darkOverrides }}
+            />
+          ) : (
+            <BuilderPreview
+              baseVars={baseVars}
+              overrides={builderOverrides}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

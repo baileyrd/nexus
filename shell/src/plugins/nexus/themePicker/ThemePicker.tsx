@@ -14,6 +14,7 @@ import {
 } from './themePickerStore'
 import { getPickerApi } from './pickerRuntime'
 import { ThemeBuilderPanel } from './ThemeBuilder'
+import { builderModalWidth } from './builderPreview'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ function ThemePickerModal() {
   const activeTab      = useThemePickerStore((s) => s.activeTab)
   const setActiveTab   = useThemePickerStore((s) => s.setActiveTab)
   const builderDualMode = useThemePickerStore((s) => s.builderDualMode)
+  const builderShowPreview = useThemePickerStore((s) => s.builderShowPreview)
   const kernelMode     = useThemeStore((s) => s.kernelMode)
 
   const applyMode = (mode: ThemeMode) => {
@@ -89,7 +91,7 @@ function ThemePickerModal() {
     >
       <div
         style={{
-          width: activeTab === 'build' && builderDualMode ? 960 : 660,
+          width: builderModalWidth(activeTab, builderDualMode, builderShowPreview),
           maxWidth: '96vw',
           maxHeight: 'calc(100vh - 160px)',
           background: 'var(--background-secondary)',
