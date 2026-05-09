@@ -31,6 +31,13 @@ use nexus_editor::{BlockTree, OpObserver, Operation, EDITOR_PLUGIN_ID};
 use nexus_kernel::EventBus;
 use serde_json::Value;
 
+/// Default checkpoint cadence: persist every N applied ops while the
+/// session is open, on top of the unconditional close-time write.
+/// 32 covers ~a few seconds of bursty typing and keeps the on-disk
+/// state recoverable to within a small edit window if the process is
+/// killed.
+pub const DEFAULT_CHECKPOINT_EVERY_OPS: u64 = 32;
+
 /// Per-process site identity. Each running editor process is one CRDT
 /// site; popout windows and TUI/CLI flows that share the same backend
 /// inherit it. Generated once at construction.
@@ -44,20 +51,49 @@ struct Inner {
     forge_root: PathBuf,
     site: SiteId,
     bus: Arc<EventBus>,
-    docs: Mutex<HashMap<String, CrdtDoc>>,
+    docs: Mutex<HashMap<String, SessionState>>,
+    /// Number of ops between forced checkpoint writes. 0 disables
+    /// periodic writes (close-only persistence).
+    checkpoint_every: u64,
+}
+
+/// Per-relpath state held by the publisher: the live CRDT doc plus a
+/// checkpoint counter for periodic-write triggering.
+#[derive(Debug)]
+struct SessionState {
+    doc: CrdtDoc,
+    /// Ops applied since the last successful checkpoint write (or
+    /// session open). Reset to 0 after each checkpoint.
+    ops_since_checkpoint: u64,
 }
 
 impl CrdtPublisher {
     /// Construct a publisher rooted at `forge_root`, publishing on
-    /// `bus`. Generates a fresh per-process [`SiteId`].
+    /// `bus`. Generates a fresh per-process [`SiteId`] and uses the
+    /// [`DEFAULT_CHECKPOINT_EVERY_OPS`] cadence for periodic
+    /// persistence.
     #[must_use]
     pub fn new(forge_root: PathBuf, bus: Arc<EventBus>) -> Self {
+        Self::with_checkpoint_every(forge_root, bus, DEFAULT_CHECKPOINT_EVERY_OPS)
+    }
+
+    /// Construct a publisher with a custom periodic-checkpoint cadence
+    /// (in ops). Pass `0` to disable periodic writes — only the
+    /// close-time write happens. Tests use `0` to keep on-disk
+    /// behavior fully deterministic.
+    #[must_use]
+    pub fn with_checkpoint_every(
+        forge_root: PathBuf,
+        bus: Arc<EventBus>,
+        checkpoint_every: u64,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 forge_root,
                 site: SiteId::new(),
                 bus,
                 docs: Mutex::new(HashMap::new()),
+                checkpoint_every,
             }),
         }
     }
@@ -106,19 +142,32 @@ impl CrdtPublisher {
     }
 
     fn write_persisted(&self, relpath: &str, doc: &CrdtDoc, source_bytes: &[u8]) {
+        self.write_persisted_state(relpath, &doc.state(), source_bytes);
+    }
+
+    /// Lower-level form that takes a pre-captured snapshot, used by
+    /// the periodic-checkpoint path so the snapshot can be taken
+    /// under the session lock and the I/O happens outside it.
+    /// Returns `true` if the file was successfully replaced.
+    fn write_persisted_state(
+        &self,
+        relpath: &str,
+        state: &nexus_crdt::CrdtState,
+        source_bytes: &[u8],
+    ) -> bool {
         let path = self.state_file(relpath);
         if let Some(parent) = path.parent() {
             if let Err(err) = std::fs::create_dir_all(parent) {
                 tracing::warn!(%err, path = %parent.display(), "BL-074: mkdir failed");
-                return;
+                return false;
             }
         }
-        let envelope = PersistedCrdt::new(doc.state(), content_hash_hex(source_bytes));
+        let envelope = PersistedCrdt::new(state.clone(), content_hash_hex(source_bytes));
         let bytes = match serde_json::to_vec(&envelope) {
             Ok(b) => b,
             Err(err) => {
                 tracing::warn!(%err, "BL-074: encode persisted crdt failed");
-                return;
+                return false;
             }
         };
         // Atomic write: temp + rename on the same filesystem so a
@@ -126,12 +175,14 @@ impl CrdtPublisher {
         let tmp = path.with_extension("json.tmp");
         if let Err(err) = std::fs::write(&tmp, &bytes) {
             tracing::warn!(%err, path = %tmp.display(), "BL-074: tmp write failed");
-            return;
+            return false;
         }
         if let Err(err) = std::fs::rename(&tmp, &path) {
             tracing::warn!(%err, path = %path.display(), "BL-074: rename failed");
             let _ = std::fs::remove_file(&tmp);
+            return false;
         }
+        true
     }
 
     fn publish_op(&self, relpath: &str, op: nexus_crdt::CrdtOp) {
@@ -172,7 +223,13 @@ impl OpObserver for CrdtPublisher {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        guard.insert(relpath.to_string(), doc);
+        guard.insert(
+            relpath.to_string(),
+            SessionState {
+                doc,
+                ops_since_checkpoint: 0,
+            },
+        );
     }
 
     fn on_session_closed(&self, relpath: &str) {
@@ -180,39 +237,72 @@ impl OpObserver for CrdtPublisher {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        if let Some(doc) = guard.remove(relpath) {
-            let source_bytes = Self::canonical_markdown_bytes(&doc);
-            self.write_persisted(relpath, &doc, &source_bytes);
+        if let Some(state) = guard.remove(relpath) {
+            let source_bytes = Self::canonical_markdown_bytes(&state.doc);
+            self.write_persisted(relpath, &state.doc, &source_bytes);
         }
     }
 
     fn on_apply_transaction(&self, relpath: &str, ops: &[Operation]) {
         // Author the wire ops under the lock, then publish outside it
         // so a slow subscriber can't stall future apply_transactions.
-        let wire_ops: Vec<_> = {
+        // Also decide whether this transaction tips us over the
+        // checkpoint threshold; if so, capture a snapshot to write
+        // out once the lock is dropped.
+        let (wire_ops, checkpoint) = {
             let mut guard = match self.inner.docs.lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            let Some(doc) = guard.get_mut(relpath) else {
+            let Some(state) = guard.get_mut(relpath) else {
                 tracing::debug!(
                     relpath,
                     "BL-074: apply_transaction with no observed session — dropped"
                 );
                 return;
             };
-            ops.iter()
-                .filter_map(|op| match doc.apply_local(op) {
+            let wire: Vec<_> = ops
+                .iter()
+                .filter_map(|op| match state.doc.apply_local(op) {
                     Ok(wire) => Some(wire),
                     Err(err) => {
                         tracing::warn!(%err, relpath, "BL-074: apply_local rejected op");
                         None
                     }
                 })
-                .collect()
+                .collect();
+            state.ops_since_checkpoint = state.ops_since_checkpoint.saturating_add(wire.len() as u64);
+            let checkpoint = if self.inner.checkpoint_every > 0
+                && state.ops_since_checkpoint >= self.inner.checkpoint_every
+            {
+                // Snapshot the doc *under the lock* so the on-disk
+                // image is consistent with a real point in the op
+                // sequence. Subsequent apply_locals will queue up
+                // until we re-acquire (or never, since we hold no
+                // observers' attention here). Reset the counter only
+                // if the write succeeds — if it fails the next op
+                // gets another shot.
+                let snapshot = state.doc.state();
+                let source_bytes = Self::canonical_markdown_bytes(&state.doc);
+                Some((snapshot, source_bytes))
+            } else {
+                None
+            };
+            (wire, checkpoint)
         };
         for wire in wire_ops {
             self.publish_op(relpath, wire);
+        }
+        if let Some((snapshot, source_bytes)) = checkpoint {
+            if self.write_persisted_state(relpath, &snapshot, &source_bytes) {
+                // Reset the counter under the lock so a concurrent
+                // observer sees the post-checkpoint state.
+                if let Ok(mut guard) = self.inner.docs.lock() {
+                    if let Some(state) = guard.get_mut(relpath) {
+                        state.ops_since_checkpoint = 0;
+                    }
+                }
+            }
         }
     }
 }
@@ -303,8 +393,61 @@ mod tests {
 
         publisher.on_session_opened("notes.md", &t2, saved_markdown.as_bytes());
         let docs = publisher.inner.docs.lock().unwrap();
-        let doc = docs.get("notes.md").expect("session restored");
+        let state = docs.get("notes.md").expect("session restored");
         // Restored doc carries the prior op log.
-        assert_eq!(doc.log().len(), 1);
+        assert_eq!(state.doc.log().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn periodic_checkpoint_writes_before_close() {
+        // With checkpoint_every=2, the third InsertText triggers a
+        // mid-session write — so the on-disk file should exist
+        // *before* on_session_closed runs.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            2,
+        );
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+        let path = dir.path().join(crdt_state_path("notes.md"));
+        assert!(!path.exists(), "no file before any apply");
+
+        // First op: under threshold, no write.
+        publisher.on_apply_transaction("notes.md", &[insert_text(b, 0, "a")]);
+        assert!(!path.exists(), "no file after 1 op (threshold=2)");
+
+        // Second op: hits threshold; checkpoint fires.
+        publisher.on_apply_transaction("notes.md", &[insert_text(b, 1, "b")]);
+        assert!(path.exists(), "checkpoint must have written by now");
+
+        // The on-disk envelope's log length tracks the live state.
+        let bytes = std::fs::read(&path).unwrap();
+        let envelope: PersistedCrdt = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(envelope.state.log.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn periodic_checkpoint_disabled_when_zero() {
+        // checkpoint_every=0 ⇒ no mid-session writes; close is the
+        // only persistence trigger.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+        for ch in ["a", "b", "c", "d", "e"] {
+            publisher.on_apply_transaction("notes.md", &[insert_text(b, 0, ch)]);
+        }
+        let path = dir.path().join(crdt_state_path("notes.md"));
+        assert!(!path.exists(), "no checkpoint with cadence=0");
+
+        publisher.on_session_closed("notes.md");
+        assert!(path.exists(), "close must still persist");
     }
 }
