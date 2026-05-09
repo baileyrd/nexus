@@ -225,6 +225,15 @@ impl LspClient {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let (notif_tx, notif_rx) = mpsc::unbounded_channel();
         let pending_for_reader = Arc::clone(&pending);
+        // Wrap stdin in the shared `Arc<Mutex<...>>` BEFORE spawning the
+        // reader so the reader can write responses back for
+        // server-initiated requests (BL-076 follow-up). Pre-fix the
+        // reader had no access to stdin and the canned method-not-found
+        // response was discarded — servers that rely on
+        // `workspace/configuration` (rust-analyzer's settings round-
+        // trip) hung waiting.
+        let stdin_arc: Arc<Mutex<ChildStdin>> = Arc::new(Mutex::new(stdin));
+        let stdin_for_reader = Arc::clone(&stdin_arc);
         let server_label = server_name.to_string();
         let reader = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
@@ -261,38 +270,37 @@ impl LspClient {
                         });
                     }
                     Ok(JsonRpcMessage::Request(req)) => {
-                        // Server-initiated requests (workspace/configuration,
-                        // window/showMessageRequest, …). We don't service them
-                        // today; reply with a method-not-found error so the
-                        // server doesn't hang waiting.
-                        let id = req.id.clone();
-                        let resp = JsonRpcMessage::Response(JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            id,
-                            result: None,
-                            error: Some(JsonRpcError {
-                                code: -32601,
-                                message: format!(
-                                    "host does not implement '{}'",
-                                    req.method
-                                ),
-                                data: None,
-                            }),
-                        });
-                        // We need stdin to write back; but stdin lives on
-                        // the LspClient struct. Send through the
-                        // notification channel as a synthetic "host
-                        // declined" event instead — losing one inbound
-                        // request is preferable to deadlocking the
-                        // reader on a stdin lock we don't hold here.
-                        tracing::debug!(
-                            server = %server_label,
-                            method = %req.method,
-                            "ignoring server-initiated request (not implemented)"
-                        );
-                        // serialize the canned response for parity
-                        // with future implementations:
-                        let _ = resp;
+                        // BL-076 — server-initiated requests
+                        // (workspace/configuration, window/
+                        // showMessageRequest, client/registerCapability,
+                        // …). The host returns a spec-compliant
+                        // result for the well-known methods so servers
+                        // don't hang; unknown methods get a
+                        // method-not-found error so the server can
+                        // adapt its capability set.
+                        let resp_msg = build_server_request_reply(&req.method, req.params.as_ref(), req.id.clone());
+                        // Acquire stdin briefly to write the response.
+                        // Must NOT hold across await points other than
+                        // the write itself — the same mutex is used
+                        // by `send_request` / `send_notification` on
+                        // outbound traffic, and reader-side stalls
+                        // would back-pressure the whole client.
+                        let mut stdin = stdin_for_reader.lock().await;
+                        if let Err(err) = write_message(&mut *stdin, &resp_msg).await {
+                            tracing::warn!(
+                                server = %server_label,
+                                method = %req.method,
+                                error = %err,
+                                "failed to reply to server-initiated request"
+                            );
+                        } else {
+                            tracing::debug!(
+                                server = %server_label,
+                                method = %req.method,
+                                "replied to server-initiated request"
+                            );
+                        }
+                        drop(stdin);
                     }
                     Err(TransportError::Eof) => {
                         tracing::info!(
@@ -335,7 +343,7 @@ impl LspClient {
             server_name: server_name.to_string(),
             spec: spec.clone(),
             child: Some(child),
-            stdin: Arc::new(Mutex::new(stdin)),
+            stdin: stdin_arc,
             _reader: reader,
             notifications: Arc::new(Mutex::new(notif_rx)),
             pending,
@@ -704,10 +712,139 @@ fn minimal_client_capabilities() -> serde_json::Value {
             },
         },
         "workspace": {
-            "configuration": false,
+            // BL-076 — host now answers `workspace/configuration`
+            // server-initiated requests (with array of nulls = use
+            // defaults). Advertising support unblocks rust-analyzer's
+            // settings round-trip and lets servers gate behavior on
+            // the response rather than skipping the call.
+            "configuration": true,
             "workspaceFolders": true,
+            // Dynamic capability registration — host accepts
+            // (un)register requests with a null result so servers
+            // can finish their startup sequence.
+            "didChangeConfiguration": { "dynamicRegistration": true },
+        },
+        "window": {
+            // Host returns null (cancellation) for showMessageRequest
+            // — there's no dialog UI today, but advertising support
+            // means servers route through this rather than alternative
+            // surfaces (e.g., raw publishDiagnostics with action hints).
+            "showMessage": { "messageActionItem": { "additionalPropertiesSupport": false } },
+            "workDoneProgress": true,
         },
     })
+}
+
+/// BL-076 — build a JSON-RPC reply for a server-initiated request.
+///
+/// The host doesn't actually drive client-side configuration or
+/// dialog UI today, but most servers can adapt to no-op replies as
+/// long as we acknowledge the request. The dispatch table below
+/// covers every method the major LSP servers (rust-analyzer,
+/// typescript-language-server, gopls) issue at boot:
+///
+/// | Method                              | Reply                                                  |
+/// |-------------------------------------|--------------------------------------------------------|
+/// | `workspace/configuration`           | `[null, null, …]` — one null per requested item        |
+/// | `workspace/workspaceFolders`        | `null` — single-root workspace; spec-compliant         |
+/// | `window/showMessageRequest`         | `null` — user-canceled (no action selected)            |
+/// | `window/showDocument`               | `{ "success": false }` — host can't open arbitrary URIs|
+/// | `window/workDoneProgress/create`    | `null` — accept the token, no UI surface                |
+/// | `client/registerCapability`         | `null` — accept; host doesn't track dynamic registry   |
+/// | `client/unregisterCapability`       | `null` — accept                                         |
+/// | `workspace/applyEdit`               | `{ "applied": false }` — host doesn't apply edits      |
+/// | `workspace/codeLens/refresh`        | `null` — accept; refresh is a no-op without code-lens  |
+/// | `workspace/diagnostic/refresh`      | `null` — accept                                        |
+/// | `workspace/inlayHint/refresh`       | `null` — accept                                        |
+/// | `workspace/semanticTokens/refresh`  | `null` — accept                                        |
+/// | other                                | error `-32601 method not found`                         |
+///
+/// Pure function — extracted so the dispatch table is unit-testable
+/// without spawning a server. The `id` is threaded through verbatim.
+fn build_server_request_reply(
+    method: &str,
+    params: Option<&serde_json::Value>,
+    id: serde_json::Value,
+) -> JsonRpcMessage {
+    if let Some(result) = build_known_reply(method, params) {
+        return JsonRpcMessage::Response(JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(result),
+            error: None,
+        });
+    }
+    JsonRpcMessage::Response(JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id,
+        result: None,
+        error: Some(JsonRpcError {
+            code: -32601,
+            message: format!("host does not implement '{method}'"),
+            data: None,
+        }),
+    })
+}
+
+/// Inner table — returns `Some(result)` for methods we know how to
+/// answer with a no-op-shaped value, `None` to signal "fall through
+/// to method-not-found error".
+fn build_known_reply(
+    method: &str,
+    params: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    match method {
+        "workspace/configuration" => {
+            // Spec: response is `LSPAny[]` with one entry per
+            // requested item, in the order the items appeared. The
+            // host has no per-section overrides, so the spec-compliant
+            // "use defaults" reply is an array of nulls.
+            let count = params
+                .and_then(|p| p.get("items"))
+                .and_then(|v| v.as_array())
+                .map_or(0, Vec::len);
+            // Match the count exactly. A zero-length items array
+            // (which some servers emit defensively) yields an empty
+            // array; rust-analyzer treats `null` as a hard failure.
+            Some(serde_json::Value::Array(vec![serde_json::Value::Null; count]))
+        }
+        // Single-root workspace — null is the spec-compliant "no
+        // additional folders" reply.
+        "workspace/workspaceFolders" => Some(serde_json::Value::Null),
+        // No dialog UI in the host. The user can't pick an action,
+        // so report cancellation.
+        "window/showMessageRequest" => Some(serde_json::Value::Null),
+        // Host can't open arbitrary URIs from a server's request.
+        // `{ success: false }` lets the server fall back gracefully
+        // (e.g., log a hint instead of waiting on a viewer to focus).
+        "window/showDocument" => Some(serde_json::json!({ "success": false })),
+        // Progress token registration — accept with null. We don't
+        // surface progress UI but the server expects acknowledgement
+        // before it starts publishing `$/progress` notifications.
+        "window/workDoneProgress/create" => Some(serde_json::Value::Null),
+        // Dynamic capability (un)registration — accept with null.
+        // The host doesn't track the registry but accepting unblocks
+        // servers that gate behavior on a successful registration
+        // (rust-analyzer, vscode-html-languageserver).
+        "client/registerCapability" | "client/unregisterCapability" => {
+            Some(serde_json::Value::Null)
+        }
+        // Servers occasionally try to drive workspace edits. The host
+        // can't apply them without going through the editor IPC layer
+        // (and the BL-077 WorkspaceEdit applier already covers the
+        // shell-driven path), so report not-applied and let the
+        // server retry through user-initiated commands.
+        "workspace/applyEdit" => Some(serde_json::json!({ "applied": false })),
+        // Refresh requests — accept with null. The host doesn't
+        // cache anything that needs invalidation; the server's
+        // expectation is "I will resend on next pull."
+        "workspace/codeLens/refresh"
+        | "workspace/diagnostic/refresh"
+        | "workspace/inlayHint/refresh"
+        | "workspace/semanticTokens/refresh"
+        | "workspace/foldingRange/refresh" => Some(serde_json::Value::Null),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -718,6 +855,208 @@ mod tests {
     fn file_uri_includes_scheme() {
         let uri = file_uri(std::path::Path::new("/tmp/foo"));
         assert_eq!(uri, "file:///tmp/foo");
+    }
+
+    // ── BL-076 server-initiated request reply table ────────────────
+
+    /// Helper for the dispatch-table tests: build the reply, assert
+    /// the wire shape, and pull out the JSON-RPC `result` (or panic
+    /// on error). Centralised so each method's test stays focused on
+    /// the result payload, not the envelope plumbing.
+    fn reply_result_for(method: &str, params: serde_json::Value) -> serde_json::Value {
+        let msg = build_server_request_reply(method, Some(&params), serde_json::json!(42));
+        let JsonRpcMessage::Response(resp) = msg else {
+            panic!("expected Response, got {msg:?}")
+        };
+        assert_eq!(resp.id, serde_json::json!(42), "id must round-trip verbatim");
+        assert!(resp.error.is_none(), "expected success result, got error: {:?}", resp.error);
+        resp.result.expect("success result")
+    }
+
+    fn reply_error_for(method: &str) -> JsonRpcError {
+        let msg = build_server_request_reply(
+            method,
+            None,
+            serde_json::json!(7),
+        );
+        let JsonRpcMessage::Response(resp) = msg else {
+            panic!("expected Response")
+        };
+        resp.error.expect("expected error")
+    }
+
+    #[test]
+    fn workspace_configuration_returns_array_of_nulls_matching_item_count() {
+        // Three items requested → three nulls. Matching the count is
+        // a hard contract — rust-analyzer treats a length mismatch
+        // as a fatal protocol error and disconnects.
+        let result = reply_result_for(
+            "workspace/configuration",
+            serde_json::json!({
+                "items": [
+                    { "scopeUri": "file:///a", "section": "rust-analyzer.cargo" },
+                    { "scopeUri": "file:///a", "section": "rust-analyzer.checkOnSave" },
+                    { "section": "editor" }
+                ]
+            }),
+        );
+        assert_eq!(result, serde_json::json!([null, null, null]));
+    }
+
+    #[test]
+    fn workspace_configuration_handles_empty_items_array() {
+        let result = reply_result_for(
+            "workspace/configuration",
+            serde_json::json!({ "items": [] }),
+        );
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[test]
+    fn workspace_configuration_handles_missing_items_field() {
+        // Defensive — a malformed request gets back a zero-length
+        // array rather than a server-killing protocol error.
+        let result = reply_result_for(
+            "workspace/configuration",
+            serde_json::json!({}),
+        );
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[test]
+    fn workspace_workspace_folders_returns_null() {
+        let result = reply_result_for(
+            "workspace/workspaceFolders",
+            serde_json::json!({}),
+        );
+        assert_eq!(result, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn show_message_request_returns_null_canceled() {
+        let result = reply_result_for(
+            "window/showMessageRequest",
+            serde_json::json!({
+                "type": 1,
+                "message": "do you want to enable foo?",
+                "actions": [{ "title": "Yes" }, { "title": "No" }]
+            }),
+        );
+        assert_eq!(result, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn show_document_returns_success_false() {
+        let result = reply_result_for(
+            "window/showDocument",
+            serde_json::json!({ "uri": "file:///x.rs", "external": false }),
+        );
+        assert_eq!(result, serde_json::json!({ "success": false }));
+    }
+
+    #[test]
+    fn work_done_progress_create_returns_null() {
+        let result = reply_result_for(
+            "window/workDoneProgress/create",
+            serde_json::json!({ "token": "rustAnalyzer/Indexing" }),
+        );
+        assert_eq!(result, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn register_and_unregister_capability_return_null() {
+        let result = reply_result_for(
+            "client/registerCapability",
+            serde_json::json!({
+                "registrations": [{
+                    "id": "rust-analyzer-textDocument-completion",
+                    "method": "textDocument/completion",
+                }]
+            }),
+        );
+        assert_eq!(result, serde_json::Value::Null);
+        let result = reply_result_for(
+            "client/unregisterCapability",
+            serde_json::json!({ "unregisterations": [] }),
+        );
+        assert_eq!(result, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn workspace_apply_edit_reports_not_applied() {
+        let result = reply_result_for(
+            "workspace/applyEdit",
+            serde_json::json!({
+                "edit": { "changes": {} }
+            }),
+        );
+        assert_eq!(result, serde_json::json!({ "applied": false }));
+    }
+
+    #[test]
+    fn refresh_requests_return_null() {
+        for method in [
+            "workspace/codeLens/refresh",
+            "workspace/diagnostic/refresh",
+            "workspace/inlayHint/refresh",
+            "workspace/semanticTokens/refresh",
+            "workspace/foldingRange/refresh",
+        ] {
+            let result = reply_result_for(method, serde_json::json!({}));
+            assert_eq!(
+                result,
+                serde_json::Value::Null,
+                "refresh method '{method}' must return null",
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_method_returns_method_not_found_error() {
+        // Anything we don't recognise gets the spec-compliant
+        // -32601 error. Servers MAY adapt their capability set
+        // based on this; they MUST NOT hang waiting.
+        let err = reply_error_for("totally/made/up");
+        assert_eq!(err.code, -32601);
+        assert!(err.message.contains("totally/made/up"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn build_known_reply_returns_none_for_unknown_method() {
+        // Direct test of the inner table — used by the fall-through
+        // arm in `build_server_request_reply`.
+        assert!(build_known_reply("totally/made/up", None).is_none());
+    }
+
+    #[test]
+    fn id_is_preserved_for_string_and_integer_forms() {
+        // JSON-RPC ids can be integers, strings, or null. Servers may
+        // emit any of these for their own requests; the reply must
+        // echo whatever we received.
+        let int_id = serde_json::json!(99);
+        let str_id = serde_json::json!("rustAnalyzer-5");
+
+        let msg = build_server_request_reply(
+            "workspace/configuration",
+            Some(&serde_json::json!({ "items": [] })),
+            int_id.clone(),
+        );
+        if let JsonRpcMessage::Response(r) = msg {
+            assert_eq!(r.id, int_id);
+        } else {
+            panic!("expected Response");
+        }
+
+        let msg = build_server_request_reply(
+            "client/registerCapability",
+            Some(&serde_json::json!({})),
+            str_id.clone(),
+        );
+        if let JsonRpcMessage::Response(r) = msg {
+            assert_eq!(r.id, str_id);
+        } else {
+            panic!("expected Response");
+        }
     }
 
     #[test]
