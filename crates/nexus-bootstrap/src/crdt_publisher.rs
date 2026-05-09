@@ -25,11 +25,46 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexus_crdt::{
-    content_hash_hex, crdt_state_path, ops_topic, CrdtDoc, OpEnvelope, PersistedCrdt, SiteId,
+    content_hash_hex, crdt_state_path, ops_topic, Conflict, CrdtDoc, OpEnvelope, PersistedCrdt,
+    RemoteOutcome, SiteId,
 };
 use nexus_editor::{BlockTree, OpObserver, Operation, Transaction, EDITOR_PLUGIN_ID};
 use nexus_kernel::EventBus;
 use serde_json::Value;
+
+/// BL-007 pull-landing report. Emitted by
+/// [`CrdtPublisher::reload_after_external_change`] after a `git pull`
+/// (or any other writer) has updated `.forge/.editor/crdt/<sha>.json`
+/// so the caller can log / surface conflicts.
+#[derive(Debug, Default)]
+pub struct ReloadOutcome {
+    /// Number of remote ops applied to the live session via
+    /// `apply_remote`. Each one is also published on the ops topic.
+    pub absorbed: usize,
+    /// Conflicts that surfaced while absorbing remote ops. The Phase 2
+    /// silent-merge path resolves text overlap inside `apply_remote`,
+    /// so what reaches here is structural-delete-vs-edit and concurrent
+    /// whole-block replacements — both need a resolver UI (see
+    /// BL-074 follow-ups).
+    pub conflicts: Vec<Conflict>,
+}
+
+/// Reason a [`CrdtPublisher::reload_after_external_change`] returned
+/// [`None`]. Non-fatal — the caller logs at debug and moves on.
+#[derive(Debug)]
+pub enum ReloadSkip {
+    /// The publisher has no open session for this relpath. Reload will
+    /// happen naturally on the next `on_session_opened` (which reads
+    /// the file directly).
+    NoSession,
+    /// The persisted state file does not exist. Either the forge
+    /// doesn't track CRDT state for this file, or git removed it.
+    Missing,
+    /// The file exists but couldn't be decoded (version mismatch,
+    /// truncated, malformed JSON). Logged at debug; same policy as
+    /// `load_persisted` — degrade rather than crash.
+    Invalid,
+}
 
 /// Default checkpoint cadence: persist every N applied ops while the
 /// session is open, on top of the unconditional close-time write.
@@ -285,6 +320,113 @@ impl OpObserver for CrdtPublisher {
 }
 
 impl CrdtPublisher {
+    /// BL-007 pull-landing hook. Re-read the persisted state file for
+    /// `relpath` (post `git pull` / merge driver) and absorb any ops
+    /// the live session hasn't seen via [`CrdtDoc::apply_remote`].
+    /// Each absorbed op is also published on the
+    /// `com.nexus.editor.ops.<relpath>` topic so subscribers (editor
+    /// UI, plugins) converge.
+    ///
+    /// Returns `Ok(ReloadOutcome)` on success — `absorbed` may be 0
+    /// if the persisted log was already a subset of the live log.
+    /// Returns `Err(ReloadSkip)` for the non-fatal cases (no live
+    /// session, no state file, decode failure). Unlike
+    /// [`Self::load_persisted`], this path does **not** check the
+    /// `content_hash` — after a `git pull` the markdown source on
+    /// disk also changed, so the live session's baseline source bytes
+    /// are stale by design. The op log union remains correct because
+    /// it's keyed on [`nexus_crdt::OpId`], not on byte offsets.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReloadSkip`] in the cases described above. None of
+    /// them indicate a bug — they're caller-side telemetry.
+    pub fn reload_after_external_change(
+        &self,
+        relpath: &str,
+    ) -> std::result::Result<ReloadOutcome, ReloadSkip> {
+        let envelope = self.load_persisted_unchecked(relpath)?;
+        let (absorbed_envelopes, conflicts) = {
+            let mut guard = match self.inner.docs.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let Some(state) = guard.get_mut(relpath) else {
+                return Err(ReloadSkip::NoSession);
+            };
+            let mut absorbed = Vec::new();
+            let mut conflicts = Vec::new();
+            for op in envelope.state.log.iter() {
+                if state.doc.log().contains(op.id) {
+                    continue;
+                }
+                let cloned = op.clone();
+                match state.doc.apply_remote(cloned.clone()) {
+                    Ok(RemoteOutcome::Applied) => absorbed.push(cloned),
+                    Ok(RemoteOutcome::Duplicate) => {
+                        // Should be filtered by `contains` above, but
+                        // `apply_remote` is the source of truth.
+                    }
+                    Ok(RemoteOutcome::Conflict(c)) => conflicts.push(c),
+                    Err(err) => {
+                        tracing::warn!(
+                            %err,
+                            relpath,
+                            op_id = ?op.id,
+                            "BL-007: apply_remote rejected op during pull-landing reload"
+                        );
+                    }
+                }
+            }
+            (absorbed, conflicts)
+        };
+        let absorbed_count = absorbed_envelopes.len();
+        for op in absorbed_envelopes {
+            self.publish_op(relpath, op);
+        }
+        Ok(ReloadOutcome {
+            absorbed: absorbed_count,
+            conflicts,
+        })
+    }
+
+    /// Read and decode the persisted envelope without checking the
+    /// content hash — used by the BL-007 pull-landing path where the
+    /// markdown source is expected to have changed alongside the
+    /// state file.
+    fn load_persisted_unchecked(
+        &self,
+        relpath: &str,
+    ) -> std::result::Result<PersistedCrdt, ReloadSkip> {
+        let path = self.state_file(relpath);
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ReloadSkip::Missing);
+            }
+            Err(err) => {
+                tracing::debug!(%err, path = %path.display(), "BL-007: state read failed");
+                return Err(ReloadSkip::Invalid);
+            }
+        };
+        let envelope: PersistedCrdt = match serde_json::from_slice(&bytes) {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::debug!(%err, path = %path.display(), "BL-007: state decode failed");
+                return Err(ReloadSkip::Invalid);
+            }
+        };
+        if envelope.version != nexus_crdt::PERSISTED_VERSION {
+            tracing::debug!(
+                version = envelope.version,
+                path = %path.display(),
+                "BL-007: state version mismatch"
+            );
+            return Err(ReloadSkip::Invalid);
+        }
+        Ok(envelope)
+    }
+
     /// Shared body for apply / undo / redo: feeds each op through
     /// `CrdtDoc::apply_local` under the session lock, publishes wire
     /// envelopes outside it, and triggers a periodic checkpoint if
@@ -540,5 +682,170 @@ mod tests {
 
         publisher.on_session_closed("notes.md");
         assert!(path.exists(), "close must still persist");
+    }
+
+    /// Helper for the BL-007 reload tests: write `envelope` to the
+    /// publisher's state path for `relpath`, simulating what a `git
+    /// pull` + merge driver would have produced on disk.
+    fn write_state_file(forge_root: &std::path::Path, relpath: &str, envelope: &PersistedCrdt) {
+        let path = forge_root.join(crdt_state_path(relpath));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec(envelope).unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reload_returns_missing_when_no_state_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::new(dir.path().to_path_buf(), Arc::clone(&bus));
+        match publisher.reload_after_external_change("notes.md") {
+            Err(ReloadSkip::Missing) => {}
+            other => panic!("expected ReloadSkip::Missing, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_returns_invalid_on_malformed_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::new(dir.path().to_path_buf(), Arc::clone(&bus));
+        let path = dir.path().join(crdt_state_path("notes.md"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{ not valid json").unwrap();
+        match publisher.reload_after_external_change("notes.md") {
+            Err(ReloadSkip::Invalid) => {}
+            other => panic!("expected ReloadSkip::Invalid, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_returns_no_session_when_state_present_but_no_open_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::new(dir.path().to_path_buf(), Arc::clone(&bus));
+
+        // Build a valid persisted envelope from a fresh peer.
+        let peer_site = SiteId::new();
+        let (tree, b) = fresh_tree();
+        let mut peer = CrdtDoc::new(peer_site, tree);
+        peer.apply_local(&insert_text(b, 0, "remote")).unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"remote"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        // No session opened on the publisher.
+        match publisher.reload_after_external_change("notes.md") {
+            Err(ReloadSkip::NoSession) => {}
+            other => panic!("expected ReloadSkip::NoSession, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_absorbs_remote_ops_and_publishes_them() {
+        // Live session has its own local op. The on-disk state file
+        // (as if a git pull just landed via the merge driver) carries
+        // both that op and a peer's op. Reload absorbs only the
+        // peer's op and publishes one envelope on the ops topic.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        let mut sub = bus.subscribe(EventFilter::CustomExact(ops_topic("notes.md")));
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+
+        // Local edit on the open session.
+        publisher.on_apply_transaction("notes.md", &[insert_text(b, 0, "L")]);
+        // Drain the local-apply event so the next `recv` is the remote.
+        sub.recv().await.unwrap();
+
+        // Build a "merged" log on disk: a peer site's op layered on top
+        // of the same local op the open session produced. Since we
+        // can't reach into the publisher's locked doc to clone it,
+        // instead simulate the merge by constructing a peer doc with
+        // a single new op against the same tree, and then unioning
+        // the peer's log with the live session's log (read out via
+        // an unrelated path: the publisher writes a checkpoint at
+        // close, but here we use a direct approach — start the peer
+        // from the same baseline tree, apply its op, and persist
+        // *only* the peer's log. The reload path will absorb the
+        // peer op without resurrecting the local one because
+        // `OpLog::contains` filters duplicates by id).
+        let peer_site = SiteId::new();
+        let mut peer_tree = BlockTree::new(DocumentMetadata::default());
+        let mut peer_block = Block::new(BlockType::Paragraph);
+        peer_block.id = b;
+        peer_tree.insert(peer_block, None, 0).unwrap();
+        let mut peer = CrdtDoc::new(peer_site, peer_tree);
+        let peer_op = peer.apply_local(&insert_text(b, 0, "R")).unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"any"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        let outcome = publisher
+            .reload_after_external_change("notes.md")
+            .expect("reload succeeded");
+        assert_eq!(outcome.absorbed, 1, "only the peer op was new");
+        assert!(
+            outcome.conflicts.is_empty(),
+            "concurrent text edits resolve via RGA, no conflict surfaces"
+        );
+
+        // The absorbed op fired on the ops topic.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("absorbed event arrived")
+            .expect("non-error");
+        if let NexusEvent::Custom { payload, .. } = &event.event {
+            let env = OpEnvelope::from_json(payload).unwrap();
+            assert_eq!(env.op.id, peer_op.id, "envelope is the peer op");
+        } else {
+            panic!("expected Custom event");
+        }
+
+        // Live session's log now contains the peer op.
+        {
+            let docs = publisher.inner.docs.lock().unwrap();
+            let state = docs.get("notes.md").unwrap();
+            assert!(state.doc.log().contains(peer_op.id));
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_is_idempotent_when_state_already_absorbed() {
+        // Calling reload twice with the same state file is a no-op
+        // the second time — `apply_remote` filters duplicates by id.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+
+        let peer_site = SiteId::new();
+        let mut peer_tree = BlockTree::new(DocumentMetadata::default());
+        let mut peer_block = Block::new(BlockType::Paragraph);
+        peer_block.id = b;
+        peer_tree.insert(peer_block, None, 0).unwrap();
+        let mut peer = CrdtDoc::new(peer_site, peer_tree);
+        peer.apply_local(&insert_text(b, 0, "R")).unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"any"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        let first = publisher
+            .reload_after_external_change("notes.md")
+            .expect("first reload");
+        assert_eq!(first.absorbed, 1);
+
+        let second = publisher
+            .reload_after_external_change("notes.md")
+            .expect("second reload");
+        assert_eq!(second.absorbed, 0, "no new ops on the second pass");
     }
 }
