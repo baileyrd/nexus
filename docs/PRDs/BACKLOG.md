@@ -133,7 +133,7 @@ _BL-082 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #5
 **Effort**: Large (broken into four phases — see ADR 0026)
-**Status**: Phases 1–4 + editor wiring + periodic checkpoints + undo/redo propagation + git merge driver shim shipped 2026-05-08. Pull-landing primitive (`CrdtPublisher::reload_after_external_change`) + bus subscriber (`start_pull_landing_subscriber` listening on `com.nexus.git.commit`, wired from `nexus-bootstrap`) shipped 2026-05-08 — closes the BL-007 transport loop end-to-end for the in-process editor. Remaining open: op-log compaction *wiring* using the post-merge VV oracle; conflict UI for `StructuralDeleteEdit`. Tauri popout forwarding turned out to be already covered by `bridge::kernel_subscribe`'s per-window scoping.
+**Status**: Phases 1–4 + editor wiring + periodic checkpoints + undo/redo propagation + git merge driver shim shipped 2026-05-08. Pull-landing primitive (`CrdtPublisher::reload_after_external_change`) + bus subscriber (`start_pull_landing_subscriber` listening on `com.nexus.git.commit`, wired from `nexus-bootstrap`) shipped 2026-05-08 — closes the BL-007 transport loop end-to-end for the in-process editor. Op-log compaction wiring (open-time-VV oracle, prune-on-close) and shell-side conflict toast (`nexus.crdtConflict`) shipped 2026-05-09. Only optional follow-up left is the per-block resolver modal — a richer UX surface that lands when the editor needs it; the toast already gives the user a signal that a merge needs review. Tauri popout forwarding turned out to be already covered by `bridge::kernel_subscribe`'s per-window scoping.
 **Crates**: `nexus-crdt` ✓, `nexus-editor` (observer hook ✓), `nexus-bootstrap` (publisher orchestrator ✓), `nexus-cli` (merge-driver shim ✓)
 **Related**: BL-007 (CRDT-over-Git transport); PRD-08 collaborative editing spec; stable block IDs (ADR 0017) were built for this; ADR 0026 documents the phase plan
 
@@ -167,9 +167,9 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 - Wired into `build_*_runtime` so all invokers (CLI, TUI, MCP, Tauri shell) get publishing + persistence by default.
 
 **Open follow-ups:**
-- Op-log compaction *wiring* — `OpLog::prune_dominated` ships as a primitive but no code calls it. Needs a stable-VV oracle: after a successful pull-and-push round-trip the post-merge VV is "what every participant has acknowledged", but the publisher doesn't currently track per-peer ack state. Cheapest first cut: prune on close to whatever VV is on disk, accepting that single-replica forges will compact aggressively and multi-peer forges will keep ops longer.
+- ~~Op-log compaction *wiring*~~ — shipped 2026-05-09. `CrdtDoc::compact_to(stable_vv)` wraps `OpLog::prune_dominated`; `CrdtPublisher` snapshots the doc's VV at session-open as the conservative "stable VV" oracle (anything dominated by it was on disk before the session started, so the prune floor still reports those ids as seen for any peer that loads the persisted state). On `on_session_closed` the publisher prunes against that floor before writing. Single-replica forges collapse old ops aggressively across reopens; multi-peer forges keep ops authored or absorbed during the session because they exceed the open-time VV — the deliberate trade-off the BL-074 follow-up note called out.
 - ~~State-file git-tracking policy~~ — shipped 2026-05-09. `Forge::init` writes a default `.forge/.gitignore` that excludes the rebuildable / per-machine state and leaves `.forge/.editor/crdt/*.json` tracked. `nexus crdt enable-transport` runs the same gitignore step and `install-merge-driver --apply` for forges created before this change. Both steps idempotent.
-- Conflict UI shell consumer — kernel side ships now (`com.nexus.editor.crdt.conflict.<relpath>` event with `ConflictEnvelope` payload, fired from `reload_after_external_change`). Shell-side toast / modal still needed; route through a `nexus.editor.crdt-conflict` plugin under `shell/src/plugins/nexus/`.
+- ~~Conflict UI shell consumer~~ — shipped 2026-05-09. New `nexus.crdtConflict` plugin under `shell/src/plugins/nexus/crdtConflict/` subscribes to the `com.nexus.editor.crdt.conflict.` topic prefix, summarises the `ConflictEnvelope` payload (counts of `concurrent_block_edit` vs `structural_delete_edit`), and surfaces a warning toast naming the relpath and conflict shape so the user knows a merge needs review. Default-on, action-less for now — a per-block resolver modal (pick local / pick remote) is a richer UX project that lands separately when the underlying editor needs the surface.
 - Reparenting / move-loop detection — pre-existing CRDT limitation, separate from BL-074.
 
 **Definition of done (full):**
@@ -184,8 +184,10 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 - BL-007 conflict surface (`com.nexus.editor.crdt.conflict.<relpath>` topic + `ConflictEnvelope` wire type; `reload_after_external_change` publishes when conflicts are non-empty so the shell can render a resolver UI by subscribing) ✓ (2026-05-09)
 - BL-007 state-file git-tracking policy (`Forge::init` writes a default `.forge/.gitignore` that excludes rebuildable / per-machine state; `.forge/.editor/crdt/*.json` rides through and feeds the merge driver. `nexus crdt enable-transport` does the same setup for pre-existing forges plus runs `install-merge-driver --apply`) ✓ (2026-05-09)
 - Op-log compaction primitive (`OpLog::prune_dominated`) ✓ (2026-05-08)
+- Op-log compaction wiring (`CrdtDoc::compact_to` + open-time-VV oracle in `CrdtPublisher`; prune-on-close so single-replica forges don't accumulate ops across reopens) ✓ (2026-05-09)
+- Conflict UI shell consumer (`nexus.crdtConflict` plugin subscribes to `com.nexus.editor.crdt.conflict.` and surfaces a warning toast naming the relpath + conflict counts) ✓ (2026-05-09)
 - Tauri popout-window ops forwarding ✓ (was already covered by `bridge::kernel_subscribe` per-window scoping)
-- Structural conflicts surface as a user-resolvable dialog — detected in Phase 1; UI surfacing remains a UX follow-up
+- Structural conflicts surface as a user-resolvable dialog — detected in Phase 1, toast surfaced in shell 2026-05-09; per-block resolver modal (pick local / pick remote) remains an optional UX follow-up
 
 ---
 
