@@ -209,6 +209,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description: 'Heading outline of the active document, with click-to-jump navigation.',
     load: () => import('./nexus/outline').then(m => m.outlinePlugin),
   },
+  {
+    id: 'nexus.crdtConflict', name: 'CRDT Conflict',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description:
+      'BL-007 / BL-074 — surfaces CRDT pull-landing conflicts (concurrent block edits, delete-vs-edit) as a toast so the user knows a merge needs review. Resolver modal is a deferred follow-up.',
+    load: () => import('./nexus/crdtConflict').then(m => m.crdtConflictPlugin),
+  },
   // ── UX primitives ──────────────────────────────────────────────────────────
   {
     id: 'nexus.commandPalette', name: 'Command Palette',
