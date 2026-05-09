@@ -133,7 +133,7 @@ _BL-082 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #5
 **Effort**: Large (broken into four phases — see ADR 0026)
-**Status**: Phases 1–4 + editor wiring + periodic checkpoints + undo/redo propagation + git merge driver shim shipped 2026-05-08. Pull-landing primitive on `CrdtPublisher` (`reload_after_external_change`) shipped 2026-05-08 — partially unblocks the BL-007 transport story. Remaining open: bus subscription wiring (publisher hooked to `com.nexus.git.commit` / `remote_changed` so reload runs automatically); op-log compaction *wiring* using the post-merge VV; conflict UI for `StructuralDeleteEdit`. Tauri popout forwarding turned out to be already covered by `bridge::kernel_subscribe`'s per-window scoping.
+**Status**: Phases 1–4 + editor wiring + periodic checkpoints + undo/redo propagation + git merge driver shim shipped 2026-05-08. Pull-landing primitive (`CrdtPublisher::reload_after_external_change`) + bus subscriber (`start_pull_landing_subscriber` listening on `com.nexus.git.commit`, wired from `nexus-bootstrap`) shipped 2026-05-08 — closes the BL-007 transport loop end-to-end for the in-process editor. Remaining open: op-log compaction *wiring* using the post-merge VV oracle; conflict UI for `StructuralDeleteEdit`. Tauri popout forwarding turned out to be already covered by `bridge::kernel_subscribe`'s per-window scoping.
 **Crates**: `nexus-crdt` ✓, `nexus-editor` (observer hook ✓), `nexus-bootstrap` (publisher orchestrator ✓), `nexus-cli` (merge-driver shim ✓)
 **Related**: BL-007 (CRDT-over-Git transport); PRD-08 collaborative editing spec; stable block IDs (ADR 0017) were built for this; ADR 0026 documents the phase plan
 
@@ -167,9 +167,8 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 - Wired into `build_*_runtime` so all invokers (CLI, TUI, MCP, Tauri shell) get publishing + persistence by default.
 
 **Open follow-ups:**
-- Bus subscription wiring — `CrdtPublisher::reload_after_external_change` exists but nothing calls it. Subscribe to `com.nexus.git.commit` (HEAD changed via local merge) and `com.nexus.git.remote_changed` (tracking ref advanced) in `nexus-bootstrap`, iterate open sessions, and call reload per relpath.
-- Op-log compaction *wiring* — `OpLog::prune_dominated` ships as a primitive but no code calls it. Blocked on the bus wiring above delivering a stable-VV oracle (post-merge VV after a successful pull-and-push round-trip).
-- Conflict UI for `StructuralDeleteEdit` — `reload_after_external_change` already returns surfaced conflicts; UI consumer (toast / modal) still needed.
+- Op-log compaction *wiring* — `OpLog::prune_dominated` ships as a primitive but no code calls it. Needs a stable-VV oracle: after a successful pull-and-push round-trip the post-merge VV is "what every participant has acknowledged", but the publisher doesn't currently track per-peer ack state. Cheapest first cut: prune on close to whatever VV is on disk, accepting that single-replica forges will compact aggressively and multi-peer forges will keep ops longer.
+- Conflict UI for `StructuralDeleteEdit` — `reload_after_external_change` already returns surfaced conflicts; the bus subscriber currently logs at `info` level. UI consumer (toast / modal) still needed; could publish a `com.nexus.editor.crdt.conflict.<relpath>` event for the shell to subscribe to.
 - Reparenting / move-loop detection — pre-existing CRDT limitation, separate from BL-074.
 
 **Definition of done (full):**
@@ -180,6 +179,7 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 - Editor wiring (per-session `CrdtDoc`, on-open/on-close persistence, per-op publishing, periodic checkpoints, undo/redo propagation) ✓ (2026-05-08)
 - BL-007 git merge driver primitive (`OpLog::merge`) + CLI shim (`nexus crdt merge-driver` / `install-merge-driver`) ✓ (2026-05-08)
 - BL-007 pull-landing primitive (`CrdtPublisher::reload_after_external_change` — re-reads merged state file, applies absorbed remote ops via `apply_remote`, publishes envelopes on the ops topic, surfaces structural conflicts) ✓ (2026-05-08)
+- BL-007 pull-landing bus wiring (`start_pull_landing_subscriber` thread, subscribes to `com.nexus.git.commit`, drains every event into per-relpath reloads; thread holds a `Weak<Inner>` and self-exits when the publisher drops) ✓ (2026-05-08)
 - Op-log compaction primitive (`OpLog::prune_dominated`) ✓ (2026-05-08)
 - Tauri popout-window ops forwarding ✓ (was already covered by `bridge::kernel_subscribe` per-window scoping)
 - Structural conflicts surface as a user-resolvable dialog — detected in Phase 1; UI surfacing remains a UX follow-up

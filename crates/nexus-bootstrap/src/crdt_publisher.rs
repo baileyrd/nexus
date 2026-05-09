@@ -22,15 +22,28 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use nexus_crdt::{
     content_hash_hex, crdt_state_path, ops_topic, Conflict, CrdtDoc, OpEnvelope, PersistedCrdt,
     RemoteOutcome, SiteId,
 };
 use nexus_editor::{BlockTree, OpObserver, Operation, Transaction, EDITOR_PLUGIN_ID};
-use nexus_kernel::EventBus;
+use nexus_kernel::{EventBus, EventFilter};
 use serde_json::Value;
+
+/// Topic the BL-007 pull-landing subscriber listens on. Fired by
+/// `nexus-git`'s state poller when HEAD advances — which covers the
+/// merge / fast-forward paths a `git pull` ends in. Local commits
+/// also fire this; reload is a no-op in that case (live session is
+/// already in sync with the file we just wrote).
+const PULL_LANDING_TOPIC: &str = "com.nexus.git.commit";
+
+/// Poll cadence for the pull-landing subscriber. Latency from a HEAD
+/// advance to a session reload is bounded by this. 250ms keeps idle
+/// CPU at zero while still feeling instant in the editor UI.
+const PULL_LANDING_TICK: Duration = Duration::from_millis(250);
 
 /// BL-007 pull-landing report. Emitted by
 /// [`CrdtPublisher::reload_after_external_change`] after a `git pull`
@@ -137,6 +150,54 @@ impl CrdtPublisher {
     #[must_use]
     pub fn site(&self) -> SiteId {
         self.inner.site
+    }
+
+    /// BL-007 helper: relpaths with a live session. Stable order is
+    /// not guaranteed (HashMap iteration). Used by the pull-landing
+    /// subscriber and by tests.
+    #[must_use]
+    pub fn open_relpaths(&self) -> Vec<String> {
+        match self.inner.docs.lock() {
+            Ok(g) => g.keys().cloned().collect(),
+            Err(p) => p.into_inner().keys().cloned().collect(),
+        }
+    }
+
+    /// BL-007 bus wiring. Spawn a background thread that subscribes
+    /// to [`PULL_LANDING_TOPIC`] and, for each event observed, calls
+    /// [`Self::reload_after_external_change`] for every open relpath.
+    /// Returns the [`std::thread::JoinHandle`] so the caller can join
+    /// at shutdown if it wants — bootstrap stores it on the runtime
+    /// so the thread is part of the orderly teardown chain; tests
+    /// just `join()` directly.
+    ///
+    /// The thread holds a [`Weak`] reference to the publisher's inner
+    /// state, so dropping the last [`CrdtPublisher`] clone causes the
+    /// next `Weak::upgrade` to fail and the thread to exit cleanly —
+    /// no explicit shutdown signal needed.
+    ///
+    /// Idempotent in spirit (subscribing twice is allowed but
+    /// wasteful — bootstrap calls this exactly once per publisher).
+    ///
+    /// # Panics
+    /// Panics if the OS refuses to spawn the subscriber thread, which
+    /// is treated as boot-time fatal — bootstrap can't continue
+    /// without the pull-landing path.
+    #[must_use]
+    pub fn start_pull_landing_subscriber(&self) -> std::thread::JoinHandle<()> {
+        // Create the subscription on the *parent* thread so any event
+        // published after this call is observed. Subscribing inside
+        // the spawned thread races: the bus drops events that arrive
+        // before any subscriber exists.
+        let sub = self
+            .inner
+            .bus
+            .subscribe(EventFilter::CustomExact(PULL_LANDING_TOPIC.to_string()));
+        let weak = Arc::downgrade(&self.inner);
+        std::thread::Builder::new()
+            .name("nexus-crdt-pull-landing".to_string())
+            .spawn(move || run_pull_landing_subscriber(weak, sub))
+            .expect("spawn nexus-crdt-pull-landing thread")
     }
 
     fn state_file(&self, relpath: &str) -> PathBuf {
@@ -489,6 +550,68 @@ impl CrdtPublisher {
     }
 }
 
+/// Body of the pull-landing thread spawned by
+/// [`CrdtPublisher::start_pull_landing_subscriber`]. Reads from a
+/// pre-built [`nexus_kernel::EventSubscription`] and, whenever an
+/// event arrives, asks the publisher to reload every open relpath.
+/// Exits when the publisher's last strong [`Arc`] drops (so the
+/// [`Weak`] no longer upgrades).
+fn run_pull_landing_subscriber(weak: Weak<Inner>, mut sub: nexus_kernel::EventSubscription) {
+    loop {
+        // Drop ref each iteration so the Arc count reflects only
+        // external owners — that's what `Weak::upgrade` relies on.
+        let Some(inner) = weak.upgrade() else {
+            tracing::debug!("BL-007 pull-landing subscriber: publisher dropped, exiting");
+            break;
+        };
+
+        // Drain pending events without blocking. We don't care how
+        // many came in — one event is as good as ten for "go reload".
+        let mut had_event = false;
+        loop {
+            match sub.try_recv() {
+                Ok(Some(_)) => had_event = true,
+                Ok(None) => break,
+                Err(err) => {
+                    tracing::debug!(%err, "BL-007 pull-landing subscriber: recv error");
+                    break;
+                }
+            }
+        }
+
+        if had_event {
+            let publisher = CrdtPublisher { inner };
+            for relpath in publisher.open_relpaths() {
+                match publisher.reload_after_external_change(&relpath) {
+                    Ok(outcome) => {
+                        if outcome.absorbed > 0 || !outcome.conflicts.is_empty() {
+                            tracing::info!(
+                                relpath,
+                                absorbed = outcome.absorbed,
+                                conflicts = outcome.conflicts.len(),
+                                "BL-007 pull-landing reload"
+                            );
+                        }
+                    }
+                    Err(ReloadSkip::Missing) => {
+                        // No state file for this relpath — expected
+                        // for files the user hasn't edited yet.
+                    }
+                    Err(skip) => {
+                        tracing::debug!(relpath, ?skip, "BL-007 pull-landing reload skipped");
+                    }
+                }
+            }
+        } else {
+            // No event this tick — release `inner` and sleep. Without
+            // this drop, the strong count would stay at 1 across the
+            // sleep and we'd never see "publisher dropped".
+            drop(inner);
+            std::thread::sleep(PULL_LANDING_TICK);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -810,6 +933,88 @@ mod tests {
             let docs = publisher.inner.docs.lock().unwrap();
             let state = docs.get("notes.md").unwrap();
             assert!(state.doc.log().contains(peer_op.id));
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_landing_subscriber_reloads_on_git_commit_event() {
+        // End-to-end: subscriber thread + bus + publisher. After a
+        // `com.nexus.git.commit` event fires, the thread re-reads the
+        // state file and absorbs any new ops, republishing them on
+        // the ops topic.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        let mut ops_sub = bus.subscribe(EventFilter::CustomExact(ops_topic("notes.md")));
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+
+        // Spawn the subscriber. Start it *after* the session is open
+        // so the first reload the thread runs has something to find.
+        let _handle = publisher.start_pull_landing_subscriber();
+
+        // Build a peer's state and drop it on disk where the merge
+        // driver would have left it after a pull.
+        let peer_site = SiteId::new();
+        let mut peer_tree = BlockTree::new(DocumentMetadata::default());
+        let mut peer_block = Block::new(BlockType::Paragraph);
+        peer_block.id = b;
+        peer_tree.insert(peer_block, None, 0).unwrap();
+        let mut peer = CrdtDoc::new(peer_site, peer_tree);
+        let peer_op = peer.apply_local(&insert_text(b, 0, "R")).unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"any"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        // Fire the event the subscriber listens for.
+        bus.publish_plugin(
+            "com.nexus.git",
+            "com.nexus.git.commit",
+            serde_json::json!({"head": "deadbeef"}),
+        )
+        .unwrap();
+
+        // The subscriber polls every 250ms; expect the absorbed
+        // envelope on the ops topic within a couple of ticks.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(3), ops_sub.recv())
+            .await
+            .expect("absorbed op envelope arrived within 3s")
+            .expect("non-error");
+        if let NexusEvent::Custom { payload, .. } = &event.event {
+            let env = OpEnvelope::from_json(payload).unwrap();
+            assert_eq!(env.op.id, peer_op.id, "envelope is the peer op");
+        } else {
+            panic!("expected Custom event");
+        }
+    }
+
+    #[test]
+    fn pull_landing_subscriber_exits_when_publisher_drops() {
+        // Strong-ref release: dropping the last `CrdtPublisher` clone
+        // causes the thread's `Weak::upgrade` to fail and exit. No
+        // explicit shutdown signal needed — that's the whole reason
+        // we use `Weak` instead of an `AtomicBool`.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::new(dir.path().to_path_buf(), Arc::clone(&bus));
+        let handle = publisher.start_pull_landing_subscriber();
+        drop(publisher);
+        // Worst case is one tick of sleep (250ms) plus the time to
+        // notice the upgrade failure. Allow generous slack so a busy
+        // CI host doesn't flake.
+        let join_result = std::thread::Builder::new()
+            .name("test-join-watchdog".to_string())
+            .spawn(move || handle.join())
+            .unwrap()
+            .join();
+        match join_result {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => panic!("subscriber thread panicked"),
+            Err(_) => panic!("watchdog thread panicked"),
         }
     }
 

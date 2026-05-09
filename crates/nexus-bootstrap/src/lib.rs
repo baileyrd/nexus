@@ -841,6 +841,17 @@ fn register_core_plugins(
                     forge_root.to_path_buf(),
                     Arc::clone(event_bus),
                 ));
+                // BL-007 pull-landing wiring: when `nexus-git`'s state
+                // poller emits `com.nexus.git.commit` (HEAD advanced
+                // — including the merge / fast-forward end of a
+                // `git pull`), the subscriber re-reads each open
+                // session's `.forge/.editor/crdt/<sha>.json` and
+                // absorbs any ops the merge driver unioned in. The
+                // thread holds a `Weak` to the publisher's inner
+                // state, so when the editor plugin's `on_stop`
+                // releases the last `Arc` the thread exits on its
+                // next tick — no explicit shutdown signal needed.
+                let _pull_landing_handle = publisher.start_pull_landing_subscriber();
                 plugin.set_op_observer(publisher);
                 Box::new(plugin)
             },
