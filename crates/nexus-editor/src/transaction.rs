@@ -177,6 +177,121 @@ impl Operation {
         }
     }
 
+    /// Compute the inverse of this operation as a *new* [`Operation`]
+    /// against `tree` in its **post-apply** state, without mutating
+    /// the tree.
+    ///
+    /// Used by the BL-074 publisher to author CRDT envelopes for
+    /// undo / redo: peers see the inverse as a fresh local op and
+    /// stay convergent with the local site's intent. The `tree`
+    /// argument should be the publisher's mirror at the moment the
+    /// undo fires (i.e., still showing the result of the original
+    /// transaction); the inverse op authored against that state can
+    /// then be `apply_local`'d to roll back the mirror.
+    ///
+    /// # Errors
+    /// - [`EditorError::BlockNotFound`] if a referenced block has
+    ///   already been removed from `tree`.
+    pub fn inverse(&self, tree: &BlockTree) -> Result<Self> {
+        match self {
+            Self::InsertText {
+                block_id,
+                pos,
+                text,
+                ..
+            } => {
+                let block = tree
+                    .get(*block_id)
+                    .ok_or(EditorError::BlockNotFound(*block_id))?;
+                Ok(Self::DeleteText {
+                    block_id: *block_id,
+                    pos: *pos,
+                    deleted_text: text.clone(),
+                    pre_annotations: block.annotations.clone(),
+                })
+            }
+            Self::DeleteText {
+                block_id,
+                pos,
+                deleted_text,
+                ..
+            } => {
+                let block = tree
+                    .get(*block_id)
+                    .ok_or(EditorError::BlockNotFound(*block_id))?;
+                Ok(Self::InsertText {
+                    block_id: *block_id,
+                    pos: *pos,
+                    text: deleted_text.clone(),
+                    pre_annotations: block.annotations.clone(),
+                })
+            }
+            Self::InsertBlock {
+                block,
+                parent_id,
+                index_in_parent,
+            } => {
+                // Capture the block's current state from the tree —
+                // it may have been mutated by later ops in the same
+                // transaction even though InsertBlock authored an
+                // empty leaf.
+                let live = tree
+                    .get(block.id)
+                    .cloned()
+                    .unwrap_or_else(|| block.clone());
+                Ok(Self::DeleteBlock {
+                    old_block: live,
+                    was_parent_id: *parent_id,
+                    was_index_in_parent: *index_in_parent,
+                })
+            }
+            Self::DeleteBlock {
+                old_block,
+                was_parent_id,
+                was_index_in_parent,
+            } => Ok(Self::InsertBlock {
+                block: old_block.clone(),
+                parent_id: *was_parent_id,
+                index_in_parent: *was_index_in_parent,
+            }),
+            Self::ReparentBlock {
+                id,
+                old_parent_id,
+                old_index_in_parent,
+                new_parent_id,
+                new_index_in_parent,
+            } => Ok(Self::ReparentBlock {
+                id: *id,
+                old_parent_id: *new_parent_id,
+                old_index_in_parent: *new_index_in_parent,
+                new_parent_id: *old_parent_id,
+                new_index_in_parent: *old_index_in_parent,
+            }),
+            Self::UpdateBlockContent {
+                id,
+                old_content,
+                new_content,
+                old_annotations,
+                new_annotations,
+            } => Ok(Self::UpdateBlockContent {
+                id: *id,
+                old_content: new_content.clone(),
+                new_content: old_content.clone(),
+                old_annotations: new_annotations.clone(),
+                new_annotations: old_annotations.clone(),
+            }),
+            Self::UpdateAnnotations {
+                block_id,
+                old_annotations,
+                new_annotations,
+            } => Ok(Self::UpdateAnnotations {
+                block_id: *block_id,
+                old_annotations: new_annotations.clone(),
+                new_annotations: old_annotations.clone(),
+            }),
+        }
+    }
+
     /// Reverse this operation, restoring the state that existed before
     /// the matching [`Operation::apply`].
     ///

@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use nexus_crdt::{
     content_hash_hex, crdt_state_path, ops_topic, CrdtDoc, OpEnvelope, PersistedCrdt, SiteId,
 };
-use nexus_editor::{BlockTree, OpObserver, Operation, EDITOR_PLUGIN_ID};
+use nexus_editor::{BlockTree, OpObserver, Operation, Transaction, EDITOR_PLUGIN_ID};
 use nexus_kernel::EventBus;
 use serde_json::Value;
 
@@ -244,11 +244,52 @@ impl OpObserver for CrdtPublisher {
     }
 
     fn on_apply_transaction(&self, relpath: &str, ops: &[Operation]) {
-        // Author the wire ops under the lock, then publish outside it
-        // so a slow subscriber can't stall future apply_transactions.
-        // Also decide whether this transaction tips us over the
-        // checkpoint threshold; if so, capture a snapshot to write
-        // out once the lock is dropped.
+        self.apply_local_ops(relpath, ops.iter().cloned());
+    }
+
+    fn on_undo_transaction(&self, relpath: &str, reversed: &Transaction, _post_tree: &BlockTree) {
+        // Author the inverse of each op (in reverse order) against
+        // the publisher's own mirror tree. The mirror is still in the
+        // *post-tx* state at this point — we re-derive the inverse
+        // from there so byte/annotation positions are accurate.
+        let inverses: Vec<Operation> = {
+            let guard = match self.inner.docs.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let Some(state) = guard.get(relpath) else {
+                tracing::debug!(relpath, "BL-074: undo with no observed session — dropped");
+                return;
+            };
+            let mirror = state.doc.tree();
+            let mut out = Vec::with_capacity(reversed.operations.len());
+            for op in reversed.operations.iter().rev() {
+                match op.inverse(mirror) {
+                    Ok(inv) => out.push(inv),
+                    Err(err) => {
+                        tracing::warn!(%err, relpath, "BL-074: undo inverse failed; aborting propagation");
+                        return;
+                    }
+                }
+            }
+            out
+        };
+        self.apply_local_ops(relpath, inverses.into_iter());
+    }
+
+    fn on_redo_transaction(&self, relpath: &str, replayed: &Transaction, _post_tree: &BlockTree) {
+        // Redo replays the original ops; from the CRDT's view this is
+        // just a fresh local apply.
+        self.apply_local_ops(relpath, replayed.operations.iter().cloned());
+    }
+}
+
+impl CrdtPublisher {
+    /// Shared body for apply / undo / redo: feeds each op through
+    /// `CrdtDoc::apply_local` under the session lock, publishes wire
+    /// envelopes outside it, and triggers a periodic checkpoint if
+    /// the threshold is hit.
+    fn apply_local_ops<I: Iterator<Item = Operation>>(&self, relpath: &str, ops: I) {
         let (wire_ops, checkpoint) = {
             let mut guard = match self.inner.docs.lock() {
                 Ok(g) => g,
@@ -257,13 +298,12 @@ impl OpObserver for CrdtPublisher {
             let Some(state) = guard.get_mut(relpath) else {
                 tracing::debug!(
                     relpath,
-                    "BL-074: apply_transaction with no observed session — dropped"
+                    "BL-074: apply_local_ops with no observed session — dropped"
                 );
                 return;
             };
             let wire: Vec<_> = ops
-                .iter()
-                .filter_map(|op| match state.doc.apply_local(op) {
+                .filter_map(|op| match state.doc.apply_local(&op) {
                     Ok(wire) => Some(wire),
                     Err(err) => {
                         tracing::warn!(%err, relpath, "BL-074: apply_local rejected op");
@@ -428,6 +468,57 @@ mod tests {
         let bytes = std::fs::read(&path).unwrap();
         let envelope: PersistedCrdt = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(envelope.state.log.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn undo_publishes_inverse_op_envelope() {
+        // After apply + undo, the publisher should issue an envelope
+        // containing a DeleteText (the inverse of the InsertText).
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        let mut sub = bus.subscribe(EventFilter::CustomExact(ops_topic("notes.md")));
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+
+        let insert = insert_text(b, 0, "hello");
+        publisher.on_apply_transaction("notes.md", &[insert.clone()]);
+        // Drain the apply event.
+        sub.recv().await.unwrap();
+
+        // Build the same tx the editor would have built.
+        let tx = nexus_editor::Transaction::new(
+            vec![insert],
+            nexus_editor::TransactionMetadata::default(),
+        );
+        // Pretend the editor undid this tx — the publisher's mirror
+        // is still post-apply, matching what the editor passes.
+        let post_tree = {
+            let docs = publisher.inner.docs.lock().unwrap();
+            docs.get("notes.md").unwrap().doc.tree().clone()
+        };
+        publisher.on_undo_transaction("notes.md", &tx, &post_tree);
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("undo event")
+            .expect("non-error");
+        if let NexusEvent::Custom { payload, .. } = &event.event {
+            let envelope = OpEnvelope::from_json(payload).unwrap();
+            match &envelope.op.op {
+                Operation::DeleteText { deleted_text, .. } => {
+                    assert_eq!(deleted_text, "hello");
+                }
+                other => panic!("expected DeleteText inverse, got {other:?}"),
+            }
+        } else {
+            panic!("expected Custom event");
+        }
     }
 
     #[tokio::test]

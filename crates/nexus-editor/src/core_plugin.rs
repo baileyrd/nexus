@@ -69,6 +69,35 @@ pub trait OpObserver: Send + Sync {
     /// them to any tree the editor owns — its own internal state is
     /// the only thing it should mutate.
     fn on_apply_transaction(&self, relpath: &str, ops: &[crate::Operation]);
+
+    /// Called after a successful `undo`. The observer receives the
+    /// transaction that was reversed, in its original (apply-order)
+    /// op list, plus the post-undo block tree. To stay in sync with
+    /// peers, the observer should author inverse ops against its own
+    /// state — see [`crate::Operation::inverse`].
+    ///
+    /// Default impl: no-op. Implementors that don't track undo
+    /// semantics across sessions can ignore it.
+    fn on_undo_transaction(
+        &self,
+        _relpath: &str,
+        _reversed: &crate::Transaction,
+        _post_tree: &crate::BlockTree,
+    ) {
+    }
+
+    /// Called after a successful `redo`. Mirror of
+    /// [`Self::on_undo_transaction`] — the transaction was re-applied,
+    /// so the observer should treat its ops as a fresh local apply.
+    ///
+    /// Default impl: no-op.
+    fn on_redo_transaction(
+        &self,
+        _relpath: &str,
+        _replayed: &crate::Transaction,
+        _post_tree: &crate::BlockTree,
+    ) {
+    }
 }
 
 /// Prefix for per-session mutation events. Each mutation handler
@@ -335,8 +364,18 @@ impl CorePlugin for EditorCorePlugin {
                 self.op_observer.as_ref(),
                 args,
             ),
-            HANDLER_UNDO => handle_undo(&self.sessions, self.event_bus.as_ref(), args),
-            HANDLER_REDO => handle_redo(&self.sessions, self.event_bus.as_ref(), args),
+            HANDLER_UNDO => handle_undo(
+                &self.sessions,
+                self.event_bus.as_ref(),
+                self.op_observer.as_ref(),
+                args,
+            ),
+            HANDLER_REDO => handle_redo(
+                &self.sessions,
+                self.event_bus.as_ref(),
+                self.op_observer.as_ref(),
+                args,
+            ),
             HANDLER_LIST_OPEN => handle_list_open(&self.sessions),
             HANDLER_SYNC_CONTENT => handle_sync_content(
                 &self.sessions,
@@ -1280,22 +1319,34 @@ fn extract_wikilink_block_uuid(literal: &str) -> Option<uuid::Uuid> {
 fn handle_undo(
     sessions: &Mutex<HashMap<String, Session>>,
     event_bus: Option<&Arc<EventBus>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "undo")?;
-    let (value, revision) = {
+    // Capture the transaction being reversed *before* the undo runs
+    // so the observer can author inverse ops against the
+    // pre-undo (post-tx) state of its own mirror tree.
+    let (value, revision, captured) = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
         let s = guard
             .get_mut(&relpath)
             .ok_or_else(|| exec_err(format!("undo: no open session for '{relpath}'")))?;
+        let cur_tx = s
+            .undo
+            .current()
+            .map(|idx| Arc::clone(&s.undo.transactions()[idx]));
         s.undo
             .undo(&mut s.tree)
             .map_err(|e| exec_err(format!("undo: {e}")))?;
         s.revision = s.revision.saturating_add(1);
         let rev = s.revision;
         let val = snapshot_to_value(&snapshot_of(s), "undo")?;
-        (val, rev)
+        let post_tree = s.tree.clone();
+        (val, rev, cur_tx.map(|tx| (tx, post_tree)))
     };
+    if let (Some(obs), Some((tx, post_tree))) = (observer, captured.as_ref()) {
+        obs.on_undo_transaction(&relpath, tx, post_tree);
+    }
     publish_changed(event_bus, &relpath, revision, None);
     Ok(value)
 }
@@ -1303,10 +1354,11 @@ fn handle_undo(
 fn handle_redo(
     sessions: &Mutex<HashMap<String, Session>>,
     event_bus: Option<&Arc<EventBus>>,
+    observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "redo")?;
-    let (value, revision) = {
+    let (value, revision, captured) = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
         let s = guard
             .get_mut(&relpath)
@@ -1317,8 +1369,17 @@ fn handle_redo(
         s.revision = s.revision.saturating_add(1);
         let rev = s.revision;
         let val = snapshot_to_value(&snapshot_of(s), "redo")?;
-        (val, rev)
+        // Post-redo, `current` points at the just-replayed tx.
+        let replayed_tx = s
+            .undo
+            .current()
+            .map(|idx| Arc::clone(&s.undo.transactions()[idx]));
+        let post_tree = s.tree.clone();
+        (val, rev, replayed_tx.map(|tx| (tx, post_tree)))
     };
+    if let (Some(obs), Some((tx, post_tree))) = (observer, captured.as_ref()) {
+        obs.on_redo_transaction(&relpath, tx, post_tree);
+    }
     publish_changed(event_bus, &relpath, revision, None);
     Ok(value)
 }
