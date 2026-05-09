@@ -26,8 +26,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use nexus_crdt::{
-    content_hash_hex, crdt_state_path, ops_topic, Conflict, CrdtDoc, OpEnvelope, PersistedCrdt,
-    RemoteOutcome, SiteId,
+    conflict_topic, content_hash_hex, crdt_state_path, ops_topic, Conflict, ConflictEnvelope,
+    CrdtDoc, OpEnvelope, PersistedCrdt, RemoteOutcome, SiteId,
 };
 use nexus_editor::{BlockTree, OpObserver, Operation, Transaction, EDITOR_PLUGIN_ID};
 use nexus_kernel::{EventBus, EventFilter};
@@ -296,6 +296,29 @@ impl CrdtPublisher {
         }
     }
 
+    /// BL-007 conflict surface. Publish a [`ConflictEnvelope`] on
+    /// [`conflict_topic`] so the shell (or any subscriber) can render
+    /// a resolver UI. The CRDT layer can't pick a winner for
+    /// `StructuralDeleteEdit` or whole-block-replacement conflicts —
+    /// the user must.
+    fn publish_conflicts(&self, relpath: &str, conflicts: Vec<Conflict>) {
+        if conflicts.is_empty() {
+            return;
+        }
+        let envelope = ConflictEnvelope::new(conflicts);
+        let payload: Value = match envelope.to_json() {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::warn!(%err, relpath, "BL-007: conflict envelope encode failed");
+                return;
+            }
+        };
+        let topic = conflict_topic(relpath);
+        if let Err(err) = self.inner.bus.publish_plugin(EDITOR_PLUGIN_ID, &topic, payload) {
+            tracing::warn!(%err, relpath, "BL-007: conflict bus publish failed");
+        }
+    }
+
     /// Canonical-markdown bytes for the doc's current tree, used at
     /// close time to compute the integrity hash that goes into the
     /// persistence envelope. Matches what the editor's `save` would
@@ -445,6 +468,12 @@ impl CrdtPublisher {
         for op in absorbed_envelopes {
             self.publish_op(relpath, op);
         }
+        // Conflicts also fire on the bus so the shell can render a
+        // resolver UI without polling — same contract as absorbed
+        // ops on `ops_topic`. The returned `ReloadOutcome` still
+        // carries them so imperative callers (tests, future MCP
+        // commands) can react without subscribing.
+        self.publish_conflicts(relpath, conflicts.clone());
         Ok(ReloadOutcome {
             absorbed: absorbed_count,
             conflicts,
@@ -933,6 +962,127 @@ mod tests {
             let docs = publisher.inner.docs.lock().unwrap();
             let state = docs.get("notes.md").unwrap();
             assert!(state.doc.log().contains(peer_op.id));
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_publishes_conflict_envelope_on_concurrent_block_edit() {
+        // Live session and a peer both run `UpdateBlockContent` on
+        // the same block; peer's `vv_at_creation` doesn't include the
+        // local edit. `apply_remote` flags
+        // `Conflict::ConcurrentBlockEdit`; reload publishes a
+        // `ConflictEnvelope` on the conflict topic.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        let mut conflict_sub =
+            bus.subscribe(EventFilter::CustomExact(nexus_crdt::conflict_topic("notes.md")));
+
+        // Live tree: a paragraph block initialised to "old".
+        let mut tree = BlockTree::new(DocumentMetadata::default());
+        let mut block = Block::new(BlockType::Paragraph);
+        block.content = "old".into();
+        let b = block.id;
+        tree.insert(block, None, 0).unwrap();
+        publisher.on_session_opened("notes.md", &tree, b"old");
+
+        // Local edit: replace whole-block content with "L".
+        publisher.on_apply_transaction(
+            "notes.md",
+            &[Operation::UpdateBlockContent {
+                id: b,
+                old_content: "old".into(),
+                new_content: "L".into(),
+                old_annotations: vec![],
+                new_annotations: vec![],
+            }],
+        );
+
+        // Peer doc: same baseline, replaces with "R".
+        let mut peer_tree = BlockTree::new(DocumentMetadata::default());
+        let mut peer_block = Block::new(BlockType::Paragraph);
+        peer_block.id = b;
+        peer_block.content = "old".into();
+        peer_tree.insert(peer_block, None, 0).unwrap();
+        let mut peer = CrdtDoc::new(SiteId::new(), peer_tree);
+        peer.apply_local(&Operation::UpdateBlockContent {
+            id: b,
+            old_content: "old".into(),
+            new_content: "R".into(),
+            old_annotations: vec![],
+            new_annotations: vec![],
+        })
+        .unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"any"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        let outcome = publisher
+            .reload_after_external_change("notes.md")
+            .expect("reload succeeded");
+        assert_eq!(outcome.absorbed, 0, "the conflicting op was not applied");
+        assert_eq!(outcome.conflicts.len(), 1, "one conflict surfaces");
+        assert!(matches!(
+            outcome.conflicts[0],
+            nexus_crdt::Conflict::ConcurrentBlockEdit { .. }
+        ));
+
+        // The conflict envelope fired on the conflict topic.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), conflict_sub.recv())
+            .await
+            .expect("conflict event arrived")
+            .expect("non-error");
+        if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+            assert_eq!(type_id, "com.nexus.editor.crdt.conflict.notes.md");
+            let env = nexus_crdt::ConflictEnvelope::from_json(payload).unwrap();
+            assert_eq!(env.conflicts.len(), 1);
+        } else {
+            panic!("expected Custom event");
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_does_not_publish_conflict_envelope_when_clean() {
+        // Sanity check: a clean reload (no conflicts) does NOT fire on
+        // the conflict topic. The empty-list short-circuit lives in
+        // `publish_conflicts`.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        let mut conflict_sub =
+            bus.subscribe(EventFilter::CustomExact(nexus_crdt::conflict_topic("notes.md")));
+
+        let (tree, b) = fresh_tree();
+        publisher.on_session_opened("notes.md", &tree, b"");
+
+        // Peer adds an op to the same block, no concurrent local edit
+        // — RGA absorbs silently, no conflict.
+        let mut peer_tree = BlockTree::new(DocumentMetadata::default());
+        let mut peer_block = Block::new(BlockType::Paragraph);
+        peer_block.id = b;
+        peer_tree.insert(peer_block, None, 0).unwrap();
+        let mut peer = CrdtDoc::new(SiteId::new(), peer_tree);
+        peer.apply_local(&insert_text(b, 0, "R")).unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"any"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        let outcome = publisher
+            .reload_after_external_change("notes.md")
+            .expect("reload succeeded");
+        assert_eq!(outcome.absorbed, 1);
+        assert!(outcome.conflicts.is_empty());
+
+        // Conflict topic stays silent.
+        match conflict_sub.try_recv() {
+            Ok(None) | Err(_) => {}
+            Ok(Some(_)) => panic!("conflict topic should not fire on clean reload"),
         }
     }
 

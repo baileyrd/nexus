@@ -59,4 +59,7 @@ pub use state::{
     content_hash_hex, crdt_state_path, CrdtState, PersistedCrdt, PERSISTED_VERSION,
 };
 pub use sync::{DocHandle, InboundOutcome, SyncLoop};
-pub use wire::{ops_topic, relpath_of_topic, OpEnvelope, OPS_TOPIC_PREFIX};
+pub use wire::{
+    conflict_topic, ops_topic, relpath_of_conflict_topic, relpath_of_topic, ConflictEnvelope,
+    OpEnvelope, CONFLICT_TOPIC_PREFIX, OPS_TOPIC_PREFIX,
+};
