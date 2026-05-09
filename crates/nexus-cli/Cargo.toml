@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 nexus-bootstrap = { path = "../nexus-bootstrap" }
+nexus-crdt = { path = "../nexus-crdt" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-security = { path = "../nexus-security" }
 nexus-plugins = { path = "../nexus-plugins" }
@@ -40,4 +41,5 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 nexus-storage = { path = "../nexus-storage" }
+nexus-editor = { path = "../nexus-editor" }
 tempfile = { workspace = true }

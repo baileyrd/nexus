@@ -135,6 +135,9 @@ enum Commands {
     /// Page template operations (list, apply)
     Template(TemplateArgs),
 
+    /// CRDT-layer utilities (BL-074): git merge driver, state inspection.
+    Crdt(CrdtArgs),
+
     /// Plugin-registered subcommand (`nexus <plugin-id> [args…]`)
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -1073,6 +1076,56 @@ enum ExportCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Crdt (BL-074)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct CrdtArgs {
+    #[command(subcommand)]
+    command: CrdtCommand,
+}
+
+#[derive(Subcommand)]
+enum CrdtCommand {
+    /// Three-way git merge driver for `.forge/.editor/crdt/<sha>.json`
+    /// state files. Reads `--ours` and `--theirs` envelopes, takes
+    /// the idempotent union of their op logs, writes the merged
+    /// envelope back to `--ours` (the destination git expects).
+    /// `--base` is read for diagnostics only — the union is
+    /// independent of the merge base because every op carries its
+    /// own causality witness.
+    ///
+    /// To register: run `nexus crdt install-merge-driver` or set up
+    /// manually with `git config merge.nexus-crdt.driver "nexus crdt
+    /// merge-driver --base %O --ours %A --theirs %B"` and add
+    /// `.forge/.editor/crdt/* merge=nexus-crdt` to `.gitattributes`.
+    MergeDriver {
+        /// Path to the merge base file (informational; may not exist
+        /// if the file was added on both branches).
+        #[arg(long = "base")]
+        base: PathBuf,
+        /// Path to "our" side of the merge — also the destination
+        /// the merged envelope is written to.
+        #[arg(long = "ours")]
+        ours: PathBuf,
+        /// Path to "their" side of the merge.
+        #[arg(long = "theirs")]
+        theirs: PathBuf,
+    },
+    /// Print the recommended `.gitattributes` line and the
+    /// `git config` invocation for registering the merge driver in
+    /// the current repository, plus a one-line setup script. Use
+    /// `--apply` to actually run the configuration changes.
+    InstallMergeDriver {
+        /// Apply the changes (write `.gitattributes` if missing the
+        /// rule, run `git config`). Without this flag, only prints
+        /// the commands.
+        #[arg(long = "apply")]
+        apply: bool,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Git
 // ---------------------------------------------------------------------------
 
@@ -1769,6 +1822,15 @@ fn main() {
                 overwrite,
                 dry_run,
             } => commands::template::apply(&app, &name, args, target, overwrite, dry_run),
+        },
+
+        Commands::Crdt(args) => match args.command {
+            CrdtCommand::MergeDriver { base, ours, theirs } => {
+                commands::crdt::merge_driver(&base, &ours, &theirs)
+            }
+            CrdtCommand::InstallMergeDriver { apply } => {
+                commands::crdt::install_merge_driver(apply)
+            }
         },
 
         // Dispatch to a plugin-registered CLI subcommand: `nexus <subcommand> [args…]`
