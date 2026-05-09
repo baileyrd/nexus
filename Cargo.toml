@@ -66,7 +66,7 @@ serde_json = "1.0"
 toml = "1.1"
 
 # Utilities
-uuid = { version = "1.23", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.23", features = ["v4", "v5", "v7", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "std", "clock"] }
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 thiserror = "2.0"

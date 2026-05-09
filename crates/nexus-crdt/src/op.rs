@@ -5,6 +5,7 @@ use nexus_editor::{BlockId, Operation};
 use serde::{Deserialize, Serialize};
 
 use crate::id::{OpId, VersionVector};
+use crate::text::RgaTextOp;
 
 /// A CRDT-tagged edit. The envelope adds:
 ///
@@ -13,6 +14,11 @@ use crate::id::{OpId, VersionVector};
 ///   *before* this op was authored. Two ops `A` and `B` are concurrent
 ///   iff `B.id ∉ A.vv_at_creation` and `A.id ∉ B.vv_at_creation`. This
 ///   is the standard vector-clock CRDT causality test.
+/// - `rga_ops` (Phase 2): the position-free RGA translation of `op`,
+///   computed by the authoring site against its own RGA state.
+///   Receivers replay these on their own per-block RGA mirror so
+///   concurrent text edits converge silently — see ADR 0026 §"Phase 2".
+///   Empty for non-text ops and for legacy/Phase-1 wire payloads.
 ///
 /// The wrapped [`Operation`] retains its full self-reversal payload
 /// (`pre_annotations`, `deleted_text`, etc.) so undo on the receiving
@@ -25,6 +31,10 @@ pub struct CrdtOp {
     pub vv_at_creation: VersionVector,
     /// The wrapped editor primitive.
     pub op: Operation,
+    /// Per-character RGA translation of `op`. Authored at apply-local
+    /// time so peers can replay the edit position-free.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rga_ops: Vec<RgaTextOp>,
 }
 
 /// Return the block id this op primarily targets, used to bucket ops

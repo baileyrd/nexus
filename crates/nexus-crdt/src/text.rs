@@ -142,6 +142,44 @@ impl RgaText {
         Some(RgaTextOp::Delete { id, target })
     }
 
+    /// Build an [`RgaText`] representing a baseline string of
+    /// characters, where each character's [`OpId`] is provided by
+    /// `make_id`. Successive characters are chained via parent linkage
+    /// (`make_id(0)` parents `make_id(1)`, etc.) so future inserts can
+    /// anchor at any visible position.
+    ///
+    /// Used by [`crate::CrdtDoc`] to materialise a per-block RGA mirror
+    /// from the baseline tree content. Both peers feed the same
+    /// `make_id` (see [`crate::merge::baseline_op_id`]), so they end up
+    /// with identical RGA state.
+    #[must_use]
+    pub fn from_chars<I, F>(chars: I, make_id: F) -> Self
+    where
+        I: IntoIterator<Item = char>,
+        F: Fn(usize) -> OpId,
+    {
+        let mut text = Self::new();
+        let mut prev: Option<OpId> = None;
+        for (i, ch) in chars.into_iter().enumerate() {
+            let id = make_id(i);
+            let op = RgaTextOp::Insert {
+                id,
+                parent: prev,
+                ch,
+            };
+            text.apply(&op);
+            prev = Some(id);
+        }
+        text
+    }
+
+    /// [`OpId`] of the character at the given visible-character index,
+    /// or `None` if the index is out of range.
+    #[must_use]
+    pub fn op_id_at(&self, pos: usize) -> Option<OpId> {
+        self.id_at_visible_index(Some(pos))
+    }
+
     /// Apply a wire op. Idempotent. Returns `true` iff the state
     /// changed.
     pub fn apply(&mut self, op: &RgaTextOp) -> bool {

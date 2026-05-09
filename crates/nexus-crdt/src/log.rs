@@ -118,6 +118,7 @@ mod tests {
                 text: "x".into(),
                 pre_annotations: vec![],
             },
+            rga_ops: vec![],
         }
     }
 

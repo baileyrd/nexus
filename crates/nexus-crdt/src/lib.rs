@@ -4,27 +4,34 @@
 //! sessions on the same forge can exchange edits and converge without
 //! user intervention.
 //!
-//! # Phase 1 scope (this revision)
+//! # Scope (Phase 1 + Phase 2)
 //!
 //! - Core types: [`SiteId`], [`Lamport`], [`OpId`], [`VersionVector`].
 //! - [`OpLog`]: append-only, idempotent by `OpId`, with version-vector
 //!   summary for gossip.
-//! - [`CrdtDoc`]: tracks a [`BlockTree`] plus its op log, applies local
-//!   and remote ops, and surfaces concurrent same-block edits as
-//!   [`Conflict`] values for the caller (UI / sync layer) to resolve.
-//! - [`text::RgaText`]: sequence CRDT for in-block character-level merge,
-//!   tested standalone. Phase 2 wires it into `CrdtDoc`'s text-conflict
-//!   path so concurrent text edits within a block converge automatically
-//!   instead of surfacing as a conflict.
+//! - [`CrdtDoc`]: tracks a [`BlockTree`] plus its op log and a
+//!   per-block [`text::RgaText`] mirror. Local edits author wire ops
+//!   ([`CrdtOp`]) carrying both the editor [`nexus_editor::Operation`]
+//!   and a position-free RGA translation; remote edits apply through
+//!   the RGA when concurrent so text overlap converges silently.
+//! - [`text::RgaText`]: sequence CRDT for in-block character-level
+//!   merge.
+//! - [`merge`]: deterministic synthetic-id helpers that let two peers
+//!   independently materialise the same baseline RGA.
 //!
-//! # Phase 2 (deferred — see ADR 0026)
+//! After Phase 2 the only conflict surface that reaches the caller is
+//! [`Conflict::StructuralDeleteEdit`] (edit racing a block delete) and
+//! [`Conflict::ConcurrentBlockEdit`] for concurrent whole-block
+//! replacements (`UpdateBlockContent` / `UpdateAnnotations`) — those
+//! aren't the RGA's problem.
 //!
-//! - Wire [`text::RgaText`] into block-content merge so concurrent
-//!   `InsertText` / `DeleteText` on the same block converge silently.
+//! # Deferred (see ADR 0026)
+//!
+//! - Phase 3 — event-bus sync loop (`com.nexus.editor.ops.<path>`) and
+//!   Tauri transport for live cursor exchange.
+//! - Phase 4 — BL-007 git-on-disk persistence of op log + version
+//!   vector (load/save lives in the editor; merge driver in storage).
 //! - Reparenting / move-loop detection.
-//! - Event-bus sync loop (`com.nexus.editor.ops.<path>`) and Tauri
-//!   transport for live cursor exchange.
-//! - BL-007 git-on-disk persistence of op log + version vector.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -35,6 +42,7 @@ mod doc;
 mod error;
 mod id;
 mod log;
+pub mod merge;
 mod op;
 pub mod text;
 
