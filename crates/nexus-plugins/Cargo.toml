@@ -37,11 +37,11 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 criterion = { workspace = true }
+# Compile WAT (WebAssembly Text Format) fixtures at test time so we don't
+# vendor `.wasm` binaries for every regression test. Pure-Rust, no extra
+# toolchain. Used by `tests/wasm_capability_denial.rs`.
+wat = "1"
 
 [[bench]]
 name = "ipc_dispatch"
 harness = false
-# Compile WAT (WebAssembly Text Format) fixtures at test time so we don't
-# vendor `.wasm` binaries for every regression test. Pure-Rust, no extra
-# toolchain.
-wat = "1"
