@@ -12,7 +12,10 @@ serde_json  = { workspace = true }
 uuid        = { workspace = true }
 thiserror   = { workspace = true }
 tracing     = { workspace = true }
+tokio       = { workspace = true, features = ["sync", "rt", "macros"] }
 nexus-editor = { path = "../nexus-editor" }
+nexus-kernel = { path = "../nexus-kernel" }
 
 [dev-dependencies]
 nexus-formats = { path = "../nexus-formats" }
+tokio        = { workspace = true, features = ["sync", "rt", "macros", "time", "test-util"] }

@@ -44,11 +44,15 @@ mod id;
 mod log;
 pub mod merge;
 mod op;
+pub mod sync;
 pub mod text;
+pub mod wire;
 
 pub use conflict::Conflict;
-pub use doc::CrdtDoc;
+pub use doc::{CrdtDoc, RemoteOutcome};
 pub use error::{CrdtError, Result};
 pub use id::{Lamport, OpId, SiteId, VersionVector};
 pub use log::OpLog;
 pub use op::{affected_blocks, primary_block_id, CrdtOp};
+pub use sync::{DocHandle, InboundOutcome, SyncLoop};
+pub use wire::{ops_topic, relpath_of_topic, OpEnvelope, OPS_TOPIC_PREFIX};

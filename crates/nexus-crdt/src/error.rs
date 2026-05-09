@@ -35,4 +35,10 @@ pub enum CrdtError {
     /// caller should surface to the user.
     #[error("editor operation failed: {0}")]
     Editor(#[from] EditorError),
+
+    /// A wire-format payload could not be encoded or decoded. Phase 3+
+    /// transports return this when an event-bus payload doesn't match
+    /// the expected schema (see [`crate::wire`]).
+    #[error("wire payload: {0}")]
+    Wire(String),
 }
