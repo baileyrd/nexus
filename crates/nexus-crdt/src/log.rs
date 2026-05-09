@@ -27,6 +27,14 @@ pub struct OpLog {
     ops: HashMap<OpId, CrdtOp>,
     /// Cached version-vector summary of `history`.
     vv: VersionVector,
+    /// Per-site high-water mark of *pruned* ops (BL-074 follow-up
+    /// compaction). An op id whose lamport ≤ `pruned_floor.get(site)`
+    /// was either pruned (known seen) or is below the prune horizon
+    /// and must be treated as already-applied to keep peers
+    /// convergent. Distinct from `vv` so [`Self::append`] stays the
+    /// authoritative path for "have we actually seen this op".
+    #[serde(default)]
+    pruned_floor: VersionVector,
 }
 
 mod ops_map_vec {
@@ -60,17 +68,20 @@ impl OpLog {
         Self::default()
     }
 
-    /// Has `id` been appended already?
+    /// Has `id` been appended already, or is it below the prune
+    /// horizon (and so already known-seen)?
     #[must_use]
     pub fn contains(&self, id: OpId) -> bool {
-        self.ops.contains_key(&id)
+        self.ops.contains_key(&id) || self.pruned_floor.contains(id)
     }
 
     /// Append `op`. Idempotent: a duplicate `OpId` is silently ignored.
-    /// Returns `true` if the log changed, `false` if the op was a
-    /// duplicate.
+    /// An op below the prune floor (already seen and compacted) is
+    /// also silently dropped — re-appending would resurrect a state
+    /// every replica has agreed to forget. Returns `true` if the log
+    /// changed, `false` if the op was a duplicate or pruned.
     pub fn append(&mut self, op: CrdtOp) -> bool {
-        if self.ops.contains_key(&op.id) {
+        if self.contains(op.id) {
             return false;
         }
         let id = op.id;
@@ -107,6 +118,45 @@ impl OpLog {
     #[must_use]
     pub fn get(&self, id: OpId) -> Option<&CrdtOp> {
         self.ops.get(&id)
+    }
+
+    /// Compaction primitive: drop every op whose [`OpId`] is dominated
+    /// by `stable_vv` (i.e., contained in it), and advance the
+    /// internal prune floor so [`Self::contains`] keeps reporting
+    /// those ids as seen. Returns the number of ops removed.
+    ///
+    /// **Caller invariant:** `stable_vv` must represent state every
+    /// active replica has acknowledged. If a replica below the floor
+    /// later resurrects and sends one of the pruned ops, this log
+    /// will drop it as a duplicate — exactly the behaviour you want
+    /// when the resurrection is a stale replica catching up, but
+    /// catastrophic if `stable_vv` was computed against a partial
+    /// view of the cluster.
+    ///
+    /// Safe usage in `nexus`: only call from the BL-007 git-pull
+    /// landing path after the merged log has been written to disk
+    /// and acknowledged by every site whose state contributed to
+    /// `stable_vv`. The publisher does not call this automatically.
+    pub fn prune_dominated(&mut self, stable_vv: &VersionVector) -> usize {
+        let before = self.history.len();
+        self.history.retain(|id| !stable_vv.contains(*id));
+        self.ops.retain(|id, _| !stable_vv.contains(*id));
+        // Advance the prune floor — site by site — so future
+        // `contains(id)` calls report seen for any id at or below
+        // the floor regardless of whether it's still in `ops`.
+        for (site, lamport) in &stable_vv.0 {
+            let entry = self.pruned_floor.0.entry(*site).or_default();
+            if *lamport > *entry {
+                *entry = *lamport;
+            }
+        }
+        before - self.history.len()
+    }
+
+    /// Borrow the prune floor (for diagnostics / persistence).
+    #[must_use]
+    pub fn pruned_floor(&self) -> &VersionVector {
+        &self.pruned_floor
     }
 
     /// Idempotent union: absorb every op in `other` that this log
@@ -192,6 +242,61 @@ mod tests {
         let vv = log.version_vector();
         assert_eq!(vv.get(&s1), Lamport(2));
         assert_eq!(vv.get(&s2), Lamport(7));
+    }
+
+    #[test]
+    fn prune_dominated_removes_ops_and_keeps_contains_truthful() {
+        let s1 = SiteId::new();
+        let s2 = SiteId::new();
+        let mut log = OpLog::new();
+        log.append(dummy_op(s1, Lamport(1), VersionVector::new()));
+        log.append(dummy_op(s1, Lamport(2), VersionVector::new()));
+        log.append(dummy_op(s1, Lamport(3), VersionVector::new()));
+        log.append(dummy_op(s2, Lamport(7), VersionVector::new()));
+
+        // Stable VV says everyone has seen s1 up to 2 and s2 up to 7.
+        let mut stable = VersionVector::new();
+        stable.observe(OpId::new(s1, Lamport(2)));
+        stable.observe(OpId::new(s2, Lamport(7)));
+
+        let removed = log.prune_dominated(&stable);
+        assert_eq!(removed, 3, "s1/1, s1/2, s2/7 are pruned");
+        assert_eq!(log.len(), 1, "only s1/3 remains");
+
+        // Pruned ids still report as seen.
+        assert!(log.contains(OpId::new(s1, Lamport(1))));
+        assert!(log.contains(OpId::new(s1, Lamport(2))));
+        assert!(log.contains(OpId::new(s2, Lamport(7))));
+        // Surviving op is still seen.
+        assert!(log.contains(OpId::new(s1, Lamport(3))));
+        // An id above the floor that we never had reports unseen.
+        assert!(!log.contains(OpId::new(s1, Lamport(99))));
+    }
+
+    #[test]
+    fn prune_then_merge_skips_pruned_ops() {
+        // Two logs share history; one prunes, the other still has the
+        // ops. Merging the unpruned into the pruned must not
+        // resurrect the pruned ops (the floor blocks them as
+        // already-seen duplicates).
+        let s1 = SiteId::new();
+        let mut a = OpLog::new();
+        let mut b = OpLog::new();
+        let op1 = dummy_op(s1, Lamport(1), VersionVector::new());
+        let op2 = dummy_op(s1, Lamport(2), VersionVector::new());
+        a.append(op1.clone());
+        a.append(op2.clone());
+        b.append(op1);
+        b.append(op2);
+
+        let mut stable = VersionVector::new();
+        stable.observe(OpId::new(s1, Lamport(2)));
+        a.prune_dominated(&stable);
+        assert_eq!(a.len(), 0, "all ops at/below stable were pruned");
+
+        let absorbed = a.merge(&b);
+        assert_eq!(absorbed, 0, "pruned ops must NOT be re-absorbed");
+        assert_eq!(a.len(), 0);
     }
 
     #[test]
