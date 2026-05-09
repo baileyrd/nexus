@@ -133,8 +133,8 @@ _BL-082 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #5
 **Effort**: Large (broken into four phases — see ADR 0026)
-**Status**: Phases 1–4 + editor wiring shipped 2026-05-08. Remaining open: Tauri popout-window forwarding, BL-007 git merge driver registration, op-log compaction, conflict UI for `StructuralDeleteEdit`, undo/redo CRDT propagation.
-**Crates**: `nexus-crdt` ✓, `nexus-editor` (observer hook ✓), `nexus-bootstrap` (publisher orchestrator ✓)
+**Status**: Phases 1–4 + editor wiring + periodic checkpoints + undo/redo propagation + git merge driver shim shipped 2026-05-08. Remaining open: op-log compaction *wiring* (primitive ships, no caller — blocked on BL-007 pull-landing hook for a stable-VV oracle); conflict UI for `StructuralDeleteEdit`. Tauri popout forwarding turned out to be already covered by `bridge::kernel_subscribe`'s per-window scoping.
+**Crates**: `nexus-crdt` ✓, `nexus-editor` (observer hook ✓), `nexus-bootstrap` (publisher orchestrator ✓), `nexus-cli` (merge-driver shim ✓)
 **Related**: BL-007 (CRDT-over-Git transport); PRD-08 collaborative editing spec; stable block IDs (ADR 0017) were built for this; ADR 0026 documents the phase plan
 
 The block model was designed with collaboration in mind — stable IDs survive upstream edits, annotation ranges adjust on insert/delete, and the transaction system is invertible. The CRDT merge semantics are documented in the spec. What's missing is the live sync loop: a mechanism for two sessions on the same forge to exchange operations and converge.
@@ -167,20 +167,20 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 - Wired into `build_*_runtime` so all invokers (CLI, TUI, MCP, Tauri shell) get publishing + persistence by default.
 
 **Open follow-ups:**
-- Tauri popout-window forwarding of the ops topic across windows (ADR 0020) — within-process popouts already converge through the shared `CrdtDoc`; the gap is for plugin code running *inside* a popout that wants to subscribe to ops directly.
-- BL-007 git merge driver registration — `OpLog::merge` and a `nexus crdt merge-driver` CLI shim ship; one-time `.gitattributes` + `git config` setup needed per forge.
-- Op-log compaction — log grows unbounded in this revision.
-- Conflict UI for `StructuralDeleteEdit` — needs a peer-sync consumer driving `apply_remote` (BL-007 git pulls or popout-window bridge) to fire.
-- Undo/redo CRDT propagation — `handle_undo` / `handle_redo` don't currently invoke the observer; cross-session undo is genuinely hard for op-based CRDTs.
+- Op-log compaction *wiring* — `OpLog::prune_dominated` ships as a primitive but no code calls it. Blocked on BL-007's pull-landing hook delivering a stable-VV oracle.
+- Conflict UI for `StructuralDeleteEdit` — needs a peer-sync consumer driving `apply_remote` (BL-007 git pulls) to fire.
+- Reparenting / move-loop detection — pre-existing CRDT limitation, separate from BL-074.
 
 **Definition of done (full):**
 - `nexus-crdt` crate implements operation-based CRDT over the `Operation` type from `nexus-editor` ✓ (Phase 1)
 - Merge conflicts (concurrent edits to the same block) resolve via CRDT semantics; no user intervention needed for text edits ✓ (Phase 2)
 - Sync infrastructure (`com.nexus.editor.ops.<path>` topic + `SyncLoop`) ✓ (Phase 3)
 - Persistence primitives (`PersistedCrdt`, `crdt_state_path`, `OpLog::merge`) ✓ (Phase 4)
-- Editor wiring (per-session `CrdtDoc`, on-open/on-close persistence, per-op publishing) ✓ (2026-05-08)
+- Editor wiring (per-session `CrdtDoc`, on-open/on-close persistence, per-op publishing, periodic checkpoints, undo/redo propagation) ✓ (2026-05-08)
+- BL-007 git merge driver primitive (`OpLog::merge`) + CLI shim (`nexus crdt merge-driver` / `install-merge-driver`) ✓ (2026-05-08)
+- Op-log compaction primitive (`OpLog::prune_dominated`) ✓ (2026-05-08)
+- Tauri popout-window ops forwarding ✓ (was already covered by `bridge::kernel_subscribe` per-window scoping)
 - Structural conflicts surface as a user-resolvable dialog — detected in Phase 1; UI surfacing remains a UX follow-up
-- BL-007 (CRDT-over-Git) becomes the persistence layer for async collaboration — pending merge-driver registration in user's git config
 
 ---
 

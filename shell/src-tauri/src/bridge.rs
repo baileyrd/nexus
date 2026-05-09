@@ -404,6 +404,17 @@ pub async fn kernel_invoke(
 /// that happened to be alive, would receive every kernel event from
 /// every subscription. Now each subscription's events are scoped to
 /// the window that asked for them.
+///
+/// **BL-074 ops topic (popout forwarding):** plugin code running
+/// inside a popout window can subscribe to
+/// `EventFilter::CustomPrefix("com.nexus.editor.ops.")` through this
+/// command and receive `OpEnvelope` events scoped to that popout's
+/// webview. No additional shell-side wiring is needed because every
+/// popout shares the same `KernelRuntime`/`EventBus` as the main
+/// window; the per-window scoping above is exactly what BL-074
+/// wants. If you change this command's emit target, update
+/// `docs/adr/0026-collaborative-editing-crdt-layer.md` so the
+/// follow-up plan stays in sync.
 #[tauri::command]
 pub async fn kernel_subscribe(
     topic_prefix: String,

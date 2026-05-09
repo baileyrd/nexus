@@ -3,9 +3,10 @@
 **Date:** 2026-05-08
 **Status:** Accepted. Phases 1–4 of the `nexus-crdt` library plus the
 editor wiring (`OpObserver` callback, `CrdtPublisher` orchestrator,
-on-open/on-close persistence) shipped 2026-05-08. Remaining work
-(Tauri popout forwarding, BL-007 git merge driver registration,
-op-log compaction, conflict UI for `StructuralDeleteEdit`) is
+on-open/on-close persistence, periodic checkpoints, undo/redo
+propagation) and the BL-007 git merge driver shim shipped
+2026-05-08. Remaining work (op-log compaction wiring — primitive
+ships, no caller — and conflict UI for `StructuralDeleteEdit`) is
 tracked under "Open follow-ups" below.
 **Related:** BL-074 (CRDT layer), BL-007 (CRDT-over-Git transport),
 ADR 0017 (block-id stability), PRD-08 §8 (collaborative editing).
@@ -205,22 +206,17 @@ Three pieces sit on top of the library:
 
 ## Open follow-ups
 
-- **Tauri popout window forwarding** (ADR 0020) — the shell's
-  Tauri host doesn't relay `com.nexus.editor.ops.<relpath>`
-  events between popout windows. Within a single backend process
-  the editor's `CrdtDoc` is the same object across all windows so
-  they already converge through it; the gap is for plugin code
-  running *inside* a popout window that wants to subscribe to ops
-  directly.
-- **BL-007 git merge driver registration** —
-  `OpLog::merge` and a CLI shim
-  (`nexus crdt merge-driver --base ... --ours ... --theirs ...`)
-  ship; users still need a one-time `.gitattributes` rule
-  (`.forge/.editor/crdt/* merge=nexus-crdt`) and a `git config
-  merge.nexus-crdt.driver "nexus crdt merge-driver %O %A %B"`
-  invocation. The CLI command tells the user what to add.
+- **Op-log compaction wiring.** `OpLog::prune_dominated(stable_vv)`
+  is shipped as a primitive but no code calls it yet. Wiring is
+  blocked on a stable-VV oracle: we need a way to know when every
+  active replica has acknowledged a given op. The natural trigger
+  is the BL-007 git-pull landing path — after a successful pull
+  every site that contributed to the merged log has, by definition,
+  shipped its state — but that path doesn't currently surface
+  acknowledgement back to the publisher. Defer until BL-007's
+  push/pull hook lands.
 - **Conflict UI for `StructuralDeleteEdit`.** When peer-sync is
-  driving `apply_remote` (BL-007 git pulls or popout-window
+  driving `apply_remote` (BL-007 git pulls or a future cross-process
   bridge), the resolver UI for delete-vs-edit conflicts needs a
   surface — currently the publisher only authors local ops via
   `apply_local`, so no `Conflict` reaches the caller in the
@@ -230,3 +226,15 @@ Three pieces sit on top of the library:
   to different parents will *both* apply, and the second op wins by
   causal ordering. This is acceptable while reparent is rare;
   revisit if collaborative outlining becomes a primary use case.
+
+### Resolved by existing infrastructure (was follow-up, isn't)
+
+- **Tauri popout-window ops forwarding** — already covered by
+  `bridge::kernel_subscribe`'s per-window scoping (issue #86,
+  shipped earlier). Plugin code inside a popout calls
+  `kernel_subscribe('com.nexus.editor.ops.')` and receives
+  `OpEnvelope` events emitted to its own webview. No new
+  shell-side wiring needed because every popout shares the same
+  `KernelRuntime` / `EventBus` as the main window. Pinned in
+  `bridge.rs` rustdoc so a future refactor can't regress this
+  property silently.
