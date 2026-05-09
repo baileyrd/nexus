@@ -78,6 +78,14 @@ const COMMAND_OPEN_DIFF = 'nexus.editor.openDiff'
 // `applyWorkspaceEdit` (active tab through the live CM view, every
 // other file through `com.nexus.storage::write_file`).
 const COMMAND_LSP_RENAME = 'nexus.editor.lsp.rename'
+// BL-077 follow-up — LSP code actions. Cursor-position code-action
+// menu surfaced via `api.input.pick`; a chosen action's
+// `WorkspaceEdit` applies through the same `applyWorkspaceEdit`
+// path as rename. Command-only actions (no `edit`) require the
+// LSP `workspace/executeCommand` surface that the host doesn't
+// expose yet — those are listed in the picker for transparency
+// but with a disabled message.
+const COMMAND_LSP_CODE_ACTIONS = 'nexus.editor.lsp.codeActions'
 
 // Tab-actions menu placeholders. Each one shows a "Coming soon"
 // notification so users get feedback instead of a dead disabled row.
@@ -191,6 +199,7 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_TOGGLE_BLAME, title: 'Toggle Inline Git Blame', category: 'Editor' },
         { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
         { id: COMMAND_LSP_RENAME, title: 'Rename Symbol (LSP)', category: 'Editor' },
+        { id: COMMAND_LSP_CODE_ACTIONS, title: 'Code Actions (LSP)', category: 'Editor' },
         ...STUB_COMMANDS.map((s) => ({ id: s.id, title: s.title, category: 'Editor' })),
       ],
       keybindings: [
@@ -212,6 +221,13 @@ export const editorPlugin: Plugin = {
         {
           command: COMMAND_LSP_RENAME,
           key: 'F2',
+          when: CONTEXT_KEY_HAS_ACTIVE_TAB,
+        },
+        // BL-077 follow-up — Mod-. matches VS Code's "Quick Fix" chord.
+        {
+          command: COMMAND_LSP_CODE_ACTIONS,
+          key: 'ctrl+.',
+          mac: 'cmd+.',
           when: CONTEXT_KEY_HAS_ACTIVE_TAB,
         },
       ],
@@ -803,6 +819,156 @@ export const editorPlugin: Plugin = {
         api.notifications.show({
           type: 'error',
           message: `Rename apply failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    // BL-077 follow-up — LSP code actions. Quick-pick of every action
+    // the server returns at the cursor; the chosen action's
+    // WorkspaceEdit applies via the same `applyWorkspaceEdit` path
+    // as rename. Command-only actions (no `edit`) require LSP
+    // `workspace/executeCommand` which the host doesn't expose yet
+    // — we surface them as disabled rows so users see them in the
+    // list but can't act on them.
+    interface LspCodeAction {
+      title: string
+      kind?: string
+      disabled?: { reason: string }
+      edit?: LspWorkspaceEdit
+      command?: { title: string; command: string }
+    }
+    api.commands.register(COMMAND_LSP_CODE_ACTIONS, async () => {
+      const view = getActiveCmView()
+      const relpath = activeTabRelpath()
+      if (!view || !relpath) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Code actions require a code-mode editor tab.',
+        })
+        return
+      }
+      const sel = view.state.selection.main
+      const startLine = view.state.doc.lineAt(sel.from)
+      const endLine = view.state.doc.lineAt(sel.to)
+      const range = {
+        start: {
+          line: startLine.number - 1,
+          character: sel.from - startLine.from,
+        },
+        end: {
+          line: endLine.number - 1,
+          character: sel.to - endLine.from,
+        },
+      }
+      let raw: unknown
+      try {
+        raw = await lspIpc.codeActions({ path: relpath, range })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Code actions failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      // Reply is `(Command | CodeAction)[] | null`. LSP3.16+ servers
+      // emit `CodeAction`; we tolerate the legacy `Command` shape (no
+      // `edit`, just a command) by surfacing it as a disabled row
+      // alongside actions whose `edit` is missing.
+      const actions = (Array.isArray(raw) ? (raw as LspCodeAction[]) : []) ?? []
+      if (actions.length === 0) {
+        api.notifications.show({
+          type: 'info',
+          message: 'No code actions available at this position.',
+        })
+        return
+      }
+      const pickItems = actions.map((action) => {
+        const hasEdit = action.edit != null
+        const isDisabled = action.disabled != null || (!hasEdit && action.command != null)
+        const detail = action.disabled?.reason
+          ? `disabled — ${action.disabled.reason}`
+          : !hasEdit && action.command != null
+            ? `requires workspace command (not yet supported)`
+            : action.kind
+        return {
+          label: action.title,
+          description: action.kind,
+          detail,
+          value: { action, isDisabled },
+        }
+      })
+      const picked = await api.input.pick(pickItems, {
+        title: 'Code actions',
+        placeholder: 'Filter actions…',
+      })
+      if (!picked) return
+      if (picked.isDisabled) {
+        api.notifications.show({
+          type: 'warning',
+          message: picked.action.disabled?.reason
+            ? `Action disabled: ${picked.action.disabled.reason}`
+            : 'Action requires workspace command support, which is not wired yet.',
+        })
+        return
+      }
+      const edit = picked.action.edit
+      if (!edit) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Selected action did not return any edits.',
+        })
+        return
+      }
+
+      const forgeRoot = useWorkspaceStore.getState().rootPath
+      if (!forgeRoot) {
+        api.notifications.show({
+          type: 'error',
+          message: 'Code action failed: no workspace open.',
+        })
+        return
+      }
+
+      try {
+        const result = await applyWorkspaceEdit(edit, {
+          forgeRoot,
+          activeView: view,
+          activeRelpath: relpath,
+          readFile: async (p) => {
+            const resp = await api.kernel.invoke<ReadFileResponse>(
+              STORAGE_PLUGIN_ID,
+              READ_FILE_COMMAND,
+              { path: p },
+            )
+            return decodeUtf8(resp.bytes ?? [])
+          },
+          writeFile: writeStorageFile,
+          onSkip: (uri, reason) => {
+            clientLogger.warn(
+              '[nexus.editor.lsp.codeActions] skipped URI outside forge:',
+              uri,
+              reason,
+            )
+          },
+        })
+        const total = result.liveViewFiles + result.storageFiles
+        const skipNote =
+          result.skipped.length > 0
+            ? ` (${result.skipped.length} outside-forge URI${
+                result.skipped.length === 1 ? '' : 's'
+              } skipped)`
+            : ''
+        api.notifications.show({
+          type: 'info',
+          message:
+            total === 0
+              ? `Action "${picked.action.title}" produced no edits.`
+              : `Applied "${picked.action.title}" to ${total} file${total === 1 ? '' : 's'}${skipNote}.`,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Code action apply failed: ${err instanceof Error ? err.message : String(err)}`,
         })
       }
     })
