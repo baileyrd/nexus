@@ -242,9 +242,9 @@ _BL-077 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 **Caught a subtle bug along the way.** A draft test used a dynamic `await import('@codemirror/lint')` for `forEachDiagnostic` while the implementation imports `setDiagnostics` statically. Under tsx's loader the dynamic and static specifiers resolved to *different* module instances, so the `lintState` `StateField` constants weren't identity-equal — `setDiagnostics` would write to one field and `forEachDiagnostic` would read from another, and both saw "0 diagnostics." Fixed by importing both statically from the test. Worth flagging because future CM6 extensions that test against state-field-based @codemirror sub-modules will trip the same trap.
 
 **Deferred from the DoD:**
-- **Format-on-save plumbed via the existing save command, not just the keymap.** Today `Mod-s` triggers `format` then returns `false` so the outer save handler still fires. That works as long as the user's save chord is `Mod-s`; a vim user issuing `:w` won't trigger format. A follow-up wires format through the `nexus.editor.save` command so every save path gets it.
-- **`nexus.editor:reveal-line` consumer.** Cmd+Click → definition emits the event with the resolved line/character but no handler subscribes yet; the file opens at the top. Wiring is one event listener away — defer until the second LSP-using flow needs it.
-- **Document resync after server reconnect.** BL-076's `LspClient` tracks open URI / version / text but the resync replay isn't wired. A code-mode tab whose server crashes today shows stale diagnostics until the next save bumps the version. Pair with the BL-076 follow-up that wraps each handler in `call_with_reconnect`.
+- ✅ **Format-on-save plumbed via the existing save command, not just the keymap.** Shipped in [`0d2cace3`](https://github.com/baileyrd/nexus/commit/0d2cace3). New `cm/saveFormatHooks.ts` registry: every code-mode tab with a live LSP extension registers a per-relpath format hook; `nexus.editor.save` awaits the hook for the active tab before writing. So vim's `:w`, custom save chords, and the `Mod-s` keymap all hit the same format-on-save path. Hook errors surface as a warning toast rather than blocking save.
+- ✅ **`nexus.editor:reveal-line` consumer.** Shipped in [`0d2cace3`](https://github.com/baileyrd/nexus/commit/0d2cace3). New `cm/revealLine.ts` helper (`lspPositionToCmOffset` + `revealLineInView`) plus an `api.events.on('nexus.editor:reveal-line', …)` handler in the editor plugin that mirrors the existing reveal-block staging — fire when the destination tab's CM view is mounted, queue otherwise. So Cmd+Click → definition now scrolls + cursors the destination line/character instead of opening at the top.
+- ✅ **Document resync after server reconnect.** Shipped under BL-076 (above) — `ConnectionPool` snapshots open documents and replays each `did_open` against the freshly-spawned successor before the original op retries.
 - **WorkspaceEdit applier for rename / code-actions.** `format` returns `TextEdit[]` and the applier handles that; rename/code-actions would return a `WorkspaceEdit` (multi-file) which needs a different applier. The IPC handlers are wired but the CM6 commands don't dispatch them — there's no UI surface yet (rename palette, code-actions menu). Lands when those UI surfaces do.
 
 ---
@@ -427,14 +427,7 @@ _BL-052 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
-### BL-007: CRDT-over-Git Transport
-
-**Source**: PRD 11, Section 4.4 (Level 3)
-**Effort**: Large (2–3 weeks)
-**Crate**: `nexus-git`, new `nexus-crdt`
-**Related PRD**: PRD 11 (specified but deferred — requires collaborative editing layer)
-
-Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json`, tracked in git. On push, CRDT state is included in commits. On pull with merge conflict in the CRDT file, apply CRDT merge semantics (operation-based or state-based) for automatic convergence. Fallback to content conflict if CRDT merge fails. Enables multi-user async collaboration via git push/pull without manual conflict resolution. Prerequisite: a CRDT-based editor engine (PRD 08) or collaborative editing layer.
+_BL-007 closed 2026-05-09 — fully subsumed by [BL-074](#bl-074-collaborative-editing--crdt-layer). Every DoD bullet shipped under that umbrella: `nexus-crdt::PersistedCrdt` lives at `<forge>/.forge/.editor/crdt/<sha>.json` (rebuildable per file-as-truth, but the CRDT state file specifically rides through git per the gitignore policy that shipped 2026-05-09); the `nexus crdt merge-driver` shim runs `OpLog::merge` on pull conflicts; `CrdtPublisher::reload_after_external_change` + `start_pull_landing_subscriber` close the transport loop end-to-end against `com.nexus.git.commit`; structural conflicts that can't merge silently surface on `com.nexus.editor.crdt.conflict.<relpath>` and through the `nexus.crdtConflict` shell-side toast. Multi-user async collaboration via git push/pull without manual conflict resolution works today. The "Partially New Features" framing pre-dated the BL-074 plan and is no longer accurate._
 
 ---
 
