@@ -49,7 +49,7 @@ pub mod sync;
 pub mod text;
 pub mod wire;
 
-pub use conflict::Conflict;
+pub use conflict::{Conflict, ConflictDetail, ConflictOrigin};
 pub use doc::{BlockMeta, CrdtDoc, RemoteOutcome};
 pub use error::{CrdtError, Result};
 pub use id::{Lamport, OpId, SiteId, VersionVector};

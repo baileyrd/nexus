@@ -28,7 +28,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::conflict::Conflict;
+use crate::conflict::{Conflict, ConflictDetail};
 use crate::error::{CrdtError, Result};
 use crate::op::CrdtOp;
 
@@ -116,17 +116,38 @@ impl OpEnvelope {
 /// `Vec<Conflict>`) leaves room for future fields like the merged
 /// version vector or a "remote tip" identifier without breaking
 /// subscribers.
+///
+/// The `conflicts` field holds [`ConflictDetail`]s rather than bare
+/// [`Conflict`]s as of BL-074: each entry flattens the underlying
+/// `Conflict` into its JSON shape and adds optional content snapshots
+/// (`local_content` / `remote_content` / `delete_origin`) so a
+/// resolver UI can render side-by-side without an extra round-trip.
+/// Pre-BL-074 subscribers (the toast) keep parsing — they only read
+/// `kind` and `block_id`, both of which still appear unchanged in the
+/// flattened form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConflictEnvelope {
     /// Conflicts surfaced by the reload, in the order
     /// [`crate::CrdtDoc::apply_remote`] returned them.
-    pub conflicts: Vec<Conflict>,
+    pub conflicts: Vec<ConflictDetail>,
 }
 
 impl ConflictEnvelope {
-    /// Wrap a list of conflicts in an envelope.
+    /// Wrap a list of bare [`Conflict`]s in an envelope, with no
+    /// content snapshots. Use [`Self::with_details`] to attach the
+    /// content the BL-074 resolver modal renders against.
     #[must_use]
     pub fn new(conflicts: Vec<Conflict>) -> Self {
+        Self {
+            conflicts: conflicts.into_iter().map(ConflictDetail::from).collect(),
+        }
+    }
+
+    /// Wrap a pre-built list of [`ConflictDetail`]s. Used by the
+    /// BL-007 pull-landing path which extracts content snapshots
+    /// alongside conflict detection.
+    #[must_use]
+    pub fn with_details(conflicts: Vec<ConflictDetail>) -> Self {
         Self { conflicts }
     }
 
@@ -188,6 +209,63 @@ mod tests {
         let envelope = ConflictEnvelope::new(conflicts.clone());
         let json = envelope.to_json().unwrap();
         let decoded = ConflictEnvelope::from_json(&json).unwrap();
-        assert_eq!(decoded.conflicts, conflicts);
+        assert_eq!(decoded.conflicts.len(), 1);
+        assert_eq!(decoded.conflicts[0].conflict, conflicts[0]);
+        assert!(decoded.conflicts[0].local_content.is_none());
+        assert!(decoded.conflicts[0].remote_content.is_none());
+    }
+
+    #[test]
+    fn conflict_envelope_with_details_carries_content_snapshots() {
+        let block_id = Uuid::new_v4();
+        let s = SiteId::new();
+        let detail = crate::conflict::ConflictDetail {
+            conflict: Conflict::ConcurrentBlockEdit {
+                block_id,
+                local: OpId::new(s, Lamport(1)),
+                remote: OpId::new(s, Lamport(2)),
+            },
+            local_content: Some("hello local".into()),
+            remote_content: Some("hello remote".into()),
+            delete_origin: None,
+        };
+        let envelope = ConflictEnvelope::with_details(vec![detail.clone()]);
+        let json = envelope.to_json().unwrap();
+        // Flattened wire shape: pre-BL-074 fields sit at the top
+        // level (kind, block_id, local, remote) alongside the new
+        // content fields. This is what keeps the toast subscriber
+        // parsing unchanged.
+        let conflicts = json.get("conflicts").unwrap().as_array().unwrap();
+        let row = &conflicts[0];
+        assert_eq!(row.get("kind").unwrap(), "concurrent_block_edit");
+        assert!(row.get("block_id").is_some());
+        assert_eq!(row.get("local_content").unwrap(), "hello local");
+        assert_eq!(row.get("remote_content").unwrap(), "hello remote");
+        // Round trip preserves everything.
+        let decoded = ConflictEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded.conflicts, vec![detail]);
+    }
+
+    #[test]
+    fn conflict_envelope_legacy_payload_decodes_with_default_details() {
+        // A toast-shape payload (no local_content / remote_content /
+        // delete_origin) still decodes — the new fields default to
+        // None. This is the back-compat guarantee for the BL-074
+        // upgrade.
+        let legacy = serde_json::json!({
+            "conflicts": [
+                {
+                    "kind": "concurrent_block_edit",
+                    "block_id": Uuid::new_v4(),
+                    "local": { "site": SiteId::new(), "lamport": 1 },
+                    "remote": { "site": SiteId::new(), "lamport": 2 }
+                }
+            ]
+        });
+        let decoded = ConflictEnvelope::from_json(&legacy).unwrap();
+        assert_eq!(decoded.conflicts.len(), 1);
+        assert!(decoded.conflicts[0].local_content.is_none());
+        assert!(decoded.conflicts[0].remote_content.is_none());
+        assert!(decoded.conflicts[0].delete_origin.is_none());
     }
 }

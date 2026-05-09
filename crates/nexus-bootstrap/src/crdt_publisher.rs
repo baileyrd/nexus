@@ -26,8 +26,9 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use nexus_crdt::{
-    conflict_topic, content_hash_hex, crdt_state_path, ops_topic, Conflict, ConflictEnvelope,
-    CrdtDoc, OpEnvelope, PersistedCrdt, RemoteOutcome, SiteId, VersionVector,
+    conflict_topic, content_hash_hex, crdt_state_path, ops_topic, Conflict, ConflictDetail,
+    ConflictEnvelope, ConflictOrigin, CrdtDoc, OpEnvelope, PersistedCrdt, RemoteOutcome, SiteId,
+    VersionVector,
 };
 use nexus_editor::{BlockTree, OpObserver, Operation, Transaction, EDITOR_PLUGIN_ID};
 use nexus_kernel::{EventBus, EventFilter};
@@ -57,9 +58,12 @@ pub struct ReloadOutcome {
     /// Conflicts that surfaced while absorbing remote ops. The Phase 2
     /// silent-merge path resolves text overlap inside `apply_remote`,
     /// so what reaches here is structural-delete-vs-edit and concurrent
-    /// whole-block replacements — both need a resolver UI (see
-    /// BL-074 follow-ups).
-    pub conflicts: Vec<Conflict>,
+    /// whole-block replacements — both need a resolver UI.
+    ///
+    /// Each entry is a [`ConflictDetail`] carrying the content
+    /// snapshots the BL-074 resolver modal renders against
+    /// (`local_content`, `remote_content`, `delete_origin`).
+    pub conflicts: Vec<ConflictDetail>,
 }
 
 /// Reason a [`CrdtPublisher::reload_after_external_change`] returned
@@ -312,11 +316,15 @@ impl CrdtPublisher {
     /// a resolver UI. The CRDT layer can't pick a winner for
     /// `StructuralDeleteEdit` or whole-block-replacement conflicts —
     /// the user must.
-    fn publish_conflicts(&self, relpath: &str, conflicts: Vec<Conflict>) {
+    ///
+    /// Each entry is a [`ConflictDetail`] carrying content snapshots
+    /// the BL-074 resolver modal needs to render side-by-side without
+    /// an extra round-trip.
+    fn publish_conflicts(&self, relpath: &str, conflicts: Vec<ConflictDetail>) {
         if conflicts.is_empty() {
             return;
         }
-        let envelope = ConflictEnvelope::new(conflicts);
+        let envelope = ConflictEnvelope::with_details(conflicts);
         let payload: Value = match envelope.to_json() {
             Ok(v) => v,
             Err(err) => {
@@ -474,7 +482,16 @@ impl CrdtPublisher {
                         // Should be filtered by `contains` above, but
                         // `apply_remote` is the source of truth.
                     }
-                    Ok(RemoteOutcome::Conflict(c)) => conflicts.push(c),
+                    Ok(RemoteOutcome::Conflict(c)) => {
+                        // Build a ConflictDetail with content from the
+                        // live tree (local side) and the remote op
+                        // payload (remote side) so the resolver modal
+                        // doesn't need to round-trip back into the
+                        // CRDT layer to fetch what to render.
+                        let detail =
+                            build_conflict_detail(&c, &cloned, &state.doc, &envelope.state.log);
+                        conflicts.push(detail);
+                    }
                     Err(err) => {
                         tracing::warn!(
                             %err,
@@ -599,6 +616,85 @@ impl CrdtPublisher {
                 }
             }
         }
+    }
+}
+
+/// BL-074 — enrich a bare [`Conflict`] with the content snapshots
+/// the resolver modal renders against. Pulls the local content from
+/// the live [`CrdtDoc`]'s tree and the remote content from the
+/// buffered remote op (or, for delete-edit conflicts where the local
+/// side issued the delete, from the conflicting edit op recovered out
+/// of the remote log by id).
+///
+/// Returns a fully-populated [`ConflictDetail`] whose flattened wire
+/// shape stays compatible with the pre-BL-074 toast subscriber.
+fn build_conflict_detail(
+    conflict: &Conflict,
+    remote_op: &nexus_crdt::CrdtOp,
+    doc: &CrdtDoc,
+    remote_log: &nexus_crdt::OpLog,
+) -> ConflictDetail {
+    match conflict {
+        Conflict::ConcurrentBlockEdit { block_id, .. } => {
+            let local_content = doc.tree().get(*block_id).map(|b| b.content.clone());
+            let remote_content = content_from_op(&remote_op.op);
+            ConflictDetail {
+                conflict: conflict.clone(),
+                local_content,
+                remote_content,
+                delete_origin: None,
+            }
+        }
+        Conflict::StructuralDeleteEdit {
+            block_id,
+            delete,
+            edit,
+        } => {
+            // Whichever side issued the delete: the *other* op is the
+            // edit, and that's the content we surface so the user sees
+            // what they'd lose by accepting the delete.
+            //
+            // The local doc has the local op in its log already; the
+            // remote op (whichever it was) is the one we just
+            // received. From that we derive `delete_origin`.
+            let delete_origin = if doc.log().contains(*delete) {
+                ConflictOrigin::Local
+            } else {
+                ConflictOrigin::Remote
+            };
+            // Find the edit op in whichever log carries it, and pull
+            // its `new_content` if it's a content-bearing replacement.
+            // For text-style edits (insert/delete chars) we fall back
+            // to the live tree's current content for the block — the
+            // doc has at least one editor op applied to that block in
+            // the local case, and in the remote case the live tree
+            // still holds the pre-conflict content.
+            let edit_op_content = doc
+                .log()
+                .get(*edit)
+                .or_else(|| remote_log.get(*edit))
+                .and_then(|o| content_from_op(&o.op));
+            let local_content = edit_op_content
+                .or_else(|| doc.tree().get(*block_id).map(|b| b.content.clone()));
+            ConflictDetail {
+                conflict: conflict.clone(),
+                local_content,
+                remote_content: None,
+                delete_origin: Some(delete_origin),
+            }
+        }
+    }
+}
+
+/// Extract the post-edit block content from an [`Operation`] payload,
+/// when one is carried. Returns `None` for ops that don't carry whole-
+/// block replacement content (text inserts / deletes / annotation
+/// updates / structural ops other than `InsertBlock`).
+fn content_from_op(op: &Operation) -> Option<String> {
+    match op {
+        Operation::UpdateBlockContent { new_content, .. } => Some(new_content.clone()),
+        Operation::InsertBlock { block, .. } => Some(block.content.clone()),
+        _ => None,
     }
 }
 
@@ -1130,10 +1226,17 @@ mod tests {
             .expect("reload succeeded");
         assert_eq!(outcome.absorbed, 0, "the conflicting op was not applied");
         assert_eq!(outcome.conflicts.len(), 1, "one conflict surfaces");
+        let detail = &outcome.conflicts[0];
         assert!(matches!(
-            outcome.conflicts[0],
+            detail.conflict,
             nexus_crdt::Conflict::ConcurrentBlockEdit { .. }
         ));
+        // BL-074 — the resolver modal needs both content snapshots
+        // for ConcurrentBlockEdit. Live tree carries the local content
+        // ("L"); the remote op payload carries the remote content ("R").
+        assert_eq!(detail.local_content.as_deref(), Some("L"));
+        assert_eq!(detail.remote_content.as_deref(), Some("R"));
+        assert!(detail.delete_origin.is_none());
 
         // The conflict envelope fired on the conflict topic.
         let event = tokio::time::timeout(std::time::Duration::from_secs(2), conflict_sub.recv())
@@ -1144,9 +1247,87 @@ mod tests {
             assert_eq!(type_id, "com.nexus.editor.crdt.conflict.notes.md");
             let env = nexus_crdt::ConflictEnvelope::from_json(payload).unwrap();
             assert_eq!(env.conflicts.len(), 1);
+            let wire_detail = &env.conflicts[0];
+            // The bus payload also carries the resolver-friendly
+            // content snapshots — the modal subscribes to the same
+            // topic and reads them off without an extra round-trip.
+            assert_eq!(wire_detail.local_content.as_deref(), Some("L"));
+            assert_eq!(wire_detail.remote_content.as_deref(), Some("R"));
         } else {
             panic!("expected Custom event");
         }
+    }
+
+    #[tokio::test]
+    async fn reload_publishes_structural_delete_edit_with_origin_and_edit_content() {
+        // BL-074 — the resolver modal also needs to render
+        // delete-vs-edit conflicts. This exercises the second arm of
+        // `build_conflict_detail`: local edits a block, remote deletes
+        // it. The published detail carries `delete_origin = Remote`
+        // and `local_content` = the edit's surviving content (so the
+        // modal can show what would be lost).
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+        let publisher = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+
+        // Live tree: a paragraph block with content "edited".
+        let mut tree = BlockTree::new(DocumentMetadata::default());
+        let mut block = Block::new(BlockType::Paragraph);
+        block.content = "edited".into();
+        let b = block.id;
+        let snapshot_block = block.clone();
+        tree.insert(block, None, 0).unwrap();
+        publisher.on_session_opened("notes.md", &tree, b"edited");
+
+        // Local edits the block (UpdateBlockContent → "L-edited").
+        publisher.on_apply_transaction(
+            "notes.md",
+            &[Operation::UpdateBlockContent {
+                id: b,
+                old_content: "edited".into(),
+                new_content: "L-edited".into(),
+                old_annotations: vec![],
+                new_annotations: vec![],
+            }],
+        );
+
+        // Peer issues a DeleteBlock on the same block, with no
+        // knowledge of the local edit (vv_at_creation is empty).
+        let mut peer_tree = BlockTree::new(DocumentMetadata::default());
+        let mut peer_block = snapshot_block.clone();
+        peer_block.id = b;
+        peer_tree.insert(peer_block.clone(), None, 0).unwrap();
+        let mut peer = CrdtDoc::new(SiteId::new(), peer_tree);
+        peer.apply_local(&Operation::DeleteBlock {
+            old_block: peer_block,
+            was_parent_id: None,
+            was_index_in_parent: 0,
+        })
+        .unwrap();
+        let envelope = PersistedCrdt::new(peer.state(), content_hash_hex(b"any"));
+        write_state_file(dir.path(), "notes.md", &envelope);
+
+        let outcome = publisher
+            .reload_after_external_change("notes.md")
+            .expect("reload succeeded");
+        assert_eq!(outcome.absorbed, 0, "delete blocked by structural conflict");
+        assert_eq!(outcome.conflicts.len(), 1);
+        let detail = &outcome.conflicts[0];
+        assert!(matches!(
+            detail.conflict,
+            nexus_crdt::Conflict::StructuralDeleteEdit { .. }
+        ));
+        // The remote side issued the delete.
+        assert_eq!(detail.delete_origin, Some(nexus_crdt::ConflictOrigin::Remote));
+        // Surviving edit content surfaces so the user sees what
+        // accepting the delete would discard.
+        assert_eq!(detail.local_content.as_deref(), Some("L-edited"));
+        // Delete carries no replacement content.
+        assert!(detail.remote_content.is_none());
     }
 
     #[tokio::test]

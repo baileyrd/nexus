@@ -1,5 +1,4 @@
-// BL-007 / BL-074 follow-up — surface CRDT pull-landing conflicts to
-// the user.
+// BL-007 / BL-074 — surface CRDT pull-landing conflicts to the user.
 //
 // `crates/nexus-bootstrap/src/crdt_publisher.rs::publish_conflicts`
 // fires `com.nexus.editor.crdt.conflict.<relpath>` whenever a `git
@@ -9,49 +8,29 @@
 // signal — the file appears to silently revert or skip remote edits
 // because the conflicting op was buffered away from the doc.
 //
-// This plugin is the lightest viable consumer: it subscribes to the
-// topic prefix and surfaces a warning toast naming the file and the
-// conflict shapes. A full resolver modal — pick local / pick remote
-// per block — is a richer UX project tracked under BL-074 follow-ups
-// and lives outside this plugin until then.
+// As of BL-074 the surface is an interactive **resolver modal** (not
+// the original toast). The Rust side enriches each conflict with
+// content snapshots — `local_content`, `remote_content`,
+// `delete_origin` — so the modal can render side-by-side and offer
+// "Keep local" / "Use remote" / "Open file" without an extra
+// round-trip.
+
+import { createElement } from 'react'
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
+import { ConflictModal } from './ConflictModal'
+import { useConflictStore } from './conflictStore'
+import type { ConflictEnvelope } from './types'
 
 const TOPIC_PREFIX = 'com.nexus.editor.crdt.conflict.'
-
-interface ConflictPayload {
-  conflicts: Array<
-    | { kind: 'concurrent_block_edit'; block_id: string; local: unknown; remote: unknown }
-    | { kind: 'structural_delete_edit'; block_id: string; delete: unknown; edit: unknown }
-  >
-}
-
-function summarise(payload: ConflictPayload): string {
-  const counts = { concurrent_block_edit: 0, structural_delete_edit: 0 }
-  for (const c of payload.conflicts) {
-    if (c.kind === 'concurrent_block_edit') counts.concurrent_block_edit += 1
-    else if (c.kind === 'structural_delete_edit') counts.structural_delete_edit += 1
-  }
-  const parts: string[] = []
-  if (counts.concurrent_block_edit > 0) {
-    parts.push(
-      `${counts.concurrent_block_edit} concurrent block edit${counts.concurrent_block_edit === 1 ? '' : 's'}`,
-    )
-  }
-  if (counts.structural_delete_edit > 0) {
-    parts.push(
-      `${counts.structural_delete_edit} delete-vs-edit conflict${counts.structural_delete_edit === 1 ? '' : 's'}`,
-    )
-  }
-  return parts.join(', ')
-}
+const VIEW_ID = 'nexus.crdtConflict.modal'
 
 export const crdtConflictPlugin: Plugin = {
   manifest: {
     id: 'nexus.crdtConflict',
     name: 'CRDT Conflict',
-    version: '0.1.0',
+    version: '0.2.0',
     core: false,
     activationEvents: ['onStartup'],
     contributes: {},
@@ -60,24 +39,33 @@ export const crdtConflictPlugin: Plugin = {
   async activate(api: PluginAPI) {
     let unsub: (() => void) | null = null
 
+    api.views.register(VIEW_ID, {
+      slot: 'overlay',
+      // The modal needs `api.kernel.invoke` (apply_transaction) and
+      // `api.events.emit` (files:open) — both threaded through as a
+      // prop. Wrap in a closure component so the registry-supplied
+      // factory can render without arguments.
+      component: () => createElement(ConflictModal, { api }),
+      // Same priority bucket as `confirm` and `pick`: an overlay
+      // serialises behind the conflict store's queue+current pattern,
+      // so two conflict modals can't render simultaneously.
+      priority: 90,
+    })
+
     const subscribe = async () => {
       if (unsub) return
       try {
-        unsub = await api.kernel.on<ConflictPayload>(TOPIC_PREFIX, (topic, payload) => {
+        unsub = await api.kernel.on<ConflictEnvelope>(TOPIC_PREFIX, (topic, payload) => {
           const relpath = topic.slice(TOPIC_PREFIX.length)
           if (!payload || !Array.isArray(payload.conflicts) || payload.conflicts.length === 0) {
             return
           }
-          const summary = summarise(payload)
-          clientLogger.warn('[nexus.crdtConflict]', relpath, payload.conflicts)
-          api.notifications.show({
-            type: 'warning',
-            // Toast is intentionally action-less for now — a resolver
-            // modal lands as a separate follow-up. Until then the
-            // user opens the file and resolves manually.
-            message: `Merge needs review in ${relpath}: ${summary}.`,
-            duration: 8000,
-          })
+          clientLogger.info(
+            '[nexus.crdtConflict]',
+            relpath,
+            `${payload.conflicts.length} conflict(s)`,
+          )
+          useConflictStore.getState().enqueue(relpath, payload.conflicts)
         })
       } catch (err) {
         clientLogger.warn('[nexus.crdtConflict] subscribe failed:', err)
