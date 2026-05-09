@@ -364,10 +364,10 @@ The theme system already has live reload; the only new backend work is a `previe
 >
 > **Phase 2b closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `workspace.moveLeafToDock(leaf, side)` mutator (leaf is unmounted from its source Tabs, pushed onto the destination dock's first Tabs, parent pointer rewritten, view instance preserved). View Builder snapshot rows gain a per-leaf `↔` "Move to" affordance with four target buttons (left / right / bottom / main) and per-dock collapse-toggle + −/+ size step controls in the section heading. The existing `setSidedockSize` / `setSidedockCollapsed` mutators carry the size/collapse work; the new code is the move surface plus the UI plumbing.
 >
-> **Phase 2c (deferred)**: full WYSIWYG drag-drop canvas with drag-divider resize. Needs pointer-event plumbing across docks; deferred since the click-button surface ships the same capability.
+> **Phase 2c closed 2026-05-09** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Visual layout canvas (`LayoutCanvas` component, 360×220 px box-model preview at the top of the View Builder panel) renders the live workspace as a scaled-down 2D layout — left | main | right with bottom spanning beneath, dock proportions scaled against `TYPICAL_WORKSPACE_WIDTH = 1200` / `TYPICAL_WORKSPACE_HEIGHT = 800` and clamped to `MAX_DOCK_FRACTION = 35%` of canvas. Two pointer-driven interactions: drag a leaf chip onto a different region's box to move it (fires `workspace.moveLeafToDock(leaf, side)` on release; same mutator the Phase 2b inline-buttons call), and drag a divider line continuously to resize a dock (fires `workspace.setSidedockSize(side, realPx)` on every move; the workspace store's 150-real-px floor still clamps). All geometry math lives in `canvasGeometry.ts` (pure module: `computeLayout`, `regionAt`, `dividerAt`, `dragDividerToRealPx`, `extractCanvasState`); the React component is render + pointer-event wiring only. 21 new tests cover the geometry helpers (scale fns + their inverses, layout composition, hit-tests against interior/exterior/divider zones, divider-drag math, and the snapshot extractor's region-walking + active-flag + missing-dock cases). Drop-target highlight (`var(--interactive-accent)` outline + hover background) appears while a leaf is being dragged over a non-source region. Click-button surface from Phase 2a/2b kept untouched — the canvas is additive.
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
-**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b + 2c ~1 week (deferred)
+**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b ~1 day _(shipped)_ · Phase 2c ~1 day _(shipped)_
 **Crates**: `ExtensionHost` (JS introspection API), new `shell/src/plugins/nexus/viewBuilder/`
 **Related**: ADR 0011 (plugin-first shell), BL-053 (forge visual target), BL-054 (Nexus OS Mode)
 
@@ -380,7 +380,7 @@ Every panel, sidebar, and pane in the Nexus shell is a registered plugin contrib
 - ✅ Per-leaf close affordances on the live snapshot (Phase 2a)
 - ✅ "Export as plugin" code generator that emits `manifest.toml` + `index.ts` + layout JSON + README (Phase 2d)
 - ✅ Per-panel configuration UI — move-between-docks + dock size/collapse (Phase 2b — shipped 2026-05-08)
-- ⬜ WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize (Phase 2c — deferred)
+- ✅ WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize (Phase 2c — shipped 2026-05-09)
 
 ---
 

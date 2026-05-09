@@ -29,6 +29,7 @@ import type {
   SerializedSplit,
   SerializedTabs,
 } from '../../../workspace/types'
+import { LayoutCanvas } from './LayoutCanvas'
 import { useLayoutsStore, normaliseName } from './layoutsStore'
 
 type DockSide = 'left' | 'right' | 'bottom' | 'main'
@@ -74,6 +75,7 @@ export function ViewBuilderView({
         gap: 16,
       }}
     >
+      <CanvasSection />
       <CurrentLayoutSection />
       <SavedLayoutsSection
         onApply={onApply}
@@ -132,6 +134,24 @@ function nudgeDockSize(
   delta: number,
 ): void {
   workspace.setSidedockSize(side, current + delta)
+}
+
+// ── Canvas (Phase 2c) ───────────────────────────────────────────────────────
+
+/** BL-067 Phase 2c — visual drag-drop canvas. Stays above the indented
+ *  text snapshot so the latter remains the authoritative ground-truth
+ *  view (handy when the user wants to confirm exactly what's where
+ *  without trusting the visual approximation). */
+function CanvasSection(): ReactElement {
+  return (
+    <section>
+      <h3 style={sectionHeading}>Layout canvas</h3>
+      <div style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginBottom: 6 }}>
+        Drag a panel to a different region to move it. Drag a divider to resize.
+      </div>
+      <LayoutCanvas />
+    </section>
+  )
 }
 
 // ── Current layout ──────────────────────────────────────────────────────────
