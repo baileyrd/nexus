@@ -55,7 +55,7 @@
 
 ### PRD-03 — Storage Engine ✅
 **Shipped:** Forge init, SQLite (files/blocks/links/tags/properties), Tantivy FTS, atomic writes, notify-debouncer watcher, kernel-bus event forwarding, petgraph knowledge graph with backlinks + unresolved-link tracking, CRDT state persistence. Search scoping operators (`tag:`, `path:`, `prop:`, `type:`) with post-filter (BL-003 ✅ 2026-04-18). 3-tier wikilink resolution — exact → basename → case-insensitive stem, bidirectional phantom-link upgrade (BL-004 ✅ 2026-04-18). Block-level RAG chunking with heading-context prefix (BL-006 ✅ 2026-04-18).
-**Gaps:** Symlink deduplication in watcher + reconcile (BL-082); forge-to-forge import tool (BL-083); CRDT peer-sync editor wiring — `nexus-crdt` library (Phases 1–4) shipped 2026-05-08 with silent text merge, `SyncLoop` + ops topic, persistence primitives, and `OpLog::merge` git-driver primitive; per-session `OpObserver` adoption in `nexus-editor` + `CrdtPublisher` orchestration in `nexus-bootstrap` remain (BL-074).
+**Gaps:** Symlink deduplication in watcher + reconcile (BL-082); forge-to-forge import tool (BL-083); CRDT cross-machine collaboration tail — Phases 1–4 + editor wiring (per-session `CrdtDoc`, per-op publishing on `com.nexus.editor.ops.<relpath>`, on-open/on-close persistence at `.forge/.editor/crdt/<sha>.json`) shipped 2026-05-08; remaining: Tauri popout forwarding, BL-007 git merge driver registration, op-log compaction, conflict UI for structural delete-edit (BL-074).
 **Evidence:** [crates/nexus-storage/src/{schema,search,graph,watcher}.rs](crates/nexus-storage/src/).
 
 ### PRD-04 — Plugin System ✅
