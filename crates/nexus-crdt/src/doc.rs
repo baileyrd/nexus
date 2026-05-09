@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::conflict::Conflict;
 use crate::error::Result;
-use crate::id::{Lamport, OpId, SiteId};
+use crate::id::{Lamport, OpId, SiteId, VersionVector};
 use crate::log::OpLog;
 use crate::merge::{baseline_op_id, byte_to_char_pos, subop_id};
 use crate::op::{affected_blocks, primary_block_id, CrdtOp};
@@ -112,6 +112,20 @@ impl CrdtDoc {
     #[must_use]
     pub fn log(&self) -> &OpLog {
         &self.log
+    }
+
+    /// BL-074 follow-up — op-log compaction wrapper. Drop every op in
+    /// the log dominated by `stable_vv` and advance the prune floor so
+    /// future `apply_remote` calls treat those ids as already-seen.
+    /// Returns the number of ops removed.
+    ///
+    /// **Caller invariant** matches [`OpLog::prune_dominated`]:
+    /// `stable_vv` must represent state every active replica has
+    /// acknowledged. The publisher uses the on-disk VV captured at
+    /// session-open time as a cheap, conservative oracle — see
+    /// `crdt_publisher::CrdtPublisher::on_session_opened`.
+    pub fn compact_to(&mut self, stable_vv: &VersionVector) -> usize {
+        self.log.prune_dominated(stable_vv)
     }
 
     /// This site's id.

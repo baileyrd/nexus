@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use nexus_crdt::{
     conflict_topic, content_hash_hex, crdt_state_path, ops_topic, Conflict, ConflictEnvelope,
-    CrdtDoc, OpEnvelope, PersistedCrdt, RemoteOutcome, SiteId,
+    CrdtDoc, OpEnvelope, PersistedCrdt, RemoteOutcome, SiteId, VersionVector,
 };
 use nexus_editor::{BlockTree, OpObserver, Operation, Transaction, EDITOR_PLUGIN_ID};
 use nexus_kernel::{EventBus, EventFilter};
@@ -113,6 +113,17 @@ struct SessionState {
     /// Ops applied since the last successful checkpoint write (or
     /// session open). Reset to 0 after each checkpoint.
     ops_since_checkpoint: u64,
+    /// BL-074 follow-up — op-log compaction oracle. The doc's version
+    /// vector at session open (after any disk-restore) is the cheapest
+    /// "this slice has already been written to disk" snapshot we can
+    /// take. On close we prune the log down to it: anything in the
+    /// open-time VV is older than this session and was already
+    /// persisted; ops authored or absorbed during the session sit
+    /// above it and survive compaction. Multi-peer forges keep extra
+    /// ops around because the open-time VV doesn't include peer ops
+    /// gossiped while the session was open — exactly the conservative
+    /// trade-off the BL-074 follow-up calls out.
+    prune_floor_at_open: VersionVector,
 }
 
 impl CrdtPublisher {
@@ -342,11 +353,13 @@ impl OpObserver for CrdtPublisher {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
+        let prune_floor_at_open = doc.log().version_vector().clone();
         guard.insert(
             relpath.to_string(),
             SessionState {
                 doc,
                 ops_since_checkpoint: 0,
+                prune_floor_at_open,
             },
         );
     }
@@ -356,7 +369,17 @@ impl OpObserver for CrdtPublisher {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        if let Some(state) = guard.remove(relpath) {
+        if let Some(mut state) = guard.remove(relpath) {
+            // BL-074 op-log compaction. Anything dominated by the
+            // open-time VV was on disk before this session started, so
+            // a future peer that loads the persisted state still finds
+            // those ids reported as seen via `OpLog::pruned_floor`.
+            // Keeps single-replica forges from accumulating an
+            // ever-growing log across reopens.
+            let pruned = state.doc.compact_to(&state.prune_floor_at_open);
+            if pruned > 0 {
+                tracing::debug!(relpath, pruned, "BL-074: compacted op log on close");
+            }
             let source_bytes = Self::canonical_markdown_bytes(&state.doc);
             self.write_persisted(relpath, &state.doc, &source_bytes);
         }
@@ -812,6 +835,88 @@ mod tests {
             }
         } else {
             panic!("expected Custom event");
+        }
+    }
+
+    #[tokio::test]
+    async fn close_compacts_log_to_open_time_vv() {
+        // BL-074 follow-up — op-log compaction wiring. Session A
+        // authors ops, closes, persisting log L1. Session B reopens
+        // the same file, authors more ops, closes. The post-close
+        // persisted log must contain only ops authored *during*
+        // session B — every op in session A's persisted state has
+        // been pruned because its VV is at-or-below session B's
+        // open-time VV.
+        let dir = tempfile::tempdir().unwrap();
+        let bus = Arc::new(EventBus::new(64));
+
+        // Session A: 3 ops, then close.
+        let publisher_a = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        let (tree, b) = fresh_tree();
+        publisher_a.on_session_opened("notes.md", &tree, b"");
+        publisher_a.on_apply_transaction("notes.md", &[insert_text(b, 0, "a")]);
+        publisher_a.on_apply_transaction("notes.md", &[insert_text(b, 1, "b")]);
+        publisher_a.on_apply_transaction("notes.md", &[insert_text(b, 2, "c")]);
+        publisher_a.on_session_closed("notes.md");
+
+        // Sanity: 3 ops were the only ops in the session, so nothing
+        // was pruned (open-time VV was empty). Session-A log on disk
+        // still has 3 entries.
+        let path = dir.path().join(crdt_state_path("notes.md"));
+        let bytes = std::fs::read(&path).unwrap();
+        let envelope: PersistedCrdt = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(envelope.state.log.len(), 3, "session A keeps its own ops");
+
+        // Build session B's tree from the saved markdown so the
+        // content-hash check passes and the open-time restore wins.
+        let saved_markdown = nexus_editor::MarkdownSerializer::serialize(&{
+            let mut t = BlockTree::new(DocumentMetadata::default());
+            let mut bb = Block::new(BlockType::Paragraph);
+            bb.id = b;
+            bb.content = "abc".into();
+            t.insert(bb, None, 0).unwrap();
+            t
+        });
+        let mut tree_b = BlockTree::new(DocumentMetadata::default());
+        let mut bb = Block::new(BlockType::Paragraph);
+        bb.id = b;
+        bb.content = "abc".into();
+        tree_b.insert(bb, None, 0).unwrap();
+
+        // Session B: open (restoring 3 ops), author 2 more, close.
+        let publisher_b = CrdtPublisher::with_checkpoint_every(
+            dir.path().to_path_buf(),
+            Arc::clone(&bus),
+            0,
+        );
+        publisher_b.on_session_opened("notes.md", &tree_b, saved_markdown.as_bytes());
+        publisher_b.on_apply_transaction("notes.md", &[insert_text(b, 3, "d")]);
+        publisher_b.on_apply_transaction("notes.md", &[insert_text(b, 4, "e")]);
+        publisher_b.on_session_closed("notes.md");
+
+        // Post-close on disk: only the 2 session-B ops survive in the
+        // log; the 3 session-A ops collapse into the prune floor.
+        let bytes2 = std::fs::read(&path).unwrap();
+        let envelope2: PersistedCrdt = serde_json::from_slice(&bytes2).unwrap();
+        assert_eq!(envelope2.state.log.len(), 2, "session A log compacted away");
+        assert!(
+            !envelope2.state.log.pruned_floor().0.is_empty(),
+            "prune floor advanced to cover the dropped ops"
+        );
+
+        // A peer that never saw session A's ops can still load the
+        // compacted state and converge — the prune floor reports
+        // those ids as already-seen.
+        for op in envelope.state.log.iter() {
+            assert!(
+                envelope2.state.log.contains(op.id),
+                "pruned op {:?} still reports as seen via the floor",
+                op.id
+            );
         }
     }
 
