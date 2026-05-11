@@ -192,8 +192,17 @@ interface EditorState {
  * check for tabs that have no kernel session (untitled placeholders,
  * non-markdown buffers for which we never acquire).
  */
-export function isDirty(tab: EditorTab): boolean {
-  const state = useEditorStore.getState()
+/** State slice `isDirty` reads. Accepting this lets the context-key
+ *  subscriber pass `prev` and `current` snapshots so the comparison
+ *  actually distinguishes them — without it, the function would always
+ *  read live state and report `prev === current`. */
+export interface IsDirtySource {
+  sessionRevision: Map<string, number>
+  savedRevision: Map<string, number>
+}
+
+export function isDirty(tab: EditorTab, source?: IsDirtySource): boolean {
+  const state = source ?? useEditorStore.getState()
   const current = state.sessionRevision.get(tab.relpath)
   if (current !== undefined) {
     // SessionManager seeds both maps on acquire so a freshly-opened

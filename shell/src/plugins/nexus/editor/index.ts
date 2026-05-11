@@ -1707,8 +1707,13 @@ export const editorPlugin: Plugin = {
       }
       const activeTab = state.tabs.find((t) => t.relpath === state.activeRelpath)
       const prevActiveTab = prev.tabs.find((t) => t.relpath === prev.activeRelpath)
-      const dirty = !!activeTab && isDirty(activeTab)
-      const prevDirty = !!prevActiveTab && isDirty(prevActiveTab)
+      // Pass the snapshots explicitly — `isDirty(tab)` without an
+      // explicit source falls back to live store state, which would
+      // make `dirty` and `prevDirty` read the same maps and never
+      // diverge. The kernel-revision dirty path needs the prev/current
+      // revision maps to compare.
+      const dirty = !!activeTab && isDirty(activeTab, state)
+      const prevDirty = !!prevActiveTab && isDirty(prevActiveTab, prev)
       if (dirty !== prevDirty) {
         api.context.set(CONTEXT_KEY_ACTIVE_TAB_DIRTY, dirty)
       }
