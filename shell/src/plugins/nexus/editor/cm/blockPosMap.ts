@@ -35,10 +35,13 @@ import type { EditorState } from '@codemirror/state'
 import type { BlockId, EditorSnapshot } from '../types.ts'
 
 /** A resolved kernel-side position. `bytePos` is the UTF-8 byte offset
- *  within the block's `content` string. */
+ *  within the block's `content` string (what the kernel sees on the wire);
+ *  `charPos` is the JS UTF-16 char offset (what the bridge uses to
+ *  advance its local mirror). */
 export interface BlockPos {
   blockId: BlockId
   bytePos: number
+  charPos: number
 }
 
 /** A resolved kernel-side range, both ends inside the *same* block. */
@@ -46,6 +49,8 @@ export interface BlockRange {
   blockId: BlockId
   byteFrom: number
   byteTo: number
+  charFrom: number
+  charTo: number
 }
 
 // Minimal shape of the @lezer/common node we touch. Matches the runtime
@@ -168,7 +173,7 @@ export function resolveBlockPos(
   if (source !== block.content) return null
 
   const before = state.doc.sliceString(bounds.contentStart, cmOffset)
-  return { blockId, bytePos: utf8Bytes(before) }
+  return { blockId, bytePos: utf8Bytes(before), charPos: before.length }
 }
 
 /**
@@ -188,5 +193,11 @@ export function resolveBlockRange(
   const end = resolveBlockPos(state, snapshot, cmTo)
   if (!end) return null
   if (start.blockId !== end.blockId) return null
-  return { blockId: start.blockId, byteFrom: start.bytePos, byteTo: end.bytePos }
+  return {
+    blockId: start.blockId,
+    byteFrom: start.bytePos,
+    byteTo: end.bytePos,
+    charFrom: start.charPos,
+    charTo: end.charPos,
+  }
 }

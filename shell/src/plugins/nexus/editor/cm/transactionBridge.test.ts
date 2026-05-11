@@ -643,8 +643,9 @@ test('bridge core: a keystroke arriving during an in-flight apply waits + drains
   core.flushSync()
 
   // While the first apply is still in flight, the user types another
-  // character. Bridge gates the second flush on inFlight=0 so the
-  // stale-snapshot translation problem is avoided.
+  // character. The bridge advances its optimistic mirror by op1
+  // immediately, so the second flush translates against post-op state
+  // without waiting for the kernel ack.
   view.setDoc('oldXY')
   tr = st.update({ changes: { from: 4, to: 4, insert: 'Y' } })
   core.push(realUpdate(st, tr, view))
