@@ -166,9 +166,62 @@ function makeStubView(initialDoc: string): BridgeViewLike & {
 
 // ── changesToOps ─────────────────────────────────────────────────────────────
 
-test('changesToOps: single insert produces one insert_text op', () => {
-  const start = EditorState.create({ doc: '' })
-  const tr = start.update({ changes: { from: 0, to: 0, insert: 'hello' } })
+// The bridge translation now needs a real markdown EditorState so the
+// Lezer parse tree can find top-level blocks. These tests stand up a
+// state with `markdown()` and verify position translation lands on the
+// right block with the right byte offset.
+
+import { markdown } from '@codemirror/lang-markdown'
+
+function mdState(doc: string): EditorState {
+  return EditorState.create({ doc, extensions: [markdown()] })
+}
+
+function snapshotForParagraph(content: string): EditorSnapshot {
+  return snapshotWithRoot('notes/a.md', content)
+}
+
+function snapshotWithBlocks(
+  relpath: string,
+  blocks: Array<{ id: BlockId; content: string; kind: string; level?: number }>,
+): EditorSnapshot {
+  const tree: EditorSnapshot['tree'] = {
+    blocks: {},
+    root_blocks: [],
+    metadata: {},
+  }
+  for (const b of blocks) {
+    const ty: { kind: string; level?: number } = { kind: b.kind }
+    if (b.level !== undefined) ty.level = b.level
+    tree.blocks[b.id] = {
+      id: b.id,
+      ty,
+      content: b.content,
+      annotations: [],
+      properties: {},
+      parent_id: null,
+      children: [],
+      index_in_parent: tree.root_blocks.length,
+      created_at: 0,
+      updated_at: 0,
+      is_deleted: false,
+    }
+    tree.root_blocks.push(b.id)
+  }
+  return {
+    relpath,
+    tree,
+    undoPosition: null,
+    undoLen: 0,
+    canUndo: false,
+    canRedo: false,
+    revision: 0,
+  }
+}
+
+test('changesToOps: insert into a paragraph emits insert_text against that block', () => {
+  const start = mdState('hello')
+  const tr = start.update({ changes: { from: 5, to: 5, insert: '!' } })
   const update = {
     docChanged: true,
     changes: tr.changes,
@@ -177,21 +230,23 @@ test('changesToOps: single insert produces one insert_text op', () => {
     view: null,
   } as unknown as import('@codemirror/view').ViewUpdate
 
-  const { ops, fallbackFullDoc } = changesToOps(update, ROOT_ID)
+  const { ops, fallbackFullDoc } = changesToOps(update, snapshotForParagraph('hello'))
   assert.equal(fallbackFullDoc, false)
   assert.equal(ops.length, 1)
   const op = ops[0]!
   assert.equal(op.kind, 'insert_text')
   if (op.kind === 'insert_text') {
     assert.equal(op.block_id, ROOT_ID)
-    assert.equal(op.pos, 0)
-    assert.equal(op.text, 'hello')
+    assert.equal(op.pos, 5)
+    assert.equal(op.text, '!')
   }
 })
 
-test('changesToOps: single delete produces one delete_text op', () => {
-  const start = EditorState.create({ doc: 'hello' })
-  const tr = start.update({ changes: { from: 1, to: 4, insert: '' } })
+test('changesToOps: insert at end of an H1 heading translates to block-local byte offset', () => {
+  // Doc: `# Hello`. CM offset at line end = 7. The heading block's
+  // content is "Hello" (5 bytes). The op pos MUST be 5, not 7.
+  const start = mdState('# Hello')
+  const tr = start.update({ changes: { from: 7, to: 7, insert: '!' } })
   const update = {
     docChanged: true,
     changes: tr.changes,
@@ -200,20 +255,148 @@ test('changesToOps: single delete produces one delete_text op', () => {
     view: null,
   } as unknown as import('@codemirror/view').ViewUpdate
 
-  const { ops, fallbackFullDoc } = changesToOps(update, ROOT_ID)
+  const snap = snapshotWithBlocks('notes/h.md', [
+    { id: ROOT_ID, content: 'Hello', kind: 'heading', level: 1 },
+  ])
+  const { ops, fallbackFullDoc } = changesToOps(update, snap)
   assert.equal(fallbackFullDoc, false)
   assert.equal(ops.length, 1)
+  const op = ops[0]!
+  assert.equal(op.kind, 'insert_text')
+  if (op.kind === 'insert_text') {
+    assert.equal(op.block_id, ROOT_ID)
+    assert.equal(op.pos, 5, 'CM offset 7 maps to byte offset 5 inside the heading content')
+    assert.equal(op.text, '!')
+  }
+})
+
+test('changesToOps: non-ASCII content uses UTF-8 byte offsets, not JS char offsets', () => {
+  // `# café` — heading content is "café" (4 JS chars, 5 UTF-8 bytes).
+  // CM offset at line end = 6. Heading content start in source = 2.
+  // Substring source[2..6] = "café" = 5 bytes. Op pos MUST be 5.
+  const start = mdState('# café')
+  const tr = start.update({ changes: { from: 6, to: 6, insert: '!' } })
+  const update = {
+    docChanged: true,
+    changes: tr.changes,
+    startState: start,
+    state: tr.state,
+    view: null,
+  } as unknown as import('@codemirror/view').ViewUpdate
+
+  const snap = snapshotWithBlocks('notes/h.md', [
+    { id: ROOT_ID, content: 'café', kind: 'heading', level: 1 },
+  ])
+  const { ops } = changesToOps(update, snap)
+  assert.equal(ops.length, 1)
+  const op = ops[0]!
+  assert.equal(op.kind, 'insert_text')
+  if (op.kind === 'insert_text') {
+    assert.equal(op.pos, 5, 'UTF-8 byte offset reflects é = 2 bytes')
+  }
+})
+
+test('changesToOps: insert in the second top-level block targets root_blocks[1]', () => {
+  const SECOND_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
+  // Doc:
+  //   # Title
+  //
+  //   body text
+  const doc = '# Title\n\nbody text'
+  const start = mdState(doc)
+  // Insert at end of "body text" (offset 18)
+  const tr = start.update({ changes: { from: 18, to: 18, insert: '!' } })
+  const update = {
+    docChanged: true,
+    changes: tr.changes,
+    startState: start,
+    state: tr.state,
+    view: null,
+  } as unknown as import('@codemirror/view').ViewUpdate
+
+  const snap = snapshotWithBlocks('notes/m.md', [
+    { id: ROOT_ID, content: 'Title', kind: 'heading', level: 1 },
+    { id: SECOND_ID, content: 'body text', kind: 'paragraph' },
+  ])
+  const { ops, fallbackFullDoc } = changesToOps(update, snap)
+  assert.equal(fallbackFullDoc, false)
+  const op = ops[0]!
+  assert.equal(op.kind, 'insert_text')
+  if (op.kind === 'insert_text') {
+    assert.equal(op.block_id, SECOND_ID, 'op targets the paragraph block, not root_blocks[0]')
+    assert.equal(op.pos, 9, 'CM offset 18 maps to byte 9 inside "body text"')
+  }
+})
+
+test('changesToOps: delete inside a heading translates both ends to byte offsets', () => {
+  const start = mdState('# Hello')
+  // Delete "ell" from inside heading: CM offsets 3..6
+  const tr = start.update({ changes: { from: 3, to: 6, insert: '' } })
+  const update = {
+    docChanged: true,
+    changes: tr.changes,
+    startState: start,
+    state: tr.state,
+    view: null,
+  } as unknown as import('@codemirror/view').ViewUpdate
+
+  const snap = snapshotWithBlocks('notes/h.md', [
+    { id: ROOT_ID, content: 'Hello', kind: 'heading', level: 1 },
+  ])
+  const { ops, fallbackFullDoc } = changesToOps(update, snap)
+  assert.equal(fallbackFullDoc, false)
   const op = ops[0]!
   assert.equal(op.kind, 'delete_text')
   if (op.kind === 'delete_text') {
     assert.equal(op.block_id, ROOT_ID)
-    assert.equal(op.pos, 1)
+    assert.equal(op.pos, 1, 'CM offset 3 -> byte 1 inside "Hello"')
     assert.equal(op.deleted_text, 'ell')
   }
 })
 
+test('changesToOps: insert in a block with inline formatting bails to the full-doc fallback', () => {
+  // Source: `# *Hi*`. Heading block content (per parser) is "Hi" — the
+  // `*` marks are stripped into an Italic annotation. The source slice
+  // at content start..end = "*Hi*" which differs from block.content =
+  // "Hi", so resolveBlockPos returns null and we fall back.
+  const start = mdState('# *Hi*')
+  const tr = start.update({ changes: { from: 6, to: 6, insert: '!' } })
+  const update = {
+    docChanged: true,
+    changes: tr.changes,
+    startState: start,
+    state: tr.state,
+    view: null,
+  } as unknown as import('@codemirror/view').ViewUpdate
+
+  const snap = snapshotWithBlocks('notes/h.md', [
+    { id: ROOT_ID, content: 'Hi', kind: 'heading', level: 1 },
+  ])
+  const { ops, fallbackFullDoc } = changesToOps(update, snap)
+  assert.equal(fallbackFullDoc, true)
+  const op = ops[0]!
+  assert.equal(op.kind, 'update_block_content')
+})
+
+test('changesToOps: inserted newline bypasses single-block translation', () => {
+  const start = mdState('hello')
+  const tr = start.update({ changes: { from: 5, to: 5, insert: '\n' } })
+  const update = {
+    docChanged: true,
+    changes: tr.changes,
+    startState: start,
+    state: tr.state,
+    view: null,
+  } as unknown as import('@codemirror/view').ViewUpdate
+
+  const { ops, fallbackFullDoc } = changesToOps(update, snapshotForParagraph('hello'))
+  assert.equal(fallbackFullDoc, true, 'newline insertion falls back, since it would split the block')
+  const op = ops[0]!
+  assert.equal(op.kind, 'update_block_content')
+})
+
 test('changesToOps: replacement falls back to update_block_content', () => {
-  const start = EditorState.create({ doc: 'hello' })
+  const start = mdState('hello')
   const tr = start.update({ changes: { from: 0, to: 5, insert: 'WORLD' } })
   const update = {
     docChanged: true,
@@ -223,7 +406,7 @@ test('changesToOps: replacement falls back to update_block_content', () => {
     view: null,
   } as unknown as import('@codemirror/view').ViewUpdate
 
-  const { ops, fallbackFullDoc } = changesToOps(update, ROOT_ID)
+  const { ops, fallbackFullDoc } = changesToOps(update, snapshotForParagraph('hello'))
   assert.equal(fallbackFullDoc, true)
   assert.equal(ops.length, 1)
   const op = ops[0]!

@@ -34,7 +34,6 @@ import type { Extension } from '@codemirror/state'
 import type { EditorKernelClient } from '../kernelClient.ts'
 import { clientLogger } from '../../../../clientLogger'
 import type {
-  BlockId,
   EditorSnapshot,
   Operation,
   Transaction,
@@ -43,6 +42,7 @@ import type {
   UserAction,
 } from '../types.ts'
 import { useEditorStore } from '../editorStore.ts'
+import { resolveBlockPos, resolveBlockRange } from './blockPosMap.ts'
 
 /**
  * Optional surface for surfacing errors. The bridge gets a `KernelAPI`
@@ -69,32 +69,32 @@ export interface ChangeMapping {
 }
 
 /**
- * Translate a CM `ViewUpdate`'s `ChangeSet` into kernel [`Operation`]s
- * against a single root block.
+ * Translate a CM `ViewUpdate`'s `ChangeSet` into kernel [`Operation`]s.
  *
  * Strategy:
- *   - Walk `iterChanges`. If there's exactly ONE change segment and it
- *     is either pure insert (fromA == toA, inserted.length > 0) or
- *     pure delete (inserted.length == 0, fromA < toA), emit a matching
- *     `InsertText` / `DeleteText` op against `rootBlockId`. The `pos`
- *     is the CM offset (bytes-of-string-in-UTF-16, same as CM's doc
- *     indexing) — the kernel uses byte offsets; for ASCII-only edits
- *     these coincide, and the v1 coarse mapping accepts the drift for
- *     non-ASCII input. The `pre_annotations` field is `[]` — v1 doesn't
- *     carry annotations through CM yet.
- *   - For anything else (replace, multi-segment, or an empty change),
- *     fall back to a single `UpdateBlockContent` op carrying the whole
- *     new doc content. `old_content` is captured from the update's
- *     `startState`; the server verifies it matches the block's current
- *     content.
+ *   - Walk `iterChanges`. If there's exactly ONE segment that's a pure
+ *     insert or a pure delete entirely within a single top-level
+ *     Paragraph or ATXHeading block, resolve the CM offset to
+ *     `(block_id, byte-offset-within-block)` via {@link resolveBlockPos}
+ *     / {@link resolveBlockRange} and emit `InsertText`/`DeleteText`
+ *     against the correct block. Inserts/deletes containing a newline
+ *     bypass this path — newlines typically split or join blocks and
+ *     can't be expressed as a text op against one block.
+ *   - For anything else (multi-segment, cross-block, unresolvable
+ *     position, inline-formatted block, list/blockquote/etc.), fall
+ *     back to a single `UpdateBlockContent` op against the first root
+ *     block carrying the whole new doc content. This fallback is
+ *     known-imperfect — see the bridge module header for context — but
+ *     covers cases the single-block translator deliberately punts on.
  *
- * Caller is responsible for providing a valid `rootBlockId` (typically
- * `snapshot.tree.root_blocks[0]`). Returns an empty op list when the
- * CM update has no actual doc change.
+ * `pre_annotations` is `[]` — the kernel doesn't consume it on the
+ * forward apply (only used for inverse computation, which the kernel
+ * derives itself from the post-state). Returns an empty op list when
+ * the CM update has no actual doc change.
  */
 export function changesToOps(
   update: ViewUpdate,
-  rootBlockId: BlockId,
+  snapshot: EditorSnapshot,
 ): ChangeMapping {
   if (!update.docChanged) return { ops: [], fallbackFullDoc: false }
 
@@ -120,48 +120,62 @@ export function changesToOps(
     const s = segs[0]!
     const isPureInsert = s.fromA === s.toA && s.insertedStr.length > 0
     const isPureDelete = s.fromA < s.toA && s.insertedStr.length === 0
-    if (isPureInsert) {
-      return {
-        ops: [
-          {
-            kind: 'insert_text',
-            block_id: rootBlockId,
-            pos: s.fromA,
-            text: s.insertedStr,
-            pre_annotations: [],
-          },
-        ],
-        fallbackFullDoc: false,
+    if (isPureInsert && !s.insertedStr.includes('\n')) {
+      const pos = resolveBlockPos(update.startState, snapshot, s.fromA)
+      if (pos) {
+        return {
+          ops: [
+            {
+              kind: 'insert_text',
+              block_id: pos.blockId,
+              pos: pos.bytePos,
+              text: s.insertedStr,
+              pre_annotations: [],
+            },
+          ],
+          fallbackFullDoc: false,
+        }
       }
     }
     if (isPureDelete) {
       const deleted = update.startState.doc.sliceString(s.fromA, s.toA)
-      return {
-        ops: [
-          {
-            kind: 'delete_text',
-            block_id: rootBlockId,
-            pos: s.fromA,
-            deleted_text: deleted,
-            pre_annotations: [],
-          },
-        ],
-        fallbackFullDoc: false,
+      if (!deleted.includes('\n')) {
+        const range = resolveBlockRange(update.startState, snapshot, s.fromA, s.toA)
+        if (range) {
+          return {
+            ops: [
+              {
+                kind: 'delete_text',
+                block_id: range.blockId,
+                pos: range.byteFrom,
+                deleted_text: deleted,
+                pre_annotations: [],
+              },
+            ],
+            fallbackFullDoc: false,
+          }
+        }
       }
     }
   }
 
-  // Fallback: one UpdateBlockContent carrying the whole doc.
+  // Fallback: one UpdateBlockContent against the first root block,
+  // carrying the whole new doc. Known-imperfect for multi-block docs —
+  // tracked separately.
   const oldContent = update.startState.doc.toString()
   const newContent = update.state.doc.toString()
   if (oldContent === newContent) {
     return { ops: [], fallbackFullDoc: false }
   }
+  const rootId = snapshot.tree.root_blocks[0]
+  if (!rootId) {
+    return { ops: [], fallbackFullDoc: true }
+  }
   return {
     ops: [
       {
         kind: 'update_block_content',
-        id: rootBlockId,
+        id: rootId,
         old_content: oldContent,
         new_content: newContent,
         old_annotations: [],
@@ -348,11 +362,11 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
 
     const snapshot = getSnapshot()
     const rootId = snapshot?.tree.root_blocks[0]
-    if (!rootId) return
+    if (!snapshot || !rootId) return
 
     let ops: Operation[]
     if (batch.length === 1) {
-      ops = changesToOps(batch[0]!, rootId).ops
+      ops = changesToOps(batch[0]!, snapshot).ops
     } else {
       const first = batch[0]!
       const last = batch[batch.length - 1]!
