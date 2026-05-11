@@ -320,6 +320,19 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
   const dispatchTransaction = (view: BridgeViewLike, tx: Transaction): void => {
     useEditorStore.getState().addPendingLocalRevision(tx.id)
     inFlight++
+    // Text-only ops (InsertText/DeleteText/UpdateAnnotations) cannot
+    // produce a canonical that diverges from CM — the kernel just
+    // mutates a block's content string verbatim, no serializer
+    // normalization happens. Skip the post-apply `getMarkdown` round-
+    // trip for these, halving the IPC cost per keystroke. Structural
+    // ops (insert_block, reparent, update_block_content, ...) can
+    // change the serialized form and still need reconcile.
+    const skipReconcile = tx.operations.every(
+      (o) =>
+        o.kind === 'insert_text' ||
+        o.kind === 'delete_text' ||
+        o.kind === 'update_annotations',
+    )
     void kernelClient
       .applyTransaction(relpath, tx)
       .then(async (snapshot) => {
@@ -330,20 +343,24 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
         // check would fail and the bridge would bail to the (now empty)
         // fallback, silently dropping the next keystroke.
         setSnapshot?.(snapshot)
+        inFlight--
+        // Drain accumulated pending updates synchronously rather than
+        // scheduling a fresh rAF — going through requestAnimationFrame
+        // here adds ~16ms of needless latency between every kernel ack
+        // and the next batch dispatch, which the user perceives as
+        // typing stutter when chars arrive faster than the round-trip.
+        if (pending.length > 0) flush()
+        if (skipReconcile) {
+          useEditorStore.getState().setSessionRevision(relpath, snapshot.revision)
+          return
+        }
         let canonical: string
         try {
           canonical = await kernelClient.getMarkdown(relpath)
         } catch (err) {
-          inFlight--
-          if (pending.length > 0) scheduleFlush()
           onError('editor bridge: getMarkdown failed after apply', err)
           return
         }
-        inFlight--
-        // Pending keystrokes that accumulated during the round-trip
-        // were held back by the `inFlight > 0` gate in `flush`. Drain
-        // them now against the freshly-refreshed snapshot.
-        if (pending.length > 0) scheduleFlush()
         reconcile(view, canonical, snapshot.revision)
       })
       .catch((err) => {
@@ -353,12 +370,12 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
           .getMarkdown(relpath)
           .then((canonical) => {
             inFlight--
-            if (pending.length > 0) scheduleFlush()
+            if (pending.length > 0) flush()
             reconcile(view, canonical, null)
           })
           .catch(() => {
             inFlight--
-            if (pending.length > 0) scheduleFlush()
+            if (pending.length > 0) flush()
           })
       })
   }
