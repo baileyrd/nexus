@@ -357,6 +357,82 @@ test('bridge core: reconciles CM doc via getMarkdown after apply_transaction', a
   )
 })
 
+// ── Reconcile defers while typing is in flight ───────────────────────────────
+
+test('bridge core: reconcile skips doc-replace while a follow-up keystroke is pending', async () => {
+  resetStore()
+  // Two responses queued by call order. Both `apply_transaction`s
+  // return the *same* canonical the first time we ask, then a
+  // catch-up canonical that matches the second update — so the first
+  // reconcile, if it ran, would clobber the second keystroke.
+  let applyCount = 0
+  let getCount = 0
+  const { api } = makeMockApi({
+    apply_transaction: () => {
+      applyCount++
+      return snapshotWithRoot('notes/d.md', 'old')
+    },
+    get_markdown: () => {
+      getCount++
+      // First reconcile would see "old" (lost the user's typing).
+      // Second reconcile sees the up-to-date doc.
+      return getCount === 1 ? 'old' : 'oldXY'
+    },
+  })
+  const client = new EditorKernelClient(api)
+  const snapshot = snapshotWithRoot('notes/d.md', 'old')
+  const core = createBridgeCore({
+    relpath: 'notes/d.md',
+    kernelClient: client,
+    getSnapshot: () => snapshot,
+  })
+  const view = makeStubView('oldX')
+
+  // First keystroke: doc goes "old" → "oldX". Flush sends a transaction.
+  let st = EditorState.create({ doc: 'old' })
+  let tr = st.update({ changes: { from: 3, to: 3, insert: 'X' } })
+  core.push(makeFakeUpdate(st, tr.state, view))
+  st = tr.state
+  core.flushSync()
+
+  // While the first apply is still in flight, the user types another
+  // character. The view + state advance to "oldXY"; the bridge queues
+  // another update.
+  view.setDoc('oldXY')
+  tr = st.update({ changes: { from: 4, to: 4, insert: 'Y' } })
+  core.push(makeFakeUpdate(st, tr.state, view))
+  st = tr.state
+
+  // Drain the first apply's promise chain. The reconcile call inside
+  // it must see `pending.length > 0` and skip the doc-replace.
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((r) => setTimeout(r, 0))
+  await Promise.resolve()
+
+  assert.equal(
+    view.dispatched.length,
+    0,
+    'first reconcile defers because a follow-up keystroke is pending',
+  )
+  assert.equal(view.state.doc.toString(), 'oldXY', 'CM doc still has the user typing intact')
+
+  // Flush the queued second update; its reconcile lands cleanly.
+  core.flushSync()
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((r) => setTimeout(r, 0))
+  await Promise.resolve()
+
+  assert.equal(applyCount, 2, 'both keystrokes were applied to the kernel')
+  assert.equal(
+    view.dispatched.length,
+    0,
+    'second reconcile is a no-op because CM already matches canonical',
+  )
+  assert.equal(view.state.doc.toString(), 'oldXY')
+})
+
 // ── Undo via Ctrl-Z (through the kernel client) ──────────────────────────────
 
 test('kernel undo path: client.undo round-trips and the view reflects canonical markdown', async () => {

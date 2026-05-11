@@ -273,6 +273,13 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
   const pending: ViewUpdate[] = []
   let rafHandle: number | null = null
   let flushing = false
+  // Tracks transactions whose `apply_transaction` round-trip hasn't
+  // resolved yet. While > 0, the local CM doc is ahead of whatever
+  // canonical we hold — replacing the doc would clobber chars typed
+  // during the round-trip. Decremented just before reconcile runs so
+  // the *last* in-flight transaction's reconcile is the one that
+  // actually executes when the queue drains.
+  let inFlight = 0
 
   const reconcile = (
     view: BridgeViewLike,
@@ -282,6 +289,14 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     if (revision !== null) {
       useEditorStore.getState().setSessionRevision(relpath, revision)
     }
+    // Skip the full-doc replace if there's still work the kernel
+    // hasn't seen. `pending.length > 0` means keystrokes queued for
+    // the next rAF flush; `inFlight > 0` means earlier transactions
+    // whose responses haven't landed yet. In either case `canonical`
+    // is stale relative to CM and replacing would lose user typing.
+    // A later reconcile (after pending drains and inFlight returns
+    // to zero) will catch us up if the kernel normalized anything.
+    if (pending.length > 0 || inFlight > 0) return
     const current = view.state.doc.toString()
     if (current === canonical) return
     flushing = true
@@ -296,6 +311,7 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
 
   const dispatchTransaction = (view: BridgeViewLike, tx: Transaction): void => {
     useEditorStore.getState().addPendingLocalRevision(tx.id)
+    inFlight++
     void kernelClient
       .applyTransaction(relpath, tx)
       .then(async (snapshot) => {
@@ -303,9 +319,11 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
         try {
           canonical = await kernelClient.getMarkdown(relpath)
         } catch (err) {
+          inFlight--
           onError('editor bridge: getMarkdown failed after apply', err)
           return
         }
+        inFlight--
         reconcile(view, canonical, snapshot.revision)
       })
       .catch((err) => {
@@ -313,8 +331,13 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
         onError('editor bridge: apply_transaction failed', err)
         void kernelClient
           .getMarkdown(relpath)
-          .then((canonical) => reconcile(view, canonical, null))
-          .catch(() => {})
+          .then((canonical) => {
+            inFlight--
+            reconcile(view, canonical, null)
+          })
+          .catch(() => {
+            inFlight--
+          })
       })
   }
 
