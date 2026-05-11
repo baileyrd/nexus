@@ -1705,6 +1705,28 @@ export const editorPlugin: Plugin = {
     // editor tab whose relpath no longer has a corresponding leaf.
     // Untitled tabs (no on-disk backing) are kept as-is: they are
     // owned by the editor store, not the workspace.
+    // Diagnostic: log every change to the markdown tab's content/
+    // revision state so we can see whether setContent + the bridge
+    // are actually reaching the store. Runs outside React so it
+    // can't trigger render loops. Remove once dirty-dot wiring is
+    // confirmed.
+    let lastDiagSummary = ''
+    useEditorStore.subscribe((state) => {
+      const tab = state.tabs.find((t) =>
+        t.relpath.endsWith('AI-MEMORY-LAYER-PLAN.md'),
+      )
+      if (!tab) return
+      const summary = JSON.stringify({
+        contentLen: tab.content.length,
+        savedContentLen: tab.savedContent.length,
+        sessionRev: state.sessionRevision.get(tab.relpath) ?? null,
+        savedRev: state.savedRevision.get(tab.relpath) ?? null,
+      })
+      if (summary === lastDiagSummary) return
+      lastDiagSummary = summary
+      clientLogger.info(`[editor.store:diag] relpath=${tab.relpath} ${summary}`)
+    })
+
     const reconcileTabs = () => {
       const mdLeaves = workspace.getLeavesOfType('markdown')
       const mdRelpaths = new Set<string>()

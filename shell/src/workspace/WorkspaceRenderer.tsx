@@ -1218,32 +1218,12 @@ function useLeafDirty(leaf: Leaf): boolean {
     const st = leaf.view.getState() as { relpath?: unknown } | undefined
     return typeof st?.relpath === 'string' ? st.relpath : undefined
   })()
-  // Deeper diagnostic for the markdown leaf — also subscribe to the
-  // raw content+revision values so the effect re-fires when *any* of
-  // them changes, even if the resulting `dirty` boolean doesn't flip.
-  // Lets us see whether setContent and apply_transaction are reaching
-  // the store at all.
-  const probe = useEditorStore((s) => {
-    if (!relpath) return null
+  return useEditorStore((s) => {
+    if (!relpath) return false
     const tab = s.tabs.find((t) => t.relpath === relpath)
-    if (!tab) return { tabFound: false } as const
-    return {
-      tabFound: true,
-      contentLen: tab.content.length,
-      savedContentLen: tab.savedContent.length,
-      sessionRev: s.sessionRevision.get(relpath) ?? null,
-      savedRev: s.savedRevision.get(relpath) ?? null,
-      dirty: isDirty(tab, s),
-    }
+    if (!tab) return false
+    return isDirty(tab, s)
   })
-  useEffect(() => {
-    if (leaf.view?.viewType !== 'markdown') return
-    clientLogger.info(
-      `[useLeafDirty:md] leaf.id=${leaf.id} relpath=${String(relpath)} probe=${JSON.stringify(probe)}`,
-    )
-  }, [leaf.id, leaf.view, relpath, probe])
-  if (!probe || probe.tabFound !== true) return false
-  return probe.dirty === true
 }
 
 function TabButton({
