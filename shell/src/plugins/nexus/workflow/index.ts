@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { WorkflowView } from './WorkflowView'
 import { workflowPaneViewCreator } from './WorkflowPaneView'
 import { useWorkflowStore, type WorkflowEntry } from './workflowStore'
@@ -199,7 +199,7 @@ export const workflowPlugin: Plugin = {
       })
 
     // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
-    viewRegistry.register('workflow', workflowPaneViewCreator(renderWorkflowView))
+    api.viewRegistry.register('workflow', workflowPaneViewCreator(renderWorkflowView))
 
     api.activityBar.addItem({
       id: 'nexus.workflow.activityItem',

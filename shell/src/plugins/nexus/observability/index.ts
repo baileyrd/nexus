@@ -12,7 +12,7 @@
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { clientLogger } from '../../../clientLogger'
 import type { ActivityEntry } from '../activityTimeline/activityTimelineStore'
 import { OsObservabilityView } from './OsObservabilityView'
@@ -192,7 +192,7 @@ export const osObservabilityPlugin: Plugin = {
         onRunWorkflow: (name: string) => { void runWorkflow(name) },
       })
 
-    viewRegistry.register('osObservability', osObservabilityPaneViewCreator(renderView))
+    api.viewRegistry.register('osObservability', osObservabilityPaneViewCreator(renderView))
 
     api.activityBar.addItem({
       id: 'nexus.osObservability.activityItem',

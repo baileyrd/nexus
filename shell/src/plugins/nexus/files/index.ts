@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { FilesTree } from './FilesTree'
 import { fileExplorerViewCreator } from './FileExplorerView'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
@@ -125,7 +125,7 @@ export const filesPlugin: Plugin = {
     // Phase 7 (leaf-migration-plan.md): the legacy SlotRegistry
     // registration for slot:'sidebarContent' was removed. The tree now
     // mounts through the Leaf/View pipeline below.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'file-explorer',
       fileExplorerViewCreator(() =>
         createElement(FilesTree, { onFileActivate: handleFileActivate }),

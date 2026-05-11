@@ -137,8 +137,26 @@ export default function App() {
   // Global keyboard dispatcher
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      // Skip if an inner handler (CM keymap, focus trap, modal, …)
+      // has already consumed the event. The document handler runs in
+      // the bubble phase, so by now any nested editor has had its
+      // turn — if it claimed the key, we let it stand.
+      if (e.defaultPrevented) return
+      // Plain printable typing inside an editable surface (CM is
+      // contentEditable) shouldn't run through the registry: it
+      // would just be a no-op since plain letters aren't bindable,
+      // but we save the lookup cost. Modifier combos and special
+      // keys (F2, Escape, arrows, …) always go through so Ctrl+S /
+      // Cmd+S etc. work inside the editor.
+      const target = e.target as HTMLElement | null
+      const isInEditable =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      const hasModifierOrSpecialKey =
+        e.ctrlKey || e.metaKey || e.altKey || e.key.length > 1
+      if (isInEditable && !hasModifierOrSpecialKey) return
       const reg = getRegistry()
       if (!reg) return
       const keys = contextKeyService.snapshot()

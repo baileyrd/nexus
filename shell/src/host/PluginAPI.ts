@@ -130,11 +130,39 @@ export function buildPluginAPI(
     },
 
     // ─── Workspace / ViewRegistry ─────────────────────────────────────────
-    // Injected so plugins can reach the Leaf-based workspace facade via their
-    // `api` argument without importing shell internals directly. See
-    // docs/leaf-architecture.md.
+    // `workspace` is the singleton facade — Leaf/Split/Tabs mutations
+    // don't need ownership tagging because the leaf lifetime is bound
+    // to the tree node, not to any plugin.
+    //
+    // `viewRegistry` IS plugin-scoped: every register/update/
+    // registerExtensions call is auto-tagged with `pluginId` so plugin
+    // unload can sweep the creator AND detach any live leaves of that
+    // viewType (otherwise disabling a plugin in Settings leaves its
+    // panels visible until the next restart — see PluginRegistry's
+    // `viewTypeOwnership` map).
     workspace,
-    viewRegistry,
+    viewRegistry: {
+      register(type, creator) {
+        const dispose = viewRegistry.register(type, creator)
+        registry.trackViewType(pluginId, type, dispose)
+        return dispose
+      },
+      update(type, creator) {
+        const dispose = viewRegistry.update(type, creator)
+        registry.trackViewType(pluginId, type, dispose)
+        return dispose
+      },
+      registerExtensions(exts, type) {
+        const dispose = viewRegistry.registerExtensions(exts, type)
+        // Extension mappings are scoped per-extension, not per-viewType
+        // — we don't gate them through `viewTypeOwnership`. Tracking as
+        // a generic subscription is enough for unload sweep.
+        registry.trackSubscription(pluginId, dispose)
+        return dispose
+      },
+      getCreator: (type) => viewRegistry.getCreator(type),
+      getTypeForExt: (ext) => viewRegistry.getTypeForExt(ext),
+    },
 
     // ─── Context keys ───────────────────────────────────────────────────────
     context: {

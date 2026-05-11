@@ -192,27 +192,40 @@ interface EditorState {
  * check for tabs that have no kernel session (untitled placeholders,
  * non-markdown buffers for which we never acquire).
  */
-export function isDirty(tab: EditorTab): boolean {
-  const state = useEditorStore.getState()
+/** State slice `isDirty` reads. Accepting this lets the context-key
+ *  subscriber pass `prev` and `current` snapshots so the comparison
+ *  actually distinguishes them — without it, the function would always
+ *  read live state and report `prev === current`. */
+export interface IsDirtySource {
+  sessionRevision: Map<string, number>
+  savedRevision: Map<string, number>
+}
+
+export function isDirty(tab: EditorTab, source?: IsDirtySource): boolean {
+  const state = source ?? useEditorStore.getState()
   const current = state.sessionRevision.get(tab.relpath)
-  if (current !== undefined) {
-    // SessionManager seeds both maps on acquire so a freshly-opened
-    // tab reads as clean; after that, any divergence is a real edit.
-    const saved = state.savedRevision.get(tab.relpath)
-    if (saved === undefined) {
-      // Invariant violation: sessionRevision exists but savedRevision
-      // doesn't — acquire failed to seed savedRevision, or some path
-      // wrote sessionRevision before acquire. Defensive fallback:
-      // assume clean (matches prior `?? current` behaviour) so we
-      // don't false-flag every newly-opened tab as dirty, but log so
-      // the broken invariant surfaces in dev builds.
-      clientLogger.warn(
-        `[editorStore] isDirty: sessionRevision present but savedRevision missing for '${tab.relpath}' — invariant violation; treating as clean. This indicates a missed acquire seed in SessionManager.`,
-      )
-      return false
-    }
-    return current !== saved
+  const saved = state.savedRevision.get(tab.relpath)
+  if (current !== undefined && saved === undefined) {
+    // Invariant violation: sessionRevision exists but savedRevision
+    // doesn't — acquire failed to seed savedRevision, or some path
+    // wrote sessionRevision before acquire. Defensive fallback:
+    // assume clean so we don't false-flag every newly-opened tab as
+    // dirty, but log so the broken invariant surfaces in dev builds.
+    clientLogger.warn(
+      `[editorStore] isDirty: sessionRevision present but savedRevision missing for '${tab.relpath}' — invariant violation; treating as clean. This indicates a missed acquire seed in SessionManager.`,
+    )
+    return false
   }
+  // Kernel-side divergence — the bridge advanced the session revision
+  // past savedRevision via a successful `apply_transaction`.
+  if (current !== undefined && saved !== undefined && current !== saved) {
+    return true
+  }
+  // CM-side divergence — `setContent` from the CM `onChange` always
+  // advances `tab.content`, even when the bridge's translation bailed
+  // and never sent an op (block-merge backspace, inline-formatted
+  // span edit, …). Without this fallback the tab would stay clean
+  // despite obviously unsaved edits and Ctrl+S would do nothing.
   return tab.content !== tab.savedContent
 }
 

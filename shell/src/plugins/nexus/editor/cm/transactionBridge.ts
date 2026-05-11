@@ -34,7 +34,6 @@ import type { Extension } from '@codemirror/state'
 import type { EditorKernelClient } from '../kernelClient.ts'
 import { clientLogger } from '../../../../clientLogger'
 import type {
-  BlockId,
   EditorSnapshot,
   Operation,
   Transaction,
@@ -43,6 +42,7 @@ import type {
   UserAction,
 } from '../types.ts'
 import { useEditorStore } from '../editorStore.ts'
+import { resolveBlockPos, resolveBlockRange } from './blockPosMap.ts'
 
 /**
  * Optional surface for surfacing errors. The bridge gets a `KernelAPI`
@@ -69,32 +69,32 @@ export interface ChangeMapping {
 }
 
 /**
- * Translate a CM `ViewUpdate`'s `ChangeSet` into kernel [`Operation`]s
- * against a single root block.
+ * Translate a CM `ViewUpdate`'s `ChangeSet` into kernel [`Operation`]s.
  *
  * Strategy:
- *   - Walk `iterChanges`. If there's exactly ONE change segment and it
- *     is either pure insert (fromA == toA, inserted.length > 0) or
- *     pure delete (inserted.length == 0, fromA < toA), emit a matching
- *     `InsertText` / `DeleteText` op against `rootBlockId`. The `pos`
- *     is the CM offset (bytes-of-string-in-UTF-16, same as CM's doc
- *     indexing) — the kernel uses byte offsets; for ASCII-only edits
- *     these coincide, and the v1 coarse mapping accepts the drift for
- *     non-ASCII input. The `pre_annotations` field is `[]` — v1 doesn't
- *     carry annotations through CM yet.
- *   - For anything else (replace, multi-segment, or an empty change),
- *     fall back to a single `UpdateBlockContent` op carrying the whole
- *     new doc content. `old_content` is captured from the update's
- *     `startState`; the server verifies it matches the block's current
- *     content.
+ *   - Walk `iterChanges`. If there's exactly ONE segment that's a pure
+ *     insert or a pure delete entirely within a single top-level
+ *     Paragraph or ATXHeading block, resolve the CM offset to
+ *     `(block_id, byte-offset-within-block)` via {@link resolveBlockPos}
+ *     / {@link resolveBlockRange} and emit `InsertText`/`DeleteText`
+ *     against the correct block. Inserts/deletes containing a newline
+ *     bypass this path — newlines typically split or join blocks and
+ *     can't be expressed as a text op against one block.
+ *   - For anything else (multi-segment, cross-block, unresolvable
+ *     position, inline-formatted block, list/blockquote/etc.), fall
+ *     back to a single `UpdateBlockContent` op against the first root
+ *     block carrying the whole new doc content. This fallback is
+ *     known-imperfect — see the bridge module header for context — but
+ *     covers cases the single-block translator deliberately punts on.
  *
- * Caller is responsible for providing a valid `rootBlockId` (typically
- * `snapshot.tree.root_blocks[0]`). Returns an empty op list when the
- * CM update has no actual doc change.
+ * `pre_annotations` is `[]` — the kernel doesn't consume it on the
+ * forward apply (only used for inverse computation, which the kernel
+ * derives itself from the post-state). Returns an empty op list when
+ * the CM update has no actual doc change.
  */
 export function changesToOps(
   update: ViewUpdate,
-  rootBlockId: BlockId,
+  snapshot: EditorSnapshot,
 ): ChangeMapping {
   if (!update.docChanged) return { ops: [], fallbackFullDoc: false }
 
@@ -120,56 +120,55 @@ export function changesToOps(
     const s = segs[0]!
     const isPureInsert = s.fromA === s.toA && s.insertedStr.length > 0
     const isPureDelete = s.fromA < s.toA && s.insertedStr.length === 0
-    if (isPureInsert) {
-      return {
-        ops: [
-          {
-            kind: 'insert_text',
-            block_id: rootBlockId,
-            pos: s.fromA,
-            text: s.insertedStr,
-            pre_annotations: [],
-          },
-        ],
-        fallbackFullDoc: false,
+    if (isPureInsert && !s.insertedStr.includes('\n')) {
+      const pos = resolveBlockPos(update.startState, snapshot, s.fromA)
+      if (pos) {
+        return {
+          ops: [
+            {
+              kind: 'insert_text',
+              block_id: pos.blockId,
+              pos: pos.bytePos,
+              text: s.insertedStr,
+              pre_annotations: [],
+            },
+          ],
+          fallbackFullDoc: false,
+        }
       }
     }
     if (isPureDelete) {
       const deleted = update.startState.doc.sliceString(s.fromA, s.toA)
-      return {
-        ops: [
-          {
-            kind: 'delete_text',
-            block_id: rootBlockId,
-            pos: s.fromA,
-            deleted_text: deleted,
-            pre_annotations: [],
-          },
-        ],
-        fallbackFullDoc: false,
+      if (!deleted.includes('\n')) {
+        const range = resolveBlockRange(update.startState, snapshot, s.fromA, s.toA)
+        if (range) {
+          return {
+            ops: [
+              {
+                kind: 'delete_text',
+                block_id: range.blockId,
+                pos: range.byteFrom,
+                deleted_text: deleted,
+                pre_annotations: [],
+              },
+            ],
+            fallbackFullDoc: false,
+          }
+        }
       }
     }
   }
 
-  // Fallback: one UpdateBlockContent carrying the whole doc.
-  const oldContent = update.startState.doc.toString()
-  const newContent = update.state.doc.toString()
-  if (oldContent === newContent) {
-    return { ops: [], fallbackFullDoc: false }
-  }
-  return {
-    ops: [
-      {
-        kind: 'update_block_content',
-        id: rootBlockId,
-        old_content: oldContent,
-        new_content: newContent,
-        old_annotations: [],
-        new_annotations: [],
-      },
-    ],
-    fallbackFullDoc: true,
-  }
+  // No single-block translation worked. The previous fallback —
+  // `update_block_content` against `root_blocks[0]` with the whole
+  // doc as `new_content` — actively corrupted the kernel by stuffing
+  // the entire markdown into a single block's content string. Skip
+  // the op instead; CM keeps the user's local state until the next
+  // successful flush (or a reconcile from `getMarkdown`) brings CM
+  // back in line with the kernel. Multi-block edits (Enter, paste)
+  // need real `InsertBlock`/`DeleteBlock` op synthesis — tracked
+  // separately.
+  return { ops: [], fallbackFullDoc: true }
 }
 
 // ── Transaction assembly ─────────────────────────────────────────────────────
@@ -229,6 +228,21 @@ export interface TransactionBridgeOptions {
    *  `() => sessionManager.getSnapshot(relpath)` via a helper, or a
    *  closure that reads from wherever the snapshot lives. */
   getSnapshot: () => EditorSnapshot | null
+  /** Replace the cached snapshot for this relpath. The bridge calls
+   *  this after each successful `apply_transaction` so the next CM-
+   *  offset translation sees the post-edit block tree. Typically
+   *  `(snap) => sessionManager.setSnapshot(relpath, snap)`. Optional so
+   *  existing tests that drive the bridge without a session manager
+   *  keep working — when omitted, the snapshot stays stale and the
+   *  block-pos translator will bail more aggressively. */
+  setSnapshot?: (snapshot: EditorSnapshot) => void
+  /** Receive a `reset` callback that, when invoked, clears the
+   *  optimistic mirror and cancels every queued chain entry. The save
+   *  flow calls this after `sync_content` pushes CM markdown into the
+   *  kernel — the kernel's block IDs change in that path, so any
+   *  in-flight op against the old IDs would be a doomed dispatch.
+   *  Optional so headless tests can skip the wiring. */
+  registerReset?: (reset: () => void) => void
   /** Report an error from the async dispatch path. Defaults to
    *  `console.error`. Plugin-layer callers typically wire this to
    *  `api.notifications.show({ type: 'error', message })`. */
@@ -267,12 +281,55 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     relpath,
     kernelClient,
     getSnapshot,
+    setSnapshot,
+    registerReset,
     onError = defaultErrorReporter,
   } = opts
 
   const pending: ViewUpdate[] = []
   let rafHandle: number | null = null
   let flushing = false
+  // Optimistic mirror of the kernel-side block tree. Each flush
+  // translates against the mirror, generates ops, and advances the
+  // mirror by applying those ops locally — without waiting for the
+  // kernel to ack. The kernel processes our `apply_transaction` calls
+  // serially (Tauri serialises IPC), so when an ack arrives the mirror
+  // already reflects the resulting state.
+  //
+  // Why a mirror at all: the sessionManager-owned snapshot only
+  // advances at apply-success, which adds the kernel round-trip
+  // latency (~30-60ms) to every keystroke before the *next* op can be
+  // translated against fresh block content. A local mirror sidesteps
+  // that wait — keystrokes that arrive during the round-trip translate
+  // against the optimistic mirror and dispatch immediately.
+  //
+  // Initialised lazily from `getSnapshot()` on first flush; reset on
+  // apply-error (kernel rejected, mirror is now ahead of reality).
+  let mirror: EditorSnapshot | null = null
+
+  // Serialise IPC dispatches through a JS-level promise chain. Multiple
+  // flushes can fire back-to-back without waiting for prior acks; the
+  // chain ensures the kernel sees `apply_transaction` calls in
+  // generation order.
+  let dispatchChain: Promise<void> = Promise.resolve()
+  // Bumped whenever an apply fails. Each queued chain entry captures
+  // the generation it was scheduled under; entries whose generation no
+  // longer matches the current value skip their work. Without this, a
+  // single rejection cascades through every subsequent queued op (each
+  // computed against an optimistic-mirror state the kernel never
+  // reached), so each one in turn rejects and triggers another
+  // recovery — visible to the user as repeated flicker.
+  let dispatchGeneration = 0
+
+  registerReset?.(() => {
+    // Clear the mirror so the next flush re-inits from the (now
+    // freshly-set) sessionManager snapshot, and bump the generation
+    // so any queued chain entry computed against the discarded
+    // mirror short-circuits instead of issuing a dispatch with stale
+    // block IDs or byte offsets.
+    mirror = null
+    dispatchGeneration++
+  })
 
   const reconcile = (
     view: BridgeViewLike,
@@ -282,6 +339,7 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     if (revision !== null) {
       useEditorStore.getState().setSessionRevision(relpath, revision)
     }
+    if (pending.length > 0) return
     const current = view.state.doc.toString()
     if (current === canonical) return
     flushing = true
@@ -296,26 +354,67 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
 
   const dispatchTransaction = (view: BridgeViewLike, tx: Transaction): void => {
     useEditorStore.getState().addPendingLocalRevision(tx.id)
-    void kernelClient
-      .applyTransaction(relpath, tx)
-      .then(async (snapshot) => {
-        let canonical: string
-        try {
-          canonical = await kernelClient.getMarkdown(relpath)
-        } catch (err) {
-          onError('editor bridge: getMarkdown failed after apply', err)
+    // Text-only ops can't diverge from CM — the kernel just mutates
+    // block content verbatim, no serializer normalisation. Skip the
+    // post-apply `getMarkdown` round-trip for these; structural ops
+    // (none currently generated by the translator, but kept for
+    // forward-compat) would still reconcile if they appeared.
+    const skipReconcile = tx.operations.every(
+      (o) =>
+        o.kind === 'insert_text' ||
+        o.kind === 'delete_text' ||
+        o.kind === 'update_annotations',
+    )
+    const myGen = dispatchGeneration
+    dispatchChain = dispatchChain.then(async () => {
+      if (myGen !== dispatchGeneration) {
+        // A prior op in this chain failed; this op's byte offsets were
+        // computed against an optimistic-mirror state the kernel never
+        // reached. Sending it would just trigger another rejection and
+        // another full-doc reconcile flicker. Drop it silently — CM
+        // keeps the user's typing locally, and a future explicit
+        // resync (save flow, focus change) reconciles content.
+        useEditorStore.getState().consumePendingLocalRevision(tx.id)
+        return
+      }
+      try {
+        const snapshot = await kernelClient.applyTransaction(relpath, tx)
+        // Push the authoritative snapshot back to sessionManager so
+        // external consumers (drag-bridge, comments) see fresh data.
+        // The bridge itself keeps using its own mirror.
+        setSnapshot?.(snapshot)
+        if (skipReconcile) {
+          useEditorStore.getState().setSessionRevision(relpath, snapshot.revision)
           return
         }
+        const canonical = await kernelClient.getMarkdown(relpath)
         reconcile(view, canonical, snapshot.revision)
-      })
-      .catch((err) => {
+      } catch (err) {
         useEditorStore.getState().consumePendingLocalRevision(tx.id)
         onError('editor bridge: apply_transaction failed', err)
-        void kernelClient
-          .getMarkdown(relpath)
-          .then((canonical) => reconcile(view, canonical, null))
-          .catch(() => {})
-      })
+        // Mirror is ahead of reality — kernel didn't apply this op.
+        // Bump the generation so subsequent queued ops skip themselves
+        // (they were computed against an unreachable state). Refetch
+        // the authoritative tree so the next translation has correct
+        // block contents.
+        //
+        // Deliberately *not* reconciling CM here. Replacing the doc
+        // out from under the user causes visible flicker, and the
+        // common cause of a failure (a block-merging keystroke we
+        // didn't translate, e.g. backspace across a paragraph
+        // boundary) leaves CM with the user's intended state — we'd
+        // rather diverge silently than yank their edits back. A
+        // higher-level resync (save / focus) can push CM content to
+        // the kernel when needed.
+        dispatchGeneration++
+        try {
+          const fresh = await kernelClient.getTree(relpath)
+          mirror = fresh
+        } catch {
+          mirror = null
+        }
+      }
+    })
   }
 
   const flush = (): void => {
@@ -323,34 +422,47 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     if (pending.length === 0) return
     const batch = pending.splice(0, pending.length)
 
-    const snapshot = getSnapshot()
-    const rootId = snapshot?.tree.root_blocks[0]
-    if (!rootId) return
+    // Lazy-init the mirror from the sessionManager snapshot on first
+    // flush. Subsequent flushes reuse and advance the mirror without
+    // touching the cache, so keystrokes don't wait for the kernel
+    // round-trip to refresh block contents.
+    if (!mirror) {
+      mirror = getSnapshot()
+      if (!mirror) return
+    }
+    const snapshot = mirror
 
-    let ops: Operation[]
+    // Collapse a multi-update batch into a single synthetic update by
+    // composing its ChangeSets. This sidesteps the in-batch snapshot
+    // staleness problem: each individual u[i] would otherwise need to
+    // be translated against a mirror of the snapshot that already
+    // reflects u[0..i-1]'s mutations. The composed change set runs
+    // against the batch's *original* startState, which the cached
+    // snapshot matches (the snapshot only advances at apply-success).
+    let synthetic: ViewUpdate
     if (batch.length === 1) {
-      ops = changesToOps(batch[0]!, rootId).ops
+      synthetic = batch[0]!
     } else {
       const first = batch[0]!
       const last = batch[batch.length - 1]!
-      const oldContent = first.startState.doc.toString()
-      const newContent = last.state.doc.toString()
-      if (oldContent === newContent) {
-        ops = []
-      } else {
-        ops = [
-          {
-            kind: 'update_block_content',
-            id: rootId,
-            old_content: oldContent,
-            new_content: newContent,
-            old_annotations: [],
-            new_annotations: [],
-          },
-        ]
+      let composed = first.changes
+      for (let i = 1; i < batch.length; i++) {
+        composed = composed.compose(batch[i]!.changes)
       }
+      synthetic = {
+        docChanged: true,
+        changes: composed,
+        startState: first.startState,
+        state: last.state,
+        view: last.view,
+      } as ViewUpdate
     }
+    const ops = changesToOps(synthetic, snapshot).ops
     if (ops.length === 0) return
+
+    // Optimistically advance the mirror so the next flush sees the
+    // post-op state, without waiting for the kernel ack.
+    mirror = applyOpsToSnapshot(snapshot, ops)
 
     const tx = makeTransaction(ops, { source: 'user' })
     const view = batch[batch.length - 1]!.view as unknown as BridgeViewLike
@@ -400,4 +512,84 @@ export function transactionBridge(opts: TransactionBridgeOptions): Extension {
 
 function defaultErrorReporter(message: string, err: unknown): void {
   clientLogger.error(`[nexus.editor] ${message}:`, err)
+}
+
+/**
+ * Apply text-only ops to a snapshot's block tree, returning a new
+ * snapshot. Used by the bridge's optimistic mirror — each generated
+ * `InsertText`/`DeleteText` op is reflected in the mirror immediately
+ * so the next flush's translation sees the expected post-op block
+ * contents (matching what the kernel will see once acks land).
+ *
+ * Wire ops carry UTF-8 byte offsets (`op.pos`); block content is a JS
+ * UTF-16 string. The walker converts byte offset to char index so the
+ * splice lands at the same logical position.
+ */
+function applyOpsToSnapshot(
+  snap: EditorSnapshot,
+  ops: ReadonlyArray<Operation>,
+): EditorSnapshot {
+  let blocks = snap.tree.blocks
+  let dirty = false
+  for (const op of ops) {
+    if (op.kind === 'insert_text') {
+      const block = blocks[op.block_id]
+      if (!block) continue
+      const charIdx = utf8ByteOffsetToCharIndex(block.content, op.pos)
+      const next = block.content.slice(0, charIdx) + op.text + block.content.slice(charIdx)
+      blocks = { ...blocks, [op.block_id]: { ...block, content: next } }
+      dirty = true
+      continue
+    }
+    if (op.kind === 'delete_text') {
+      const block = blocks[op.block_id]
+      if (!block) continue
+      const charStart = utf8ByteOffsetToCharIndex(block.content, op.pos)
+      // `deleted_text` is the original JS substring — its `length`
+      // matches the char span to remove (the bridge captured it via
+      // CM's `sliceString`, so it's already in JS UTF-16 units).
+      const charEnd = charStart + op.deleted_text.length
+      const next = block.content.slice(0, charStart) + block.content.slice(charEnd)
+      blocks = { ...blocks, [op.block_id]: { ...block, content: next } }
+      dirty = true
+      continue
+    }
+    // Other op kinds (insert_block, delete_block, reparent,
+    // update_block_content, update_annotations) aren't currently
+    // generated by `changesToOps` — when they appear, extend this
+    // walker. For now they're a silent skip; the mirror will drift
+    // until the kernel ack triggers a `setSnapshot` refresh.
+  }
+  if (!dirty) return snap
+  return { ...snap, tree: { ...snap.tree, blocks } }
+}
+
+/** UTF-8 byte offset → JS UTF-16 char index inside `s`. Mirrors the
+ *  encoding the bridge sends to the kernel (which uses byte offsets in
+ *  `block.content`) so the local mirror can splice at the matching
+ *  char position. Walks the string once, accumulating bytes per char
+ *  until `byteOffset` is reached. */
+function utf8ByteOffsetToCharIndex(s: string, byteOffset: number): number {
+  if (byteOffset <= 0) return 0
+  let bytes = 0
+  let chars = 0
+  while (chars < s.length && bytes < byteOffset) {
+    const code = s.charCodeAt(chars)
+    if (code < 0x80) {
+      bytes += 1
+      chars += 1
+    } else if (code < 0x800) {
+      bytes += 2
+      chars += 1
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      // High surrogate of a supplementary code point — paired with the
+      // following low surrogate it's 4 UTF-8 bytes total.
+      bytes += 4
+      chars += 2
+    } else {
+      bytes += 3
+      chars += 1
+    }
+  }
+  return chars
 }

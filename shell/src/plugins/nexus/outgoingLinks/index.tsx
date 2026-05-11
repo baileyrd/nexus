@@ -1,7 +1,7 @@
 import { createRoot, type Root } from 'react-dom/client'
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
+import { ViewBase, workspace, type Leaf } from '../../../workspace'
 
 const VIEW_TYPE = 'outgoing-links'
 const COMMAND_FOCUS = 'nexus.outgoingLinks.focus'
@@ -60,7 +60,7 @@ export const outgoingLinksPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    viewRegistry.register(VIEW_TYPE, (leaf) => new OutgoingLinksPaneView(leaf))
+    api.viewRegistry.register(VIEW_TYPE, (leaf) => new OutgoingLinksPaneView(leaf))
     api.commands.register(COMMAND_FOCUS, async () => {
       const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'right')
       workspace.revealLeaf(leaf)

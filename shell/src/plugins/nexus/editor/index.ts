@@ -481,20 +481,20 @@ export const editorPlugin: Plugin = {
 
     // Phase 7: legacy SlotRegistry slot:'editorArea' entry removed.
     // `.md` opens now land as leaves of type 'markdown' in the main dock.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'markdown',
       markdownViewCreator(
         (relpath, leafId) => createElement(EditorView, { relpath, leafId, onRetry: handleRetry }),
         sessionManager,
       ),
     )
-    viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
+    api.viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
 
     // Override the default no-op empty view (shell/src/workspace/ViewRegistry.ts)
     // with one that renders the Obsidian-style action links — used by
     // the tab-strip `+` button and any other leaf that lands on the
     // empty type (e.g. restored placeholder leaves).
-    viewRegistry.update(EMPTY_VIEW_TYPE, emptyViewCreator)
+    api.viewRegistry.update(EMPTY_VIEW_TYPE, emptyViewCreator)
 
     // Settings panel auto-generates UI from this. Defaults match the
     // pre-settings behaviour so existing users don't see a regression.
@@ -1444,7 +1444,70 @@ export const editorPlugin: Plugin = {
           // `MarkdownSerializer::serialize` under the session lock and
           // hands off to `com.nexus.storage::write_file` atomically
           // (see `crates/nexus-editor/src/core_plugin.rs` ~L370).
+          //
+          // First push CM's authoritative markdown into the kernel via
+          // `sync_content`. The transaction bridge tries hard to keep
+          // the kernel tree in sync with CM through `apply_transaction`
+          // ops, but any op the translator can't safely express (block-
+          // merging backspace, edits inside inline-formatted spans,
+          // etc.) leaves CM ahead of the kernel. Without this push,
+          // `save` would write the kernel's pre-divergence state and
+          // silently lose the user's edits.
+          //
+          // After sync_content the kernel re-parses and assigns fresh
+          // block IDs, so we reset the bridge's optimistic mirror —
+          // any queued chain entry against the old IDs short-circuits
+          // and the next user keystroke re-translates against the
+          // refreshed tree.
+          const t0 = performance.now()
+          clientLogger.info(
+            `[editor.save] start relpath=${tab.relpath} contentLen=${tab.content.length}`,
+          )
+          // Snapshot the last 60 chars of CM content so we can compare
+          // it against what the kernel reflects post-sync.
+          const cmTail = tab.content.slice(-60).replace(/\n/g, '\\n')
+          clientLogger.info(`[editor.save] CM tail: ${JSON.stringify(cmTail)}`)
+          await editorClient.syncContent(tab.relpath, tab.content)
+          const tSync = performance.now()
+          clientLogger.info(
+            `[editor.save] syncContent done in ${Math.round(tSync - t0)}ms`,
+          )
+          try {
+            const postSync = await editorClient.getMarkdown(tab.relpath)
+            const kernelTail = postSync.slice(-60).replace(/\n/g, '\\n')
+            clientLogger.info(
+              `[editor.save] kernel tail post-sync: ${JSON.stringify(kernelTail)}`,
+            )
+          } catch (err) {
+            clientLogger.warn(`[editor.save] getMarkdown failed: ${String(err)}`)
+          }
+          sessionManager.resetBridge(tab.relpath)
+          try {
+            const fresh = await editorClient.getTree(tab.relpath)
+            sessionManager.setSnapshot(tab.relpath, fresh)
+            // Push the post-sync revision into the store *now* rather
+            // than waiting for the async `changed` event from sync_content
+            // to land. `markSaved` snapshots `sessionRevision` into
+            // `savedRevision`, so if the event arrives after markSaved
+            // the tab would stay dirty (`savedRevision = K` but
+            // `sessionRevision` later becomes `K+1`).
+            useEditorStore
+              .getState()
+              .setSessionRevision(tab.relpath, fresh.revision)
+          } catch {
+            // get_tree is a defensive freshness pull; if it fails the
+            // next bridge lazy-init will re-fetch via openSession's
+            // cached snapshot. Save still proceeds.
+          }
+          const tGet = performance.now()
+          clientLogger.info(
+            `[editor.save] resetBridge+getTree done in ${Math.round(tGet - tSync)}ms`,
+          )
           await editorClient.saveSession(tab.relpath)
+          const tSave = performance.now()
+          clientLogger.info(
+            `[editor.save] saveSession done in ${Math.round(tSave - tGet)}ms (total ${Math.round(tSave - t0)}ms)`,
+          )
           useEditorStore.getState().markSaved(tab.relpath)
           // BL-045 — broadcast a save event so opt-in features
           // (auto-enrichment, etc.) can react. Payload is intentionally
@@ -1642,6 +1705,28 @@ export const editorPlugin: Plugin = {
     // editor tab whose relpath no longer has a corresponding leaf.
     // Untitled tabs (no on-disk backing) are kept as-is: they are
     // owned by the editor store, not the workspace.
+    // Diagnostic: log every change to the markdown tab's content/
+    // revision state so we can see whether setContent + the bridge
+    // are actually reaching the store. Runs outside React so it
+    // can't trigger render loops. Remove once dirty-dot wiring is
+    // confirmed.
+    let lastDiagSummary = ''
+    useEditorStore.subscribe((state) => {
+      const tab = state.tabs.find((t) =>
+        t.relpath.endsWith('AI-MEMORY-LAYER-PLAN.md'),
+      )
+      if (!tab) return
+      const summary = JSON.stringify({
+        contentLen: tab.content.length,
+        savedContentLen: tab.savedContent.length,
+        sessionRev: state.sessionRevision.get(tab.relpath) ?? null,
+        savedRev: state.savedRevision.get(tab.relpath) ?? null,
+      })
+      if (summary === lastDiagSummary) return
+      lastDiagSummary = summary
+      clientLogger.info(`[editor.store:diag] relpath=${tab.relpath} ${summary}`)
+    })
+
     const reconcileTabs = () => {
       const mdLeaves = workspace.getLeavesOfType('markdown')
       const mdRelpaths = new Set<string>()
@@ -1682,8 +1767,13 @@ export const editorPlugin: Plugin = {
       }
       const activeTab = state.tabs.find((t) => t.relpath === state.activeRelpath)
       const prevActiveTab = prev.tabs.find((t) => t.relpath === prev.activeRelpath)
-      const dirty = !!activeTab && isDirty(activeTab)
-      const prevDirty = !!prevActiveTab && isDirty(prevActiveTab)
+      // Pass the snapshots explicitly — `isDirty(tab)` without an
+      // explicit source falls back to live store state, which would
+      // make `dirty` and `prevDirty` read the same maps and never
+      // diverge. The kernel-revision dirty path needs the prev/current
+      // revision maps to compare.
+      const dirty = !!activeTab && isDirty(activeTab, state)
+      const prevDirty = !!prevActiveTab && isDirty(prevActiveTab, prev)
       if (dirty !== prevDirty) {
         api.context.set(CONTEXT_KEY_ACTIVE_TAB_DIRTY, dirty)
       }

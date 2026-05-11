@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { McpView } from './McpView'
 import { mcpPaneViewCreator } from './McpPaneView'
 import { ToolCallModal } from './ToolCallModal'
@@ -281,7 +281,7 @@ export const mcpPlugin: Plugin = {
       })
 
     // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
-    viewRegistry.register('mcp', mcpPaneViewCreator(renderMcpView))
+    api.viewRegistry.register('mcp', mcpPaneViewCreator(renderMcpView))
 
     api.views.register(TOOL_MODAL_VIEW_ID, {
       slot: 'overlay',

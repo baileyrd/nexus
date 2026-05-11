@@ -12,6 +12,7 @@ import { slotRegistry } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 import { eventBus } from './EventBus'
 import { clientLogger } from './clientLogger'
+import { workspace } from '../workspace'
 
 export class PluginRegistry {
   readonly commands     = new CommandRegistry()
@@ -36,6 +37,17 @@ export class PluginRegistry {
   // drained on plugin unload so dead listeners can't keep receiving events
   // and the Rust-side forwarder tasks get torn down.
   private subscriptions = new Map<string, Set<() => void>>()
+
+  // Per-plugin viewType ownership. Plugins register workspace leaf
+  // creators via `api.viewRegistry.register(type, creator)`; the API
+  // wrapper records the owning plugin id here so:
+  //   1. On plugin unload, `unregisterAll` calls each disposer to
+  //      remove the creator from `viewRegistry`.
+  //   2. Any live workspace leaves of that viewType are detached so
+  //      disabling a plugin in Settings actually makes its panels go
+  //      away — no restart required.
+  // Shape: `pluginId → Map<viewType, dispose>`.
+  private viewTypeOwnership = new Map<string, Map<string, () => void>>()
 
   // Per-plugin keybinding override tags (FU-9). Records `commandId →
   // { pluginId, chord }` for every override pushed via the
@@ -67,6 +79,45 @@ export class PluginRegistry {
       this.subscriptions.set(pluginId, new Set())
     }
     this.subscriptions.get(pluginId)!.add(unsubscribe)
+  }
+
+  /**
+   * Record that `pluginId` owns the workspace viewType `viewType`,
+   * with `dispose` being the unregister function returned by
+   * `viewRegistry.register`. Idempotent: re-registering the same type
+   * from the same plugin (e.g. an HMR-driven re-activate) replaces
+   * the prior disposer.
+   */
+  trackViewType(pluginId: string, viewType: string, dispose: () => void) {
+    let owned = this.viewTypeOwnership.get(pluginId)
+    if (!owned) {
+      owned = new Map()
+      this.viewTypeOwnership.set(pluginId, owned)
+    }
+    const prior = owned.get(viewType)
+    if (prior && prior !== dispose) {
+      try {
+        prior()
+      } catch (err) {
+        clientLogger.warn(
+          `[PluginRegistry] prior viewType disposer for '${viewType}' threw:`,
+          err,
+        )
+      }
+    }
+    owned.set(viewType, dispose)
+  }
+
+  /**
+   * List of viewTypes registered by a given plugin. Exposed so the
+   * tab context menu can resolve a leaf back to its owning plugin
+   * ("Disable plugin <name>").
+   */
+  ownerOfViewType(viewType: string): string | null {
+    for (const [pluginId, owned] of this.viewTypeOwnership) {
+      if (owned.has(viewType)) return pluginId
+    }
+    return null
   }
 
   /**
@@ -167,6 +218,36 @@ export class PluginRegistry {
         // but unload is sync; errors are logged by the registry.
         void this.keybindings.clearOverride(commandId)
       }
+    }
+
+    // Drain workspace viewTypes this plugin registered. Two-step:
+    //   1. Detach every live leaf whose viewType matches — disabling a
+    //      plugin in Settings must remove its panels live (no restart).
+    //   2. Call each disposer so the creator vanishes from the
+    //      `viewRegistry`, preventing a stale persisted leaf from
+    //      rehydrating into a half-broken view on the next workspace
+    //      open.
+    // Order matters: detach first so the leaf's `onClose` runs while the
+    // creator (and any closures referencing plugin state) is still alive.
+    const ownedViewTypes = this.viewTypeOwnership.get(pluginId)
+    if (ownedViewTypes && ownedViewTypes.size > 0) {
+      for (const viewType of ownedViewTypes.keys()) {
+        // Detach is async; fire-and-forget so unload stays synchronous.
+        // Errors are logged inside `detachLeavesByViewType` — they don't
+        // abort the sweep of the remaining types.
+        void workspace.detachLeavesByViewType(viewType)
+      }
+      for (const [viewType, dispose] of ownedViewTypes) {
+        try {
+          dispose()
+        } catch (err) {
+          clientLogger.warn(
+            `[PluginRegistry] viewType disposer for '${viewType}' threw:`,
+            err,
+          )
+        }
+      }
+      this.viewTypeOwnership.delete(pluginId)
     }
 
     // Belt-and-braces: sweep any URI handlers still owned by the plugin.

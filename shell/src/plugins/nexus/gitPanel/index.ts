@@ -1,5 +1,5 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { useGitStatusStore } from '../gitStatus/gitStatusStore'
 import { useGitPanelStore } from './gitPanelStore'
 import { setGitPanelApi } from './gitPanelRuntime'
@@ -32,7 +32,7 @@ export const gitPanelPlugin: Plugin = {
     setGitPanelApi(api)
 
     // Register the view type so workspace.ensureLeafOfType can create it.
-    viewRegistry.register(VIEW_TYPE, gitPanelViewCreator())
+    api.viewRegistry.register(VIEW_TYPE, gitPanelViewCreator())
 
     // ── Data loading ──────────────────────────────────────────────────
     const loadAll = async (): Promise<void> => {

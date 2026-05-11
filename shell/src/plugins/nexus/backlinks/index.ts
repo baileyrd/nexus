@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { BacklinksView } from './BacklinksView'
 import { backlinkViewCreator } from './BacklinkView'
 import { useBacklinksStore, type Backlink } from './backlinksStore'
@@ -93,7 +93,7 @@ export const backlinksPlugin: Plugin = {
 
   activate(api: PluginAPI) {
     // Phase 7: legacy SlotRegistry slot:'rightPanelContent' entry removed.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'backlink',
       backlinkViewCreator(() => createElement(BacklinksView)),
     )

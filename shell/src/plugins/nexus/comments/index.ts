@@ -21,7 +21,7 @@
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { CommentsView } from './CommentsView'
 import { commentsPaneViewCreator } from './CommentsPaneView'
 import { useCommentsStore } from './commentsStore'
@@ -65,7 +65,7 @@ export const commentsPlugin: Plugin = {
       return cachedApi
     }
 
-    viewRegistry.register(
+    api.viewRegistry.register(
       'comments',
       commentsPaneViewCreator(() =>
         createElement(CommentsView, { api: getApi(), author: null }),

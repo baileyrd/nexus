@@ -107,6 +107,10 @@ export class SessionManager {
   private readonly api: KernelAPI | null
   private readonly entries = new Map<string, Entry>()
   private readonly changedListeners = new Set<EditorChangedListener>()
+  // Per-relpath callbacks registered by the transaction bridge so the
+  // save flow can ask the bridge to drop its optimistic mirror after a
+  // `sync_content` push changes the kernel-side block IDs.
+  private readonly bridgeResetters = new Map<string, () => void>()
 
   constructor(client: EditorKernelClient, api: KernelAPI | null = null) {
     this.client = client
@@ -223,15 +227,52 @@ export class SessionManager {
 
   /**
    * Return the cached snapshot for `relpath`, or `null` when the
-   * session isn't open. Used by the Phase 5 transaction bridge to
-   * resolve `tree.root_blocks[0]` at dispatch time. Note: this is the
-   * *open-time* snapshot — subsequent edits advance the kernel-side
-   * revision, but the tree shape on v1's coarse-block path doesn't
-   * change (still a single root). Callers who care about freshness
-   * should call `client.getTree(relpath)` directly.
+   * session isn't open. Initially seeded at `acquire` time; refreshed
+   * via {@link setSnapshot} after every successful kernel mutation so
+   * callers (the transaction bridge's CM-offset translator in
+   * particular) see live block contents rather than the open-time
+   * tree.
    */
   getSnapshot(relpath: string): EditorSnapshot | null {
     return this.entries.get(relpath)?.snapshot ?? null
+  }
+
+  /**
+   * Replace the cached snapshot for `relpath`. Called by the
+   * transaction bridge in its `apply_transaction` success handler so
+   * the next CM-offset translation uses the post-edit tree, not the
+   * open-time one. No-op for paths without a live entry — a stray late
+   * resolution after `release` shouldn't resurrect the cache.
+   */
+  setSnapshot(relpath: string, snapshot: EditorSnapshot): void {
+    const entry = this.entries.get(relpath)
+    if (!entry) return
+    entry.snapshot = snapshot
+  }
+
+  /**
+   * Register a `reset` callback for `relpath`. The transaction bridge
+   * calls this once during initialization; the save flow invokes the
+   * stored callback after a `sync_content` push so the bridge drops
+   * its optimistic mirror (whose block IDs no longer match the
+   * kernel's freshly-parsed tree).
+   *
+   * Returns an unsubscribe handle the bridge can call on tear-down.
+   */
+  registerBridgeReset(relpath: string, reset: () => void): () => void {
+    this.bridgeResetters.set(relpath, reset)
+    return () => {
+      if (this.bridgeResetters.get(relpath) === reset) {
+        this.bridgeResetters.delete(relpath)
+      }
+    }
+  }
+
+  /** Invoke the bridge reset callback for `relpath`, if one is
+   *  registered. No-op when no bridge is wired (untitled buffers,
+   *  unit-test setups). */
+  resetBridge(relpath: string): void {
+    this.bridgeResetters.get(relpath)?.()
   }
 
   /**

@@ -17,7 +17,7 @@
 
 import { createElement, useCallback, useEffect, useRef, useState } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
+import { ViewBase, workspace, type Leaf } from '../../../workspace'
 import { createRoot, type Root } from 'react-dom/client'
 import { clientLogger } from '../../../clientLogger'
 import {
@@ -375,7 +375,7 @@ export const healthPanelPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    viewRegistry.register(VIEW_TYPE, (leaf) => new HealthPanelPaneView(leaf, api))
+    api.viewRegistry.register(VIEW_TYPE, (leaf) => new HealthPanelPaneView(leaf, api))
 
     api.commands.register(COMMAND_FOCUS, async () => {
       try {

@@ -16,7 +16,7 @@
 import { createElement } from 'react'
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { clientLogger } from '../../../clientLogger'
 
 import { ViewBuilderView } from './ViewBuilderView'
@@ -89,7 +89,7 @@ export const viewBuilderPlugin: Plugin = {
         onRefresh: refresh,
       })
 
-    viewRegistry.register(VIEW_TYPE, viewBuilderPaneViewCreator(renderView))
+    api.viewRegistry.register(VIEW_TYPE, viewBuilderPaneViewCreator(renderView))
 
     api.activityBar.addItem({
       id: 'nexus.viewBuilder.activityItem',

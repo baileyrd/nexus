@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { TemplatesView } from './TemplatesView'
 import { templatesPaneViewCreator } from './TemplatesPaneView'
 import { useTemplatesStore, type TemplateEntry } from './templatesStore'
@@ -118,7 +118,7 @@ export const templatesPlugin: Plugin = {
           }),
       })
 
-    viewRegistry.register('templates', templatesPaneViewCreator(renderTemplatesView))
+    api.viewRegistry.register('templates', templatesPaneViewCreator(renderTemplatesView))
 
     api.activityBar.addItem({
       id: 'nexus.templates.activityItem',

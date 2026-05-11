@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { SkillsView } from './SkillsView'
 import { skillsPaneViewCreator } from './SkillsPaneView'
 import {
@@ -153,7 +153,7 @@ export const skillsPlugin: Plugin = {
       })
 
     // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
-    viewRegistry.register('skills', skillsPaneViewCreator(renderSkillsView))
+    api.viewRegistry.register('skills', skillsPaneViewCreator(renderSkillsView))
 
     api.activityBar.addItem({
       id: 'nexus.skills.activityItem',

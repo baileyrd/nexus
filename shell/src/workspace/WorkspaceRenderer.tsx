@@ -35,6 +35,13 @@ import { workspace } from './workspaceStore.ts'
 import { popoutLeaf as popoutLeafBridge } from './popoutWindowBridge.ts'
 import { ForgeSelector } from './ForgeSelector.tsx'
 import { RightPanelFooter } from './RightPanelFooter.tsx'
+import { ContextMenu, type ContextMenuItem } from '../shell/ContextMenu.tsx'
+import { getRegistry } from '../host/shellRegistry'
+import { disableBuiltinPlugin } from '../host/pluginActivation'
+import { ALL_PLUGINS } from '../plugins/catalog'
+import { contextKeyService } from '../host/ContextKeyService'
+import { clientLogger } from '../host/clientLogger'
+import { useEditorStore, isDirty } from '../plugins/nexus/editor/editorStore'
 
 // ---------------------------------------------------------------------------
 // Layout-change subscription hook.
@@ -630,6 +637,22 @@ function TabStrip({
   const dragSrcIndex = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
+  // Tab right-click menu. Anchored at the mouse position (constructed as
+  // a zero-size DOMRect so `ContextMenu`'s positioning logic places it
+  // immediately below the cursor). One menu per strip — opening on a
+  // different tab swaps the anchor leaf in place.
+  const [tabMenu, setTabMenu] = useState<{
+    leaf: Leaf
+    anchorRect: DOMRect
+  } | null>(null)
+
+  const handleTabContextMenu = (leaf: Leaf, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const anchor = new DOMRect(e.clientX, e.clientY, 0, 0)
+    setTabMenu({ leaf, anchorRect: anchor })
+  }
+
   const handleNewTab = (): void => {
     const leaf = workspace.createLeaf(tabs)
     tabs.leaves.push(leaf)
@@ -722,6 +745,7 @@ function TabStrip({
               onClose={() => {
                 void workspace.detachLeaf(leaf)
               }}
+              onTabContextMenu={(e) => handleTabContextMenu(leaf, e)}
               sideDock={sideDock}
               // Drag-reorder — main-dock only (sideDock tabs use icon-only
               // buttons that live in a fixed rail; reordering them is not
@@ -829,8 +853,84 @@ function TabStrip({
       )}
       {/* Left sidebar collapse lives in the activity bar (single source
           of truth); no duplicate affordance in the tab strip. */}
+      <ContextMenu
+        open={tabMenu !== null}
+        anchorRect={tabMenu?.anchorRect ?? null}
+        items={tabMenu ? buildTabMenuItems(tabMenu.leaf) : []}
+        onClose={() => setTabMenu(null)}
+        align="start"
+      />
     </div>
   )
+}
+
+/**
+ * Build the right-click menu for a tab. The menu always offers Close.
+ * If the leaf's viewType is owned by a known plugin (i.e. registered
+ * via `api.viewRegistry.register`), it also offers the user a way to
+ * jump to that plugin's Settings entry and to disable it outright —
+ * disabling now removes the leaves live thanks to the
+ * viewType-ownership sweep in `PluginRegistry.unregisterAll`.
+ */
+function buildTabMenuItems(leaf: Leaf): ContextMenuItem[] {
+  const items: ContextMenuItem[] = []
+  const label =
+    leaf.view?.getDisplayText?.() ?? leaf.view?.viewType ?? 'Tab'
+
+  items.push({
+    kind: 'item',
+    label: 'Close',
+    iconName: 'x',
+    onSelect: () => {
+      void workspace.detachLeaf(leaf)
+    },
+    tooltip: `Close ${label}`,
+  })
+
+  const viewType = leaf.view?.viewType
+  const reg = getRegistry()
+  const ownerId = viewType && reg ? reg.ownerOfViewType(viewType) : null
+  if (ownerId) {
+    const entry = ALL_PLUGINS.find((p) => p.id === ownerId)
+    const pluginName = entry?.name ?? ownerId
+
+    items.push({ kind: 'separator' })
+    items.push({ kind: 'header', label: `Plugin: ${pluginName}` })
+    items.push({
+      kind: 'item',
+      label: 'Plugin settings…',
+      iconName: 'settings',
+      onSelect: () => {
+        contextKeyService.set('settingsPanelVisible', true)
+        contextKeyService.set('settingsActiveTab', 'plugins')
+      },
+    })
+
+    // Only non-core plugins are disable-able mid-session — core
+    // services would leave the shell in a half-broken state. The
+    // catalog tracks which is which; gate the menu row off that flag
+    // rather than letting the user trigger a guaranteed-failure call.
+    const disablable = entry ? entry.core === false : false
+    items.push({
+      kind: 'item',
+      label: 'Disable plugin',
+      iconName: 'x',
+      disabled: !disablable,
+      tooltip: disablable
+        ? `Disable ${pluginName} — closes all of its panels`
+        : 'This plugin is a required built-in and cannot be disabled',
+      onSelect: async () => {
+        const result = await disableBuiltinPlugin(ownerId)
+        if (!result.ok) {
+          clientLogger.warn(
+            `[workspace] disablePlugin('${ownerId}') failed: ${result.error}`,
+          )
+        }
+      },
+    })
+  }
+
+  return items
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,6 +1159,11 @@ interface TabButtonProps {
   canClose: boolean
   onActivate: () => void
   onClose: () => void
+  /** Right-click handler. Both main-dock and sidedock variants support
+   *  this — sidedock tabs would otherwise have no removal affordance
+   *  at all, since their icon-only buttons have no room for a × and
+   *  the surrounding chrome doesn't expose one either. */
+  onTabContextMenu: (e: React.MouseEvent) => void
   /** When set, this tab lives in a sidedock and should render as an
    *  icon-only button with no ×-close (Obsidian sidebar-tab pattern).
    *  Left-undefined for main-dock tabs, which keep label + close. */
@@ -1099,12 +1204,35 @@ function iconForSidebarLeaf(leaf: Leaf): string | null {
   return null
 }
 
+/**
+ * Read a leaf's dirty state from the editor store. Returns `true` when
+ * the leaf hosts a markdown view whose backing tab has unsaved edits,
+ * `false` otherwise (non-markdown views, leaves without a relpath,
+ * tabs the editor plugin doesn't know about). Subscribes via a Zustand
+ * selector so the TabButton re-renders the dot when the tab flips
+ * dirty / clean.
+ */
+function useLeafDirty(leaf: Leaf): boolean {
+  const relpath = (() => {
+    if (leaf.view?.viewType !== 'markdown') return undefined
+    const st = leaf.view.getState() as { relpath?: unknown } | undefined
+    return typeof st?.relpath === 'string' ? st.relpath : undefined
+  })()
+  return useEditorStore((s) => {
+    if (!relpath) return false
+    const tab = s.tabs.find((t) => t.relpath === relpath)
+    if (!tab) return false
+    return isDirty(tab, s)
+  })
+}
+
 function TabButton({
   leaf,
   active,
   canClose,
   onActivate,
   onClose,
+  onTabContextMenu,
   sideDock,
   onTabDragStart,
   onTabDragOver,
@@ -1113,6 +1241,7 @@ function TabButton({
   onTabDragEnd,
   isDragOver,
 }: TabButtonProps): JSX.Element {
+  const dirty = useLeafDirty(leaf)
   // Views may override `getDisplayText()` to show a per-instance label
   // (e.g. markdown shows the filename). Fall back to `viewType`, or
   // "Empty" when the view is null.
@@ -1131,6 +1260,7 @@ function TabButton({
         aria-label={label}
         title={label}
         onClick={onActivate}
+        onContextMenu={onTabContextMenu}
         className={`workspace-tab sidebar-tab${active ? ' is-active' : ''}`}
         style={{
           display: 'inline-flex',
@@ -1201,6 +1331,7 @@ function TabButton({
       }}
       onDrop={onTabDrop}
       onDragEnd={onTabDragEnd}
+      onContextMenu={onTabContextMenu}
       className={`workspace-tab${active ? ' is-active' : ''}`}
       title={label}
       style={{
@@ -1245,6 +1376,23 @@ function TabButton({
       >
         {label}
       </span>
+      {dirty && (
+        <span
+          aria-label="Unsaved changes"
+          title="Unsaved changes"
+          style={{
+            // Bright orange so the diagnostic is unambiguous. Will
+            // dial back to var(--interactive-accent) once we've
+            // confirmed the rendering path works.
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            background: '#ff6600',
+            flex: '0 0 auto',
+            marginLeft: 2,
+          }}
+        />
+      )}
       {closable && (
         <button
           type="button"

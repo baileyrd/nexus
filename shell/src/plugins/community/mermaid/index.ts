@@ -18,7 +18,7 @@
 // import. `plugin.json` is informational only (`enabled: false`).
 
 import type { Leaf, ViewCreator } from '../../../workspace'
-import { ViewBase, viewRegistry } from '../../../workspace'
+import { ViewBase } from '../../../workspace'
 import type { KernelAPI, Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
 
@@ -101,8 +101,8 @@ const plugin: Plugin = {
 
     // BL-009: whole-file `.mermaid` viewer.
     const creator = mermaidPaneViewCreator(api.kernel)
-    registeredViewDispose = viewRegistry.register(VIEW_TYPE, creator)
-    registeredExtDispose = viewRegistry.registerExtensions(['mermaid'], VIEW_TYPE)
+    registeredViewDispose = api.viewRegistry.register(VIEW_TYPE, creator)
+    registeredExtDispose = api.viewRegistry.registerExtensions(['mermaid'], VIEW_TYPE)
   },
   deactivate() {
     registeredFenceDispose?.()
