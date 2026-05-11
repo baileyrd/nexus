@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { SearchView } from './SearchView'
 import { searchPaneViewCreator } from './SearchPaneView'
 import { useSearchStore, type SearchHit } from './searchStore'
@@ -75,7 +75,7 @@ export const searchPlugin: Plugin = {
     // Phase 7: legacy SlotRegistry slot:'sidebarContent' registration
     // removed. The view is now hosted exclusively via the Leaf/View
     // pipeline below.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'search',
       searchPaneViewCreator(() =>
         createElement(SearchView, { onHitActivate: handleHitActivate }),

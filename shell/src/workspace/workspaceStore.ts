@@ -315,6 +315,33 @@ function getLeavesOfType(type: string): Leaf[] {
   return result
 }
 
+/**
+ * Detach every live leaf whose `view.viewType === type`. Used by the
+ * plugin host on plugin unload so disabling a plugin in Settings
+ * removes its panels live — without this, leaves linger until the
+ * next app restart purges them (the creator is gone, so hydrate
+ * can't reconstruct them).
+ *
+ * Iterates the leaves registry (covers main dock, sidedocks, AND
+ * floating windows) and snapshots first so we don't mutate during
+ * iteration. Individual `detachLeaf` failures are logged but do not
+ * abort the sweep — a half-swept state is worse than a fully-swept
+ * state where one leaf logged an error.
+ */
+async function detachLeavesByViewType(type: string): Promise<void> {
+  const snapshot = getLeavesOfType(type)
+  for (const leaf of snapshot) {
+    try {
+      await detachLeaf(leaf)
+    } catch (err) {
+      clientLogger.warn(
+        `[workspace] detachLeavesByViewType: failed to detach leaf ${leaf.id} of type '${type}':`,
+        err,
+      )
+    }
+  }
+}
+
 function setActiveLeaf(leaf: Leaf): void {
   if (state().activeLeafId === leaf.id) {
     // Still emit — callers may want to re-assert active for focus side-effects.
@@ -1163,6 +1190,7 @@ export const workspace = {
   setTabActiveIndex,
   reorderLeaves,
   detachLeaf,
+  detachLeavesByViewType,
   moveLeafToDock,
   // BL-029
   popoutLeaf,

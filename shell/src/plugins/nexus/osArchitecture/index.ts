@@ -9,7 +9,7 @@
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { OsArchitectureView } from './OsArchitectureView'
 import { osArchitecturePaneViewCreator } from './OsArchitecturePaneView'
 import { useOsArchitectureStore } from './osArchitectureStore'
@@ -119,7 +119,7 @@ export const osArchitecturePlugin: Plugin = {
     const renderView = () =>
       createElement(OsArchitectureView, { onRefresh: () => void refresh() })
 
-    viewRegistry.register('osArchitecture', osArchitecturePaneViewCreator(renderView))
+    api.viewRegistry.register('osArchitecture', osArchitecturePaneViewCreator(renderView))
 
     api.activityBar.addItem({
       id: 'nexus.osArchitecture.activityItem',

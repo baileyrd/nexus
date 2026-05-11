@@ -1,6 +1,5 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
 import { GraphView } from './GraphView'
 import { graphPaneViewCreator } from './GraphPaneView'
 import {
@@ -112,7 +111,7 @@ export const graphPlugin: Plugin = {
     // also means it doesn't win by accident if something reorders
     // activation.
     // Phase 7: legacy SlotRegistry slot:'rightPanelContent' entry removed.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'graph',
       graphPaneViewCreator(() => createElement(GraphView)),
     )

@@ -6,7 +6,6 @@
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
 import { CanvasView } from './CanvasView'
 import { canvasPaneViewCreator } from './CanvasPaneView'
 import { makeCanvasKernelClient } from './kernelClient'
@@ -121,7 +120,7 @@ export const canvasPlugin: Plugin = {
     const client = makeCanvasKernelClient(api.kernel)
     setCanvasApi(api)
 
-    viewRegistry.register(
+    api.viewRegistry.register(
       'canvas',
       canvasPaneViewCreator((relpath) => {
         if (!relpath) {
@@ -139,7 +138,7 @@ export const canvasPlugin: Plugin = {
 
     // Opens `.canvas` files as leaves of view-type `canvas` via the
     // editor plugin's existing viewTypeForFile() path.
-    viewRegistry.registerExtensions(['canvas'], 'canvas')
+    api.viewRegistry.registerExtensions(['canvas'], 'canvas')
 
     // Commands all dispatch to the currently-focused canvas leaf. A
     // missing handle is a no-op (e.g. palette invocation with no

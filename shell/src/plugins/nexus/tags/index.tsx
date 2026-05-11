@@ -1,7 +1,7 @@
 import { createRoot, type Root } from 'react-dom/client'
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
+import { ViewBase, workspace, type Leaf } from '../../../workspace'
 
 const VIEW_TYPE = 'tags'
 const COMMAND_FOCUS = 'nexus.tags.focus'
@@ -60,7 +60,7 @@ export const tagsPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    viewRegistry.register(VIEW_TYPE, (leaf) => new TagsPaneView(leaf))
+    api.viewRegistry.register(VIEW_TYPE, (leaf) => new TagsPaneView(leaf))
     api.commands.register(COMMAND_FOCUS, async () => {
       const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'right')
       workspace.revealLeaf(leaf)

@@ -10,7 +10,7 @@
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
+import { ViewBase, workspace, type Leaf } from '../../../workspace'
 import { SearchPanelView } from './SearchPanelView'
 import { useSearchPanelStore } from './searchPanelStore'
 import './searchPanel.css'
@@ -71,7 +71,7 @@ export const searchPanelPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    viewRegistry.register(VIEW_TYPE, (leaf) =>
+    api.viewRegistry.register(VIEW_TYPE, (leaf) =>
       new SearchPaneView(leaf, () =>
         createElement(SearchPanelView, {
           kernel: api.kernel,

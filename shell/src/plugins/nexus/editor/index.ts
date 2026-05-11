@@ -481,20 +481,20 @@ export const editorPlugin: Plugin = {
 
     // Phase 7: legacy SlotRegistry slot:'editorArea' entry removed.
     // `.md` opens now land as leaves of type 'markdown' in the main dock.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'markdown',
       markdownViewCreator(
         (relpath, leafId) => createElement(EditorView, { relpath, leafId, onRetry: handleRetry }),
         sessionManager,
       ),
     )
-    viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
+    api.viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
 
     // Override the default no-op empty view (shell/src/workspace/ViewRegistry.ts)
     // with one that renders the Obsidian-style action links — used by
     // the tab-strip `+` button and any other leaf that lands on the
     // empty type (e.g. restored placeholder leaves).
-    viewRegistry.update(EMPTY_VIEW_TYPE, emptyViewCreator)
+    api.viewRegistry.update(EMPTY_VIEW_TYPE, emptyViewCreator)
 
     // Settings panel auto-generates UI from this. Defaults match the
     // pre-settings behaviour so existing users don't see a regression.

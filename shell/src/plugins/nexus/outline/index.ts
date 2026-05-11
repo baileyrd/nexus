@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { OutlineView } from './OutlineView'
 import { outlinePaneViewCreator } from './OutlinePaneView'
 import { useOutlineStore } from './outlineStore'
@@ -58,7 +58,7 @@ export const outlinePlugin: Plugin = {
 
   activate(api: PluginAPI) {
     // Phase 7: legacy SlotRegistry slot:'rightPanelContent' entry removed.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'outline',
       outlinePaneViewCreator(() => createElement(OutlineView)),
     )

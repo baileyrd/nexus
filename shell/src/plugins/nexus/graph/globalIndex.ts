@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { GraphGlobalView } from './GraphGlobalView'
 import { graphGlobalPaneViewCreator } from './GraphGlobalPaneView'
 import { useGlobalGraphStore } from './graphGlobalStore'
@@ -85,7 +85,7 @@ export const graphGlobalPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
-    viewRegistry.register(
+    api.viewRegistry.register(
       VIEW_TYPE,
       graphGlobalPaneViewCreator(() => createElement(GraphGlobalView)),
     )

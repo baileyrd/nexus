@@ -6,7 +6,6 @@
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
 import { BasesView } from './BasesView'
 import { basesPaneViewCreator } from './BasesPaneView'
 import { makeBasesKernelClient } from './kernelClient'
@@ -72,7 +71,7 @@ export const basesPlugin: Plugin = {
     const client = makeBasesKernelClient(api.kernel)
     setRuntime(api, client)
 
-    viewRegistry.register(
+    api.viewRegistry.register(
       'bases',
       basesPaneViewCreator((relpath) => {
         if (!relpath) {
@@ -99,7 +98,7 @@ export const basesPlugin: Plugin = {
     // `.bases` (directory) and `.base` (Obsidian single-file YAML —
     // ADR 0019, read-only) both mount the same view component. The
     // BasesView branches on extension to pick the correct loader.
-    viewRegistry.registerExtensions(['bases', 'base'], 'bases')
+    api.viewRegistry.registerExtensions(['bases', 'base'], 'bases')
 
     api.views.register(DIALOG_VIEW_ID, {
       slot: 'overlay',

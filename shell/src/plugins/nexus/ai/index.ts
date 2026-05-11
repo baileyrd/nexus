@@ -20,7 +20,7 @@
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { useConfigStore } from '../../../stores/configStore'
 import { useContextKeyStore } from '../../../host/ContextKeyService'
 import { eventBus } from '../../../host/EventBus'
@@ -307,7 +307,7 @@ export const aiPlugin: Plugin = {
       void api.commands.execute(COMMAND_OPEN_SETTINGS)
     }
 
-    viewRegistry.register(
+    api.viewRegistry.register(
       'ai-chat',
       aiChatViewCreator(() =>
         createElement(ChatView, {

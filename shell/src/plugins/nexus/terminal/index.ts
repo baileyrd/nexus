@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
-import { viewRegistry, workspace } from '../../../workspace'
+import { workspace } from '../../../workspace'
 import { TerminalView } from './TerminalView'
 import { terminalPaneViewCreator } from './TerminalPaneView'
 import {
@@ -178,7 +178,7 @@ export const terminalPlugin: Plugin = {
 
     // Phase 7: legacy SlotRegistry slot:'panelArea' entry removed.
     // TerminalView now mounts exclusively through the Leaf/View pipeline.
-    viewRegistry.register(
+    api.viewRegistry.register(
       'terminal',
       terminalPaneViewCreator(() =>
         createElement(TerminalView, {
@@ -360,7 +360,7 @@ export const terminalPlugin: Plugin = {
     // (HANDLER_SEND_INPUT, kernel-side appends a newline). If no
     // session exists, the view falls through to `ensureAndReveal`
     // which creates one.
-    viewRegistry.register(
+    api.viewRegistry.register(
       SAVED_COMMANDS_VIEW_TYPE,
       savedCommandsPaneViewCreator(() =>
         createElement(SavedCommandsView, {
@@ -396,7 +396,7 @@ export const terminalPlugin: Plugin = {
     // time. Re-run / promote / delete are wired through the
     // `com.nexus.terminal::adhoc_*` handlers; promote-to-saved updates
     // both stores.
-    viewRegistry.register(
+    api.viewRegistry.register(
       HISTORY_VIEW_TYPE,
       historyPaneViewCreator(() =>
         createElement(HistoryView, {
@@ -424,7 +424,7 @@ export const terminalPlugin: Plugin = {
     // Sibling sidebar leaf to Saved Commands / History. The view
     // owns its own debounced search input — index.ts only handles
     // registration + reveal.
-    viewRegistry.register(
+    api.viewRegistry.register(
       CROSS_SEARCH_VIEW_TYPE,
       crossSearchPaneViewCreator(() =>
         createElement(CrossSearchView, {
