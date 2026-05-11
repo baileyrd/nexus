@@ -1218,11 +1218,23 @@ function useLeafDirty(leaf: Leaf): boolean {
   // — short-circuit to `false`. The relpath is read each render but
   // is stable across re-renders of the same leaf (only `setState`
   // changes it, which triggers a layout-change anyway).
-  const relpath = (() => {
-    if (leaf.view?.viewType !== 'markdown') return undefined
-    const st = leaf.view.getState() as { relpath?: unknown } | undefined
-    return typeof st?.relpath === 'string' ? st.relpath : undefined
-  })()
+  const viewType = leaf.view?.viewType
+  let relpath: string | undefined
+  if (viewType === 'markdown') {
+    const st = leaf.view?.getState() as { relpath?: unknown } | undefined
+    relpath = typeof st?.relpath === 'string' ? st.relpath : undefined
+  }
+  // One-shot diagnostic: log per leaf at first render so we can see
+  // what viewType the workspace sees and whether the relpath lookup
+  // is finding a matching tab. Remove once dirty-dot wiring is
+  // confirmed end-to-end.
+  const loggedRef = useRef(false)
+  if (!loggedRef.current) {
+    loggedRef.current = true
+    clientLogger.info(
+      `[useLeafDirty] leaf.id=${leaf.id} viewType=${String(viewType)} relpath=${String(relpath)}`,
+    )
+  }
   return useEditorStore((s) => {
     if (!relpath) return false
     const tab = s.tabs.find((t) => t.relpath === relpath)
