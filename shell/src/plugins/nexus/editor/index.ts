@@ -1463,11 +1463,24 @@ export const editorPlugin: Plugin = {
           clientLogger.info(
             `[editor.save] start relpath=${tab.relpath} contentLen=${tab.content.length}`,
           )
+          // Snapshot the last 60 chars of CM content so we can compare
+          // it against what the kernel reflects post-sync.
+          const cmTail = tab.content.slice(-60).replace(/\n/g, '\\n')
+          clientLogger.info(`[editor.save] CM tail: ${JSON.stringify(cmTail)}`)
           await editorClient.syncContent(tab.relpath, tab.content)
           const tSync = performance.now()
           clientLogger.info(
             `[editor.save] syncContent done in ${Math.round(tSync - t0)}ms`,
           )
+          try {
+            const postSync = await editorClient.getMarkdown(tab.relpath)
+            const kernelTail = postSync.slice(-60).replace(/\n/g, '\\n')
+            clientLogger.info(
+              `[editor.save] kernel tail post-sync: ${JSON.stringify(kernelTail)}`,
+            )
+          } catch (err) {
+            clientLogger.warn(`[editor.save] getMarkdown failed: ${String(err)}`)
+          }
           sessionManager.resetBridge(tab.relpath)
           try {
             const fresh = await editorClient.getTree(tab.relpath)
