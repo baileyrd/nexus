@@ -1381,12 +1381,13 @@ function TabButton({
           aria-label="Unsaved changes"
           title="Unsaved changes"
           style={{
-            // Small filled circle in the accent colour — the
-            // conventional "modified document" affordance.
-            width: 8,
-            height: 8,
+            // Bright orange so the diagnostic is unambiguous. Will
+            // dial back to var(--interactive-accent) once we've
+            // confirmed the rendering path works.
+            width: 10,
+            height: 10,
             borderRadius: 999,
-            background: 'var(--interactive-accent, currentColor)',
+            background: '#ff6600',
             flex: '0 0 auto',
             marginLeft: 2,
           }}
