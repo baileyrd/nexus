@@ -919,6 +919,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
                 relpath: tab.relpath,
                 kernelClient: runtime.kernelClient,
                 getSnapshot: () => runtime.sessionManager.getSnapshot(tab.relpath),
+                setSnapshot: (snap) => runtime.sessionManager.setSnapshot(tab.relpath, snap),
                 onError: runtime.reportBridgeError,
               }),
               slashCommandExt(),

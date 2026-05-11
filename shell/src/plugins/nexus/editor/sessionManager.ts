@@ -223,15 +223,27 @@ export class SessionManager {
 
   /**
    * Return the cached snapshot for `relpath`, or `null` when the
-   * session isn't open. Used by the Phase 5 transaction bridge to
-   * resolve `tree.root_blocks[0]` at dispatch time. Note: this is the
-   * *open-time* snapshot — subsequent edits advance the kernel-side
-   * revision, but the tree shape on v1's coarse-block path doesn't
-   * change (still a single root). Callers who care about freshness
-   * should call `client.getTree(relpath)` directly.
+   * session isn't open. Initially seeded at `acquire` time; refreshed
+   * via {@link setSnapshot} after every successful kernel mutation so
+   * callers (the transaction bridge's CM-offset translator in
+   * particular) see live block contents rather than the open-time
+   * tree.
    */
   getSnapshot(relpath: string): EditorSnapshot | null {
     return this.entries.get(relpath)?.snapshot ?? null
+  }
+
+  /**
+   * Replace the cached snapshot for `relpath`. Called by the
+   * transaction bridge in its `apply_transaction` success handler so
+   * the next CM-offset translation uses the post-edit tree, not the
+   * open-time one. No-op for paths without a live entry — a stray late
+   * resolution after `release` shouldn't resurrect the cache.
+   */
+  setSnapshot(relpath: string, snapshot: EditorSnapshot): void {
+    const entry = this.entries.get(relpath)
+    if (!entry) return
+    entry.snapshot = snapshot
   }
 
   /**

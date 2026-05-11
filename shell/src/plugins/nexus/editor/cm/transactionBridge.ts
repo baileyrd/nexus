@@ -159,31 +159,16 @@ export function changesToOps(
     }
   }
 
-  // Fallback: one UpdateBlockContent against the first root block,
-  // carrying the whole new doc. Known-imperfect for multi-block docs —
-  // tracked separately.
-  const oldContent = update.startState.doc.toString()
-  const newContent = update.state.doc.toString()
-  if (oldContent === newContent) {
-    return { ops: [], fallbackFullDoc: false }
-  }
-  const rootId = snapshot.tree.root_blocks[0]
-  if (!rootId) {
-    return { ops: [], fallbackFullDoc: true }
-  }
-  return {
-    ops: [
-      {
-        kind: 'update_block_content',
-        id: rootId,
-        old_content: oldContent,
-        new_content: newContent,
-        old_annotations: [],
-        new_annotations: [],
-      },
-    ],
-    fallbackFullDoc: true,
-  }
+  // No single-block translation worked. The previous fallback —
+  // `update_block_content` against `root_blocks[0]` with the whole
+  // doc as `new_content` — actively corrupted the kernel by stuffing
+  // the entire markdown into a single block's content string. Skip
+  // the op instead; CM keeps the user's local state until the next
+  // successful flush (or a reconcile from `getMarkdown`) brings CM
+  // back in line with the kernel. Multi-block edits (Enter, paste)
+  // need real `InsertBlock`/`DeleteBlock` op synthesis — tracked
+  // separately.
+  return { ops: [], fallbackFullDoc: true }
 }
 
 // ── Transaction assembly ─────────────────────────────────────────────────────
@@ -243,6 +228,14 @@ export interface TransactionBridgeOptions {
    *  `() => sessionManager.getSnapshot(relpath)` via a helper, or a
    *  closure that reads from wherever the snapshot lives. */
   getSnapshot: () => EditorSnapshot | null
+  /** Replace the cached snapshot for this relpath. The bridge calls
+   *  this after each successful `apply_transaction` so the next CM-
+   *  offset translation sees the post-edit block tree. Typically
+   *  `(snap) => sessionManager.setSnapshot(relpath, snap)`. Optional so
+   *  existing tests that drive the bridge without a session manager
+   *  keep working — when omitted, the snapshot stays stale and the
+   *  block-pos translator will bail more aggressively. */
+  setSnapshot?: (snapshot: EditorSnapshot) => void
   /** Report an error from the async dispatch path. Defaults to
    *  `console.error`. Plugin-layer callers typically wire this to
    *  `api.notifications.show({ type: 'error', message })`. */
@@ -281,6 +274,7 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     relpath,
     kernelClient,
     getSnapshot,
+    setSnapshot,
     onError = defaultErrorReporter,
   } = opts
 
@@ -329,15 +323,27 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     void kernelClient
       .applyTransaction(relpath, tx)
       .then(async (snapshot) => {
+        // Refresh the cached snapshot so the next CM-offset translation
+        // sees the post-edit block tree. Without this, a heading whose
+        // content grew from "Hello" to "Hello!" would still resolve
+        // against the open-time "Hello" — the source-vs-content equality
+        // check would fail and the bridge would bail to the (now empty)
+        // fallback, silently dropping the next keystroke.
+        setSnapshot?.(snapshot)
         let canonical: string
         try {
           canonical = await kernelClient.getMarkdown(relpath)
         } catch (err) {
           inFlight--
+          if (pending.length > 0) scheduleFlush()
           onError('editor bridge: getMarkdown failed after apply', err)
           return
         }
         inFlight--
+        // Pending keystrokes that accumulated during the round-trip
+        // were held back by the `inFlight > 0` gate in `flush`. Drain
+        // them now against the freshly-refreshed snapshot.
+        if (pending.length > 0) scheduleFlush()
         reconcile(view, canonical, snapshot.revision)
       })
       .catch((err) => {
@@ -347,10 +353,12 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
           .getMarkdown(relpath)
           .then((canonical) => {
             inFlight--
+            if (pending.length > 0) scheduleFlush()
             reconcile(view, canonical, null)
           })
           .catch(() => {
             inFlight--
+            if (pending.length > 0) scheduleFlush()
           })
       })
   }
@@ -358,35 +366,45 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
   const flush = (): void => {
     rafHandle = null
     if (pending.length === 0) return
+    if (inFlight > 0) {
+      // Snapshot won't be refreshed until the in-flight apply returns.
+      // Translating against a stale snapshot would either misroute the
+      // op or bail to the (now-empty) fallback and silently drop the
+      // edit. The post-apply `.then` schedules another flush, which
+      // drains accumulated pending updates in one composed batch.
+      return
+    }
     const batch = pending.splice(0, pending.length)
 
     const snapshot = getSnapshot()
-    const rootId = snapshot?.tree.root_blocks[0]
-    if (!snapshot || !rootId) return
+    if (!snapshot) return
 
-    let ops: Operation[]
+    // Collapse a multi-update batch into a single synthetic update by
+    // composing its ChangeSets. This sidesteps the in-batch snapshot
+    // staleness problem: each individual u[i] would otherwise need to
+    // be translated against a mirror of the snapshot that already
+    // reflects u[0..i-1]'s mutations. The composed change set runs
+    // against the batch's *original* startState, which the cached
+    // snapshot matches (the snapshot only advances at apply-success).
+    let synthetic: ViewUpdate
     if (batch.length === 1) {
-      ops = changesToOps(batch[0]!, snapshot).ops
+      synthetic = batch[0]!
     } else {
       const first = batch[0]!
       const last = batch[batch.length - 1]!
-      const oldContent = first.startState.doc.toString()
-      const newContent = last.state.doc.toString()
-      if (oldContent === newContent) {
-        ops = []
-      } else {
-        ops = [
-          {
-            kind: 'update_block_content',
-            id: rootId,
-            old_content: oldContent,
-            new_content: newContent,
-            old_annotations: [],
-            new_annotations: [],
-          },
-        ]
+      let composed = first.changes
+      for (let i = 1; i < batch.length; i++) {
+        composed = composed.compose(batch[i]!.changes)
       }
+      synthetic = {
+        docChanged: true,
+        changes: composed,
+        startState: first.startState,
+        state: last.state,
+        view: last.view,
+      } as ViewUpdate
     }
+    const ops = changesToOps(synthetic, snapshot).ops
     if (ops.length === 0) return
 
     const tx = makeTransaction(ops, { source: 'user' })

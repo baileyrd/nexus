@@ -354,11 +354,13 @@ test('changesToOps: delete inside a heading translates both ends to byte offsets
   }
 })
 
-test('changesToOps: insert in a block with inline formatting bails to the full-doc fallback', () => {
+test('changesToOps: insert in a block with inline formatting bails (no ops emitted)', () => {
   // Source: `# *Hi*`. Heading block content (per parser) is "Hi" — the
   // `*` marks are stripped into an Italic annotation. The source slice
   // at content start..end = "*Hi*" which differs from block.content =
-  // "Hi", so resolveBlockPos returns null and we fall back.
+  // "Hi", so resolveBlockPos returns null. The previous coarse
+  // fallback (UpdateBlockContent with the whole doc) corrupted the
+  // kernel; we now skip the op and let a later reconcile catch CM up.
   const start = mdState('# *Hi*')
   const tr = start.update({ changes: { from: 6, to: 6, insert: '!' } })
   const update = {
@@ -373,9 +375,8 @@ test('changesToOps: insert in a block with inline formatting bails to the full-d
     { id: ROOT_ID, content: 'Hi', kind: 'heading', level: 1 },
   ])
   const { ops, fallbackFullDoc } = changesToOps(update, snap)
-  assert.equal(fallbackFullDoc, true)
-  const op = ops[0]!
-  assert.equal(op.kind, 'update_block_content')
+  assert.equal(fallbackFullDoc, true, 'translation bailed')
+  assert.equal(ops.length, 0, 'no op emitted — the broken fallback was removed')
 })
 
 test('changesToOps: inserted newline bypasses single-block translation', () => {
@@ -391,11 +392,10 @@ test('changesToOps: inserted newline bypasses single-block translation', () => {
 
   const { ops, fallbackFullDoc } = changesToOps(update, snapshotForParagraph('hello'))
   assert.equal(fallbackFullDoc, true, 'newline insertion falls back, since it would split the block')
-  const op = ops[0]!
-  assert.equal(op.kind, 'update_block_content')
+  assert.equal(ops.length, 0)
 })
 
-test('changesToOps: replacement falls back to update_block_content', () => {
+test('changesToOps: replacement falls back (no ops emitted)', () => {
   const start = mdState('hello')
   const tr = start.update({ changes: { from: 0, to: 5, insert: 'WORLD' } })
   const update = {
@@ -408,14 +408,7 @@ test('changesToOps: replacement falls back to update_block_content', () => {
 
   const { ops, fallbackFullDoc } = changesToOps(update, snapshotForParagraph('hello'))
   assert.equal(fallbackFullDoc, true)
-  assert.equal(ops.length, 1)
-  const op = ops[0]!
-  assert.equal(op.kind, 'update_block_content')
-  if (op.kind === 'update_block_content') {
-    assert.equal(op.id, ROOT_ID)
-    assert.equal(op.old_content, 'hello')
-    assert.equal(op.new_content, 'WORLD')
-  }
+  assert.equal(ops.length, 0, 'replacement (delete + insert) is not a pure insert or delete')
 })
 
 // ── makeTransaction ──────────────────────────────────────────────────────────
@@ -445,40 +438,56 @@ test('makeTransaction: ai source marks ai_edit true', () => {
   assert.equal(tx.metadata.ai_edit, true)
 })
 
+// Build a ViewUpdate-shaped object from a CM transaction's real
+// ChangeSet (not a synthetic whole-doc replace). The bridge core tests
+// need this so `changesToOps` sees the precise per-keystroke change
+// segments that translation depends on.
+function realUpdate(
+  startState: EditorState,
+  tr: ReturnType<EditorState['update']>,
+  view: BridgeViewLike,
+): import('@codemirror/view').ViewUpdate {
+  return {
+    docChanged: startState.doc.toString() !== tr.state.doc.toString(),
+    changes: tr.changes,
+    startState,
+    state: tr.state,
+    view: view as unknown as import('@codemirror/view').EditorView,
+  } as unknown as import('@codemirror/view').ViewUpdate
+}
+
 // ── Bridge core: five keystrokes batch into one transaction ─────────────────
 
-test('bridge core: five keystrokes batch into ONE transaction with pending-id tracking', async () => {
+test('bridge core: five keystrokes batch into ONE transaction with composed op', async () => {
   resetStore()
   const received: Transaction[] = []
   const { api } = makeMockApi({
     apply_transaction: (args) => {
       received.push((args as { transaction: Transaction }).transaction)
-      return snapshotWithRoot('notes/a.md', 'hello')
+      return snapshotForParagraph('abcdef')
     },
-    get_markdown: () => 'hello',
+    get_markdown: () => 'abcdef',
   })
   const client = new EditorKernelClient(api)
-  const snapshot = snapshotWithRoot('notes/a.md', '')
+  const snapshot = snapshotForParagraph('a')
   const core = createBridgeCore({
     relpath: 'notes/a.md',
     kernelClient: client,
     getSnapshot: () => snapshot,
   })
 
-  const view = makeStubView('')
-  // Simulate five sequential keystrokes as five separate ViewUpdates
-  // on the same rAF tick. Each carries a proper startState→state pair
-  // from a chain of EditorState transactions.
-  let st = EditorState.create({ doc: '' })
-  for (const ch of 'hello') {
+  const view = makeStubView('a')
+  // Start with non-empty paragraph (Lezer doesn't emit a Paragraph
+  // node for an empty doc, so the translator can't pair anything to
+  // root_blocks[0] in that state). Type five chars at the end.
+  let st = mdState('a')
+  for (const ch of 'bcdef') {
     const tr = st.update({ changes: { from: st.doc.length, to: st.doc.length, insert: ch } })
-    const update = makeFakeUpdate(st, tr.state, view)
-    core.push(update)
+    core.push(realUpdate(st, tr, view))
     st = tr.state
   }
 
   core.flushSync()
-  // Let the async apply + getMarkdown promise chain resolve.
   await Promise.resolve()
   await Promise.resolve()
   await new Promise((r) => setTimeout(r, 0))
@@ -486,11 +495,15 @@ test('bridge core: five keystrokes batch into ONE transaction with pending-id tr
 
   assert.equal(received.length, 1, 'five keystrokes coalesce into one transaction')
   const tx = received[0]!
-  assert.equal(tx.operations.length, 1, 'multi-update batch collapses to one op')
-  assert.equal(tx.operations[0]!.kind, 'update_block_content')
+  assert.equal(tx.operations.length, 1, 'composed change set yields one op')
+  const op = tx.operations[0]!
+  assert.equal(op.kind, 'insert_text', 'translated to InsertText against the paragraph block')
+  if (op.kind === 'insert_text') {
+    assert.equal(op.block_id, ROOT_ID)
+    assert.equal(op.pos, 1)
+    assert.equal(op.text, 'bcdef')
+  }
 
-  // Pending-id was inserted before dispatch and is still there until
-  // the Phase-4 echo consumes it.
   assert.equal(
     useEditorStore.getState().pendingLocalRevisions.has(tx.id),
     true,
@@ -506,13 +519,13 @@ test('bridge core: reconciles CM doc via getMarkdown after apply_transaction', a
   resetStore()
   const { api } = makeMockApi({
     apply_transaction: () => ({
-      ...snapshotWithRoot('notes/b.md', 'unused'),
+      ...snapshotForParagraph('oldX'),
       revision: 7,
     }),
     get_markdown: () => 'REMOTE CANONICAL',
   })
   const client = new EditorKernelClient(api)
-  const snapshot = snapshotWithRoot('notes/b.md', 'old')
+  const snapshot = snapshotForParagraph('old')
   const core = createBridgeCore({
     relpath: 'notes/b.md',
     kernelClient: client,
@@ -520,9 +533,9 @@ test('bridge core: reconciles CM doc via getMarkdown after apply_transaction', a
   })
   const view = makeStubView('oldX')
 
-  const start = EditorState.create({ doc: 'old' })
+  const start = mdState('old')
   const tr = start.update({ changes: { from: 3, to: 3, insert: 'X' } })
-  core.push(makeFakeUpdate(start, tr.state, view))
+  core.push(realUpdate(start, tr, view))
   core.flushSync()
 
   await Promise.resolve()
@@ -532,7 +545,6 @@ test('bridge core: reconciles CM doc via getMarkdown after apply_transaction', a
 
   assert.equal(view.dispatched.length, 1, 'bridge issued a reconciliation dispatch')
   assert.equal(view.dispatched[0]!.insert, 'REMOTE CANONICAL')
-  // Revision was bumped in the store.
   assert.equal(
     useEditorStore.getState().sessionRevision.get('notes/b.md'),
     7,
@@ -540,20 +552,72 @@ test('bridge core: reconciles CM doc via getMarkdown after apply_transaction', a
   )
 })
 
+// ── Snapshot is refreshed after apply ────────────────────────────────────────
+
+test('bridge core: setSnapshot is called with the post-apply snapshot', async () => {
+  resetStore()
+  const postApplySnap = snapshotForParagraph('hello!')
+  const { api } = makeMockApi({
+    apply_transaction: () => postApplySnap,
+    get_markdown: () => 'hello!',
+  })
+  const client = new EditorKernelClient(api)
+  let cached = snapshotForParagraph('hello')
+  const view = makeStubView('hello')
+  const core = createBridgeCore({
+    relpath: 'notes/s.md',
+    kernelClient: client,
+    getSnapshot: () => cached,
+    setSnapshot: (snap) => {
+      cached = snap
+    },
+  })
+
+  const start = mdState('hello')
+  const tr = start.update({ changes: { from: 5, to: 5, insert: '!' } })
+  core.push(realUpdate(start, tr, view))
+  core.flushSync()
+
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((r) => setTimeout(r, 0))
+  await Promise.resolve()
+
+  assert.equal(
+    cached.tree.blocks[ROOT_ID]?.content,
+    'hello!',
+    'cached snapshot now reflects the post-apply block content',
+  )
+})
+
 // ── Reconcile defers while typing is in flight ───────────────────────────────
 
 test('bridge core: reconcile skips doc-replace while a follow-up keystroke is pending', async () => {
   resetStore()
-  // Two responses queued by call order. Both `apply_transaction`s
-  // return the *same* canonical the first time we ask, then a
-  // catch-up canonical that matches the second update — so the first
-  // reconcile, if it ran, would clobber the second keystroke.
   let applyCount = 0
   let getCount = 0
+  let snap = snapshotForParagraph('old')
   const { api } = makeMockApi({
-    apply_transaction: () => {
+    apply_transaction: (args) => {
       applyCount++
-      return snapshotWithRoot('notes/d.md', 'old')
+      // Advance the cached snapshot the way the real kernel would so
+      // the second keystroke's translation has a fresh content string.
+      const op = (args as { transaction: Transaction }).transaction.operations[0]
+      if (op?.kind === 'insert_text') {
+        const block = snap.tree.blocks[op.block_id]!
+        const next = block.content.slice(0, op.pos) + op.text + block.content.slice(op.pos)
+        snap = {
+          ...snap,
+          tree: {
+            ...snap.tree,
+            blocks: {
+              ...snap.tree.blocks,
+              [op.block_id]: { ...block, content: next },
+            },
+          },
+        }
+      }
+      return snap
     },
     get_markdown: () => {
       getCount++
@@ -563,18 +627,20 @@ test('bridge core: reconcile skips doc-replace while a follow-up keystroke is pe
     },
   })
   const client = new EditorKernelClient(api)
-  const snapshot = snapshotWithRoot('notes/d.md', 'old')
+  const view = makeStubView('oldX')
   const core = createBridgeCore({
     relpath: 'notes/d.md',
     kernelClient: client,
-    getSnapshot: () => snapshot,
+    getSnapshot: () => snap,
+    setSnapshot: (s) => {
+      snap = s
+    },
   })
-  const view = makeStubView('oldX')
 
   // First keystroke: doc goes "old" → "oldX". Flush sends a transaction.
-  let st = EditorState.create({ doc: 'old' })
+  let st = mdState('old')
   let tr = st.update({ changes: { from: 3, to: 3, insert: 'X' } })
-  core.push(makeFakeUpdate(st, tr.state, view))
+  core.push(realUpdate(st, tr, view))
   st = tr.state
   core.flushSync()
 
@@ -583,7 +649,7 @@ test('bridge core: reconcile skips doc-replace while a follow-up keystroke is pe
   // another update.
   view.setDoc('oldXY')
   tr = st.update({ changes: { from: 4, to: 4, insert: 'Y' } })
-  core.push(makeFakeUpdate(st, tr.state, view))
+  core.push(realUpdate(st, tr, view))
   st = tr.state
 
   // Drain the first apply's promise chain. The reconcile call inside
