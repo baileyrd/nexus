@@ -41,6 +41,7 @@ import { disableBuiltinPlugin } from '../host/pluginActivation'
 import { ALL_PLUGINS } from '../plugins/catalog'
 import { contextKeyService } from '../host/ContextKeyService'
 import { clientLogger } from '../host/clientLogger'
+import { useEditorStore, isDirty } from '../plugins/nexus/editor/editorStore'
 
 // ---------------------------------------------------------------------------
 // Layout-change subscription hook.
@@ -1203,6 +1204,33 @@ function iconForSidebarLeaf(leaf: Leaf): string | null {
   return null
 }
 
+/**
+ * Read a leaf's dirty state from the editor store. Returns `true` when
+ * the leaf hosts a markdown view whose backing tab has unsaved edits,
+ * `false` otherwise (non-markdown views, leaves without a relpath,
+ * tabs the editor plugin doesn't know about). Subscribes via a Zustand
+ * selector so the TabButton re-renders the dot when the tab flips
+ * dirty / clean.
+ */
+function useLeafDirty(leaf: Leaf): boolean {
+  // The markdown view exposes its relpath through `getState()` as
+  // `{ relpath?: string }`. Other view types don't carry an editor tab
+  // — short-circuit to `false`. The relpath is read each render but
+  // is stable across re-renders of the same leaf (only `setState`
+  // changes it, which triggers a layout-change anyway).
+  const relpath = (() => {
+    if (leaf.view?.viewType !== 'markdown') return undefined
+    const st = leaf.view.getState() as { relpath?: unknown } | undefined
+    return typeof st?.relpath === 'string' ? st.relpath : undefined
+  })()
+  return useEditorStore((s) => {
+    if (!relpath) return false
+    const tab = s.tabs.find((t) => t.relpath === relpath)
+    if (!tab) return false
+    return isDirty(tab, s)
+  })
+}
+
 function TabButton({
   leaf,
   active,
@@ -1218,6 +1246,7 @@ function TabButton({
   onTabDragEnd,
   isDragOver,
 }: TabButtonProps): JSX.Element {
+  const dirty = useLeafDirty(leaf)
   // Views may override `getDisplayText()` to show a per-instance label
   // (e.g. markdown shows the filename). Fall back to `viewType`, or
   // "Empty" when the view is null.
@@ -1352,6 +1381,22 @@ function TabButton({
       >
         {label}
       </span>
+      {dirty && (
+        <span
+          aria-label="Unsaved changes"
+          title="Unsaved changes"
+          style={{
+            // Small filled circle in the accent colour — the
+            // conventional "modified document" affordance.
+            width: 8,
+            height: 8,
+            borderRadius: 999,
+            background: 'var(--interactive-accent, currentColor)',
+            flex: '0 0 auto',
+            marginLeft: 2,
+          }}
+        />
+      )}
       {closable && (
         <button
           type="button"
