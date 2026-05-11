@@ -304,6 +304,14 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
   // chain ensures the kernel sees `apply_transaction` calls in
   // generation order.
   let dispatchChain: Promise<void> = Promise.resolve()
+  // Bumped whenever an apply fails. Each queued chain entry captures
+  // the generation it was scheduled under; entries whose generation no
+  // longer matches the current value skip their work. Without this, a
+  // single rejection cascades through every subsequent queued op (each
+  // computed against an optimistic-mirror state the kernel never
+  // reached), so each one in turn rejects and triggers another
+  // recovery — visible to the user as repeated flicker.
+  let dispatchGeneration = 0
 
   const reconcile = (
     view: BridgeViewLike,
@@ -339,7 +347,18 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
         o.kind === 'delete_text' ||
         o.kind === 'update_annotations',
     )
+    const myGen = dispatchGeneration
     dispatchChain = dispatchChain.then(async () => {
+      if (myGen !== dispatchGeneration) {
+        // A prior op in this chain failed; this op's byte offsets were
+        // computed against an optimistic-mirror state the kernel never
+        // reached. Sending it would just trigger another rejection and
+        // another full-doc reconcile flicker. Drop it silently — CM
+        // keeps the user's typing locally, and a future explicit
+        // resync (save flow, focus change) reconciles content.
+        useEditorStore.getState().consumePendingLocalRevision(tx.id)
+        return
+      }
       try {
         const snapshot = await kernelClient.applyTransaction(relpath, tx)
         // Push the authoritative snapshot back to sessionManager so
@@ -355,21 +374,26 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
       } catch (err) {
         useEditorStore.getState().consumePendingLocalRevision(tx.id)
         onError('editor bridge: apply_transaction failed', err)
-        // Mirror is ahead of reality — kernel didn't apply this op (or
-        // a prior one in the chain). Refetch the authoritative tree so
-        // the next translation has correct block contents.
+        // Mirror is ahead of reality — kernel didn't apply this op.
+        // Bump the generation so subsequent queued ops skip themselves
+        // (they were computed against an unreachable state). Refetch
+        // the authoritative tree so the next translation has correct
+        // block contents.
+        //
+        // Deliberately *not* reconciling CM here. Replacing the doc
+        // out from under the user causes visible flicker, and the
+        // common cause of a failure (a block-merging keystroke we
+        // didn't translate, e.g. backspace across a paragraph
+        // boundary) leaves CM with the user's intended state — we'd
+        // rather diverge silently than yank their edits back. A
+        // higher-level resync (save / focus) can push CM content to
+        // the kernel when needed.
+        dispatchGeneration++
         try {
           const fresh = await kernelClient.getTree(relpath)
           mirror = fresh
-          setSnapshot?.(fresh)
         } catch {
           mirror = null
-        }
-        try {
-          const canonical = await kernelClient.getMarkdown(relpath)
-          reconcile(view, canonical, null)
-        } catch {
-          // best-effort
         }
       }
     })
