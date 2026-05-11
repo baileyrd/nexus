@@ -1472,6 +1472,15 @@ export const editorPlugin: Plugin = {
           try {
             const fresh = await editorClient.getTree(tab.relpath)
             sessionManager.setSnapshot(tab.relpath, fresh)
+            // Push the post-sync revision into the store *now* rather
+            // than waiting for the async `changed` event from sync_content
+            // to land. `markSaved` snapshots `sessionRevision` into
+            // `savedRevision`, so if the event arrives after markSaved
+            // the tab would stay dirty (`savedRevision = K` but
+            // `sessionRevision` later becomes `K+1`).
+            useEditorStore
+              .getState()
+              .setSessionRevision(tab.relpath, fresh.revision)
           } catch {
             // get_tree is a defensive freshness pull; if it fails the
             // next bridge lazy-init will re-fetch via openSession's
