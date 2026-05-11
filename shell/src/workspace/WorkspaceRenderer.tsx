@@ -1213,32 +1213,37 @@ function iconForSidebarLeaf(leaf: Leaf): string | null {
  * dirty / clean.
  */
 function useLeafDirty(leaf: Leaf): boolean {
-  // The markdown view exposes its relpath through `getState()` as
-  // `{ relpath?: string }`. Other view types don't carry an editor tab
-  // — short-circuit to `false`. The relpath is read each render but
-  // is stable across re-renders of the same leaf (only `setState`
-  // changes it, which triggers a layout-change anyway).
   const relpath = (() => {
     if (leaf.view?.viewType !== 'markdown') return undefined
     const st = leaf.view.getState() as { relpath?: unknown } | undefined
     return typeof st?.relpath === 'string' ? st.relpath : undefined
   })()
-  const dirty = useEditorStore((s) => {
-    if (!relpath) return false
+  // Deeper diagnostic for the markdown leaf — also subscribe to the
+  // raw content+revision values so the effect re-fires when *any* of
+  // them changes, even if the resulting `dirty` boolean doesn't flip.
+  // Lets us see whether setContent and apply_transaction are reaching
+  // the store at all.
+  const probe = useEditorStore((s) => {
+    if (!relpath) return null
     const tab = s.tabs.find((t) => t.relpath === relpath)
-    if (!tab) return false
-    return isDirty(tab, s)
+    if (!tab) return { tabFound: false } as const
+    return {
+      tabFound: true,
+      contentLen: tab.content.length,
+      savedContentLen: tab.savedContent.length,
+      sessionRev: s.sessionRevision.get(relpath) ?? null,
+      savedRev: s.savedRevision.get(relpath) ?? null,
+      dirty: isDirty(tab, s),
+    }
   })
-  // Effect-based diagnostic — runs after render so it can't throw
-  // during the render tree walk. Logs only when the resolved relpath
-  // or the dirty state changes, so we get one line per state
-  // transition instead of one per re-render.
   useEffect(() => {
+    if (leaf.view?.viewType !== 'markdown') return
     clientLogger.info(
-      `[useLeafDirty] leaf.id=${leaf.id} viewType=${String(leaf.view?.viewType)} relpath=${String(relpath)} dirty=${dirty}`,
+      `[useLeafDirty:md] leaf.id=${leaf.id} relpath=${String(relpath)} probe=${JSON.stringify(probe)}`,
     )
-  }, [leaf.id, leaf.view, relpath, dirty])
-  return dirty
+  }, [leaf.id, leaf.view, relpath, probe])
+  if (!probe || probe.tabFound !== true) return false
+  return probe.dirty === true
 }
 
 function TabButton({
