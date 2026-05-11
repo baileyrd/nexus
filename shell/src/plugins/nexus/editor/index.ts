@@ -1459,7 +1459,15 @@ export const editorPlugin: Plugin = {
           // any queued chain entry against the old IDs short-circuits
           // and the next user keystroke re-translates against the
           // refreshed tree.
+          const t0 = performance.now()
+          clientLogger.info(
+            `[editor.save] start relpath=${tab.relpath} contentLen=${tab.content.length}`,
+          )
           await editorClient.syncContent(tab.relpath, tab.content)
+          const tSync = performance.now()
+          clientLogger.info(
+            `[editor.save] syncContent done in ${Math.round(tSync - t0)}ms`,
+          )
           sessionManager.resetBridge(tab.relpath)
           try {
             const fresh = await editorClient.getTree(tab.relpath)
@@ -1469,7 +1477,15 @@ export const editorPlugin: Plugin = {
             // next bridge lazy-init will re-fetch via openSession's
             // cached snapshot. Save still proceeds.
           }
+          const tGet = performance.now()
+          clientLogger.info(
+            `[editor.save] resetBridge+getTree done in ${Math.round(tGet - tSync)}ms`,
+          )
           await editorClient.saveSession(tab.relpath)
+          const tSave = performance.now()
+          clientLogger.info(
+            `[editor.save] saveSession done in ${Math.round(tSave - tGet)}ms (total ${Math.round(tSave - t0)}ms)`,
+          )
           useEditorStore.getState().markSaved(tab.relpath)
           // BL-045 — broadcast a save event so opt-in features
           // (auto-enrichment, etc.) can react. Payload is intentionally
