@@ -1223,12 +1223,22 @@ function useLeafDirty(leaf: Leaf): boolean {
     const st = leaf.view.getState() as { relpath?: unknown } | undefined
     return typeof st?.relpath === 'string' ? st.relpath : undefined
   })()
-  return useEditorStore((s) => {
+  const dirty = useEditorStore((s) => {
     if (!relpath) return false
     const tab = s.tabs.find((t) => t.relpath === relpath)
     if (!tab) return false
     return isDirty(tab, s)
   })
+  // Effect-based diagnostic — runs after render so it can't throw
+  // during the render tree walk. Logs only when the resolved relpath
+  // or the dirty state changes, so we get one line per state
+  // transition instead of one per re-render.
+  useEffect(() => {
+    clientLogger.info(
+      `[useLeafDirty] leaf.id=${leaf.id} viewType=${String(leaf.view?.viewType)} relpath=${String(relpath)} dirty=${dirty}`,
+    )
+  }, [leaf.id, leaf.view, relpath, dirty])
+  return dirty
 }
 
 function TabButton({
