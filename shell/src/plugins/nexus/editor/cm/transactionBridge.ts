@@ -236,6 +236,13 @@ export interface TransactionBridgeOptions {
    *  keep working — when omitted, the snapshot stays stale and the
    *  block-pos translator will bail more aggressively. */
   setSnapshot?: (snapshot: EditorSnapshot) => void
+  /** Receive a `reset` callback that, when invoked, clears the
+   *  optimistic mirror and cancels every queued chain entry. The save
+   *  flow calls this after `sync_content` pushes CM markdown into the
+   *  kernel — the kernel's block IDs change in that path, so any
+   *  in-flight op against the old IDs would be a doomed dispatch.
+   *  Optional so headless tests can skip the wiring. */
+  registerReset?: (reset: () => void) => void
   /** Report an error from the async dispatch path. Defaults to
    *  `console.error`. Plugin-layer callers typically wire this to
    *  `api.notifications.show({ type: 'error', message })`. */
@@ -275,6 +282,7 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
     kernelClient,
     getSnapshot,
     setSnapshot,
+    registerReset,
     onError = defaultErrorReporter,
   } = opts
 
@@ -312,6 +320,16 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
   // reached), so each one in turn rejects and triggers another
   // recovery — visible to the user as repeated flicker.
   let dispatchGeneration = 0
+
+  registerReset?.(() => {
+    // Clear the mirror so the next flush re-inits from the (now
+    // freshly-set) sessionManager snapshot, and bump the generation
+    // so any queued chain entry computed against the discarded
+    // mirror short-circuits instead of issuing a dispatch with stale
+    // block IDs or byte offsets.
+    mirror = null
+    dispatchGeneration++
+  })
 
   const reconcile = (
     view: BridgeViewLike,

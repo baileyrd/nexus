@@ -27,6 +27,7 @@ const CMD = {
   applyTransaction: 'apply_transaction',
   undo: 'undo',
   redo: 'redo',
+  syncContent: 'sync_content',
   getMarkdown: 'get_markdown',
   stampBlock: 'stamp_block',
   executeDatabaseView: 'execute_database_view',
@@ -104,6 +105,30 @@ export class EditorKernelClient {
   /** Persist the session's block tree to disk via `com.nexus.storage`. */
   async saveSession(relpath: string): Promise<void> {
     await this.api.invoke(EDITOR_PLUGIN_ID, CMD.save, { relpath })
+  }
+
+  /**
+   * Reparse `content` and replace the session's in-memory block tree
+   * with the result. Bumps the session revision; the resulting `changed`
+   * event carries `transaction_id: null` so listeners know this wasn't
+   * an `apply_transaction` echo.
+   *
+   * Used by the save flow to push CM's authoritative markdown into the
+   * kernel before writing to disk — without this, any divergence
+   * between CM and the kernel (caused by an op the bridge couldn't
+   * translate, e.g. a block-merging backspace) would silently persist
+   * the kernel's pre-divergence state and lose the user's edits.
+   *
+   * Undo history is intentionally *not* threaded through this path —
+   * the kernel-side handler leaves the undo tree untouched, treating
+   * sync_content as a fresh-open. Callers that want undoable edits
+   * should keep routing through `apply_transaction`.
+   */
+  async syncContent(relpath: string, content: string): Promise<void> {
+    await this.api.invoke(EDITOR_PLUGIN_ID, CMD.syncContent, {
+      relpath,
+      content,
+    })
   }
 
   /**

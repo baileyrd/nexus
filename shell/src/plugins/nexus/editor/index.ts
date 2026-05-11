@@ -1444,6 +1444,31 @@ export const editorPlugin: Plugin = {
           // `MarkdownSerializer::serialize` under the session lock and
           // hands off to `com.nexus.storage::write_file` atomically
           // (see `crates/nexus-editor/src/core_plugin.rs` ~L370).
+          //
+          // First push CM's authoritative markdown into the kernel via
+          // `sync_content`. The transaction bridge tries hard to keep
+          // the kernel tree in sync with CM through `apply_transaction`
+          // ops, but any op the translator can't safely express (block-
+          // merging backspace, edits inside inline-formatted spans,
+          // etc.) leaves CM ahead of the kernel. Without this push,
+          // `save` would write the kernel's pre-divergence state and
+          // silently lose the user's edits.
+          //
+          // After sync_content the kernel re-parses and assigns fresh
+          // block IDs, so we reset the bridge's optimistic mirror —
+          // any queued chain entry against the old IDs short-circuits
+          // and the next user keystroke re-translates against the
+          // refreshed tree.
+          await editorClient.syncContent(tab.relpath, tab.content)
+          sessionManager.resetBridge(tab.relpath)
+          try {
+            const fresh = await editorClient.getTree(tab.relpath)
+            sessionManager.setSnapshot(tab.relpath, fresh)
+          } catch {
+            // get_tree is a defensive freshness pull; if it fails the
+            // next bridge lazy-init will re-fetch via openSession's
+            // cached snapshot. Save still proceeds.
+          }
           await editorClient.saveSession(tab.relpath)
           useEditorStore.getState().markSaved(tab.relpath)
           // BL-045 — broadcast a save event so opt-in features

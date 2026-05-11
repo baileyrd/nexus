@@ -107,6 +107,10 @@ export class SessionManager {
   private readonly api: KernelAPI | null
   private readonly entries = new Map<string, Entry>()
   private readonly changedListeners = new Set<EditorChangedListener>()
+  // Per-relpath callbacks registered by the transaction bridge so the
+  // save flow can ask the bridge to drop its optimistic mirror after a
+  // `sync_content` push changes the kernel-side block IDs.
+  private readonly bridgeResetters = new Map<string, () => void>()
 
   constructor(client: EditorKernelClient, api: KernelAPI | null = null) {
     this.client = client
@@ -244,6 +248,31 @@ export class SessionManager {
     const entry = this.entries.get(relpath)
     if (!entry) return
     entry.snapshot = snapshot
+  }
+
+  /**
+   * Register a `reset` callback for `relpath`. The transaction bridge
+   * calls this once during initialization; the save flow invokes the
+   * stored callback after a `sync_content` push so the bridge drops
+   * its optimistic mirror (whose block IDs no longer match the
+   * kernel's freshly-parsed tree).
+   *
+   * Returns an unsubscribe handle the bridge can call on tear-down.
+   */
+  registerBridgeReset(relpath: string, reset: () => void): () => void {
+    this.bridgeResetters.set(relpath, reset)
+    return () => {
+      if (this.bridgeResetters.get(relpath) === reset) {
+        this.bridgeResetters.delete(relpath)
+      }
+    }
+  }
+
+  /** Invoke the bridge reset callback for `relpath`, if one is
+   *  registered. No-op when no bridge is wired (untitled buffers,
+   *  unit-test setups). */
+  resetBridge(relpath: string): void {
+    this.bridgeResetters.get(relpath)?.()
   }
 
   /**
