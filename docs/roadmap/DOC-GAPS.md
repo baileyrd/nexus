@@ -218,7 +218,7 @@ actual sidecar layout.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 3
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Doc describes `<Card />`, `<Alert />`, `<Badge />` and
 `editor.registerMdxComponent` — none exist under `shell/src`. The
@@ -227,6 +227,21 @@ tree (declarative, host-walked); the doc shows React JSX.
 
 **Definition of done:** Either build the components (promote to a BL
 entry under PRD-08) or remove the section and add a "planned" pointer.
+
+**Resolution.** Doc-rewrite path (no components built). The MDX
+extractor + renderer ship today (per
+`IMPLEMENTATION_STATUS.md` and the CM6 `mdxComponentExtension`); the
+gap was the doc claiming Card/Callout/Alert/Badge as built-ins and
+showing a fictional `registerMdxComponent(name, options)` shape. The
+real API is `ctx.editor.registerMdxComponent(component: MdxComponent)`
+where `MdxComponent = { id, name, description?, render(props): PanelNode }`
+— host-walked declarative output, not JSX/DOM. Rewrote the §MDX
+components and §Custom components sections to: (a) make explicit that
+no components ship built-in, plugins author them; (b) show the real
+single-argument `MdxComponent` shape with a `PanelNode`-returning
+`render`; (c) cite `packages/nexus-extension-api/src/index.ts` as the
+authoritative source. Embeds section was untouched — embeds
+(`![[Note]]`, `![[image.png]]`) are real per PRD-06 ✅.
 
 ---
 
