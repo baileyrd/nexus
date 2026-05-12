@@ -989,7 +989,7 @@ implement install-from-URL as a standalone item (BL entry).
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 specifies a `ToolRegistry` abstraction the agent system calls
 into. Not implemented. (Agents currently use ad-hoc dispatch.)
@@ -997,6 +997,74 @@ into. Not implemented. (Agents currently use ad-hoc dispatch.)
 **Definition of done:** Per PRD-15 §4 — typed registry, capability
 checks, registration discoverable from `nexus tool list`. Promote to
 BL when prioritized.
+
+### Outcome
+
+Typed agent-facing tool registry shipped as
+[`crates/nexus-agent/src/tool_registry.rs`](../../crates/nexus-agent/src/tool_registry.rs):
+
+- `Capability` enum covering the ten capability domains PRD-15 §4
+  lists. Serializes as the canonical dotted-id string (`fs.read`,
+  `terminal.execute`, …) so wire / CLI / `.agent.toml` (DG-36) all
+  speak the same form. `Capability::as_str` / `Capability::from_str`
+  is the round-trip surface.
+- `AgentToolSpec` carries name, description, JSON-Schema input
+  schema, `requires_approval` flag, `estimated_duration_ms` hint,
+  `required_capabilities`, and the kernel IPC route
+  (`target_plugin_id` / `command_id`) so a session loop can dispatch
+  through the existing `ToolDispatcher` without re-implementing
+  transport.
+- `AgentToolRegistry` is a process-global (`OnceLock<Arc<…>>` —
+  same pattern DG-39 introduced for MCP dynamic tools) catalogue.
+  `bootstrap::register_core_plugins` calls
+  `nexus_agent::seed_default_tools()` after registering
+  `com.nexus.agent`, seeding the eight in-tree tools that mirror the
+  AI executor's catalogue (`read_file`, `write_file`, `search_forge`,
+  `list_backlinks`, `git_log`, `terminal_run_saved`,
+  `terminal_get_status`, `terminal_send_signal`). `write_file` and
+  the two terminal-write tools are marked `requires_approval: true`
+  so DG-34 (interactive approval) can read the flag without a
+  separate config surface.
+- `list_for_agent(&[Capability])` returns only the tools an agent's
+  granted capabilities satisfy. `validate_params` runs the
+  structural checks PRD-15 calls for (`required` keys present,
+  `additionalProperties: false` honoured). `check_capabilities`
+  returns a typed `AgentToolError::CapabilityDenied` on the first
+  missing capability. `record_access` + `access_log` keep a bounded
+  (1024-entry) in-memory audit trail.
+- New IPC handler `com.nexus.agent::list_tools` (handler id 18) —
+  sync path, no kernel context needed. Args:
+  `{ capabilities?: ["fs.read", …] }`; reply: sorted
+  `Vec<AgentToolSpec>`. Unknown capability ids fail loudly so a
+  typo doesn't silently return the full catalogue.
+- New CLI command `nexus tool list [--capability ID]…` in
+  [`crates/nexus-cli/src/commands/tool.rs`](../../crates/nexus-cli/src/commands/tool.rs)
+  — routes through the IPC handler, renders a fixed-width table
+  with `NAME`, `APPR`, `~ms`, `CAPS`, `DESCRIPTION`.
+- ts-rs / schemars bindings regenerated under
+  `packages/nexus-extension-api/src/generated/ipc/{Capability,AgentToolSpec,AgentToolAccessRecord,ListToolsArgs}.ts`
+  and `crates/nexus-bootstrap/schemas/ipc/`; `scripts/check_ipc_drift.sh`
+  clean.
+- Test coverage: 16 unit tests in `tool_registry.rs` (capability
+  round-trip, register / lookup / overwrite, capability-filtered
+  listing, capability check, params validation matrix, access-log
+  cap) + 3 IPC dispatch tests in `core_plugin.rs` (full catalog,
+  unknown capability rejection, capability-filter narrowing). All
+  41 lib tests green.
+
+**Deferred** as documented follow-ups:
+
+- `call_with_retry` / exponential backoff (PRD-15 §4) — the
+  registry tracks `estimated_duration_ms` and `requires_approval`
+  but doesn't own the dispatch loop yet. Retry policy lives in the
+  session executor where it can see proposed-call context; once a
+  user request needs it, the wiring is one method on `AgentToolRegistry`
+  that takes a `&dyn ToolDispatcher`.
+- `parse_result` / `ParsedToolResult` (PRD-15 §4) — the existing
+  session loop already classifies tool outcomes into the
+  `RoundDecision` shape. Lifting a separate `ParsedToolResult`
+  would duplicate that surface; revisit if a non-session caller
+  needs structured tool-result parsing.
 
 ---
 

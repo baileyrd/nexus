@@ -1274,12 +1274,19 @@ fn register_core_plugins(
                     ("session_delete", nexus_agent::core_plugin::HANDLER_SESSION_DELETE),
                     // ADR 0024 Phase 2b — caller-side approval reply.
                     ("round_decide", nexus_agent::core_plugin::HANDLER_ROUND_DECIDE),
+                    // DG-32 (PRD-15 §4) — agent tool registry discovery.
+                    ("list_tools", nexus_agent::HANDLER_LIST_TOOLS),
                 ]),
             ),
             forge_root,
             Box::new(AgentCorePlugin::new()),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.agent")?;
+
+    // DG-32 — seed the agent-tool registry's process-global catalogue
+    // once the agent core plugin is registered. Read by
+    // `com.nexus.agent::list_tools` and by `nexus tool list`.
+    nexus_agent::seed_default_tools();
 
     // MCP Host orchestrator — loads mcp.toml, lazily connects to external MCP
     // servers, exposes list_tools / call_tool / list_resources / list_prompts

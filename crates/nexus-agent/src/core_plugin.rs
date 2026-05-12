@@ -106,6 +106,14 @@ pub const HANDLER_SESSION_DELETE: u32 = 16;
 /// dispatching tools.
 pub const HANDLER_ROUND_DECIDE: u32 = 17;
 
+/// `list_tools` (DG-32 — PRD-15 §4) — return the agent tool
+/// registry catalogue. Args: `{ capabilities?: [string] }`. With
+/// no args, returns every registered tool; with `capabilities`,
+/// filters to those the agent could call given those grants.
+/// Reply: `[AgentToolSpec]`. Read-only; touches the in-memory
+/// global registry only.
+pub const HANDLER_LIST_TOOLS: u32 = 18;
+
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -170,12 +178,16 @@ impl CorePlugin for AgentCorePlugin {
         handler_id: u32,
         _args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        // `list_archetypes` is the one sync handler on this plugin — it
-        // reads only from compile-time `archetypes.rs` constants so
-        // there's no reason to burn an async hop. Every other handler
-        // is kernel-context-dependent and lives in `dispatch_async`.
+        // `list_archetypes` and `list_tools` are the two sync handlers
+        // on this plugin — both read only from compile-time / in-memory
+        // state, so there's no reason to burn an async hop. Every other
+        // handler is kernel-context-dependent and lives in
+        // `dispatch_async`.
         if handler_id == HANDLER_LIST_ARCHETYPES {
             return Ok(serde_json::json!(ARCHETYPE_NAMES));
+        }
+        if handler_id == HANDLER_LIST_TOOLS {
+            return handle_list_tools(_args);
         }
         Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -190,11 +202,11 @@ impl CorePlugin for AgentCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
-        // Let the sync path handle `list_archetypes` — the kernel's
-        // `ipc_call` prefers `dispatch_async` when Some is returned,
-        // and we don't want to hop an unnecessary async frame for a
-        // pure compile-time constant read.
-        if handler_id == HANDLER_LIST_ARCHETYPES {
+        // Let the sync path handle `list_archetypes` and `list_tools` —
+        // the kernel's `ipc_call` prefers `dispatch_async` when Some is
+        // returned, and we don't want to hop an unnecessary async frame
+        // for an in-memory read.
+        if handler_id == HANDLER_LIST_ARCHETYPES || handler_id == HANDLER_LIST_TOOLS {
             return None;
         }
 
@@ -385,6 +397,56 @@ async fn handle_history_list(
 #[serde(deny_unknown_fields)]
 pub struct PlanIdArgs {
     plan_id: String,
+}
+
+/// Args for `com.nexus.agent::list_tools` (handler id 18).
+///
+/// `capabilities` (when present) is the list of [`crate::Capability`]
+/// id strings (e.g. `["fs.read", "git.read"]`) the agent holds. The
+/// handler filters the registry to tools whose `required_capabilities`
+/// are a subset of that list. Omitting the field returns the full
+/// catalogue.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ListToolsArgs {
+    /// Optional capability filter. Strings parsed via
+    /// [`crate::Capability::from_str`]; unknown ids are rejected.
+    #[serde(default)]
+    pub capabilities: Option<Vec<String>>,
+}
+
+fn handle_list_tools(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    let a: ListToolsArgs = if args.is_null() {
+        ListToolsArgs { capabilities: None }
+    } else {
+        parse(args, "list_tools")?
+    };
+    let registry = crate::AgentToolRegistry::global();
+    let specs = match a.capabilities {
+        None => registry.list_all(),
+        Some(ids) => {
+            let mut held = Vec::with_capacity(ids.len());
+            for id in ids {
+                let cap = crate::Capability::from_str(&id).ok_or_else(|| {
+                    exec_err(format!("list_tools: unknown capability id '{id}'"))
+                })?;
+                held.push(cap);
+            }
+            registry.list_for_agent(&held)
+        }
+    };
+    // Stable ordering for callers that diff outputs (CLI, shell).
+    let mut sorted = specs;
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    to_value(&sorted, "list_tools")
 }
 
 async fn handle_history_get(
@@ -1188,6 +1250,74 @@ mod tests {
         let mut plugin = AgentCorePlugin::new();
         let fut = plugin.dispatch_async(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null);
         assert!(fut.is_none(), "list_archetypes must not return an async future");
+    }
+
+    /// DG-32 — `list_tools` returns the agent tool registry's seeded
+    /// catalogue via the sync dispatch path. The handler reads from
+    /// the process-global registry; the test seeds it explicitly so
+    /// the assertion is independent of bootstrap order.
+    #[test]
+    fn list_tools_returns_seeded_catalog() {
+        crate::seed_default_tools();
+        let mut plugin = AgentCorePlugin::new();
+        let v = plugin
+            .dispatch(HANDLER_LIST_TOOLS, &serde_json::Value::Null)
+            .expect("list_tools dispatch");
+        let arr = v.as_array().expect("array reply");
+        let names: std::collections::HashSet<_> = arr
+            .iter()
+            .filter_map(|v| v.get("name").and_then(|n| n.as_str()))
+            .collect();
+        for expected in [
+            "read_file",
+            "write_file",
+            "search_forge",
+            "git_log",
+            "terminal_run_saved",
+        ] {
+            assert!(
+                names.contains(expected),
+                "list_tools missing tool: {expected}"
+            );
+        }
+    }
+
+    /// DG-32 — `list_tools` honours the `capabilities` filter and
+    /// rejects unknown capability ids with a clear error.
+    #[test]
+    fn list_tools_with_unknown_capability_errors() {
+        crate::seed_default_tools();
+        let mut plugin = AgentCorePlugin::new();
+        let err = plugin
+            .dispatch(
+                HANDLER_LIST_TOOLS,
+                &serde_json::json!({ "capabilities": ["bogus"] }),
+            )
+            .expect_err("should reject unknown capability");
+        let msg = format!("{err}");
+        assert!(msg.contains("unknown capability"), "got: {msg}");
+    }
+
+    /// DG-32 — Filtering by a held capability returns only tools
+    /// satisfied by it.
+    #[test]
+    fn list_tools_with_capability_filter_narrows_catalog() {
+        crate::seed_default_tools();
+        let mut plugin = AgentCorePlugin::new();
+        let v = plugin
+            .dispatch(
+                HANDLER_LIST_TOOLS,
+                &serde_json::json!({ "capabilities": ["fs.read"] }),
+            )
+            .expect("list_tools dispatch");
+        let arr = v.as_array().expect("array reply");
+        let names: std::collections::HashSet<_> = arr
+            .iter()
+            .filter_map(|v| v.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert!(names.contains("read_file"));
+        // `write_file` needs `fs.write` which we didn't grant.
+        assert!(!names.contains("write_file"));
     }
 
 /// Phase 2b — `round_decide` routes the caller's decision into

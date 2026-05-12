@@ -47,6 +47,7 @@ mod archetypes;
 pub mod core_plugin;
 mod llm;
 pub mod session;
+pub mod tool_registry;
 
 pub use agents::EchoAgent;
 pub use archetypes::{
@@ -55,7 +56,11 @@ pub use archetypes::{
 };
 pub use core_plugin::{
     AgentCorePlugin, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST,
-    HANDLER_LIST_ARCHETYPES, HANDLER_PLAN, PLUGIN_ID,
+    HANDLER_LIST_ARCHETYPES, HANDLER_LIST_TOOLS, HANDLER_PLAN, PLUGIN_ID,
+};
+pub use tool_registry::{
+    default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,
+    AgentToolError, AgentToolRegistry, AgentToolSpec, Capability,
 };
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use session::{

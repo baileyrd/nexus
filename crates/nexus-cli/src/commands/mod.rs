@@ -20,6 +20,7 @@ pub mod skill;
 pub mod tags;
 pub mod template;
 pub mod term;
+pub mod tool;
 pub mod tui;
 pub mod watch;
 pub mod workflow;

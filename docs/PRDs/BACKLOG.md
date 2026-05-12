@@ -445,7 +445,7 @@ _BL-007 closed 2026-05-09 — fully subsumed by [BL-074](#bl-074-collaborative-e
 
 Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 doc-traceability audit. Full descriptions in [../roadmap/DOC-GAPS.md](../roadmap/DOC-GAPS.md) under DG-32 through DG-46. Doc-only bugs (DG-01..DG-31) live in DOC-GAPS but are not cross-listed here since they're not BL-shaped work.
 
-- [ ] **DG-32: PRD-15 §4 ToolRegistry** — typed registry for agent tool calls; not implemented (agents use ad-hoc dispatch).
+- [x] **DG-32: PRD-15 §4 ToolRegistry** — closed 2026-05-12. Typed `AgentToolRegistry` + `Capability` enum + `AgentToolSpec` shipped in `crates/nexus-agent/src/tool_registry.rs`; seeded with the eight in-tree tools at bootstrap. New `com.nexus.agent::list_tools` (handler id 18) + `nexus tool list [--capability ID]…` CLI close the discoverability DoD. See [../roadmap/DOC-GAPS.md#dg-32](../roadmap/DOC-GAPS.md).
 - [ ] **DG-33: PRD-15 §5 Memory** — agent-scoped persistent memory; runs currently stateless.
 - [ ] **DG-34: PRD-15 §7 interactive approval round-trip** — agent loop runs through without surfacing approval prompts; coordinate with ADR 0024 UI.
 - [ ] **DG-35: PRD-15 §8 six built-in agent classes** — 3 of 6 shipped (`researcher`, `writer`, `coder`); missing `auditor`, `librarian`, `coach`.

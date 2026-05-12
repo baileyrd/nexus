@@ -103,6 +103,8 @@ enum Commands {
     Ai(AiArgs),
     /// Agent operations (PRD-15): plan + execute tool-calling loops
     Agent(AgentArgs),
+    /// Agent tool registry (PRD-15 §4) — list catalogued tools
+    Tool(ToolArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
     Skill(SkillArgs),
     /// Workflow operations (PRD-16): list/show/validate `.workflow.toml` files
@@ -397,6 +399,29 @@ enum AiCommand {
         /// the whole file (use a smaller value to bound the prompt).
         #[arg(long = "context")]
         context_lines: Option<usize>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Tool registry (PRD-15 §4 — DG-32)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct ToolArgs {
+    #[command(subcommand)]
+    command: ToolCommand,
+}
+
+#[derive(Subcommand)]
+enum ToolCommand {
+    /// List agent tools registered in the process-global catalogue.
+    /// Optional `--capability` filters by what the agent holds.
+    List {
+        /// Restrict to tools the agent could call given these
+        /// capabilities. Repeat to add more. Example:
+        /// `--capability fs.read --capability search.forge`.
+        #[arg(long = "capability", value_name = "ID")]
+        capabilities: Vec<String>,
     },
 }
 
@@ -1683,6 +1708,12 @@ fn main() {
             }
             AgentCommand::Run { goal, archetype } => {
                 commands::agent::run(&mut app, &goal, archetype.as_deref())
+            }
+        },
+
+        Commands::Tool(args) => match args.command {
+            ToolCommand::List { capabilities } => {
+                commands::tool::list(&mut app, &capabilities)
             }
         },
 
