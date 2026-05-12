@@ -521,6 +521,15 @@ export const editorPlugin: Plugin = {
       ),
     )
     api.viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
+    // Code-mode files share the same view type — the editor picks
+    // document vs code rendering at tab-open time based on the
+    // extension. Without this, opening `.toml` / `.rs` / etc. falls
+    // through to the empty-view fallback even though the editor knows
+    // how to render them. User-added extensions in
+    // `nexus.editor.codeFileExtensions` aren't covered here yet — that's
+    // a separate enhancement (the registry doesn't currently re-bind
+    // on config change).
+    api.viewRegistry.registerExtensions([...DEFAULT_CODE_EXTENSIONS], 'markdown')
 
     // Override the default no-op empty view (shell/src/workspace/ViewRegistry.ts)
     // with one that renders the Obsidian-style action links — used by
