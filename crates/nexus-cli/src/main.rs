@@ -455,6 +455,9 @@ enum AgentCommand {
         #[arg(long)]
         archetype: Option<String>,
     },
+    /// List custom agents defined in `<forge>/.forge/agents/*/agent.toml`
+    /// (PRD-15 §9 — DG-36).
+    ListCustom,
 }
 
 // ---------------------------------------------------------------------------
@@ -1709,6 +1712,7 @@ fn main() {
             AgentCommand::Run { goal, archetype } => {
                 commands::agent::run(&mut app, &goal, archetype.as_deref())
             }
+            AgentCommand::ListCustom => commands::agent::list_custom(&mut app),
         },
 
         Commands::Tool(args) => match args.command {

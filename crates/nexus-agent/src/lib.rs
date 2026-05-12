@@ -45,6 +45,7 @@ use thiserror::Error;
 mod agents;
 mod archetypes;
 pub mod core_plugin;
+pub mod custom_agent;
 mod llm;
 pub mod session;
 pub mod tool_registry;
@@ -56,7 +57,13 @@ pub use archetypes::{
 };
 pub use core_plugin::{
     AgentCorePlugin, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST,
-    HANDLER_LIST_ARCHETYPES, HANDLER_LIST_TOOLS, HANDLER_PLAN, PLUGIN_ID,
+    HANDLER_LIST_ARCHETYPES, HANDLER_LIST_CUSTOM, HANDLER_LIST_TOOLS, HANDLER_PLAN, PLUGIN_ID,
+};
+pub use custom_agent::{
+    load_from_path as load_custom_agent, parse_str as parse_custom_agent_str,
+    resolve_system_prompt as resolve_custom_system_prompt, scan_forge as scan_custom_agents,
+    AgentSection, CustomAgentError, CustomAgentManifest, ExecutionSection, MemorySection,
+    SystemPromptSection, ToolsSection, AGENTS_DIR, MANIFEST_FILE_NAME,
 };
 pub use tool_registry::{
     default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,

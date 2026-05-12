@@ -1120,12 +1120,66 @@ amend PRD-15 to reflect a 3-archetype design.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 User-authored `.agent.toml` files for custom agents are spec'd; no
 parser or loader exists.
 
 **Definition of done:** Per PRD-15 §9.
+
+### Outcome
+
+Parser + loader + IPC + CLI shipped:
+
+- New [`crates/nexus-agent/src/custom_agent.rs`](../../crates/nexus-agent/src/custom_agent.rs)
+  ships `CustomAgentManifest` plus the five sub-section types
+  (`AgentSection`, `ExecutionSection`, `ToolsSection`,
+  `MemorySection`, `SystemPromptSection`) matching the PRD-15 §9
+  TOML schema. Each section carries `#[serde(deny_unknown_fields)]`
+  so typos (e.g. `max_stepz`) fail loudly rather than silently
+  defaulting.
+- `parse_str(body, slug, path)` and `load_from_path(&Path)` parse
+  one manifest; `scan_forge(&Path)` walks
+  `<forge>/.forge/agents/*/agent.toml` and returns a tuple of
+  loaded manifests + per-manifest errors so a single broken file
+  doesn't poison the listing. Output is slug-sorted for stable
+  CLI / shell diffs.
+- `resolve_system_prompt` reads the prompt body — either inline
+  via `[system_prompt].text` or by following
+  `[system_prompt].path` relative to the manifest directory.
+  Mutual-exclusivity and presence checks happen at parse time.
+- New IPC handler `com.nexus.agent::list_custom` (handler id 19,
+  async) walks `.forge/agents/` via `ctx.list_files`, parses each
+  `agent.toml`, and replies `{ manifests, errors }`. Missing
+  directory is a clean empty reply — most forges won't have a
+  custom-agents directory yet.
+- New CLI command `nexus agent list-custom` renders the result as
+  a fixed-width `SLUG | NAME | ARCHETYPE` table with errors below.
+- ts-rs / schemars bindings generated for `CustomAgentManifest`,
+  `AgentSection`, `ExecutionSection`, `ToolsSection`,
+  `MemorySection`, `SystemPromptSection` under
+  `packages/nexus-extension-api/src/generated/ipc/`;
+  `scripts/check_ipc_drift.sh` clean.
+- 11 unit tests in `custom_agent::tests` cover the parse matrix
+  (minimal / full PRD example / missing prompt / both text+path /
+  invalid memory storage / unknown execution field), the forge
+  scanner (missing dir / multiple manifests sorted / broken
+  manifest isolated to errors), and prompt resolution (inline /
+  file). All 55 nexus-agent lib tests green.
+
+**Deferred** as documented follow-ups:
+
+- Routing a custom agent through `nexus agent plan/run --archetype <slug>`
+  isn't wired yet. `build_archetype` in `archetypes.rs` resolves
+  built-in names only; a `--archetype` arg that matches a custom
+  manifest's slug should layer that manifest's `system_prompt`
+  over its `archetype` baseline. Foundation is in place — every
+  manifest exposes the system prompt + base archetype — but the
+  resolver itself is one follow-up away (read scan result during
+  `handle_plan` / `handle_session_run`).
+- Tool allow/deny enforcement against `AgentToolRegistry` likewise
+  pending until the planning loop reads the manifest at request
+  time.
 
 ---
 

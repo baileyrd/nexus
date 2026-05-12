@@ -1276,6 +1276,8 @@ fn register_core_plugins(
                     ("round_decide", nexus_agent::core_plugin::HANDLER_ROUND_DECIDE),
                     // DG-32 (PRD-15 §4) — agent tool registry discovery.
                     ("list_tools", nexus_agent::HANDLER_LIST_TOOLS),
+                    // DG-36 (PRD-15 §9) — custom .agent.toml manifests.
+                    ("list_custom", nexus_agent::HANDLER_LIST_CUSTOM),
                 ]),
             ),
             forge_root,

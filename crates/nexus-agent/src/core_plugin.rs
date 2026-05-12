@@ -113,6 +113,13 @@ pub const HANDLER_ROUND_DECIDE: u32 = 17;
 /// Reply: `[AgentToolSpec]`. Read-only; touches the in-memory
 /// global registry only.
 pub const HANDLER_LIST_TOOLS: u32 = 18;
+/// `list_custom` (DG-36 — PRD-15 §9) — scan
+/// `<forge>/.forge/agents/*/agent.toml` and return parsed
+/// manifests. No args. Reply:
+/// `{ manifests: [CustomAgentManifest], errors: [{ path, error }] }`.
+/// Per-manifest errors are surfaced alongside the loaded entries so
+/// a single broken file doesn't poison the listing.
+pub const HANDLER_LIST_CUSTOM: u32 = 19;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -229,6 +236,7 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_SESSION_GET => handle_session_get(ctx, &args).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(ctx, &args).await,
                 HANDLER_ROUND_DECIDE => handle_round_decide(pending_approvals, &args).await,
+                HANDLER_LIST_CUSTOM => handle_list_custom(ctx).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -447,6 +455,73 @@ fn handle_list_tools(args: &serde_json::Value) -> Result<serde_json::Value, Plug
     let mut sorted = specs;
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
     to_value(&sorted, "list_tools")
+}
+
+/// DG-36 (PRD-15 §9) — scan `.forge/agents/*/agent.toml` and return
+/// the parsed manifests. Per-manifest errors land in a sibling
+/// `errors` array so a single broken file doesn't poison the read.
+async fn handle_list_custom(
+    ctx: Arc<KernelPluginContext>,
+) -> Result<serde_json::Value, PluginError> {
+    let agents_dir = std::path::Path::new(crate::custom_agent::AGENTS_DIR);
+    // Missing directory is a clean empty reply — most forges won't
+    // have a custom-agents dir until a user opts in.
+    let entries = match ctx.list_files(agents_dir).await {
+        Ok(e) => e,
+        Err(_) => {
+            return Ok(serde_json::json!({
+                "manifests": [],
+                "errors": []
+            }));
+        }
+    };
+
+    let mut manifests: Vec<crate::CustomAgentManifest> = Vec::new();
+    let mut errors: Vec<serde_json::Value> = Vec::new();
+
+    for entry in entries {
+        // list_files returns every entry — files and directories
+        // alike. We want subdirectories; reading their agent.toml
+        // via the kernel keeps the capability surface honest.
+        let slug = entry
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        if slug.is_empty() {
+            continue;
+        }
+        let manifest_path = entry.join(crate::custom_agent::MANIFEST_FILE_NAME);
+        // Try to read; missing file → not an agent dir → skip silently.
+        let body = match ctx.read_file(&manifest_path).await {
+            Ok(bytes) => match std::str::from_utf8(&bytes) {
+                Ok(s) => s.to_string(),
+                Err(e) => {
+                    errors.push(serde_json::json!({
+                        "path": manifest_path.display().to_string(),
+                        "error": format!("manifest not UTF-8: {e}"),
+                    }));
+                    continue;
+                }
+            },
+            Err(_) => continue,
+        };
+
+        match crate::custom_agent::parse_str(&body, &slug, &manifest_path) {
+            Ok(manifest) => manifests.push(manifest),
+            Err(e) => errors.push(serde_json::json!({
+                "path": manifest_path.display().to_string(),
+                "error": format!("{e}"),
+            })),
+        }
+    }
+
+    manifests.sort_by(|a, b| a.slug.cmp(&b.slug));
+
+    Ok(serde_json::json!({
+        "manifests": manifests,
+        "errors": errors,
+    }))
 }
 
 async fn handle_history_get(
