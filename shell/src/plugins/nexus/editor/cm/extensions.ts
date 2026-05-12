@@ -14,6 +14,7 @@ import type { EditorKernelClient } from '../kernelClient.ts'
 import { clientLogger } from '../../../../clientLogger'
 import { vimKeymapExt, type VimKeymapOptions } from './vimKeymap'
 import { emacsKeymapExt, type EmacsKeymapOptions } from './emacsKeymap'
+import { nexusSyntaxHighlighting } from './syntaxHighlight'
 
 /** BL-070 / BL-071: opt-in keybinding layers. */
 export type EditorKeybindings = 'default' | 'vim' | 'emacs'
@@ -122,6 +123,7 @@ export function baselineExtensions(
     search({ top: true }),
     keymap.of([...searchKeymap, ...keys]),
     EditorView.lineWrapping,
+    nexusSyntaxHighlighting,
   ]
   if (opts.lineNumbers) exts.push(lineNumbers())
   // Vim layers in front of the search/default keymaps so its modal
