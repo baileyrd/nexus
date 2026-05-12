@@ -74,3 +74,44 @@ copying legacy patterns.
 - `docs/archive/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-17)
 - `packages/nexus-extension-api/README.md` — canonical API surface
 - ADR 0011 — plugin-first shell adoption
+
+## Addendum 2026-05-12 — residual `ribbon` surfaces audit
+
+A doc-traceability sweep (DG-20) verified where the `ribbon` term
+still appears in the tree two years after this ADR shipped. Recording
+the audit so future readers understand which residues are deliberate
+and which are pending removal.
+
+**Already aligned (no remaining work):**
+
+- `packages/nexus-extension-api/` — the script/TS extension API
+  surface ships zero `ribbon` references (grep is empty). The DG-20
+  finding cited `packages/nexus-extension-api/src/sandbox/{context,runtime}.ts`
+  and `index.ts`, but `git log --all -S ribbon -- packages/nexus-extension-api/`
+  returns no history — the cleanup either landed before this file
+  carried the term or the audit was sourced from a stale snapshot.
+  Either way the contract for script plugins is `activityBar` only.
+
+**Kept for backward compatibility:**
+
+- WASM plugin manifest schema in `crates/nexus-plugins/src/{lib.rs,manifest.rs}`:
+  the public manifest key `[[registrations.ui_ribbon_item]]` plus the
+  Rust types (`UiRibbonItemReg`, `UiRibbonItemContribution`,
+  `UiRibbonItemContribution.ribbon_id`) and the aggregator
+  `PluginManager::ui_ribbon_items()` all still carry the legacy term.
+  Renaming them is a breaking manifest change for WASM plugin authors;
+  the only in-tree consumer is `plugins/hello-nexus/manifest.toml`, so
+  the cost would be tiny — but no external WASM authors exist yet, so
+  there is also no urgency. **Rename deferred to a marketplace-shaped
+  ABI break (e.g. paired with WI-44 manifest versioning).** Until then,
+  WASM plugin docs (PRD-04 §1.4) honestly document the legacy
+  manifest key.
+
+**Out of scope per the original ADR (kept by design):**
+
+- Shell-internal CSS class names (`.workspace-ribbon`,
+  `--ribbon-width`, `--ribbon-background`, body class `show-ribbon`)
+  are Obsidian-parity selectors and stay. Renaming them would break
+  every Obsidian-derived theme.
+- Migration / audit documents are allowed to mention "ribbon" in
+  historical context per the original "Consequences" section.
