@@ -107,4 +107,4 @@ Full lifecycle: [Lifecycle](lifecycle.md).
 | Wondering "can my plugin do X?" | [Capabilities reference](capabilities.md) |
 | Trying to integrate with another plugin | [IPC](ipc.md) |
 | Building UI | [Views and slots](../ui/views-and-slots.md) |
-| Stuck on a runtime quirk | [`../../shell/docs/writing-a-plugin.md`](../../../shell/docs/writing-a-plugin.md) |
+| Stuck on a runtime quirk | [`docs/shell/writing-a-plugin.md`](../../shell/writing-a-plugin.md) |

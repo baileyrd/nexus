@@ -69,7 +69,7 @@ Core topics published by the kernel and built-in plugins:
 Authoritative payload shapes: the TypeScript event types in
 [`packages/nexus-extension-api/src/events.ts`](../../../packages/nexus-extension-api/src/events.ts)
 (or imports from `@nexus/extension-api`). Cross-reference
-[`../../../shell/docs/event-bus.md`](../../../shell/docs/event-bus.md).
+[`../../shell/event-bus.md`](../../shell/event-bus.md).
 
 ## Defining your own topics
 
@@ -156,7 +156,7 @@ A future bus version may add server-side filters.
 
 ## See also
 
-- [`../../../shell/docs/event-bus.md`](../../../shell/docs/event-bus.md)
+- [`../../shell/event-bus.md`](../../shell/event-bus.md)
   — naming conventions and shell-side event flow.
 - [IPC](ipc.md) — the request/response sibling.
 - [Lifecycle](lifecycle.md) — `onEvent:` activation.

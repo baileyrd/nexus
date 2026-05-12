@@ -1,4 +1,4 @@
-> **Archived 2026-04-26** — Refactor plan; the keybinding override persistence has been moved out of the settings plugin. Current architecture lives in `shell/docs/extension-host.md` and `shell/docs/registry-system.md`.
+> **Archived 2026-04-26** — Refactor plan; the keybinding override persistence has been moved out of the settings plugin. Current architecture lives in `docs/shell/extension-host.md` and `docs/shell/registry-system.md`.
 
 # Plan: Move Keybinding Override Persistence to Registry Bootstrap
 

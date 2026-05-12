@@ -20,7 +20,7 @@ view contributed by a plugin.
 | `notification` | Floating overlay | Toasts (managed by shell) |
 
 Authoritative reference:
-[`../../../shell/docs/slot-system.md`](../../../shell/docs/slot-system.md).
+[`../../shell/slot-system.md`](../../shell/slot-system.md).
 
 ## Contribute a view
 
@@ -213,8 +213,8 @@ For your own per-view state (scroll position, selection, etc.), use
 
 ## See also
 
-- [`../../../shell/docs/slot-system.md`](../../../shell/docs/slot-system.md)
+- [`../../shell/slot-system.md`](../../shell/slot-system.md)
   — slot internals.
-- [`../../../shell/docs/workspace-layout.md`](../../../shell/docs/workspace-layout.md)
+- [`../../shell/workspace-layout.md`](../../shell/workspace-layout.md)
   — `workspace.json` schema.
 - [Context keys](context-keys.md) — when-clauses for conditional UI.

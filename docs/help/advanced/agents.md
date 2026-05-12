@@ -108,4 +108,4 @@ context.agents.register({
 });
 ```
 
-See `shell/docs/plugin-api.md`.
+See `docs/shell/plugin-api.md`.

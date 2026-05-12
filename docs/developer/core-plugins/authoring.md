@@ -120,7 +120,7 @@ pub fn build_runtime(forge_root: &Path) -> Result<Runtime, BootstrapError> {
 
 Order matters: register dependencies before dependents. The
 bootstrap module is the canonical record of load order — see
-[`shell/docs/core-plugins.md`](../../../shell/docs/core-plugins.md).
+[`docs/shell/core-plugins.md`](../../shell/core-plugins.md).
 
 ## Capabilities
 
@@ -248,5 +248,5 @@ unit test that exercises `info()`.
 
 - [Architecture primer](../architecture-primer.md)
 - [`../../architecture/invariants.md`](../../architecture/invariants.md)
-- [`../../../shell/docs/core-plugins.md`](../../../shell/docs/core-plugins.md)
+- [`../../shell/core-plugins.md`](../../shell/core-plugins.md)
   — catalog of existing core plugins and load order.

@@ -80,7 +80,7 @@ export const plugin: Plugin = {
 Two lifecycle hooks: `activate` (called once when the plugin is
 loaded) and `deactivate` (called on unload or shutdown). The
 `PluginContext` is your handle to everything: commands, UI, IPC, KV,
-events. Full API: [`shell/docs/plugin-api.md`](../../shell/docs/plugin-api.md).
+events. Full API: [`docs/shell/plugin-api.md`](../shell/plugin-api.md).
 
 ## 4. Build
 

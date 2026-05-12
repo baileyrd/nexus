@@ -61,4 +61,4 @@ context.editor.registerMdxComponent('MyTag', {
 ```
 
 See [Building your own plugin](../plugins/build-your-own.md) and
-`shell/docs/plugin-api.md` for the full API.
+`docs/shell/plugin-api.md` for the full API.

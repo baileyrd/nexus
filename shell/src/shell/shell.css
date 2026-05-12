@@ -1867,7 +1867,7 @@ textarea:disabled {
    OBSIDIAN CHROME PORT
    ══════════════════════════════════════════════════════════════════════════
    Verbatim-ported Obsidian rules against our Obsidian-aligned tokens.
-   Source: obsidian-unpacked/app.css (see shell/docs/obsidian/
+   Source: obsidian-unpacked/app.css (see docs/shell/obsidian/
    obsidian-measurements.md for line-numbered traces). Only the token
    names are adjusted; every layout / color / hover rule mirrors
    Obsidian's chrome 1:1. Scope is strictly chrome — PDF, canvas, graph,

@@ -74,6 +74,6 @@ docs/archive/
 
 ## Shell-specific archive
 
-`shell/docs/archive/` mirrors this pattern for docs scoped to the
-shell crate. See [`shell/docs/archive/`](../../shell/docs/archive/)
-for the inventory.
+`docs/shell/archive/` mirrors this pattern for docs scoped to the
+shell crate. See [`docs/shell/archive/`](../shell/archive/) for the
+inventory.

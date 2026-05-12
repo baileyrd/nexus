@@ -173,4 +173,4 @@ event delivery and IPC dispatch until the user re-enables it.
 - [Manifest](manifest.md)
 - `PluginStatus` enum: `crates/nexus-plugin-api/src/plugin.rs`
 - Loader internals (advanced):
-  [`../../../shell/docs/extension-host.md`](../../../shell/docs/extension-host.md)
+  [`../../shell/extension-host.md`](../../shell/extension-host.md)

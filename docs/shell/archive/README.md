@@ -18,7 +18,7 @@ For repository-wide archived documentation see
 
 ## Still current
 
-`shell/docs/` (the parent directory) holds shell architecture
+`docs/shell/` (the parent directory) holds shell architecture
 documentation that *is* current:
 
 - `architecture.md`, `extension-host.md`, `plugin-system.md`,

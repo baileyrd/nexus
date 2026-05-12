@@ -6,7 +6,7 @@ and conditional UI. The shell publishes core keys; plugins can
 publish their own.
 
 Authoritative reference (built-in keys + impl notes):
-[`../../../shell/docs/context-keys.md`](../../../shell/docs/context-keys.md).
+[`../../shell/context-keys.md`](../../shell/context-keys.md).
 
 ## Built-in keys
 
@@ -157,7 +157,7 @@ streaming.
 
 ## See also
 
-- [`../../../shell/docs/context-keys.md`](../../../shell/docs/context-keys.md)
+- [`../../shell/context-keys.md`](../../shell/context-keys.md)
   — full built-in key list with publish locations.
 - [Commands and keybindings](commands-and-keybindings.md) — where
   `when` clauses are most often used.

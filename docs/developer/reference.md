@@ -7,7 +7,7 @@ hub explain *how* and *why*; the files below are *what*.
 
 | Source | What it covers |
 |---|---|
-| [`shell/docs/plugin-api.md`](../../shell/docs/plugin-api.md) | Full `@nexus/extension-api` surface: commands, views, events, config, statusBar, IPC. Authoritative for TypeScript/JS plugin authors. |
+| [`docs/shell/plugin-api.md`](../shell/plugin-api.md) | Full `@nexus/extension-api` surface: commands, views, events, config, statusBar, IPC. Authoritative for TypeScript/JS plugin authors. |
 | [`packages/nexus-extension-api/src/`](../../packages/nexus-extension-api/src/) | The TypeScript source of truth. `index.ts` for the public surface; `generated/` for IPC types and schemas. |
 | [`crates/nexus-plugin-api/src/`](../../crates/nexus-plugin-api/src/) | The Rust public API for core plugin authors (`CorePlugin` trait, `PluginContext`, error types). |
 
@@ -43,14 +43,14 @@ hub explain *how* and *why*; the files below are *what*.
 |---|---|
 | [`docs/architecture/C4.md`](../architecture/C4.md) | C4 model — system context → containers → components → code. |
 | [`docs/architecture/invariants.md`](../architecture/invariants.md) | The four load-bearing rules and how they're enforced. |
-| [`shell/docs/architecture.md`](../../shell/docs/architecture.md) | Shell-side four-layer substrate model. |
-| [`shell/docs/registry-system.md`](../../shell/docs/registry-system.md) | Plugin / command / slot registries; ownership. |
-| [`shell/docs/extension-host.md`](../../shell/docs/extension-host.md) | Load order, dependency resolution, lifecycle. |
-| [`shell/docs/event-bus.md`](../../shell/docs/event-bus.md) | Event-bus naming conventions and core topic glossary. |
-| [`shell/docs/slot-system.md`](../../shell/docs/slot-system.md) | UI slot ids, overlay pattern, pointer-events handling. |
-| [`shell/docs/workspace-layout.md`](../../shell/docs/workspace-layout.md) | `workspace.json` schema. |
-| [`shell/docs/context-keys.md`](../../shell/docs/context-keys.md) | Built-in context keys; when-clause grammar. |
-| [`shell/docs/core-plugins.md`](../../shell/docs/core-plugins.md) | Catalog of every shipped core plugin. |
+| [`docs/shell/architecture.md`](../shell/architecture.md) | Shell-side four-layer substrate model. |
+| [`docs/shell/registry-system.md`](../shell/registry-system.md) | Plugin / command / slot registries; ownership. |
+| [`docs/shell/extension-host.md`](../shell/extension-host.md) | Load order, dependency resolution, lifecycle. |
+| [`docs/shell/event-bus.md`](../shell/event-bus.md) | Event-bus naming conventions and core topic glossary. |
+| [`docs/shell/slot-system.md`](../shell/slot-system.md) | UI slot ids, overlay pattern, pointer-events handling. |
+| [`docs/shell/workspace-layout.md`](../shell/workspace-layout.md) | `workspace.json` schema. |
+| [`docs/shell/context-keys.md`](../shell/context-keys.md) | Built-in context keys; when-clause grammar. |
+| [`docs/shell/core-plugins.md`](../shell/core-plugins.md) | Catalog of every shipped core plugin. |
 
 ## Decisions (ADRs)
 
@@ -93,6 +93,6 @@ the repo).
 For the absolute current state:
 
 - `git log --oneline crates/nexus-plugin-api/` — recent API changes.
-- `git log --oneline shell/docs/` — recent doc updates.
+- `git log --oneline docs/shell/` — recent doc updates.
 - [`docs/PRDs/IMPLEMENTATION_STATUS.md`](../PRDs/IMPLEMENTATION_STATUS.md)
   — what's shipped vs. in-progress.

@@ -78,7 +78,7 @@ The TypeScript surface (`@nexus/extension-api`) covers:
 - **Settings** — declare a JSON schema; settings UI is auto-generated
 - **Notifications** — toasts and alerts
 
-Full API reference: [`shell/docs/plugin-api.md`](../../../shell/docs/plugin-api.md).
+Full API reference: [`docs/shell/plugin-api.md`](../../shell/plugin-api.md).
 
 ## Capabilities
 
