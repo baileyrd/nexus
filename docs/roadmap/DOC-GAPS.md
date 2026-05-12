@@ -403,7 +403,7 @@ is missing from the docs).
 **Severity:** Should-fix (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/PRDs/IMPLEMENTATION_STATUS.md` says PRD-16 (Workflow) has no
 webhook / git_event / mcp_event triggers and no parallel / retry
@@ -413,6 +413,19 @@ scheduling. All four shipped per
 **Definition of done:** Bump PRD-16's status tier from 🟠 to 🟢; cite
 the four landing commits.
 
+### Outcome
+- PRD-16 status tier bumped 🟠 → 🟢.
+- Added "Shipped (webhook / git_event / mcp_event triggers)" entry
+  citing `crates/nexus-workflow/src/webhook.rs` (BL-028g) and the
+  `spawn_git_event_triggers` / `spawn_mcp_event_triggers` functions
+  in `core_plugin.rs`.
+- Added "Shipped (parallel steps + retry/backoff)" entry citing
+  `executor.rs`'s `futures::future::join_all` + per-step retry config
+  (`max_retries` / `retry_backoff` / `retry_initial_delay_ms` /
+  `retry_max_delay_ms` / `retry_jitter`).
+- Replaced "Gaps: No webhook…" line with "Gaps: None remaining
+  against PRD-16."
+
 ---
 
 ## DG-19 — IMPLEMENTATION_STATUS PRD-13 entries stale
@@ -420,7 +433,7 @@ the four landing commits.
 **Severity:** Cosmetic (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Two PRD-13 (Skills) claims in `IMPLEMENTATION_STATUS.md`:
 - "No skill composition / dependency resolution" — BL-021 `compose`
@@ -428,6 +441,19 @@ Two PRD-13 (Skills) claims in `IMPLEMENTATION_STATUS.md`:
 - "4 built-in skills" — 5 exist.
 
 **Definition of done:** Update both lines.
+
+### Outcome
+- "Four canonical .skill.md files" → "Five canonical" — added
+  `os-setup` to the list. Verified by `ls
+  crates/nexus-skills/builtins/`.
+- "No skill composition / dependency resolution" gap removed and
+  replaced with a "Shipped (composition resolver, BL-021)" line
+  citing `crates/nexus-skills/src/compose.rs` and handler id 8
+  (`com.nexus.skills::invoke`).
+- Remaining gap "UI SkillsPanel is read-only" kept as a future
+  concern (separate from this DG).
+- Removed the now-redundant top-of-file warning that flagged
+  DG-18/DG-19.
 
 ---
 
