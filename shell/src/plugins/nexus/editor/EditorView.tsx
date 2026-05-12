@@ -318,6 +318,9 @@ export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
       clearTimeout(initial)
       if (raf) cancelAnimationFrame(raf)
     }
+    // Narrow deps to the tab fields that affect the scroll target —
+    // identity-watching `activeTab` would re-run on every store tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeTab?.relpath,
     activeTab?.mode,
@@ -341,6 +344,8 @@ export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
     return () => {
       setActiveCmView(null)
     }
+    // See above — narrow tab fields only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeTab?.relpath,
     activeTab?.mode,
@@ -356,6 +361,8 @@ export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
     if (activeTab.mode !== 'preview') return ''
     if (!isMarkdown(activeTab.name)) return ''
     return renderMarkdown(activeTab.content)
+    // See above — narrow tab fields only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeTab?.relpath,
     activeTab?.content,
@@ -480,6 +487,8 @@ function ViewHeader({ activeTab, mode, onToggleMode, onMoveLeft, onMoveRight }: 
       activeTab
         ? buildTabContextMenu({ mode: activeTab.mode, isUntitled: isUntitledRel })
         : [],
+    // Narrow deps; full activeTab identity would re-run unnecessarily.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeTab?.mode, activeTab?.relpath, isUntitledRel],
   )
 

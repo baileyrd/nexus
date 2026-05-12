@@ -55,6 +55,9 @@ export function CapabilityModalView() {
     // Focus Approve button so Enter confirms — same pattern as
     // nexus.confirm.
     requestAnimationFrame(() => approveRef.current?.focus())
+    // Re-run only when a new request lands (identity change), not on
+    // unrelated store mutations of the same request object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.pluginId, current?.version])
 
   if (!current) return null

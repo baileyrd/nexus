@@ -40,6 +40,7 @@ export function ToolCallModal({ onRun }: ToolCallModalProps) {
   useEffect(() => {
     if (!toolCall) return
     requestAnimationFrame(() => textareaRef.current?.focus())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toolCall?.serverName, toolCall?.toolName])
 
   // Esc closes (only when no run is in flight — bailing mid-call

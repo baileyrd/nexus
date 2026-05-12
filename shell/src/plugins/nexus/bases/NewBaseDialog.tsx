@@ -30,6 +30,8 @@ export function NewBaseDialog() {
     setErr(null)
     setBusy(false)
     requestAnimationFrame(() => nameInputRef.current?.focus())
+    // Reset only on a fresh request, not on every store tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id])
 
   useEffect(() => {

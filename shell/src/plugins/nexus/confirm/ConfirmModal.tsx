@@ -26,6 +26,9 @@ export function ConfirmModal() {
   useEffect(() => {
     if (!current) return
     requestAnimationFrame(() => confirmRef.current?.focus())
+    // Focus on each fresh request — full `current` would re-run on
+    // every store mutation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id])
 
   useEffect(() => {

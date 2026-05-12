@@ -595,6 +595,7 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     }
     // Plugin api refs are stable for the life of the app — safe to
     // hold across renders without re-running the effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

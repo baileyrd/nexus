@@ -243,6 +243,7 @@ export function GraphGlobalView() {
     }
     // Intentionally only depends on values that change the loop body; sim
     // mutation lives in refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     settings.freeze,
     settings.linkDistance,
