@@ -2,8 +2,8 @@
 // Maps slot IDs to sorted lists of plugin-contributed components.
 // Backed by Zustand so slot changes trigger React re-renders immediately.
 //
-// After the Leaf + ViewRegistry migration (see docs/leaf-architecture.md and
-// docs/leaf-migration-plan.md §Phase 7), `SlotRegistry` is restricted to
+// After the Leaf + ViewRegistry migration (see docs/architecture/leaf-architecture.md
+// and docs/archive/leaf-migration-plan.md §Phase 7), `SlotRegistry` is restricted to
 // *chrome* positions only — fixed regions that don't move, don't persist
 // per-instance state, and don't participate in the tabbed/movable pane
 // model. Movable panes go through `workspace` + `viewRegistry`.

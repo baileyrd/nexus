@@ -524,7 +524,7 @@ export interface SettingsTabContribution {
  * regions of the shell (title bar, activity bar, status bar, overlay
  * root) that host plugin-contributed components outside the movable
  * pane model. Movable panes use the Leaf / ViewRegistry surface
- * instead (see `docs/leaf-architecture.md`).
+ * instead (see `docs/architecture/leaf-architecture.md`).
  *
  * This type lives in the extension-api package so native (Rust) and
  * community (JS) plugins see identical slot names at the contract

@@ -1,6 +1,7 @@
 # Nexus Documentation
 
-> Repository-level documentation index. Reorganized 2026-04-30 (audience-oriented).
+> Reorganized 2026-05-12 — root cleared of loose docs; every file
+> lives under the directory that matches its kind.
 
 Pick the path that matches what you're trying to do.
 
@@ -14,13 +15,13 @@ or the Tauri bridge.
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Policies, guardrails, the `dep_invariants` test |
 | [`architecture/C4.md`](architecture/C4.md) | C4 model: System Context → Containers → Components → Code |
 | [`architecture/invariants.md`](architecture/invariants.md) | The four rules and how each is enforced |
-| [`adr/README.md`](adr/README.md) | ADR conventions; jump from there to the 25 numbered ADRs |
+| [`architecture/leaf-architecture.md`](architecture/leaf-architecture.md) | Shell pane/leaf chrome-vs-content separation |
+| [`architecture/editor-transaction-architecture.md`](architecture/editor-transaction-architecture.md) | Edit-flow model from shell → kernel → storage |
+| [`architecture/ipc-schemas.md`](architecture/ipc-schemas.md) | IPC drift-check policy; generated dirs are the listing |
+| [`architecture/legacy-shell-retirement.md`](architecture/legacy-shell-retirement.md) | Why `app/` and `crates/nexus-app` are gone (v0.4.0) |
+| [`adr/README.md`](adr/README.md) | ADR conventions; jump from there to the numbered ADRs |
 | [`PRDs/IMPLEMENTATION_STATUS.md`](PRDs/IMPLEMENTATION_STATUS.md) | What's shipped, in-progress, blocked — the live state doc |
 | [`PRDs/BACKLOG.md`](PRDs/BACKLOG.md) | Live work-item index referenced by other planning docs |
-| [`ipc-schemas.md`](ipc-schemas.md) | IPC drift-check policy; generated dirs are the listing |
-| [`leaf-architecture.md`](leaf-architecture.md) | Shell pane/leaf chrome-vs-content separation |
-| [`editor-transaction-architecture.md`](editor-transaction-architecture.md) | Edit-flow model from shell → kernel → storage |
-| [`legacy-shell-retirement.md`](legacy-shell-retirement.md) | Why `app/` and `crates/nexus-app` are gone (v0.4.0) |
 
 ## I'm writing a plugin
 
@@ -28,16 +29,15 @@ You're building a community WASM/JS plugin or a shell-side TS plugin.
 
 | Read | What it gives you |
 |---|---|
-| [`developer/README.md`](developer/README.md) | **Developer docs** — Obsidian-style hub: plugins, editor, UI, themes, core plugins, reference (start here) |
-| [`plugin-authors/README.md`](plugin-authors/README.md) | Original plugin-authors hub (now linked from developer/) |
-| [`plugin-authors/quickstart.md`](plugin-authors/quickstart.md) | Scaffold and run your first plugin |
-| [`../shell/docs/writing-a-plugin.md`](../shell/docs/writing-a-plugin.md) | In-depth shell plugin reference |
-| [`../shell/docs/plugin-api.md`](../shell/docs/plugin-api.md) | The `@nexus/extension-api` surface |
+| [`developer/README.md`](developer/README.md) | **Start here.** Topic-decomposed developer hub: plugins, editor, UI, themes, core plugins, reference. |
+| [`developer/getting-started.md`](developer/getting-started.md) | Ten-minute "hello world" walkthrough. |
+| [`shell/writing-a-plugin.md`](shell/writing-a-plugin.md) | In-depth shell plugin reference (manifest, sandbox, capabilities, slot system, worked example). |
+| [`shell/plugin-api.md`](shell/plugin-api.md) | The `@nexus/extension-api` import surface. |
 | [`adr/0002-hierarchical-capability-strings.md`](adr/0002-hierarchical-capability-strings.md) | Capability taxonomy |
 | [`adr/0015-iframe-sandbox-plugin-runtime.md`](adr/0015-iframe-sandbox-plugin-runtime.md) | JS/TS sandbox model |
 | [`adr/0016-microkernel-native-vs-wasm-plugin-split.md`](adr/0016-microkernel-native-vs-wasm-plugin-split.md) | Native vs WASM/JS choice |
-| [`templates/community-plugin/README.md`](templates/community-plugin/README.md) | Plugin scaffolding template |
-| [`templates/core-plugin/README.md`](templates/core-plugin/README.md) | Core plugin template |
+| [`PRDs/templates/community-plugin/README.md`](PRDs/templates/community-plugin/README.md) | Plugin scaffolding template |
+| [`PRDs/templates/core-plugin/README.md`](PRDs/templates/core-plugin/README.md) | Core plugin template |
 
 ## I'm using Nexus to manage notes
 
@@ -50,7 +50,7 @@ You want to install Nexus, point it at a forge of markdown, and use it.
 | [`users/README.md`](users/README.md) | End-user documentation hub (reference) |
 | [`users/cli.md`](users/cli.md) | Full CLI command reference |
 | [`users/tui.md`](users/tui.md) | TUI key bindings and behaviour |
-| [`users/mcp.md`](users/mcp.md) | MCP server, the 15 `nexus_*` tools, Claude Code / Cursor integration |
+| [`users/mcp.md`](users/mcp.md) | MCP server, the `nexus_*` tools, Claude Code / Cursor integration |
 
 ## I'm an AI agent picking up context
 
@@ -64,94 +64,57 @@ You're Claude Code, Cursor, or another agent reading the repo for the first time
 | [`adr/`](adr/) | Why the code looks the way it does |
 | [`archive/README.md`](archive/README.md) | When a commit message references a doc you can't find |
 
-## In-flight planning
+## In-flight planning, research, audits
 
-The roadmap hub at [`roadmap/README.md`](roadmap/README.md) catalogs
-in-flight planning docs. Direct pointers to the active set:
-
-| Read | What it covers |
+| Directory | What it holds |
 |---|---|
-| [`OPEN-ITEMS.md`](OPEN-ITEMS.md) | Post-migration carryover gaps |
-| [`REQUIRED-FOR-FORMAL-RELEASE.md`](REQUIRED-FOR-FORMAL-RELEASE.md) | WI-41/42/44/46 deferred from personal-tool scope |
-| [`AI-INTEGRATION-DIRECTIONS.md`](AI-INTEGRATION-DIRECTIONS.md) | Exploratory AI-roadmap design |
-| [`AI-MEMORY-LAYER-PLAN.md`](AI-MEMORY-LAYER-PLAN.md) | Personal-memory-layer thinking |
-| [`AI-AMBIENT-COPILOT-PLAN.md`](AI-AMBIENT-COPILOT-PLAN.md) | Ambient copilot UX plan |
-| [`notion-block-ux-plan.md`](notion-block-ux-plan.md) | Block UX plan in flight |
-| [`PRDs/Nexus_Growth_Plan.md`](PRDs/Nexus_Growth_Plan.md) | Long-term growth thinking (currently filed under PRDs/) |
+| [`roadmap/`](roadmap/README.md) | In-flight planning docs — OPEN-ITEMS, REQUIRED-FOR-FORMAL-RELEASE, exploratory AI plans, notion-block UX plan |
+| [`research/`](research/README.md) | Comparative research and ecosystem assessments — Obsidian parity, Tolaria comparison, AnythingLLM/AffinE/CommandBook, GitNexus |
+| [`audits/`](audits/README.md) | Point-in-time audit snapshots — subsystem assessments (2026-05-06), AI interaction surface, shell UI, architecture, docs |
 
-> Mechanical `git mv` of these files into `roadmap/` is queued for a
-> follow-up so git history follows the moves. The roadmap hub above
-> documents the planned final layout.
+## Shell-specific docs
 
-## Reference
+Shell-internal reference under [`shell/`](shell/README.md): plugin
+architecture, the slot/registry system, the extension host, and
+Obsidian-internal references for parity work
+([`shell/obsidian/`](shell/obsidian/)). Shell-specific archive lives
+at [`shell/archive/`](shell/archive/README.md).
+
+## References
 
 - [`references/`](references/) — UX references for parity work (Obsidian settings modal, etc.).
-- [`../shell/docs/obsidian/`](../shell/docs/obsidian/) — Obsidian internals reverse-engineered for design parity. Reference only — not authoritative for Nexus.
 
 ## Archive
 
-- [`archive/README.md`](archive/README.md) — historical docs (completed plans, superseded designs, point-in-time audits). Each carries a `> **Archived <date>** — <reason>` header.
+[`archive/README.md`](archive/README.md) — historical docs (completed
+plans, superseded designs). Each carries a `> **Archived <date>** —
+<reason>` header.
 
 ## Layout
 
 ```
 docs/
-├── README.md                              ← this file (curated entry point)
-├── ARCHITECTURE.md                        redirect → architecture/C4.md
+├── README.md                   ← this file (curated entry point)
 │
-│   ── Architecture (current) ──
-├── architecture/
-│   ├── C4.md                              canonical C4 model
-│   └── invariants.md                      the four rules
-├── leaf-architecture.md                   shell pane/leaf model
-├── editor-transaction-architecture.md     edit-flow model
-├── ipc-schemas.md                         IPC drift-check policy
-├── legacy-shell-retirement.md             v0.4.0 migration record
+├── architecture/               C4, invariants, leaf, editor-transaction, ipc-schemas, legacy-shell-retirement
+├── adr/                        architecture decision records (0001–0025)
+├── PRDs/                       17 numbered PRDs, IMPLEMENTATION_STATUS, BACKLOG, templates
 │
-│   ── Product (current) ──
-├── PRDs/                                  PRDs 01-17, IMPLEMENTATION_STATUS, BACKLOG
-├── adr/                                   architecture decision records (0001-0025)
+├── developer/                  plugin authors hub (topic-decomposed)
+├── help/                       task-oriented user help
+├── users/                      end-user reference (CLI, TUI, MCP)
+├── shell/                      shell-internal reference (plugin-api, registry, slot system, ...)
 │
-│   ── Audiences ──
-├── plugin-authors/                        plugin author journey (quickstart + index)
-├── users/                                 end-user docs (CLI, TUI, MCP)
-├── roadmap/                               in-flight planning index (catalogs the docs below)
-│
-│   ── In-flight planning (canonical files; mechanical mv into roadmap/ queued) ──
-├── OPEN-ITEMS.md
-├── REQUIRED-FOR-FORMAL-RELEASE.md
-├── AI-INTEGRATION-DIRECTIONS.md
-├── AI-MEMORY-LAYER-PLAN.md
-├── AI-AMBIENT-COPILOT-PLAN.md
-├── notion-block-ux-plan.md
-│
-│   ── Reference ──
-├── references/                            UX reference captures (Obsidian settings modal, etc.)
-│
-│   ── Archive ──
-└── archive/                               historical / superseded — see archive/README.md
-    ├── planning/                          phase plans + audits
-    ├── superpowers/                       pre-impl specs
-    └── *.md                               individual completed plans + audits
+├── roadmap/                    in-flight planning
+├── research/                   comparative research
+├── audits/                     point-in-time audit snapshots
+├── references/                 UX reference captures
+└── archive/                    historical / superseded
 ```
-
-The audience landings (`plugin-authors/`, `users/`, `roadmap/`) are the
-new navigation layer added by the docs-reorg. The current canonical
-locations of long-lived planning docs (`OPEN-ITEMS.md`, etc.) are kept
-in place so that this PR doesn't move file content — git history
-preservation is handled by a follow-up `git mv` step. Cross-links from
-this README and from `roadmap/README.md` already use the correct final
-paths for everything that has been physically reorganised
-(architecture, audience directories, plugin-author quickstart) and the
-canonical paths for everything still queued.
 
 ## Conventions
 
 - **ADRs are immutable.** Once accepted, an ADR's content is not edited; if a decision is later revised, write a new ADR that supersedes it.
 - **PRDs are authoritative product spec.** When behavior diverges from a PRD, fix one — not both silently.
 - **Plans go to archive when shipped.** A plan in `roadmap/` should describe work still active or upcoming; once shipped, move it under `archive/` with an archive note. Architecture-level details that outlast the plan should land in `architecture/` separately.
-- **Audits stay snapshots.** A point-in-time audit doesn't age into "current architecture"; it stays as a snapshot under `archive/` and a fresh audit is filed if needed.
-
-## Shell-specific docs
-
-The shell crate has its own docs tree at [`../shell/docs/`](../shell/docs/) covering plugin architecture, the slot/registry system, and the extension host. Shell-specific archive lives at [`../shell/docs/archive/`](../shell/docs/archive/).
+- **Audits stay snapshots.** A point-in-time audit doesn't age into "current architecture"; it stays under `audits/` and a fresh audit is filed if needed.

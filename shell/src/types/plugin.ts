@@ -166,7 +166,7 @@ export interface PluginAPI {
   /**
    * Chrome-slot registration only (titleBar, activityBar, statusBarLeft,
    * statusBarRight, overlay, paneMode). For movable panes, use
-   * `viewRegistry` + `workspace` instead — see docs/leaf-architecture.md.
+   * `viewRegistry` + `workspace` instead — see docs/architecture/leaf-architecture.md.
    */
   views: ViewsAPI
   /**

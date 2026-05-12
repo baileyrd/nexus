@@ -109,7 +109,7 @@ regenerated TypeScript + JSON Schema output. Fix one of:
      carries \`#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]\`
      and that the \`#[ts(export, export_to = …)]\` path is correct.
 
-See \`docs/ipc-schemas.md\` for the full generator story.
+See \`docs/architecture/ipc-schemas.md\` for the full generator story.
 EOF
     exit 1
 fi

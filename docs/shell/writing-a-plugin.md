@@ -3,7 +3,7 @@
 This document is the in-depth reference for writing Nexus shell plugins.
 It assumes you have already scaffolded a plugin with
 `nexus plugin scaffold --template script` — if not, start with the
-[quickstart](../../docs/writing-your-first-plugin.md) and come back
+[quickstart](../developer/getting-started.md) and come back
 here once your plugin boots.
 
 The reference is organised around the five subsystems every
@@ -422,7 +422,7 @@ Before loading a plugin in a real forge:
 
 ## Related docs
 
-- [Plugin quickstart](../../docs/writing-your-first-plugin.md) — the scaffold-to-install path
+- [Plugin quickstart](../developer/getting-started.md) — the scaffold-to-install path
 - [Architecture overview](architecture.md) — shell substrate and plugin layers
 - [Plugin system](plugin-system.md) — loading, lifecycle, registry
 - [Extension host](extension-host.md) — activation events in depth

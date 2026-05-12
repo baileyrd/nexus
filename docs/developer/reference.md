@@ -15,7 +15,7 @@ hub explain *how* and *why*; the files below are *what*.
 
 | Source | What it covers |
 |---|---|
-| [`docs/ipc-schemas.md`](../ipc-schemas.md) | IPC schema generation policy and drift-check workflow. |
+| [`docs/architecture/ipc-schemas.md`](../architecture/ipc-schemas.md) | IPC schema generation policy and drift-check workflow. |
 | [`packages/nexus-extension-api/src/generated/ipc/`](../../packages/nexus-extension-api/src/generated/ipc/) | Generated TypeScript types for every cross-boundary IPC payload. |
 | [`crates/nexus-bootstrap/schemas/ipc/`](../../crates/nexus-bootstrap/schemas/ipc/) | JSON Schema files for the same payloads. |
 | [`scripts/check_ipc_drift.sh`](../../scripts/check_ipc_drift.sh) | Regenerate bindings; CI fails on diff. |

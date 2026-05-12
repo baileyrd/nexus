@@ -4,7 +4,7 @@
 // `cargo test -p nexus-storage --features ts-export` and
 // `cargo test -p nexus-ai --features ts-export` and must NOT be edited
 // by hand. This barrel itself is hand-authored — keep it in sync when
-// the pilot grows in v1.1 (see `docs/ipc-schemas.md`).
+// the pilot grows in v1.1 (see `docs/architecture/ipc-schemas.md`).
 //
 // The 5 pilot handlers (Phase 4 §3.1):
 //   com.nexus.storage::search      — StorageSearch*
