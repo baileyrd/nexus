@@ -25,7 +25,7 @@ The plugin-first shell at `shell/` + `shell/src-tauri/` (crate
 `nexus-shell`) is the single Tauri desktop target, per
 [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy
 tri-pane shell (`app/` + `crates/nexus-app`) was retired in v0.4.0 —
-see [`docs/legacy-shell-retirement.md`](docs/legacy-shell-retirement.md).
+see [`docs/architecture/legacy-shell-retirement.md`](docs/architecture/legacy-shell-retirement.md).
 History remains recoverable via git (`v0.1.0-legacy-shell` tag).
 
 ### What this means day-to-day

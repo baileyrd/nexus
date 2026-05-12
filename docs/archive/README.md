@@ -18,8 +18,9 @@ explaining why it's no longer in the active set.
   architecture doc points back to a superseded plan.
 
 For anything load-bearing for current development, **read the docs in
-the parent directory first** (`docs/ARCHITECTURE.md`,
-`docs/leaf-architecture.md`, `docs/legacy-shell-retirement.md`,
+the parent directory first** (`docs/architecture/C4.md`,
+`docs/architecture/leaf-architecture.md`,
+`docs/architecture/legacy-shell-retirement.md`,
 `docs/PRDs/`, `docs/adr/`).
 
 ## Layout

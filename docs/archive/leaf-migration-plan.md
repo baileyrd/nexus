@@ -1,4 +1,4 @@
-> **Archived 2026-04-26** — Migration plan that introduced Obsidian-style `WorkspaceLeaf` + `ViewRegistry` to the shell. Migration shipped; the current architecture reference is [`leaf-architecture.md`](../leaf-architecture.md).
+> **Archived 2026-04-26** — Migration plan that introduced Obsidian-style `WorkspaceLeaf` + `ViewRegistry` to the shell. Migration shipped; the current architecture reference is [`leaf-architecture.md`](../architecture/leaf-architecture.md).
 
 # Leaf + ViewRegistry Migration Plan
 

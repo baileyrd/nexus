@@ -1,4 +1,4 @@
-> **Archived 2026-04-26** — Phased build-out plan for routing editor transactions through the kernel. Phases shipped; the current architecture reference is [`editor-transaction-architecture.md`](../editor-transaction-architecture.md).
+> **Archived 2026-04-26** — Phased build-out plan for routing editor transactions through the kernel. Phases shipped; the current architecture reference is [`editor-transaction-architecture.md`](../architecture/editor-transaction-architecture.md).
 
 # Editor Transaction Wiring Plan
 

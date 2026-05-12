@@ -1,6 +1,6 @@
 # Nexus Feature Backlog — Completed Items
 
-> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). See `docs/legacy-shell-retirement.md`. Paths like `app/src/…` and `crates/nexus-app/…` in the entries below reflect the tree at time of closure and are preserved verbatim as an audit trail; most capabilities now live in `shell/` + the `nexus-*` service crates (see `docs/archive/planning/SHELL-COMPARISON.md` for the per-capability map).
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). See `docs/architecture/legacy-shell-retirement.md`. Paths like `app/src/…` and `crates/nexus-app/…` in the entries below reflect the tree at time of closure and are preserved verbatim as an audit trail; most capabilities now live in `shell/` + the `nexus-*` service crates (see `docs/archive/planning/SHELL-COMPARISON.md` for the per-capability map).
 
 > Archive of items from [BACKLOG.md](BACKLOG.md) that have been delivered. Preserved verbatim under their original section headings for historical context and audit trails. New work belongs in [BACKLOG.md](BACKLOG.md); move an item here only when it lands.
 

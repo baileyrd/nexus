@@ -2,7 +2,7 @@
 
 A personal, plugin-extensible knowledge environment built in Rust. Nexus combines file-based note management with full-text search, a knowledge graph, AI-powered RAG, and a plugin system — accessible via CLI, terminal UI, desktop shell, or MCP server.
 
-The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/) (crate `nexus-shell`) is the single desktop target per [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy tri-pane shell was removed in 2026-04 — see [`docs/legacy-shell-retirement.md`](docs/legacy-shell-retirement.md) for the migration story, or recover the code via the `v0.1.0-legacy-shell` git tag.
+The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/) (crate `nexus-shell`) is the single desktop target per [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy tri-pane shell was removed in 2026-04 — see [`docs/architecture/legacy-shell-retirement.md`](docs/architecture/legacy-shell-retirement.md) for the migration story, or recover the code via the `v0.1.0-legacy-shell` git tag.
 
 ## Architecture
 

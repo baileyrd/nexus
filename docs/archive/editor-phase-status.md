@@ -1,4 +1,4 @@
-> **Archived 2026-04-26** — Point-in-time audit (2026-04-23) of the editor-transaction wiring phases. Phases are substantially complete; current architecture lives in [`editor-transaction-architecture.md`](../editor-transaction-architecture.md).
+> **Archived 2026-04-26** — Point-in-time audit (2026-04-23) of the editor-transaction wiring phases. Phases are substantially complete; current architecture lives in [`editor-transaction-architecture.md`](../architecture/editor-transaction-architecture.md).
 
 # Editor Wiring Plan — Phase Status Audit
 
