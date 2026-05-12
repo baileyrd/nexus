@@ -870,7 +870,7 @@ Phase 1 of BL-053 — chrome polish only. Targets ~70% of the visible mockup gap
 
 ### BL-052: Universal activity timeline ✅ (2026-05-07)
 
-**Source**: AIG-04 follow-up (2026-05-05) — see [../AI-GAPS.md](../AI-GAPS.md#aig-04--activity-audit-panel)
+**Source**: AIG-04 follow-up (2026-05-05) — see [../audits/AI-GAPS-2026-05-05.md](../audits/AI-GAPS-2026-05-05.md#aig-04--activity-audit-panel)
 **Files**: new `crates/nexus-types/src/activity.rs`; `crates/nexus-types/{Cargo.toml, src/lib.rs}`; `crates/nexus-ai/{Cargo.toml, src/lib.rs, src/activity_log.rs, src/core_plugin.rs, src/ipc.rs}`; `crates/nexus-bootstrap/{Cargo.toml, tests/ipc_schema_emit.rs}`; `crates/nexus-storage/src/core_plugin.rs`; `crates/nexus-git/src/core_plugin.rs`; `crates/nexus-workflow/{Cargo.toml, src/core_plugin.rs}`; `crates/nexus-terminal/{Cargo.toml, src/core_plugin.rs}` (BL-057 emitter); `shell/src/plugins/nexus/activityTimeline/{index.ts, activityTimelineStore.ts, ActivityTimelineView.tsx}`; `shell/src/plugins/catalog.ts`; regenerated TS bindings + JSON schemas under `packages/nexus-extension-api/src/generated/ipc/Activity*.ts` and `crates/nexus-bootstrap/schemas/ipc/com_nexus_ai__activity_list_*.json`.
 **Related**: BL-037 (original AI-only timeline); BL-057 (terminal emitter, landed in the same sweep); AIG-02 (agent approval log, future consumer of the same schema)
 

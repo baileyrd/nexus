@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-01
 **Status:** Accepted
-**Audit reference:** [audit-2026-05-01](../architecture/audit-2026-05-01.md) §
+**Audit reference:** [audit-2026-05-01](../audits/architecture-audit-2026-05-01.md) §
 Dim 2 (P1-2 follow-up)
 
 ## Context

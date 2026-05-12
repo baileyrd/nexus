@@ -1,7 +1,7 @@
 # BL-054 — Nexus OS Mode
 
 **Source**: AI Integration Assessment (2026-05-06) + analysis of Chase AI's "Agentic OS" framework  
-**Reference**: `docs/AI-INTEGRATION-ASSESSMENT.md`, `docs/research/agentic-os-implementation-plan.md`  
+**Reference**: `docs/audits/AI-INTEGRATION-ASSESSMENT-2026-05-06.md`, `docs/research/agentic-os-implementation-plan.md`  
 **Effort**: ~1 week of focused work across 5 phases  
 **Crates**: `nexus-skills` (new `invoke` handler), `shell/src/plugins/nexus/skills/`, new `shell/src/plugins/nexus/osArchitecture/`, new `shell/src/plugins/nexus/observability/`  
 **Related**: BL-037 (activity timeline), BL-052 (universal activity timeline), PRD-13 (skills), PRD-15 (agent), PRD-16 (workflow)

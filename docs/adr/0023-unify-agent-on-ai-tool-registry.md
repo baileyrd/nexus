@@ -3,7 +3,7 @@
 **Date:** 2026-05-05
 **Status:** Accepted. Shipped as Phase 1 of ADR 0024.
 **Superseded-by-section:** ADR 0025 (legacy planner retirement — Phase 2 cleanup)
-**Audit reference:** [`docs/AI-INTERACTION-SURFACE-AUDIT.md`](../AI-INTERACTION-SURFACE-AUDIT.md) §2C / §5 (G7)
+**Audit reference:** [`docs/audits/AI-INTERACTION-SURFACE-AUDIT-2026-05-04.md`](../audits/AI-INTERACTION-SURFACE-AUDIT-2026-05-04.md) §2C / §5 (G7)
 
 ## Context
 

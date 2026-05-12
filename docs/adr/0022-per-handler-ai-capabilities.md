@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-05
 **Status:** Accepted
-**Audit reference:** [`docs/AI-INTERACTION-SURFACE-AUDIT.md`](../AI-INTERACTION-SURFACE-AUDIT.md) §4 (G6)
+**Audit reference:** [`docs/audits/AI-INTERACTION-SURFACE-AUDIT-2026-05-04.md`](../audits/AI-INTERACTION-SURFACE-AUDIT-2026-05-04.md) §4 (G6)
 
 ## Context
 
