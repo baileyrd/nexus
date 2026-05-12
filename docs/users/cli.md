@@ -1,5 +1,15 @@
 # `nexus` — Unified CLI
 
+> [!WARNING]
+> **STALE — see [DG-03](../roadmap/DOC-GAPS.md#dg-03--userscli.md-misses-12-subcommand-groups).**
+> The subcommand listings below are out of date. Entire groups
+> (`template`, `crdt`, `skill`, `import`, `export`, `completions`,
+> `proc`, `workflow`, `bases`, `forge`, plus 16+ `git` subcommands)
+> are missing; several documented commands (`tags locate`,
+> `bases validate`, `agent list/history`, `proc kill`, `term saved`,
+> `config get/set/list`) don't exist. For the authoritative listing,
+> run `nexus --help` (and `nexus <subcommand> --help`).
+
 One binary, multiple faces. `nexus` is the single entry point for every
 non-GUI interaction with Nexus: headless CLI operations, the terminal UI,
 and launching the desktop shell. This page covers the three subcommands

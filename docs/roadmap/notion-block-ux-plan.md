@@ -1,5 +1,11 @@
 # Notion-style block UX — shell implementation plan
 
+> [!NOTE]
+> **SHIPPED — should archive — see [DG-11](./DOC-GAPS.md#dg-11--notion-block-ux-planmd-should-archive-shipped).**
+> All 6 phases shipped 2026-04-22. This file's location under
+> `roadmap/` is incorrect; it belongs under `docs/archive/`. The
+> per-phase "still open" notes inside this doc are also out of date.
+
 Surface the already-shipped block-tree engine (PRD-08) through the UI
 affordances that make a block-based editor *feel* block-based: slash
 menu, block handles, block selection, block drag, per-block actions.

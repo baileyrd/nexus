@@ -1,5 +1,18 @@
 # Nexus Developer Docs
 
+> [!WARNING]
+> **STALE — see [DG-01](../roadmap/DOC-GAPS.md#dg-01--docsdeveloper-teaches-a-fictional-plugin-api).**
+> The examples on this hub's `plugins/*.md` and `editor/*.md` pages
+> teach a TypeScript API (`Plugin` / `PluginContext` / `activate()` /
+> `ctx.commands.register(...)`) that **does not exist**. The real
+> contract lives in `packages/nexus-extension-api/src/index.ts` —
+> `ScriptPlugin` with `onInit` / `onStart` / `onStop` / `dispatch`,
+> and `NexusPluginContext` with `settings.get()`, `events.emit()`,
+> `ipc.call()`, `editor.register*()`, etc. Following the docs as-is
+> will give you code that won't run. Use the
+> [`packages/nexus-extension-api/src/`](../../packages/nexus-extension-api/src/)
+> source as the authoritative reference until the docs catch up.
+
 You're here to **build something that runs inside Nexus**: a community
 plugin, a core plugin, a theme, an MDX component, an editor extension,
 or an MCP-side integration. This is the hub.

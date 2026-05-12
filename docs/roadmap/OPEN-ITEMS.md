@@ -1,5 +1,13 @@
 # Open Items — Post-Migration Carryover Gaps
 
+> [!NOTE]
+> **MOSTLY RESOLVED — see [DG-12](./DOC-GAPS.md#dg-12--open-itemsmd-should-archive-2122-resolved).**
+> 21 of 22 OI items below are resolved (each carries its own
+> `Status: Resolved <date>` line plus an `### Outcome` block). Only
+> **OI-05** (Rust dep duplication, blocked upstream) is genuinely
+> open. The 21 resolved entries are kept here as audit trail until
+> the bulk move to `docs/archive/` lands.
+
 > Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement (2026-04-24). Surfaced by the capability-presence sweep on 2026-04-24.
 >
 > Listed here rather than in [PRDs/BACKLOG.md](PRDs/BACKLOG.md) because these are regressions from prior-shipped behavior, not new features. Linked from BACKLOG.md under "Post-migration carryover gaps."

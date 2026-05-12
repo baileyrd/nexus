@@ -439,6 +439,28 @@ _BL-007 closed 2026-05-09 — fully subsumed by [BL-074](#bl-074-collaborative-e
 
 ---
 
+## Doc-audit-surfaced product gaps (2026-05-12)
+
+Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 doc-traceability audit. Full descriptions in [../roadmap/DOC-GAPS.md](../roadmap/DOC-GAPS.md) under DG-32 through DG-46. Doc-only bugs (DG-01..DG-31) live in DOC-GAPS but are not cross-listed here since they're not BL-shaped work.
+
+- [ ] **DG-32: PRD-15 §4 ToolRegistry** — typed registry for agent tool calls; not implemented (agents use ad-hoc dispatch).
+- [ ] **DG-33: PRD-15 §5 Memory** — agent-scoped persistent memory; runs currently stateless.
+- [ ] **DG-34: PRD-15 §7 interactive approval round-trip** — agent loop runs through without surfacing approval prompts; coordinate with ADR 0024 UI.
+- [ ] **DG-35: PRD-15 §8 six built-in agent classes** — 3 of 6 shipped (`researcher`, `writer`, `coder`); missing `auditor`, `librarian`, `coach`.
+- [ ] **DG-36: PRD-15 §9 `.agent.toml`** — custom-agent format spec'd; no parser/loader.
+- [ ] **DG-37: PRD-15 §10 agent-to-agent comms** — spec'd; not built.
+- [ ] **DG-38: PRD-17 cross-platform reframe-or-build** — §3 WASM / §4 `nexus-platform` crate / §5 web / §6 mobile (UniFFI) all unimplemented. Needs scoping decision: reframe PRD-17 as desktop-only, or commit to multi-platform and split into per-platform BLs.
+- [ ] **DG-39: PRD-14 §10 dynamic MCP tool registration** — community plugins can't publish tools to the MCP server.
+- [ ] **DG-40: PRD-14 §12.2 MCP audit logging** — `call_tool` doesn't write to the kernel audit store.
+- [ ] **DG-41: PRD-10 §7 relations + rollup** — current impl is in-memory filter chain.
+- [ ] **DG-42: PRD-10 §8 SQL compilation** — Bases queries should compile to SQL against the storage index.
+- [ ] **DG-43: PRD-06 §9 frontmatter versioning + migration** — no `version:` handling; needed before forge-format-breaking changes.
+- [ ] **DG-44: PRD-04 §10 dynamic .so/.dll loading** — should reject as obsolete (superseded by ADR 0011 + ADR 0016).
+- [ ] **DG-45: ADR 0013 macOS menu-bar plugin** — Phase-4 plugin never built; build it or supersede the ADR.
+- [ ] **DG-46: ADR 0006 first in-tree consumer** — convention-only ADR; no in-tree user yet because community WASM plugins haven't shipped.
+
+---
+
 ## Post-migration carryover gaps (2026-04-24)
 
 Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. Full descriptions and acceptance criteria in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md). Resolved entries are archived in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).

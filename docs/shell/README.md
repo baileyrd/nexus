@@ -1,5 +1,17 @@
 # Shell Documentation
 
+> [!WARNING]
+> **STALE — see [DG-02](../roadmap/DOC-GAPS.md#dg-02--docsshell-reference-is-post-leaf-migration-stale).**
+> Several concrete claims in this tree are wrong post-leaf-migration:
+> documented slot count (8) vs. real (6); plugin count (38) vs. real
+> (60); namespace (`core.*`) vs. real (`nexus.*`); workspace path
+> (`.nexus/workspace.json`) vs. real (`<forge>/.forge/workspace.json`);
+> `PluginAPI` doc covers ~10 of ~17 sub-surfaces; multiple registry
+> and contribution shapes are fabricated. Cross-check against the
+> source under [`../../shell/src/`](../../shell/src/) and
+> [`../../packages/nexus-extension-api/src/`](../../packages/nexus-extension-api/src/)
+> before relying on a documented interface.
+
 Documentation specific to the Nexus desktop shell — the Tauri 2 + Vite +
 React app at `shell/` (crate `nexus-shell`). For repository-wide docs,
 see [`../../docs/README.md`](../../docs/README.md).
