@@ -502,7 +502,7 @@ impl Transaction {
     /// block's current parent + index from `tree`.
     ///
     /// This is the canonical "move block" entry point for block-drag UX
-    /// (notion-block-ux-plan.md Phase 3). Single op = single undo step,
+    /// (roadmap/notion-block-ux-plan.md Phase 3). Single op = single undo step,
     /// so `ctrl+z` after a drag reverses the whole move atomically
     /// instead of re-inserting and re-deleting one edge at a time.
     ///

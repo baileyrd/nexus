@@ -1,4 +1,4 @@
-// Phase 5 of docs/notion-block-ux-plan.md — inline annotation
+// Phase 5 of docs/roadmap/notion-block-ux-plan.md — inline annotation
 // toolbar + keyboard shortcuts.
 //
 // A small floating toolbar rides above any non-empty text selection

@@ -235,7 +235,7 @@ Each item is rated:
 | SQL-agent tool | **Adapt** | Already have `nexus-database`; expose query as agent tool | Trivial. |
 | Filesystem tool | **Skip** | Storage IPC is already the agent's filesystem | Use existing handlers. |
 | Create-files tool | **Skip** | Same — `com.nexus.storage::write` exists | — |
-| Memory tool | **Adapt** | Could land in `nexus-kv` + `nexus-ai::tools`; see also `AI-MEMORY-LAYER-PLAN.md` | Existing plan covers most of it. |
+| Memory tool | **Adapt** | Could land in `nexus-kv` + `nexus-ai::tools`; see also `../roadmap/AI-MEMORY-LAYER-PLAN.md` | Existing plan covers most of it. |
 | Summarize tool | **Adapt** | Trivial wrapper over `nexus-ai::chat` | — |
 | Rechart / chart-image tool | **Adapt — medium leverage** | New `nexus-charts` crate (or module under `nexus-formats`); IPC `com.nexus.charts::render` taking `{ spec, data }` → SVG/PNG written under `<forge>/attachments/` and referenced from MD | Pure-Rust renderer (e.g. `plotters`) keeps it deterministic, offline, no JS runtime. Natural fit over `nexus-storage::graph`, `nexus-database`, and the bases/canvas work — *not* the niche chat-decoration it is in ALL. |
 | Gmail / Outlook / Google Calendar | **Adapt (eventual)** | OAuth + connector plugins; not core | Heavy auth surface; only do if user demand exists. |
