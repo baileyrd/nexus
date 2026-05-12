@@ -465,13 +465,13 @@ Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 d
 
 ## Post-migration carryover gaps (2026-04-24)
 
-Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. Full descriptions and acceptance criteria in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md). Resolved entries are archived in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
+Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. The single still-open OI lives in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md); the 21 resolved-OI audit trail was archived 2026-05-12 to [../archive/OPEN-ITEMS-resolved-2026-04-26.md](../archive/OPEN-ITEMS-resolved-2026-04-26.md). BL-shaped follow-ups land in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 ### Open
 
 - [ ] **OI-05: Rust dep duplication** — Blocked on upstream. 34 crates with duplicated versions all trace through `wasmtime 42` (toml/sha2/digest/rand_core/reqwest/rustix/nix/hashbrown) or `portable-pty → filedescriptor` (`thiserror 1`). Revisit after the next wasmtime major release.
 
-### Resolved (preserved here for cross-reference; full notes in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md))
+### Resolved (preserved here for cross-reference; full notes in [../archive/OPEN-ITEMS-resolved-2026-04-26.md](../archive/OPEN-ITEMS-resolved-2026-04-26.md))
 
 - [x] OI-01 — Settings modal + `registerSettingsTab` API _(2026-04-24)_
 - [x] OI-02 — Split-size persistence (editor splits gained drag handles + `setSplitSizes` mutator) _(2026-04-24)_
@@ -514,7 +514,7 @@ Previously: design-only docs without committed timelines. **Scoped into the impl
 - **AI integration directions** — see [../roadmap/AI-INTEGRATION-DIRECTIONS.md](../roadmap/AI-INTEGRATION-DIRECTIONS.md). Mapping: "inline rewrite/summarize" → BL-034 (engine) + BL-035 (action surface); "auto-link suggestions" → BL-039; "semantic search" → BL-040; "per-surface chat" → merged into BL-010 (reshape note); "skills as prompts" → composed via BL-021 / BL-022; "agent loops" → merged into BL-027 (same surface); "MCP exposure" (Nexus-as-server) → BL-042; "background indexing" → BL-041. Direction "tool-calling" was already BL-016.
 - **Ambient copilot UX patterns** — see [../roadmap/AI-AMBIENT-COPILOT-PLAN.md](../roadmap/AI-AMBIENT-COPILOT-PLAN.md). Mapping: Cmd+I overlay → BL-032; context chips + model switcher → BL-033; ghost suggestions → BL-034; right-click AI actions → BL-035 (shared with NB block AI actions); margin suggestions + inline correction → BL-036; activity timeline → BL-037; citations → BL-038; capture → AI → folded into BL-043 (memory quick-capture).
 - **AI memory layer** — see [../roadmap/AI-MEMORY-LAYER-PLAN.md](../roadmap/AI-MEMORY-LAYER-PLAN.md). Mapping: quick-capture → BL-043; auto-enrichment on save → BL-045; recall hotkey → BL-044; implicit chat context → merged into BL-010 (reshape note); code-aware capture → BL-046; scheduled digests → BL-047.
-- **Notion-style block UX out-of-scope follow-ups** — see [../roadmap/notion-block-ux-plan.md](../roadmap/notion-block-ux-plan.md). Mapping: drag-to-embed into canvas → BL-048; block-links navigator → BL-049 (gated on block-id stability ADR); side-margin comments → BL-050; block AI actions → merged into BL-035; multi-cursor from multi-block → BL-051.
+- **Notion-style block UX out-of-scope follow-ups** — see [../archive/notion-block-ux-plan.md](../archive/notion-block-ux-plan.md) (archived 2026-05-12 — all 6 phases shipped). Mapping: drag-to-embed into canvas → BL-048; block-links navigator → BL-049 (gated on block-id stability ADR); side-margin comments → BL-050; block AI actions → merged into BL-035; multi-cursor from multi-block → BL-051.
 
 ---
 
@@ -698,7 +698,7 @@ _BL-051 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 ### Verification notes (no BL ID — informational)
 
-- **ADR-0009 keyring hard-fail enforcement** — Verified 2026-04-30 and resolved as **OI-21** the same day: `SecurityCorePlugin::on_init` now runs an injected `KeyringProbe` (default `CredentialVault::new().available()`) and returns `PluginError::LifecycleError` with the platform hint when the OS keyring is unavailable. Bootstrap propagates the lifecycle error so frontends exit non-zero. See [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md) §OI-21.
+- **ADR-0009 keyring hard-fail enforcement** — Verified 2026-04-30 and resolved as **OI-21** the same day: `SecurityCorePlugin::on_init` now runs an injected `KeyringProbe` (default `CredentialVault::new().available()`) and returns `PluginError::LifecycleError` with the platform hint when the OS keyring is unavailable. Bootstrap propagates the lifecycle error so frontends exit non-zero. See [../archive/OPEN-ITEMS-resolved-2026-04-26.md](../archive/OPEN-ITEMS-resolved-2026-04-26.md) §OI-21.
 - **PRD-04a MockPluginContext / MockEventBus** — referenced in template tests as TODO but not yet exposed from `nexus-plugin-api`. Low priority; community plugin authors are not yet writing many tests, and the issue surfaces only when someone tries.
 
 ## Decisions — PRD-04 audit (2026-04-17)

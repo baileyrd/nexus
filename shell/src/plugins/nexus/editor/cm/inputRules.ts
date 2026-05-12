@@ -1,4 +1,4 @@
-// Phase 4 of docs/roadmap/notion-block-ux-plan.md — markdown input rules.
+// Phase 4 of docs/archive/notion-block-ux-plan.md — markdown input rules.
 //
 // Most of the block-creation shortcuts from the plan (`#` / `##` /
 // `###` / `-` / `1.` / `>` / `---`) already work because they're

@@ -271,7 +271,7 @@ points and the actual `CorePlugin` registration mechanism.
 **Severity:** Should-fix (filing)
 **Kind:** `filing`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Roadmap
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 All 6 phases of the notion-block UX plan shipped 2026-04-22. Doc still
 lives in `roadmap/` as if in-flight. Also has a duplicated/contradictory
@@ -281,6 +281,16 @@ Phase 4 entry in its "Phasing recap" block.
 docs/archive/`, add archive header citing the shipping date and the
 landing commits.
 
+**Resolution.** `git mv docs/roadmap/notion-block-ux-plan.md
+docs/archive/notion-block-ux-plan.md`, replaced the stale "SHIPPED —
+should archive" callout with a standard archive header (BL-048..BL-051
+follow-up mapping included). Updated path references in five shell
+CodeMirror plugin files, `crates/nexus-editor/src/transaction.rs`,
+`docs/PRDs/BACKLOG.md`'s Future-directions mapping, and removed the
+row from `docs/roadmap/README.md`. The body's internal "still open"
+notes are preserved unedited — the archive header flags they're stale
+by definition.
+
 ---
 
 ## DG-12 — `OPEN-ITEMS.md` should archive (21/22 resolved)
@@ -288,7 +298,7 @@ landing commits.
 **Severity:** Should-fix (filing)
 **Kind:** `filing`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Roadmap
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Of the 22 OI-NN items, 21 are resolved (per the existing `Status:
 Resolved` lines in the file itself). Only OI-05 (Rust dep duplication,
@@ -299,6 +309,15 @@ a live tracker.
 OI-05 to a single BL entry in `PRDs/BACKLOG.md` or leave a one-page
 `OPEN-ITEMS.md` containing just OI-05 + a pointer to the archived
 audit trail.
+
+**Resolution.** Chose option B (keep a one-page live tracker). The
+full 22-entry audit trail was moved verbatim via `git mv` to
+`docs/archive/OPEN-ITEMS-resolved-2026-04-26.md` and gained a standard
+archive header; the live `docs/roadmap/OPEN-ITEMS.md` was rewritten as
+a slim file with just OI-05 and a pointer to the archive. Cross-links
+updated in `docs/roadmap/README.md` and `docs/PRDs/BACKLOG.md` (the
+"Resolved" subsection and the ADR-0009 verification note both now
+point at the archive).
 
 ---
 

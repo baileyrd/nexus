@@ -1,4 +1,4 @@
-// Phase 1 of docs/roadmap/notion-block-ux-plan.md — slash command menu.
+// Phase 1 of docs/archive/notion-block-ux-plan.md — slash command menu.
 //
 // Typing `/` at the start of a block (or after whitespace only) opens
 // a small overlay anchored at the cursor. Each entry rewrites the

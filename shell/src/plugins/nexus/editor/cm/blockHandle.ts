@@ -1,4 +1,4 @@
-// Phase 3 of docs/roadmap/notion-block-ux-plan.md — block handle + per-block
+// Phase 3 of docs/archive/notion-block-ux-plan.md — block handle + per-block
 // menu + drag reorder.
 //
 // A 6-dot grip glyph renders in the left gutter next to each block's
