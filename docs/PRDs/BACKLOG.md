@@ -6,6 +6,8 @@
 > - **Completed items** are archived verbatim in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 > - **Full descriptions of OI-\*** items live in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md); this file cross-lists by ID.
 > - **Formal-release work** (auto-updater, telemetry, marketplace, beta→GA) is deferred to [../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md](../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md); the WI-IDs are indexed below for completeness.
+> - **Doc gaps and product gaps surfaced by the 2026-05-12 traceability audit** live in [../roadmap/DOC-GAPS.md](../roadmap/DOC-GAPS.md) as DG-01..DG-46. Product-gap entries (DG-32..DG-46) are cross-listed in this file under "Doc-audit-surfaced product gaps". Doc-bug entries (DG-01..DG-31) live in DOC-GAPS only since they're documentation edits, not feature work.
+> - **Research-surfaced ideas** from external-project assessments under [../research/](../research/) are indexed under "Research-surfaced ideas (2026-05, unscoped)".
 > - **Exploratory / unscoped design docs** (AI directions, ambient copilot, memory layer, settings extraction inventory) are linked under "Future directions" — they do not have committed timelines.
 >
 > Section headings with no listed items are preserved as structural placeholders — consult the archive for what landed under each, and add new follow-ups directly below the heading.
