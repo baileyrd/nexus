@@ -37,6 +37,10 @@
 }
 .nexus-editor-source:focus { outline: 0; }
 
+/* CodeMirror ships a default 1px dotted focus outline on .cm-editor —
+ * suppress it so focusing the editor doesn't draw a dark box around the doc. */
+.cm-editor.cm-focused { outline: none; }
+
 /* ---- Markdown body -------------------------------------------------- */
 
 .nexus-markdown-body {
