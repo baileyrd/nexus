@@ -724,7 +724,7 @@ function TabStrip({
               key={leaf.id}
               leaf={leaf}
               active={isActive}
-              canClose={tabs.leaves.length > 1}
+              canClose
               onActivate={() => workspace.setTabActiveIndex(tabs.id, i)}
               onClose={() => {
                 void workspace.detachLeaf(leaf)
@@ -768,6 +768,13 @@ function TabStrip({
             aria-label="New tab"
             title="New tab"
             onClick={handleNewTab}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                'var(--background-modifier-hover, rgba(127,127,127,0.25))'
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+            }}
             className="workspace-tab-new"
             style={{
               background: 'transparent',
@@ -777,10 +784,15 @@ function TabStrip({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '0 8px',
+              padding: 0,
+              width: 24,
+              height: 24,
+              marginLeft: 10,
+              borderRadius: 4,
               fontSize: 12,
               lineHeight: 1,
               flex: '0 0 auto',
+              alignSelf: 'center',
             }}
           >
             <Icon name="plus" size={14} />
@@ -1384,15 +1396,31 @@ function TabButton({
             e.stopPropagation()
             onClose()
           }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              'var(--background-modifier-hover, rgba(127,127,127,0.25))'
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+          }}
           title="Close tab"
           style={{
             background: 'transparent',
             border: 'none',
             color: 'inherit',
             cursor: 'pointer',
-            padding: '0 2px',
-            fontSize: 12,
+            padding: 0,
+            fontSize: 14,
             lineHeight: 1,
+            width: 18,
+            height: 18,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 3,
+            flex: '0 0 auto',
+            marginLeft: 4,
           }}
         >
           ×

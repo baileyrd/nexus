@@ -1729,6 +1729,22 @@ export const editorPlugin: Plugin = {
           store.closeTab(tab.relpath)
         }
       }
+
+      // Main-dock floor: if the user just closed the last main-dock leaf,
+      // seed a fresh empty placeholder so the dock is never blank. Side
+      // docks are intentionally excluded — collapsing an empty sidedock
+      // is a feature, not a bug.
+      const mainLeaves: Leaf[] = []
+      collectMainLeaves(workspace.rootSplit, mainLeaves)
+      if (mainLeaves.length === 0) {
+        const target = findFirstMainTabs(workspace.rootSplit)
+        if (target) {
+          const leaf = workspace.createLeaf(target)
+          target.leaves.push(leaf)
+          target.activeIndex = target.leaves.length - 1
+          void leaf.setViewState({ type: EMPTY_VIEW_TYPE, active: true })
+        }
+      }
     }
     workspace.on('layout-change', reconcileTabs)
 
