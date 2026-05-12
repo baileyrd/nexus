@@ -1079,7 +1079,7 @@ Spec'd; not built.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open — needs scoping decision
+**Status:** Resolved 2026-05-12 — **Option A** (reframe as desktop-only)
 
 PRD-17 §3 (WASM target), §4 (`nexus-platform` crate), §5 (web target),
 §6 (mobile / UniFFI bindings) are all unimplemented. No `wasm32`,
@@ -1090,6 +1090,35 @@ PRD-17 §3 (WASM target), §4 (`nexus-platform` crate), §5 (web target),
   to exploratory `roadmap/` or `research/`.
 - Option B: Commit to multi-platform; promote each platform to BL
   entries.
+
+### Outcome
+
+Option A chosen. PRD-17 reframed as "Desktop Strategy":
+
+- Title and executive summary rewritten in
+  [`docs/PRDs/17-cross-platform-strategy.md`](../PRDs/17-cross-platform-strategy.md);
+  status line bumped to "1.0 (reframed 2026-05-12 per DG-38)".
+- Header callout at the top spells out the scoping decision and lists
+  every section that is now considered deferred design rationale
+  rather than committed work.
+- Per-section "Deferred (DG-38, 2026-05-12)" callouts inserted at
+  §3 (WASM), §5 (Web), §6 (Mobile), §15 (Web Onboarding), §16
+  (Mobile UX), and a "Partially deferred" callout at §4 (Platform
+  Abstraction) noting that the desktop column ships today but the
+  separate `nexus-platform` crate was never created — desktop callers
+  use Tauri / keyring / portable-pty directly.
+- [`docs/PRDs/00-index.md`](../PRDs/00-index.md) PRD-17 row retitled
+  "Desktop Strategy" with a scope summary that names DG-38.
+- [`docs/PRDs/IMPLEMENTATION_STATUS.md`](../PRDs/IMPLEMENTATION_STATUS.md)
+  PRD-17 entry retitled and its Gaps line rewritten to point at this
+  DG; web/mobile no longer count as gaps. Tauri-updater signing is
+  left tracked under WI-41 (formal-release scope).
+
+The PRD body sections are preserved verbatim so the design thinking
+survives. If multi-platform is ever pursued, each platform should be
+promoted to its own BL entry and re-validated against ADR 0011
+(single-shell desktop) + ADR 0016 (microkernel native-vs-WASM split)
+before any code lands.
 
 ---
 

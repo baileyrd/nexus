@@ -1,16 +1,18 @@
-# Cross-Platform Strategy — Nexus v1.0 PRD
+# Desktop Strategy — Nexus v1.0 PRD
 
-**Status:** 🟢 Shipped (desktop only) — web + mobile deferred (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
-**Version:** 1.0  
-**Owner:** Architecture  
-**Date:** April 2026  
-**Target Platforms:** Desktop (Tauri 2.x), Web (WASM), Mobile (iOS/Android via UniFFI)
+**Status:** 🟢 Shipped (desktop)
+**Version:** 1.0 (reframed 2026-05-12 per [DG-38](../roadmap/DOC-GAPS.md#dg-38))
+**Owner:** Architecture
+**Date:** April 2026 · reframed May 2026
+**Target Platforms:** Desktop (Tauri 2.x) on Linux / macOS / Windows
+
+> **Scoping note (2026-05-12, DG-38).** This PRD is reframed as a **desktop strategy**. The original document scoped Web (WASM) and Mobile (iOS / Android via UniFFI) as committed targets alongside desktop; that commitment is withdrawn. The web / mobile sections (§3, §5, §6, plus per-platform rows in the §7 build pipeline, §10 feature matrix, §11 performance targets, §12 testing matrix, §13 parity roadmap, §14 native-behavior columns, §15 web onboarding, §16 mobile UX) are preserved below for historical context and design rationale — they are **not** committed work items. If multi-platform is pursued later, each platform must be promoted to its own BL entry and re-validated against current architecture (ADR 0011 single-shell desktop, ADR 0016 microkernel native-vs-WASM split). The active scope is Desktop / Tauri 2.x; everything else is exploratory.
 
 ---
 
 ## Executive Summary
 
-Nexus is a Rust-based, AI-native developer knowledge environment shipping simultaneously on three platforms from a single codebase. The architecture maximizes code reuse (kernel, storage, plugins in Rust) while respecting platform-specific constraints (file system, UI rendering, input methods). This strategy enables desktop-grade power, web accessibility, and mobile convenience without fragmentation.
+Nexus is a Rust-based, AI-native developer knowledge environment shipping on the desktop via Tauri 2.x. The architecture keeps the kernel, storage, and plugin layers platform-agnostic in Rust so a future multi-platform pivot remains reachable, but the committed product surface today is the Tauri desktop shell on Linux, macOS, and Windows.
 
 ---
 
@@ -83,6 +85,8 @@ codesign -s "Developer ID Application" src-tauri/target/release/bundle/macos/Nex
 
 ## 3. WASM Compilation Strategy
 
+> **Deferred (DG-38, 2026-05-12).** Not a committed work item. Preserved for design rationale.
+
 ### Crate Compatibility Matrix
 | Crate | WASM Target | Notes |
 |-------|-------------|-------|
@@ -122,6 +126,8 @@ Web performance acceptable for typical usage; heavy indexing deferred to backgro
 ---
 
 ## 4. Platform Abstraction Layer
+
+> **Partially deferred (DG-38, 2026-05-12).** The desktop column of the implementation matrix is shipped (file I/O, Tauri APIs, keyring, hotkeys). The `nexus-platform` crate itself was never created — desktop currently calls Tauri / keyring / portable-pty directly. Web / iOS / Android columns are deferred design notes.
 
 ### Core Traits (nexus-platform)
 
@@ -172,6 +178,8 @@ pub trait GlobalHotkeys: Send + Sync {
 ---
 
 ## 5. Web Platform Implementation
+
+> **Deferred (DG-38, 2026-05-12).** Not a committed work item. Preserved for design rationale.
 
 ### File System Backend: OPFS + IndexedDB
 - **OPFS (File System Access API)**: User grants directory picker once; persistent access to `/nexus-forges/`
@@ -228,6 +236,8 @@ await writable.close();
 ---
 
 ## 6. Mobile Platform Implementation (iOS/Android)
+
+> **Deferred (DG-38, 2026-05-12).** Not a committed work item. Preserved for design rationale.
 
 ### UniFFI Bindings
 ```rust
@@ -555,6 +565,8 @@ Feature tests     ✓ Nightly       –               –                 ✓ Ni
 
 ## 15. Web Onboarding Flow
 
+> **Deferred (DG-38, 2026-05-12).** Not a committed work item. Preserved for design rationale.
+
 1. **Land on nexus.dev** → PWA install prompt (Chrome/Edge only)
 2. **Create account** → Google/GitHub OAuth or email+password
 3. **Create first forge** → Single-click with name + GitHub repo link (optional)
@@ -566,6 +578,8 @@ Feature tests     ✓ Nightly       –               –                 ✓ Ni
 ---
 
 ## 16. Mobile UX
+
+> **Deferred (DG-38, 2026-05-12).** Not a committed work item. Preserved for design rationale.
 
 ### Quick Capture Widget (iOS 17+ / Android 12+)
 - **iOS Lockscreen widget**: Tap to open capture dialog; adds note without opening app

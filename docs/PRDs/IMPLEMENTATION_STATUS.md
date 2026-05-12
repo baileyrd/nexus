@@ -188,9 +188,9 @@
 **Gaps:** None remaining against PRD-16. Subsequent ideas land in BACKLOG via the standard BL flow.
 **Evidence:** [crates/nexus-workflow/src/](crates/nexus-workflow/src/), [crates/nexus-cli/src/commands/workflow.rs](crates/nexus-cli/src/commands/workflow.rs), [crates/nexus-bootstrap/src/lib.rs](crates/nexus-bootstrap/src/lib.rs).
 
-### PRD-17 — Cross-Platform Strategy 🟢
+### PRD-17 — Desktop Strategy 🟢
 **Shipped:** Tauri 2.x desktop shell with React/Zustand frontend, strict CSP, sandboxed webview panels, Rust core platform-agnostic, deep-link scheme dispatch plumbing.
-**Gaps:** Web target — no OPFS read/write, no IndexedDB vector store, no service-worker sync. Mobile — no UniFFI Kotlin/Swift FFI, no iOS/Android shell. Platform chrome (vibrancy/Mica) CSS-only. Multi-window (detachable panels) not wired. Tauri updater signature verification deferred.
+**Gaps:** PRD reframed as desktop-only on 2026-05-12 per [DG-38](../roadmap/DOC-GAPS.md#dg-38) — web (§3, §5) and mobile (§6) sections are preserved as deferred design rationale and are no longer counted as gaps. Tauri updater signature verification remains deferred under [WI-41](../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md).
 **Evidence:** [shell/src-tauri/](../../shell/src-tauri/), [shell/src/](../../shell/src/), [packages/nexus-extension-api/](../../packages/nexus-extension-api/). Tracing subscriber installed in shell binary (2026-04-24, commit `5b7b937`). OS deep-link bridge wired via `tauri-plugin-deep-link` (2026-04-24, commit `204fcf7` — resolves WI-13 deferral). Filesystem event forwarder active — `shell/src/plugins/nexus/files/index.ts:377-470` subscribes to `com.nexus.storage.file_{created,modified,deleted,renamed}` via `api.kernel.on`.
 
 ## Cross-cutting observations
