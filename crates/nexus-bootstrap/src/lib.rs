@@ -646,6 +646,14 @@ fn register_core_plugins(
                         "config_reset",
                         nexus_storage::core_plugin::HANDLER_CONFIG_RESET,
                     ),
+                    (
+                        "settings_read",
+                        nexus_storage::core_plugin::HANDLER_SETTINGS_READ,
+                    ),
+                    (
+                        "settings_write",
+                        nexus_storage::core_plugin::HANDLER_SETTINGS_WRITE,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),

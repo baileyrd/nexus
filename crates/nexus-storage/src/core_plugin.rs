@@ -286,6 +286,17 @@ pub const HANDLER_READ_FRONTMATTER: u32 = 59;
 /// peers via git while rebuildable / per-machine state stays
 /// excluded.
 pub const HANDLER_WRITE_DEFAULT_GITIGNORE: u32 = 60;
+/// Handler id for `settings_read`. Args: `{}`. Returns the
+/// `[settings]` table from `.forge/app.toml` as a JSON object
+/// keyed by `pluginId.field`. Missing file / missing block both
+/// return `{}` — the shell treats those as "use defaults."
+pub const HANDLER_SETTINGS_READ: u32 = 61;
+/// Handler id for `settings_write`. Args: `{ "key": String, "value": Value }`.
+/// Atomic read-modify-write of one entry in the `[settings]` table.
+/// Other sections of `app.toml` are preserved. Passing `null` as
+/// the value removes the key, restoring the schema-declared default.
+/// Returns `{}`.
+pub const HANDLER_SETTINGS_WRITE: u32 = 62;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -427,6 +438,8 @@ impl CorePlugin for StorageCorePlugin {
         match handler_id {
             HANDLER_CONFIG_READ => return dispatch_config_read(&self.forge_root, args),
             HANDLER_CONFIG_RESET => return dispatch_config_reset(&self.forge_root, args),
+            HANDLER_SETTINGS_READ => return dispatch_settings_read(&self.forge_root),
+            HANDLER_SETTINGS_WRITE => return dispatch_settings_write(&self.forge_root, args),
             HANDLER_WRITE_DEFAULT_GITIGNORE => {
                 let forge = crate::Forge::new(&self.forge_root);
                 let wrote = forge
@@ -1371,6 +1384,46 @@ fn dispatch_config_reset(
     Ok(serde_json::json!({}))
 }
 
+fn dispatch_settings_read(
+    forge_root: &std::path::Path,
+) -> Result<serde_json::Value, PluginError> {
+    let cfg = crate::config::load_app_config(forge_root)
+        .map_err(|e| exec_err(format!("settings_read: {e}")))?;
+    // toml::Value implements Serialize, so serde_json walks the tree
+    // and produces a JSON object directly. No manual conversion.
+    serde_json::to_value(&cfg.settings)
+        .map_err(|e| exec_err(format!("settings_read: serialize: {e}")))
+}
+
+fn dispatch_settings_write(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| exec_err("settings_write: missing 'key' (string)".to_string()))?
+        .to_string();
+    let value = args
+        .get("value")
+        .ok_or_else(|| exec_err("settings_write: missing 'value'".to_string()))?;
+
+    let mut cfg = crate::config::load_app_config(forge_root)
+        .map_err(|e| exec_err(format!("settings_write: load: {e}")))?;
+
+    if value.is_null() {
+        cfg.settings.remove(&key);
+    } else {
+        let toml_value: toml::Value = serde_json::from_value(value.clone())
+            .map_err(|e| exec_err(format!("settings_write: value→toml: {e}")))?;
+        cfg.settings.insert(key, toml_value);
+    }
+
+    crate::config::save_app_config(forge_root, &cfg)
+        .map_err(|e| exec_err(format!("settings_write: save: {e}")))?;
+    Ok(serde_json::json!({}))
+}
+
 // ── Bridge thread ──────────────────────────────────────────────────────────────
 
 /// Polls the watcher until the stop signal arrives, translating each
@@ -1591,6 +1644,8 @@ mod tests {
             ("HANDLER_NOTE_APPEND", HANDLER_NOTE_APPEND),
             ("HANDLER_BACKLINKS_TO_BLOCK", HANDLER_BACKLINKS_TO_BLOCK),
             ("HANDLER_WRITE_DEFAULT_GITIGNORE", HANDLER_WRITE_DEFAULT_GITIGNORE),
+            ("HANDLER_SETTINGS_READ", HANDLER_SETTINGS_READ),
+            ("HANDLER_SETTINGS_WRITE", HANDLER_SETTINGS_WRITE),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {
