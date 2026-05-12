@@ -32,4 +32,5 @@ decisions see [`../adr/`](../adr/).
 | Doc | What it covers |
 |---|---|
 | [`agentic-os-implementation-plan.md`](agentic-os-implementation-plan.md) | "Agentic OS" mode implementation outline. Source for BL-054. |
+| [`hermes-agent-implementation-plan.md`](hermes-agent-implementation-plan.md) | Hermes Agent native-Rust port plan. 7 features (iteration budget, memory persistence, skills, context compression, session FTS search, multi-agent delegation, ACP adapter) scoped with merge order. **Cross-listed** in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Research-surfaced ideas". |
 | [`settings-stubs-audit.md`](settings-stubs-audit.md) | Settings-tab stub inventory. |
