@@ -100,6 +100,53 @@ pub fn log_credential_access(credential_name: &str, action: &str) {
     );
 }
 
+/// Log an MCP tool call (DG-40 / PRD-14 §12.2).
+///
+/// `result` is `"success"` or `"error"`; `error` carries the message
+/// when the call failed and is omitted from the structured event
+/// otherwise. The MCP server is responsible for wall-clock timing.
+pub fn log_mcp_tool_call(tool: &str, duration_ms: u64, result: &str, error: Option<&str>) {
+    tracing::info!(
+        audit = true,
+        tool,
+        duration_ms,
+        result,
+        error = error.unwrap_or(""),
+        "mcp tool call"
+    );
+    let mut detail = serde_json::json!({
+        "tool": tool,
+        "duration_ms": duration_ms,
+        "result": result,
+    });
+    if let Some(err) = error {
+        detail["error"] = serde_json::Value::String(err.to_string());
+    }
+    crate::audit_store::append("mcp_tool_call", None, &detail);
+}
+
+/// Log an MCP resource read (DG-40 / PRD-14 §12.2). Companion to
+/// [`log_mcp_tool_call`] for the resource side of the MCP surface.
+pub fn log_mcp_resource_read(uri: &str, duration_ms: u64, result: &str, error: Option<&str>) {
+    tracing::info!(
+        audit = true,
+        uri,
+        duration_ms,
+        result,
+        error = error.unwrap_or(""),
+        "mcp resource read"
+    );
+    let mut detail = serde_json::json!({
+        "uri": uri,
+        "duration_ms": duration_ms,
+        "result": result,
+    });
+    if let Some(err) = error {
+        detail["error"] = serde_json::Value::String(err.to_string());
+    }
+    crate::audit_store::append("mcp_resource_read", None, &detail);
+}
+
 /// Log a path traversal denial.
 pub fn log_path_traversal_denied(plugin_id: &str, requested_path: &Path, forge_root: &Path) {
     tracing::warn!(
@@ -241,6 +288,43 @@ mod tests {
         assert!(event.contains("audit=true"), "missing audit field: {event}");
         assert!(event.contains("credential_name=ai.anthropic"), "missing credential_name: {event}");
         assert!(event.contains("action=retrieve"), "missing action: {event}");
+    }
+
+    #[test]
+    fn mcp_tool_call_success_emits_audit_event() {
+        let events = with_captured_events(|| {
+            log_mcp_tool_call("nexus_read_note", 12, "success", None);
+        });
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert!(event.contains("audit=true"), "missing audit field: {event}");
+        assert!(event.contains("tool=nexus_read_note"), "missing tool: {event}");
+        assert!(event.contains("duration_ms=12"), "missing duration_ms: {event}");
+        assert!(event.contains("result=success"), "missing result: {event}");
+    }
+
+    #[test]
+    fn mcp_tool_call_error_carries_error_text() {
+        let events = with_captured_events(|| {
+            log_mcp_tool_call("nexus_write_note", 8, "error", Some("forge: read-only"));
+        });
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert!(event.contains("result=error"), "missing result: {event}");
+        assert!(event.contains("error=forge: read-only"), "missing error: {event}");
+    }
+
+    #[test]
+    fn mcp_resource_read_emits_audit_event() {
+        let events = with_captured_events(|| {
+            log_mcp_resource_read("mcp://nexus/notes/foo.md", 3, "success", None);
+        });
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert!(event.contains("audit=true"), "missing audit field: {event}");
+        assert!(event.contains("uri=mcp://nexus/notes/foo.md"), "missing uri: {event}");
+        assert!(event.contains("duration_ms=3"), "missing duration_ms: {event}");
+        assert!(event.contains("result=success"), "missing result: {event}");
     }
 
     #[test]

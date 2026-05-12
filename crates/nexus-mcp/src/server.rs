@@ -1021,8 +1021,33 @@ impl rmcp::ServerHandler for NexusMcpServer {
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResult, rmcp::ErrorData>> + Send + '_
     {
+        // DG-40 / PRD-14 §12.2 — every tool call is audited with the
+        // tool name and wall-clock duration. We capture the name before
+        // moving the request into the ToolCallContext so it stays
+        // available after the call finishes.
+        let tool_name = request.name.to_string();
+        let started = std::time::Instant::now();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        self.tool_router.call(tcc)
+        let fut = self.tool_router.call(tcc);
+        async move {
+            let outcome = fut.await;
+            let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            match &outcome {
+                Ok(_) => nexus_kernel::audit::log_mcp_tool_call(
+                    &tool_name,
+                    duration_ms,
+                    "success",
+                    None,
+                ),
+                Err(e) => nexus_kernel::audit::log_mcp_tool_call(
+                    &tool_name,
+                    duration_ms,
+                    "error",
+                    Some(&e.to_string()),
+                ),
+            }
+            outcome
+        }
     }
 
     fn list_tools(
@@ -1073,24 +1098,48 @@ impl rmcp::ServerHandler for NexusMcpServer {
         struct ReadFileResp {
             bytes: Vec<u8>,
         }
-        let Some(path) = parse_note_uri(&request.uri) else {
-            return Err(rmcp::ErrorData::resource_not_found(
-                format!("unknown resource uri: {}", request.uri),
-                None,
-            ));
-        };
-        let resp: ReadFileResp = self
-            .storage_call("read_file", serde_json::json!({ "path": path }))
-            .await
-            .map_err(|e| {
-                rmcp::ErrorData::resource_not_found(
-                    format!("resource not found: {} ({e})", request.uri),
+        // DG-40 / PRD-14 §12.2 — audit every resource read with the
+        // URI and wall-clock duration.
+        let started = std::time::Instant::now();
+        let uri = request.uri.clone();
+        let outcome: Result<ReadResourceResult, rmcp::ErrorData> = async {
+            let Some(path) = parse_note_uri(&uri) else {
+                return Err(rmcp::ErrorData::resource_not_found(
+                    format!("unknown resource uri: {uri}"),
                     None,
-                )
-            })?;
-        let text = String::from_utf8_lossy(&resp.bytes).into_owned();
-        let contents = ResourceContents::text(text, &request.uri).with_mime_type("text/markdown");
-        Ok(ReadResourceResult::new(vec![contents]))
+                ));
+            };
+            let resp: ReadFileResp = self
+                .storage_call("read_file", serde_json::json!({ "path": path }))
+                .await
+                .map_err(|e| {
+                    rmcp::ErrorData::resource_not_found(
+                        format!("resource not found: {uri} ({e})"),
+                        None,
+                    )
+                })?;
+            let text = String::from_utf8_lossy(&resp.bytes).into_owned();
+            let contents =
+                ResourceContents::text(text, &uri).with_mime_type("text/markdown");
+            Ok(ReadResourceResult::new(vec![contents]))
+        }
+        .await;
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        match &outcome {
+            Ok(_) => nexus_kernel::audit::log_mcp_resource_read(
+                &uri,
+                duration_ms,
+                "success",
+                None,
+            ),
+            Err(e) => nexus_kernel::audit::log_mcp_resource_read(
+                &uri,
+                duration_ms,
+                "error",
+                Some(&e.to_string()),
+            ),
+        }
+        outcome
     }
 }
 
