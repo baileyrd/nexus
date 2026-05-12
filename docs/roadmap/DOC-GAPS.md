@@ -1112,12 +1112,37 @@ is static at startup.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Kernel audit store exists but isn't called from `crates/nexus-mcp/src/server.rs::call_tool`. MCP tool calls leave no audit trail.
 
 **Definition of done:** Wire `AuditEvent::McpToolCall` (or similar)
 through `call_tool`.
+
+### Outcome
+
+- New `nexus_kernel::audit::log_mcp_tool_call(tool, duration_ms, result, error)`
+  and `log_mcp_resource_read(uri, duration_ms, result, error)` helpers
+  emit a structured `tracing::info!` event (`audit = true`) and
+  append a typed row (`mcp_tool_call` / `mcp_resource_read`) into the
+  kernel audit store via the existing `audit_store::append` path. The
+  SQLite-backed implementation in `nexus-bootstrap` picks them up
+  unchanged.
+- `crates/nexus-mcp/src/server.rs::call_tool` captures the tool name
+  and wall-clock duration around `tool_router.call(...)` and calls
+  `log_mcp_tool_call` with `"success"` or `"error"` + message.
+- `read_resource` does the same for resource reads — both URI parse
+  failures and downstream `storage::read_file` errors are audited as
+  failures alongside successful reads.
+- Five new unit tests in `crates/nexus-kernel/src/audit.rs` cover
+  emission for both success and error paths.
+- PRD-14 §12.2's separate `mcp-audit.jsonl` file with daily rotation
+  is intentionally not built: the kernel audit store already provides
+  a single durable audit surface across capability, lifecycle,
+  credential, and now MCP events, and `nexus logs` already queries it.
+  Adding a second sink for MCP-only events would split the audit
+  trail. If a JSONL exporter is needed later it can read from the
+  same store.
 
 ---
 
