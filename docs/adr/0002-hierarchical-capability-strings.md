@@ -49,3 +49,14 @@ parsing validates strings against the enum at parse time. No wildcards.
 | `ui.notify` | `UiNotify` | Low — shows toasts; no destructive effect, but spam potential warrants a gate |
 
 `host::get_settings` (own-plugin settings reads) is intentionally ungated: a plugin reading its own validated settings is first-party and carries no cross-plugin risk.
+
+## Addendum 2026-05-12 — capability inventory has grown
+
+The inventory above is the table as of 2026-04-16 (14 entries). [ADR
+0022] added eight `ai.*` capabilities (Phase 1: six; Phase 2: two), so
+the canonical surface is now 22 entries. Per the immutable-body
+convention, the original table is preserved; the authoritative inventory
+lives at [ADR 0022 §Inventory note (2026-05-12)](0022-per-handler-ai-capabilities.md#inventory-note-2026-05-12),
+mirrored from `crates/nexus-plugin-api/src/capability.rs::Capability::ALL`.
+
+[ADR 0022]: 0022-per-handler-ai-capabilities.md

@@ -1,194 +1,189 @@
 # Testing your plugin
 
-A plugin is a `Plugin` object that takes a `PluginContext`. Both are
-plain TypeScript shapes, so unit-testing is straightforward: build a
-mock context, call your `activate`, and assert against what the
-plugin did.
+> **Story.** Nexus does not ship a `@nexus/extension-api/testing`
+> entrypoint or a `mockContext` factory. Every shipped plugin under
+> `shell/src/plugins/nexus/**` and `crates/nexus-*/` is tested with the
+> language's built-in test runner against hand-rolled fakes of the
+> `NexusPluginContext` / `KernelAPI` surfaces it actually uses. Build
+> the smallest fake your code needs; don't reach for a generic harness
+> that doesn't exist.
 
-## Project setup
+Two runners cover the two plugin shapes Nexus supports today:
 
-The scaffold ships with [Vitest](https://vitest.dev) wired in:
+- **Script plugins (TypeScript)** — `node --test` via the `node:test`
+  module. The shell workspace already wires it up; tests live next to
+  the code as `*.test.ts`.
+- **Native plugins (Rust)** — `cargo test -p <crate>`, with `tokio::test`
+  for async surface and `tempfile::TempDir` for forge-shaped fixtures.
+
+## Project setup (script plugins)
+
+Tests live next to the file they cover and are discovered by `node:test`:
 
 ```bash
-pnpm test                 # run once
-pnpm test --watch         # watch mode
-pnpm test --coverage      # with coverage
+pnpm --filter nexus-shell test            # all shell tests
+pnpm --filter nexus-shell test -- --watch # watch mode (Node flag)
 ```
 
-Tests live in `tests/` next to `src/`.
+A scaffolded plugin gets the same toolchain when it ships inside the
+shell workspace. Out-of-tree script plugins choose their own runner;
+the recipes below transpose cleanly to Vitest or Jest if you prefer.
 
 ## A first test
 
 ```ts
-// tests/hello.test.ts
-import { describe, it, expect } from 'vitest';
-import { mockContext } from '@nexus/extension-api/testing';
-import { plugin } from '../src/index';
+// shell/src/plugins/nexus/hello/hello.test.ts
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 
-describe('hello plugin', () => {
-  it('registers the sayHi command', async () => {
-    const ctx = mockContext();
-    await plugin.activate(ctx);
+import type { KernelAPI, NexusPluginContext } from '../../../types/plugin.ts';
+import { plugin } from './index.ts';
 
-    expect(ctx.commands.list()).toContain('hello.sayHi');
-  });
+interface FakeKernel extends KernelAPI {
+  calls: Array<{ pluginId: string; commandId: string; args: unknown }>;
+}
 
-  it('greets the user', async () => {
-    const ctx = mockContext({
-      ui: { promptResponse: 'Ada' },
-    });
-    await plugin.activate(ctx);
-
-    await ctx.commands.invoke('hello.sayHi');
-
-    expect(ctx.ui.lastNotification()?.message).toBe('Hello, Ada!');
-  });
-});
-```
-
-## What `mockContext` gives you
-
-`mockContext(opts?)` returns a `PluginContext` whose subsystems are
-in-memory fakes. Each subsystem records what your plugin did and
-exposes inspection helpers.
-
-| Subsystem | Inspection helpers |
-|---|---|
-| `commands` | `list()`, `invoke(id, args?)`, `unregisterCount()` |
-| `events`   | `published()`, `subscriptionsFor(topic)`, `emit(topic, payload)` |
-| `ipc`      | `recordedCalls()`, `setHandler(plugin, command, fn)` |
-| `kv`       | Real in-memory map; `dump()` to inspect |
-| `fs`       | In-memory file system; `seed({ path: contents })` |
-| `config`   | `setValue(key, val)`, `lastChanged()` |
-| `ui`       | `lastNotification()`, `notifications()`, `promptResponse` |
-| `env`      | `setEnv(key, val)` |
-
-`opts` lets you preconfigure responses:
-
-```ts
-const ctx = mockContext({
-  fs: { seed: { 'README.md': '# Hi' } },
-  ipc: {
-    handlers: {
-      'com.nexus.storage:list_notes': async () => [{ path: 'a.md' }],
+function makeFakeKernel(): FakeKernel {
+  const calls: FakeKernel['calls'] = [];
+  return {
+    calls,
+    async invoke<T>(pluginId, commandId, args): Promise<T> {
+      calls.push({ pluginId, commandId, args: args ?? {} });
+      return undefined as T;
     },
-  },
-  ui: { promptResponse: 'Ada' },
-  config: { values: { 'hello.greeting': 'Hi' } },
+    // …implement only the methods this test exercises
+  } as FakeKernel;
+}
+
+test('plugin starts cleanly', async () => {
+  const ctx = makeFakeContext();
+  await plugin.onStart?.(ctx);
+  assert.equal(ctx.disposables.size > 0, true);
 });
 ```
 
-## Testing IPC
+The pattern is **build the minimum fake your code touches, then assert
+on its recorded state**. `shell/src/plugins/nexus/status/statusStore.test.ts`
+is a worked example of a `KernelAPI` fake with recorded calls and
+canned responses.
 
-When your plugin calls `ctx.ipc.call(...)`, the mock looks up a
-registered fake handler. Unregistered targets reject with
-`PluginNotFound`:
+## Faking subsystems
+
+`NexusPluginContext` is the host-supplied object the plugin sees at
+runtime. There is no factory; the host wires it up inside the shell.
+For unit tests, build narrow fakes scoped to the subsystem you exercise:
+
+| Subsystem (real) | Test approach |
+|---|---|
+| `ipc.call(plugin, command, args)` | Hand-rolled fake with a `calls: […]` array and a `responses: Map<key, value>` for canned returns. |
+| `events.emit(topic, payload)` | Push to a recorded array; subscribers fan out via a `Map<topic, Set<handler>>`. |
+| `settings.get(key)` / `onChange` | In-memory `Map`; trigger `onChange` callbacks synchronously. |
+| `editor.register*` / contributions | Record the contribution in a list; assert what your `onStart` registered. |
+| `ui.notify(level, msg)` | Push to a `notifications: NoticeRecord[]` array. |
+
+When the real surface evolves, the compiler will flag drift the moment
+you re-`import type` the contract.
+
+## Testing IPC interactions
+
+Plugins reach storage / AI / git / etc. through `ctx.ipc.call(...)`.
+Tests substitute a `KernelAPI` whose `invoke` returns canned values:
 
 ```ts
-ctx.ipc.setHandler('com.nexus.ai', 'ask', async (args) => {
-  return { answer: `mock answer for: ${args.question}` };
+test('save dispatches storage.write_file', async () => {
+  const kernel = makeFakeKernel();
+  kernel.responses.set('com.nexus.storage::write_file', { ok: true });
+  const ctx = makeFakeContext({ kernel });
+
+  await plugin.onStart?.(ctx);
+  await ctx.commands.invoke?.('hello.save');
+
+  assert.deepEqual(kernel.calls.map(c => c.commandId), ['write_file']);
 });
-
-await plugin.activate(ctx);
-await ctx.commands.invoke('hello.askAi', { question: '?' });
-
-expect(ctx.ipc.recordedCalls()).toEqual([
-  { plugin: 'com.nexus.ai', command: 'ask', args: { question: '?' } },
-]);
 ```
 
-## Testing event subscribers
+Unregistered targets should error in the fake the same way the
+real dispatcher errors (`PluginNotFound` / `CommandNotFound`).
 
-Use `ctx.events.emit` to drive subscribers:
+## Testing event flows
+
+Drive subscribers by emitting against your fake:
 
 ```ts
-await plugin.activate(ctx);
-ctx.events.emit('files:changed', {
+const ctx = makeFakeContext();
+await plugin.onStart?.(ctx);
+ctx.events.emit('com.nexus.storage::file_changed', {
   path: 'a.md',
   kind: 'modified',
 });
-
-expect(/* whatever your subscriber did */).toBe(/* expected */);
 ```
 
-To verify your plugin **published** something:
+To verify what your plugin **published**, record into an array inside
+the fake's `emit` and assert against it.
+
+## Testing capability denials
+
+The real host throws a `CapabilityDenied` error before the kernel
+dispatches an `ipc.call` for an ungranted capability. Mirror that in
+the fake by gating `invoke` on a configured capability set:
 
 ```ts
-expect(ctx.events.published()).toContainEqual({
-  topic: 'hello:greeted',
-  payload: { name: 'Ada' },
-});
-```
-
-## Testing capabilities
-
-By default the mock context grants every capability. To assert your
-plugin handles denied capabilities:
-
-```ts
-const ctx = mockContext({ capabilities: { deny: ['fs.write'] } });
-await plugin.activate(ctx);
-
-await expect(ctx.commands.invoke('hello.save')).rejects.toThrow(
-  /CapabilityDenied/
+const ctx = makeFakeContext({ deniedCapabilities: new Set(['fs.write']) });
+await assert.rejects(
+  () => ctx.commands.invoke?.('hello.save'),
+  /CapabilityDenied/,
 );
 ```
 
 ## Testing settings
 
 ```ts
-const ctx = mockContext({
-  config: { values: { 'hello.greeting': 'Howdy' } },
-});
-await plugin.activate(ctx);
-// plugin reads hello.greeting from ctx.config — uses 'Howdy'
+const ctx = makeFakeContext({ settings: { 'hello.greeting': 'Howdy' } });
+await plugin.onStart?.(ctx);
+// plugin reads hello.greeting; uses 'Howdy'.
 
-ctx.config.setValue('hello.greeting', 'Hi');
-// triggers any onChange subscriber
+ctx.settings.setValue?.('hello.greeting', 'Hi'); // triggers onChange
 ```
 
-## Testing async flows
+## Integration testing against a real runtime
 
-Use Vitest's `vi.advanceTimersByTime` for debounced handlers, and
-`await Promise.resolve()` (or `vi.waitFor`) to flush microtasks
-between `emit` and assertion.
-
-## Integration testing
-
-Beyond unit tests, you can run a plugin against a real Nexus runtime
-in a temp forge:
+Beyond unit tests, you can run a plugin end-to-end inside a temp forge
+by driving the `nexus` CLI:
 
 ```ts
-import { spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const forge = await mkdtemp(`${tmpdir()}/nexus-test-`);
-spawn('nexus', ['forge', 'init', forge]);
-spawn('nexus', ['plugin', 'install', './'], { cwd: __dirname });
-
-const result = spawn('nexus', ['plugin', 'call', 'com.example.hello', 'greet', '--arg', 'name=Ada']);
-// assert on stdout
+process.env.NEXUS_FORGE_PATH = forge;
+spawnSync('nexus', ['forge', 'init', forge]);
+spawnSync('nexus', ['plugin', 'install', './']);
+const result = spawnSync(
+  'nexus',
+  ['plugin', 'call', 'com.example.hello', 'greet', '--arg', 'name=Ada'],
+);
+// assert on result.stdout
 ```
 
-This is slower but catches integration bugs (manifest typos, missing
-capabilities, etc.) the mock can't see.
+This catches integration bugs the fake can't see (manifest typos,
+missing capabilities, ABI version mismatch).
 
-## What the mock doesn't simulate
+## What hand-rolled fakes don't simulate
 
-- **Sandbox boundaries.** The mock runs your code in the same process
-  as the test. Sandbox-specific bugs (postMessage serialization,
-  WASM ABI quirks) won't surface.
-- **Concurrency.** The mock processes IPC and events synchronously
-  per call. Race conditions won't reproduce.
-- **Persistence.** The mock KV / fs / config reset per test. Run
-  integration tests against a real forge for upgrade scenarios.
-
-For sandbox-level testing, use the integration approach above.
+- **Sandbox boundaries.** Tests run in-process; postMessage
+  serialization quirks and WASM ABI edges only show up in integration.
+- **Concurrency.** Synchronous fake dispatch hides races. Use
+  `setTimeout(0)` or real promise scheduling in the fake to model
+  microtask ordering.
+- **Persistence.** Fakes reset per test. Upgrade scenarios need an
+  integration run against a real forge.
 
 ## See also
 
-- [Lifecycle](lifecycle.md) — what to call in tests (activate /
-  deactivate).
+- [Lifecycle](lifecycle.md) — what to call in tests (`onInit` /
+  `onStart` / `onStop`).
 - [IPC](ipc.md), [Events](events.md), [Settings](settings.md) —
-  subsystems the mock fakes.
+  subsystems the fake must shadow.
+- `packages/nexus-extension-api/src/index.ts` — authoritative source
+  of the `NexusPluginContext` shape you're faking.
