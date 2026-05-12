@@ -280,13 +280,17 @@ textarea:disabled {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* Topbar doubles as the drag handle. The input and close button
-   suppress this cursor on themselves. */
-.settings-topbar--drag { cursor: grab; user-select: none; }
-.settings-topbar--dragging { cursor: grabbing; }
+/* Topbar and rail both double as drag handles. Interactive children
+   (rail buttons, search input, close button) keep their own cursor —
+   the drag handler bails out when the mousedown target matches one. */
+.settings-topbar--drag,
+.settings-rail--drag { cursor: grab; user-select: none; }
+.settings-topbar--dragging,
+.settings-rail--dragging { cursor: grabbing; }
 .settings-topbar--drag > input,
 .settings-topbar--drag > button { cursor: auto; }
 .settings-topbar--drag > .settings-close { cursor: pointer; }
+.settings-rail--drag .settings-rail-item { cursor: pointer; }
 
 .settings-rail {
   flex-shrink: 0;

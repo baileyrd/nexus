@@ -414,7 +414,10 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
         {/* Left rail — Obsidian-style flat nav with grouped sections.
             "Options" lists the built-in pages; "Core plugins" lists every
             plugin schema as its own page. No inner sub-nav. */}
-        <nav className="settings-rail">
+        <nav
+          className={`settings-rail settings-rail--drag${dragging ? ' settings-rail--dragging' : ''}`}
+          onMouseDown={onDragStart}
+        >
           <div className="settings-rail-group-header">Options</div>
           <RailItem
             label="General"
