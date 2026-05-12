@@ -19,15 +19,19 @@
   margin: 0;
 }
 
-/* Source-mode textarea — shown when the tab's mode is 'source'. */
+/* Source-mode textarea — shown when the tab's mode is 'source'.
+ * Font size and line height pull from CSS custom properties set by
+ * nexus.editor's applyEditorCssVars (driven by the `editor.fontSize`
+ * and `editor.lineHeight` settings). The literal fallbacks match the
+ * pre-settings defaults so unconfigured environments are unchanged. */
 .nexus-editor-source {
   width: 100%;
   height: 100%;
   background: transparent;
   color: var(--text-normal);
   font-family: var(--font-monospace);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--editor-font-size, 13px);
+  line-height: var(--editor-line-height, 1.6);
   border: 0;
   outline: 0;
   padding: 16px 20px;
@@ -37,9 +41,18 @@
 }
 .nexus-editor-source:focus { outline: 0; }
 
-/* CodeMirror ships a default 1px dotted focus outline on .cm-editor —
- * suppress it so focusing the editor doesn't draw a dark box around the doc. */
-.cm-editor.cm-focused { outline: none; }
+/* Same vars flow into the CodeMirror view so source/code-mode tabs
+ * pick them up without needing a CM theme reconfigure. */
+.cm-editor {
+  font-size: var(--editor-font-size, 13px);
+  line-height: var(--editor-line-height, 1.6);
+}
+
+/* CodeMirror ships a default 1px dotted focus outline on .cm-editor;
+ * it reads as a dark box on dark themes. The `editor.showFocusRing`
+ * setting toggles the `editor-hide-focus-ring` class on :root — when
+ * present (the default), we suppress the outline. */
+:root.editor-hide-focus-ring .cm-editor.cm-focused { outline: none; }
 
 /* ---- Markdown body -------------------------------------------------- */
 

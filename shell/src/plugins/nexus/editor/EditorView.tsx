@@ -15,6 +15,7 @@ import { gitBlameExt } from './cm/gitBlame'
 import { lspExtension } from './cm/lspClient'
 import { LspIpc } from './cm/lspIpc'
 import { useEditorBlameStore } from './blameStore'
+import { useConfigValue } from '../../../stores/configStore'
 import './cm/gitGutter.css'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
@@ -803,6 +804,10 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
   // extension stack rebuilds on toggle. The CodeMirrorHost `key`
   // includes this so a flip triggers a clean remount.
   const blameEnabled = useEditorBlameStore((s) => s.enabled)
+  // `editor.lineNumbers` flows through to CodeMirrorHost as a prop;
+  // the host's baseline compartment reconfigures live on prop change,
+  // so flipping this setting takes effect without a remount.
+  const showLineNumbers = useConfigValue('nexus.editor.lineNumbers', false) as boolean
   const centredStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -899,6 +904,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             useEditorStore.getState().setContent(tab.relpath, v)
           }}
           keybindings={keybindings}
+          lineNumbers={showLineNumbers}
           vim={
             keybindings === 'vim'
               ? {
