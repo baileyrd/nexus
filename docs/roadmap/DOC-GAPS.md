@@ -722,7 +722,7 @@ add a forward-pointer from ADR 0008.
 **Severity:** Should-fix (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 ADR 0007 declares anti-spoofing properties of the event bus. No
 dedicated test enforces them. The architectural invariants test
@@ -730,6 +730,32 @@ suite is the right home.
 
 **Definition of done:** Add `event_bus_anti_spoofing.rs` (or similar)
 under `crates/nexus-bootstrap/tests/`.
+
+**Resolution.** Added `crates/nexus-bootstrap/tests/event_bus_anti_spoofing.rs`
+with three end-to-end tests against a fully-booted `MinimalForge`
+runtime — one per ADR 0007 property:
+
+1. `ctx_publish_produces_custom_with_kernel_set_emitter` — pins
+   that publishing through `PluginContext::publish` produces a
+   `NexusEvent::Custom` variant (not a spoofed kernel-tier
+   variant like `PluginStarted`) and that `emitting_plugin` is set
+   by the kernel from the caller's plugin id, regardless of the
+   payload shape.
+2. `ctx_publish_rejects_foreign_namespace` — pins that
+   `type_id` outside the calling plugin's namespace is rejected
+   with `BusError::TypeIdNamespaceMismatch` before the event
+   reaches the bus (subscribers see nothing).
+3. `ctx_publish_rejects_prefix_substring_spoof` — pins the
+   dot-separated namespace check by sending `com.nexus.cli-evil.foo`
+   (a substring-prefix of `com.nexus.cli`) and asserting it's
+   rejected. The substring spoof is the specific class
+   `type_id_in_namespace` exists to defend against.
+
+Kernel-internal unit tests already cover (2) and (3) at the helper
+level (`event_bus.rs`, `context_impl.rs`); this file locks the
+same invariants end-to-end through a real runtime so wiring or
+context-impl regressions surface in CI. All three tests pass:
+`cargo test -p nexus-bootstrap --test event_bus_anti_spoofing`.
 
 ---
 
