@@ -2,6 +2,10 @@
 
 **Date:** 2026-04-11
 **Status:** Accepted
+**Forward-pointer (2026-05-12):** Embedding-backend defaults extended
+by [ADR 0018 — Local Embedding Backend (fastembed-rs)](0018-embedding-backend.md#addendum-2026-05-12--adr-0008-tech-stack-defaults-update).
+ADR 0018's addendum is the operative tech-stack-defaults update for
+the embeddings row.
 
 ## Context
 

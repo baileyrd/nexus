@@ -29,3 +29,28 @@ a Delete+Create pair.
 - One watcher per forge, one uniform event stream.
 - `nexus-kernel` gains a `FileRenamed` event variant.
 - `nexus-storage` has a compile-time dep on `nexus-kernel` (already true).
+
+---
+
+## Addendum 2026-05-12 — `FileRenamed` lives in `nexus-storage`, not `nexus-kernel`
+
+> Appended without editing the body of the original decision. The
+> *decision* — single watcher owned by storage, single uniform event
+> stream — still holds. Only the filing claim under Consequences is
+> superseded.
+
+When the storage watcher landed, `FileRenamed` was filed under
+`nexus-storage::watcher::StorageEvent`, not as a variant on a
+kernel-owned event enum as Consequences §2 of the original ADR
+implies. The current authoritative location is:
+
+- **Enum definition:** [`crates/nexus-storage/src/watcher.rs:48`](../../crates/nexus-storage/src/watcher.rs#L48) — `StorageEvent::FileRenamed { from, to, content_hash }`.
+- **Emit site:** [`crates/nexus-storage/src/watcher.rs:427`](../../crates/nexus-storage/src/watcher.rs#L427) (rename-as-pair detection in the watcher debounce loop).
+- **Dispatch:** [`crates/nexus-storage/src/core_plugin.rs:1515`](../../crates/nexus-storage/src/core_plugin.rs#L1515) — translates `StorageEvent::FileRenamed` into the kernel-bus `com.nexus.storage.file_renamed` topic.
+
+`nexus-kernel` doesn't own a `FileRenamed` enum variant. The kernel
+bus carries the event as a topic-string payload, decoupling the
+generic bus from storage-specific event shapes — consistent with the
+file-as-truth invariant where `nexus-storage` owns the forge.
+
+Surfaced by [DG-22](../roadmap/DOC-GAPS.md#dg-22--adr-0003-says-filerenamed-lives-in-nexus-kernel-it-doesnt) in the 2026-05-12 doc-traceability audit.

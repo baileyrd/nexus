@@ -507,14 +507,28 @@ listing and a forward-pointer from ADRs 0001 / 0004.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
-Event type lives in `crates/nexus-plugin-api/src/event.rs`, not
-`nexus-kernel` as ADR 0003 states. Decision still correct; just the
-filing claim is wrong.
+Event type lives in `crates/nexus-storage/src/watcher.rs` (variant
+`StorageEvent::FileRenamed`), not `nexus-kernel` as ADR 0003 states.
+Decision still correct; just the filing claim is wrong. *Correction:*
+the original audit said it lived in `nexus-plugin-api::event`; the
+actual location, verified during resolution, is
+`nexus-storage::watcher::StorageEvent` — emitted in the watcher
+debounce loop at line 427 and dispatched to the kernel-bus topic
+`com.nexus.storage.file_renamed` in `core_plugin.rs:1515`. The
+kernel bus carries it as a topic-string payload; no kernel enum
+variant exists.
 
 **Definition of done:** ADR-addendum pattern (don't edit 0003 body)
 noting the event-types relocation.
+
+### Outcome
+Appended `## Addendum 2026-05-12` block at the bottom of
+`docs/adr/0003-storage-owns-file-watcher.md` citing the real
+`watcher.rs:48` definition, `watcher.rs:427` emit site, and
+`core_plugin.rs:1515` dispatch site. Original ADR body left
+unchanged per the immutability convention.
 
 ---
 
@@ -523,13 +537,24 @@ noting the event-types relocation.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 ADR 0008 declared a follow-up addendum once the `fastembed-rs`
 adoption decision (ADR 0018) settled. Never written.
 
 **Definition of done:** Write the addendum at the bottom of ADR 0018,
 add a forward-pointer from ADR 0008.
+
+### Outcome
+- Appended `## Addendum 2026-05-12 — ADR 0008 tech-stack-defaults update`
+  at the bottom of `docs/adr/0018-embedding-backend.md` with a defaults
+  table (fastembed-rs `nomic-embed-text-v1.5` local default; Ollama /
+  OpenAI remote alternatives) and a pointer to the
+  `EmbeddingProvider` trait.
+- Added a forward-pointer line under the ADR 0008 header (top of
+  `docs/adr/0008-tech-stack-defaults.md`) directing readers to the
+  ADR 0018 addendum as the operative tech-stack-defaults update for
+  the embeddings row. Both ADR bodies left unchanged.
 
 ---
 
