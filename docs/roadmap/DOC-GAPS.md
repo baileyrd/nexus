@@ -145,7 +145,7 @@ generated clap help text.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 1
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `Ctrl+Shift+Space` appears as the inline-AI keybinding in 5 help
 docs. The real binding is `Ctrl+I` / `Cmd+I` per
@@ -154,6 +154,13 @@ appears in *no* keybinding registration anywhere in the codebase.
 
 **Definition of done:** Replace `Ctrl+Shift+Space` with `Ctrl+I` (or
 `Cmd+I` for macOS examples) across all 5 affected help docs.
+
+### Outcome
+Bulk `sed` across the 5 affected files: `help/customize/keybindings.md`,
+`help/getting-started/quick-tour.md`, `help/ai/overview.md`,
+`help/editing/editor.md`, `help/ai/inline-completion.md`. Both
+`Ctrl+Shift+Space` → `Ctrl+I` and `Cmd+Shift+Space` → `Cmd+I`. No
+remaining occurrences of the wrong binding in any live doc.
 
 ---
 
@@ -228,13 +235,17 @@ rewrite the doc to use the CSS-snippet path instead.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 8
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/help/customize/themes.md:54` links to
 `docs/shell/theme-variables.md`. Real path is
 `docs/developer/themes/css-variables.md`.
 
 **Definition of done:** One-line link fix.
+
+### Outcome
+`help/customize/themes.md:54-55` now uses a real link to
+`../../developer/themes/css-variables.md`.
 
 ---
 
@@ -313,7 +324,7 @@ OI-13's outcome line.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Architecture
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 - Claims **25 crates**; workspace has **28** (`nexus-lsp`, `nexus-crdt`,
   `nexus-fuzz` missing).
@@ -325,6 +336,13 @@ OI-13's outcome line.
 members` and from the `invoke_handler!` block in
 `shell/src-tauri/src/lib.rs`.
 
+### Outcome
+- `C4.md:77` "Core (Rust workspace — 25 crates)" → 28 crates (verified
+  by `awk '/^members = \[/,/^\]/' Cargo.toml | grep -cE '"[a-z]'`).
+- `C4.md:404` "23 `#[tauri::command]` handlers" → 25 (verified by
+  `grep -cE '#\[tauri::command\]' shell/src-tauri/src/**/*.rs`).
+- MCP "15 `nexus_*` tools" left unchanged — already correct.
+
 ---
 
 ## DG-15 — `ipc-schemas.md` claims wildly understate reality
@@ -332,7 +350,7 @@ members` and from the `invoke_handler!` block in
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Architecture
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Header claims "~28 JSON schemas + ~30 TS types committed". Actual:
 **131 JSON schemas, 166 TS files**. The "pilot" language is
@@ -341,6 +359,11 @@ six months out of date.
 **Definition of done:** Replace pilot-era counts with `wc -l` of the
 generated directories, or omit counts and just point at the generated
 trees.
+
+### Outcome
+- `ipc-schemas.md:3` updated: "131 JSON schemas + 166 TS types
+  committed" with a note that the generated dirs are authoritative.
+  Pilot framing dropped.
 
 ---
 
@@ -369,7 +392,7 @@ and add a forward-pointer at the top of ADR 0002. Do not edit ADR
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 2
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `developer/reference.md` and `developer/plugins/capabilities.md`
 claim 14 capabilities. Real count is 22 (the 8-member `ai.*` cluster
@@ -378,6 +401,12 @@ is missing from the docs).
 **Definition of done:** Regenerate the table from
 `crates/nexus-plugin-api/src/capability.rs`.
 
+### Outcome
+- `developer/reference.md:27` updated: 22 variants (6 HIGH-risk), with
+  pointer noting ADR 0022 added the 8 `ai.*` variants.
+- `developer/plugins/capabilities.md:9-10` updated: 22 total, 6 HIGH
+  risk, with link to ADR 0022.
+
 ---
 
 ## DG-18 — IMPLEMENTATION_STATUS marks PRD-16 🟠; actually 🟢
@@ -385,7 +414,7 @@ is missing from the docs).
 **Severity:** Should-fix (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/PRDs/IMPLEMENTATION_STATUS.md` says PRD-16 (Workflow) has no
 webhook / git_event / mcp_event triggers and no parallel / retry
@@ -395,6 +424,19 @@ scheduling. All four shipped per
 **Definition of done:** Bump PRD-16's status tier from 🟠 to 🟢; cite
 the four landing commits.
 
+### Outcome
+- PRD-16 status tier bumped 🟠 → 🟢.
+- Added "Shipped (webhook / git_event / mcp_event triggers)" entry
+  citing `crates/nexus-workflow/src/webhook.rs` (BL-028g) and the
+  `spawn_git_event_triggers` / `spawn_mcp_event_triggers` functions
+  in `core_plugin.rs`.
+- Added "Shipped (parallel steps + retry/backoff)" entry citing
+  `executor.rs`'s `futures::future::join_all` + per-step retry config
+  (`max_retries` / `retry_backoff` / `retry_initial_delay_ms` /
+  `retry_max_delay_ms` / `retry_jitter`).
+- Replaced "Gaps: No webhook…" line with "Gaps: None remaining
+  against PRD-16."
+
 ---
 
 ## DG-19 — IMPLEMENTATION_STATUS PRD-13 entries stale
@@ -402,7 +444,7 @@ the four landing commits.
 **Severity:** Cosmetic (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Two PRD-13 (Skills) claims in `IMPLEMENTATION_STATUS.md`:
 - "No skill composition / dependency resolution" — BL-021 `compose`
@@ -410,6 +452,19 @@ Two PRD-13 (Skills) claims in `IMPLEMENTATION_STATUS.md`:
 - "4 built-in skills" — 5 exist.
 
 **Definition of done:** Update both lines.
+
+### Outcome
+- "Four canonical .skill.md files" → "Five canonical" — added
+  `os-setup` to the list. Verified by `ls
+  crates/nexus-skills/builtins/`.
+- "No skill composition / dependency resolution" gap removed and
+  replaced with a "Shipped (composition resolver, BL-021)" line
+  citing `crates/nexus-skills/src/compose.rs` and handler id 8
+  (`com.nexus.skills::invoke`).
+- Remaining gap "UI SkillsPanel is read-only" kept as a future
+  concern (separate from this DG).
+- Removed the now-redundant top-of-file warning that flagged
+  DG-18/DG-19.
 
 ---
 
@@ -452,14 +507,28 @@ listing and a forward-pointer from ADRs 0001 / 0004.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
-Event type lives in `crates/nexus-plugin-api/src/event.rs`, not
-`nexus-kernel` as ADR 0003 states. Decision still correct; just the
-filing claim is wrong.
+Event type lives in `crates/nexus-storage/src/watcher.rs` (variant
+`StorageEvent::FileRenamed`), not `nexus-kernel` as ADR 0003 states.
+Decision still correct; just the filing claim is wrong. *Correction:*
+the original audit said it lived in `nexus-plugin-api::event`; the
+actual location, verified during resolution, is
+`nexus-storage::watcher::StorageEvent` — emitted in the watcher
+debounce loop at line 427 and dispatched to the kernel-bus topic
+`com.nexus.storage.file_renamed` in `core_plugin.rs:1515`. The
+kernel bus carries it as a topic-string payload; no kernel enum
+variant exists.
 
 **Definition of done:** ADR-addendum pattern (don't edit 0003 body)
 noting the event-types relocation.
+
+### Outcome
+Appended `## Addendum 2026-05-12` block at the bottom of
+`docs/adr/0003-storage-owns-file-watcher.md` citing the real
+`watcher.rs:48` definition, `watcher.rs:427` emit site, and
+`core_plugin.rs:1515` dispatch site. Original ADR body left
+unchanged per the immutability convention.
 
 ---
 
@@ -468,13 +537,24 @@ noting the event-types relocation.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 ADR 0008 declared a follow-up addendum once the `fastembed-rs`
 adoption decision (ADR 0018) settled. Never written.
 
 **Definition of done:** Write the addendum at the bottom of ADR 0018,
 add a forward-pointer from ADR 0008.
+
+### Outcome
+- Appended `## Addendum 2026-05-12 — ADR 0008 tech-stack-defaults update`
+  at the bottom of `docs/adr/0018-embedding-backend.md` with a defaults
+  table (fastembed-rs `nomic-embed-text-v1.5` local default; Ollama /
+  OpenAI remote alternatives) and a pointer to the
+  `EmbeddingProvider` trait.
+- Added a forward-pointer line under the ADR 0008 header (top of
+  `docs/adr/0008-tech-stack-defaults.md`) directing readers to the
+  ADR 0018 addendum as the operative tech-stack-defaults update for
+  the embeddings row. Both ADR bodies left unchanged.
 
 ---
 
@@ -516,12 +596,17 @@ plugin's `popoutCompatible` value matches its actual capability.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `packages/nexus-extension-api/src/events.ts` — does not
 exist. Event types are co-located with the surface they belong to.
 
 **Definition of done:** Replace with pointer to actual sources.
+
+### Outcome
+`developer/plugins/events.md:69-70` now points at
+`packages/nexus-extension-api/src/generated/NexusEvent.ts` (the
+ts-rs-generated event types, the actual authoritative shape).
 
 ---
 
@@ -546,7 +631,7 @@ doc.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `docs/templates/community-plugin/README.md` and
 `docs/templates/core-plugin/README.md`. Real templates live under
@@ -555,6 +640,12 @@ References `docs/templates/community-plugin/README.md` and
 
 **Definition of done:** Update the paths in the doc.
 
+### Outcome
+- `developer/reference.md:74-75` template paths updated to
+  `docs/PRDs/templates/{community,core}-plugin/` with live links.
+- `developer/core-plugins/authoring.md:240` template path updated to
+  match.
+
 ---
 
 ## DG-29 — `developer/themes/css-variables.md` broken style paths
@@ -562,12 +653,19 @@ References `docs/templates/community-plugin/README.md` and
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `shell/src/styles/tokens/` and `shell/src/styles/themes/` —
 do not exist. Theme tokens live under `shell/src/shell/`.
 
 **Definition of done:** Update the paths.
+
+### Outcome
+- `developer/themes/css-variables.md:9-19` now points at the real
+  consolidated stylesheet `shell/src/shell/shell.css` with its
+  `:root` / `[data-theme="…"]` / `[data-density="…"]` blocks (~547
+  custom properties).
+- "See also" footer link at line 218 updated to match.
 
 ---
 

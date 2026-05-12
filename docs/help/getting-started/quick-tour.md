@@ -75,7 +75,7 @@ You need at least one provider configured first — see
 [Configuring providers](../ai/providers.md).
 
 Inline: place your cursor at the end of a paragraph and press
-`Ctrl+Shift+Space` (or `Cmd+Shift+Space`) for an inline completion.
+`Ctrl+I` (or `Cmd+I`) for an inline completion.
 
 ## 8. Toggle a task
 

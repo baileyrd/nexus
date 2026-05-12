@@ -1,7 +1,7 @@
 # Inline completion in the editor
 
 Place the cursor anywhere in a note and press
-`Ctrl+Shift+Space` (or `Cmd+Shift+Space` on macOS). Nexus grabs the
+`Ctrl+I` (or `Cmd+I` on macOS). Nexus grabs the
 preceding ~2 KB of text (or the current selection if there is one),
 sends it to the configured AI provider, and streams a continuation
 into the document.
@@ -10,8 +10,8 @@ into the document.
 
 | Action | Result |
 |---|---|
-| `Ctrl+Shift+Space` at the cursor | Continue from the cursor |
-| Select a range, then `Ctrl+Shift+Space` | Replace the selection with a rewrite |
+| `Ctrl+I` at the cursor | Continue from the cursor |
+| Select a range, then `Ctrl+I` | Replace the selection with a rewrite |
 | `Esc` while streaming | Cancel; partial output stays |
 | `Ctrl+Z` after | Undo the entire insertion as one transaction |
 

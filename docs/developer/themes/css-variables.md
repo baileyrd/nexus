@@ -6,17 +6,18 @@ for the authoritative full list, see the source files (linked below).
 
 ## Where the canonical list lives
 
-The variable definitions are in the shell's design-system layer:
+The variable definitions are consolidated in the shell's design-token
+stylesheet:
 
-- `shell/src/styles/tokens/` — one file per tier
-- `shell/src/styles/themes/nexus-light.css` — defaults for every
-  variable (light)
-- `shell/src/styles/themes/nexus-dark.css` — defaults (dark)
+- [`shell/src/shell/shell.css`](../../../shell/src/shell/shell.css) —
+  `:root` + `[data-theme="light"]` + `[data-theme="dark"]` +
+  `[data-density="…"]` blocks. ~547 CSS custom properties total
+  (commit `5b7b937` registry sweep).
 
 For a flat dump of every variable currently defined, run:
 
 ```bash
-grep -h '^\s*--' shell/src/styles/themes/nexus-light.css | sort -u
+grep -hE '^\s*--' shell/src/shell/shell.css | sort -u
 ```
 
 (A generated machine-readable index is planned; see the gap noted in
@@ -215,5 +216,5 @@ top of this page is the workaround.
 ## See also
 
 - [Build a theme](build-a-theme.md)
-- Live source: `shell/src/styles/themes/`
+- Live source: [`shell/src/shell/shell.css`](../../../shell/src/shell/shell.css)
 - [`../../help/customize/themes.md`](../../help/customize/themes.md)

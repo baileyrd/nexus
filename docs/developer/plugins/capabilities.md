@@ -6,8 +6,10 @@ below is the **canonical and complete** vocabulary. The Rust source
 of truth is `Capability` in
 [`crates/nexus-plugin-api/src/capability.rs`](../../../crates/nexus-plugin-api/src/capability.rs).
 
-There are 14 capabilities. 5 are classified **HIGH risk** and require
-explicit user approval at install time.
+There are 22 capabilities (the original 14 plus 8 `ai.*` variants added
+by [ADR 0022](../../adr/0022-per-handler-ai-capabilities.md)). 6 are
+classified **HIGH risk** and require explicit user approval at install
+time.
 
 ## Filesystem
 

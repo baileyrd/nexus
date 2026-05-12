@@ -234,3 +234,29 @@ sub-tasks listed in the implementation plan map cleanly:
 - ADR 0008 — tech-stack defaults (gets a one-line update).
 - fastembed-rs upstream: `https://github.com/Anush008/fastembed-rs`
   (Apache 2.0).
+
+---
+
+## Addendum 2026-05-12 — ADR 0008 tech-stack-defaults update
+
+> Appended without editing the body of the decision. The original
+> ADR's references section promised "ADR 0008 — tech-stack defaults
+> (gets a one-line update)"; this addendum is that update, filed
+> here rather than as an edit to ADR 0008's immutable body.
+
+ADR 0008's defaults table did not originally name an embedding
+backend (the local-vs-remote question wasn't yet decided). After
+this ADR landed (2026-04-28), the operative default is:
+
+| Concern | Default |
+|---|---|
+| **Local embeddings** | `fastembed-rs` (Apache 2.0, ONNX runtime, default model `nomic-embed-text-v1.5` — 384-dim) |
+| **Remote embeddings** | Ollama (`nomic-embed-text`) or OpenAI (`text-embedding-3-small`); selectable via `EmbeddingProvider` config |
+
+The `EmbeddingProvider` trait at
+[`crates/nexus-ai/src/embedding.rs`](../../crates/nexus-ai/src/embedding.rs)
+remains the abstraction; both local and remote backends implement it.
+New forges default to local (fastembed-rs); existing remote-configured
+forges keep working unchanged.
+
+Surfaced by [DG-23](../roadmap/DOC-GAPS.md#dg-23--adr-0008-promised-fastembed-rs-addendum-never-landed) in the 2026-05-12 doc-traceability audit.
