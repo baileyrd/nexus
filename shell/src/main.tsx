@@ -196,13 +196,20 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     useConfigStore.getState().set(PLUGINS_ENABLED_CONFIG_KEY, migratedEnabledIds)
   }
   const enabledIds = new Set(migratedEnabledIds)
-  const optInEntries = DEFAULT_OFF_PLUGINS.filter(e => enabledIds.has(e.id))
-  // SH-020: popout windows skip chrome-only plugins (activity bar, sidebar,
-  // status bar, settings, etc.) that contribute to slots the popout shell
-  // does not render. Plugins opt out by setting `popoutCompatible: false`
-  // in their entry; absence defaults to true.
+  // SH-020 / DG-25: popout windows skip chrome-only plugins (activity
+  // bar, sidebar, status bar, settings, etc.) that contribute to slots
+  // the popout shell does not render. Plugins opt out by setting
+  // `popoutCompatible: false` in their catalog entry; absence defaults
+  // to true. The filter applies to both eager default-on plugins and
+  // user-enabled opt-in plugins — a chrome-only opt-in is just as
+  // wasteful in a popout as a chrome-only default-on.
+  const isPopoutCompatible = (e: { popoutCompatible?: boolean }) =>
+    e.popoutCompatible !== false
+  const optInEntries = popoutMode
+    ? DEFAULT_OFF_PLUGINS.filter(e => enabledIds.has(e.id) && isPopoutCompatible(e))
+    : DEFAULT_OFF_PLUGINS.filter(e => enabledIds.has(e.id))
   const defaultOnSet = popoutMode
-    ? DEFAULT_ON_PLUGINS.filter(e => e.popoutCompatible !== false)
+    ? DEFAULT_ON_PLUGINS.filter(isPopoutCompatible)
     : DEFAULT_ON_PLUGINS
   // SH-009: dynamic-import factories — load all selected plugin modules in
   // parallel before handing them to the host.
