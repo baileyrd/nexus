@@ -1,6 +1,7 @@
 //! Application config (`app.toml`).
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Top-level application settings loaded from `.forge/app.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -18,6 +19,13 @@ pub struct AppConfig {
     pub plugins: PluginSettings,
     /// Git integration.
     pub git: GitSettings,
+    /// Flat key/value bag mirrored by the shell's settings registry.
+    /// Keys follow the `pluginId.fieldName` convention (e.g.
+    /// `"nexus.editor.fontSize"`). Values can be any TOML scalar or
+    /// table. The shell auto-persists into this map; CLI/TUI surfaces
+    /// can read from the typed sections above or here, whichever fits.
+    /// `BTreeMap` keeps the on-disk order stable so diffs read cleanly.
+    pub settings: BTreeMap<String, toml::Value>,
 }
 
 /// Core forge settings.

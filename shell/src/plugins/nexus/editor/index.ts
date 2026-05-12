@@ -143,6 +143,39 @@ const CONFIG_KEYBINDINGS = 'nexus.editor.keybindings'
 // mode (raw CM6 with a language extension) rather than document mode
 // (markdown block tree). Read at file-open time.
 const CONFIG_CODE_FILE_EXTENSIONS = 'nexus.editor.codeFileExtensions'
+// Visual settings — applied live via CSS custom properties on :root
+// (see applyEditorCssVars below) and via prop flow to CodeMirrorHost.
+const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
+const CONFIG_LINE_HEIGHT = 'nexus.editor.lineHeight'
+const CONFIG_LINE_NUMBERS = 'nexus.editor.lineNumbers'
+const CONFIG_SHOW_FOCUS_RING = 'nexus.editor.showFocusRing'
+
+/**
+ * Live-applies the visual editor settings (font size, line height,
+ * focus-ring visibility) by writing CSS custom properties on the
+ * document root. markdown.css consumes these vars; nothing here
+ * touches CodeMirror's extension stack.
+ *
+ * The focus-ring toggle is delivered as a class on :root rather than
+ * a var because the underlying CSS rule is a vendor default we suppress
+ * — a class lets us flip presence rather than fight specificity with
+ * `outline: none` vs `outline: revert`.
+ */
+function applyEditorCssVars(api: PluginAPI): void {
+  const root = document.documentElement
+  const apply = () => {
+    const fontSize = api.configuration.getValue<number>(CONFIG_FONT_SIZE, 13)
+    const lineHeight = api.configuration.getValue<number>(CONFIG_LINE_HEIGHT, 1.6)
+    const showFocusRing = api.configuration.getValue<boolean>(CONFIG_SHOW_FOCUS_RING, false)
+    root.style.setProperty('--editor-font-size', `${fontSize}px`)
+    root.style.setProperty('--editor-line-height', String(lineHeight))
+    root.classList.toggle('editor-hide-focus-ring', !showFocusRing)
+  }
+  apply()
+  api.configuration.onChange(CONFIG_FONT_SIZE, apply)
+  api.configuration.onChange(CONFIG_LINE_HEIGHT, apply)
+  api.configuration.onChange(CONFIG_SHOW_FOCUS_RING, apply)
+}
 
 interface FileOpenPayload {
   relpath: string
@@ -536,8 +569,38 @@ export const editorPlugin: Plugin = {
           type: 'string',
           default: 'rs,ts,tsx,js,jsx,mjs,cjs,py,go,json,jsonc,yaml,yml,toml',
         },
+        {
+          key: CONFIG_FONT_SIZE,
+          title: 'Font size',
+          description: 'Editor font size in pixels for source and code modes. Applied live.',
+          type: 'number',
+          default: 13,
+        },
+        {
+          key: CONFIG_LINE_HEIGHT,
+          title: 'Line height',
+          description: 'Unitless line-height multiplier for editor content. Applied live.',
+          type: 'number',
+          default: 1.6,
+        },
+        {
+          key: CONFIG_LINE_NUMBERS,
+          title: 'Show line numbers',
+          description: 'Show a gutter with line numbers in source and code modes. Applied live to open tabs.',
+          type: 'boolean',
+          default: false,
+        },
+        {
+          key: CONFIG_SHOW_FOCUS_RING,
+          title: 'Show editor focus ring',
+          description: "Draw CodeMirror's default 1px dotted outline around the editor when it has focus. Off by default — the outline reads as a dark box on dark themes.",
+          type: 'boolean',
+          default: false,
+        },
       ],
     })
+
+    applyEditorCssVars(api)
 
     api.events.on<FileOpenPayload>(EVENT_FILE_OPEN, (payload) => {
       if (!payload || typeof payload.relpath !== 'string') return
