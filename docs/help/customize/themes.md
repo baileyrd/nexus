@@ -34,35 +34,36 @@ Or from the **Plugins** panel.
 
 ## Author a theme
 
-Scaffold a theme plugin:
+There is no dedicated `theme` scaffold today — `nexus plugin scaffold`
+ships only the `script`, `core`, and `community` templates. Author a
+theme by dropping a CSS snippet into your forge:
 
-```bash
-nexus plugin scaffold --template theme --id com.you.cool-theme --name "Cool Theme"
-```
-
-You get a `theme.css` and a `plugin.json`. The CSS sets variables:
+1. Create `<forge>/.forge/snippets/my-theme.css`.
+2. Override the design tokens you care about — every one of the 497
+   tokens is overridable. A reference list lives at
+   [`docs/developer/themes/css-variables.md`](../../developer/themes/css-variables.md).
+3. Toggle the snippet on in **Settings → Appearance → CSS Snippets**.
 
 ```css
-:root[data-nexus-theme="cool-theme"] {
+/* <forge>/.forge/snippets/my-theme.css */
+:root[data-nexus-theme="nexus-dark"] {
   --color-background: #1a1b26;
   --color-text: #c0caf5;
   --color-accent: #7aa2f7;
-  /* ... 494 more variables ... */
+  /* override as many or as few tokens as you like */
 }
 ```
 
-A reference list of every variable is in
-[`docs/developer/themes/css-variables.md`](../../developer/themes/css-variables.md).
-Inherit from a base theme to override
-only the deltas:
+Snippets layer on top of the active theme, so attaching your overrides
+to (e.g.) `data-nexus-theme="nexus-dark"` lets your theme follow that
+base unless you switch away. Save the file and the shell re-applies
+in under a frame — see [Hot reload](#hot-reload) below.
 
-```css
-@import url('nexus-theme://nexus-dark');
-
-:root[data-nexus-theme="my-theme"] {
-  --color-accent: #ff79c6;
-}
-```
+Packaging the snippet as a redistributable plugin (so other users can
+install it from a marketplace) is the same path as any other community
+plugin and is the eventual home for first-class themes — see WI-44
+(marketplace) in the formal-release backlog. For now, snippets are the
+authoring path.
 
 ## Hot reload
 

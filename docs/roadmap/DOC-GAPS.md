@@ -235,7 +235,7 @@ entry under PRD-08) or remove the section and add a "planned" pointer.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 4
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Doc recommends `nexus plugin scaffold --template theme`. Real
 templates are `script` (default), `core`, `community` per
@@ -244,6 +244,15 @@ template.
 
 **Definition of done:** Either add a theme template (BL entry) or
 rewrite the doc to use the CSS-snippet path instead.
+
+**Resolution.** Took the CSS-snippet path — no theme template was
+added. Rewrote `docs/help/customize/themes.md` §"Author a theme" to
+direct readers at `<forge>/.forge/snippets/*.css` (toggled in
+Settings → Appearance → CSS Snippets) with a 3-step procedure and a
+worked override example targeting `data-nexus-theme="nexus-dark"`.
+The 497-token reference at `developer/themes/css-variables.md` is
+still linked. Plugin-packaged themes are explicitly deferred to
+WI-44 (marketplace).
 
 ---
 
