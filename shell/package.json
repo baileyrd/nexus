@@ -7,7 +7,7 @@
     "build": "pnpm --filter @nexus/extension-api build && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "cross-env WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 tauri dev",
+    "tauri:dev": "cross-env WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11 tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint src",
     "test": "node --import tsx --import ./tests/setup/happy-dom.ts --test tests/*.test.ts",

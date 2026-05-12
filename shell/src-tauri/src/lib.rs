@@ -561,7 +561,19 @@ pub fn run() {
         // launches. The plugin saves on close/move/resize/maximize and
         // restores on window creation; without it the size hard-coded
         // in tauri.conf.json (1280x800) is reapplied every boot.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Persist window geometry/maximize, but NOT the `decorated` flag —
+        // we want the borderless config in tauri.conf.json (`decorations:
+        // false`) to be authoritative every launch. Otherwise a one-time
+        // decorated-true (e.g. WM-injected on WSLg) gets baked into the
+        // state file and overrides the config forever.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
+                )
+                .build(),
+        )
         .manage(bridge::KernelRuntime::new())
         // E2E-only: if NEXUS_E2E_VAULT is set, init + boot the kernel here
         // directly (bypassing the webview IPC path). Webdriver-injected
@@ -570,6 +582,14 @@ pub fn run() {
         // Rust. We also write the vault into shell-state's last_forge_path
         // so the launcher's recents / frontend restore paths see it too.
         .setup(|app| {
+            // Dev-only: auto-open devtools so an unresponsive/blank main
+            // window (e.g. WSLg WebKit rendering hiccup) still gives us a
+            // separate inspector window we can read the JS console from.
+            #[cfg(debug_assertions)]
+            if let Some(main) = app.get_webview_window("main") {
+                main.open_devtools();
+            }
+
             // WI-13 follow-up: bridge OS-level `nexus://…` deep-links into
             // the frontend's `uriHandlerRegistry`. The plugin delivers one
             // event per OS open — we emit each URL as a string payload on
