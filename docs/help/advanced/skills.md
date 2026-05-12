@@ -56,12 +56,13 @@ substitutes parameters.
 nexus skill render code-reviewer --arg diff="$(git diff)" --arg focus="bugs"
 ```
 
-This prints the rendered prompt. Pipe it to `nexus ai ask` to send to
-the model:
+This prints the rendered prompt. Feed it to `nexus ai ask` to send to
+the model — `ai ask` takes the question as a positional argument, so
+capture the rendered output and pass it directly:
 
 ```bash
-nexus skill render code-reviewer --arg diff="$(git diff)" \
-  | nexus ai ask --stdin --no-rag
+prompt=$(nexus skill render code-reviewer --arg diff="$(git diff)")
+nexus ai ask "$prompt"
 ```
 
 ## In the shell

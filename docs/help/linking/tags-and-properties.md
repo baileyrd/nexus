@@ -28,9 +28,8 @@ and a fuzzy filter. Click a tag to see every note that uses it.
 ### CLI
 
 ```bash
-nexus tags list
-nexus tags list --format json
-nexus tags locate project        # files using #project
+nexus tags list                  # every tag occurrence, grouped by name
+nexus tags list --name project   # files using #project only
 ```
 
 ## Properties (YAML frontmatter)
