@@ -195,3 +195,45 @@ under this ADR's scope:
   `shell/docs/writing-a-plugin.md`) need an `ai.*` section.
 - Future "untrusted shell surface" can hold `ai.chat` only and call
   `stream_chat` with `tools=auto_readonly` for a productive subset.
+
+## Inventory note (2026-05-12)
+
+The Phase 1 + Phase 2 work above grew the capability surface to **22
+entries**. [ADR 0002]'s inventory table predates this and is now
+incomplete; per the immutable-body convention, the full current list
+is reproduced here as the authoritative inventory. The source of truth
+is `crates/nexus-plugin-api/src/capability.rs::Capability::ALL` — that
+slice is asserted at `len() == 22` by `tests::all_slice_covers_all_discriminants`,
+so the table below cannot silently drift.
+
+| # | String | Variant | Risk | Origin |
+|---|---|---|---|---|
+| 1 | `fs.read` | `FsRead` | Low | ADR 0002 |
+| 2 | `fs.write` | `FsWrite` | Low | ADR 0002 |
+| 3 | `fs.read.external` | `FsReadExternal` | **High** | ADR 0002 |
+| 4 | `fs.write.external` | `FsWriteExternal` | **High** | ADR 0002 |
+| 5 | `net.http` | `NetHttp` | **High** | ADR 0002 |
+| 6 | `net.http.localhost` | `NetHttpLocalhost` | Medium | ADR 0002 |
+| 7 | `process.spawn` | `ProcessSpawn` | **High** | ADR 0002 |
+| 8 | `kv.read` | `KvRead` | Low | ADR 0002 |
+| 9 | `kv.write` | `KvWrite` | Low | ADR 0002 |
+| 10 | `ipc.call` | `IpcCall` | **High** | ADR 0002 |
+| 11 | `db.query` | `DbQuery` | Low | ADR 0002 |
+| 12 | `db.write` | `DbWrite` | Low | ADR 0002 |
+| 13 | `events.publish` | `EventsPublish` | Medium | ADR 0002 |
+| 14 | `ui.notify` | `UiNotify` | Low | ADR 0002 |
+| 15 | `ai.chat` | `AiChat` | Medium | ADR 0022 §Phase 1 |
+| 16 | `ai.index` | `AiIndex` | Low | ADR 0022 §Phase 1 |
+| 17 | `ai.session.read` | `AiSessionRead` | Low | ADR 0022 §Phase 1 |
+| 18 | `ai.session.write` | `AiSessionWrite` | Low | ADR 0022 §Phase 1 |
+| 19 | `ai.config.write` | `AiConfigWrite` | **High** | ADR 0022 §Phase 1 |
+| 20 | `ai.activity.write` | `AiActivityWrite` | Medium | ADR 0022 §Phase 1 |
+| 21 | `ai.tools.write` | `AiToolsWrite` | Medium | ADR 0022 §Phase 2 |
+| 22 | `ai.tools.mcp` | `AiToolsMcp` | Medium | ADR 0022 §Phase 2 |
+
+Risk values mirror `Capability::is_high_risk()` and the per-cap classification
+in `crates/nexus-security/src/risk.rs`. Adding a new capability is an
+IPC drift event (regenerate via `scripts/check_ipc_drift.sh`) and must
+update this table in the same PR.
+
+[ADR 0002]: 0002-hierarchical-capability-strings.md

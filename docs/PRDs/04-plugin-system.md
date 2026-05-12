@@ -1432,6 +1432,14 @@ Kernel auto-generates settings panel for each plugin using JSON Schema.
 
 ## 10. Dynamic Loading for Core Plugins
 
+> **Superseded by [ADR 0011](../adr/0011-adopt-plugin-first-shell.md) +
+> [ADR 0016](../adr/0016-microkernel-native-vs-wasm-plugin-split.md).** The
+> `.so` / `.dll` path described below is not implemented and will not be —
+> `libloading` is not a workspace dependency, the bootstrap is static, every
+> core plugin compiles into the binary via `nexus-bootstrap`, and the
+> community plugin surface is WASM + JS sandboxes. The section is preserved
+> for historical context only; do not implement against it.
+
 ### 10.1 .so/.dll Loading with Symbol Resolution
 
 Core plugins can be compiled into the app or loaded as native dynamic libraries.

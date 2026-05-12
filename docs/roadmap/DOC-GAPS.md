@@ -307,7 +307,7 @@ audit trail.
 **Severity:** Should-fix (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Architecture cross-file
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 OI-13's resolution outcome says it updated `docs/architecture/C4.md`
 to drop the `PluginRegistry` component box. The current C4 diagram
@@ -316,6 +316,17 @@ OI-13's outcome wording is wrong.
 
 **Definition of done:** Apply the documented C4 change, *or* correct
 OI-13's outcome line.
+
+**Resolution.** C4.md's Component diagram 3a referenced an undeclared
+`pluginRegistry` identifier in three `Rel(...)` lines (Mermaid was
+auto-creating phantom boxes). The kernel doesn't own a plugin registry
+since OI-13 deleted `nexus_kernel::PluginRegistry`; `PluginLoader::loaded`
+in `nexus-plugins` is authoritative. Edits in `docs/architecture/C4.md`:
+- Dropped `Rel(kernelFacade, pluginRegistry, "Owns")`.
+- Dropped `Rel(plugins, pluginRegistry, "Populates")`.
+- Reworded `Rel(ipcDispatcher, pluginRegistry, "Looks up backend via")` to
+  `Rel(ipcDispatcher, plugins, "Looks up backend via PluginLoader in")`,
+  pointing at the real container instead of the deleted type.
 
 ---
 
@@ -373,7 +384,7 @@ trees.
 **Kind:** `doc-bug` (NB: ADR is immutable; remediation is a per-ADR
 addendum, *not* an edit to the original ADR body)
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/adr/0002-hierarchical-capability-strings.md` enumerates the
 capability inventory; the 8 `ai.*` capabilities added by ADR 0022 are
@@ -384,6 +395,14 @@ table reads as authoritative.
 to ADR 0022 with the full current capability list (22 capabilities),
 and add a forward-pointer at the top of ADR 0002. Do not edit ADR
 0002's body (immutable convention).
+
+**Resolution.** Inventory note appended to ADR 0022 with all 22
+capabilities (14 from ADR 0002 + 6 Phase 1 + 2 Phase 2), each row
+citing variant, risk, and origin ADR. Pointer at the source of truth:
+`crates/nexus-plugin-api/src/capability.rs::Capability::ALL`, asserted
+at length 22 by `tests::all_slice_covers_all_discriminants`. ADR 0002
+gained a 2026-05-12 addendum (append-only, body preserved) pointing
+forward to the ADR 0022 inventory note.
 
 ---
 
@@ -615,7 +634,7 @@ ts-rs-generated event types, the actual authoritative shape).
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `packages/nexus-extension-api/src/testing/` — does not
 exist. Either build the test harness (BL entry) or rewrite the doc
@@ -623,6 +642,16 @@ around the existing `node --test` flow that real plugins use.
 
 **Definition of done:** Decide on the test-helper story; align the
 doc.
+
+**Resolution.** Decision: no test harness ships, and there are no
+plans to build one — in-tree plugins under `shell/src/plugins/nexus/**`
+test with `node:test` + hand-rolled fakes of the `KernelAPI` /
+`NexusPluginContext` surface the plugin actually touches. `testing.md`
+rewritten around that flow with an opening banner stating the decision,
+worked examples mirroring `shell/src/plugins/nexus/status/statusStore.test.ts`,
+and a "build the minimum fake your code touches" framing. Remaining
+fictional-API drift in this file (the broader DG-01 scope) is unrelated
+to the broken `testing/` path and stays open under DG-01.
 
 ---
 
@@ -899,7 +928,7 @@ forge-format-breaking change.
 **Severity:** Cosmetic (product-gap, obsolete)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Should-reject
+**Status:** Resolved 2026-05-12 (rejected)
 
 PRD-04 §10 mentions dynamic loading of `.so`/`.dll` plugins.
 Architecturally obsolete: the bootstrap is static, native plugins
@@ -908,6 +937,13 @@ sandboxes. No `libloading` dep anywhere.
 
 **Definition of done:** Mark PRD-04 §10 as superseded by ADR 0011
 + ADR 0016 (static bootstrap, WASM/JS for community).
+
+**Resolution.** `docs/PRDs/04-plugin-system.md §10` gained a
+"Superseded by ADR 0011 + ADR 0016" callout at the top of the section.
+The original body is preserved for historical context; the callout
+makes clear `libloading` is not a workspace dep, bootstrap is static,
+every core plugin compiles into the binary via `nexus-bootstrap`, and
+community plugins are WASM + JS sandboxes only.
 
 ---
 

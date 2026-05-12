@@ -457,7 +457,7 @@ Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 d
 - [ ] **DG-41: PRD-10 §7 relations + rollup** — current impl is in-memory filter chain.
 - [ ] **DG-42: PRD-10 §8 SQL compilation** — Bases queries should compile to SQL against the storage index.
 - [ ] **DG-43: PRD-06 §9 frontmatter versioning + migration** — no `version:` handling; needed before forge-format-breaking changes.
-- [ ] **DG-44: PRD-04 §10 dynamic .so/.dll loading** — should reject as obsolete (superseded by ADR 0011 + ADR 0016).
+- [x] **DG-44: PRD-04 §10 dynamic .so/.dll loading** — rejected 2026-05-12; PRD-04 §10 gained a "Superseded by ADR 0011 + ADR 0016" callout.
 - [ ] **DG-45: ADR 0013 macOS menu-bar plugin** — Phase-4 plugin never built; build it or supersede the ADR.
 - [ ] **DG-46: ADR 0006 first in-tree consumer** — convention-only ADR; no in-tree user yet because community WASM plugins haven't shipped.
 
