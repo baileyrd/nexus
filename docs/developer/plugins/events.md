@@ -66,8 +66,8 @@ Core topics published by the kernel and built-in plugins:
 | `ai:streamDone` | `{ sessionId, response }` | `com.nexus.ai` |
 | `plugin:enabled` / `plugin:disabled` | `{ id }` | kernel |
 
-Authoritative payload shapes: the TypeScript event types in
-[`packages/nexus-extension-api/src/events.ts`](../../../packages/nexus-extension-api/src/events.ts)
+Authoritative payload shapes: the generated TypeScript event types in
+[`packages/nexus-extension-api/src/generated/NexusEvent.ts`](../../../packages/nexus-extension-api/src/generated/NexusEvent.ts)
 (or imports from `@nexus/extension-api`). Cross-reference
 [`../../shell/event-bus.md`](../../shell/event-bus.md).
 

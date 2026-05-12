@@ -76,5 +76,5 @@ surrounding text. See [Comments](comments.md).
 
 ## Inline AI
 
-`Ctrl+Shift+Space` (or `Cmd+Shift+Space`) at the cursor streams an
+`Ctrl+I` (or `Cmd+I`) at the cursor streams an
 inline completion. See [Inline completion](../ai/inline-completion.md).

@@ -71,8 +71,8 @@ Full ADR index: [`docs/adr/README.md`](../adr/README.md).
 
 | Path | What you get |
 |---|---|
-| `docs/templates/community-plugin/` | Community-plugin scaffold (manifest, entry point, build script, tests). |
-| `docs/templates/core-plugin/` | Core-plugin scaffold (`CorePlugin` impl, Cargo.toml, IPC test). |
+| [`docs/PRDs/templates/community-plugin/`](../PRDs/templates/community-plugin/) | Community-plugin scaffold (manifest, entry point, build script, tests). |
+| [`docs/PRDs/templates/core-plugin/`](../PRDs/templates/core-plugin/) | Core-plugin scaffold (`CorePlugin` impl, Cargo.toml, IPC test). |
 
 The `nexus plugin scaffold` command copies these for you — see
 [Getting started](getting-started.md).

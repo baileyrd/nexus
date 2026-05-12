@@ -52,7 +52,8 @@ You get a `theme.css` and a `plugin.json`. The CSS sets variables:
 ```
 
 A reference list of every variable is in
-`docs/shell/theme-variables.md`. Inherit from a base theme to override
+[`docs/developer/themes/css-variables.md`](../../developer/themes/css-variables.md).
+Inherit from a base theme to override
 only the deltas:
 
 ```css

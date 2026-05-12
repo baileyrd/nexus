@@ -29,7 +29,7 @@ list.
 | Find in file | `Cmd+F` | `Ctrl+F` |
 | Find in workspace | `Cmd+Shift+F` | `Ctrl+Shift+F` |
 | Toggle live preview | `Cmd+Shift+E` | `Ctrl+Shift+E` |
-| Inline AI completion | `Cmd+Shift+Space` | `Ctrl+Shift+Space` |
+| Inline AI completion | `Cmd+I` | `Ctrl+I` |
 | Comment thread on selection | `Cmd+K Cmd+C` | `Ctrl+K Ctrl+C` |
 | Move active tab left | `Cmd+Alt+Left` | `Ctrl+Alt+Left` |
 | Move active tab right | `Cmd+Alt+Right` | `Ctrl+Alt+Right` |

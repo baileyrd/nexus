@@ -9,7 +9,7 @@ configurable provider.
 
 - **Chat** with your forge — ask a question, get an answer with
   citations to the notes that informed it. See [Chat and RAG](chat.md).
-- **Inline complete** at the cursor — `Ctrl+Shift+Space` streams a
+- **Inline complete** at the cursor — `Ctrl+I` streams a
   continuation. See [Inline completion](inline-completion.md).
 - **Run agents** — multi-step tool-using loops with stepwise approval.
   See [Agents](../advanced/agents.md).

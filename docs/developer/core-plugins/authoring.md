@@ -237,7 +237,7 @@ plugins get types automatically. See
 A scaffold for a core plugin lives at:
 
 ```
-docs/templates/core-plugin/
+docs/PRDs/templates/core-plugin/
 ```
 
 Copy it to `crates/nexus-<name>/` and edit. The template includes the

@@ -145,7 +145,7 @@ generated clap help text.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 1
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `Ctrl+Shift+Space` appears as the inline-AI keybinding in 5 help
 docs. The real binding is `Ctrl+I` / `Cmd+I` per
@@ -154,6 +154,13 @@ appears in *no* keybinding registration anywhere in the codebase.
 
 **Definition of done:** Replace `Ctrl+Shift+Space` with `Ctrl+I` (or
 `Cmd+I` for macOS examples) across all 5 affected help docs.
+
+### Outcome
+Bulk `sed` across the 5 affected files: `help/customize/keybindings.md`,
+`help/getting-started/quick-tour.md`, `help/ai/overview.md`,
+`help/editing/editor.md`, `help/ai/inline-completion.md`. Both
+`Ctrl+Shift+Space` → `Ctrl+I` and `Cmd+Shift+Space` → `Cmd+I`. No
+remaining occurrences of the wrong binding in any live doc.
 
 ---
 
@@ -228,13 +235,17 @@ rewrite the doc to use the CSS-snippet path instead.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 8
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/help/customize/themes.md:54` links to
 `docs/shell/theme-variables.md`. Real path is
 `docs/developer/themes/css-variables.md`.
 
 **Definition of done:** One-line link fix.
+
+### Outcome
+`help/customize/themes.md:54-55` now uses a real link to
+`../../developer/themes/css-variables.md`.
 
 ---
 
@@ -560,12 +571,17 @@ plugin's `popoutCompatible` value matches its actual capability.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `packages/nexus-extension-api/src/events.ts` — does not
 exist. Event types are co-located with the surface they belong to.
 
 **Definition of done:** Replace with pointer to actual sources.
+
+### Outcome
+`developer/plugins/events.md:69-70` now points at
+`packages/nexus-extension-api/src/generated/NexusEvent.ts` (the
+ts-rs-generated event types, the actual authoritative shape).
 
 ---
 
@@ -590,7 +606,7 @@ doc.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `docs/templates/community-plugin/README.md` and
 `docs/templates/core-plugin/README.md`. Real templates live under
@@ -599,6 +615,12 @@ References `docs/templates/community-plugin/README.md` and
 
 **Definition of done:** Update the paths in the doc.
 
+### Outcome
+- `developer/reference.md:74-75` template paths updated to
+  `docs/PRDs/templates/{community,core}-plugin/` with live links.
+- `developer/core-plugins/authoring.md:240` template path updated to
+  match.
+
 ---
 
 ## DG-29 — `developer/themes/css-variables.md` broken style paths
@@ -606,12 +628,19 @@ References `docs/templates/community-plugin/README.md` and
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 References `shell/src/styles/tokens/` and `shell/src/styles/themes/` —
 do not exist. Theme tokens live under `shell/src/shell/`.
 
 **Definition of done:** Update the paths.
+
+### Outcome
+- `developer/themes/css-variables.md:9-19` now points at the real
+  consolidated stylesheet `shell/src/shell/shell.css` with its
+  `:root` / `[data-theme="…"]` / `[data-density="…"]` blocks (~547
+  custom properties).
+- "See also" footer link at line 218 updated to match.
 
 ---
 
