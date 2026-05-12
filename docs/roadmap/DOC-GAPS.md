@@ -1219,12 +1219,34 @@ community plugins are WASM + JS sandboxes only.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12 (re-phased to formal release)
 
 ADR 0013 specifies a Phase-4 macOS menu-bar plugin. No `macos-menu`
 plugin exists under `shell/src/plugins/`.
 
 **Definition of done:** Build the plugin, *or* supersede ADR 0013.
+
+### Outcome
+
+ADR 0013's decision (palette-first everywhere with a macOS native
+menu-bar exception for platform conformance) **still stands**. What
+changed is the timing: the plugin's original Phase 4 target slipped,
+Phase 4 closed 2026-04-24 (`app/` → `shell/` migration) without the
+plugin, and no user friction has surfaced from its absence on macOS
+in the months since.
+
+Instead of either building the plugin blindly (no macOS build
+environment) or superseding a still-correct decision, the resolution
+re-phases the plugin to the formal-release Mac packaging window:
+
+- New addendum on `docs/adr/0013-menu-bar-strategy.md` documents
+  the slip, restates the decision, and points at the new tracker.
+- New [WI-45](REQUIRED-FOR-FORMAL-RELEASE.md) entry in
+  `docs/roadmap/REQUIRED-FOR-FORMAL-RELEASE.md` scopes the plugin
+  (four menus, dispatch through existing `api.commands.execute()`,
+  no contribution point, ~1 engineer-day) and ties its build window
+  to WI-41 (Tauri auto-updater + code-signing + notarization), so
+  both Mac-environment work items land in the same push.
 
 ---
 

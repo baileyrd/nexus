@@ -84,3 +84,25 @@ itself; menu items are not user-extensible in v1.
 - `docs/archive/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-16)
 - ADR 0011 — plugin-first shell
 - ADR 0008 — tech-stack defaults (Tauri)
+
+## Addendum (2026-05-12) — `nexus.macos-menu` re-phased to formal release
+
+The original ADR pegged the `nexus.macos-menu` plugin to **Phase 4**.
+Phase 4 closed on 2026-04-24 (WI-37, the `app/` → `shell/` migration)
+without the plugin landing. No user friction has surfaced from the
+absence — Nexus shipped through Phase 4 and into the post-migration
+sweep with palette-only command discovery on macOS as on every other
+platform.
+
+The original decision (palette-first everywhere with a macOS native
+menu-bar exception for platform conformance) **still stands**. What
+changes is the **timing**: the plugin is re-phased to the formal-release
+window alongside Mac packaging and notarization work, tracked as
+[REQUIRED-FOR-FORMAL-RELEASE.md WI-45](../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md).
+Building and testing a Tauri native menu plugin without a real macOS
+build/notarization pipeline (WI-41) is dead work; both should land in
+the same Mac-environment push.
+
+This addendum closes [DOC-GAPS.md DG-45](../roadmap/DOC-GAPS.md) —
+the gap was about ADR-vs-code status drift, not about the underlying
+design.

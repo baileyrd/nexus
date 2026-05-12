@@ -494,6 +494,42 @@ Main-thread: author `nexus-plugins.json` (initial with hello-world only), publis
 
 ---
 
+## WI-45 — `nexus.macos-menu` platform-conformance plugin
+
+[ADR 0013](../adr/0013-menu-bar-strategy.md) committed to a small
+macOS-only menu-bar plugin (File / Edit / View / Window) for platform
+conformance. The original "Phase 4" target slipped — Phase 4 closed
+2026-04-24 (`app/` → `shell/` migration) without the plugin. The
+decision still holds; only the timing changes.
+
+**Why now / why here.** The plugin needs Tauri's native menu API,
+which is platform-conditional. Building or testing it without a real
+macOS build pipeline is dead work. WI-41 brings up the Mac build +
+notarization workflow; this WI rides in alongside so both land in the
+same Mac-environment push rather than spinning up the same
+infrastructure twice.
+
+**Scope (intentionally narrow).** Four menus only — File (New /
+Open Forge / Close Window / Quit), Edit (Undo / Redo / Cut / Copy /
+Paste / Select All), View (Zoom In / Out / Reset, Toggle Sidebar),
+Window (Minimize / Zoom / Close). Items dispatch through the existing
+`api.commands.execute()` surface so the palette remains the canonical
+registry (no parallel menu registry, per ADR 0013 §Rationale). No
+user-extensible contribution point; no `api.menuBar.register()` in v1.
+
+**Out of scope.** Windows menu strip, Linux global-menu protocols
+(Unity, KDE), web fallback, custom menu items, plugin-contributed
+menu entries. All explicitly rejected by ADR 0013 and re-rejected here.
+
+**Closes:** [DOC-GAPS.md DG-45](DOC-GAPS.md).
+
+**Size.** **S** — ~1 engineer-day. Plugin scaffolds under
+`shell/src/plugins/nexus/macosMenu/` (a chrome-only, `popoutCompatible:
+false` entry); only the catalog change + ~150 lines of TS / Tauri menu
+glue.
+
+---
+
 ## WI-46 — Beta → GA
 
 
