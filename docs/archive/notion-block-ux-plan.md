@@ -1,10 +1,17 @@
-# Notion-style block UX — shell implementation plan
+> **Archived 2026-05-12** — All 6 phases of the Notion-style block UX
+> plan (slash menu, block handles, block selection, block drag,
+> per-block actions, polish) shipped 2026-04-22 under
+> `shell/src/plugins/nexus/editor/`. Phase-recap follow-ups
+> (drag-to-embed into canvas, block-links navigator, side-margin
+> comments, multi-cursor) live as BL-048..BL-051 in
+> `docs/PRDs/BACKLOG.md`; the block-AI-actions follow-up was merged
+> into BL-035.
+>
+> This file is preserved unedited for the design rationale. The
+> per-phase "still open" notes inside the body are out of date by
+> definition — trust the BL-NN entries above for current state.
 
-> [!NOTE]
-> **SHIPPED — should archive — see [DG-11](./DOC-GAPS.md#dg-11--notion-block-ux-planmd-should-archive-shipped).**
-> All 6 phases shipped 2026-04-22. This file's location under
-> `roadmap/` is incorrect; it belongs under `docs/archive/`. The
-> per-phase "still open" notes inside this doc are also out of date.
+# Notion-style block UX — shell implementation plan
 
 Surface the already-shipped block-tree engine (PRD-08) through the UI
 affordances that make a block-based editor *feel* block-based: slash

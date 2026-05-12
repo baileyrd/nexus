@@ -1,0 +1,547 @@
+# Open Items — Post-Migration Carryover Gaps (archived audit trail)
+
+> **Archived 2026-05-12** — 21 of the 22 OI items below shipped between
+> 2026-04-24 and 2026-05-01; the live tracker
+> [`../roadmap/OPEN-ITEMS.md`](../roadmap/OPEN-ITEMS.md) now carries
+> only **OI-05** (Rust dep duplication, blocked upstream). This file
+> is preserved verbatim as the resolution audit trail for the bulk of
+> the 2026-04-24 sweep. New post-migration regressions should be filed
+> in `../PRDs/BACKLOG.md` (or in the live `OPEN-ITEMS.md` if they're
+> cross-migration carryover), not appended here.
+
+> Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement (2026-04-24). Surfaced by the capability-presence sweep on 2026-04-24.
+>
+> Listed here rather than in [PRDs/BACKLOG.md](PRDs/BACKLOG.md) because these are regressions from prior-shipped behavior, not new features. Linked from BACKLOG.md under "Post-migration carryover gaps."
+
+---
+
+## OI-01 — Settings modal / `registerSettingsTab` API
+
+**Severity:** Should-fix (user-visible parity gap)
+**Surfaced by:** `docs/references/obsidian-settings-modal.md`
+**Status:** Resolved 2026-04-24. Extension point landed; built-in tabs preserved; typecheck + 271 tests green.
+
+### Outcome
+- **`SettingsTabRegistry`** in `shell/src/registry/`, following the `CommandRegistry` two-phase pattern (`registerFromManifest` → `register` → `all`). Six unit tests cover the sort order, manifest-then-register sequence, and `unregister`.
+- **`SettingsTabContribution`** DTO in `@nexus/extension-api`; **`SettingsTabEntry`** shell-side shape. `PluginContributions.settingsTabs` accepts the declarative form; `ExtensionHost.registerManifestContributions` calls `registerFromManifest` so the rail entry appears before the plugin activates.
+- **`api.settings.registerTab(id, renderer, meta?)`** on `PluginAPI`, tracked by `PluginRegistry` so unloads sweep the tab automatically (`settingsTab:<id>` ownership key).
+- **`SettingsPanelView`** renders three classes of tabs: the four existing built-ins (Settings / Appearance / Keybindings / Plugins), plugin-contributed tabs (from the registry), and **auto-tabs** for any plugin that declared a `configuration` schema without an explicit `settings_tabs` entry — matches the Obsidian "one tab per plugin with settings" convention. Plugins with both paths get the explicit tab only.
+- **Last-open tab persisted** to `plugin:core.settings:last-tab` in `localStorage` (same namespacing as keybinding overrides), hydrated on the next open. `Ctrl/Cmd+,` continues to route through `workbench.action.openSettings`.
+
+### Follow-up (not blocking)
+- The header still uses a horizontal tab bar. The Obsidian spec's vertical left rail with uppercase section headers (`OPTIONS` / `CORE PLUGINS` / `COMMUNITY PLUGINS`) is visual polish; the grouping metadata already exists in the registry so the rail-style layout is a styling-only follow-up.
+- Auto-tab `core` vs `community` classification currently uses a `com.nexus.` / `core.` prefix heuristic. A richer split would join on `pluginList` which surfaces the real `core: boolean`.
+
+---
+
+## OI-02 — Split-size persistence
+
+**Severity:** Should-fix (UX regression)
+**Surfaced by:** `docs/archive/superpowers/specs/2026-04-17-split-size-persistence-design.md`
+**Status:** Resolved 2026-04-24. The editor-split gap is closed; sidedock persistence was already landed post-migration but mis-attributed here.
+
+### Audit correction
+When I went to implement the scope from the original OI-02 text, I found that two of the three claims had already been fixed:
+
+- **Sidedock resize + persistence already works.** `WorkspaceRenderer.DockResizeHandle` drives `workspace.setSidedockSize`, which emits `layout-change` → `installAutoSave` debounces a write through `workspace.serialize()` → `<vault>/.forge/workspace.json`. Hydrate reads it back via `hydrateNode`. So "sidebar / right panel / bottom panel do not report drag-end" is stale — those three do.
+- **Sizes schema already exists.** `SerializedSplit.sizes?: number[]` is serialised per node in the workspace JSON. No rust-side `split_sizes` shell-state field was needed — the design doc predates the `.forge/workspace.json` persistence channel.
+- **Genuine remaining gap:** editor internal splits (`SplitNode` at `shell/src/workspace/WorkspaceRenderer.tsx`) render children with flex weights but had **no drag handle** — so `node.sizes` was never mutated by user interaction, meaning a user couldn't actually resize an editor split at all.
+
+### Outcome
+- **`workspace.setSplitSizes(splitId, sizes)`** mutator in `workspaceStore.ts` — walks the tree for the named split, guards arity, clamps per-child weight to `MIN_SPLIT_WEIGHT` (0.1) so a lane can't vanish, dedupes identical writes, emits `layout-change`.
+- **`SplitResizeHandle`** in `WorkspaceRenderer.tsx` between each pair of `SplitNode` children. Drag math: capture pixel rects of all children at mousedown, transfer the delta between the two adjacent lanes on move, normalise to proportional weights, call `setSplitSizes`. Matches `DockResizeHandle` styling (4px gutter).
+- Persistence path is unchanged — writes flow through the existing `installAutoSave` → `saveWorkspace` pipeline, and hydrate reads `split.sizes` back.
+- Five unit tests cover: write + event, arity-mismatch rejection, weight clamp, unknown-id no-op, idempotent re-write.
+
+### Clean-uninstall behavior (AC #2)
+`.forge/workspace.json` missing → `loadWorkspace` returns null → `buildDefaultLayout` creates a fresh tree without `sizes`, so `SplitNode` falls back to equal-flex (weight 1 per child). No errors, no panics. Also verified for the separate shell-state path: `get_shell_state` returns default on missing file (unchanged from prior behaviour).
+
+---
+
+## OI-03 — Workspace-wide clippy `-D warnings` sweep
+
+**Severity:** Tech debt (blocks strict-CI adoption)
+**Surfaced by:** audit 2026-04-24
+**Status:** Resolved 2026-04-24. `cargo clippy --workspace --no-deps --all-targets -- -D warnings` exits 0; all tests pass.
+
+### Outcome
+Swept every crate — `nexus-security`, `nexus-ai`, `nexus-agent`, `nexus-workflow`, `nexus-mcp`, `nexus-storage`, `nexus-database`, `nexus-plugins`, `nexus-bootstrap`, `nexus-terminal`, plus follow-ons in `nexus-git`, `nexus-kv`, `nexus-theme`, `nexus-editor`, `nexus-skills`, `nexus-kernel`, `nexus-cli`.
+
+Suppressions added carry a one-line justification; they're concentrated on deserialization helpers (`struct_field_names` for fields that mirror JSON/TOML keys), `needless_pass_by_value` on functions used as `map_err` function pointers, `too_many_lines` on single-jump-table `dispatch` methods, and `missing_errors_doc` at the `nexus-bootstrap` crate level (27 pass-through wrappers with identical failure modes).
+
+Leftover open follow-up: consider flipping CI on with `-D warnings` now that the floor is clean.
+
+---
+
+## OI-04 — Load-bearing TODOs for kernel contract promotion
+
+**Severity:** Design debt (type duplication)
+**Surfaced by:** audit 2026-04-24
+**Status:** Resolved 2026-04-24. Both TODOs cleared.
+
+### Outcome
+
+**TODO 1 — `SlotId` promotion** (`shell/src/types/plugin.ts:75`). `SlotId` and `ViewContribution` moved from the shell registry layer into `packages/nexus-extension-api/src/index.ts`. The shell-side `SlotRegistry.ts` now imports + re-exports `SlotId` so in-tree consumers keep their existing paths. `shell/src/types/plugin.ts` re-exports both types from the package alongside the other portable contribution DTOs (`CommandContribution`, `SettingsTabContribution`, etc.). Native (Rust) and community (JS) plugins see identical slot names at the contract boundary.
+
+**TODO 2 — `list_archetypes` IPC** (`shell/src/plugins/nexus/agent/agentStore.ts:104`). New `HANDLER_LIST_ARCHETYPES` (id 8) on `com.nexus.agent` returns the short-name catalogue (`["writer", "coder", "researcher"]`) — the exact strings `resolve_prompt` accepts back as the `archetype` arg, so the shell picker round-trips them verbatim. Served by the sync `dispatch` path; `dispatch_async` returns `None` for this handler so the kernel's `ipc_call` drops straight to the blocking-pool shortcut (no tokio frame for a compile-time constant). Bootstrap manifest registers the new command.
+
+Shell side:
+- `KNOWN_ARCHETYPES` hardcoded catalogue deleted; replaced by `FALLBACK_ARCHETYPES` (same three entries, installed at store init so the picker renders on first paint) plus `describeArchetype(id)` which joins ids to a shell-side label/description lookup.
+- `ArchetypeId` widened from `'writer' | 'coder' | 'researcher'` to `string` so a new Rust-side archetype surfaces without a shell release.
+- `loadArchetypes()` runtime helper fires on workspace open, calls the IPC, overwrites the fallback. Idempotent via `archetypesLoaded`; `reset()` deliberately preserves the catalogue across workspace close/open since it's kernel-global.
+- `AgentView.ArchetypeSelect` reads `useAgentStore(s => s.archetypes)` rather than the deleted const.
+
+### Acceptance
+- Native and community plugins now share `SlotId` / `ViewContribution` shapes through `@nexus/extension-api`.
+- The agent archetype picker is driven by the kernel; a Rust-side addition to `ARCHETYPE_NAMES` + `resolve_prompt` shows up in the shell without touching the frontend.
+- Per-target label strings remain shell-side (path c), mapped via `ARCHETYPE_DISPLAY`; unknown ids get a titlecased fallback so new Rust entries don't vanish from the dropdown.
+
+### Coverage
+- Rust: 2 new unit tests (`list_archetypes_returns_short_names`, `dispatch_async_yields_to_sync_for_list_archetypes`). `cargo clippy --workspace -- -D warnings` still exits 0.
+- Shell: 8 new unit tests covering `decodeArchetypes` (happy path, unknown ids, non-array, empty, dedupe) and `loadArchetypes` (success, failure-keeps-fallback, idempotency). Full suite: 284 tests green; typecheck clean; production build succeeds.
+
+---
+
+## OI-05 — Rust dependency duplication
+
+**Severity:** Build debt (compile time + binary size)
+**Surfaced by:** audit 2026-04-24
+**Status:** Blocked on upstream. Every duplicate identified on 2026-04-24 traces back to a transitive dependency we don't own.
+
+### Upstream blockers
+Reverse-tree walk via `cargo tree -i`:
+- **`wasmtime` 42.0.2** (pulled via `nexus-plugins`) pins `toml 0.9`, `sha2 0.10`, `digest 0.10`, `rand_core 0.6`, `reqwest 0.13`, `rustix 0.38`, `nix 0.28`, `hashbrown 0.15/0.16/0.17`, plus wasmtime-internal crates (`pulley-interpreter`, `wasmtime-internal-core`, `cranelift-bitset`) and `wasm-encoder`/`wasmparser` 0.244. Resolving any of these requires a wasmtime point release that itself upgrades them.
+- **`portable-pty`** (via `nexus-terminal`) pulls `filedescriptor` which pins `thiserror 1.0`. Upgrading portable-pty or switching PTY crates is a feature-level decision, not a drop-in bump.
+- The "identical version twice" rows (`bitflags 2.11.1`, `semver 1.0.28`, `libc 0.2.185`, etc.) are feature-flag splits inside wasmtime/Tauri — same version, two feature configurations.
+
+### When to revisit
+- Next wasmtime major release — re-run `cargo tree --duplicates` and sweep anything that unified as a side effect.
+- If the editor/terminal stack picks up a new PTY crate that doesn't depend on `filedescriptor`, `thiserror` 1.0 goes away.
+- Any direct dependency we add that pulls the older version of one of these families should be resisted — keep the forge on the newer half so the cleanup lands automatically when upstream moves.
+
+---
+
+## OI-06 — ESLint 8 / typescript-eslint 7 upgrade
+
+**Severity:** Tooling debt (ESLint 8 is EOL)
+**Surfaced by:** audit 2026-04-24
+**Status:** Resolved 2026-04-24. `pnpm lint` exits 0; all three ACs met.
+
+### Outcome
+- **ESLint 8.57 → 9.39** + **typescript-eslint 7 → 8.59** in `shell/package.json`. Added `typescript-eslint` (the flat-config meta package) + `eslint-plugin-react-hooks ^5.2` for React correctness.
+- **`shell/eslint.config.js`** pins the config at the package root. ESLint 9 flat-config search stops at the nearest `eslint.config.{js,ts,mjs}`, so the personal `~/.eslintrc.json` that was shadowing `pnpm lint` is no longer reachable — the shadowing bug is structurally gone. Presets: `tseslint.configs.recommended` + `react-hooks/recommended`. `no-explicit-any` and `exhaustive-deps` set to `warn` so they surface without blocking CI; `no-unused-vars` honours the underscore-prefix convention already used in the codebase.
+- **`lint` script** updated to drop the `--ext` flag (flat config reads file patterns from the config itself).
+- **xterm → @xterm**: `xterm 5.3.0` + `xterm-addon-fit 0.8.0` replaced with `@xterm/xterm ^5.5` + `@xterm/addon-fit ^0.10`. Three imports in `TerminalView.tsx` updated to the scoped names (including the CSS import).
+- **One real bug surfaced + fixed**: `CapabilityModalView.CapBucketSection` called `useMemo` after an early `return null`, a rules-of-hooks violation under `react-hooks/rules-of-hooks`. Hook moved above the guard.
+
+### Acceptance
+- `pnpm lint` exits 0 (0 errors, 46 advisory warnings — long-standing unused-var / explicit-any sites that pre-date this session).
+- ESLint + typescript-eslint off the deprecated 8.x / 7.x lines.
+- xterm packages on the `@xterm/*` scoped names.
+
+Typecheck clean; 289 tests pass (unchanged); production build succeeds.
+
+---
+
+## OI-07 — Route capability grants, denials & path-traversal through `audit::*`
+
+**Severity:** Should-fix (auditability gap for third-party-untrusted trust model)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-10.1.2 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-24. Every capability grant/denial and path-traversal rejection now passes through `audit::*`; coverage tests assert the structured channel sees the events.
+
+### Structural finding
+`nexus-security` already depends on `nexus-kernel` and `nexus-plugins`, so the call sites couldn't import `nexus_security::audit` without inducing a dep cycle. That cycle is exactly why the helpers had zero callers — the audit module sat *above* the gates in the dep graph. Fix: moved `audit.rs` from `nexus-security` down to `nexus-kernel` (the helpers only need `tracing` + `std::path`), and re-exported via `pub use nexus_kernel::audit;` from `nexus-security` so `nexus_security::audit::*` keeps working for outside callers (e.g. `prd-02-smoke`).
+
+### Outcome
+- **Capability denials** route through `audit::log_capability_denied` from:
+  - `crates/nexus-plugins/src/host_fns.rs::deny_capability` — the WASM host's KvRead/KvWrite/EventsPublish/FsRead/FsWrite/IpcCall/UiNotify gates.
+  - `crates/nexus-kernel/src/context_impl.rs::require_capability` — the native plugin context's FS/KV/events/log gates.
+  - `crates/nexus-kernel/src/context_impl.rs::ipc_call` — previously silent on `IpcCall` denial; now emits an audit event before returning `IpcError::CapabilityDenied`.
+- **Path-traversal rejections** route through `audit::log_path_traversal_denied` from:
+  - `host_fns.rs::deny_path_traversal` (WASM `write_file` validator failures).
+  - `context_impl.rs::confine_path` (the canonicalize-then-prefix denial).
+  - `context_impl.rs::write_file` (the TOCTOU-safe `validate_for_write` denial).
+- **Capability grants** are emitted in `crates/nexus-plugins/src/loader.rs::build_capabilities` — one `audit::log_capability_granted` per granted capability per plugin, for both Core (full set) and Community (post-HIGH-risk-filter) loads.
+- The crate-level path validator (`crates/nexus-security/src/path.rs`) is a pure error shim with no logging — call-site logging is the right home and now happens in both gates above.
+
+### Coverage
+- `audit::test_support::with_captured_events{,_async}` promoted to a `pub(crate)`, `#[cfg(test)]` helper so call-site tests can install a tracing subscriber and read back captured events.
+- Two new gate-integration tests in `context_impl.rs::tests`: `capability_denial_emits_audit_event_through_gate` (calls `kv_get` on a no-cap context, asserts an `audit=true result=denied capability=kv.read` event) and `path_traversal_emits_audit_event_through_gate` (calls `read_file("/etc/passwd")`, asserts the traversal event reaches the channel). Both prove the gate → helper → tracing path end-to-end, not just the helper in isolation.
+- Workspace: `cargo clippy --workspace --no-deps --all-targets -- -D warnings` exits 0; full test sweep green (~1300 tests).
+
+### Acceptance (note: AC text amended)
+The original AC mentioned filtering on `target = "audit"`. The implemented audit helpers (which predate this OI) emit a structured `audit = true` field instead — a richer model that survives format-layer reformatting. AC reads as: "every grant/denial/traversal rejection passes through an `audit::*` helper, and a subscriber filtering on `audit = true` sees all security-relevant events in one stream." Both halves now hold; the two coverage tests above filter exactly that way.
+
+---
+
+## OI-08 — "Running Extensions" Settings tab
+
+**Severity:** Should-fix (observability)
+**Surfaced by:** UI-AUDIT.md F-10.1.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-26.
+
+### Outcome
+- New default-on plugin [`nexus.extensionsTab`](../shell/src/plugins/nexus/extensionsTab/) — manifest declares a `settingsTabs` contribution, `activate()` calls `api.settings.registerTab('extensions', ExtensionsTab, { group: 'options', priority: 40 })`. First production consumer of the OI-01 contribution mechanism.
+- [`ExtensionsTab.tsx`](../shell/src/plugins/nexus/extensionsTab/ExtensionsTab.tsx) renders a sortable table (errors first, then alphabetical) of every plugin the shell has seen this session: id, state badge, last-error message (with stack as title attribute on hover), Disable button. Disable is wired via the same shell-internal `set_plugin_enabled` Tauri command the existing Plugins tab uses; it's gated on `isDefaultOff && state in {active, activating}` so always-on built-ins aren't accidentally killable from this surface.
+- [`SettingsPanelView.tsx`](../shell/src/plugins/core/settings/SettingsPanelView.tsx) gained `useContributedSettingsTabs()` + `<ContributedTabBody navTab>` so plugin-contributed tabs from `SettingsTabRegistry.all()` actually render — closes a plumbing gap left by OI-01 (the registry shipped, but the panel never read from it).
+
+### Coverage
+- Live state for the Extensions tab is sourced from `pluginsStatusStore` (OI-09). The store's 6 unit tests in [`shell/src/stores/pluginsStatusStore.test.ts`](../shell/src/stores/pluginsStatusStore.test.ts) cover the full event → state mapping.
+- The plugin-import-hygiene allowlist gains one entry: `shell/src/plugins/nexus/extensionsTab/ExtensionsTab.tsx` imports `@tauri-apps/api/core` for `set_plugin_enabled` (mirrors the `pluginsMgmt` exception). Justification recorded inline in [`shell/tests/plugin-import-hygiene.test.ts`](../shell/tests/plugin-import-hygiene.test.ts).
+
+### Acceptance
+- ✅ Settings → Extensions lists every loaded plugin with state + last error.
+- ✅ A plugin whose `activate()` throws shows its error message inline; the row sorts to the top.
+- ✅ Clicking Disable on a default-off plugin flips `plugin enabled` (via the existing shell-internal command).
+
+---
+
+## OI-09 — `plugins:status` store + per-plugin error surface
+
+**Severity:** Should-fix (crash-failure observability)
+**Surfaced by:** UI-AUDIT.md F-7.2.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-26.
+
+### Outcome
+- New zustand store [`shell/src/stores/pluginsStatusStore.ts`](../shell/src/stores/pluginsStatusStore.ts) subscribes to `plugin:activated` / `plugin:deactivated` / `plugin:error` on the EventBus and maintains a per-plugin `{ state, lastError }` map keyed by plugin id. Subscriptions install at module load; because `catalog.ts` imports every plugin module before `host.loadAll(plugins)` runs, the store is live before the first plugin activates and never misses an event.
+- A successful `plugin:activated` after a prior `plugin:error` clears `lastError` automatically (the store overwrites the row, so a hot-reload-driven recovery shows up clean in the Extensions tab).
+- `getPluginStatus(pluginId)` is a synchronous accessor for non-React callers (tests, future status-bar widget). The hook form is `usePluginsStatusStore((s) => s.byId[pluginId])`.
+
+### Coverage
+- 6 unit tests in [`shell/src/stores/pluginsStatusStore.test.ts`](../shell/src/stores/pluginsStatusStore.test.ts): activated → active, deactivated → inactive, error captures message + stack, recovery clears lastError, multi-plugin independence, immutable updates (referential identity).
+
+### Acceptance
+- ✅ A plugin that throws in `activate()` appears in the Extensions tab with its error message.
+- ✅ The store reflects deactivation via the existing `set_plugin_enabled` flow on next boot — no shell-side bookkeeping required.
+
+---
+
+## OI-10 — Keybinding-conflict detection + UI
+
+**Severity:** Should-fix (user-invisible collision hazard)
+**Surfaced by:** UI-AUDIT.md F-4.1.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-27.
+
+### Outcome
+- [`KeybindingRegistry`](../shell/src/registry/KeybindingRegistry.ts) gained `getConflicts()` and a private `computeConflicts()` that buckets bindings by active chord and pairs entries whose `when` clauses overlap. The overlap rule is the conservative one documented on the new `KeybindingConflict` type — equal `when` strings (incl. both `undefined`) or one-side-unconditional always conflict; two distinct `when`s are assumed disjoint and skipped, since the shell has no boolean-formula solver and false-positive collisions would be noisier than the underlying bug.
+- Every mutation path (`registerFromManifest` / `unregister` / `setOverride` / `clearOverride` / `loadOverrides`) now calls `maybeEmitConflicts`. A signature-based dedup means bulk manifest registration at boot converges to a single `plugins:keybindings-conflict` emission — only mutations that actually change the conflict set re-emit.
+- `BindingRow` carries a new `conflictsWith: string[]` field populated by the same computation, so `Settings → Keybindings` renders a `!` badge per conflicted row (with a tooltip listing the competing commandIds) plus a top-of-tab summary banner. No second registry call required.
+- Event added to `ShellEvents` in [`shell/src/host/EventBus.ts`](../shell/src/host/EventBus.ts) so subscribers get full type-checking.
+
+### Coverage
+- 9 new tests in [`shell/src/registry/KeybindingRegistry.test.ts`](../shell/src/registry/KeybindingRegistry.test.ts): no-conflict baseline, two unconditional bindings on same chord, identical-when conflict, differing-when not flagged, gated-vs-unconditional conflict, `unregister` clears, `setOverride` introduces a conflict, bulk-registration emits exactly twice (appearance + expansion), and resolution emits an empty list.
+
+### Acceptance
+- ✅ Two plugins binding the same chord show a conflict row in the Keybindings tab with both command titles in the `!`-badge tooltip.
+- ✅ Setting a user override on either command (or unregistering the offending plugin) clears the badge and re-emits an updated conflict list.
+
+---
+
+## OI-11 — UI-thread time budget on plugin command dispatch
+
+**Severity:** Should-fix (UX hazard from slow plugins)
+**Surfaced by:** UI-AUDIT.md F-8.2.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-27.
+
+### Outcome
+- [`CommandRegistry.execute`](../shell/src/registry/CommandRegistry.ts) now races the handler against a configurable cancel deadline using `Promise.race`. Two new keys land in the existing `configStore`: `shell.command.timeoutWarnMs` (default 250ms) and `shell.command.timeoutCancelMs` (default 5000ms). Either set to 0 disables that tier — useful for tests, debug sessions, and users who explicitly opt out of cancellation.
+- New exported `CommandCancelledError` (`name = 'CommandCancelled'`) carries `commandId` + `thresholdMs` so awaiters can distinguish a hard-cancel from a regular crash without relying on string matching. The cancellation path explicitly does *not* emit `command:error` — it emits `command:cancelled` instead.
+- Soft-warn tier logs `[CommandRegistry] Command 'X' (plugin 'Y') still pending after Nms` via `console.warn` at the warn threshold; no event, since the spec asked only for the cancel-side event.
+- `command:cancelled` added to the `ShellEvents` interface in [`shell/src/host/EventBus.ts`](../shell/src/host/EventBus.ts) with payload `{ commandId, pluginId?, thresholdMs }`. The handler keeps running in the background after cancel — JavaScript promises aren't natively cancellable — but the awaiter is released and any late handler rejection is silenced via a `.catch(() => {})` sink.
+
+### Coverage
+- 7 new tests in [`shell/src/registry/CommandRegistry.test.ts`](../shell/src/registry/CommandRegistry.test.ts) covering: hard-cancel rejects with `CommandCancelledError`, `command:cancelled` payload shape, cancellation suppresses `command:error`, fast handler emits no cancellation, `timeoutCancelMs=0` disables, soft-warn fires for moderately slow handlers, `warnMs=0` suppresses the warn. Tests use a `withTimeouts(warnMs, cancelMs, fn)` helper that sets the config keys for the test's duration and resets them in `finally`.
+
+### Acceptance
+- ✅ A command handler that sleeps past 5 s rejects with `CommandCancelledError`, fires `command:cancelled`, and the shell continues to dispatch unrelated commands.
+- ✅ Both thresholds are runtime-configurable via the same `configStore` the settings panel reads from.
+
+---
+
+## OI-12 — Document or remove absolute-path auto-promotion
+
+**Severity:** Should-fix (silent capability escalation)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-6.3.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-27 — option (b), with a documented split between the two FS surfaces.
+
+### Outcome
+- Kernel side (Rust, [`KernelPluginContext::read_file`](../crates/nexus-kernel/src/context_impl.rs) / `write_file`) already had auto-promotion removed in a prior pass — `confine_path` now canonicalises every input (relative *or* absolute), prefix-checks against `forge_root_canonical`, and rejects out-of-root paths with `Error::Io(PermissionDenied)` plus an `audit::log_path_traversal_denied` event. This pass rewrote the doc comments on `confine_path`, `read_file`, and `write_file` to spell out that contract — including an explicit "no auto-promotion to `FsReadExternal`" sentence — so a future reader doesn't have to reverse-engineer it from test names.
+- Script-plugin side (TS, [`PlatformFsAPI`](../packages/nexus-extension-api/src/index.ts)) is intentionally a different shape — it's a thin pass-through to `@tauri-apps/plugin-fs` and the shell does **not** confine paths to the forge root. The interface JSDoc now documents the full path-semantics + capability contract on the type itself, with per-method `Requires FsRead/FsWrite` notes pointing back at the type's overview block. The capability check happens at the sandbox boundary (`capabilityGuard.METHOD_CAPABILITY_MAP`) — `FsRead` / `FsWrite`, no `*External` distinction.
+
+### Coverage
+- Two new tests in [`crates/nexus-kernel/src/context_impl.rs`](../crates/nexus-kernel/src/context_impl.rs): `read_file_absolute_outside_forge_returns_typed_traversal_error` and `write_file_absolute_outside_forge_returns_typed_traversal_error`. Both pin the AC literally — `Error::Io` with `ErrorKind::PermissionDenied` and a "path traversal denied" message — so a future regression that makes the failure silent (e.g. swallowing the kind, or returning the generic capability error) trips a test rather than only an audit-log diff.
+- The pre-existing `path_traversal_emits_audit_event_through_gate` (OI-07 coverage) already verifies the audit-log line fires.
+
+### Acceptance
+- ✅ A plugin author reading the `@nexus/extension-api` JSDoc knows that script-plugin FS paths are **not** confined and that the only gate is `FsRead`/`FsWrite`; the kernel docstrings cover the WASM-plugin path that **is** confined.
+- ✅ `read_file("/abs/path")` with only `FsRead` (no `FsReadExternal` exists at runtime) returns a typed `PermissionDenied` traversal error, not a silent capability denial.
+
+---
+
+## OI-13 — Reconcile kernel-side `PluginRegistry` with `PluginLoader::loaded`
+
+**Severity:** Tech debt (dead code path + two sources of truth)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-1.2.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-26.
+
+### Outcome
+- Deleted [`crates/nexus-kernel/src/plugin_registry.rs`](../crates/nexus-kernel/src/plugin_registry.rs) entirely.
+- Removed the `plugins: PluginRegistry` field from [`Kernel`](../crates/nexus-kernel/src/kernel.rs) along with `Kernel::plugins()` and the `pub use plugin_registry::PluginRegistry;` re-export from `lib.rs`.
+- Cleaned up the matching test in `kernel.rs::tests::plugins_accessor_returns_empty_registry_before_start` and the `smoke_plugin_registry_is_empty_in_prd_01_scope` smoke test in `tests/smoke_kernel.rs`. The "all public types importable" smoke test no longer references `PluginRegistry`.
+- Updated `Kernel`'s top-of-file doc comment to point future readers at `nexus_plugins::PluginLoader::loaded` as the authoritative live map.
+- Updated the C4 component diagram in [`docs/architecture/C4.md`](../docs/architecture/C4.md) and the kernel component table in [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) to drop the `PluginRegistry` component box and its relationships.
+
+No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
+
+### Acceptance
+- ✅ Zero references to `nexus_kernel::PluginRegistry` anywhere in the workspace.
+- ✅ `cargo build --workspace` and `cargo test -p nexus-kernel` pass.
+- ✅ Pre-existing failures elsewhere (theme builtins-parse, nexus-ai clippy lints) are unrelated and unchanged.
+
+---
+
+## OI-14 — Expose `ctx.workspace` / `ctx.editor.active` through extension-api
+
+**Severity:** Should-fix (forces plugins to use raw `invoke`)
+**Surfaced by:** UI-AUDIT.md F-6.1.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-26.
+
+### Outcome
+- **`api.workspace.forgeRoot(): string | null`** added to the leaf workspace facade in [`shell/src/workspace/workspaceStore.ts`](../shell/src/workspace/workspaceStore.ts) — reads the active forge root from `useWorkspaceStore` (the `nexus.workspace` plugin store) so plugins don't have to import shell-internal stores. Returns null between `workspace:closed` and the next `workspace:opened`.
+- **`api.editor.active(): { relpath, revision } | null`** + **`api.editor.onChange(handler): () => void`** wired in [`shell/src/host/PluginAPI.ts`](../shell/src/host/PluginAPI.ts). `active()` projects `useEditorStore.{activeRelpath, sessionRevision}` into the public shape; `onChange` subscribes via `useEditorStore.subscribe` and dedupes redundant fires through `activeEditorEquals` so handlers only run on a real switch or revision advance. The returned disposer is idempotent and tracked through `PluginRegistry.trackSubscription` so plugin unload sweeps it (mirrors `kernel.on`).
+- **Pure projection helpers** extracted to [`shell/src/host/activeEditor.ts`](../shell/src/host/activeEditor.ts) (`computeActiveEditor`, `activeEditorEquals`) so unit tests don't need to drag in `@tauri-apps/*` imports through PluginAPI.ts.
+- **Type contract** in [`packages/nexus-extension-api/src/index.ts`](../packages/nexus-extension-api/src/index.ts) — new exported `ActiveEditor`, `EditorAPI`, `WorkspaceAPI` interfaces. The previous aspirational `editorActive` / `workspace.{root,name}` shape (never wired) is replaced; both had zero consumers.
+
+### Coverage
+- 10 new unit tests in [`shell/src/host/PluginAPI.editor.test.ts`](../shell/src/host/PluginAPI.editor.test.ts) — projection helpers (3), equality predicate (5), end-to-end dedupe over `useEditorStore` mutations (1), idempotent-disposer pattern (1). All pass.
+- No new typecheck or lint errors. Subscription cleanup behaviour is already covered by [`shell/tests/subscription-cleanup.test.ts`](../shell/tests/subscription-cleanup.test.ts) since the disposer flows through the same `PluginRegistry.trackSubscription` path.
+
+### Acceptance
+- A plugin reads `api.editor.active()` to get `{ relpath, revision }` without knowing about `com.nexus.editor`'s handler ids.
+- A plugin subscribes via `api.editor.onChange(handler)` and is auto-unsubscribed on deactivate; redundant store mutations don't trigger redundant handler fires.
+- A plugin reads `api.workspace.forgeRoot()` to get the current forge path without importing shell stores.
+
+---
+
+## OI-15 — Manifest signature / provenance
+
+**Severity:** Should-fix (marketplace prerequisite)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-3.2.2 reconciliation 2026-04-24
+**Status:** Resolved 2026-05-01.
+
+### Outcome
+- `ed25519-dalek = "2"` and `hex = "0.4"` added to `shell/src-tauri/Cargo.toml`.
+- New `VerificationStatus` enum (`Unsigned | Verified | UntrustedKey | InvalidSignature`) in `shell/src-tauri/src/lib.rs` with `serde(rename_all = "camelCase")` so it serialises cleanly to TypeScript.
+- `TRUSTED_PUBLIC_KEYS: &[&str] = &[]` static — empty for pre-marketplace. Add the canonical hex public key here when the marketplace CA is established.
+- `verify_plugin_signature(manifest_bytes, dir_path)` reads `plugin.json.sig` (JSON `{ "publicKey": "<64-hex>", "signature": "<128-hex>" }`), decodes the key/sig bytes, checks the key against the trusted list, then calls `VerifyingKey::verify`. Returns `Unsigned` when no sig file exists.
+- `CommunityPluginManifest` gains a `#[serde(skip_deserializing, default)] verification_status: VerificationStatus` field — injected by both `scan_plugin_directory` and `scan_plugin_directory_at` after the main-entry-point check. Both scan functions filter out (`return None`) any plugin whose status is `UntrustedKey` or `InvalidSignature`, so only `Unsigned` and `Verified` plugins reach the frontend.
+- TypeScript `CommunityPluginManifest` in `shell/src/host/communityPluginLoader.ts` gains `verificationStatus?: 'unsigned' | 'verified' | 'untrustedKey' | 'invalidSignature'`.
+- `CommunityPluginRow` in `SettingsPanelView.tsx` shows a green "verified" pill for `Verified` plugins and a muted "unsigned" pill otherwise.
+
+### Acceptance
+- ✅ A plugin signed by a trusted key shows "verified" in Plugins tab; unsigned plugins show "unsigned"; a plugin.json.sig with an untrusted or invalid key is silently rejected at scan time (plugin never appears in the list).
+- ✅ All 819 existing tests pass; `cargo check` and `tsc --noEmit` both clean.
+
+---
+
+## OI-16 — `beforeunload` → `onStop` for script plugins
+
+**Severity:** Nice-to-have (cleanup on window close)
+**Surfaced by:** UI-AUDIT.md F-7.3.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-27.
+
+### Outcome
+- New [`ExtensionHost.deactivateAllForShutdown(perPluginCapMs = 1000)`](../shell/src/host/ExtensionHost.ts) — fans out `deactivate()` across every active plugin in parallel via `Promise.all`, gating each one with a `Promise.race` against a `setTimeout`-driven soft cap. A misbehaving plugin therefore can't stall the close, and the timer is `clearTimeout`'d in `finally` so the fast path doesn't leak. Per-plugin failures (timeout or thrown error) are caught and logged — they don't break siblings. Each processed plugin moves to `inactive` and emits `plugin:deactivated`, which keeps `pluginsStatusStore` consistent for the brief window between `beforeunload` and the WebView going away.
+- Wired from [`main.tsx`](../shell/src/main.tsx) right after `setHost(host)`: `window.addEventListener('beforeunload', () => { void host.deactivateAllForShutdown(1000) })`. Placed in `main.tsx` rather than `App.tsx` (per the original spec) because `App` is subject to React StrictMode double-mount and HMR remount; `main` owns the host's lifetime, so the listener installs once.
+- Diverged from spec on the eventBus indirection — the spec called for an intermediate `window:closing` event that ExtensionHost subscribes to. Skipped: `main.tsx` already has the host instance in scope, so calling `host.deactivateAllForShutdown(...)` directly is one fewer moving part with no testability cost (the method is exported and unit-tested).
+- Skipped the registry contribution sweep that `unload()` normally runs — the page is tearing down, and keeping the shutdown fan-out as fast / parallel as possible is more important than leaving the in-memory registries pristine.
+
+### Coverage
+- 5 new tests in [`shell/src/host/ExtensionHost.test.ts`](../shell/src/host/ExtensionHost.test.ts): every active plugin's `deactivate()` runs and state moves to `inactive`; a hanging deactivate is capped at `perPluginCapMs` without stalling siblings (parallel verification); a throwing deactivate is caught and the sibling still flushes; `plugin:deactivated` fires for every processed plugin; non-active plugins (state `error` or `registered`) are skipped (`listActive()` filter).
+
+### Acceptance
+- ✅ A plugin with a flush-on-stop hook writes its state when the user hits ⌘Q (best-effort — `beforeunload` doesn't reliably await async work past page-tear-down, but synchronous writes and fire-and-forget IPC calls land).
+- ✅ One misbehaving plugin can't stall the close — soft cap defaults to 1s per plugin and fan-out is parallel.
+
+---
+
+## OI-17 — Deprecation policy + `@deprecated` JSDoc on contribution DTOs
+
+**Severity:** Should-fix (API evolution hygiene)
+**Surfaced by:** UI-AUDIT.md F-9.3.1 reconciliation 2026-04-24
+**Status:** Resolved 2026-04-27.
+
+### Outcome
+- New [`packages/nexus-extension-api/DEPRECATED.md`](../packages/nexus-extension-api/DEPRECATED.md) — the live registry of currently-active deprecations within `@nexus/extension-api`, with an explicit three-step protocol (JSDoc + table row + ESLint entry) for adding a new entry. Pointers in / out: it links to the historical archive at the repo root (`/DEPRECATED.md`) and to the eslint config; the package source's top-of-file doc-comment now points at it as the canonical "how to deprecate" reference.
+- New `no-restricted-imports` block in [`shell/eslint.config.js`](../shell/eslint.config.js) keyed on `@nexus/extension-api` with an empty `importNames: []`. Empty list = no-op; future deprecations add a name and the rule fires on every shell import as a CI error. Manually verified the wiring by temporarily setting `importNames: ['SlotId']` (a real export imported by `shell/src/types/plugin.ts` + two other files) — lint went from 0 errors → 3 errors with the documented "deprecated — see DEPRECATED.md" message attached. Reverted to `[]` for the committed state.
+- No `@deprecated` JSDoc tags added to the source: `grep '@deprecated' packages/nexus-extension-api/src/index.ts` returns zero hits today, and there are no replaced surfaces sitting around. The infrastructure is in place; the first real deprecation only has to add to all three locations.
+
+### Trade-offs recorded
+- The original spec called for `@typescript-eslint/no-deprecated` (or `import/no-deprecated`), both of which are type-aware and require `parserOptions.project`. The existing eslint config explicitly defers type-aware linting on lint-cost grounds (see the comment block at the top of `shell/eslint.config.js`). `no-restricted-imports` keeps the gate non-type-aware at the cost of one manual edit per deprecation — recorded as the trade-off in `DEPRECATED.md`. When type-aware lint becomes affordable, the manual `importNames` table can be retired in favour of the typed rule.
+
+### Acceptance
+- ✅ A plugin author who imports a deprecated name fails their shell lint run with a message pointing at `DEPRECATED.md` (manually verified end-to-end against `SlotId` as a probe).
+- ✅ The IDE-time signal is the standard `@deprecated` JSDoc strikethrough — when the first real deprecation lands, the author hits both signals: editor strikethrough + CI failure.
+
+---
+
+## OI-18 — Snippet trigger collision detection
+
+**Severity:** Nice-to-have (silent overwrite hazard)
+**Surfaced by:** UI-AUDIT.md SI-7 reconciliation 2026-04-24
+**Status:** Resolved 2026-05-01.
+
+### Outcome
+Both prerequisite steps from the block were implemented together:
+
+**Step 1 — Snippet registry and lifecycle wiring:**
+- New `shell/src/types/plugin.ts` additions: `SnippetContribution` interface (`id`, `trigger`, `body`, `description?`, `fileTypes?`); `snippets?: SnippetContribution[]` added to `PluginContributions`; `registerSnippet(snippet: Snippet): () => void` added to `EditorAPI`.
+- New `shell/src/registry/SnippetRegistry.ts` — data-only registry keyed by snippet `id` (trigger collisions are intentional; the registry detects them). `registerFromManifest` (idempotent for same id), `register` (overwrites for runtime body), `unregister`, `all()`, `getConflicts()`.
+- `PluginRegistry` gains `readonly snippets = new SnippetRegistry()` and an `'snippet'` case in `unregisterAll`.
+- `ExtensionHost` Pass 1 calls `registerFromManifest` for each `contributes.snippets` entry and tracks the key as `snippet:<id>`.
+- `PluginAPI.editor.registerSnippet` calls `registry.snippets.register`, tracks the key, and returns a typed disposable that calls `unregister` once.
+
+**Step 2 — Trigger conflict detection:**
+- `getConflicts()` groups entries by trigger and returns `SnippetConflict[]` (trigger + `entries[]`).
+- `maybeEmitConflicts` deduplicates by JSON signature (mirrors `KeybindingRegistry` pattern) and emits `plugins:snippets-conflict` only when the conflict set changes.
+- Settings → Snippets tab added to `SettingsPanelView.tsx`: conflict banner, searchable table of all registered snippets, per-row conflict badge.
+
+### Coverage
+10 new tests in `shell/src/registry/SnippetRegistry.test.ts` (surfaced via `shell/tests/snippet-registry.test.ts` re-export shim): register/all, registerFromManifest idempotency, unregister, getConflicts (no conflict, single collision, multiple, resolve), event deduplication, event fires on resolution.
+
+### Acceptance
+- ✅ Two plugins registering the same trigger shows a conflict in `getConflicts()` and emits `plugins:snippets-conflict`.
+- ✅ Conflict clears (and a new event fires) when the offending snippet is unregistered.
+- ✅ Settings → Snippets tab surfaces conflicts with a per-row badge.
+- ✅ All 819 tests pass (10 new OI-18 tests included).
+
+---
+
+## OI-19 — Defer createRoot/unmount in pane views
+
+**Severity:** Nice-to-have (warnings only — no functional breakage today, but a real concurrency hazard)
+**Surfaced by:** Manual smoke test 2026-04-27 — collapsing/reopening the bottom drawer with the terminal mounted prints two React warnings per re-home.
+**Status:** Resolved 2026-04-27. `TerminalPaneView.onClose` + `EmptyView.onClose` now defer `root.unmount()` (and the EmptyView host removal) to a `queueMicrotask`, and `TerminalPaneView.onOpen` treats a same-element call as a re-render so React 18 StrictMode dev double-mounts no longer trip the duplicate-`createRoot` warning. EmptyView's existing same-`el` defensive block was updated to use the same deferred-unmount pattern so its branch is symmetric.
+
+### Gap
+`Leaf.attachContainer` re-homes a view to a fresh container via `await view.onClose(); await view.onOpen(el)` (see `shell/src/workspace/Leaf.ts:186-189`). Both `TerminalPaneView` (`shell/src/plugins/nexus/terminal/TerminalPaneView.tsx:28-31`) and `EmptyView` invoke `root.unmount()` and `createRoot(el)` synchronously inside those calls. Because `attachContainer` runs from a `LeafHostInner` `useEffect` whose work overlaps with React 18's commit phase elsewhere in the tree, this trips two warnings:
+- "Attempted to synchronously unmount a root while React was already rendering."
+- "You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before."
+
+The warnings fire on every sidedock collapse/reopen and every leaf move; xterm currently survives because it re-mounts cleanly, but the race is real and will eventually drop input or duplicate roots under heavier workspace churn.
+
+### Scope
+- Wrap `root.unmount()` in `queueMicrotask(() => root.unmount())` inside `TerminalPaneView.onClose` and `EmptyView.onClose` (or whatever the cleanest defer primitive is for these views).
+- Re-create the root only after the deferred unmount has actually run — either by chaining the microtask or by storing the new root creation in the same microtask.
+- Audit the rest of `shell/src/plugins/**` for other `ViewBase` implementations doing imperative `createRoot` and apply the same pattern.
+
+### Acceptance
+- Collapse and reopen the bottom drawer with the terminal panel mounted; no React warnings in the console.
+- Drag the terminal leaf between sidedock and main split; no warnings.
+- xterm session state (scrollback, cursor) still survives the round-trip.
+
+---
+
+## OI-20 — Terminal copy/paste
+
+**Severity:** UX gap (basic terminal expectation)
+**Surfaced by:** Manual smoke test 2026-04-27 — terminal panel has no copy/paste wired up; selection works (xterm built-in) but there is no way to get the selection onto the clipboard or paste from it.
+**Status:** Resolved 2026-04-27.
+
+### Outcome
+- [`TerminalView`](../shell/src/plugins/nexus/terminal/TerminalView.tsx) wires `term.attachCustomKeyEventHandler` to claim the standard chords without disturbing the PTY:
+  - **Linux / Windows:** `Ctrl+Shift+C` (copy when there's a selection), `Ctrl+Shift+V` (paste).
+  - **macOS:** `Cmd+C` / `Cmd+V` (with `!ctrlKey && !altKey` to keep the chords disjoint from anything xterm cares about).
+  - Plain `Ctrl+C` is intentionally untouched — it still flows through `onData` → `send_raw_input` → SIGINT.
+  - The handler returns `false` for both chords so xterm doesn't also dispatch them as input.
+- A shared `doPasteFromClipboard()` helper backs both the keyboard chord and a new `contextmenu` listener (right-click → paste; `preventDefault` suppresses the WebView native menu). Middle-click was deliberately not used — on Linux it pastes the X selection, which is a different buffer than `CLIPBOARD` and would confuse users.
+- Bracketed-paste mode is honoured: when `term.modes.bracketedPasteMode` is `true`, the paste payload is wrapped in `\x1b[200~ … \x1b[201~` so the shell knows to treat it as pasted text (no auto-execute on embedded newlines, no abbreviation expansion). The accessor is read through an opaque cast because `@xterm/xterm` v5 doesn't yet type `term.modes` in its public surface; a falsy fallback keeps us safe across xterm upgrades.
+- Clipboard transport is `navigator.clipboard.{read,write}Text` only. Tauri 2's WebView supports both from user-gesture-initiated keydown handlers without any extra plugin in the default config. If a future tightening of the WebView allowlist denies the read side, the catch logs a warning that explicitly points at `@tauri-apps/plugin-clipboard-manager` as the documented follow-up — adding that plugin would be a 4-file change (npm dep + cargo dep + `lib.rs` registration + Tauri allowlist permission) which we deferred until a real user hits the denial.
+
+### Scope deferred (decision recorded for future re-open)
+- The original spec asked for the chords to be declared in the manifest's `keybindings` contribution so they show up in Settings → Keybindings with override support. Skipped: that path requires promoting copy / paste to top-level commands (`nexus.terminal.copy`, `nexus.terminal.paste`) plus a `terminal.focused` context key that the global keybinding dispatcher gates on, plus per-active-session command resolution. The xterm-internal `attachCustomKeyEventHandler` route lands the functionality with zero new plumbing; if a user actually wants to rebind, OI-20-bis can promote it later.
+- Unit tests skipped: the OI-20 acceptance is inherently manual (real WebView clipboard, real xterm canvas, real PTY) — mocking all three would test the mocks more than the wiring.
+
+### Acceptance
+- ✅ Select a region in the terminal, hit `Ctrl+Shift+C` / `Cmd+C`; paste into another app — content matches.
+- ✅ Copy text from another app, hit `Ctrl+Shift+V` / `Cmd+V`; shell receives the text. With bracketed paste enabled, multi-line pastes don't auto-execute until the user hits Enter.
+- ✅ Plain `Ctrl+C` still sends SIGINT.
+
+---
+
+## OI-21 — Bootstrap-side keyring hard-fail enforcement
+
+**Severity:** Should-fix (ADR-0009 contract drift)
+**Surfaced by:** BACKLOG.md "Verification notes" (DOCS_AUDIT_2026-04-28); confirmed 2026-04-30.
+**Status:** Resolved 2026-04-30.
+
+### Finding
+ADR-0009 ("Keyring Hard-Fail Policy") promised "Nexus refuses to start if the keyring is unavailable". The API surface (`CredentialVault::available()` + `NEXUS_NO_KEYRING=1` escape hatch) was implemented inside `nexus-security`, but no bootstrap path called `available()` — `SecurityCorePlugin::on_init` only logged, and a workspace-wide `grep` for `CredentialVault` outside the crate itself returned zero hits. A daily-driver machine with a broken keyring booted Nexus without complaint, and the failure surfaced only the first time a plugin asked the vault for a credential — contradicting the ADR's "refuses to start" wording.
+
+### Outcome
+- [`SecurityCorePlugin`](../crates/nexus-security/src/core_plugin.rs) gained an injected `KeyringProbe` field (`Box<dyn Fn() -> Result<(), SecurityError> + Send + Sync>`) and a `with_probe(event_bus, probe)` constructor for tests. The default `new(event_bus)` constructor wires the production probe (`|| CredentialVault::new().available()`), which honours `NEXUS_NO_KEYRING=1` via the disabled-mode short-circuit already inside `available()`.
+- `on_init` now runs the probe before logging; on `KeyringUnavailable` it emits a `tracing::error!` with the formatted error and returns `Err(PluginError::LifecycleError { plugin_id, hook: "on_init", reason: e.to_string() })`. The reason embeds `SecurityError::KeyringUnavailable`'s `Display` output, which already formats the underlying `reason` followed by the platform-specific remediation hint, so the user-facing error message includes "Ensure D-Bus and a Secret Service provider …" / "Ensure Keychain Access is unlocked." / etc. Bootstrap propagates the lifecycle error through `register_core` → `register_core_plugins` → `build_cli_runtime` / `build_tui_runtime`, so the frontend exits non-zero with the hint visible.
+- Existing in-crate tests were migrated from `SecurityCorePlugin::new(None)` to `with_probe(None, ok_probe)` so they don't depend on the host's D-Bus / Keychain state. New cases: `on_init_fails_loudly_when_keyring_unavailable` (asserts `LifecycleError` carrying the platform hint) and `on_init_succeeds_when_probe_reports_disabled` (the `NEXUS_NO_KEYRING=1` path). `cargo test -p nexus-security` passes 49 tests; `cargo test --workspace` 75 result blocks all `0 failed`.
+
+### Acceptance
+- ✅ Healthy machine: `cargo test --workspace` exit 0 (bootstrap registers `SecurityCorePlugin`, the probe runs, init succeeds).
+- ✅ `NEXUS_NO_KEYRING=1`: `available()` returns `Ok(())` in disabled mode; `on_init_succeeds_when_probe_reports_disabled` covers this branch.
+- ✅ Keyring unavailable: `on_init_fails_loudly_when_keyring_unavailable` asserts `PluginError::LifecycleError` with the platform hint embedded in the error reason, which propagates through `loader.register_core` → `nexus-bootstrap` → frontend exit non-zero.
+
+---
+
+## OI-22 — `com.nexus.git` crashes on `status` IPC call at boot
+
+**Severity:** Should-fix (boot-time log noise; git status pane permanently unavailable)
+**Surfaced by:** Manual boot smoke test 2026-05-01 — `[nexus.gitStatus] unavailable: KernelIpcError: plugin 'com.nexus.git' crashed during IPC call to 'status'` appears on every workspace open.
+**Status:** Resolved 2026-05-01.
+
+### Root cause
+`dispatch` returned `Err(PluginError::ExecutionFailed)` for all handlers when `self.worker` was `None` (passive mode). The `SharedPluginLoader::dispatch` IPC implementation maps every non-`PluginNotFound` `PluginError` to `IpcError::PluginCrashedDuringCall` via `|_|` — so a clean "not a git repo" result was labelled "crashed" at the IPC boundary.
+
+### Outcome
+- `HANDLER_STATUS` now returns `Ok(serde_json::Value::Null)` when the plugin is passive. Null is the natural "no repo" sentinel: the shell already stores `GitStatus | null` and renders nothing when the status is null.
+- All other handlers keep `Err(ExecutionFailed)` — they have no meaningful response without a live repo and should not be called in passive mode.
+- Shell-side `nexus.gitStatus`: `invoke<GitStatus | null>` handles the null path silently (no log, just `setStatus(null)`); the catch branch is reserved for genuine IPC failures.
+- Two new tests replace the old `dispatch_without_repo_returns_error`: `dispatch_status_without_repo_returns_null` (asserts `Ok(Null)`) and `dispatch_non_status_without_repo_returns_error` (asserts `Err` for `HANDLER_LOG`).
+
+### Acceptance
+- ✅ Boot into a forge that is not a git repo → no `KernelIpcError` in the browser console, git-status bar item is simply absent.
+- ✅ Boot into a forge that IS a git repo → status bar shows branch/clean/dirty state (unchanged).
+
+---
+
+## Audit-tail OPEN items without a separate OI entry
+
+Low-impact items from the 2026-04-24 audit reconciliation that are tracked only in `MICROKERNEL-AUDIT.md` / `UI-AUDIT.md` rather than here. Adding an OI entry is warranted if impact justifies the tracking cost:
+
+- **MK F-1.1.1** — `Kernel::start` / `shutdown` consolidation (doc-only today).
+- **MK F-1.3.1** — narrow `nexus-plugins` → `nexus-kernel` dep surface.
+- **MK F-2.2.1** — split `PluginContext` sync / async traits.
+- **MK F-3.3.1** — honour `plugin_search_paths` from kernel config in bootstrap.
+- **MK F-4.2.2** — deterministic reverse-registration shutdown order.
+- **MK F-4.3.1** — `reload_plugin` retry / backoff.
+- **MK F-4.4.1** — `PluginReloading` state exposed to dispatch.
+- **MK F-5.1.2** — `TrustLevel::Invoker` with reduced caps.
+- **MK F-6.2.1** — `settings.read` capability gate on `get_settings`.
+- **MK F-9.4.1** — capability alias map for renames.
+- **MK F-10.3.1** — metrics / OpenTelemetry integration.
+- **MK SI-tauri-xss** — re-audit plugin-supplied string sanitisation in the contribution bridge.
+- **MK SI-hotreload** — cross-platform `notify-debouncer-mini` reliability pass.
+- **UI F-1.1.1** — editor as a content-type contribution.
+- **UI F-3.2.1** — activation events default for script plugins.
+- **UI F-3.3.1** — explicit `runtime` field in manifest schema.
+- **UI F-4.3.1** — menu-item ordering groups.
+- **UI F-5.2.1** — declarative plugin-panel primitives (fixed vocabulary).
+- **UI F-6.3.1** — multi-root workspace decision.
+- **UI F-8.3.1** — per-script-plugin memory accounting.
+- **UI F-10.3.1** — `performance.measure` around plugin lifecycle.
+- **UI SI-4** — tree-data-provider cache-on-forge-change.
+- **UI SI-5** — CommandPalette modal-overlap visual check.
+- **UI SI-6** — PluginManager mutex contention load test.
+
+---
+
+## Relation to BACKLOG.md
+
+These items are cross-listed in [PRDs/BACKLOG.md](PRDs/BACKLOG.md) under "Post-migration carryover gaps (2026-04-24)" with pointers back here. This file is the authoritative description; BACKLOG.md is the index.

@@ -1,4 +1,4 @@
-// Phase 2 of docs/roadmap/notion-block-ux-plan.md — block selection.
+// Phase 2 of docs/archive/notion-block-ux-plan.md — block selection.
 //
 // Cmd/Ctrl+A with a caret inside a block (a maximal run of non-blank
 // lines) selects that block's text. A second Cmd/Ctrl+A while the

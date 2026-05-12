@@ -19,9 +19,8 @@ outlast the plan should be promoted to `architecture/` separately.
 | Doc | What it covers |
 |---|---|
 | [`DOC-GAPS.md`](./DOC-GAPS.md) | 46 doc-bugs and product-gaps surfaced by the 2026-05-12 traceability audit ([`../audits/traceability-2026-05-12.md`](../audits/traceability-2026-05-12.md)). DG-01 through DG-31 are doc bugs (fix the doc); DG-32 through DG-46 are product gaps cross-listed in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Doc-audit-surfaced product gaps". |
-| [`OPEN-ITEMS.md`](./OPEN-ITEMS.md) | Post-migration carryover gaps from the 2026-04-24 sweep. **Mostly resolved (21/22)** — only OI-05 (Rust dep duplication, blocked upstream) is genuinely open. See DG-12 for the archive-this-file plan. Cross-listed in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Post-migration carryover gaps". |
+| [`OPEN-ITEMS.md`](./OPEN-ITEMS.md) | One open item from the 2026-04-24 Phase 4 leaf-migration sweep: **OI-05** (Rust dep duplication, blocked upstream). The 21 resolved OIs live verbatim at [`../archive/OPEN-ITEMS-resolved-2026-04-26.md`](../archive/OPEN-ITEMS-resolved-2026-04-26.md). Cross-listed in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Post-migration carryover gaps". |
 | [`REQUIRED-FOR-FORMAL-RELEASE.md`](./REQUIRED-FOR-FORMAL-RELEASE.md) | Work deferred from personal-tool scope to formal-release scope: WI-41 (auto-updater), WI-42 (Sentry), WI-44 (marketplace), WI-46 (beta→GA). Indexed from [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Formal release scope (deferred)". |
-| [`notion-block-ux-plan.md`](./notion-block-ux-plan.md) | **All 6 phases shipped 2026-04-22** — should archive. See DG-11. |
 
 ## Exploratory
 
