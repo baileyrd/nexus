@@ -354,6 +354,27 @@ struct RenderSkillOutput {
     body: String,
 }
 
+// ── Dynamic tool helpers (DG-39) ─────────────────────────────────────────────
+
+/// Convert a [`crate::dynamic_tools::DynamicTool`] declaration into
+/// an rmcp `Tool` so it can be returned from `list_tools`. The schema
+/// is wrapped in `Arc<JsonObject>` per the rmcp shape; if the
+/// declaration's `input_schema` is not a JSON object we substitute
+/// an empty object so the client still sees a valid schema.
+fn dynamic_tool_to_rmcp(t: &crate::dynamic_tools::DynamicTool) -> rmcp::model::Tool {
+    let schema_obj = match &t.input_schema {
+        serde_json::Value::Object(o) => o.clone(),
+        _ => serde_json::Map::new(),
+    };
+    // `rmcp::model::Tool` is `#[non_exhaustive]`, so we can't use a
+    // struct literal. Mutate a default instead.
+    let mut tool = rmcp::model::Tool::default();
+    tool.name = std::borrow::Cow::Owned(t.name.clone());
+    tool.description = Some(std::borrow::Cow::Owned(t.description.clone()));
+    tool.input_schema = std::sync::Arc::new(schema_obj);
+    tool
+}
+
 // ── Server ───────────────────────────────────────────────────────────────────
 
 /// MCP server that exposes Nexus forge operations as tools.
@@ -1027,10 +1048,41 @@ impl rmcp::ServerHandler for NexusMcpServer {
         // available after the call finishes.
         let tool_name = request.name.to_string();
         let started = std::time::Instant::now();
-        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        let fut = self.tool_router.call(tcc);
+        // DG-39 / PRD-14 §10 — dynamic registry beats the static
+        // router. Static `nexus_*` tools can't collide because their
+        // names are reserved by `dynamic_tools::validate_name`.
+        let dynamic = crate::dynamic_tools::global().lookup(&tool_name);
+        let kernel_ctx = Arc::clone(&self.context);
+        let tcc_opt = dynamic
+            .is_none()
+            .then(|| rmcp::handler::server::tool::ToolCallContext::new(self, request.clone(), context));
+        let static_fut = tcc_opt.map(|tcc| self.tool_router.call(tcc));
         async move {
-            let outcome = fut.await;
+            let outcome = if let Some(tool) = dynamic {
+                // Plugin-published tool — route through ipc_call.
+                let args = request.arguments.map_or_else(
+                    || serde_json::Value::Object(serde_json::Map::new()),
+                    serde_json::Value::Object,
+                );
+                match kernel_ctx
+                    .ipc_call(&tool.plugin_id, &tool.command, args, IPC_TIMEOUT)
+                    .await
+                {
+                    Ok(value) => Ok(CallToolResult::structured(value)),
+                    Err(e) => Err(rmcp::ErrorData::internal_error(
+                        format!("dynamic tool '{}' failed: {e}", tool.name),
+                        None,
+                    )),
+                }
+            } else if let Some(fut) = static_fut {
+                fut.await
+            } else {
+                // Defensive: unreachable in practice — either
+                // `dynamic` is `Some` or `tcc_opt` was built above.
+                Err(rmcp::ErrorData::method_not_found::<
+                    rmcp::model::CallToolRequestMethod,
+                >())
+            };
             let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             match &outcome {
                 Ok(_) => nexus_kernel::audit::log_mcp_tool_call(
@@ -1056,7 +1108,15 @@ impl rmcp::ServerHandler for NexusMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<ListToolsResult, rmcp::ErrorData>> + Send + '_
     {
-        let items = self.tool_router.list_all();
+        // DG-39 / PRD-14 §10 — surface dynamic tools alongside the
+        // static `nexus_*` router output. Dynamic entries are
+        // appended; their order is alphabetical by name
+        // (BTreeMap iteration) so external clients see a stable
+        // ordering.
+        let mut items = self.tool_router.list_all();
+        for t in crate::dynamic_tools::global().list() {
+            items.push(dynamic_tool_to_rmcp(&t));
+        }
         std::future::ready(Ok(ListToolsResult {
             tools: items,
             ..Default::default()

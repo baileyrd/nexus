@@ -21,6 +21,13 @@
 //! | 5 | `list_prompts` | `{"server": "..."}` |
 //! | 6 | `connect` | `{"server": "..."}` |
 //! | 7 | `disconnect` | `{"server": "..."}` |
+//! | 8 | `register_tool` | `{"name": "...", "description": "...", "input_schema": {...}, "plugin_id": "...", "command": "..."}` |
+//! | 9 | `unregister_tool` | `{"name": "..."}` |
+//! | 10 | `list_dynamic_tools` | — |
+//!
+//! Handlers 8–10 (DG-39 / PRD-14 §10) manage the in-process
+//! [`dynamic_tools`](crate::dynamic_tools) registry that
+//! `NexusMcpServer` consults to expose plugin-published tools.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +56,16 @@ pub const HANDLER_LIST_PROMPTS: u32 = 5;
 pub const HANDLER_CONNECT: u32 = 6;
 /// IPC handler (async): disconnect from a server and free its process.
 pub const HANDLER_DISCONNECT: u32 = 7;
+/// IPC handler (sync, DG-39): register a tool with the in-process
+/// MCP dynamic-tool registry. Args carry `name` / `description` /
+/// `input_schema` / `plugin_id` / `command`.
+pub const HANDLER_REGISTER_TOOL: u32 = 8;
+/// IPC handler (sync, DG-39): unregister a previously-registered
+/// dynamic tool. Args carry `name`.
+pub const HANDLER_UNREGISTER_TOOL: u32 = 9;
+/// IPC handler (sync, DG-39): list every tool currently in the
+/// dynamic-tool registry (no args).
+pub const HANDLER_LIST_DYNAMIC_TOOLS: u32 = 10;
 
 /// Core plugin that manages connections to external MCP servers.
 pub struct McpHostPlugin {
@@ -155,7 +172,7 @@ impl CorePlugin for McpHostPlugin {
     fn dispatch(
         &mut self,
         handler_id: u32,
-        _args: &serde_json::Value,
+        args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
@@ -177,6 +194,32 @@ impl CorePlugin for McpHostPlugin {
                     })
                     .unwrap_or_default();
                 Ok(serde_json::Value::Array(arr))
+            }
+            HANDLER_REGISTER_TOOL => {
+                let tool: crate::dynamic_tools::DynamicTool = serde_json::from_value(args.clone())
+                    .map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("register_tool: invalid args: {e}"),
+                    })?;
+                crate::dynamic_tools::global()
+                    .register(tool)
+                    .map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("register_tool: {e}"),
+                    })?;
+                Ok(json!({ "ok": true }))
+            }
+            HANDLER_UNREGISTER_TOOL => {
+                let name = str_arg(args, "name").ok_or_else(|| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: "unregister_tool: missing 'name' arg".to_string(),
+                })?;
+                let removed = crate::dynamic_tools::global().unregister(&name);
+                Ok(json!({ "removed": removed, "name": name }))
+            }
+            HANDLER_LIST_DYNAMIC_TOOLS => {
+                let tools = crate::dynamic_tools::global().list();
+                Ok(serde_json::to_value(&tools).unwrap_or(serde_json::Value::Array(vec![])))
             }
             HANDLER_LIST_TOOLS
             | HANDLER_CALL_TOOL
@@ -519,5 +562,123 @@ disabled = true
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
         plugin.on_stop(); // must not panic
+    }
+
+    // ── DG-39 dynamic-tool dispatch tests ────────────────────────────────────
+    //
+    // Note: the registry is process-global, so every test below uses a
+    // uniquely-named tool to avoid cross-test interference. Each test
+    // cleans up by unregistering at the end.
+
+    #[test]
+    fn register_tool_inserts_into_global_registry() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let name = "dg39_register_inserts";
+        let result = plugin
+            .dispatch(
+                HANDLER_REGISTER_TOOL,
+                &json!({
+                    "name": name,
+                    "description": "test",
+                    "input_schema": { "type": "object", "properties": {} },
+                    "plugin_id": "com.example.test",
+                    "command": "do_thing",
+                }),
+            )
+            .unwrap();
+        assert_eq!(result, json!({ "ok": true }));
+        let entry = crate::dynamic_tools::global().lookup(name);
+        assert!(entry.is_some());
+        assert!(crate::dynamic_tools::global().unregister(name));
+    }
+
+    #[test]
+    fn register_tool_rejects_reserved_prefix() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let err = plugin
+            .dispatch(
+                HANDLER_REGISTER_TOOL,
+                &json!({
+                    "name": "nexus_evil_override",
+                    "description": "naughty",
+                    "input_schema": {},
+                    "plugin_id": "com.example.test",
+                    "command": "do_thing",
+                }),
+            )
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("reserved") || msg.contains("nexus_"),
+            "expected reserved-prefix error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn unregister_tool_returns_removed_flag() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let name = "dg39_unregister_flag";
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_TOOL,
+                &json!({
+                    "name": name,
+                    "description": "test",
+                    "input_schema": {},
+                    "plugin_id": "com.example.test",
+                    "command": "do_thing",
+                }),
+            )
+            .unwrap();
+        let result = plugin
+            .dispatch(HANDLER_UNREGISTER_TOOL, &json!({ "name": name }))
+            .unwrap();
+        assert_eq!(result["removed"], json!(true));
+        // Second unregister reports false.
+        let again = plugin
+            .dispatch(HANDLER_UNREGISTER_TOOL, &json!({ "name": name }))
+            .unwrap();
+        assert_eq!(again["removed"], json!(false));
+    }
+
+    #[test]
+    fn list_dynamic_tools_returns_registered_entries() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let name = "dg39_list_returns";
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_TOOL,
+                &json!({
+                    "name": name,
+                    "description": "test desc",
+                    "input_schema": { "type": "object", "properties": {} },
+                    "plugin_id": "com.example.test",
+                    "command": "do_thing",
+                }),
+            )
+            .unwrap();
+        let arr = plugin
+            .dispatch(HANDLER_LIST_DYNAMIC_TOOLS, &json!({}))
+            .unwrap();
+        let tools = arr.as_array().unwrap();
+        assert!(
+            tools.iter().any(|t| t["name"] == json!(name)),
+            "registered tool '{name}' not in list: {arr}"
+        );
+        plugin
+            .dispatch(HANDLER_UNREGISTER_TOOL, &json!({ "name": name }))
+            .unwrap();
     }
 }
