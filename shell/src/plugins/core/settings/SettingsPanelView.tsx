@@ -783,6 +783,34 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
       </div>
 
       <StubRow
+        title="Edit settings file"
+        description="Open .forge/app.toml in a new editor tab. Direct edits to the [settings] table take effect after closing and reopening the forge."
+        control={
+          <button
+            type="button"
+            onClick={() => {
+              eventBus.emit('files:open', {
+                relpath: '.forge/app.toml',
+                name: 'app.toml',
+              })
+              useContextKeyStore.getState().set('settingsPanelVisible', false)
+            }}
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Open
+          </button>
+        }
+      />
+
+      <StubRow
         title="Notify if startup takes longer than expected"
         description="Diagnose issues by seeing what is causing the app to load slowly."
         control={
