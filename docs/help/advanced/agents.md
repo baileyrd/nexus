@@ -21,11 +21,21 @@ describe the task, click **Start**.
 CLI:
 
 ```bash
-nexus agent run researcher \
-  --task "Summarize what I've written about wikilinks across all notes."
-nexus agent list
-nexus agent history --session abc123
+nexus agent run \
+  "Summarize what I've written about wikilinks across all notes." \
+  --archetype researcher
+
+# Produce a plan without executing it
+nexus agent plan \
+  "Summarize what I've written about wikilinks across all notes." \
+  --archetype researcher
 ```
+
+The CLI surface is intentionally narrow — `plan` and `run`. Listing
+prior runs and browsing history are shell-only today (AI Chat →
+Agents → Sessions); the on-disk transcripts at
+`<forge>/.forge/agents/<session-id>.json` are the source of truth
+and you can grep / cat them directly.
 
 ## Stepwise approval
 

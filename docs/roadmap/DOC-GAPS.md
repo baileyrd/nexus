@@ -674,7 +674,7 @@ do not exist. Theme tokens live under `shell/src/shell/`.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 6
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/help/` files reference these subcommands that do not exist or
 have different semantics:
@@ -686,6 +686,32 @@ have different semantics:
 
 **Definition of done:** Either implement (BL entries) or rewrite the
 help docs to the actual surface.
+
+**Resolution.** Rewrote the help docs to the actual CLI surface
+verified against `crates/nexus-cli/src/main.rs`:
+
+- **Confirmed-real (no doc change needed)**: `nexus content delete`,
+  `nexus content links`, `nexus plugin reset` — the last entry on the
+  list above was an audit miss; `PluginCommand::Reset { plugin_id }`
+  renders as `nexus plugin reset <id>` and is the public surface, even
+  though the implementation calls `plugin::reset_crash` under the
+  hood.
+- `docs/help/advanced/agents.md`: replaced the fictional `agent run
+  <archetype> --task <…>` with the real `nexus agent run <goal>
+  --archetype <archetype>` form and added an `agent plan` example.
+  Removed the `agent list` / `agent history --session <…>` block and
+  noted that session listing is shell-only; on-disk transcripts at
+  `<forge>/.forge/agents/<session-id>.json` are authoritative.
+- `docs/help/linking/tags-and-properties.md`: `tags locate <name>` →
+  `tags list --name <name>`. Also dropped the fictional `tags list
+  --format json` (no `--format` flag).
+- `docs/help/forge-and-files.md`: dropped the fictional `content
+  update --rename`; document the real story (no rename subcommand;
+  rename at the filesystem and the watcher reindexes).
+- `docs/help/advanced/skills.md`: `nexus ai ask --stdin --no-rag` →
+  capture the rendered prompt in a shell variable and pass it as the
+  positional argument to `nexus ai ask`. `ai ask` takes one positional
+  question and no flags.
 
 ---
 

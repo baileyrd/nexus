@@ -40,10 +40,14 @@ index. Wikilinks are resolved by filename, so renaming `Foo.md` to
 `Bar.md` will leave `[[Foo]]` references **unresolved** unless you
 update them. (Auto-rename of inbound wikilinks is on the backlog.)
 
-CLI:
+CLI: there is no `content rename` subcommand — `mv` the file at the
+filesystem and the watcher reindexes on the next tick. The shell
+**File → Rename** menu does the same thing, plus prompts to update
+inbound wikilinks.
 
 ```bash
-nexus content update foo.md --rename bar.md
+mv foo.md bar.md            # watcher picks it up; inbound [[foo]] still breaks
+nexus content read bar.md   # confirm the index re-resolved
 ```
 
 ## Deleting
