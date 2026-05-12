@@ -6,6 +6,8 @@
 > - **Completed items** are archived verbatim in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 > - **Full descriptions of OI-\*** items live in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md); this file cross-lists by ID.
 > - **Formal-release work** (auto-updater, telemetry, marketplace, beta→GA) is deferred to [../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md](../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md); the WI-IDs are indexed below for completeness.
+> - **Doc gaps and product gaps surfaced by the 2026-05-12 traceability audit** live in [../roadmap/DOC-GAPS.md](../roadmap/DOC-GAPS.md) as DG-01..DG-46. Product-gap entries (DG-32..DG-46) are cross-listed in this file under "Doc-audit-surfaced product gaps". Doc-bug entries (DG-01..DG-31) live in DOC-GAPS only since they're documentation edits, not feature work.
+> - **Research-surfaced ideas** from external-project assessments under [../research/](../research/) are indexed under "Research-surfaced ideas (2026-05, unscoped)".
 > - **Exploratory / unscoped design docs** (AI directions, ambient copilot, memory layer, settings extraction inventory) are linked under "Future directions" — they do not have committed timelines.
 >
 > Section headings with no listed items are preserved as structural placeholders — consult the archive for what landed under each, and add new follow-ups directly below the heading.
@@ -439,6 +441,28 @@ _BL-007 closed 2026-05-09 — fully subsumed by [BL-074](#bl-074-collaborative-e
 
 ---
 
+## Doc-audit-surfaced product gaps (2026-05-12)
+
+Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 doc-traceability audit. Full descriptions in [../roadmap/DOC-GAPS.md](../roadmap/DOC-GAPS.md) under DG-32 through DG-46. Doc-only bugs (DG-01..DG-31) live in DOC-GAPS but are not cross-listed here since they're not BL-shaped work.
+
+- [ ] **DG-32: PRD-15 §4 ToolRegistry** — typed registry for agent tool calls; not implemented (agents use ad-hoc dispatch).
+- [ ] **DG-33: PRD-15 §5 Memory** — agent-scoped persistent memory; runs currently stateless.
+- [ ] **DG-34: PRD-15 §7 interactive approval round-trip** — agent loop runs through without surfacing approval prompts; coordinate with ADR 0024 UI.
+- [ ] **DG-35: PRD-15 §8 six built-in agent classes** — 3 of 6 shipped (`researcher`, `writer`, `coder`); missing `auditor`, `librarian`, `coach`.
+- [ ] **DG-36: PRD-15 §9 `.agent.toml`** — custom-agent format spec'd; no parser/loader.
+- [ ] **DG-37: PRD-15 §10 agent-to-agent comms** — spec'd; not built.
+- [ ] **DG-38: PRD-17 cross-platform reframe-or-build** — §3 WASM / §4 `nexus-platform` crate / §5 web / §6 mobile (UniFFI) all unimplemented. Needs scoping decision: reframe PRD-17 as desktop-only, or commit to multi-platform and split into per-platform BLs.
+- [ ] **DG-39: PRD-14 §10 dynamic MCP tool registration** — community plugins can't publish tools to the MCP server.
+- [ ] **DG-40: PRD-14 §12.2 MCP audit logging** — `call_tool` doesn't write to the kernel audit store.
+- [ ] **DG-41: PRD-10 §7 relations + rollup** — current impl is in-memory filter chain.
+- [ ] **DG-42: PRD-10 §8 SQL compilation** — Bases queries should compile to SQL against the storage index.
+- [ ] **DG-43: PRD-06 §9 frontmatter versioning + migration** — no `version:` handling; needed before forge-format-breaking changes.
+- [ ] **DG-44: PRD-04 §10 dynamic .so/.dll loading** — should reject as obsolete (superseded by ADR 0011 + ADR 0016).
+- [ ] **DG-45: ADR 0013 macOS menu-bar plugin** — Phase-4 plugin never built; build it or supersede the ADR.
+- [ ] **DG-46: ADR 0006 first in-tree consumer** — convention-only ADR; no in-tree user yet because community WASM plugins haven't shipped.
+
+---
+
 ## Post-migration carryover gaps (2026-04-24)
 
 Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. Full descriptions and acceptance criteria in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md). Resolved entries are archived in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
@@ -491,6 +515,16 @@ Previously: design-only docs without committed timelines. **Scoped into the impl
 - **Ambient copilot UX patterns** — see [../roadmap/AI-AMBIENT-COPILOT-PLAN.md](../roadmap/AI-AMBIENT-COPILOT-PLAN.md). Mapping: Cmd+I overlay → BL-032; context chips + model switcher → BL-033; ghost suggestions → BL-034; right-click AI actions → BL-035 (shared with NB block AI actions); margin suggestions + inline correction → BL-036; activity timeline → BL-037; citations → BL-038; capture → AI → folded into BL-043 (memory quick-capture).
 - **AI memory layer** — see [../roadmap/AI-MEMORY-LAYER-PLAN.md](../roadmap/AI-MEMORY-LAYER-PLAN.md). Mapping: quick-capture → BL-043; auto-enrichment on save → BL-045; recall hotkey → BL-044; implicit chat context → merged into BL-010 (reshape note); code-aware capture → BL-046; scheduled digests → BL-047.
 - **Notion-style block UX out-of-scope follow-ups** — see [../roadmap/notion-block-ux-plan.md](../roadmap/notion-block-ux-plan.md). Mapping: drag-to-embed into canvas → BL-048; block-links navigator → BL-049 (gated on block-id stability ADR); side-margin comments → BL-050; block AI actions → merged into BL-035; multi-cursor from multi-block → BL-051.
+
+---
+
+## Research-surfaced ideas (2026-05, unscoped)
+
+Three external-project assessments under [`../research/`](../research/) each carry an explicit Adopt / Adapt / Skip column. The Adopt and Adapt items aren't scoped into BL-NN entries yet — they're held here so they're discoverable until a decision lands. Skip items stay in the research doc only.
+
+- **GitNexus capability porting** — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Seven scoped ports recommended: cross-repo code intel index (MVP), diff→symbol detection in `nexus-git`, `codegraph.impact(symbol_id, depth)` blast-radius handler, BM25 over code symbols, three new MCP tools (`nexus_context` / `nexus_impact` / `nexus_detect_changes`), `ai.generate_docs(symbol_id)` doc generator, optional community/clustering pass for large forges. Each lands inside the existing `nexus-storage` / `nexus-git` / `nexus-ai` / `nexus-mcp` crates — no new top-level subsystem. Promote to BL-NN entries when prioritized.
+- **AFFiNE portability** — see [../research/affine-portability-assessment.md](../research/affine-portability-assessment.md). 9 Adopt items (snapshot API, command pattern, linked-docs UX, database views, mind-map output, multimodal embed pipeline, custom block schemas pattern, inline-embed extensions pattern, widget extensions — last two already adopted in spirit) plus 8 Adapt items (canvas, PDF embed, slide gen, image gen, custom blocks, AI panel UX, inline primitive, doc-on-canvas). 11 items judged already-adopted-in-spirit. See §6 of the assessment for recommended next steps if pursued.
+- **Anything-LLM portability** — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Adapt items worth surfacing: per-user scoped API token issuance (extends `nexus-security` + keyring); a `nexus-audio` crate with Whisper STT + TTS provider-trait backends; native browser STT/TTS via Web Speech API in the Tauri webview. Skip items (multi-user, PostHog telemetry, cloud deploys, scheduled-jobs engine, "desktop app") are settled as out-of-scope per existing PRDs/ADRs.
 
 ---
 

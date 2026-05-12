@@ -1,5 +1,13 @@
 # Nexus PRD Implementation Status
 
+> [!WARNING]
+> **Some entries stale per 2026-05-12 doc audit** — see
+> [`../roadmap/DOC-GAPS.md`](../roadmap/DOC-GAPS.md) §DG-18, §DG-19.
+> Notably: PRD-16 (Workflow) is marked 🟠 below but should be 🟢
+> (webhook/git_event/mcp_event triggers + parallel/retry all shipped);
+> PRD-13 (Skills) entries say "no skill composition" but BL-021
+> `compose` resolver shipped, and "4 built-in skills" should be 5.
+
 > **ASOT pair:** This file tracks **per-PRD status**. Open work items (OI-\*, BL-\*, WI-\*, F-X.X.X) live in [BACKLOG.md](BACKLOG.md). When a PRD's status here references unfinished work, follow the link to BACKLOG.md for the live queue.
 >
 > **Snapshot date:** 2026-05-06 (PRD-02 refreshed: credential vault IPC + SSH passphrase caching + audit event persistence (BL-098, BL-090, BL-094). PRD-11 refreshed: 26-handler `com.nexus.git` IPC surface + `nexus.gitPanel` shell plugin. PRD-07 refreshed: ~547-variable CSS registry, `nexus-manuscript` bundled theme, `nexus.themePicker` shell plugin with Themes/Snippets/Build tabs and activity-bar icon; BL-104 and BL-107 closed. Previous refresh 2026-04-24: Phase 4 `app/` + `crates/nexus-app/` retirement and Phase 5 personal-tool polish — WI-37 legacy-shell retirement, WI-38 unified `nexus` binary, WI-39 plugin scaffold, WI-40 MCP parity, WI-43 default-on/off plugin catalog, WI-45-lite docs reconcile, WI-47 local panic log. Evidence links now point at `shell/src/` and service-crate IPC. Phase 5 formal-release items (WI-41 auto-updater, WI-42 Sentry, WI-44 marketplace, WI-46 beta→GA) are deferred to [REQUIRED-FOR-FORMAL-RELEASE.md](../roadmap/REQUIRED-FOR-FORMAL-RELEASE.md) per personal-tool scope.)
