@@ -13,9 +13,30 @@
 // `data-tauri-drag-region`; these buttons are plain <button>s so click
 // events fire normally (Tauri 2 on Windows swallows clicks inside a
 // drag region).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { clientLogger } from '../host/clientLogger'
+
+// Native-DOM click binding. React's synthetic onClick path was observed to
+// silently drop clicks on these buttons (an ancestor in the chrome subtree
+// calls stopPropagation on the bubble path before reaching React's root
+// delegate). Attaching the listener directly on the button element bypasses
+// React's delegation entirely.
+function useNativeClick(
+  ref: React.RefObject<HTMLButtonElement | null>,
+  handler: () => void,
+) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onClick = (e: MouseEvent) => {
+      e.stopPropagation()
+      handler()
+    }
+    el.addEventListener('click', onClick)
+    return () => el.removeEventListener('click', onClick)
+  }, [ref, handler])
+}
 
 // Resolved once at module init — `installBodyClasses()` is guaranteed to
 // run before any plugin or React tree is mounted.
@@ -53,6 +74,8 @@ function WinButton({
   children: React.ReactNode
 }) {
   const [hover, setHover] = useState(false)
+  const ref = useRef<HTMLButtonElement | null>(null)
+  useNativeClick(ref, onClick)
   // Windows convention: close button hovers to red; others use a subtle
   // raised background from the token palette.
   const hoverBg = closeAccent ? '#e81123' : 'var(--background-modifier-hover)'
@@ -64,8 +87,8 @@ function WinButton({
   }
   return (
     <button
+      ref={ref}
       type="button"
-      onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       aria-label={label}
@@ -98,10 +121,12 @@ function MacButton({
   symbol: string
 }) {
   const [hover, setHover] = useState(false)
+  const ref = useRef<HTMLButtonElement | null>(null)
+  useNativeClick(ref, onClick)
   return (
     <button
+      ref={ref}
       type="button"
-      onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       aria-label={label}
