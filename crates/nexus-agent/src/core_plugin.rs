@@ -121,6 +121,29 @@ pub const HANDLER_LIST_TOOLS: u32 = 18;
 /// a single broken file doesn't poison the listing.
 pub const HANDLER_LIST_CUSTOM: u32 = 19;
 
+/// `memory_record` (DG-33 — PRD-15 §5) — append a `MemoryEntry` to
+/// the agent's `history.jsonl`. Args:
+/// `{ agent_id: string, entry: MemoryEntry }`. Reply:
+/// `{ recorded: true }`. The agent id is validated to a safe slug
+/// (`A-Za-z0-9_.-`, ≤96 chars).
+pub const HANDLER_MEMORY_RECORD: u32 = 20;
+/// `memory_query` (DG-33) — return entries matching a substring
+/// pattern (case-insensitive). Args:
+/// `{ agent_id: string, pattern?: string, limit?: u32 }`.
+/// Reply: `[MemoryEntry]`, newest-first. `pattern` empty / omitted
+/// returns the most recent entries unfiltered; `limit` defaults to 50.
+pub const HANDLER_MEMORY_QUERY: u32 = 21;
+/// `memory_prune` (DG-33) — drop entries older than `retention_ms`,
+/// preserving `Decision` entries indefinitely per PRD-15 §5. Args:
+/// `{ agent_id: string, retention_days: u32 }`. Reply:
+/// `{ pruned: u32, kept: u32 }`. The agent's history file is
+/// rewritten atomically (tmp + rename) so a crash mid-prune doesn't
+/// corrupt the log.
+pub const HANDLER_MEMORY_PRUNE: u32 = 22;
+/// `memory_export` (DG-33) — render the agent's history as markdown.
+/// Args: `{ agent_id: string }`. Reply: `{ markdown: string }`.
+pub const HANDLER_MEMORY_EXPORT: u32 = 23;
+
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -237,6 +260,10 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_SESSION_DELETE => handle_session_delete(ctx, &args).await,
                 HANDLER_ROUND_DECIDE => handle_round_decide(pending_approvals, &args).await,
                 HANDLER_LIST_CUSTOM => handle_list_custom(ctx).await,
+                HANDLER_MEMORY_RECORD => handle_memory_record(ctx, &args).await,
+                HANDLER_MEMORY_QUERY => handle_memory_query(ctx, &args).await,
+                HANDLER_MEMORY_PRUNE => handle_memory_prune(ctx, &args).await,
+                HANDLER_MEMORY_EXPORT => handle_memory_export(ctx, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -522,6 +549,199 @@ async fn handle_list_custom(
         "manifests": manifests,
         "errors": errors,
     }))
+}
+
+// ── DG-33 memory handlers ───────────────────────────────────────────────────
+
+/// Args for `memory_record` — `{ agent_id, entry }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryRecordArgs {
+    /// Reverse-DNS or short id naming the agent that owns the memory.
+    pub agent_id: String,
+    /// Entry to append.
+    pub entry: crate::memory::MemoryEntry,
+}
+
+/// Args for `memory_query` — `{ agent_id, pattern?, limit? }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryQueryArgs {
+    /// Agent id to query.
+    pub agent_id: String,
+    /// Substring filter; empty / absent returns the most recent entries.
+    #[serde(default)]
+    pub pattern: Option<String>,
+    /// Max entries to return (default 50).
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Args for `memory_prune` — `{ agent_id, retention_days }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryPruneArgs {
+    /// Agent id whose memory should be pruned.
+    pub agent_id: String,
+    /// Drop entries older than this many days.
+    pub retention_days: u32,
+}
+
+/// Args for `memory_export` — `{ agent_id }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryExportArgs {
+    /// Agent id whose memory should be exported as markdown.
+    pub agent_id: String,
+}
+
+const MEMORY_DEFAULT_QUERY_LIMIT: u32 = 50;
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+async fn handle_memory_record(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryRecordArgs = parse(args, "memory_record")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_record: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let mut bytes = serde_json::to_vec(&a.entry)
+        .map_err(|e| exec_err(format!("memory_record: serialize entry: {e}")))?;
+    bytes.push(b'\n');
+
+    // Read current contents, append, rewrite atomically. The kernel
+    // doesn't expose a raw append; one-shot replace is the safest
+    // primitive we have inside the capability surface.
+    let existing = ctx.read_file(&path).await.unwrap_or_default();
+    let mut combined = existing;
+    combined.extend_from_slice(&bytes);
+    ctx.write_file(&path, &combined)
+        .await
+        .map_err(|e| exec_err(format!("memory_record: write {}: {e}", path.display())))?;
+    Ok(serde_json::json!({ "recorded": true }))
+}
+
+async fn handle_memory_query(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryQueryArgs = parse(args, "memory_query")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_query: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let bytes = ctx.read_file(&path).await.unwrap_or_default();
+    let entries = parse_memory_lines(&bytes);
+    let pattern = a.pattern.unwrap_or_default();
+    let limit =
+        usize::try_from(a.limit.unwrap_or(MEMORY_DEFAULT_QUERY_LIMIT)).unwrap_or(usize::MAX);
+    let hits = crate::memory::query_entries(&entries, &pattern, limit);
+    serde_json::to_value(hits).map_err(|e| exec_err(format!("memory_query: serialize: {e}")))
+}
+
+async fn handle_memory_prune(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryPruneArgs = parse(args, "memory_prune")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_prune: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let bytes = ctx.read_file(&path).await.unwrap_or_default();
+    if bytes.is_empty() {
+        return Ok(serde_json::json!({ "pruned": 0, "kept": 0 }));
+    }
+    let entries = parse_memory_lines(&bytes);
+    let retention_ms = u64::from(a.retention_days).saturating_mul(86_400_000);
+    let (kept, pruned) = crate::memory::prune_entries(entries, now_unix_ms(), retention_ms);
+    let mut out = Vec::with_capacity(bytes.len());
+    for entry in &kept {
+        let mut line = serde_json::to_vec(entry)
+            .map_err(|e| exec_err(format!("memory_prune: serialize: {e}")))?;
+        line.push(b'\n');
+        out.extend_from_slice(&line);
+    }
+    ctx.write_file(&path, &out)
+        .await
+        .map_err(|e| exec_err(format!("memory_prune: write {}: {e}", path.display())))?;
+    Ok(serde_json::json!({
+        "pruned": pruned,
+        "kept": kept.len(),
+    }))
+}
+
+async fn handle_memory_export(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryExportArgs = parse(args, "memory_export")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_export: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let bytes = ctx.read_file(&path).await.unwrap_or_default();
+    let entries = parse_memory_lines(&bytes);
+    let markdown = crate::memory::export_markdown(&a.agent_id, &entries);
+    Ok(serde_json::json!({ "markdown": markdown }))
+}
+
+fn parse_memory_lines(bytes: &[u8]) -> Vec<crate::memory::MemoryEntry> {
+    let mut entries = Vec::new();
+    for raw in bytes.split(|b| *b == b'\n') {
+        if raw.is_empty() {
+            continue;
+        }
+        let Ok(s) = std::str::from_utf8(raw) else {
+            continue;
+        };
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<crate::memory::MemoryEntry>(trimmed) {
+            Ok(entry) => entries.push(entry),
+            Err(e) => {
+                tracing::warn!(error = %e, line = trimmed, "skipping malformed memory line");
+            }
+        }
+    }
+    entries
 }
 
 async fn handle_history_get(

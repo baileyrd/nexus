@@ -1073,13 +1073,80 @@ Typed agent-facing tool registry shipped as
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 §5 specifies agent-scoped persistent memory. Not implemented;
 runs are stateless.
 
 **Definition of done:** Per PRD-15 §5. Related to AI-MEMORY-LAYER-PLAN
 (roadmap exploratory).
+
+### Outcome
+
+Filesystem-backed agent-scoped memory shipped:
+
+- New [`crates/nexus-agent/src/memory.rs`](../../crates/nexus-agent/src/memory.rs)
+  defines the `MemoryEntry` enum covering the eight variants
+  PRD-15 §5 calls out (`UserGoal`, `AgentPlan`, `StepExecution`,
+  `ToolCall`, `UserFeedback`, `Error`, `Decision`, `Artifact`) plus
+  the surrounding primitives: `agent_dir`, `history_path`,
+  `normalize_agent_id` (validates ASCII alphanumeric / `.-_`,
+  ≤96 chars — mirrors the existing plan-history slug rule),
+  `append_entry_to_path`, `read_entries_from_path` (skips malformed
+  lines with a warn), `query_entries` (case-insensitive substring,
+  newest-first), `prune_entries` (drops everything older than the
+  retention window **except** `Decision` entries — PRD-15 §5
+  invariant), and `export_markdown`.
+- Storage layout matches the PRD: `<forge>/.forge/agents/<agent_id>/`
+  with `history.jsonl` (append-only one-entry-per-line log) and
+  reserved `snapshots/` + `artifacts/` subdirs (the entry variants
+  reference artifacts by path so the layout is forward-compatible
+  even though dated snapshots aren't wired yet — see deferred).
+- Four IPC handlers on `com.nexus.agent`:
+  - `memory_record` (id 20) — append a `MemoryEntry` to the log.
+    Read-modify-write through `ctx.read_file` + `ctx.write_file`
+    so the capability surface stays correct (the kernel doesn't
+    expose a raw append primitive).
+  - `memory_query` (id 21) — substring filter + limit; default
+    limit 50, newest-first.
+  - `memory_prune` (id 22) — drop entries older than
+    `retention_days * 86_400_000` ms while preserving `Decision`
+    entries; rewrites the log via `write_file`.
+  - `memory_export` (id 23) — render the entire log as
+    human-readable markdown.
+- ts-rs / schemars bindings generated for `MemoryEntry`,
+  `MemoryRecordArgs`, `MemoryQueryArgs`, `MemoryPruneArgs`,
+  `MemoryExportArgs` under
+  `packages/nexus-extension-api/src/generated/ipc/`;
+  `scripts/check_ipc_drift.sh` clean.
+- 13 unit tests in `memory::tests` cover the parse / round-trip
+  (append+read), query (substring case-insensitive, empty pattern
+  newest-first, limit cap), prune (drops old non-decisions, keeps
+  decisions), export (every variant renders), agent-id validator
+  (reverse-DNS / empty / too-long / unsafe chars), and missing
+  file handling. All 68 nexus-agent lib tests green.
+
+**Deferred** as documented follow-ups:
+
+- Auto-recording from the session loop. The session loop in
+  `session.rs` writes per-session transcripts under
+  `.forge/agent/sessions/` already; threading those events through
+  `memory_record` so a Coder agent's prior decisions show up on
+  its next invocation is the integration step. Foundation is in
+  place (the handler exists; the session loop knows the agent id);
+  one focused PR away.
+- Dated `MemorySnapshot` rollups. The PRD-15 §5 `MemorySnapshot`
+  type wasn't materialised — the JSONL log is the canonical
+  source. A rollup writer that compresses old history into a
+  weekly snapshot can land if log file sizes become an issue;
+  retention-by-prune already keeps the active log bounded.
+- Database backend (`MemoryStore::Database`). FS-only today; the
+  IPC surface is backend-agnostic so swapping requires only a
+  handler-side route change.
+- Prompt-time recall (injecting prior memory into the planner's
+  system prompt at session start). The query handler is in place;
+  binding it into `system_prompt_with_skills` is the next step
+  for a "memory layer" feel.
 
 ---
 

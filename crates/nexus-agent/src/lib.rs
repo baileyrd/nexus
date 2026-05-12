@@ -47,6 +47,7 @@ mod archetypes;
 pub mod core_plugin;
 pub mod custom_agent;
 mod llm;
+pub mod memory;
 pub mod session;
 pub mod tool_registry;
 
@@ -57,7 +58,8 @@ pub use archetypes::{
 };
 pub use core_plugin::{
     AgentCorePlugin, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST,
-    HANDLER_LIST_ARCHETYPES, HANDLER_LIST_CUSTOM, HANDLER_LIST_TOOLS, HANDLER_PLAN, PLUGIN_ID,
+    HANDLER_LIST_ARCHETYPES, HANDLER_LIST_CUSTOM, HANDLER_LIST_TOOLS, HANDLER_MEMORY_EXPORT,
+    HANDLER_MEMORY_PRUNE, HANDLER_MEMORY_QUERY, HANDLER_MEMORY_RECORD, HANDLER_PLAN, PLUGIN_ID,
 };
 pub use custom_agent::{
     load_from_path as load_custom_agent, parse_str as parse_custom_agent_str,

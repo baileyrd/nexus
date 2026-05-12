@@ -1278,6 +1278,11 @@ fn register_core_plugins(
                     ("list_tools", nexus_agent::HANDLER_LIST_TOOLS),
                     // DG-36 (PRD-15 §9) — custom .agent.toml manifests.
                     ("list_custom", nexus_agent::HANDLER_LIST_CUSTOM),
+                    // DG-33 (PRD-15 §5) — agent-scoped persistent memory.
+                    ("memory_record", nexus_agent::HANDLER_MEMORY_RECORD),
+                    ("memory_query", nexus_agent::HANDLER_MEMORY_QUERY),
+                    ("memory_prune", nexus_agent::HANDLER_MEMORY_PRUNE),
+                    ("memory_export", nexus_agent::HANDLER_MEMORY_EXPORT),
                 ]),
             ),
             forge_root,
