@@ -329,7 +329,7 @@ WI-44 (marketplace).
 **Severity:** Critical (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 7
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Doc shows `build_runtime(forge_root)` + `kernel.register_core_plugin(...)`.
 Actual API is `build_cli_runtime(PathBuf)` / `build_tui_runtime(PathBuf)`
@@ -338,6 +338,38 @@ doc cannot wire their plugin into the bootstrap.
 
 **Definition of done:** Match the example to the real bootstrap entry
 points and the actual `CorePlugin` registration mechanism.
+
+**Resolution.** Rewrote five sections of
+`docs/developer/core-plugins/authoring.md` against the real surface
+in `crates/nexus-plugins/src/loader.rs` and `crates/nexus-bootstrap/src/lib.rs`:
+
+- **The contract.** Replaced the fictional `#[async_trait] impl CorePlugin`
+  with the real synchronous trait. Lifecycle hooks are sync, take no
+  `ctx` (`on_init/start: &mut self -> Result<(), PluginError>`,
+  `on_stop: &mut self` with no Result). Dispatch is `fn dispatch(&mut self,
+  handler_id: u32, args: &serde_json::Value) -> Result<…, PluginError>` —
+  **numeric handler IDs**, not string command matching. Added
+  `dispatch_async`/`wire_context` and called out that there is no
+  `fn info(&self)` method on the trait (identity lives on the manifest).
+- **Register in bootstrap.** Replaced the fictional
+  `build_runtime` + `kernel.register_core_plugin` example with the real
+  pattern: edit the private `register_core_plugins` in
+  `crates/nexus-bootstrap/src/lib.rs` to add a
+  `loader.register_core(core_manifest_with_ipc(id, name, LifecycleFlags{…},
+  &with_v1_aliases(&[("cmd", HANDLER_CMD), …])), forge_root, Box::new(plugin))
+  .or_lifecycle_skip(event_bus, …)?` call. Documented the v1-alias
+  convention (ADR 0021) and the skip-and-continue failure mode.
+- **IPC: handle vs call.** `ctx.ipc_call(...)` requires a `timeout:
+  Duration` argument (matches `PluginContext` trait); errors are
+  `IpcError`, not the fictional `?` propagation.
+- **Events.** Real methods are `ctx.publish(type_id, payload)` and
+  `ctx.subscribe(EventFilter)`, not `events_publish` / `events_subscribe`.
+  Namespace rule documented (type_id must start with the plugin's id).
+- **Tests.** Replaced the fictional `build_test_runtime()` with the
+  real pattern: `tempfile::tempdir() + build_cli_runtime(path)`,
+  then `runtime.context.ipc_call(plugin, cmd, args, Duration::from_secs(5))`.
+  Pointed at the `common::MinimalForge` helper in
+  `crates/nexus-bootstrap/tests/common/mod.rs` for new bootstrap-tests.
 
 ---
 
