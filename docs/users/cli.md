@@ -1,54 +1,59 @@
 # `nexus` — Unified CLI
 
-> [!WARNING]
-> **STALE — see [DG-03](../roadmap/DOC-GAPS.md#dg-03--userscli.md-misses-12-subcommand-groups).**
-> The subcommand listings below are out of date. Entire groups
-> (`template`, `crdt`, `skill`, `import`, `export`, `completions`,
-> `proc`, `workflow`, `bases`, `forge`, plus 16+ `git` subcommands)
-> are missing; several documented commands (`tags locate`,
-> `bases validate`, `agent list/history`, `proc kill`, `term saved`,
-> `config get/set/list`) don't exist. For the authoritative listing,
-> run `nexus --help` (and `nexus <subcommand> --help`).
-
 One binary, multiple faces. `nexus` is the single entry point for every
 non-GUI interaction with Nexus: headless CLI operations, the terminal UI,
-and launching the desktop shell. This page covers the three subcommands
-added by Phase 4 WI-38 (`nexus tui`, `nexus desktop`, plugin install/list/remove
-extensions) plus the broader command surface. For per-PRD context see
+and launching the desktop shell. For per-PRD context see
 [`../PRDs/05-cli.md`](../PRDs/05-cli.md).
+
+> **Source of truth.** Run `nexus --help` (and `nexus <subcommand> --help`)
+> for the authoritative current surface. The clap definitions live at
+> `crates/nexus-cli/src/main.rs`; per-command handlers at
+> `crates/nexus-cli/src/commands/`. The table below is regenerated from
+> those enums on every backlog audit and may lag a release window.
 
 ## Command surface
 
-```
-Commands:
-  forge      init, status
-  content    create, read, delete, search, tasks, task-toggle, links,
-             backlinks, daily, export
-  graph      status, unresolved, neighbors
-  tags       list, locate
-  plugin     install, list, call, uninstall, scaffold, enable, disable,
-             reset, settings
-  skill      list, render
-  bases      query, validate
-  canvas     render
-  agent      run, list, history
-  workflow   run, list
-  db         query, schema (forge index introspection)
-  config     get, set, list
-  git        status, log, blame, diff
-  proc       list, kill (process manager via nexus-terminal)
-  term       saved, run (saved-command snippets)
-  watch      monitor filesystem changes (glob patterns)
-  logs       tail, show, path
-  ai         ask, embed, status, config
-  mcp        Start MCP server (stdio)
-  tui        Launch the terminal UI in the current terminal
-  desktop    Launch the Tauri desktop shell (forwards args to nexus-shell)
-```
+The 24 top-level groups, ordered roughly by frequency of use:
 
-For details on individual subcommands run `nexus <subcommand> --help`.
-The clap definitions live at `crates/nexus-cli/src/main.rs` and the
-per-command handlers at `crates/nexus-cli/src/commands/`.
+| Group | Subcommands |
+|---|---|
+| `tui` | (no subcommands) — launches the ratatui UI |
+| `desktop` | (no subcommands) — launches `nexus-shell`, passes through trailing args |
+| `forge` | `init`, `status`, `reindex`, `import` |
+| `content` | `create`, `update`, `list`, `read`, `delete`, `search`, `tasks`, `task-toggle`, `links`, `backlinks`, `daily`, `export` |
+| `graph` | `status`, `unresolved`, `neighbors` |
+| `tags` | `list` (optional `--name` filter) |
+| `ai` | `ask`, `embed`, `status`, `config`, `chat`, `complete` |
+| `agent` | `plan`, `run` |
+| `skill` | `list`, `show`, `context`, `triggered`, `reload`, `render` |
+| `workflow` | `list`, `show`, `run`, `reload`, `validate`, `template` (→ `list` / `show` / `init`) |
+| `proc` | `list`, `show`, `add`, `delete`, `reorder`, `history` |
+| `term` | `env`, `run`, `shell` |
+| `mcp` | `serve`, `servers`, `tools`, `call` |
+| `plugin` | `install`, `list`, `remove`, `call`, `uninstall`, `scaffold`, `enable`, `disable`, `reset`, `settings`, `revoke`, `verify` |
+| `template` | `list`, `apply` |
+| `bases` | `create`, `list`, `show`, `add-record`, `query`, `import`, `export`, `formula` |
+| `db` | low-level twin of `bases`, wraps `com.nexus.database` IPC handlers |
+| `canvas` | `create`, `show`, `add-node`, `add-edge` |
+| `git` | `info`, `status`, `diff`, `blame`, `log`, `stage`, `unstage`, `stage-hunk`, `unstage-hunk`, `commit`, `branch` (→ `create` / `switch` / `delete`), `tag`, `stash` (→ `list` / `pop` / `drop`), `fetch`, `push`, `pull`, `merge`, `rebase`, `cherry-pick`, `abort-merge`, `conflicts`, `remotes`, `auto-commit`, `set-passphrase`, `clear-passphrase`, `lfs-status` |
+| `crdt` | `merge-driver`, `install-merge-driver`, `enable-transport` |
+| `import` | `notion` |
+| `export` | `notion` |
+| `config` | `show`, `reset` |
+| `logs` | `tail`, `show`, `path`, `list`, `export`, `clear` |
+| `watch` | (no subcommands) — monitors filesystem changes for a glob pattern |
+| `completions` | (positional `<shell>`) — emits shell completions for bash / zsh / fish / powershell |
+
+Two stub groups exist for forward-compat — `sync` and `run` both
+print a "coming soon" message and exit. Treat them as not-yet-shipped.
+
+Community plugins can also register their own top-level subcommands —
+running `nexus <plugin-id> [args…]` for an unrecognised group routes
+to a plugin-defined external subcommand handler (`#[command(external_subcommand)]`
+in `enum Commands`).
+
+For details on any group run `nexus <group> --help`. For a specific
+leaf run `nexus <group> <subcommand> --help`.
 
 ## `nexus tui`
 

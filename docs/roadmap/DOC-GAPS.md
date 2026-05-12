@@ -120,7 +120,7 @@ docs never caught up. Concrete drift:
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Users; agent finding 4
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 CLI surface in `docs/users/cli.md` is badly out of date.
 - **Missing entire groups:** `template`, `crdt`, `skill`, `import`,
@@ -137,6 +137,24 @@ CLI surface in `docs/users/cli.md` is badly out of date.
 `crates/nexus-cli/src/main.rs` + the `commands/` subdirectory. Add a
 note that the source-of-truth listing is `nexus --help` and the
 generated clap help text.
+
+**Resolution.** Dropped the STALE warning banner and regenerated the
+"Command surface" table from `crates/nexus-cli/src/main.rs` enums
+(`Commands` plus 22 sub-enums). The new table covers all 24 top-level
+groups including the previously-missing ones (`forge`, `skill`,
+`workflow`, `proc`, `term`, `bases`, `template`, `import`, `export`,
+`crdt`, `completions`, `watch`, `logs`) and documents the nested
+structure for `git branch` / `git stash` / `workflow template`. All
+fictional commands flagged by DG-03 are gone: `tags locate`,
+`bases validate`, `agent list`, `agent history`, `proc kill`,
+`term saved`, `config get/set/list` — replaced by their real
+counterparts. The two stub groups (`sync`, `run`) are explicitly
+labelled "coming soon"; the plugin-defined `External` subcommand
+pathway is documented. Added a "Source of truth: `nexus --help`"
+admonition at the top of the section that points readers at clap's
+generated help. Lower sections (`tui`, `desktop`, plugin install /
+list / scaffold) are still accurate against current source — left
+untouched.
 
 ---
 
