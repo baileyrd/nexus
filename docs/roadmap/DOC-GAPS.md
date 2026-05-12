@@ -186,13 +186,29 @@ update either the registration or the doc.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 2
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
-Doc claims comments live in YAML frontmatter. Real storage is a JSON
+Doc claimed comments live in YAML frontmatter. Real storage is a JSON
 sidecar per `crates/nexus-comments/src/store.rs`.
 
 **Definition of done:** Rewrite the storage-model section against the
 actual sidecar layout.
+
+**Resolution.** Rewrote §"Where comments live" against the real
+sidecar layout (`<forge>/.forge/comments/<relpath>.json`) sourced from
+`crates/nexus-comments/src/{store.rs,types.rs}`. The replacement
+section shows the actual JSON shape (`version`, `file_path`, `threads`
+with anchor `block_id`, comments array), describes the
+delete-when-empty behaviour, and corrects the three downstream claims
+the old "block properties + YAML frontmatter" model implied:
+
+- Markdown body / `git diff` stays clean — comments are out-of-band.
+- The sidecar sits inside `.forge/comments/` so VCS sees it either way
+  (commit to share, gitignore to keep local).
+- Renames do **not** auto-relocate the sidecar — no in-tree rename
+  hook on `com.nexus.comments` (the "survives a rename via
+  comment-store migration" comment in `core_plugin.rs` is aspirational;
+  no migrate code path exists). Manual move is the workaround.
 
 ---
 
