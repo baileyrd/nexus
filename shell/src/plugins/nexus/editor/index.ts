@@ -1463,9 +1463,13 @@ export const editorPlugin: Plugin = {
           clientLogger.info(
             `[editor.save] start relpath=${tab.relpath} contentLen=${tab.content.length}`,
           )
-          // Snapshot the last 60 chars of CM content so we can compare
-          // it against what the kernel reflects post-sync.
+          // Snapshot head + tail of CM content so we can compare against
+          // what the kernel reflects post-sync. Head matters because
+          // edits in the heading would otherwise be invisible to a
+          // tail-only diagnostic.
+          const cmHead = tab.content.slice(0, 120).replace(/\n/g, '\\n')
           const cmTail = tab.content.slice(-60).replace(/\n/g, '\\n')
+          clientLogger.info(`[editor.save] CM head: ${JSON.stringify(cmHead)}`)
           clientLogger.info(`[editor.save] CM tail: ${JSON.stringify(cmTail)}`)
           await editorClient.syncContent(tab.relpath, tab.content)
           const tSync = performance.now()
@@ -1474,7 +1478,11 @@ export const editorPlugin: Plugin = {
           )
           try {
             const postSync = await editorClient.getMarkdown(tab.relpath)
+            const kernelHead = postSync.slice(0, 120).replace(/\n/g, '\\n')
             const kernelTail = postSync.slice(-60).replace(/\n/g, '\\n')
+            clientLogger.info(
+              `[editor.save] kernel head post-sync: ${JSON.stringify(kernelHead)}`,
+            )
             clientLogger.info(
               `[editor.save] kernel tail post-sync: ${JSON.stringify(kernelTail)}`,
             )

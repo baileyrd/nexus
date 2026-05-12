@@ -879,10 +879,15 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           ref={cmViewRef}
           className="nexus-editor-source"
           value={tab.content}
-          onChange={() => {
-            // No-op on the hot path. The bridge owns dispatching the
-            // edit through the kernel; the store's `content` is
-            // reconciled lazily when a snapshot update lands.
+          onChange={(v) => {
+            // The bridge still owns dispatching the edit through the
+            // kernel. But we also mirror CM's text into `tab.content`
+            // so that COMMAND_SAVE's `sync_content` push reflects
+            // CM's authoritative state — if a transaction's
+            // translation failed (e.g. inline edits inside an H1
+            // span), the kernel tree would otherwise lag CM and a
+            // save would write the stale tree to disk.
+            useEditorStore.getState().setContent(tab.relpath, v)
           }}
           keybindings={keybindings}
           vim={
