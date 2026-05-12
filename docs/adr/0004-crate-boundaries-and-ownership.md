@@ -37,3 +37,29 @@ Strict DAG with `nexus-types` as leaf-of-leaf. No cycles.
 - Plugins physically cannot bypass capability checks because they only
   hold `&dyn PluginContext`.
 - `nexus-security` is slim — policy + side effects, not a request gate.
+
+## Addendum 2026-05-12 — additional crate boundaries
+
+The "Decision" section names five crates; the workspace now ships **28**.
+The same DAG-with-`nexus-types`-at-the-leaf rule still holds — boundaries
+are enforced at compile time by `crates/nexus-bootstrap/tests/dep_invariants.rs`.
+The full categorised inventory and the rationale per added crate live
+in [ADR 0001 §Addendum 2026-05-12](0001-cargo-workspace-with-prd-crates.md#addendum-2026-05-12--workspace-grew-to-28-crates);
+this addendum exists only to redirect readers who land here first.
+
+Boundary highlights for the post-2026-05-12 crates not in the original
+table:
+
+- `nexus-bootstrap` is the only crate allowed to depend on every
+  service plugin — it's the static-wiring orchestrator (per ADR 0011).
+- `nexus-plugin-api` is a leaf alongside `nexus-types`; both
+  community plugins and core plugins consume it.
+- Service crates (`nexus-ai`, `nexus-agent`, `nexus-editor`, …) all
+  satisfy "subsystem crates depend on the kernel; the kernel never
+  depends on a subsystem" (per `CLAUDE.md`'s microkernel-isolation
+  invariant).
+- Frontends (`nexus-cli`, `nexus-tui`) reach storage / AI / editor
+  only via `context.ipc_call(...)` per ADR 0011's IPC-over-direct-calls
+  rule.
+
+[`crates/nexus-bootstrap/tests/dep_invariants.rs`]: ../../crates/nexus-bootstrap/tests/dep_invariants.rs

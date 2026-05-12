@@ -490,7 +490,7 @@ breaking-change pass through extension-api consumers.
 **Severity:** Cosmetic (doc-bug; ADR-addendum required)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 ADRs 0001 / 0004 enumerate 5–6 crates. Workspace has 28. The *spirit*
 of those ADRs (microkernel + crate-per-subsystem) still holds; only
@@ -499,6 +499,20 @@ the inventory listing is stale.
 **Definition of done:** Add an "Inventory updated 2026-05" addendum
 to ADR 0026 (or the most recent ADR) with the current 28-crate
 listing and a forward-pointer from ADRs 0001 / 0004.
+
+**Resolution.** Filed the inventory in ADR 0001's appendix rather than
+ADR 0026 (which is topically about the CRDT layer, not workspace
+structure). ADR 0001 gained an `Addendum 2026-05-12 — workspace grew
+to 28 crates` block with the full categorised listing (leaf primitives,
+kernel + lifecycle, security, storage plane, editor/content surfaces,
+AI/agent, external-system bridges, frontend binaries, quality), naming
+the original-decision sextet that ships unchanged and the 22 added
+crates by category. ADR 0004 gained a shorter `Addendum 2026-05-12 —
+additional crate boundaries` forward-pointer to ADR 0001 plus
+post-2026-05-12 boundary highlights (bootstrap is sole all-service
+consumer; plugin-api is a leaf; service crates obey microkernel-isolation;
+frontends route through `ipc_call`). Both addenda are append-only,
+ADR bodies preserved per immutable-body convention.
 
 ---
 
