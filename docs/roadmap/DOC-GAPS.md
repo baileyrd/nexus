@@ -313,7 +313,7 @@ OI-13's outcome line.
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Architecture
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 - Claims **25 crates**; workspace has **28** (`nexus-lsp`, `nexus-crdt`,
   `nexus-fuzz` missing).
@@ -325,6 +325,13 @@ OI-13's outcome line.
 members` and from the `invoke_handler!` block in
 `shell/src-tauri/src/lib.rs`.
 
+### Outcome
+- `C4.md:77` "Core (Rust workspace — 25 crates)" → 28 crates (verified
+  by `awk '/^members = \[/,/^\]/' Cargo.toml | grep -cE '"[a-z]'`).
+- `C4.md:404` "23 `#[tauri::command]` handlers" → 25 (verified by
+  `grep -cE '#\[tauri::command\]' shell/src-tauri/src/**/*.rs`).
+- MCP "15 `nexus_*` tools" left unchanged — already correct.
+
 ---
 
 ## DG-15 — `ipc-schemas.md` claims wildly understate reality
@@ -332,7 +339,7 @@ members` and from the `invoke_handler!` block in
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Architecture
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Header claims "~28 JSON schemas + ~30 TS types committed". Actual:
 **131 JSON schemas, 166 TS files**. The "pilot" language is
@@ -341,6 +348,11 @@ six months out of date.
 **Definition of done:** Replace pilot-era counts with `wc -l` of the
 generated directories, or omit counts and just point at the generated
 trees.
+
+### Outcome
+- `ipc-schemas.md:3` updated: "131 JSON schemas + 166 TS types
+  committed" with a note that the generated dirs are authoritative.
+  Pilot framing dropped.
 
 ---
 
@@ -369,7 +381,7 @@ and add a forward-pointer at the top of ADR 0002. Do not edit ADR
 **Severity:** Cosmetic (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Developer hub; agent finding 2
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `developer/reference.md` and `developer/plugins/capabilities.md`
 claim 14 capabilities. Real count is 22 (the 8-member `ai.*` cluster
@@ -377,6 +389,12 @@ is missing from the docs).
 
 **Definition of done:** Regenerate the table from
 `crates/nexus-plugin-api/src/capability.rs`.
+
+### Outcome
+- `developer/reference.md:27` updated: 22 variants (6 HIGH-risk), with
+  pointer noting ADR 0022 added the 8 `ai.*` variants.
+- `developer/plugins/capabilities.md:9-10` updated: 22 total, 6 HIGH
+  risk, with link to ADR 0022.
 
 ---
 

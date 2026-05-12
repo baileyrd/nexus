@@ -1,6 +1,6 @@
 # IPC Schemas — Shared Command Taxonomy
 
-**Status:** Active. Pilot expanded; ~28 JSON schemas + ~30 TS types committed.
+**Status:** Active. 131 JSON schemas + 166 TS types committed (counts from the generated directories; authoritative listing is the directories themselves, not this header).
 **Authoritative listing:** the generated directories, not this doc.
 
 - TypeScript types: `packages/nexus-extension-api/src/generated/ipc/`

@@ -24,7 +24,7 @@ hub explain *how* and *why*; the files below are *what*.
 
 | Source | What it covers |
 |---|---|
-| [`crates/nexus-plugin-api/src/capability.rs`](../../crates/nexus-plugin-api/src/capability.rs) | Canonical `Capability` enum: 14 variants, manifest strings, HIGH-risk classification. |
+| [`crates/nexus-plugin-api/src/capability.rs`](../../crates/nexus-plugin-api/src/capability.rs) | Canonical `Capability` enum: 22 variants (6 HIGH-risk), manifest strings, classification. The 8 `ai.*` variants were added by ADR 0022. |
 | [`docs/adr/0002-hierarchical-capability-strings.md`](../adr/0002-hierarchical-capability-strings.md) | Design rationale. |
 | [Capabilities reference](plugins/capabilities.md) | Plugin-author view. |
 
