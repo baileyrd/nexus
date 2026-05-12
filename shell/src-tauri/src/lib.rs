@@ -557,20 +557,21 @@ pub fn run() {
         // accelerators at activate/deactivate time; this just wires the
         // plugin into the Builder so the JS bridge can talk to it.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        // Persist window size, position, and maximized state across
-        // launches. The plugin saves on close/move/resize/maximize and
-        // restores on window creation; without it the size hard-coded
-        // in tauri.conf.json (1280x800) is reapplied every boot.
-        // Persist window geometry/maximize, but NOT the `decorated` flag —
-        // we want the borderless config in tauri.conf.json (`decorations:
-        // false`) to be authoritative every launch. Otherwise a one-time
-        // decorated-true (e.g. WM-injected on WSLg) gets baked into the
-        // state file and overrides the config forever.
+        // Persist window size + maximize/fullscreen across launches, but
+        // intentionally NOT position or decorations:
+        //   - POSITION: WSLg/X11 reports unreliable coords across compositor
+        //     restarts; a one-time off-axis geometry gets baked in and the
+        //     window opens "off center" on every subsequent launch. Letting
+        //     the WM place a fresh window each time is more predictable.
+        //   - DECORATIONS: tauri.conf.json says `decorations: false`; a
+        //     WM-injected decorated-true (common on WSLg) would otherwise
+        //     get cached and override the config forever.
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::all()
-                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                        | tauri_plugin_window_state::StateFlags::FULLSCREEN,
                 )
                 .build(),
         )

@@ -13,12 +13,12 @@
 //     light + dark overrides, useful when authoring a theme that
 //     ships both modes in one file
 //
-// All token math lives in `builderPreview.ts` (pure module, unit-
+// All token math lives in `previewTokens.ts` (pure module, unit-
 // tested). This component is rendering only.
 
 import type { CSSProperties, ReactElement } from 'react'
 
-import { composeOverridesForPreview } from './builderPreview'
+import { composeOverridesForPreview } from './previewTokens'
 
 interface PreviewSnippetProps {
   baseVars: Record<string, string>

@@ -14,7 +14,7 @@ import {
 } from './themePickerStore'
 import { getPickerApi } from './pickerRuntime'
 import { ThemeBuilderPanel } from './ThemeBuilder'
-import { builderModalWidth } from './builderPreview'
+import { builderModalWidth } from './previewTokens'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

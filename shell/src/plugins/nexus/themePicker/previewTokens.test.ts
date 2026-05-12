@@ -7,7 +7,7 @@ import {
   builderModalWidth,
   composeOverridesForPreview,
   PREVIEW_SCOPED_KEYS,
-} from './builderPreview'
+} from './previewTokens'
 
 test('composeOverridesForPreview falls back to baseVars for unspecified keys', () => {
   const result = composeOverridesForPreview(
