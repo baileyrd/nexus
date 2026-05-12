@@ -521,6 +521,35 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            <button
+              className="settings-close"
+              title="Edit settings file (.forge/app.toml)"
+              aria-label="Edit settings file"
+              onClick={() => {
+                eventBus.emit('files:open', {
+                  relpath: '.forge/app.toml',
+                  name: 'app.toml',
+                })
+                close()
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="9" y1="13" x2="15" y2="13" />
+                <line x1="9" y1="17" x2="13" y2="17" />
+              </svg>
+            </button>
             <button className="settings-close" onClick={close}>✕</button>
           </div>
 
@@ -781,34 +810,6 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
       <div className="settings-section-title" style={{ marginTop: 24 }}>
         Advanced
       </div>
-
-      <StubRow
-        title="Edit settings file"
-        description="Open .forge/app.toml in a new editor tab. Direct edits to the [settings] table take effect after closing and reopening the forge."
-        control={
-          <button
-            type="button"
-            onClick={() => {
-              eventBus.emit('files:open', {
-                relpath: '.forge/app.toml',
-                name: 'app.toml',
-              })
-              useContextKeyStore.getState().set('settingsPanelVisible', false)
-            }}
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Open
-          </button>
-        }
-      />
 
       <StubRow
         title="Notify if startup takes longer than expected"

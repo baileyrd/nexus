@@ -148,6 +148,27 @@
         --file-header-background-focused:var(--background-primary);
         --file-header-border:            var(--divider-width) solid var(--divider-color);
 
+        /* ── Syntax-highlight tokens ──────────────────────────────────
+           Consumed by `nexusHighlightStyle` in
+           shell/src/plugins/nexus/editor/cm/syntaxHighlight.ts via
+           `var(--syntax-*)`. Defaults below are tuned for dark
+           backgrounds (the One Dark palette); theme overrides can
+           replace any of them without touching the highlight style.
+           ─────────────────────────────────────────────────────────── */
+        --syntax-keyword:     #c678dd; /* if/let/struct, TOML headers   */
+        --syntax-string:      #98c379; /* "quoted" / 'single'           */
+        --syntax-number:      #d19a66; /* literals                      */
+        --syntax-atom:        #56b6c2; /* true / false / null           */
+        --syntax-comment:     #7f848e; /* # … / // … / /* */            */
+        --syntax-property:    #e06c75; /* keys, attributes              */
+        --syntax-function:    #61afef; /* function names                */
+        --syntax-type:        #e5c07b; /* type names                    */
+        --syntax-operator:    var(--text-muted);
+        --syntax-punctuation: var(--text-faint);
+        --syntax-meta:        var(--text-muted);
+        --syntax-link:        var(--interactive-accent);
+        --syntax-invalid:     var(--risk);
+
         /* ── Shadow (unchanged) ───────────────────────────────────── */
         --shadow: var(--nx-shadow-lg, 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35));
 
