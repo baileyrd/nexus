@@ -169,7 +169,7 @@ remaining occurrences of the wrong binding in any live doc.
 **Severity:** Should-fix (doc-bug)
 **Kind:** `doc-bug`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §Help; agent finding 5
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 `docs/help/customize/keybindings.md` documents `Ctrl+Shift+T` as "new
 terminal session". `shell/src/plugins/nexus/themePicker/index.ts:37`
@@ -178,6 +178,23 @@ wrong, or the binding needs to move.
 
 **Definition of done:** Decide which feature owns `Ctrl+Shift+T` and
 update either the registration or the doc.
+
+**Resolution.** Theme picker keeps `Ctrl+Shift+T` (already shipped +
+registered at `shell/src/plugins/nexus/themePicker/index.ts:37`). The
+terminal plugin does **not** register any "new session" keybinding —
+its only registration is `Ctrl+\`` for toggling the integrated
+terminal (`shell/src/plugins/nexus/terminal/index.ts:148`). Two help
+docs claimed the wrong owner and got rewritten to the real surface:
+
+- `docs/help/customize/keybindings.md`: replaced the fictional
+  "New terminal session | — | `Ctrl+Shift+T`" row with two real
+  rows — "Toggle integrated terminal | `Cmd+\`` | `Ctrl+\``" and
+  "Open theme picker | `Cmd+Shift+T` | `Ctrl+Shift+T`".
+- `docs/help/advanced/terminal.md`: dropped the fictional
+  `Ctrl+Shift+T | New session` and `Ctrl+Shift+W | Close session`
+  rows (neither is registered). Added a note that new/close session
+  are panel-header buttons today and `Ctrl+Shift+T` belongs to the
+  theme picker.
 
 ---
 

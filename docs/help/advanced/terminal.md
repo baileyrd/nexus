@@ -19,8 +19,10 @@ Keybindings inside the terminal:
 | `Ctrl+L` | Clear screen |
 | `Ctrl+Shift+C` | Copy selection |
 | `Ctrl+Shift+V` | Paste |
-| `Ctrl+Shift+T` | New session |
-| `Ctrl+Shift+W` | Close session |
+
+New / close sessions are buttons in the terminal panel header — no
+keybinding ships today. `Ctrl+Shift+T` is bound to the theme picker
+(see [customize/keybindings.md](../customize/keybindings.md)).
 
 ## Saved commands
 
