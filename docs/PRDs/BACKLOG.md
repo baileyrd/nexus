@@ -452,7 +452,7 @@ Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 d
 - [ ] **DG-36: PRD-15 §9 `.agent.toml`** — custom-agent format spec'd; no parser/loader.
 - [ ] **DG-37: PRD-15 §10 agent-to-agent comms** — spec'd; not built.
 - [ ] **DG-38: PRD-17 cross-platform reframe-or-build** — §3 WASM / §4 `nexus-platform` crate / §5 web / §6 mobile (UniFFI) all unimplemented. Needs scoping decision: reframe PRD-17 as desktop-only, or commit to multi-platform and split into per-platform BLs.
-- [ ] **DG-39: PRD-14 §10 dynamic MCP tool registration** — community plugins can't publish tools to the MCP server.
+- [x] **DG-39: PRD-14 §10 dynamic MCP tool registration** — closed 2026-05-12. New `crates/nexus-mcp/src/dynamic_tools.rs` registry plus `register_tool` / `unregister_tool` / `list_dynamic_tools` IPC handlers on `com.nexus.mcp.host`; `NexusMcpServer::list_tools` + `call_tool` merge static + dynamic surfaces. `notifications/tools/list_changed` broadcast + dedicated capability deferred as documented follow-ups. See [../roadmap/DOC-GAPS.md#dg-39](../roadmap/DOC-GAPS.md).
 - [x] **DG-40: PRD-14 §12.2 MCP audit logging** — closed 2026-05-12 via `nexus_kernel::audit::log_mcp_tool_call` + `log_mcp_resource_read` wired through `crates/nexus-mcp/src/server.rs`. See [../roadmap/DOC-GAPS.md#dg-40](../roadmap/DOC-GAPS.md).
 - [ ] **DG-41: PRD-10 §7 relations + rollup** — current impl is in-memory filter chain.
 - [ ] **DG-42: PRD-10 §8 SQL compilation** — Bases queries should compile to SQL against the storage index.

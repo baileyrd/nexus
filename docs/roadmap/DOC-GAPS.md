@@ -1098,12 +1098,50 @@ PRD-17 §3 (WASM target), §4 (`nexus-platform` crate), §5 (web target),
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Community plugins can't publish tools to the MCP server. Tool surface
 is static at startup.
 
 **Definition of done:** Per PRD-14 §10.
+
+### Outcome
+
+- New module `crates/nexus-mcp/src/dynamic_tools.rs` ships
+  `DynamicTool`, `DynamicToolRegistry`, and a process-global accessor
+  (`global()`) following the same `OnceLock<Arc<…>>` pattern as
+  `nexus_kernel::audit_store`. Eight unit tests cover register /
+  duplicate-rejection / reserved-prefix rejection (the `nexus_`
+  namespace is owned by the static router) / empty-name rejection /
+  unregister-then-reregister / alphabetical-list / pointer-equality
+  of `global()`.
+- `McpHostPlugin::dispatch` gains three new sync handlers —
+  `HANDLER_REGISTER_TOOL` (id 8), `HANDLER_UNREGISTER_TOOL` (id 9),
+  `HANDLER_LIST_DYNAMIC_TOOLS` (id 10). Plugins announce or withdraw
+  tools by calling these via `ipc_call("com.nexus.mcp.host", …)`.
+  Four integration tests in `core_plugin::tests` exercise the
+  dispatch path including reserved-prefix rejection at the IPC layer.
+- `NexusMcpServer::list_tools` returns the static
+  `tool_router.list_all()` followed by the dynamic registry's
+  contents (`dynamic_tool_to_rmcp` adapts the descriptor into rmcp's
+  `Tool`). `call_tool` checks the dynamic registry first; on hit it
+  routes through `context.ipc_call(plugin_id, command, args)` and
+  wraps the JSON reply as `CallToolResult::structured`, on miss it
+  falls through to the static `tool_router` unchanged. Audit logging
+  (DG-40) wraps both paths uniformly.
+- PRD-14 §10's "Latency: < 100ms from registration to availability"
+  is satisfied trivially — registration is an in-process map insert
+  and the next `list_tools` request sees it. The PRD's
+  `notifications/tools/list_changed` broadcast to connected clients
+  is deferred: it's a nice-to-have and external MCP clients can
+  re-poll `list_tools` cheaply. When a UI surfaces tool publication
+  events, the broadcast can land as a follow-up that reads the
+  registry on a kernel event-bus subscription.
+- Capability gating is deferred to a follow-up. Today the registry
+  trusts whichever plugin calls `register_tool`; the existing
+  `ipc.call` capability check on the publisher's side is the gate.
+  A dedicated `mcp.publish_tool` capability would tighten this
+  further and pairs naturally with BL-099 (signed plugins).
 
 ---
 

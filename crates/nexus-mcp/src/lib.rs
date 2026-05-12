@@ -23,6 +23,9 @@ mod auth;
 mod client;
 mod config;
 pub mod core_plugin;
+/// DG-39 / PRD-14 §10 — runtime registry that lets plugins publish
+/// tools to the MCP server's exposed surface.
+pub mod dynamic_tools;
 /// Wire-mirror IPC arg/reply types — the authoritative contract that
 /// the schema generator and the shell consume (audit P1-3, #113).
 pub mod ipc;
@@ -33,5 +36,6 @@ pub use auth::{AuthError, McpAuth, McpAuthSecret, ResolvedAuth};
 pub use client::{McpClient, McpClientError};
 pub use config::{McpConfigError, McpHostConfig, McpServerSpec, McpTransport};
 pub use core_plugin::McpHostPlugin;
+pub use dynamic_tools::{DynamicTool, DynamicToolRegistry, RegistryError as ToolRegistryError};
 pub use pool::{ConnectionPool, PoolConfig};
 pub use server::NexusMcpServer;
