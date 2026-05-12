@@ -256,7 +256,9 @@ textarea:disabled {
 .settings-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -264,7 +266,10 @@ textarea:disabled {
 }
 
 .settings-panel {
-  background: var(--background-secondary);
+  /* Hex fallback guards against themes that override
+     --background-secondary with a translucent value. */
+  background: #242424;
+  background: var(--background-secondary, #242424);
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   width: min(1000px, 92vw);
@@ -274,6 +279,14 @@ textarea:disabled {
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
+
+/* Topbar doubles as the drag handle. The input and close button
+   suppress this cursor on themselves. */
+.settings-topbar--drag { cursor: grab; user-select: none; }
+.settings-topbar--dragging { cursor: grabbing; }
+.settings-topbar--drag > input,
+.settings-topbar--drag > button { cursor: auto; }
+.settings-topbar--drag > .settings-close { cursor: pointer; }
 
 .settings-rail {
   flex-shrink: 0;

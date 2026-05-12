@@ -2,7 +2,7 @@
 // Auto-generates settings UI from registered config schemas.
 // Plugins tab: lists core plugins + discovered community plugins with toggles.
 
-import { useState, useEffect, useRef, useCallback, useMemo, createElement } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, createElement, type MouseEvent as ReactMouseEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { PLUGIN_API_VERSION, type Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
@@ -225,6 +225,7 @@ type NavTab = BuiltInTab | string
 // writes under `plugin:<id>:...` so this key resolves to
 // `plugin:core.settings:last-tab` — same scheme as keybinding overrides.
 const LAST_TAB_STORAGE_KEY = 'plugin:core.settings:last-tab'
+const PANEL_OFFSET_STORAGE_KEY = 'plugin:core.settings:panel-offset'
 
 // `api` is supplied by the settings plugin's `views.register()` wrapper
 // in `index.ts` — the slot system itself doesn't pass props, so we
@@ -249,6 +250,67 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   const [navTab, setNavTab] = useState<NavTab>('general')
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Drag state — translates the panel from its centered resting
+  // position. Persisted so the user's chosen spot survives close/open.
+  const [offset, setOffset] = useState<{ x: number; y: number }>(() => {
+    try {
+      const raw = localStorage.getItem(PANEL_OFFSET_STORAGE_KEY)
+      if (!raw) return { x: 0, y: 0 }
+      const parsed = JSON.parse(raw) as { x?: unknown; y?: unknown }
+      const x = typeof parsed.x === 'number' ? parsed.x : 0
+      const y = typeof parsed.y === 'number' ? parsed.y : 0
+      return { x, y }
+    } catch {
+      return { x: 0, y: 0 }
+    }
+  })
+  const [dragging, setDragging] = useState(false)
+  const dragStartRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null)
+
+  const onDragStart = useCallback((e: ReactMouseEvent) => {
+    // Ignore drags that originate on interactive children — the input
+    // needs to receive its own pointer events, the close button needs
+    // its click. Only the bare topbar area initiates a drag.
+    const target = e.target as HTMLElement
+    if (target.closest('input, button, select, textarea, a')) return
+    e.preventDefault()
+    dragStartRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }
+    setDragging(true)
+  }, [offset.x, offset.y])
+
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e: MouseEvent) => {
+      const start = dragStartRef.current
+      if (!start) return
+      // Clamp so the panel can't be dragged entirely off-screen.
+      // 40px of the panel must remain in the viewport on every edge.
+      const maxX = Math.max(0, window.innerWidth / 2 - 40)
+      const maxY = Math.max(0, window.innerHeight / 2 - 40)
+      const nx = Math.max(-maxX, Math.min(maxX, start.ox + (e.clientX - start.x)))
+      const ny = Math.max(-maxY, Math.min(maxY, start.oy + (e.clientY - start.y)))
+      setOffset({ x: nx, y: ny })
+    }
+    const onUp = () => {
+      setDragging(false)
+      dragStartRef.current = null
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [dragging])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_OFFSET_STORAGE_KEY, JSON.stringify(offset))
+    } catch {
+      // storage may be unavailable in tests — non-fatal.
+    }
+  }, [offset])
 
   // Hydrate the last-opened tab the first time the panel opens. The
   // panel mounts with the overlay at boot (hidden until `visible`
@@ -344,6 +406,10 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
         className="settings-panel"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && close()}
+        style={{
+          transform: `translate(${offset.x}px, ${offset.y}px)`,
+          transition: dragging ? 'none' : 'transform 120ms ease-out',
+        }}
       >
         {/* Left rail — Obsidian-style flat nav with grouped sections.
             "Options" lists the built-in pages; "Core plugins" lists every
@@ -441,7 +507,10 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             Search lives in the topbar regardless of tab; an active query
             overrides the page body with cross-plugin search results. */}
         <div className="settings-main">
-          <div className="settings-topbar">
+          <div
+            className={`settings-topbar settings-topbar--drag${dragging ? ' settings-topbar--dragging' : ''}`}
+            onMouseDown={onDragStart}
+          >
             <input
               ref={inputRef}
               className="settings-search"
