@@ -48,14 +48,19 @@ export class FilesystemService {
   }
 
   async watch(path: string, handler: (event: FsEvent) => void): Promise<() => void> {
+    // Tauri's plugin-fs watcher emits `{ type, paths }` records; the
+    // SDK's published type is loose, so we narrow locally.
+    interface RawWatchEvent { type?: unknown; paths?: unknown }
     const unwatch = await watch(path, (event) => {
-      const kind = String((event as any).type ?? '')
+      const raw = event as RawWatchEvent
+      const kind = String(raw.type ?? '')
+      const paths = Array.isArray(raw.paths) ? raw.paths : []
       handler({
         kind: kind.includes('create') ? 'created'
             : kind.includes('remove') ? 'deleted'
             : kind.includes('rename') ? 'renamed'
             : 'modified',
-        path: String((event as any).paths?.[0] ?? path),
+        path: String(paths[0] ?? path),
       })
     })
     return unwatch

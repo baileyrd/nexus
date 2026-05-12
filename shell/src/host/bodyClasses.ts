@@ -27,13 +27,17 @@ function setClass(name: string, on: boolean) {
   document.body.classList.toggle(name, on)
 }
 
+interface NavigatorWithUA extends Navigator {
+  userAgentData?: { platform?: string }
+}
+
 function detectPlatformClass(): 'mod-windows' | 'mod-macos' | 'mod-linux' | null {
   // `userAgentData.platform` is the modern, non-deprecated source; fall
   // back to `navigator.platform` on older Chromium / non-Chromium UAs.
-  const nav: any = typeof navigator !== 'undefined' ? navigator : null
+  const nav = typeof navigator !== 'undefined' ? (navigator as NavigatorWithUA) : null
   const raw =
-    (nav?.userAgentData?.platform as string | undefined) ??
-    (nav?.platform as string | undefined) ??
+    nav?.userAgentData?.platform ??
+    nav?.platform ??
     ''
   const p = raw.toLowerCase()
   if (p.includes('win')) return 'mod-windows'

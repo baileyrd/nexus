@@ -10,7 +10,6 @@ import {
   setKernel,
 } from './searchRuntime'
 
-const VIEW_ID = 'nexus.search.view'
 const COMMAND_FOCUS = 'nexus.search.focus'
 
 const EVENT_FILE_OPEN = 'files:open'

@@ -189,7 +189,6 @@ function ChangesTab() {
   const commitMessage = useGitPanelStore((s) => s.commitMessage)
   const committing   = useGitPanelStore((s) => s.committing)
   const pushAfterCommit = useGitPanelStore((s) => s.pushAfterCommit)
-  const setSelectedFile = useGitPanelStore((s) => s.setSelectedFile)
   const setCommitMessage = useGitPanelStore((s) => s.setCommitMessage)
   const setCommitting  = useGitPanelStore((s) => s.setCommitting)
   const setPush        = useGitPanelStore((s) => s.setPushAfterCommit)

@@ -84,7 +84,6 @@ function extendByBlock(dir: 'down' | 'up'): (view: EditorView) => boolean {
       let lineNo = line.number + 1
       while (lineNo <= doc.lines && doc.line(lineNo).text.trim() === '') lineNo++
       if (lineNo > doc.lines) return false
-      const start = doc.line(lineNo)
       let endLineNo = lineNo
       while (endLineNo < doc.lines && doc.line(endLineNo + 1).text.trim() !== '') endLineNo++
       const end = doc.line(endLineNo)
@@ -99,7 +98,6 @@ function extendByBlock(dir: 'down' | 'up'): (view: EditorView) => boolean {
     let lineNo = line.number - 1
     while (lineNo >= 1 && doc.line(lineNo).text.trim() === '') lineNo--
     if (lineNo < 1) return false
-    const end = doc.line(lineNo)
     let startLineNo = lineNo
     while (startLineNo > 1 && doc.line(startLineNo - 1).text.trim() !== '') startLineNo--
     const start = doc.line(startLineNo)

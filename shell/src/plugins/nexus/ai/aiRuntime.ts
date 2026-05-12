@@ -277,7 +277,7 @@ export async function hydrateConfig(api: PluginAPI): Promise<void> {
     const cfg = await api.kernel.invoke<AiConfig>(AI_PLUGIN_ID, HANDLER_CONFIG, {})
     useAiStore.getState().setConfig(cfg)
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] hydrateConfig failed', err)
   }
 }
@@ -407,7 +407,7 @@ export async function pushUserConfig(
     )
     useAiStore.getState().setConfig(cfg)
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] pushUserConfig failed', err)
   }
 }
@@ -632,7 +632,7 @@ export async function loadSessions(api: PluginAPI): Promise<void> {
     useAiStore.getState().setSessions(coerceSessionList(raw))
   } catch (err) {
     // Plugin may not be wired yet — swallow per legacy (ChatPanel.tsx:287).
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] loadSessions failed', err)
     useAiStore.getState().setSessions([])
   } finally {
@@ -735,7 +735,7 @@ export async function loadSession(api: PluginAPI, id: string): Promise<void> {
     useAiStore.getState().hydrateTurns(turns)
     useAiStore.getState().setActiveSessionId(id)
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] loadSession failed', err)
   }
 }
@@ -791,7 +791,7 @@ export async function saveCurrentSession(
     await loadSessions(api)
     return id
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] saveCurrentSession failed', err)
     return null
   }
@@ -807,7 +807,7 @@ export async function deleteSession(api: PluginAPI, id: string): Promise<void> {
   try {
     await api.kernel.invoke<unknown>(AI_PLUGIN_ID, HANDLER_SESSION_DELETE, { id })
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] deleteSession failed', err)
     // Still proceed to refresh the list — legacy ChatPanel.tsx:798
     // pattern (warn + carry on; the file may already be gone).
@@ -851,7 +851,7 @@ export async function renameSession(
       )
       turnsToWrite = decodeTurns(raw?.turns)
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       clientLogger.warn('[nexus.ai] renameSession load failed', err)
       return
     }
@@ -865,7 +865,7 @@ export async function renameSession(
       updated_at: new Date().toISOString(),
     })
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     clientLogger.warn('[nexus.ai] renameSession save failed', err)
     return
   }

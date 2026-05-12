@@ -95,31 +95,6 @@ function findFirstTabs(node: WorkspaceParent): Tabs | null {
   return null
 }
 
-/**
- * Ascend the tree from a leaf, walking through parent Tabs and Splits, to
- * find the nearest containing Sidedock (if any). Because Nexus leaves hold a
- * direct `parent` back-pointer that is only one step (the Tabs), and Tabs
- * don't themselves back-point to their split, this helper walks the whole
- * tree looking for a Tabs that contains the leaf and returns its dock
- * ancestor.
- */
-function findAncestorSidedock(
-  leaf: Leaf,
-  roots: WorkspaceParent[],
-): Sidedock | null {
-  for (const root of roots) {
-    const found = findLeafAncestry(leaf, root, [])
-    if (!found) continue
-    // `found` is the chain [root, ..., parentTabs] leading to the leaf.
-    for (let i = found.length - 1; i >= 0; i--) {
-      const node = found[i]
-      if (isSidedock(node)) return node
-    }
-    return null
-  }
-  return null
-}
-
 function isSidedock(node: WorkspaceParent | undefined): node is Sidedock {
   return !!node && node.kind === 'split' && 'side' in node
 }
@@ -915,11 +890,6 @@ function serialize(): WorkspaceJSON {
 // contract. Only nodes/leaves produced by the default layout (when json is
 // absent) get fresh ids via crypto.randomUUID().
 // ---------------------------------------------------------------------------
-
-interface HydrateBuildResult {
-  node: WorkspaceParent
-  pendingLeaves: Array<{ leaf: Leaf; viewState: import('./types.ts').ViewState }>
-}
 
 function hydrateNode(
   serialized: SerializedNode,

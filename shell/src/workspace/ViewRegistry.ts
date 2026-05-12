@@ -109,7 +109,7 @@ const createEmptyView: ViewCreator = (leaf: Leaf): View => ({
 
 // Guard against duplicate registration on HMR / repeated module evaluation.
 declare global {
-  // eslint-disable-next-line no-var
+   
   var __nexusEmptyViewRegistered: boolean | undefined
 }
 

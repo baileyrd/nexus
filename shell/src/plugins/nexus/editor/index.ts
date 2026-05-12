@@ -37,7 +37,6 @@ import { createCommentsApi } from '../comments/commentsApi'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
 
-const VIEW_ID = 'nexus.editor.view'
 const EVENT_FILE_OPEN = 'files:open'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 

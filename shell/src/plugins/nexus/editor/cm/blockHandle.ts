@@ -169,7 +169,6 @@ function reorderBlock(
 ): void {
   const doc = view.state.doc
   if (source.from === target.from) return
-  const sourceText = doc.sliceString(source.from, source.to)
 
   // Work in line numbers — splice the source block out of the list,
   // then rebuild the rest joined by blank lines. The current cursor

@@ -196,7 +196,7 @@ export function Icon({ name, size = 16, ...rest }: IconProps): ReactElement {
   if (!entry) {
     if (!warnedNames.has(name)) {
       warnedNames.add(name)
-      // eslint-disable-next-line no-console
+       
       console.warn(`[Icon] unknown name "${name}" — rendering fallback`)
     }
     entry = FALLBACK_ENTRY

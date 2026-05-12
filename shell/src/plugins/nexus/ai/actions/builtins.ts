@@ -74,7 +74,7 @@ function surfaceResult(api: PluginAPI, action: AiAction, text: string): void {
     type: 'info',
     message: `${action.label}: ${trimmed.slice(0, 240)}${trimmed.length > 240 ? '…' : ''}`,
   })
-  // eslint-disable-next-line no-console
+   
   clientLogger.info(`[nexus.ai.actions] ${action.id} →`, trimmed)
 }
 

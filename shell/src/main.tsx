@@ -29,7 +29,7 @@ import { closePopoutTauri } from './workspace/popoutWindowBridge'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
-import { useThemeStore } from './stores/themeStore'
+import './stores/themeStore'
 import type { Plugin } from './types/plugin'
 import {
   scanCommunityPlugins,
@@ -371,7 +371,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
 
   const { useSlotStore } = await import('./registry/SlotRegistry')
   const slotSummary = Object.entries(useSlotStore.getState().slots)
-    .map(([k, v]) => `${k}:${(v as any[]).length}`)
+    .map(([k, v]) => `${k}:${v.length}`)
     .join(' ')
   clientLogger.info(`[Boot] Slots: ${slotSummary}`)
 

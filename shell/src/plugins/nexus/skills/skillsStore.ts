@@ -21,7 +21,7 @@ function emitChange(event: { id: string; action: ChangeAction }): void {
     try {
       listener(event)
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       clientLogger.warn('[nexus.skills] change listener threw', err)
     }
   }
@@ -608,7 +608,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
       try {
         await api.invoke<unknown>(SKILLS_PLUGIN_ID, CMD_RELOAD, {})
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         clientLogger.warn('[nexus.skills] reload after save failed', err)
       }
       set({ saving: false, editingId: null, draft: null, saveError: null })
@@ -634,7 +634,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
       try {
         await api.invoke<unknown>(SKILLS_PLUGIN_ID, CMD_RELOAD, {})
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         clientLogger.warn('[nexus.skills] reload after delete failed', err)
       }
       set((s) => ({

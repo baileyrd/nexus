@@ -333,8 +333,7 @@ export function isInSkipZone(text: string, caret: number): boolean {
   // fences at the start of a line to avoid inline-code false positives.
   const fenceRe = /^```/gm
   let count = 0
-  let m: RegExpExecArray | null
-  while ((m = fenceRe.exec(beforeCaret)) !== null) {
+  while (fenceRe.exec(beforeCaret) !== null) {
     count++
   }
   if (count % 2 === 1) return true

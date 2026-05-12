@@ -864,18 +864,6 @@ function strokeRoundRect(
   ctx.stroke()
 }
 
-function clipRoundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): void {
-  pathRoundRect(ctx, x, y, w, h, r)
-  ctx.clip()
-}
-
 function pathRoundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -894,35 +882,6 @@ function pathRoundRect(
   ctx.closePath()
 }
 
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-): void {
-  if (!text) return
-  const paragraphs = text.split('\n')
-  let cy = y
-  for (const para of paragraphs) {
-    const words = para.split(/\s+/)
-    let line = ''
-    for (const word of words) {
-      const next = line ? line + ' ' + word : word
-      if (ctx.measureText(next).width > maxWidth && line) {
-        ctx.fillText(line, x, cy)
-        cy += lineHeight
-        line = word
-      } else {
-        line = next
-      }
-    }
-    if (line) ctx.fillText(line, x, cy)
-    cy += lineHeight
-  }
-}
-
 function drawLabelTab(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -937,12 +896,6 @@ function drawLabelTab(
   ctx.fillRect(x, y - 14, w, 14)
   ctx.fillStyle = fg
   ctx.fillText(label, x + 6, y - 3)
-}
-
-function basenameOf(path: string): string {
-  if (!path) return ''
-  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  return i >= 0 ? path.slice(i + 1) : path
 }
 
 /** Best-effort hex → rgba with alpha. Falls back to the original colour

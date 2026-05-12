@@ -9,7 +9,7 @@ import type { BasesTabState, ViewMode } from './basesStore'
 
 export type PersistableMode = ViewMode
 
-export function isPersistableMode(m: ViewMode): m is PersistableMode {
+export function isPersistableMode(_m: ViewMode): _m is PersistableMode {
   // Every ViewMode now has a ViewType counterpart.
   return true
 }

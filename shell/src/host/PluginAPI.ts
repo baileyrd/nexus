@@ -118,6 +118,11 @@ export function buildPluginAPI(
 
     // ─── Views ─────────────────────────────────────────────────────────────
     views: {
+      // Slot registry stores components with heterogeneous prop shapes
+      // (some take api, some take nothing). `any` is the canonical React
+      // typing for a generic component registry — `unknown` would force
+      // every contributor to cast at registration time.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       register(viewId, config: { slot: SlotId; component: ComponentType<any>; priority?: number }) {
         useSlotStore.getState().register(config.slot, {
           id: viewId,

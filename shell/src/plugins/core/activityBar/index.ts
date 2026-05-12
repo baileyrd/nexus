@@ -1,6 +1,6 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ActivityBarView } from './ActivityBarView'
-import { useActivityBarStore } from './activityBarStore'
+import { useActivityBarStore, type ActivityBarItem } from './activityBarStore'
 
 export { useActivityBarStore } from './activityBarStore'
 export type { ActivityBarItem } from './activityBarStore'
@@ -26,8 +26,7 @@ export const activityBarPlugin: Plugin = {
     })
 
     api.events.on('activityBar:itemAdded', (config: unknown) => {
-      const c = config as any
-      useActivityBarStore.getState().addItem(c)
+      useActivityBarStore.getState().addItem(config as ActivityBarItem)
     })
 
     api.events.on('activityBar:itemRemoved', ({ id }: { id: string }) => {

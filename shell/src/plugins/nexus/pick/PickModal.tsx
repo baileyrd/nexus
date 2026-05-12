@@ -28,7 +28,7 @@ export function PickModal() {
   // itself — the request payload (items / title) is immutable per
   // request and re-firing on every store mutation would clobber the
   // user's typed filter while they're scrolling rows.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     setFilter('')
     setSelectedIdx(0)

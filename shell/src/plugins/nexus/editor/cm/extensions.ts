@@ -84,7 +84,7 @@ export function baselineExtensions(
       kernelClient,
       applyCanonical,
       onError = (m, e) => {
-        // eslint-disable-next-line no-console
+         
         clientLogger.error(`[nexus.editor] ${m}:`, e)
       },
     } = opts.kernelUndo

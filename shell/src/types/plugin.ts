@@ -294,6 +294,8 @@ export interface CommandEntry {
 export interface ViewsAPI {
   register(viewId: string, config: {
     slot: SlotId
+    // Heterogeneous component registry — see PluginAPI.ts for rationale.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     component: ComponentType<any>
     priority?: number
   }): void

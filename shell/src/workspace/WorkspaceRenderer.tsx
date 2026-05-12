@@ -171,28 +171,12 @@ export function Workspace(): JSX.Element {
 
 const COLLAPSE_THRESHOLD = 120
 const DOCK_MIN_SIZE = 150
-// SH-004: Default width for the collapsed-ribbon placeholder. The actual visual
-// width is overridden by the CSS token --chrome-icon-size from the density block.
-const RIBBON_WIDTH = 24
-// Height of the collapsed bottom-drawer strip. Roughly matches a single
-// tab row — enough to host a label + expand button without eating space.
-const BOTTOM_COLLAPSED_HEIGHT = 28
 
 type DockSide = 'left' | 'right' | 'bottom'
 
 interface SidedockFrameProps {
   side: DockSide
   dock: Sidedock
-}
-
-const COLLAPSED_BAR_STYLE: CSSProperties = {
-  width: 'var(--chrome-icon-size)',
-  flex: '0 0 var(--chrome-icon-size)',
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'center',
-  background: 'var(--background-secondary)',
-  borderRight: '1px solid var(--divider-color)',
 }
 
 function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {

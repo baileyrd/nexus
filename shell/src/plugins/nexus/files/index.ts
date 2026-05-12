@@ -17,7 +17,6 @@ import { setApi } from './runtime'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useStatusStore } from '../status/statusStore'
 
-const VIEW_ID = 'nexus.files.tree'
 const COMMAND_FOCUS = 'nexus.files.focus'
 // WI-21: context-menu / shortcut commands. Surface the same actions
 // the legacy shell's FileTree.tsx exposed via right-click; bind
@@ -33,7 +32,6 @@ const EVENT_FILE_OPEN = 'files:open'
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
-const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 // Topic strings verified against crates/nexus-storage/src/core_plugin.rs::publish_event.
 const TOPIC_FILE_CREATED = 'com.nexus.storage.file_created'
 const TOPIC_FILE_MODIFIED = 'com.nexus.storage.file_modified'

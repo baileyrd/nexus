@@ -25,6 +25,8 @@ export type { SlotId }
 export interface SlotEntry {
   id: string
   pluginId: string
+  // Heterogeneous component registry — see PluginAPI.ts for rationale.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   component: ComponentType<any>
   priority: number
 }
