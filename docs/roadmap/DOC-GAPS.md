@@ -791,7 +791,7 @@ context-impl regressions surface in CI. All three tests pass:
 **Severity:** Should-fix (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 ADR 0020 specifies a `popoutCompatible` allowlist for plugins that
 can render in pop-out windows. Nothing verifies that new chrome-only
@@ -800,6 +800,29 @@ runtime surprise.
 
 **Definition of done:** Add a contract test verifying every shipped
 plugin's `popoutCompatible` value matches its actual capability.
+
+### Outcome
+
+New contract test `shell/src/plugins/popoutCompatible.test.ts`
+(surfaced via `shell/tests/popout-compatible.test.ts`) statically
+parses each plugin's manifest declaration out of its source file and
+asserts it agrees with the catalog entry. The manifest is the plugin's
+self-described capability; the catalog is what the runtime filters on
+at popout boot. Drift between the two is the "runtime surprise" the
+gap calls out.
+
+The test caught three real bugs on first run:
+
+1. `nexus.osArchitecture`, `nexus.osObservability`, and
+   `nexus.viewBuilder` declared `popoutCompatible: false` in their
+   manifests but the catalog entries were missing the flag. Catalog
+   entries fixed in `shell/src/plugins/catalog.ts`.
+2. The popout-boot filter in `shell/src/main.tsx` only applied to
+   `DEFAULT_ON_PLUGINS`. User-enabled opt-in plugins from
+   `DEFAULT_OFF_PLUGINS` were loaded unconditionally, so a chrome-only
+   opt-in (e.g. one of the three above, if a user enabled it) still
+   booted into popouts regardless of the flag. The boot path now
+   applies the same `popoutCompatible !== false` filter to both sets.
 
 ---
 

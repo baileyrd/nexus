@@ -470,18 +470,21 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.osArchitecture', name: 'Architecture',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
     description: 'Render architecture.md as a domain → task hierarchy with drift detection against installed skills + workflows (BL-054 Phase 2). Pair with `nexus forge init --template os`.',
     load: () => import('./nexus/osArchitecture').then(m => m.osArchitecturePlugin),
   },
   {
     id: 'nexus.osObservability', name: 'Observability',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
     description: 'Three-tab observability panel — usage rollup over the AI activity log, foundation-workflow status with manual run, and a vault-feed of file activity under raw/, wiki/, output/ (BL-054 Phase 4).',
     load: () => import('./nexus/observability').then(m => m.osObservabilityPlugin),
   },
   {
     id: 'nexus.viewBuilder', name: 'View Builder',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
     description: 'Save / switch / delete named workspace layouts under .forge/layouts/. Read-only inventory of registered view types. Drag-drop canvas + export-as-plugin are deferred follow-ups (BL-067 Phase 1).',
     load: () => import('./nexus/viewBuilder').then(m => m.viewBuilderPlugin),
   },
