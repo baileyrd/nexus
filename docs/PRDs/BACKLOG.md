@@ -516,6 +516,16 @@ Previously: design-only docs without committed timelines. **Scoped into the impl
 
 ---
 
+## Research-surfaced ideas (2026-05, unscoped)
+
+Three external-project assessments under [`../research/`](../research/) each carry an explicit Adopt / Adapt / Skip column. The Adopt and Adapt items aren't scoped into BL-NN entries yet — they're held here so they're discoverable until a decision lands. Skip items stay in the research doc only.
+
+- **GitNexus capability porting** — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Seven scoped ports recommended: cross-repo code intel index (MVP), diff→symbol detection in `nexus-git`, `codegraph.impact(symbol_id, depth)` blast-radius handler, BM25 over code symbols, three new MCP tools (`nexus_context` / `nexus_impact` / `nexus_detect_changes`), `ai.generate_docs(symbol_id)` doc generator, optional community/clustering pass for large forges. Each lands inside the existing `nexus-storage` / `nexus-git` / `nexus-ai` / `nexus-mcp` crates — no new top-level subsystem. Promote to BL-NN entries when prioritized.
+- **AFFiNE portability** — see [../research/affine-portability-assessment.md](../research/affine-portability-assessment.md). 9 Adopt items (snapshot API, command pattern, linked-docs UX, database views, mind-map output, multimodal embed pipeline, custom block schemas pattern, inline-embed extensions pattern, widget extensions — last two already adopted in spirit) plus 8 Adapt items (canvas, PDF embed, slide gen, image gen, custom blocks, AI panel UX, inline primitive, doc-on-canvas). 11 items judged already-adopted-in-spirit. See §6 of the assessment for recommended next steps if pursued.
+- **Anything-LLM portability** — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Adapt items worth surfacing: per-user scoped API token issuance (extends `nexus-security` + keyring); a `nexus-audio` crate with Whisper STT + TTS provider-trait backends; native browser STT/TTS via Web Speech API in the Tauri webview. Skip items (multi-user, PostHog telemetry, cloud deploys, scheduled-jobs engine, "desktop app") are settled as out-of-scope per existing PRDs/ADRs.
+
+---
+
 ## Settings extraction queue
 
 Inventory of named-constant / hardcoded settings candidates lives in [../../shell/HARDCODED_SETTINGS_AUDIT.md](../../shell/HARDCODED_SETTINGS_AUDIT.md). Pickable in any order; each is a 1–2 hour change.

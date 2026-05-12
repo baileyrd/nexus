@@ -9,10 +9,10 @@ decisions see [`../adr/`](../adr/).
 
 | Doc | What it covers |
 |---|---|
-| [`affine-portability-assessment.md`](affine-portability-assessment.md) | How portable AffinE concepts are to Nexus. |
-| [`anything-llm-assessment.md`](anything-llm-assessment.md) | AnythingLLM feature audit and adapt/skip ratings. |
+| [`affine-portability-assessment.md`](affine-portability-assessment.md) | AFFiNE capability audit. Adopt / Adapt / Skip per item. **Adopt + Adapt items cross-listed** in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Research-surfaced ideas". |
+| [`anything-llm-assessment.md`](anything-llm-assessment.md) | AnythingLLM feature audit. Adopt / Adapt / Skip per item. **Adapt items cross-listed** in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Research-surfaced ideas" (scoped API tokens, audio crate, browser STT/TTS). |
 | [`commandbook-evaluation.md`](commandbook-evaluation.md) | Command-Book product evaluation. |
-| [`gitnexus-capability-assessment.md`](gitnexus-capability-assessment.md) | GitNexus capability mapping. |
+| [`gitnexus-capability-assessment.md`](gitnexus-capability-assessment.md) | GitNexus capability mapping. **7 scoped ports** cross-listed in [`../PRDs/BACKLOG.md`](../PRDs/BACKLOG.md) "Research-surfaced ideas" (cross-repo code intel, diff→symbol detection, impact handler, BM25, MCP tools, doc generator, community pass). |
 | [`nexus-vs-tolaria.md`](nexus-vs-tolaria.md) | Side-by-side architectural comparison with Tolaria. |
 | [`nexus-vs-tolaria-ui.md`](nexus-vs-tolaria-ui.md) | UI/shell deep-dive comparison with Tolaria. |
 | [`nexus-borrowings-from-tolaria.md`](nexus-borrowings-from-tolaria.md) | What Nexus could borrow from Tolaria, ranked. |
