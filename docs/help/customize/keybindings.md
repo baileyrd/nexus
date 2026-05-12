@@ -33,7 +33,8 @@ list.
 | Comment thread on selection | `Cmd+K Cmd+C` | `Ctrl+K Ctrl+C` |
 | Move active tab left | `Cmd+Alt+Left` | `Ctrl+Alt+Left` |
 | Move active tab right | `Cmd+Alt+Right` | `Ctrl+Alt+Right` |
-| New terminal session | — | `Ctrl+Shift+T` |
+| Toggle integrated terminal | `Cmd+\`` | `Ctrl+\`` |
+| Open theme picker | `Cmd+Shift+T` | `Ctrl+Shift+T` |
 | Quit | `Cmd+Q` | `Ctrl+Q` |
 
 ## Customize a binding
