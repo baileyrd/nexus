@@ -618,7 +618,7 @@ Two PRD-13 (Skills) claims in `IMPLEMENTATION_STATUS.md`:
 **Severity:** Should-fix (status-drift)
 **Kind:** `status-drift`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §ADRs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 ADR 0014 deprecated the `ribbon` slot/concept. `ribbon` still appears
 in `packages/nexus-extension-api/src/sandbox/{context,runtime}.ts`
@@ -627,6 +627,33 @@ the API surface) or the ADR needs a "left in place for compat" note.
 
 **Definition of done:** Decide and document. If removing,
 breaking-change pass through extension-api consumers.
+
+**Resolution.** The specific finding was already stale at audit time:
+`grep -r ribbon packages/nexus-extension-api/` returns zero matches,
+and `git log --all -S ribbon -- packages/nexus-extension-api/` shows
+no history of the term ever landing there. The script-plugin API is
+`activityBar`-only.
+
+What remains in the tree:
+
+- WASM manifest schema in `crates/nexus-plugins/src/{lib.rs,manifest.rs}`
+  still uses `ui_ribbon_item` / `UiRibbonItemReg` / `UiRibbonItemContribution`
+  + `ui_ribbon_items()`. Rename is a breaking manifest change for WASM
+  plugin authors; only in-tree consumer is `plugins/hello-nexus/manifest.toml`,
+  so the cost is small but there are no external WASM authors yet to
+  justify churn either. **Deferred** to a marketplace-shaped ABI break
+  (pair with WI-44 manifest versioning).
+- Shell-internal CSS class names (`.workspace-ribbon`, `--ribbon-width`,
+  body class `show-ribbon`) stay per ADR 0014's original "Consequences"
+  section — Obsidian-parity selectors used by every Obsidian-derived
+  theme.
+
+Documented both decisions in a new "Addendum 2026-05-12 — residual
+`ribbon` surfaces audit" block at the bottom of ADR 0014, so future
+readers know which residues are deliberate (CSS, manifest compat) and
+which are pending (manifest rename gated on WI-44). PRD-04 §1.4
+already honestly documents the legacy `[[registrations.ui_ribbon_item]]`
+manifest key — no edit needed there.
 
 ---
 
