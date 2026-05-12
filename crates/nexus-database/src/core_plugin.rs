@@ -12,7 +12,7 @@
 //!
 //! Invokers (CLI / TUI) reach these via
 //! `ipc_call("com.nexus.database", …)` instead of linking `nexus-database`
-//! directly (invariant #3 in `docs/ARCHITECTURE.md` §7).
+//! directly (invariant #3 in `docs/architecture/C4.md` §7).
 
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};

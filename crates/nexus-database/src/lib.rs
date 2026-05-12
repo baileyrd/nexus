@@ -11,7 +11,7 @@
 //! surfaces its pure helpers (CSV import/export, formula evaluation) over
 //! IPC as `com.nexus.database`. Invokers (CLI / TUI) reach these via
 //! `ipc_call("com.nexus.database", …)` rather than linking the library
-//! directly (invariant #3 in `docs/ARCHITECTURE.md` §7).
+//! directly (invariant #3 in `docs/architecture/C4.md` §7).
 //!
 //! Callers who need to run SQL queries against bases should go through
 //! `ipc_call("com.nexus.storage", "base_query", …)` instead.

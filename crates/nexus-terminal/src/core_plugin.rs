@@ -15,7 +15,7 @@
 //! the plugin layer (`nexus-plugins`). Every other module stays a pure
 //! library — the kernel bus reaches the terminal through exactly this
 //! plugin, nowhere else. That preserves invariant #3 from
-//! `docs/ARCHITECTURE.md` §7 ("invokers must reach terminal features
+//! `docs/architecture/C4.md` §7 ("invokers must reach terminal features
 //! via `com.nexus.terminal`, not by linking the library").
 //!
 //! # Handlers

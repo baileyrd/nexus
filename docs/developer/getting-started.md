@@ -133,7 +133,7 @@ rebuild. No restart of Nexus required.
 - **You want to extend the editor.** Read
   [Editor / overview](editor/overview.md).
 - **You want a more rigorous treatment of every step above.** Read
-  [`../plugin-authors/quickstart.md`](../plugin-authors/quickstart.md)
-  (the long-form version of this page) and
-  [`../../shell/docs/writing-a-plugin.md`](../../shell/docs/writing-a-plugin.md)
-  (the in-depth shell-plugin reference).
+  [`../shell/writing-a-plugin.md`](../shell/writing-a-plugin.md)
+  — the in-depth shell-plugin reference (manifest fields, activation
+  events, sandbox model, capability declarations, slot system,
+  worked word-count example).

@@ -764,7 +764,7 @@ fn register_core_plugins(
     // over IPC as `com.nexus.database`; SQL-backed base queries go through
     // `com.nexus.storage` (`base_index` / `base_list` / `base_query`) which
     // is the sole owner of the forge's SQLite database. See
-    // ARCHITECTURE.md §4.2.
+    // docs/architecture/C4.md §4.2.
     loader
         .register_core(
             core_manifest_with_ipc(

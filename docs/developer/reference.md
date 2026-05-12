@@ -77,14 +77,12 @@ Full ADR index: [`docs/adr/README.md`](../adr/README.md).
 The `nexus plugin scaffold` command copies these for you — see
 [Getting started](getting-started.md).
 
-## Existing plugin-author docs (deeper)
+## Shell plugin reference (deeper)
 
 | Source | What it covers |
 |---|---|
-| [`docs/plugin-authors/quickstart.md`](../plugin-authors/quickstart.md) | Long-form walkthrough — the in-depth version of [Getting started](getting-started.md). |
-| [`docs/plugin-authors/README.md`](../plugin-authors/README.md) | Plugin-authors hub (curated journey). |
-| [`shell/docs/writing-a-plugin.md`](../../shell/docs/writing-a-plugin.md) | In-depth shell plugin reference (manifest, sandbox, capabilities, slot system, worked example). |
-| [`shell/docs/plugin-system.md`](../../shell/docs/plugin-system.md) | `Plugin` object shape, manifest anatomy, core vs. community details. |
+| [`docs/shell/writing-a-plugin.md`](../shell/writing-a-plugin.md) | In-depth shell plugin reference (manifest, sandbox, capabilities, slot system, worked example). |
+| [`docs/shell/plugin-system.md`](../shell/plugin-system.md) | `Plugin` object shape, manifest anatomy, core vs. community details. |
 
 ## When something's missing
 

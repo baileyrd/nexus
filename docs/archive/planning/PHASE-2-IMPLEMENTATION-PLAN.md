@@ -7,7 +7,7 @@
 **Author:** Claude (audit + planning run)
 **Phase:** 2 of 6 in the shell-migration roadmap (per [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 and [ADR 0011](../adr/0011-adopt-plugin-first-shell.md))
 **Prerequisite:** [Phase 1](./PHASE-1-IMPLEMENTATION-PLAN.md) acceptance complete.
-**Source of truth for scope:** [`PARITY-CHECKLIST.md`](./PARITY-CHECKLIST.md) + [`Parity-Checklist.xlsx`](../Parity-Checklist.xlsx) (23 work items).
+**Source of truth for scope:** [`PARITY-CHECKLIST.md`](./PARITY-CHECKLIST.md) + [`Parity-Checklist.xlsx`](./Parity-Checklist.xlsx) (23 work items).
 
 ---
 

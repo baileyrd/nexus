@@ -243,11 +243,11 @@ cargo build -p nexus-tui        # Build just the TUI
 
 ### Key Docs
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — current architecture overview
+- [`docs/architecture/C4.md`](docs/architecture/C4.md) — current architecture overview
 - [`docs/adr/`](docs/adr/) — architecture decision records
 - [`docs/PRDs/`](docs/PRDs/00-index.md) — product requirements (see `IMPLEMENTATION_STATUS.md` for current state)
-- [`docs/writing-your-first-plugin.md`](docs/writing-your-first-plugin.md) — plugin quickstart
-- [`shell/docs/writing-a-plugin.md`](shell/docs/writing-a-plugin.md) — plugin author reference
+- [`docs/developer/getting-started.md`](docs/developer/getting-started.md) — plugin quickstart
+- [`docs/shell/writing-a-plugin.md`](docs/shell/writing-a-plugin.md) — plugin author reference
 - [`docs/archive/planning/`](docs/archive/planning/) — historical phase plans and audits
 
 ## License

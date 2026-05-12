@@ -18,7 +18,7 @@ your issue tracker seed or copy into whatever system you run.
   produced the 6-phase roadmap. **Phase 2 is implemented by this file.**
 - [`adr/0011-adopt-plugin-first-shell.md`](../adr/0011-adopt-plugin-first-shell.md) —
   the decision this checklist executes on (Status: Accepted, 2026-04-23).
-- [`SHELL-COMPARISON.md`](./SHELL-COMPARISON.md) + [`Shell-Capability-Comparison.xlsx`](../Shell-Capability-Comparison.xlsx) —
+- [`SHELL-COMPARISON.md`](./SHELL-COMPARISON.md) + [`Shell-Capability-Comparison.xlsx`](./Shell-Capability-Comparison.xlsx) —
   the comparison matrix (115 rows). This checklist is the distilled
   ticket form of its `only-app` + `partial` + `architectural-diff` rows.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — the freeze policy that

@@ -22,7 +22,7 @@ const FORBIDDEN: &[(&str, &str)] = &[
     ("nexus-database", "nexus-storage"),
     // Invokers must reach pure-logic database helpers (CSV import/export,
     // formula eval) through `ipc_call("com.nexus.database", …)` rather
-    // than linking `nexus-database` directly. See ARCHITECTURE.md §7 #3.
+    // than linking `nexus-database` directly. See docs/architecture/C4.md §7 #3.
     ("nexus-cli", "nexus-database"),
     ("nexus-tui", "nexus-database"),
     // `nexus-storage` is the sole owner of the forge's SQLite database:

@@ -14,9 +14,9 @@ PHASE-3-IMPLEMENTATION-PLAN.md §5"), and because the raw findings
 in the audits are useful history even when the specific remediation
 has shipped.
 
-**Current architecture docs live two levels up**
-(`docs/ARCHITECTURE.md`, `docs/leaf-architecture.md`,
-`docs/legacy-shell-retirement.md`) and in `docs/adr/` (architecture
+**Current architecture docs live in `docs/architecture/`**
+(`C4.md`, `invariants.md`, `leaf-architecture.md`,
+`legacy-shell-retirement.md`) and in `docs/adr/` (architecture
 decision records). Go there first for anything load-bearing.
 
 Contents:

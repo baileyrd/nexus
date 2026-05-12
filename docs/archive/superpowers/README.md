@@ -36,7 +36,7 @@ go to:
 - [`docs/PRDs/`](../../PRDs/) — current product requirements (PRDs 01–17).
 - [`docs/PRDs/IMPLEMENTATION_STATUS.md`](../../PRDs/IMPLEMENTATION_STATUS.md) —
   rolling tracker of PRD status.
-- [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) — current C4-level
+- [`docs/architecture/C4.md`](../../architecture/C4.md) — current C4-level
   architecture.
 - [`docs/adr/`](../../adr/) — architecture decision records.
 

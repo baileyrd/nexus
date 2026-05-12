@@ -46,4 +46,5 @@ Cross-subsystem deep-dives done in a single sweep. Each scores the subsystem
 
 | Audit | Purpose |
 |---|---|
-| [`DOCS-AUDIT-2026-04-30.md`](DOCS-AUDIT-2026-04-30.md) | Doc-set audit that drove the `docs-reorg` branch. Kept as audit-trail snapshot. |
+| [`DOCS_AUDIT_2026-04-28.md`](DOCS_AUDIT_2026-04-28.md) | Cross-PRD docs audit — items spec'd in a PRD but not yet built. Source for several BACKLOG verification entries. |
+| [`DOCS-AUDIT-2026-04-30.md`](DOCS-AUDIT-2026-04-30.md) | Whole-doc-set audit that drove the `docs-reorg` branch. Kept as audit-trail snapshot. |
