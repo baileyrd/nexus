@@ -1222,7 +1222,7 @@ every round" into PRD-15 §7's risk-table-aware behaviour.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 specifies 6 built-in agent classes. Three archetype prompts
 shipped (`researcher`, `writer`, `coder`). Missing per the PRD:
@@ -1230,6 +1230,42 @@ shipped (`researcher`, `writer`, `coder`). Missing per the PRD:
 
 **Definition of done:** Build out the three missing archetypes, or
 amend PRD-15 to reflect a 3-archetype design.
+
+### Outcome
+
+Built the three missing archetypes:
+
+- `AUDITOR_SYSTEM_PROMPT` + `AUDITOR_ID =
+  "com.nexus.agent.auditor"` — read-heavy reviewer; spirit-mapped to
+  PRD-15 §8.5 (Review Agent). Prefers `read_file` / `search_forge` /
+  `list_backlinks` / `git_log`; writes only the final audit note;
+  never mutates the audited material.
+- `LIBRARIAN_SYSTEM_PROMPT` + `LIBRARIAN_ID =
+  "com.nexus.agent.librarian"` — knowledge organisation /
+  cross-linking / deduplication. Prefers linking over duplicating;
+  writes only to catalogue notes; refuses to reorganise files
+  without explicit go-ahead.
+- `COACH_SYSTEM_PROMPT` + `COACH_ID =
+  "com.nexus.agent.coach"` — guidance over execution. Surfaces
+  clarifying questions, writes coaching notes (suggestions /
+  next-step prompts) rather than finished artefacts; references
+  concrete file paths so the user can follow the trail.
+
+All three resolved by `archetypes::resolve_prompt` (case-insensitive)
+and listed by `com.nexus.agent::list_archetypes` (handler id 8).
+The catalog constant `ARCHETYPE_NAMES` now reads
+`["writer", "coder", "researcher", "auditor", "librarian", "coach"]`.
+
+2 new resolver-matrix tests + the existing `list_archetypes` IPC
+test updated to pin the new catalog. Full nexus-agent lib suite at
+74 tests stays green.
+
+PRD-15 §8.x sub-section names (Refactor / Documentation / Review /
+Automation) and the BACKLOG-cited names (auditor / librarian /
+coach) don't line up 1:1 — the BACKLOG names are the user-facing
+short ids we shipped, mapped against PRD §8's spirit where each
+overlaps. The PRD text remains as design rationale; the archetype
+catalog is the working contract.
 
 ---
 

@@ -53,7 +53,14 @@ use crate::{
 /// Exposed via the `list_archetypes` handler so the shell's picker can
 /// send any of these back as the `archetype` arg to `plan` / `run`
 /// without guessing the expected case or prefix.
-const ARCHETYPE_NAMES: &[&str] = &["writer", "coder", "researcher"];
+const ARCHETYPE_NAMES: &[&str] = &[
+    "writer",
+    "coder",
+    "researcher",
+    "auditor",
+    "librarian",
+    "coach",
+];
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.agent";
@@ -1717,7 +1724,11 @@ mod tests {
             .dispatch(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null)
             .expect("list_archetypes dispatch");
         let names: Vec<String> = serde_json::from_value(v).expect("decode");
-        assert_eq!(names, vec!["writer", "coder", "researcher"]);
+        // DG-35 — auditor / librarian / coach added 2026-05-12.
+        assert_eq!(
+            names,
+            vec!["writer", "coder", "researcher", "auditor", "librarian", "coach"]
+        );
     }
 
     /// OI-04 — `dispatch_async` returns `None` for
