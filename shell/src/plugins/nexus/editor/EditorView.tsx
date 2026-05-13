@@ -9,6 +9,8 @@ import { workspace, type Tabs } from '../../../workspace'
 import { getEditorRuntime, setActiveCmView } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
+import { markdown as markdownLang } from '@codemirror/lang-markdown'
+import { Table } from '@lezer/markdown'
 import { getEditorMode, pickLanguageExtension } from './codeMode'
 import { gitGutterExt } from './cm/gitGutter'
 import { gitBlameExt } from './cm/gitBlame'
@@ -935,6 +937,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           }}
           buildExtensions={() => {
             const base = [
+              markdownLang({ extensions: [Table] }),
               transactionBridge({
                 relpath: tab.relpath,
                 kernelClient: runtime.kernelClient,
@@ -1061,6 +1064,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     const codeBuildExtensions = (() => {
       const base: import('@codemirror/state').Extension[] = []
       if (languageExtension !== null) base.push(languageExtension)
+      else if (isMarkdown(tab.name)) base.push(markdownLang({ extensions: [Table] }))
       if (gitGutterExtension !== null) base.push(gitGutterExtension)
       if (gitBlameExtension !== null) base.push(gitBlameExtension)
       if (lspClientExtension !== null) base.push(lspClientExtension)

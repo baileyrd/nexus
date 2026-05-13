@@ -40,6 +40,14 @@ function fakePluginAPI(): Harness {
       }
     },
   }
+  // BL-009 added a `.mermaid` file viewer; activate() now also touches
+  // viewRegistry + kernel. The contract test doesn't exercise the view,
+  // so the stubs just need to be callable.
+  stub.kernel = {} as PluginAPI['kernel']
+  stub.viewRegistry = {
+    register: () => () => {},
+    registerExtensions: () => () => {},
+  } as unknown as PluginAPI['viewRegistry']
   return {
     api: stub,
     registered,

@@ -1,7 +1,5 @@
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
-import { markdown } from '@codemirror/lang-markdown'
-import { Table } from '@lezer/markdown'
 // Phase 5 ripped out `@codemirror/commands` `history()` + `historyKeymap`.
 // The kernel's UndoTree owns history now — see
 // docs/editor-transaction-wiring-plan.md §Phase 5 / resolved decision #3.
@@ -9,6 +7,7 @@ import { Table } from '@lezer/markdown'
 // not cover AI-generated edits applied via `apply_transaction`.
 import { defaultKeymap } from '@codemirror/commands'
 import { search, searchKeymap } from '@codemirror/search'
+import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
 
 import type { EditorKernelClient } from '../kernelClient.ts'
 import { clientLogger } from '../../../../clientLogger'
@@ -119,7 +118,9 @@ export function baselineExtensions(
   }
 
   const exts: Extension[] = [
-    markdown({ extensions: [Table] }),
+    // CM6 ships language parsers but no highlight style — without this
+    // the parse tree is unstyled and code-mode tabs render as plain text.
+    syntaxHighlighting(defaultHighlightStyle),
     search({ top: true }),
     keymap.of([...searchKeymap, ...keys]),
     EditorView.lineWrapping,

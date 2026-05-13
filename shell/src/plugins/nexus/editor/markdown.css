@@ -48,11 +48,9 @@
   line-height: var(--editor-line-height, 1.6);
 }
 
-/* CodeMirror ships a default 1px dotted focus outline on .cm-editor;
- * it reads as a dark box on dark themes. The `editor.showFocusRing`
- * setting toggles the `editor-hide-focus-ring` class on :root — when
- * present (the default), we suppress the outline. */
-:root.editor-hide-focus-ring .cm-editor.cm-focused { outline: none; }
+/* CodeMirror ships a default 1px dotted focus outline that reads as a
+ * dark box on dark themes — suppress it. */
+.cm-editor.cm-focused { outline: none; }
 
 /* ---- Markdown body -------------------------------------------------- */
 
