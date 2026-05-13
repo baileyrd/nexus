@@ -1,20 +1,23 @@
-# ADR 0027: Protocol-Host Contribution Model for LSP / DAP / MCP
+# ADR 0027: Protocol-Host Contribution Model for LSP / DAP / MCP / ACP
 
 **Date:** 2026-05-13
 **Status:** Proposed — open for review. Tracks as **BL-113** in the backlog.
-**Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/BACKLOG_COMPLETED.md) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host, parked on `bl-081-dap-debugger` pending this ADR).
+**Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/BACKLOG_COMPLETED.md) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host, parked on `bl-081-dap-debugger` pending this ADR), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet implemented; named here so the future crate lands on the contribution model from day one).
 
 ## Context
 
-Three Nexus core plugins host external-process protocol adapters today:
+Three Nexus core plugins host external-process protocol adapters today, and a fourth (ACP) is in the queue:
 
-| Crate | Host plugin | Adapter config | Examples |
-|---|---|---|---|
-| `nexus-lsp` | `com.nexus.lsp` | `<forge>/.forge/lsp.toml` | rust-analyzer, typescript-language-server |
-| `nexus-mcp` | `com.nexus.mcp.host` | `<forge>/.forge/mcp.toml` | filesystem, git, custom MCP servers |
-| `nexus-dap` | `com.nexus.dap` | `<forge>/.forge/dap.toml` | codelldb, debugpy, js-debug, dlv |
+| Crate | Host plugin | Adapter config | Examples | Status |
+|---|---|---|---|---|
+| `nexus-lsp` | `com.nexus.lsp` | `<forge>/.forge/lsp.toml` | rust-analyzer, typescript-language-server | shipped (BL-076) |
+| `nexus-mcp` | `com.nexus.mcp.host` | `<forge>/.forge/mcp.toml` | filesystem, git, custom MCP servers | shipped |
+| `nexus-dap` | `com.nexus.dap` | `<forge>/.forge/dap.toml` | codelldb, debugpy, js-debug, dlv | parked branch (BL-081) |
+| `nexus-acp` | `com.nexus.acp` (proposed) | `<forge>/.forge/acp.toml` (proposed) | Hermes-shaped sub-agents, external A2A peers | not built — Hermes Feature 7 |
 
-All three follow the same shape: the *host* is a core Rust plugin registered at bootstrap; the *adapters* are external executables named in a flat TOML config. The host proxies a protocol surface (JSON-RPC for LSP/MCP, a `type`-tagged JSON envelope for DAP) over IPC and republishes server-pushed messages on the kernel bus.
+All four follow the same shape: the *host* is a core Rust plugin registered at bootstrap; the *adapters* are external executables named in a flat TOML config. The host proxies a protocol surface (JSON-RPC for LSP/MCP/ACP, a `type`-tagged JSON envelope for DAP) over IPC and republishes server-pushed messages on the kernel bus.
+
+ACP (Agent Communication Protocol — see the Hermes plan) is the agent-to-agent / IDE-to-agent equivalent of LSP. It's stdio JSON-RPC with a request/response/notification family; the wire shape and the connection-pool / reconnect / event-fan-out concerns are all near-identical to what `nexus-lsp` already ships. Landing it under the contribution model from day one means we never have to migrate a fourth flat-TOML config later.
 
 This pattern is consistent with the microkernel invariant ("new capability ⇒ IPC handler in service crate") and was a load-bearing simplification for the BL-076 and BL-081 first cuts. It has a real limitation, surfaced during the BL-081 review:
 
@@ -33,7 +36,7 @@ This pattern is consistent with the microkernel invariant ("new capability ⇒ I
 
 ### Shape (sketched, not final)
 
-A community plugin contributes adapters via a new manifest section:
+A community plugin contributes adapters via a new manifest section. The four protocol families share one contribution shape with per-family sub-tables:
 
 ```toml
 # example: a "Rust debugging" plugin manifest fragment
@@ -61,9 +64,21 @@ hover_renderer = "rust_hover"  # references a shell-side export
 id = "rust-docs-mcp"
 command = "rust-docs-mcp"
 auto_connect = true
+
+# And for ACP (Hermes Feature 7, not built yet — registering the shape now
+# so the future `nexus-acp` crate inherits the contribution loader rather
+# than ship a fourth flat-TOML form):
+[[contributes.protocolHosts.acp]]
+id = "hermes-rust-reviewer"
+display_name = "Rust Code Reviewer (Hermes)"
+command = "hermes-agent"
+args = ["--profile", "rust-reviewer"]
+# Optional declarative agent metadata — equivalent to LSP's `file_types` /
+# DAP's `launch_config_schema`. Exact field set TBD during the Phase 4 spike.
+capabilities = ["delegate", "tools", "memory"]
 ```
 
-`nexus-lsp`, `nexus-dap`, and `nexus-mcp` each gain a new `register_adapter` IPC verb that the plugin loader calls during contribution wiring; the runtime contribution set is merged with the legacy TOML so existing forges keep working through a transition window.
+`nexus-lsp`, `nexus-dap`, `nexus-mcp`, and `nexus-acp` (when it's built) each gain a new `register_adapter` IPC verb that the plugin loader calls during contribution wiring; the runtime contribution set is merged with the legacy TOML so existing forges keep working through a transition window.
 
 The launch-config / variable-renderer / hover-renderer keys reference shell-side exports the contributing plugin provides — so a community DAP plugin can ship a typed launch form (built against the schema) and a per-language variable-formatting hook, and the shell host (`nexus.debugger` / the editor) consumes them through the existing plugin export surface.
 
@@ -73,7 +88,8 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
 2. **Phase 1 — DAP contribution model lands.** Bring BL-081 (the parked `bl-081-dap-debugger` branch) onto the new contribution shape, ship two example adapter plugins (`first-party.dap.rust`, `first-party.dap.node`). Keep `dap.toml` working as a legacy fallback.
 3. **Phase 2 — LSP follows.** Refactor `nexus-lsp` to read contributions alongside `lsp.toml`. Migrate the bundled-server pattern to first-party plugins.
 4. **Phase 3 — MCP follows.** Same for `nexus-mcp.host`. `mcp.toml` keeps working for user-authored entries; first-party / vetted MCP servers ship as contributions.
-5. **Phase 4 (optional) — retire TOML.** After two minor releases of overlap, mark the flat-TOML form deprecated and remove it. Decision deferred to that point.
+5. **Phase 4 — ACP greenfield.** When the Hermes-Feature-7 work (or whichever ACP integration BL ends up scoping) is picked up, the `nexus-acp` crate inherits the contribution model from day one. No legacy TOML to deprecate later because we never ship one.
+6. **Phase 5 (optional) — retire TOML.** After two minor releases of overlap, mark the flat-TOML forms (LSP/DAP/MCP) deprecated and remove them. Decision deferred to that point.
 
 ### What stays
 
@@ -84,10 +100,11 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
 ## Consequences
 
 **Positive**
-- Per-adapter UX (launch forms, value renderers, hover providers) becomes possible without modifying any core crate.
+- Per-adapter UX (launch forms, value renderers, hover providers, agent capability descriptors) becomes possible without modifying any core crate.
 - Marketplace + signing already work for plugins — adapter distribution rides on the existing capability path.
-- One shared contribution loader serves three protocols, reducing the LSP/DAP/MCP-host code triplication.
+- One shared contribution loader serves four protocols, reducing the LSP/DAP/MCP/ACP-host code quadruplication.
 - BL-081's "deferred launch-config picker" item collapses — the picker becomes schema-driven against contributions.
+- The future `nexus-acp` crate inherits the contribution model on day one, so it never accretes a flat-TOML form that has to be migrated later.
 - `nexus-bootstrap`'s ordering of LSP / DAP / MCP doesn't change; only how they discover their adapters does.
 
 **Negative**

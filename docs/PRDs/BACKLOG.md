@@ -242,24 +242,25 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-113: Protocol-host contribution model for LSP / DAP / MCP
+### BL-113: Protocol-host contribution model for LSP / DAP / MCP / ACP
 
 **Source**: BL-081 review (2026-05-13) — full design in [ADR 0027](../adr/0027-protocol-host-contribution-model.md).
-**Effort**: Large. Phase 0 (ADR + spike) ~1–2 days; Phase 1 (DAP on the new shape) ~1 wk; Phases 2–3 (LSP, MCP) ~1 wk each.
-**Crates**: `nexus-lsp`, `nexus-dap` (on the parked branch), `nexus-mcp`, `nexus-plugins` (contribution loader), shell-side plugin manifest schema.
-**Related**: ADR 0011 (plugin-first shell), [BL-081](#bl-081-dap-debugger-integration) (parked pending this), [BL-076](BACKLOG_COMPLETED.md) (nexus-lsp host — shipped under the legacy flat-TOML pattern this would replace).
+**Effort**: Large. Phase 0 (ADR + spike) ~1–2 days; Phase 1 (DAP on the new shape) ~1 wk; Phases 2–3 (LSP, MCP) ~1 wk each; Phase 4 (ACP) lands greenfield when the Hermes Feature-7 / ACP integration BL is picked up.
+**Crates**: `nexus-lsp`, `nexus-dap` (on the parked branch), `nexus-mcp`, future `nexus-acp`, `nexus-plugins` (contribution loader), shell-side plugin manifest schema.
+**Related**: ADR 0011 (plugin-first shell), [BL-081](#bl-081-dap-debugger-integration) (parked pending this), [BL-076](BACKLOG_COMPLETED.md) (nexus-lsp host — shipped under the legacy flat-TOML pattern this would replace), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet scoped as a BL; when it lands it inherits this model).
 
-Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML config (`lsp.toml` / `mcp.toml` / `dap.toml`) listing their external adapters. The pattern is consistent with the microkernel invariant but blocks per-adapter UX (launch-config schemas, variable renderers, hover providers), has no marketplace/install path, and duplicates ~80%-identical config shapes across three crates.
+Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML config (`lsp.toml` / `mcp.toml` / `dap.toml`) listing their external adapters. ACP (Agent Communication Protocol — Hermes Feature 7, agent-to-agent stdio JSON-RPC) is the same shape and queued as a future `nexus-acp` crate. The pattern is consistent with the microkernel invariant but blocks per-adapter UX (launch-config schemas, variable renderers, hover providers, agent capability descriptors), has no marketplace/install path, and duplicates ~80%-identical config shapes across the host crates.
 
-**Proposed**: lift adapter declarations from TOML to a shared plugin contribution point (`contributes.protocolHosts.{lsp,dap,mcp}`). The host crates stay core and protocol-only; community/first-party plugins contribute adapter definitions plus optional shell-side exports (launch-config form schema, value renderers, hover provider). Phased rollout: ADR + spike on DAP first (since BL-081 is already on a branch), then LSP, then MCP. Flat TOML stays as legacy fallback during the transition.
+**Proposed**: lift adapter declarations from TOML to a shared plugin contribution point (`contributes.protocolHosts.{lsp,dap,mcp,acp}`). The host crates stay core and protocol-only; community/first-party plugins contribute adapter definitions plus optional shell-side exports (launch-config form schema, value renderers, hover provider, agent capability metadata). Phased rollout: ADR + spike on DAP first (since BL-081 is already on a branch), then LSP, then MCP; ACP lands greenfield when its host crate is built. Flat TOML stays as legacy fallback for the existing three during the transition; ACP never gets one.
 
 **Definition of done:**
 - ADR 0027 accepted with open-question section resolved
-- New `contributes.protocolHosts.dap` contribution path lands in plugin-manifest schema + loader
+- New `contributes.protocolHosts.{lsp,dap,mcp,acp}` contribution path lands in plugin-manifest schema + loader
 - `nexus-dap` reads contributions alongside `dap.toml`; one example first-party plugin (e.g. `first-party.dap.rust`) demonstrates the new shape end-to-end including a typed launch-config form on the shell side
 - BL-081 rebases onto the new shape and lands on main
 - `nexus-lsp` migrates next; `lsp.toml` keeps working
 - `nexus-mcp.host` migrates last; `mcp.toml` keeps working
+- Future `nexus-acp` crate (Hermes Feature 7) consumes the contribution loader as its only adapter source — no `acp.toml` to migrate from
 - Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path)
 
 ---
