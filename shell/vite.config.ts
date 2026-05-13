@@ -50,6 +50,15 @@ export default defineConfig({
         : 'es2022',
     minify: process.env.TAURI_DEBUG ? false : 'esbuild',
     sourcemap: !!process.env.TAURI_DEBUG,
+    // BL-111: pin the modulepreload polyfill OFF. The helper itself
+    // is now isolated into `vite-preload-helper` via manualChunks so
+    // the chunk-routing fix below stands on its own; turning the
+    // polyfill off as well removes the eager `<link rel="modulepreload">`
+    // tags that Vite would otherwise emit for whatever the entry
+    // static-imports. Native modulepreload still works at every
+    // dynamic-import call site (the helper checks
+    // `link.relList.supports("modulepreload")` at runtime).
+    modulePreload: { polyfill: false },
     rollupOptions: {
       output: {
         // SH-009: group heavy vendor libraries into named chunks so the
@@ -57,6 +66,15 @@ export default defineConfig({
         // Dynamic plugin imports (catalog.ts load() factories) each get
         // their own auto-generated chunk from Rollup's code-splitting.
         manualChunks(id) {
+          // BL-111: route Vite's runtime preload helper into its own
+          // tiny chunk. Without this, Rollup parks the helper inside
+          // whichever named manualChunks bucket comes first by build
+          // order — historically `vendor-mermaid` (~2.7 MB) — and the
+          // entry chunk's single static import of the helper symbol
+          // pulls the entire host chunk into the eager static-import
+          // graph. Hosting it separately keeps every named manual
+          // chunk genuinely lazy.
+          if (id.includes('vite/preload-helper')) return 'vite-preload-helper'
           if (id.includes('node_modules/@codemirror')) return 'vendor-codemirror'
           if (id.includes('node_modules/@xterm')) return 'vendor-xterm'
           if (id.includes('node_modules/mermaid') || id.includes('node_modules/d3') || id.includes('node_modules/dagre')) return 'vendor-mermaid'

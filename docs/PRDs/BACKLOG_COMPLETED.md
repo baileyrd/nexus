@@ -8,6 +8,57 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-111: Defer Mermaid + heavy diagram libs until first use ✅ (2026-05-13)
+
+**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
+**Files**: `shell/vite.config.ts` (new `vite/preload-helper` `manualChunks` rule + `build.modulePreload.polyfill: false`)
+**Related**: `vendor-mermaid` manual chunk; `shell/src/plugins/community/mermaid/index.ts` (already-lazy `import('mermaid')`); `shell/src/plugins/nexus/canvas/{exportFormats.ts, CanvasView.tsx}` (already-lazy `import('./exportFormats')`)
+
+The DoD asked for a Vite bundle audit: open a markdown file with no mermaid block, confirm `vendor-mermaid` is not loaded. Audit failed before the fix. The 2.7 MB `vendor-mermaid` chunk (mermaid + d3 + dagre + DOMPurify subset) was being eagerly fetched by every cold start of the shell.
+
+**Diagnosis.** `dist/index.html` was emitting:
+
+```html
+<link rel="modulepreload" crossorigin href="/assets/vendor-react-…js">
+<link rel="modulepreload" crossorigin href="/assets/vendor-mermaid-…js">
+```
+
+and the entry chunk's source contained a static `import{_ as b}from"./vendor-mermaid-…"`. The imported symbol `_` resolved (via `export{Wt as _,…}` inside vendor-mermaid) to the `Wt` function — Vite's runtime `__vite__preload` helper, the small (~1 KB) closure that runs at every dynamic-import call site to create per-import `<link rel="modulepreload">` tags. Rollup had parked the helper inside vendor-mermaid by happenstance (vendor-mermaid was the first named chunk by build order to need it), and the entry's single static import of that helper symbol pulled the entire 2.7 MB host chunk into the eager static-import graph. The "lazy `import('mermaid')`" architecture in `shell/src/plugins/community/mermaid/index.ts:41` was correct in spirit but defeated in practice by the unrelated runtime helper.
+
+**Fix.** Two-line config change in `shell/vite.config.ts`:
+
+1. Add `if (id.includes('vite/preload-helper')) return 'vite-preload-helper'` as the first rule in `manualChunks`. Rollup now hoists the helper into its own 1.13 kB chunk (`vite-preload-helper-…js`), so the entry's single static import of the helper symbol no longer drags vendor-mermaid in.
+2. Set `build.modulePreload: { polyfill: false }`. The native `<link rel="modulepreload">` path is supported by every browser at our build target (WebKit2GTK 2.40+, Chromium 105+, Safari 17+); the polyfill is needed only for Safari 15-16 and emits the eager preload-helper machinery that the static-import edge depended on. Disabling the polyfill removes the eager preload tags from the entry HTML; native modulepreload still runs per-import-site through the (now isolated) preload helper.
+
+**Post-fix audit (clean rebuild, `pnpm --filter nexus-shell build`):**
+
+- `dist/index.html` preloads only `vite-preload-helper` (1.13 kB) and `vendor-react` (142 kB / 45 kB gz). vendor-mermaid is no longer in the preload list.
+- The entry chunk's static-import set is `{ ./vendor-react, ./vite-preload-helper }`. vendor-mermaid is not statically reached.
+- vendor-mermaid is now loaded only when the mermaid plugin (default-off, opt-in via Settings → Plugins) executes `await import('mermaid')` for the first fence render.
+- `mermaidPromise` memoization at `community/mermaid/index.ts:30` already satisfies the DoD bullet "subsequent fences in the same session reuse the cached module".
+
+**Other heavy-renderer audit (DoD bullet 3):**
+
+- **`jspdf` + `html-to-image`** — already behind `await import('./exportFormats')` in `CanvasView.tsx:1096,1112`. Build emits an auto-chunked `exportFormats-…js` (404 kB / 134 kB gz) that's only fetched when the user clicks PDF/SVG/PNG export. The static imports `import jsPDF from 'jspdf'` + `import { toPng, toSvg } from 'html-to-image'` at the top of `exportFormats.ts` are fine because exportFormats itself is dynamic-import-only.
+- **`html2canvas`** — transitive dep of jspdf; auto-chunked into `html2canvas.esm-…js` (201 kB / 48 kB gz), reachable only via the same dynamic `import('./exportFormats')` boundary.
+- **`katex`** — auto-chunked into `katex-…js` (256 kB / 77 kB gz). Loaded only via the markdown-render dynamic import path; not in the entry preload list.
+
+**Verification recipe (preserve for regression checks):**
+
+```sh
+cd shell && rm -rf dist && pnpm build
+grep -E "modulepreload" dist/index.html        # expect: only vite-preload-helper + vendor-react
+entry=$(grep -oE 'src="/assets/index-[^"]+\.js"' dist/index.html | sed 's|.*assets/||;s|".*||')
+grep -oE 'from"\./[^"]+\.js"' "dist/assets/$entry" | sort -u
+# expect: only vendor-react + vite-preload-helper. NO vendor-mermaid, vendor-codemirror, vendor-xterm, exportFormats, katex.
+```
+
+**Tested**: `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (only the 2 BL-110 expected warnings); `pnpm --filter nexus-shell test` 1260/1260 pass; clean `pnpm build` succeeds and the verification recipe above produces the expected output.
+
+**Definition of done coverage**: ✅ Vite bundle analysis confirms no eager vendor-mermaid load; ✅ subsequent fences reuse cached module via `mermaidPromise` memoization; ✅ jspdf + html-to-image audited and confirmed lazy via `import('./exportFormats')`. A regression-gate script that asserts the entry HTML preload set is left as a follow-up under BL-112's perf-harness scope.
+
+---
+
 ### BL-110: Per-frame snapshot idiom for multi-store renders ✅ (2026-05-13)
 
 **Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6

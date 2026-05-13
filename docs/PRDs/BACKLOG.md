@@ -20,19 +20,7 @@ _BL-109 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 _BL-110 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `shell/src/stores/frameSnapshot.ts` ships a React-free `FrameSnapshot` controller (subscribe N stores → coalesce notifications → flush once per rAF, identity-stable tuple within a frame) plus an injectable `Scheduler` so tests run synchronously without rAF / fake timers. New `shell/src/stores/useFrameSnapshot.ts` is a `useSyncExternalStore` adapter on top, plus a `snap()` helper that builds typed entries without `as const` boilerplate. `shell/src/plugins/nexus/statusBar/FileStats.tsx` migrated as the reference site — was four independent selectors across `useEditorStore` + `useBacklinksStore` (both fed by async kernel events that fire in separate batches), now one rAF-coalesced tuple. 7 new unit tests cover tuple identity stability within a frame, flush invalidation on per-element diff, no-op flush preservation, multi-mutation coalescing, dispose semantics, and start-twice guard. Discovered alongside: the BL-109 / BL-110 src-colocated tests weren't being executed by `pnpm --filter nexus-shell test` (which globs `tests/*.test.ts` only, not `src/**`); both relocated to `shell/tests/{flatten-tree,frame-snapshot}.test.ts`. **Filed separately under "Suspected issues — not fully investigated"**: 107 other src-colocated `*.test.ts` files appear to share the same fate._
 
-### BL-111: Defer Mermaid + heavy diagram libs until first use
-
-**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
-**Effort**: Small (~½ day)
-**Crates**: `shell/src/plugins/nexus/editor/` (markdown-render path), `shell/vite.config.ts`
-**Related**: `vendor-mermaid` manual chunk; markdown live preview
-
-`mermaid` + `d3` + `dagre` are grouped into the `vendor-mermaid` chunk — good. Need to verify the markdown extension does not pull the chunk on editor mount: it should only fetch when a `\`\`\`mermaid` fence is actually about to render in the viewport. Today's behavior is uninstrumented; first user touch is the wrong place to find this out.
-
-**Definition of done:**
-- Confirmed via Vite bundle analysis that opening a markdown file with no mermaid block does NOT load `vendor-mermaid`
-- A diagram fence triggers exactly one dynamic import; subsequent fences in the same session reuse the cached module
-- Same audit applied to other heavy renderers gated behind code fences (e.g. `jspdf`, `html-to-image`)
+_BL-111 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Audit found vendor-mermaid (2.7 MB) was being eagerly preloaded by every cold start: `index.html` emitted `<link rel="modulepreload" href="/assets/vendor-mermaid-…">` and the entry chunk had a static `import{_ as b}from"./vendor-mermaid-…"`. Root cause: Rollup parked Vite's runtime preload helper (`__vite__preload`) inside whichever `manualChunks` bucket landed first by build order — historically `vendor-mermaid` — and the entry chunk's single static import of that helper symbol silently dragged the whole 2.7 MB host chunk into the eager static-import graph. Fix: a new `vite/preload-helper` rule in `manualChunks` routes the helper into its own 1.13 kB chunk (`vite-preload-helper-…js`) plus `build.modulePreload: { polyfill: false }` to drop the eager polyfill, leaving only the native `<link rel="modulepreload">` path that runs at each dynamic-import call site. Post-fix: entry preloads `vite-preload-helper` (1.13 kB) + `vendor-react` (142 kB); vendor-mermaid only loads when `import('mermaid')` fires from the lazy mermaid plugin (which is itself a default-off catalog entry). jspdf + html-to-image are bundled together into an auto-chunked `exportFormats-…js` (404 kB) loaded only when CanvasView's user-triggered export runs `import('./exportFormats')`. mermaidPromise memoization in `community/mermaid/index.ts` already covers the "subsequent fences reuse the cached module" DoD bullet._
 
 ### BL-112: Frontend performance benchmark harness
 
