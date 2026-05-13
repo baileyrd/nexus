@@ -22,21 +22,7 @@ _BL-110 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 _BL-111 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Audit found vendor-mermaid (2.7 MB) was being eagerly preloaded by every cold start: `index.html` emitted `<link rel="modulepreload" href="/assets/vendor-mermaid-…">` and the entry chunk had a static `import{_ as b}from"./vendor-mermaid-…"`. Root cause: Rollup parked Vite's runtime preload helper (`__vite__preload`) inside whichever `manualChunks` bucket landed first by build order — historically `vendor-mermaid` — and the entry chunk's single static import of that helper symbol silently dragged the whole 2.7 MB host chunk into the eager static-import graph. Fix: a new `vite/preload-helper` rule in `manualChunks` routes the helper into its own 1.13 kB chunk (`vite-preload-helper-…js`) plus `build.modulePreload: { polyfill: false }` to drop the eager polyfill, leaving only the native `<link rel="modulepreload">` path that runs at each dynamic-import call site. Post-fix: entry preloads `vite-preload-helper` (1.13 kB) + `vendor-react` (142 kB); vendor-mermaid only loads when `import('mermaid')` fires from the lazy mermaid plugin (which is itself a default-off catalog entry). jspdf + html-to-image are bundled together into an auto-chunked `exportFormats-…js` (404 kB) loaded only when CanvasView's user-triggered export runs `import('./exportFormats')`. mermaidPromise memoization in `community/mermaid/index.ts` already covers the "subsequent fences reuse the cached module" DoD bullet._
 
-### BL-112: Frontend performance benchmark harness
-
-**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
-**Effort**: Medium (~3–5 days)
-**Crates**: new `experiments/perf/`, possibly `shell/e2e/` extensions
-**Related**: `experiments/zed-frontend-analysis.md` (independent measurements are what give that doc its analytical power); WI-IDs for future regression gates
-
-The assessment table is engineering estimates because no published Nexus benchmarks exist. The fix is a small repo-committed harness that runs a fixed set of scenarios on a known machine and produces a numeric, diff-able output: cold start trace, "open 50 MB file", "scroll a 10k-row file tree", "render outline for a 500-heading document", "type 5 chars in a 5k-line markdown file". Output committed under `experiments/perf/<date>.json` so regressions are visible at PR review time even before a CI gate exists.
-
-**Definition of done:**
-- `experiments/perf/run.ts` (or equivalent) exercises ≥5 scenarios under WebDriver/Tauri and records timings + RSS
-- Output schema is stable JSON that diffs cleanly between runs
-- README documents the host-machine assumption and how to run it
-- One baseline run committed under `experiments/perf/`
-- Stretch: a wdio-based regression check that fails CI if any metric regresses >20% against the committed baseline (deferred — needs a stable runner)
+_BL-112 closed 2026-05-13 (first cut) — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `experiments/perf/run.ts` harness ships build-output measurement (eager-vs-lazy chunk inventory, entry static-import set, HTML preload list — exactly the surface that would have caught the BL-111 vendor-mermaid regression at PR review) plus two microbenchmarks against the BL-109/110 hot helpers (`flattenTree` on a synthetic 10k-file forge with every folder expanded, `frameSnapshot` four-store flush). Stable JSON schema (`schemaVersion: 1`) sorted for textual diffability; baseline committed at `experiments/perf/baselines/2026-05-13.json`. Tauri/WDIO runtime scenarios from the original DoD (cold-start trace, 50 MB file open, 10k-row scroll, 500-heading outline, 5-char type latency) are scaffolded for as additional `scenarios` entries in the same JSON shape but **deferred** until a WDIO-Tauri runner exists — the BL itself flagged that piece as already-deferred ("needs a stable runner")._
 
 ---
 

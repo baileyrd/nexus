@@ -1,0 +1,562 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-13T17:27:14.098Z",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "nodeVersion": "v22.22.2",
+    "cpuModel": "12th Gen Intel(R) Core(TM) i7-1265U",
+    "cpuCount": 4,
+    "totalMemMB": 7943
+  },
+  "build": {
+    "durationSec": 42.67,
+    "entryChunk": {
+      "name": "index-Dmz_AyvJ.js",
+      "sizeKB": 213.9,
+      "sizeKBGz": 60.4,
+      "staticImports": [
+        "vendor-react-C4KjzCe2.js",
+        "vite-preload-helper-DfZQVC28.js"
+      ]
+    },
+    "htmlPreloads": [
+      "vite-preload-helper-DfZQVC28.js",
+      "vendor-react-C4KjzCe2.js"
+    ],
+    "eagerKB": 354.1,
+    "eagerKBGz": 105.6,
+    "lazyKB": 5855.7,
+    "lazyKBGz": 1718.9,
+    "chunks": [
+      {
+        "name": "vendor-mermaid-ClpGRxWk.js",
+        "sizeKB": 2659.4,
+        "sizeKBGz": 720.4,
+        "eager": false
+      },
+      {
+        "name": "vendor-codemirror-DElDkw2t.js",
+        "sizeKB": 703.8,
+        "sizeKBGz": 248.6,
+        "eager": false
+      },
+      {
+        "name": "exportFormats-edRGQSum.js",
+        "sizeKB": 395.2,
+        "sizeKBGz": 131.3,
+        "eager": false
+      },
+      {
+        "name": "vendor-xterm-bcxN8mh8.js",
+        "sizeKB": 381.4,
+        "sizeKBGz": 95.1,
+        "eager": false
+      },
+      {
+        "name": "index-BsZ3EK8p.js",
+        "sizeKB": 277,
+        "sizeKBGz": 84.1,
+        "eager": false
+      },
+      {
+        "name": "katex-DHMw6HUq.js",
+        "sizeKB": 253,
+        "sizeKBGz": 75.2,
+        "eager": false
+      },
+      {
+        "name": "index-Dmz_AyvJ.js",
+        "sizeKB": 213.9,
+        "sizeKBGz": 60.4,
+        "eager": true
+      },
+      {
+        "name": "html2canvas.esm-BfxBtG_O.js",
+        "sizeKB": 197.5,
+        "sizeKBGz": 46.9,
+        "eager": false
+      },
+      {
+        "name": "index.es-CNeWxR8w.js",
+        "sizeKB": 147.5,
+        "sizeKBGz": 50.5,
+        "eager": false
+      },
+      {
+        "name": "vendor-react-C4KjzCe2.js",
+        "sizeKB": 139.1,
+        "sizeKBGz": 44.5,
+        "eager": true
+      },
+      {
+        "name": "index-DPMTQ6MY.js",
+        "sizeKB": 90.1,
+        "sizeKBGz": 23.9,
+        "eager": false
+      },
+      {
+        "name": "index-7luQLAm9.js",
+        "sizeKB": 69.4,
+        "sizeKBGz": 21.2,
+        "eager": false
+      },
+      {
+        "name": "index-DNZA_oxN.js",
+        "sizeKB": 65.3,
+        "sizeKBGz": 16,
+        "eager": false
+      },
+      {
+        "name": "index-DMr0sou1.js",
+        "sizeKB": 47.2,
+        "sizeKBGz": 14.5,
+        "eager": false
+      },
+      {
+        "name": "index-jZ81xlZP.js",
+        "sizeKB": 46.5,
+        "sizeKBGz": 11.9,
+        "eager": false
+      },
+      {
+        "name": "markdownRender-C9xvQhII.js",
+        "sizeKB": 42.3,
+        "sizeKBGz": 12.9,
+        "eager": false
+      },
+      {
+        "name": "index-DB0TJAvz.js",
+        "sizeKB": 36,
+        "sizeKBGz": 9.1,
+        "eager": false
+      },
+      {
+        "name": "index-aK_hsK8W.js",
+        "sizeKB": 35.5,
+        "sizeKBGz": 11.4,
+        "eager": false
+      },
+      {
+        "name": "index-B_pZilpF.js",
+        "sizeKB": 29,
+        "sizeKBGz": 7.5,
+        "eager": false
+      },
+      {
+        "name": "index-CyQCzPy1.js",
+        "sizeKB": 24.9,
+        "sizeKBGz": 8.4,
+        "eager": false
+      },
+      {
+        "name": "index-jXDEgv3x.js",
+        "sizeKB": 24.8,
+        "sizeKBGz": 7.6,
+        "eager": false
+      },
+      {
+        "name": "index-CnKGTKQR.js",
+        "sizeKB": 23.5,
+        "sizeKBGz": 7.8,
+        "eager": false
+      },
+      {
+        "name": "index-zT3eR2ox.js",
+        "sizeKB": 20.1,
+        "sizeKBGz": 5.5,
+        "eager": false
+      },
+      {
+        "name": "index-C6YWOhQt.js",
+        "sizeKB": 16.1,
+        "sizeKBGz": 5.1,
+        "eager": false
+      },
+      {
+        "name": "index-eF2laA6X.js",
+        "sizeKB": 16,
+        "sizeKBGz": 4.9,
+        "eager": false
+      },
+      {
+        "name": "index-B-6Rn0yt.js",
+        "sizeKB": 15.6,
+        "sizeKBGz": 5.1,
+        "eager": false
+      },
+      {
+        "name": "globalIndex-DohdxNQk.js",
+        "sizeKB": 14.9,
+        "sizeKBGz": 5.8,
+        "eager": false
+      },
+      {
+        "name": "index-CX0lpiQ-.js",
+        "sizeKB": 14.4,
+        "sizeKBGz": 5.1,
+        "eager": false
+      },
+      {
+        "name": "index-3oRX-LYu.js",
+        "sizeKB": 12.3,
+        "sizeKBGz": 4.1,
+        "eager": false
+      },
+      {
+        "name": "index-Cj_2wilI.js",
+        "sizeKB": 11.6,
+        "sizeKBGz": 3.7,
+        "eager": false
+      },
+      {
+        "name": "index-DUbII9sc.js",
+        "sizeKB": 10.9,
+        "sizeKBGz": 4,
+        "eager": false
+      },
+      {
+        "name": "index-BMtSPKxq.js",
+        "sizeKB": 10.2,
+        "sizeKBGz": 3.3,
+        "eager": false
+      },
+      {
+        "name": "index-Dv-2VYlQ.js",
+        "sizeKB": 9,
+        "sizeKBGz": 3.1,
+        "eager": false
+      },
+      {
+        "name": "index-B9lY8O0A.js",
+        "sizeKB": 8.8,
+        "sizeKBGz": 3.2,
+        "eager": false
+      },
+      {
+        "name": "index-Chcw6w9p.js",
+        "sizeKB": 8.8,
+        "sizeKBGz": 3.1,
+        "eager": false
+      },
+      {
+        "name": "index-Bet2Fu3u.js",
+        "sizeKB": 8.7,
+        "sizeKBGz": 3.6,
+        "eager": false
+      },
+      {
+        "name": "index-CM-liVSx.js",
+        "sizeKB": 8.4,
+        "sizeKBGz": 3.2,
+        "eager": false
+      },
+      {
+        "name": "index-ReqTKw3v.js",
+        "sizeKB": 8.3,
+        "sizeKBGz": 3.5,
+        "eager": false
+      },
+      {
+        "name": "index-BSfkpJlA.js",
+        "sizeKB": 7.9,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-BZbezzY5.js",
+        "sizeKB": 7.9,
+        "sizeKBGz": 2.7,
+        "eager": false
+      },
+      {
+        "name": "index-Bk3TGBLc.js",
+        "sizeKB": 6.9,
+        "sizeKBGz": 2.7,
+        "eager": false
+      },
+      {
+        "name": "index-4KDpSsdd.js",
+        "sizeKB": 6.7,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-DsAWhEt7.js",
+        "sizeKB": 6.7,
+        "sizeKBGz": 2.5,
+        "eager": false
+      },
+      {
+        "name": "index-zxN3zOq2.js",
+        "sizeKB": 6.1,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-CmAfApnF.js",
+        "sizeKB": 6,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-6PYYAths.js",
+        "sizeKB": 5.4,
+        "sizeKBGz": 2.3,
+        "eager": false
+      },
+      {
+        "name": "index-088JUGHa.js",
+        "sizeKB": 4.5,
+        "sizeKBGz": 2.1,
+        "eager": false
+      },
+      {
+        "name": "index-Cv6z7hmU.js",
+        "sizeKB": 4,
+        "sizeKBGz": 1.6,
+        "eager": false
+      },
+      {
+        "name": "index-CtFnnxA3.js",
+        "sizeKB": 3.9,
+        "sizeKBGz": 1.7,
+        "eager": false
+      },
+      {
+        "name": "index-Cw0D7iLO.js",
+        "sizeKB": 3.9,
+        "sizeKBGz": 1.5,
+        "eager": false
+      },
+      {
+        "name": "index-ZorYLxdB.js",
+        "sizeKB": 3.8,
+        "sizeKBGz": 1.5,
+        "eager": false
+      },
+      {
+        "name": "index-DpWZLp9E.js",
+        "sizeKB": 3.3,
+        "sizeKBGz": 1.5,
+        "eager": false
+      },
+      {
+        "name": "index-BmlPJSjP.js",
+        "sizeKB": 2.5,
+        "sizeKBGz": 1.1,
+        "eager": false
+      },
+      {
+        "name": "index-ymJ_yqH_.js",
+        "sizeKB": 2.5,
+        "sizeKBGz": 1.2,
+        "eager": false
+      },
+      {
+        "name": "index-D7wNN3xf.js",
+        "sizeKB": 2.4,
+        "sizeKBGz": 1.1,
+        "eager": false
+      },
+      {
+        "name": "index-BVZS7yy4.js",
+        "sizeKB": 2.3,
+        "sizeKBGz": 0.9,
+        "eager": false
+      },
+      {
+        "name": "commentsApi-BejuGiVX.js",
+        "sizeKB": 2.2,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-D01HY4Ut.js",
+        "sizeKB": 1.9,
+        "sizeKBGz": 0.8,
+        "eager": false
+      },
+      {
+        "name": "index-C5eBNrJF.js",
+        "sizeKB": 1.6,
+        "sizeKBGz": 0.9,
+        "eager": false
+      },
+      {
+        "name": "wardley-RL74JXVD-DZL-gl0x.js",
+        "sizeKB": 1.5,
+        "sizeKBGz": 0.5,
+        "eager": false
+      },
+      {
+        "name": "index-CWz25Y-j.js",
+        "sizeKB": 1.4,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-BI2J8D1Z.js",
+        "sizeKB": 1.3,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-C4a2PJa1.js",
+        "sizeKB": 1.3,
+        "sizeKBGz": 0.6,
+        "eager": false
+      },
+      {
+        "name": "index-C1VUb-dx.js",
+        "sizeKB": 1.2,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-CVEABn0M.js",
+        "sizeKB": 1.2,
+        "sizeKBGz": 0.6,
+        "eager": false
+      },
+      {
+        "name": "index-DOg2dUKZ.js",
+        "sizeKB": 1.2,
+        "sizeKBGz": 0.6,
+        "eager": false
+      },
+      {
+        "name": "index-2KwyhCCT.js",
+        "sizeKB": 1.1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-CCs6jR89.js",
+        "sizeKB": 1.1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "vite-preload-helper-DfZQVC28.js",
+        "sizeKB": 1.1,
+        "sizeKBGz": 0.6,
+        "eager": true
+      },
+      {
+        "name": "index-4SN9DdDH.js",
+        "sizeKB": 1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-DM4MIPCP.js",
+        "sizeKB": 1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "blockRefDrag-kole4JeV.js",
+        "sizeKB": 0.9,
+        "sizeKBGz": 0.5,
+        "eager": false
+      },
+      {
+        "name": "outlineStore-D00nGyNC.js",
+        "sizeKB": 0.8,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "index-6DPMXviT.js",
+        "sizeKB": 0.7,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "index-C1DHLod2.js",
+        "sizeKB": 0.7,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "applyCapabilityChange-BHRsNF_d.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "confirmStore-Drv_GczV.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "filesStore-B3F6LhKM.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.3,
+        "eager": false
+      },
+      {
+        "name": "pickStore-s-lM2ciP.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "promptStore-Bx4VKJYj.js",
+        "sizeKB": 0.5,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "index-BUHL18_C.js",
+        "sizeKB": 0.2,
+        "sizeKBGz": 0.2,
+        "eager": false
+      },
+      {
+        "name": "constants-Chebcsbk.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      },
+      {
+        "name": "gitStatusStore-B7V8rhu6.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      },
+      {
+        "name": "marginApi-CG5RUV85.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      },
+      {
+        "name": "runtime-CF-Rhxkh.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      }
+    ]
+  },
+  "microbenchmarks": {
+    "flattenTree.10k": {
+      "iterations": 200,
+      "p50us": 1237.05,
+      "p95us": 2977.23,
+      "p99us": 4302.91,
+      "meanus": 1496.4,
+      "totalMs": 300.21
+    },
+    "frameSnapshot.4stores.flush": {
+      "iterations": 5000,
+      "p50us": 0.74,
+      "p95us": 1.56,
+      "p99us": 3.03,
+      "meanus": 1.25,
+      "totalMs": 7.04
+    }
+  }
+}

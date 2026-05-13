@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-112: Frontend perf benchmark harness — first cut ✅ (2026-05-13)
+
+**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
+**Files**: `experiments/perf/run.ts` (new); `experiments/perf/README.md` (new); `experiments/perf/baselines/2026-05-13.json` (new committed baseline)
+**Related**: BL-109 (`flattenTree` is one of the two microbenched helpers); BL-110 (`FrameSnapshot` is the other); BL-111 (the regression class the build-output check was designed to catch)
+
+The motivating observation in the BL: the assessment table is engineering estimates because no published Nexus benchmarks exist. First cut covers the static-analysis class — the metric class that would have caught BL-111's vendor-mermaid eager-preload regression at PR review.
+
+- **`run.ts` harness.** Single-file Node script, runs from inside `shell/` via `node --import tsx ../experiments/perf/run.ts [--write]`. Three phases:
+  1. Clean rebuild (`pnpm --filter nexus-shell build`), capture wall-clock duration.
+  2. Walk `dist/`: read `index.html` for `<link rel="modulepreload">` set, parse the entry chunk's source for `from"./X.js"` static-import edges, list every `dist/assets/*.js` with raw + gzipped size, classify each chunk as eager (in entry's static-import closure or HTML preload list) or lazy.
+  3. Run two microbenchmarks: `flattenTree` over a synthetic 10k-file forge with every folder expanded (200 iterations, branchingFactor=10), `FrameSnapshot.flush` over four mocked Subscribable stores with a manual scheduler so the flush is deterministic (5000 iterations).
+- **Stable JSON schema (`schemaVersion: 1`).** Output sorted for textual diffability — chunks by size desc, static imports alphabetically, microbench keys stable. Re-runs on the same source produce textually-identical baselines. The 354 KB eager / 5856 KB lazy split shipped today; pre-BL-111 the eager set would have included vendor-mermaid (~2.7 MB) — that's the regression class this would catch at PR review.
+- **`README.md`.** Documents the host-machine assumption (numbers are anchored to the run host; the comparison surface is "same baseline, before vs after, on the same machine"), what's measured, what's deterministic vs noisy, and the roadmap to add Tauri/WDIO scenarios as additional `scenarios` entries in the same `PerfReport` shape.
+- **Committed baseline.** `experiments/perf/baselines/2026-05-13.json` captured on the dev WSL2 host (Linux 6.6 / Node v22 / Intel i7-1265U). Build duration 42.67s; entry static imports `vendor-react` + `vite-preload-helper` only; `flattenTree.10k` p50=1.24ms / p99=4.3ms (well within a 16ms frame budget); `frameSnapshot.4stores.flush` p50=0.74µs / p99=3µs (effectively free).
+
+**Tauri / WDIO scenarios deferred (per BL).** The five runtime scenarios named in the original DoD (cold-start trace, "open 50 MB file", "scroll 10k-row file tree", "render 500-heading outline", "type 5 chars in 5k-line markdown") need a stable WDIO-Tauri runner that this repo doesn't have yet. They slot into `PerfReport.scenarios` (currently absent — additive change at `schemaVersion: 1`) once that runner lands. The BL itself called this stretch deferred; first cut intentionally landed the static-analysis class because that's where BL-111's regression hid.
+
+**Tested**: harness runs end-to-end on the dev host, produces the expected JSON, and the committed baseline survives a second run unchanged (modulo `generatedAt` and microbench medians within their noise floor — the harness reports both raw samples and percentiles so noise is visible).
+
+**Definition of done coverage**: ✅ `experiments/perf/run.ts` exercises 2 microbench scenarios + the build-output scenario class (5 build-output metrics: eager total, lazy total, entry static-import set, HTML preload set, per-chunk inventory); ✅ output schema stable JSON; ✅ README documents host assumption + how to run; ✅ one baseline committed; ⏸ regression-gate CI job + WDIO scenarios deferred per the BL.
+
+---
+
 ### BL-111: Defer Mermaid + heavy diagram libs until first use ✅ (2026-05-13)
 
 **Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
