@@ -3030,9 +3030,20 @@ function PluginsTab({
             <CommunityPluginRow
               key={m.id}
               manifest={m}
-              saving={saving === m.id}
+              saving={saving === m.id || pendingBuiltin.has(m.id)}
               changed={!!pendingChanges[m.id]}
-              onToggle={handleToggle}
+              // Catalog-registered community plugins (the `community.*`
+              // entries in DEFAULT_OFF_PLUGINS — mermaid is the
+              // load-bearing case) live entirely shell-side and have
+              // no kernel identity. Routing their toggle through the
+              // kernel's `set_plugin_enabled` returns "Plugin not
+              // found". Detect them via `optionalIds` and fall through
+              // to the catalog path that the Core section already uses.
+              onToggle={(id, enabled) =>
+                optionalIds.has(id)
+                  ? void handleToggleBuiltin(id, enabled)
+                  : void handleToggle(id, enabled)
+              }
               onJumpToHotkeys={() => onJumpToHotkeys(m.id)}
               hasOptions={pluginsWithOptions.has(m.id)}
               onJumpToOptions={() => onJumpToOptions(m.id)}

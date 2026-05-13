@@ -9,12 +9,8 @@ import { viewRegistry } from './ViewRegistry.ts'
 
 // String-indirected imports keep tsc from trying to resolve node built-ins
 // (which would need @types/node). Runtime still loads them normally.
-const nodeTest: string = 'node:test'
-const nodeAssert: string = 'node:assert/strict'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { test } = (await import(nodeTest)) as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const assert = ((await import(nodeAssert)) as any).default
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 
 const fakeLeaf = {} as Leaf
 

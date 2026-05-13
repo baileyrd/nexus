@@ -9,12 +9,8 @@ import { makeEditorClient } from './kernelClient.ts'
 import { makeSessionManager } from './sessionManager.ts'
 import { useEditorStore } from './editorStore.ts'
 
-const nodeTest: string = 'node:test'
-const nodeAssert: string = 'node:assert/strict'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { test } = (await import(nodeTest)) as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const assert = ((await import(nodeAssert)) as any).default
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 

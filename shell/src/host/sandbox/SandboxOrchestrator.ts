@@ -294,6 +294,9 @@ class SandboxInstanceImpl implements SandboxInstance {
   private readonly handshakeTimeoutMs: number
   private readonly warn: (...args: unknown[]) => void
   private readonly windowRef: Window & typeof globalThis
+  /** srcdoc body computed in the constructor but applied in `start()`
+   *  after the iframe is in the DOM — see the comment there. */
+  private readonly pendingSrcDoc: string
 
   constructor(
     private readonly spec: SandboxSpec,
@@ -331,7 +334,12 @@ class SandboxInstanceImpl implements SandboxInstance {
     this.iframe.style.height = '1px'
     this.iframe.setAttribute('aria-hidden', 'true')
     this.iframe.setAttribute('data-sandbox-plugin', spec.pluginId)
-    this.iframe.srcdoc = buildSandboxSrcDoc({
+    // Defer srcdoc assignment until `start()` runs — see the comment
+    // there. Setting srcdoc on a not-yet-attached iframe makes WebKit
+    // construct the about:srcdoc document before the sandbox attribute
+    // takes effect, producing spurious "frame is sandboxed and
+    // 'allow-scripts' permission is not set" console errors at boot.
+    this.pendingSrcDoc = buildSandboxSrcDoc({
       runtimeUrl: spec.runtimeUrl,
       bundleUrl: spec.bundleUrl,
     })
@@ -357,6 +365,19 @@ class SandboxInstanceImpl implements SandboxInstance {
   async start(): Promise<void> {
     const container = this.orchOpts.container ?? this.windowRef.document.body
     container.appendChild(this.iframe)
+
+    // Apply srcdoc only AFTER the iframe is in the DOM. WebKit
+    // (Tauri/Linux + Safari/macOS) eagerly constructs the about:srcdoc
+    // document at the moment srcdoc is assigned. If the iframe is not
+    // yet a child of any document at that point, the sandbox attribute
+    // hasn't been "committed" against the iframe's effective sandbox
+    // state and the document loads with default-deny — which means
+    // `<script type="module">` blocks inside the srcdoc fire spurious
+    // "frame is sandboxed and 'allow-scripts' permission is not set"
+    // console errors even though our sandbox attribute already says
+    // `allow-scripts`. Appending first then assigning srcdoc commits
+    // the sandbox state before the document loads.
+    this.iframe.srcdoc = this.pendingSrcDoc
 
     this.port = new IframePort({
       iframe: this.iframe,

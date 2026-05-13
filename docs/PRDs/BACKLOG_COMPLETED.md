@@ -8,6 +8,43 @@
 
 ## New Features (not addressed in any PRD)
 
+### Spike triple-shot ✅ (2026-05-13)
+
+Three small spikes filed during the BL-1xx perf sweep, all closed in one pass:
+
+#### 1. Settings → Plugins "Enable" on a catalog community plugin
+
+**Files**: `shell/src/plugins/core/settings/SettingsPanelView.tsx` (+13 lines around line 3035)
+**Symptom**: clicking Enable on `community.mermaid` (or any other `community.*` entry in `DEFAULT_OFF_PLUGINS`) errored with `[PluginsTab] set_plugin_enabled failed: "Plugin 'community.mermaid' not found"`. Reproducible since 2026-04-19 (commit `cd5687645`).
+
+The Community plugins section's row passed every toggle through `handleToggle` → `invoke('set_plugin_enabled')` → kernel WASM-plugin loader. Catalog-registered shell-side plugins have no kernel identity, so the kernel rightly returned "not found". The Core section already had the right path (`handleToggleBuiltin` → catalog activation). Fix forks the row's `onToggle` on `optionalIds.has(id)`: catalog-known ids fall through to the catalog path, everything else goes to the kernel as today. The `saving` indicator now also folds in `pendingBuiltin.has(m.id)` so the spinner fires on either path.
+
+#### 2. 107 src-colocated `*.test.ts` files appeared silently uncounted
+
+**Files**: 11 new wrappers under `shell/tests/`; 9 in-place TLA fixes under `shell/src/`; 1 documented skip in `shell/src/workspace/Leaf.test.ts`
+**Outcome**: suite size 1260 → 1331 (+71 tests recovered from the gap). One stale-spec test surfaced and skipped with documentation.
+
+The audit found that `pnpm --filter nexus-shell test` globs `tests/*.test.ts` only — but the convention for src-colocated tests is a thin re-export wrapper at `shell/tests/<name>.test.ts` doing `import '../src/.../<name>.test.ts'`. node:test discovers `test()` calls in any imported module so the assertions register as subtests of the wrapper. **96 of 107 src tests already had wrappers.** 11 didn't and were genuinely silently uncounted.
+
+Per-file action:
+- 11 new wrappers added (one per unwrapped src test).
+- 9 of the 11 src tests used a deprecated workaround pattern from before `@types/node` was installed: `const { test } = (await import('node:test'))` (top-level await with a string-indirected module specifier to dodge a tsc lookup that's no longer needed). Top-level await isn't legal under tsx's CJS transform (shell isn't `"type": "module"`) and made the tests fail with a `Transform failed: Top-level await is currently not supported with the "cjs" output format` error even through the wrapper. Converted each to plain `import { test } from 'node:test'` + `import assert from 'node:assert/strict'`.
+- 1 surviving assertion failure in `Leaf.test.ts` ("containerEl=null is a transient unmount — onClose does NOT fire; re-attach does not re-open"). Behavior changed deliberately in commit `9a541afa` ("re-home view DOM on sidebar collapse/reopen") — LeafImpl now re-fires `onOpen` on re-attach so the view rebinds to the new container element. Either the spec or the impl needs to win; deferred to the workspace owner. Test marked `{ skip: '…' }` with a comment pointing at the divergence rather than deleted, so the original intent stays visible to whoever revisits.
+
+The shell test runner's `tests/*.test.ts` glob convention is preserved; no script change needed.
+
+#### 3. `about:srcdoc` boot-time console errors
+
+**Files**: `shell/src/host/sandbox/SandboxOrchestrator.ts` (move srcdoc assignment from constructor to after `appendChild` in `start()`)
+
+The errors fired from `SandboxOrchestrator`'s iframes for sandboxed community plugins. The orchestrator was setting `sandbox="allow-scripts"` correctly but then assigning `iframe.srcdoc = …` while the iframe was still detached from any document. WebKit (Tauri/Linux + Safari/macOS) eagerly constructs the about:srcdoc document at the moment srcdoc is assigned; if the iframe isn't yet a child of any document, the sandbox attribute hasn't been "committed" against the iframe's effective sandbox state, so the document loads with default-deny and every `<script type="module">` block in the srcdoc body fires the spurious "frame is sandboxed and 'allow-scripts' permission is not set" error.
+
+Fix: store the srcdoc body in a `pendingSrcDoc` field in the constructor; assign it to `this.iframe.srcdoc` in `start()` only AFTER `container.appendChild(this.iframe)`. Append-then-assign commits the sandbox state before the document loads. No change to the visible behavior or to test stubs (which only assert that srcdoc gets set, not when).
+
+**Tested across all three**: `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (only the 2 expected BL-110 variance-boundary warnings); `pnpm --filter nexus-shell test` 1330/1330 pass with 1 documented skip.
+
+---
+
 ### BL-112: Frontend perf benchmark harness — first cut ✅ (2026-05-13)
 
 **Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6

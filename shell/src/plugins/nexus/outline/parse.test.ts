@@ -7,12 +7,8 @@
 import type { BlockTree, Block } from '../editor/types.ts'
 import { parseHeadings, treeToHeadings } from './parse.ts'
 
-const nodeTest: string = 'node:test'
-const nodeAssert: string = 'node:assert/strict'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { test } = (await import(nodeTest)) as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const assert = ((await import(nodeAssert)) as any).default
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
