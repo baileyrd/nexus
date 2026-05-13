@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
 import { clientLogger } from '../../../clientLogger'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
@@ -11,6 +12,7 @@ import { getFileIcon } from './fileIcon'
 import { getApi } from './runtime'
 import { NavActionButton, NavButtonsContainer, NavHeader } from '../../../primitives/NavHeader'
 import { FilesContextMenu, type FilesContextMenuItem } from './ContextMenu'
+import { flattenTree, isBundleDir } from './flattenTree'
 
 const DRAG_MIME = 'application/x-nexus-relpath'
 const CONTEXT_KEY_FOCUSED = 'nexus.files.focused'
@@ -21,61 +23,9 @@ interface FilesTreeProps {
 
 const INDENT_PX = 14
 const ROOT_RELPATH = ''
-
-/** Directory extensions that should behave like documents in the
- *  tree: one click opens them as a leaf instead of expanding their
- *  contents. Currently just `.bases` (PRD-10 database bundle); add
- *  more here when other bundle formats land (`.excalidraw`, etc.). */
-const BUNDLE_DIR_EXTS = new Set(['bases'])
-
-function isBundleDir(entry: FilesDirEntry): boolean {
-  if (!entry.isDir) return false
-  const dot = entry.name.lastIndexOf('.')
-  if (dot < 0) return false
-  return BUNDLE_DIR_EXTS.has(entry.name.slice(dot + 1).toLowerCase())
-}
-
-/** Sort entries in-place by the user's chosen mode. Directories always
- *  come first (VSCode / Obsidian convention); the mode only orders
- *  within each bucket. Missing timestamps sink to the bottom. */
-function sortEntries(entries: FilesDirEntry[], mode: SortMode): FilesDirEntry[] {
-  const sorted = [...entries]
-  sorted.sort((a, b) => {
-    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
-    switch (mode) {
-      case 'nameAsc':
-        return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-      case 'nameDesc':
-        return b.name.toLowerCase().localeCompare(a.name.toLowerCase())
-      case 'modifiedDesc':
-        return compareNullableNumber(b.modifiedMs, a.modifiedMs, a.name, b.name)
-      case 'modifiedAsc':
-        return compareNullableNumber(a.modifiedMs, b.modifiedMs, a.name, b.name)
-      case 'createdDesc':
-        return compareNullableNumber(b.createdMs, a.createdMs, a.name, b.name)
-      case 'createdAsc':
-        return compareNullableNumber(a.createdMs, b.createdMs, a.name, b.name)
-    }
-  })
-  return sorted
-}
-
-/** Numeric comparator that treats `undefined` as "worst" (pushed to
- *  the end) and breaks ties by case-insensitive name. */
-function compareNullableNumber(
-  a: number | undefined,
-  b: number | undefined,
-  nameA: string,
-  nameB: string,
-): number {
-  if (a === undefined && b === undefined) {
-    return nameA.toLowerCase().localeCompare(nameB.toLowerCase())
-  }
-  if (a === undefined) return 1
-  if (b === undefined) return -1
-  if (a !== b) return a - b
-  return nameA.toLowerCase().localeCompare(nameB.toLowerCase())
-}
+// Row height matches the rendered row: padding 3+3 + line-height 18.
+// Kept fixed so the virtualizer doesn't need per-row measurement.
+const ROW_HEIGHT = 24
 
 /** Forge-relative parent of a relpath. `""` → `""`. Forward-slash only. */
 function parentRelpath(relpath: string): string {
@@ -104,7 +54,7 @@ interface MenuTarget {
 }
 
 /**
- * Closure plumbed down to each TreeNode so it can request the menu
+ * Closure plumbed down to each TreeRow so it can request the menu
  * without prop-drilling. Uses module-scope React state via a singleton
  * setter installed by `<FilesTree>` on mount; this avoids a context
  * provider for a one-component-deep concern.
@@ -113,7 +63,8 @@ let openMenuRef: ((t: MenuTarget) => void) | null = null
 
 export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
-  const rootEntries = useFilesStore((s) => s.children[ROOT_RELPATH])
+  const childrenCache = useFilesStore((s) => s.children)
+  const expandedSet = useFilesStore((s) => s.expanded)
   const setChildren = useFilesStore((s) => s.setChildren)
   const sortMode = useFilesStore((s) => s.sortMode)
   const autoReveal = useFilesStore((s) => s.autoReveal)
@@ -125,8 +76,11 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const setAutoReveal = useFilesStore((s) => s.setAutoReveal)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
 
+  const rootEntries = childrenCache[ROOT_RELPATH]
+
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
   // Install the menu-open callback while this tree is mounted. Pair
   // with cleanup so a remount doesn't leave a stale closure that
@@ -150,8 +104,6 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     if (!el) return
     const onFocusIn = () => api.context.set(CONTEXT_KEY_FOCUSED, true)
     const onFocusOut = (e: FocusEvent) => {
-      // focusout fires before focus moves; check if the next target
-      // is still inside the tree to avoid flicker.
       const next = e.relatedTarget as Node | null
       if (next && el.contains(next)) return
       api.context.set(CONTEXT_KEY_FOCUSED, false)
@@ -174,15 +126,14 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
   }, [rootPath, rootEntries, setChildren])
 
   // Auto-reveal: whenever the active editor file changes and the user
-  // has the flag on, expand every ancestor directory, select the file,
-  // and scroll its row into view.
+  // has the flag on, expand every ancestor directory and select the
+  // file. The scroll-to is handled by the virtualizer effect below
+  // once the flat list rebuilds with the file in place.
   useEffect(() => {
     if (!autoReveal) return
     if (!activeRelpath) return
     for (const dir of ancestors(activeRelpath)) {
       setExpanded(dir, true)
-      // Fire-and-forget: unexpanded dirs haven't been listed yet, so
-      // `loadChildren` populates them before TreeNode renders them.
       const cached = useFilesStore.getState().children[dir]
       if (!cached) {
         loadChildren(dir).then((entries) =>
@@ -192,6 +143,32 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     }
     setSelected(activeRelpath)
   }, [autoReveal, activeRelpath, setExpanded, setSelected])
+
+  const flatRows = useMemo(
+    () =>
+      rootEntries
+        ? flattenTree(rootEntries, childrenCache, expandedSet, sortMode)
+        : [],
+    [rootEntries, childrenCache, expandedSet, sortMode],
+  )
+
+  const virtualizer = useVirtualizer({
+    count: flatRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+  })
+
+  // Scroll the selected row into view through the virtualizer.
+  // Runs on every selection change (matches the pre-virtualization
+  // `scrollIntoView` behaviour) and after auto-reveal repopulates the
+  // flat list with the freshly-revealed file.
+  useEffect(() => {
+    if (!selected) return
+    const idx = flatRows.findIndex((r) => r.entry.relpath === selected)
+    if (idx < 0) return
+    virtualizer.scrollToIndex(idx, { align: 'auto' })
+  }, [selected, flatRows, virtualizer])
 
   if (!rootPath) {
     return (
@@ -273,24 +250,23 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     setAutoReveal(!autoReveal)
   }
 
-  // Right-click on the container itself (not on a row) → "root" menu.
-  // The row's own onContextMenu stops propagation, so this only fires
-  // for the empty area / padding.
+  // Right-click on the empty area (not on a row) → "root" menu. Rows
+  // call `e.stopPropagation()` in their own context-menu handler, so
+  // this only fires when the click landed outside any row.
   const handleContainerContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return
     e.preventDefault()
     setMenu({ entry: null, x: e.clientX, y: e.clientY })
   }
 
-  // Drop on the empty container = move into the root.
+  // Drop on the empty area = move into the root. Rows that catch a
+  // drop call `e.stopPropagation()` so this handler only sees drops
+  // that landed outside any row.
   const handleContainerDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return
     if (!e.dataTransfer.types.includes(DRAG_MIME)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }
   const handleContainerDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return
     const from = e.dataTransfer.getData(DRAG_MIME)
     if (!from) return
     e.preventDefault()
@@ -298,6 +274,9 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
   }
 
   const items = menu ? buildMenuItems(menu.entry) : []
+
+  const virtualRows = virtualizer.getVirtualItems()
+  const totalHeight = virtualizer.getTotalSize()
 
   return (
     <div
@@ -316,24 +295,41 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       />
 
       <div
+        ref={scrollRef}
         className="nav-files-container"
         onContextMenu={handleContainerContextMenu}
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
       >
-        {rootEntries ? (
-          sortEntries(rootEntries, sortMode).map((entry) => (
-            <TreeNode
-              key={entry.relpath}
-              entry={entry}
-              depth={0}
-              rootPath={rootPath}
-              sortMode={sortMode}
-              onFileActivate={onFileActivate}
-            />
-          ))
-        ) : (
+        {!rootEntries ? (
           <div style={{ padding: '12px 14px', color: 'var(--text-faint)' }}>Loading…</div>
+        ) : (
+          <div style={{ position: 'relative', height: totalHeight, width: '100%' }}>
+            {virtualRows.map((vr) => {
+              const row = flatRows[vr.index]
+              if (!row) return null
+              return (
+                <div
+                  key={row.entry.relpath}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: ROW_HEIGHT,
+                    transform: `translateY(${vr.start}px)`,
+                  }}
+                >
+                  <TreeRow
+                    entry={row.entry}
+                    depth={row.depth}
+                    rootPath={rootPath}
+                    onFileActivate={onFileActivate}
+                  />
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -349,14 +345,9 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
   )
 }
 
-/** Build the right-click menu for a target (or null = root area).
- *  Each item dispatches a registered command so the menu and the
- *  Del / F2 shortcuts share a single code path. */
 function buildMenuItems(target: FilesDirEntry | null): FilesContextMenuItem[] {
   const api = getApi()
   if (!api) return []
-  // Parent directory for "New" actions: the target if it's a folder,
-  // else the target's parent, else the root.
   const parent =
     target === null
       ? ''
@@ -430,13 +421,9 @@ function buildMenuItems(target: FilesDirEntry | null): FilesContextMenuItem[] {
  */
 async function moveEntry(from: string, targetDir: string): Promise<void> {
   if (!from) return
-  // Drop on self (file or folder dragged onto itself) → no-op.
   if (from === targetDir) return
-  // Drop on the file's current parent → no-op (would rename to same path).
   const fromParent = parentRelpath(from)
   if (fromParent === targetDir) return
-  // Drop into a descendant of the dragged folder → would orphan it.
-  // `targetDir` starts with `from + "/"` iff target is inside `from`.
   if (targetDir === from || targetDir.startsWith(`${from}/`)) return
 
   const name = from.slice(from.lastIndexOf('/') + 1) || from
@@ -445,8 +432,6 @@ async function moveEntry(from: string, targetDir: string): Promise<void> {
 
   try {
     await renameEntry(from, dst)
-    // Refresh both sides; the watcher will re-confirm but eager
-    // refresh keeps the UI snappy.
     const entries1 = await loadChildren(fromParent)
     useFilesStore.getState().setChildren(fromParent, entries1)
     if (targetDir !== fromParent) {
@@ -509,11 +494,6 @@ function Toolbar({
   const sortBtnRef = useRef<HTMLButtonElement>(null)
 
   return (
-    // The toolbar row matches the main-dock view-header height
-    // (`--header-height`) and carries the 1px divider at the bottom
-    // edge itself — that way the file-tree toolbar buttons and the
-    // breadcrumb back/forward buttons share the same y-center across
-    // the dock divider, and both bottom borders land on the same row.
     <NavHeader
       style={{
         position: 'relative',
@@ -598,9 +578,6 @@ function SortMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // Dismiss on outside click / Escape. Use capture so a click on a
-  // toolbar button re-opening the same menu cleanly toggles rather
-  // than re-opening after this handler fires.
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node | null
@@ -708,45 +685,36 @@ function SortMenuItem({
   )
 }
 
-function TreeNode({
+/** Single virtualized row. Owns its own drop-hover state and handles
+ *  click / context-menu / drag-drop directly — no recursion into
+ *  children, since the parent flattens the whole visible tree before
+ *  handing it to the virtualizer. */
+function TreeRow({
   entry,
   depth,
   rootPath,
-  sortMode,
   onFileActivate,
 }: {
   entry: FilesDirEntry
   depth: number
   rootPath: string
-  sortMode: SortMode
   onFileActivate: (entry: FilesDirEntry) => void
 }) {
   const expanded = useFilesStore((s) => s.expanded.has(entry.relpath))
-  const children = useFilesStore((s) => s.children[entry.relpath])
+  const cachedChildren = useFilesStore((s) => s.children[entry.relpath])
   const toggleExpanded = useFilesStore((s) => s.toggleExpanded)
   const setChildren = useFilesStore((s) => s.setChildren)
   const selected = useFilesStore((s) => s.selected === entry.relpath)
   const setSelected = useFilesStore((s) => s.setSelected)
-  const rowRef = useRef<HTMLButtonElement>(null)
-
-  // Scroll-into-view when auto-reveal selected this row. We scroll on
-  // every `selected` transition — the cost is a single smooth scroll
-  // per click, which is cheap.
-  useEffect(() => {
-    if (selected && rowRef.current) {
-      rowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [selected])
 
   const bundle = isBundleDir(entry)
-  // Folders (real dirs, not bundle dirs) accept drops. Files don't.
   const isDropTarget = entry.isDir && !bundle
   const [dropHover, setDropHover] = useState(false)
 
   const handleClick = () => {
     if (entry.isDir && !bundle) {
       toggleExpanded(entry.relpath)
-      if (!children) {
+      if (!cachedChildren) {
         loadChildren(entry.relpath).then((entries) =>
           setChildren(entry.relpath, entries),
         )
@@ -790,7 +758,6 @@ function TreeNode({
     e.stopPropagation()
     setDropHover(false)
     await moveEntry(from, entry.relpath)
-    // Reveal the destination folder so the user sees the moved entry.
     useFilesStore.getState().setExpanded(entry.relpath, true)
     if (!useFilesStore.getState().children[entry.relpath]) {
       loadChildren(entry.relpath).then((entries) =>
@@ -800,10 +767,8 @@ function TreeNode({
   }
 
   const tooltip = entry.relpath ? `${rootPath}/${entry.relpath}` : rootPath
-
-  // Bundle dirs render with the file wrapper so they don't get the
-  // folder-expand affordance and their children are never listed.
   const wrapperClass = entry.isDir && !bundle ? 'nav-folder' : 'nav-file'
+
   return (
     <div
       className={wrapperClass}
@@ -816,8 +781,9 @@ function TreeNode({
               outline: '1px solid var(--interactive-accent)',
               outlineOffset: -1,
               borderRadius: 3,
+              height: '100%',
             }
-          : undefined
+          : { height: '100%' }
       }
     >
       <Row
@@ -829,22 +795,7 @@ function TreeNode({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDragStart={handleDragStart}
-        buttonRef={rowRef}
       />
-      {entry.isDir && !bundle && expanded && children && (
-        <div className="nav-folder-children tree-item-children">
-          {sortEntries(children, sortMode).map((child) => (
-            <TreeNode
-              key={child.relpath}
-              entry={child}
-              depth={depth + 1}
-              rootPath={rootPath}
-              sortMode={sortMode}
-              onFileActivate={onFileActivate}
-            />
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -858,7 +809,6 @@ function Row({
   onClick,
   onContextMenu,
   onDragStart,
-  buttonRef,
 }: {
   entry: FilesDirEntry
   depth: number
@@ -868,7 +818,6 @@ function Row({
   onClick: () => void
   onContextMenu: (e: ReactMouseEvent) => void
   onDragStart: (e: ReactDragEvent<HTMLElement>) => void
-  buttonRef: React.RefObject<HTMLButtonElement>
 }) {
   const bundle = isBundleDir(entry)
   const showAsDir = entry.isDir && !bundle
@@ -881,7 +830,6 @@ function Row({
   return (
     <button
       type="button"
-      ref={buttonRef}
       draggable
       onDragStart={onDragStart}
       onClick={onClick}
@@ -933,10 +881,7 @@ function Row({
 }
 
 /** BL-053 Phase 4 — status dot rendered at the right edge of each
- *  markdown row when the file's `status:` frontmatter is set.
- *  Pulled into a dedicated component so the parent `Row` doesn't
- *  re-render on every cache mutation — only this child does, and
- *  only when its own status flips. */
+ *  markdown row when the file's `status:` frontmatter is set. */
 function RowStatusDot({ entry }: { entry: FilesDirEntry }) {
   const status = useFileStatus(entry.relpath, entry.isDir, entry.name, getKernel())
   if (status == null) return null

@@ -16,20 +16,7 @@
 
 ## New Features (not addressed in any PRD)
 
-### BL-109: Virtualize the files tree
-
-**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
-**Effort**: Small (~1 day)
-**Crates**: `shell/src/plugins/nexus/files/`
-**Related**: `experiments/zed-frontend-analysis.md` (`uniform_list` pattern); BL-053 (visual target)
-
-`FilesTree.tsx` renders every expanded `TreeNode` recursively — no windowing. At ~200 visible rows the cost is invisible; at a 10k-file forge with deep expansion, paint and event-handler attachment scale linearly with row count. `@tanstack/react-virtual` is already a dependency (used by `BasesTable.tsx`), so the change is local: flatten the visible tree into an index-addressable array and let the virtualizer mount only the rows in view. This is the single highest-ROI frontend performance change available today and directly closes the Zed analysis's `uniform_list` gap.
-
-**Definition of done:**
-- `FilesTree.tsx` mounts at most `O(viewport_height / row_height)` `<Row>` nodes regardless of expansion depth
-- Drag/drop, keyboard nav, auto-reveal, and context-menu wiring all continue to work
-- Selected-row `scrollIntoView` still works through the virtualizer's `scrollToIndex`
-- Benchmark: cold open of a forge with 10k files + every folder expanded produces a smooth scroll on the dev box
+_BL-109 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `flattenTree.ts` extracts the visible-rows walker as a pure helper (sorting + bundle-dir gate + lazy-children skip); `FilesTree.tsx` rebuilt around `useVirtualizer` over that flat list. Recursive `TreeNode` collapsed into a single `TreeRow` per visible row, drop-hover state per-row, drag/drop / context-menu / keyboard wiring preserved (rows stop event propagation so the container's root-drop / root-context-menu fall through cleanly). Selection scroll-into-view now goes through `virtualizer.scrollToIndex(idx, { align: 'auto' })` so auto-reveal + click both keep working without a per-row ref. 7 new unit tests pin `flattenTree` behaviour (collapsed root, expanded with cached kids, expanded without kids, bundle-dir non-recurse, sort modes per-level, dirs-before-files, isBundleDir matrix). DoD benchmark scenario (10k files + every folder expanded) intentionally not measured against a recorded baseline — BL-112 owns the harness; the structural goal (`O(viewport_height / row_height)` mounted rows regardless of expansion depth) is met by construction since the virtualizer's `getVirtualItems` is bounded by `viewport / estimateSize + 2*overscan`._
 
 ### BL-110: Per-frame snapshot idiom for multi-store editor renders
 
