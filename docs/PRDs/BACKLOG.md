@@ -265,6 +265,136 @@ Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML c
 
 ---
 
+### BL-114: Code-symbol index foundation (GitNexus port)
+
+**Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
+**Effort**: Medium. Self-contained foundation for BL-115 + BL-116.
+**Crates**: `nexus-storage` (new `code_index` module), `nexus-git` (diff→symbol hook).
+
+Cross-repo code-intel index. The MVP: a SQLite-backed table of (path, kind, name, line_start, line_end, parent_id, doc_comment) populated by a tree-sitter walker over the forge's source files (gated by `nexus.editor.codeFileExtensions` from BL-075). Indexed on file save and on `com.nexus.git.commit`. Powers blast-radius queries, BM25 over code symbols, and the doc-generator in BL-116. No new top-level subsystem — lands inside `nexus-storage`'s existing schema next to the Tantivy FTS index.
+
+**Definition of done:**
+- Tree-sitter walker covering Rust / TS / Python / Go (the BL-075 default set)
+- SQLite table + indexed lookups by name / path / containing-file
+- File-save hook in `nexus-editor` and commit hook in `nexus-git` keep the index live
+- Rebuild path identical to FTS — files-on-disk are the source of truth, index is regenerable
+- IPC handler `com.nexus.storage::query_symbol(name, [path])` returns the matching set
+
+---
+
+### BL-115: MCP tools for code intel (GitNexus port)
+
+**Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
+**Effort**: Medium. Depends on BL-114.
+**Crates**: `nexus-mcp` (new tool registrations).
+
+Three new MCP tools backed by the BL-114 index: `nexus_context(symbol)` returns callers / callees / containing-process; `nexus_impact(symbol, depth)` walks the call graph and reports blast radius with risk classification; `nexus_detect_changes()` diffs the current dirty set against the indexed state and lists affected symbols. The shape is taken directly from the GitNexus MCP server that CLAUDE.md already requires for the impact-analysis workflow — porting it in-tree means agents working in Nexus don't need a parallel external service.
+
+**Definition of done:**
+- Three tools registered in `nexus-mcp.host`'s dynamic-tool registry (DG-39 surface)
+- `nexus_impact` accepts a depth parameter; risk levels match the GitNexus rubric (LOW / MEDIUM / HIGH / CRITICAL with documented thresholds)
+- `nexus_detect_changes` consumes `com.nexus.git::file_statuses` for the dirty set
+- Live MCP smoke against the in-process server confirms agent-side discoverability
+
+---
+
+### BL-116: `ai.generate_docs` symbol-aware doc generator (GitNexus port)
+
+**Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
+**Effort**: Small. Depends on BL-114 (consumes the symbol index).
+**Crates**: `nexus-ai` (new `generate_docs` IPC handler).
+
+Symbol-aware doc generator. Given a `symbol_id` (or `path` + `name` pair), gather the symbol's source range + its direct callers / callees from the BL-114 index, render a structured prompt, dispatch to the configured AI provider via the existing `nexus-ai` tool-loop, and return a markdown docblock. Optionally writes the docblock back as an annotation on the symbol's source range (gated by capability + confirmation).
+
+**Definition of done:**
+- `com.nexus.ai::generate_docs` IPC handler with typed args
+- Prompt template includes symbol body + 1-hop call graph context
+- Optional write-back goes through `com.nexus.editor::apply_transaction` (preserves undo)
+- Test against a synthetic symbol set (no live provider required)
+
+---
+
+### BL-117: `nexus-audio` STT + TTS crate (Anything-LLM port)
+
+**Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13.
+**Effort**: Medium. Self-contained.
+**Crates**: new `nexus-audio`.
+
+Audio I/O for capture + read-aloud. Mirror the `nexus-ai` provider-trait pattern: a `SttProvider` trait with backends for Whisper (local, via `whisper-rs` or `whisper.cpp` shell-out) and the platform-native APIs surfaced through BL-118; a `TtsProvider` trait with the same shape. IPC handlers `com.nexus.audio::transcribe(audio_blob)` + `synthesize(text)` route through the configured backend. Powers two near-term use cases: voice-driven memory capture (extends BL-043's quick-capture) and read-aloud for long agent transcripts.
+
+**Definition of done:**
+- `nexus-audio` crate compiles standalone with one local backend (Whisper) and one platform backend (via BL-118)
+- Provider selection via `<forge>/.forge/config.toml` mirroring `nexus-ai`'s `default_provider` pattern
+- `transcribe` accepts WebM / WAV / Opus; `synthesize` returns WAV bytes
+- Capability gate `audio.record` / `audio.synthesize`
+
+---
+
+### BL-118: Web Speech API shell integration (Anything-LLM port)
+
+**Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13.
+**Effort**: Small. Companion to BL-117.
+**Crates**: shell-side `nexus.audio` plugin.
+
+Native browser STT/TTS via the Web Speech API exposed through the Tauri webview. Implements the `SttProvider` / `TtsProvider` traits from BL-117 by calling `webkitSpeechRecognition` / `SpeechSynthesisUtterance` and bridging the result back to the kernel through a thin IPC adapter. Zero local-model footprint; uses the OS's built-in services on macOS / Windows / Linux-with-speech-dispatcher.
+
+**Definition of done:**
+- Shell plugin that registers itself as an `nexus-audio` backend via the BL-113 contribution path (if landed) or via a config flag
+- Wraps `webkitSpeechRecognition` with continuous-mode support
+- Wraps `SpeechSynthesisUtterance` with voice + rate selection
+- Falls back to Whisper / local TTS when browser support is missing
+
+---
+
+### BL-119: `SessionConfig` + iteration budget (Hermes Feature 1)
+
+**Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
+**Effort**: Small. Merge-first per the Hermes plan; unblocks Features 4–6 cleanly.
+**Crates**: `nexus-agent` (new `SessionConfig`).
+
+Raise the agent's iteration budget cap and introduce a typed `SessionConfig` carrying `max_iterations`, `max_tool_calls_per_iteration`, `max_context_tokens`, and provider-routing hints. The current implementation hard-codes the budget in `nexus-agent::session::run`; lifting it to config unblocks longer-running agents (the Hermes plan calls 8 iterations "the floor for non-trivial multi-step tasks") and lets BL-120's context compression slot in as a `SessionConfig` field.
+
+**Definition of done:**
+- `SessionConfig` struct in `nexus-agent` with documented defaults
+- `com.nexus.agent::run` accepts an optional `session_config` arg
+- Defaults raise `max_iterations` from current 8 to 32 (per Hermes Feature 1 recommendation)
+- Existing tests pin the legacy default through the new config path
+
+---
+
+### BL-120: Context compression in the agent session loop (Hermes Feature 4)
+
+**Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
+**Effort**: Large. Depends on BL-119.
+**Crates**: `nexus-agent` (new `compression` module).
+
+When the session-loop's running context approaches the provider's token budget, summarise the oldest turns into a compact `<system>`-tagged digest and drop them from the live transcript. Mirrors what Anthropic's `compaction` feature does for the Messages API but driven from the agent loop so it works across providers. Keeps tool-call results verbatim for the most recent N turns (the working set) and replaces older turns with a single rolling summary. Pluggable via a `Compressor` trait so the strategy can swap (LLM-summarise vs. keep-only-decisions vs. keep-only-tool-results).
+
+**Definition of done:**
+- `Compressor` trait + default LLM-backed implementation
+- Triggers when context-token estimate exceeds the `SessionConfig.max_context_tokens` threshold
+- Working-set N keeps the most recent turns + every tool result they depend on
+- `MemoryEntry::CompactedTurns` variant (extends DG-33) records what was compressed
+- Test: 50-turn synthetic session compresses cleanly without losing decisions
+
+---
+
+### BL-121: Session-transcript FTS5 search (Hermes Feature 5)
+
+**Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
+**Effort**: Medium. Independent of BL-119 / BL-120 but composes nicely.
+**Crates**: `nexus-agent` (new `transcript_search` module).
+
+FTS5 virtual table over the agent's persisted session transcripts (which DG-33 already lays down at `.forge/agents/<id>/history.jsonl`). Indexed by role + content body, queryable from a new `com.nexus.agent::search_transcripts(query, [agent_id], [since_ts])` IPC handler. Powers a "recall what we discussed when we were debugging X" surface — the agent equivalent of BL-063's terminal cross-session search.
+
+**Definition of done:**
+- FTS5 virtual table colocated with the existing agent SQLite store
+- `com.nexus.agent::search_transcripts` returns ranked snippets with (agent_id, session_id, turn_idx, role, snippet)
+- Rebuild path: walk `history.jsonl` files on first boot if the FTS table is missing
+- Shell-side: extend the existing agent panel with a search bar (or defer the UI as a follow-up)
+
+---
+
 _BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Almost everything in the DoD already shipped under `nexus.files` (sidebar tree, expand/collapse, drag-to-reorder, full context menu, live `com.nexus.storage` event sync). The only material gap was the file-type icon set, now closed via a `getFileIcon(name)` helper covering `.md` / source files / structured config and a generic fallback._
 
 ---
@@ -552,14 +682,28 @@ Previously: design-only docs without committed timelines. **Scoped into the impl
 
 ---
 
-## Research-surfaced ideas (2026-05, unscoped)
+## Research-surfaced ideas (2026-05)
 
-Three external-project assessments under [`../research/`](../research/) each carry an explicit Adopt / Adapt / Skip column. The Adopt and Adapt items aren't scoped into BL-NN entries yet — they're held here so they're discoverable until a decision lands. Skip items stay in the research doc only.
+Four external-project assessments under [`../research/`](../research/) each carry an explicit Adopt / Adapt / Skip column. Items that have been promoted into the backlog carry their BL-NN cross-ref; items left here are held discoverable until they're picked up. Skip items stay in the research doc only.
 
-- **GitNexus capability porting** — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Seven scoped ports recommended: cross-repo code intel index (MVP), diff→symbol detection in `nexus-git`, `codegraph.impact(symbol_id, depth)` blast-radius handler, BM25 over code symbols, three new MCP tools (`nexus_context` / `nexus_impact` / `nexus_detect_changes`), `ai.generate_docs(symbol_id)` doc generator, optional community/clustering pass for large forges. Each lands inside the existing `nexus-storage` / `nexus-git` / `nexus-ai` / `nexus-mcp` crates — no new top-level subsystem. Promote to BL-NN entries when prioritized.
-- **AFFiNE portability** — see [../research/affine-portability-assessment.md](../research/affine-portability-assessment.md). 9 Adopt items (snapshot API, command pattern, linked-docs UX, database views, mind-map output, multimodal embed pipeline, custom block schemas pattern, inline-embed extensions pattern, widget extensions — last two already adopted in spirit) plus 8 Adapt items (canvas, PDF embed, slide gen, image gen, custom blocks, AI panel UX, inline primitive, doc-on-canvas). 11 items judged already-adopted-in-spirit. See §6 of the assessment for recommended next steps if pursued.
-- **Anything-LLM portability** — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Adapt items worth surfacing: per-user scoped API token issuance (extends `nexus-security` + keyring); a `nexus-audio` crate with Whisper STT + TTS provider-trait backends; native browser STT/TTS via Web Speech API in the Tauri webview. Skip items (multi-user, PostHog telemetry, cloud deploys, scheduled-jobs engine, "desktop app") are settled as out-of-scope per existing PRDs/ADRs.
-- **Hermes Agent native-Rust port** — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Seven features scoped with explicit merge order, each closing a concrete gap against the shipped agent stack: (1) raise iteration budget + introduce `SessionConfig` (S, merge-first); (2) memory persistence on `com.nexus.agent` (M); (3) skills system with RAG retrieval at session start (M); (4) context compression in the session loop (L); (5) session search via FTS5 over transcripts (M); (6) multi-agent delegation (L, largest); (7) ACP protocol adapter crate (last, wraps everything). Features 2–5 parallelizable after Feature 1; Feature 6 after Feature 1; Feature 7 last. Several entries overlap existing DG product gaps (memory ↔ DG-33, skills already shipped per PRD-13, interactive approval ↔ DG-34, A2A ↔ DG-37) — promote to BL-NN by feature when prioritized.
+- **GitNexus capability porting** — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Seven scoped ports recommended; three promoted as a coordinated track (2026-05-13):
+    - Cross-repo code intel index → **[BL-114](#bl-114-code-symbol-index-foundation-gitnexus-port)**
+    - Three new MCP tools (`nexus_context` / `nexus_impact` / `nexus_detect_changes`) → **[BL-115](#bl-115-mcp-tools-for-code-intel-gitnexus-port)**
+    - `ai.generate_docs(symbol_id)` doc generator → **[BL-116](#bl-116-aigenerate_docs-symbol-aware-doc-generator-gitnexus-port)**
+  Remaining four (diff→symbol detection, `codegraph.impact(depth)` handler, BM25 over code symbols, optional clustering pass) are downstream of BL-114 and stay held here until BL-114 lands.
+- **AFFiNE portability** — see [../research/affine-portability-assessment.md](../research/affine-portability-assessment.md). 9 Adopt items (snapshot API, command pattern, linked-docs UX, database views, mind-map output, multimodal embed pipeline, custom block schemas pattern, inline-embed extensions pattern, widget extensions — last two already adopted in spirit) plus 8 Adapt items (canvas, PDF embed, slide gen, image gen, custom blocks, AI panel UX, inline primitive, doc-on-canvas). 11 items judged already-adopted-in-spirit. **Held as reference material — not promoted to BL-NN entries.** The 2026-05-13 review judged the Adopt list as diffuse pattern-borrowing without clean PR shape, and most universally-compelling Adapt items (canvas, etc.) overlap shipped work (BL-049 / BL-051 / BL-067 / BL-068). Mine specific items when a feature need surfaces. See §6 of the assessment.
+- **Anything-LLM portability** — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Two Adapt items promoted (2026-05-13):
+    - `nexus-audio` crate with Whisper STT + TTS provider-trait backends → **[BL-117](#bl-117-nexus-audio-stt--tts-crate-anything-llm-port)**
+    - Web Speech API native STT/TTS in the Tauri webview → **[BL-118](#bl-118-web-speech-api-shell-integration-anything-llm-port)**
+  Per-user scoped API token issuance held here — conflicts with the personal-tool / single-user stance. Skip items (multi-user, PostHog telemetry, cloud deploys, scheduled-jobs engine, "desktop app") are settled as out-of-scope per existing PRDs/ADRs.
+- **Hermes Agent native-Rust port** — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Seven features with merge order; three promoted (2026-05-13), three already shipped, one covered by another BL:
+    - Feature 1 — `SessionConfig` + iteration budget (S, merge-first) → **[BL-119](#bl-119-sessionconfig--iteration-budget-hermes-feature-1)**
+    - Feature 2 — memory persistence on `com.nexus.agent` → **already shipped as DG-33** (see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md))
+    - Feature 3 — skills system + RAG retrieval at session start → **already shipped per PRD-13 + DG-32**
+    - Feature 4 — context compression in the session loop (L) → **[BL-120](#bl-120-context-compression-in-the-agent-session-loop-hermes-feature-4)**
+    - Feature 5 — session-transcript FTS5 search (M) → **[BL-121](#bl-121-session-transcript-fts5-search-hermes-feature-5)**
+    - Feature 6 — multi-agent delegation → **already shipped as DG-37**
+    - Feature 7 — ACP protocol adapter crate → **covered by [BL-113](#bl-113-protocol-host-contribution-model-for-lsp--dap--mcp--acp) Phase 4**
 
 ---
 
