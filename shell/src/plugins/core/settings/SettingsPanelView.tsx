@@ -525,7 +525,37 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               className="settings-close"
               title="Edit settings file (.forge/app.toml)"
               aria-label="Edit settings file"
-              onClick={() => {
+              onClick={async () => {
+                // The config layer is lazy: `app.toml` only exists once
+                // a setting has been written. Opening a non-existent
+                // file in the editor would crash session.acquire — so
+                // seed a minimal stub if it's missing before routing
+                // through `files:open`.
+                try {
+                  const probe = await invoke<{ bytes: number[] | null }>('kernel_invoke', {
+                    pluginId: 'com.nexus.storage',
+                    commandId: 'read_file',
+                    args: { path: '.forge/app.toml' },
+                    timeoutMs: null,
+                  })
+                  if (probe.bytes === null) {
+                    const stub = '# Forge settings (.forge/app.toml)\n\n[settings]\n'
+                    await invoke('kernel_invoke', {
+                      pluginId: 'com.nexus.storage',
+                      commandId: 'write_file',
+                      args: {
+                        path: '.forge/app.toml',
+                        bytes: Array.from(new TextEncoder().encode(stub)),
+                      },
+                      timeoutMs: null,
+                    })
+                  }
+                } catch (err) {
+                  // Non-fatal: the editor's session manager will log
+                  // and degrade gracefully if the file still isn't
+                  // openable after this best-effort seed.
+                  clientLogger.warn('[settings] ensure app.toml failed', err)
+                }
                 eventBus.emit('files:open', {
                   relpath: '.forge/app.toml',
                   name: 'app.toml',

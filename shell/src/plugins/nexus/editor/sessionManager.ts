@@ -24,6 +24,7 @@ import type {
 } from './types.ts'
 import type { EditorKernelClient } from './kernelClient.ts'
 import { useEditorStore } from './editorStore.ts'
+import { clientLogger } from '../../../clientLogger'
 
 /**
  * A relpath that has no backing file on disk. Untitled placeholder
@@ -133,7 +134,22 @@ export class SessionManager {
       existing.count += 1
       return existing.snapshot
     }
-    const snapshot = await this.client.openSession(relpath)
+    let snapshot: EditorSnapshot
+    try {
+      snapshot = await this.client.openSession(relpath)
+    } catch (err) {
+      // Open failures (missing file, IPC crash, etc.) must not propagate
+      // as unhandled rejections — `void acquire(...)` in MarkdownView and
+      // similar fire-and-forget call sites would otherwise crash the
+      // global error handler. Degrading to `null` matches the untitled /
+      // empty sentinel callers already handle: the tab stays open with
+      // local-only state and the user can pick what to do next.
+      clientLogger.warn(
+        `[sessionManager] openSession('${relpath}') failed; returning null`,
+        err,
+      )
+      return null
+    }
     // Atomically seed both sessionRevision and savedRevision in one set()
     // call. Separate calls would race React 18 batching: the second updater
     // would see pre-batch state where sessionRevision is still empty, causing

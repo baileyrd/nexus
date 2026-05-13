@@ -538,7 +538,7 @@ async fn handle_open_async(
         // cover editor reads.
         #[derive(Deserialize)]
         struct Resp {
-            bytes: Vec<u8>,
+            bytes: Option<Vec<u8>>,
         }
         let value = ctx
             .ipc_call(
@@ -552,6 +552,7 @@ async fn handle_open_async(
         let resp: Resp = serde_json::from_value(value)
             .map_err(|e| exec_err(format!("open: storage.read_file decode: {e}")))?;
         resp.bytes
+            .ok_or_else(|| exec_err(format!("open: file not found: '{relpath}'")))?
     } else {
         // Fallback used only when no context has been wired (unit tests
         // that drive the plugin directly without a runtime).
@@ -1110,7 +1111,7 @@ async fn handle_resolve_block_link_async(
     let source = if let Some(ctx) = ctx.as_deref() {
         #[derive(Deserialize)]
         struct Resp {
-            bytes: Vec<u8>,
+            bytes: Option<Vec<u8>>,
         }
         let value = ctx
             .ipc_call(
@@ -1124,7 +1125,10 @@ async fn handle_resolve_block_link_async(
         let resp: Resp = serde_json::from_value(value).map_err(|e| {
             exec_err(format!("resolve_block_link: storage.read_file decode: {e}"))
         })?;
-        String::from_utf8(resp.bytes)
+        let bytes = resp.bytes.ok_or_else(|| {
+            exec_err(format!("resolve_block_link: file not found: '{relpath}'"))
+        })?;
+        String::from_utf8(bytes)
             .map_err(|_| exec_err(format!("resolve_block_link: '{relpath}' is not UTF-8")))?
     } else {
         let abs = resolve_within(forge_root, &relpath)
