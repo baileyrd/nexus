@@ -316,17 +316,38 @@ Symbol-aware doc generator. Given a `symbol_id` (or `path` + `name` pair), gathe
 
 ### BL-117: `nexus-audio` STT + TTS crate (Anything-LLM port)
 
-**Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13.
+**Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13. Scope refined 2026-05-13 to require a local-first path.
 **Effort**: Medium. Self-contained.
 **Crates**: new `nexus-audio`.
 
-Audio I/O for capture + read-aloud. Mirror the `nexus-ai` provider-trait pattern: a `SttProvider` trait with backends for Whisper (local, via `whisper-rs` or `whisper.cpp` shell-out) and the platform-native APIs surfaced through BL-118; a `TtsProvider` trait with the same shape. IPC handlers `com.nexus.audio::transcribe(audio_blob)` + `synthesize(text)` route through the configured backend. Powers two near-term use cases: voice-driven memory capture (extends BL-043's quick-capture) and read-aloud for long agent transcripts.
+Audio I/O for capture + read-aloud. Mirror the `nexus-ai` provider-trait pattern: a `SttProvider` trait and a `TtsProvider` trait, each with **three backends** so the user can choose between on-device privacy and provider quality:
+
+1. **`local` (default, primary path)** — local Whisper for STT (via `whisper-rs` against a small bundled or first-launch-downloaded model — `tiny.en` ~75 MB / `base.en` ~140 MB tier) and a local TTS engine for synthesis (likely Piper or the `speech-dispatcher`-shaped wrapper around the OS engine). Zero network egress; runs entirely on-device. This is the default so a fresh forge works out-of-the-box without an API key.
+2. **`provider` (opt-in, higher quality)** — delegate to whichever AI provider `nexus-ai` is configured for. Today: OpenAI's Whisper API for STT (`/v1/audio/transcriptions`) and OpenAI's TTS (`/v1/audio/speech`); Anthropic doesn't ship audio yet so that provider falls back to `local`. Reuses the existing `nexus-ai` keyring + capability + audit-logging path so no new auth surface.
+3. **`platform` (zero-footprint)** — Web Speech API in the Tauri webview, shipped under BL-118 as a separate plugin that registers itself against this trait.
+
+The user picks the backend in `<forge>/.forge/config.toml`:
+
+```toml
+[audio]
+stt_backend = "local"        # "local" | "provider" | "platform"
+tts_backend = "local"
+local_model_size = "base.en" # for whisper-rs
+```
+
+A `local_or_provider` fallback policy is acceptable as a future addition (try local first, fall back to provider on long inputs the small model handles poorly), but v1 ships the three backends as explicit selections.
+
+Powers two near-term use cases: voice-driven memory capture (extends BL-043's quick-capture) and read-aloud for long agent transcripts.
 
 **Definition of done:**
-- `nexus-audio` crate compiles standalone with one local backend (Whisper) and one platform backend (via BL-118)
-- Provider selection via `<forge>/.forge/config.toml` mirroring `nexus-ai`'s `default_provider` pattern
-- `transcribe` accepts WebM / WAV / Opus; `synthesize` returns WAV bytes
-- Capability gate `audio.record` / `audio.synthesize`
+- `nexus-audio` crate compiles standalone
+- `SttProvider` + `TtsProvider` traits with three backends each: `LocalWhisper` / `LocalTts` (default), `ProviderRouted` (delegates to `nexus-ai`), and a `PlatformSpeech` shell-side stub the BL-118 plugin fills in
+- Local Whisper model: bundled at `tiny.en` size, with first-launch optional download path to `base.en` / `small.en` if the user wants better quality (config-gated, capability-prompted because of the network fetch)
+- Provider-routed backend reuses `nexus-ai`'s `default_provider` + keyring — no separate auth config
+- `com.nexus.audio::transcribe(audio_blob)` accepts WebM / WAV / Opus; `synthesize(text)` returns WAV bytes
+- Backend selection via `<forge>/.forge/config.toml::[audio]`
+- Capability gates: `audio.record` (microphone permission), `audio.synthesize` (speaker output), plus the existing `network` capability inherits when `provider` backend is active
+- Test matrix: `LocalWhisper` against a small recorded WAV fixture; `ProviderRouted` against a mocked `nexus-ai` invoker; `PlatformSpeech` deferred to BL-118's tests
 
 ---
 
