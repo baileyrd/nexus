@@ -788,6 +788,15 @@ fn register_core_plugins(
                         "apply_view",
                         nexus_database::core_plugin::HANDLER_APPLY_VIEW,
                     ),
+                    // DG-41 (PRD-10 §7) — relation resolution + rollup.
+                    (
+                        "resolve_relation",
+                        nexus_database::core_plugin::HANDLER_RESOLVE_RELATION,
+                    ),
+                    (
+                        "compute_rollup",
+                        nexus_database::core_plugin::HANDLER_COMPUTE_ROLLUP,
+                    ),
                 ]),
             ),
             forge_root,

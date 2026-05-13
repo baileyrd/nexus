@@ -1540,12 +1540,60 @@ through `call_tool`.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Real impl is an in-memory filter chain in `apply_view`. PRD-10 §7
 specifies relations between bases plus computed rollups.
 
 **Definition of done:** Per PRD-10 §7.
+
+### Outcome
+
+Pure-logic relation resolution + rollup aggregation ship as a new
+module in `nexus-database`:
+
+- New [`crates/nexus-database/src/relations.rs`](../../crates/nexus-database/src/relations.rs):
+  - `resolve_relation(source, relation, target_records) -> Vec<&BaseRecord>`
+    — handles both scalar (string id) and array source values,
+    preserves source-side order for arrays, filters out
+    soft-deleted (`deleted_at != None`) targets, deduplicates by
+    target id so the same target referenced twice doesn't appear
+    twice. Special case for `target_field = "id"` matches against
+    the typed `BaseRecord.id`.
+  - `compute_rollup(source, relation, aggregate_field, aggregation, target_records)`
+    — projects `aggregate_field` across the resolved targets and
+    folds with the requested aggregation. Reuses the existing
+    `types::RollupAggregation` enum (Count / CountUnique /
+    CountValues / CountEmpty / CountNotEmpty / PercentEmpty /
+    PercentNotEmpty / Sum / Average / Min / Max).
+  - `parse_aggregation(&str) -> Option<RollupAggregation>` —
+    case-insensitive parse for IPC callers.
+- Two new IPC handlers on `com.nexus.database`:
+  `resolve_relation` (handler id 5) and `compute_rollup`
+  (handler id 6). Caller hands in pre-loaded source + target
+  records (matching the `apply_view` posture — pure in-memory
+  pipeline, no I/O). Bootstrap registers the names.
+- 15 new unit tests in `relations::tests` cover the resolver
+  matrix (scalar / array source, in-order, soft-delete filter,
+  dedup, null-source-empty, missing-source-field error,
+  non-id target field) and the rollup matrix (count /
+  count-unique / count-values null-handling / percent-empty /
+  sum / min-max / average empty-input). Full nexus-database
+  lib suite at 135 tests stays green.
+
+**Deferred** as documented follow-ups:
+
+- Wiring `BaseView` filters that reference a rollup field
+  through to `apply_view`. Today a view-level filter on a
+  rollup column doesn't auto-invoke `compute_rollup` first;
+  the caller has to evaluate rollups, then apply filters.
+- Circular-relation detection (PRD-10 §7 `validate_relation`).
+  No two-base cycles can exist today because there's no
+  schema migration that creates them; safe deferral.
+- Cardinality enforcement (`OneToMany` vs `ManyToMany` from
+  PRD-10 §7). The runtime treats every relation as
+  many-to-many implicitly; explicit enforcement is a
+  validation pass on top of the existing types.
 
 ---
 
@@ -1554,13 +1602,69 @@ specifies relations between bases plus computed rollups.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12 (already shipped — gap claim was
+stale)
 
 PRD-10 §8 specifies compiling Bases queries into SQL against the
 storage SQLite index. The current implementation does in-memory
 filtering only.
 
 **Definition of done:** Per PRD-10 §8.
+
+### Outcome
+
+Re-investigating the gap claim: the SQL compiler **already ships**.
+The 2026-05-12 traceability audit confused two adjacent code paths:
+
+- [`crates/nexus-storage/src/bases/query.rs`](../../crates/nexus-storage/src/bases/query.rs)
+  (772 lines) compiles `Query { filters, sorts, limit, offset }`
+  into a SQL `SELECT … FROM bases_records WHERE …` with
+  `json_extract(data_json, '$.<field>')` for every per-field
+  predicate. Sixteen `FilterOp` variants land in
+  `compile_filter`: `Is` / `IsNot` / `Contains` /
+  `DoesNotContain` / `StartsWith` / `EndsWith` / `GreaterThan`
+  / `LessThan` / `GreaterThanOrEqual` / `LessThanOrEqual` /
+  `IsEmpty` / `IsNotEmpty` / `DateIsBefore` / `DateIsAfter` /
+  `DateIsOnOrBefore` / `DateIsOnOrAfter`. `compile_sort`
+  produces `ORDER BY` fragments. `execute(conn, query)` runs
+  the compiled SQL with parameter binding and returns a
+  paginated `QueryResult` with `total_count` + `has_more` for
+  cursor-style paging.
+- Exposed over IPC as `com.nexus.storage::base_query`
+  (handler id 26, see `crates/nexus-storage/src/core_plugin.rs:90`).
+  Routed through the same SQLite index PRD-10 §9 specs.
+
+What the audit's "in-memory filtering only" referred to was
+`crates/nexus-database/src/views.rs::apply_view` — a *separate*
+pipeline that filters / sorts / groups records the caller has
+already loaded (typically via `base_load` for views without a
+SQL backend). Both paths ship; they target different use cases:
+
+- `apply_view` — caller already has records in hand, just wants
+  the view's filter / sort / group / kanban-grouping applied.
+  Pure in-memory; no DB connection.
+- `base_query` — caller wants to push a structured query at the
+  SQLite index without pre-loading every record. Compiles to
+  SQL via `query::compile_filter` + `compile_sort`.
+
+The two pipelines deliberately don't fuse: `apply_view`'s caller
+already paid the I/O cost (e.g. the shell loaded the base for
+rendering); reaching back into SQLite for a filter pass would
+double the read. `base_query` exists for callers that want
+backend-side filtering on a base too large to load whole.
+
+**Deferred** as documented follow-ups:
+
+- Auto-routing `apply_view` requests with very large record
+  counts through `base_query`'s SQL path. Today the caller
+  chooses; a hybrid that picks based on record count would
+  need a heuristic and a coupling from nexus-database back to
+  nexus-storage that today the layering rejects.
+- Test parity between the two pipelines. Each has its own
+  comprehensive suite; an integration test that pushes the
+  same query through both paths and diffs the result would
+  pin the equivalence formally (mostly defensive — the wire
+  shapes are already aligned).
 
 ---
 
