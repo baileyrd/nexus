@@ -42,6 +42,13 @@ pub const HANDLER_FORMULA_EVAL: u32 = 3;
 /// [`crate::views::AppliedView`] for the response shape.
 pub const HANDLER_APPLY_VIEW: u32 = 4;
 
+/// Handler id for `resolve_relation` (DG-41 / PRD-10 §7). See
+/// [`ResolveRelationArgs`].
+pub const HANDLER_RESOLVE_RELATION: u32 = 5;
+/// Handler id for `compute_rollup` (DG-41 / PRD-10 §7). See
+/// [`ComputeRollupArgs`].
+pub const HANDLER_COMPUTE_ROLLUP: u32 = 6;
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Arguments for `csv_import`.
@@ -189,6 +196,8 @@ impl CorePlugin for DatabaseCorePlugin {
             HANDLER_CSV_EXPORT => dispatch_csv_export(args),
             HANDLER_FORMULA_EVAL => dispatch_formula_eval(args),
             HANDLER_APPLY_VIEW => dispatch_apply_view(args),
+            HANDLER_RESOLVE_RELATION => dispatch_resolve_relation(args),
+            HANDLER_COMPUTE_ROLLUP => dispatch_compute_rollup(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -301,6 +310,76 @@ fn dispatch_apply_view(args: &serde_json::Value) -> Result<serde_json::Value, Pl
     let a: ApplyViewArgs = parse_args(args, "apply_view")?;
     let applied = crate::views::apply_view(&a.records, &a.schema, &a.view);
     to_value(&applied, "apply_view")
+}
+
+/// Args for `resolve_relation`. The caller passes the parent record,
+/// the relation definition, and the target base's records — the
+/// handler does the matching without doing any I/O of its own.
+/// Same posture as `apply_view` (no ts-export derives since
+/// `BaseRecord` / `BaseRelation` are nexus-types primitives that
+/// don't carry the `TS` / `JsonSchema` trait impls).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveRelationArgs {
+    /// The source record holding the relation field.
+    pub source: nexus_types::bases::BaseRecord,
+    /// Relation definition (source field → target field).
+    pub relation: nexus_types::bases::BaseRelation,
+    /// Target-base records to scan.
+    pub target_records: Vec<nexus_types::bases::BaseRecord>,
+}
+
+/// Args for `compute_rollup`. Extends [`ResolveRelationArgs`] with
+/// the aggregation function + the field on the target to aggregate.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComputeRollupArgs {
+    /// The source record holding the relation field.
+    pub source: nexus_types::bases::BaseRecord,
+    /// Relation definition.
+    pub relation: nexus_types::bases::BaseRelation,
+    /// Target-base records to aggregate over.
+    pub target_records: Vec<nexus_types::bases::BaseRecord>,
+    /// Field on the target record to project before aggregating.
+    /// Ignored for `Count` (the size of the related set is what's
+    /// counted).
+    pub aggregate_field: String,
+    /// Aggregation as a string id (case-insensitive). See
+    /// [`crate::relations::parse_aggregation`] for the accepted set.
+    pub aggregation: String,
+}
+
+fn dispatch_resolve_relation(
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: ResolveRelationArgs = parse_args(args, "resolve_relation")?;
+    let related = crate::relations::resolve_relation(&a.source, &a.relation, &a.target_records)
+        .map_err(|e| exec_err(format!("resolve_relation: {e}")))?;
+    // Clone out of the borrow so the JSON serialiser doesn't have to
+    // serialize references — keeps the wire shape simple.
+    let owned: Vec<_> = related.into_iter().cloned().collect();
+    to_value(&owned, "resolve_relation")
+}
+
+fn dispatch_compute_rollup(
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: ComputeRollupArgs = parse_args(args, "compute_rollup")?;
+    let agg = crate::relations::parse_aggregation(&a.aggregation).ok_or_else(|| {
+        exec_err(format!(
+            "compute_rollup: unknown aggregation '{}'",
+            a.aggregation
+        ))
+    })?;
+    let value = crate::relations::compute_rollup(
+        &a.source,
+        &a.relation,
+        &a.aggregate_field,
+        agg,
+        &a.target_records,
+    )
+    .map_err(|e| exec_err(format!("compute_rollup: {e}")))?;
+    Ok(value)
 }
 
 #[cfg(test)]

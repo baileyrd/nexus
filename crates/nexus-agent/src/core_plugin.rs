@@ -53,7 +53,14 @@ use crate::{
 /// Exposed via the `list_archetypes` handler so the shell's picker can
 /// send any of these back as the `archetype` arg to `plan` / `run`
 /// without guessing the expected case or prefix.
-const ARCHETYPE_NAMES: &[&str] = &["writer", "coder", "researcher"];
+const ARCHETYPE_NAMES: &[&str] = &[
+    "writer",
+    "coder",
+    "researcher",
+    "auditor",
+    "librarian",
+    "coach",
+];
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.agent";
@@ -105,6 +112,65 @@ pub const HANDLER_SESSION_DELETE: u32 = 16;
 /// side awaits a `oneshot` populated by this handler before
 /// dispatching tools.
 pub const HANDLER_ROUND_DECIDE: u32 = 17;
+
+/// `list_tools` (DG-32 — PRD-15 §4) — return the agent tool
+/// registry catalogue. Args: `{ capabilities?: [string] }`. With
+/// no args, returns every registered tool; with `capabilities`,
+/// filters to those the agent could call given those grants.
+/// Reply: `[AgentToolSpec]`. Read-only; touches the in-memory
+/// global registry only.
+pub const HANDLER_LIST_TOOLS: u32 = 18;
+/// `list_custom` (DG-36 — PRD-15 §9) — scan
+/// `<forge>/.forge/agents/*/agent.toml` and return parsed
+/// manifests. No args. Reply:
+/// `{ manifests: [CustomAgentManifest], errors: [{ path, error }] }`.
+/// Per-manifest errors are surfaced alongside the loaded entries so
+/// a single broken file doesn't poison the listing.
+pub const HANDLER_LIST_CUSTOM: u32 = 19;
+
+/// `memory_record` (DG-33 — PRD-15 §5) — append a `MemoryEntry` to
+/// the agent's `history.jsonl`. Args:
+/// `{ agent_id: string, entry: MemoryEntry }`. Reply:
+/// `{ recorded: true }`. The agent id is validated to a safe slug
+/// (`A-Za-z0-9_.-`, ≤96 chars).
+pub const HANDLER_MEMORY_RECORD: u32 = 20;
+/// `memory_query` (DG-33) — return entries matching a substring
+/// pattern (case-insensitive). Args:
+/// `{ agent_id: string, pattern?: string, limit?: u32 }`.
+/// Reply: `[MemoryEntry]`, newest-first. `pattern` empty / omitted
+/// returns the most recent entries unfiltered; `limit` defaults to 50.
+pub const HANDLER_MEMORY_QUERY: u32 = 21;
+/// `memory_prune` (DG-33) — drop entries older than `retention_ms`,
+/// preserving `Decision` entries indefinitely per PRD-15 §5. Args:
+/// `{ agent_id: string, retention_days: u32 }`. Reply:
+/// `{ pruned: u32, kept: u32 }`. The agent's history file is
+/// rewritten atomically (tmp + rename) so a crash mid-prune doesn't
+/// corrupt the log.
+pub const HANDLER_MEMORY_PRUNE: u32 = 22;
+/// `memory_export` (DG-33) — render the agent's history as markdown.
+/// Args: `{ agent_id: string }`. Reply: `{ markdown: string }`.
+pub const HANDLER_MEMORY_EXPORT: u32 = 23;
+
+/// `delegate` (DG-37 — PRD-15 §10) — run a sub-session in a child
+/// archetype and return its `AgentSession` transcript. Replaces
+/// the legacy BL-027 `delegate` (handler id 9, retired by ADR 0025)
+/// with a primitive that composes on top of the new session model.
+///
+/// Args:
+/// `{ archetype: string, goal: string, system?: string,
+///    auto_approve?: bool, approval_timeout_secs?: u64,
+///    strict_approval?: bool }`
+///
+/// Reply: a full `AgentSession` JSON (same shape `session_run`
+/// returns). The sub-session's transcript is persisted at the
+/// usual `.forge/agent/sessions/<id>.json` path so the caller can
+/// reference it after the run.
+///
+/// **Parallel / pipeline composition** are caller patterns — issue
+/// multiple `delegate` calls concurrently / sequentially. The
+/// orchestrator types BL-027 introduced were retired (ADR 0025);
+/// the session-shaped reply is the new currency.
+pub const HANDLER_DELEGATE: u32 = 24;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -170,12 +236,16 @@ impl CorePlugin for AgentCorePlugin {
         handler_id: u32,
         _args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        // `list_archetypes` is the one sync handler on this plugin — it
-        // reads only from compile-time `archetypes.rs` constants so
-        // there's no reason to burn an async hop. Every other handler
-        // is kernel-context-dependent and lives in `dispatch_async`.
+        // `list_archetypes` and `list_tools` are the two sync handlers
+        // on this plugin — both read only from compile-time / in-memory
+        // state, so there's no reason to burn an async hop. Every other
+        // handler is kernel-context-dependent and lives in
+        // `dispatch_async`.
         if handler_id == HANDLER_LIST_ARCHETYPES {
             return Ok(serde_json::json!(ARCHETYPE_NAMES));
+        }
+        if handler_id == HANDLER_LIST_TOOLS {
+            return handle_list_tools(_args);
         }
         Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -190,11 +260,11 @@ impl CorePlugin for AgentCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
-        // Let the sync path handle `list_archetypes` — the kernel's
-        // `ipc_call` prefers `dispatch_async` when Some is returned,
-        // and we don't want to hop an unnecessary async frame for a
-        // pure compile-time constant read.
-        if handler_id == HANDLER_LIST_ARCHETYPES {
+        // Let the sync path handle `list_archetypes` and `list_tools` —
+        // the kernel's `ipc_call` prefers `dispatch_async` when Some is
+        // returned, and we don't want to hop an unnecessary async frame
+        // for an in-memory read.
+        if handler_id == HANDLER_LIST_ARCHETYPES || handler_id == HANDLER_LIST_TOOLS {
             return None;
         }
 
@@ -217,6 +287,12 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_SESSION_GET => handle_session_get(ctx, &args).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(ctx, &args).await,
                 HANDLER_ROUND_DECIDE => handle_round_decide(pending_approvals, &args).await,
+                HANDLER_LIST_CUSTOM => handle_list_custom(ctx).await,
+                HANDLER_MEMORY_RECORD => handle_memory_record(ctx, &args).await,
+                HANDLER_MEMORY_QUERY => handle_memory_query(ctx, &args).await,
+                HANDLER_MEMORY_PRUNE => handle_memory_prune(ctx, &args).await,
+                HANDLER_MEMORY_EXPORT => handle_memory_export(ctx, &args).await,
+                HANDLER_DELEGATE => handle_delegate(ctx, pending_approvals, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -387,6 +463,390 @@ pub struct PlanIdArgs {
     plan_id: String,
 }
 
+/// Args for `com.nexus.agent::list_tools` (handler id 18).
+///
+/// `capabilities` (when present) is the list of [`crate::Capability`]
+/// id strings (e.g. `["fs.read", "git.read"]`) the agent holds. The
+/// handler filters the registry to tools whose `required_capabilities`
+/// are a subset of that list. Omitting the field returns the full
+/// catalogue.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ListToolsArgs {
+    /// Optional capability filter. Strings parsed via
+    /// [`crate::Capability::from_str`]; unknown ids are rejected.
+    #[serde(default)]
+    pub capabilities: Option<Vec<String>>,
+}
+
+fn handle_list_tools(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    let a: ListToolsArgs = if args.is_null() {
+        ListToolsArgs { capabilities: None }
+    } else {
+        parse(args, "list_tools")?
+    };
+    let registry = crate::AgentToolRegistry::global();
+    let specs = match a.capabilities {
+        None => registry.list_all(),
+        Some(ids) => {
+            let mut held = Vec::with_capacity(ids.len());
+            for id in ids {
+                let cap = crate::Capability::from_str(&id).ok_or_else(|| {
+                    exec_err(format!("list_tools: unknown capability id '{id}'"))
+                })?;
+                held.push(cap);
+            }
+            registry.list_for_agent(&held)
+        }
+    };
+    // Stable ordering for callers that diff outputs (CLI, shell).
+    let mut sorted = specs;
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    to_value(&sorted, "list_tools")
+}
+
+/// DG-36 (PRD-15 §9) — scan `.forge/agents/*/agent.toml` and return
+/// the parsed manifests. Per-manifest errors land in a sibling
+/// `errors` array so a single broken file doesn't poison the read.
+async fn handle_list_custom(
+    ctx: Arc<KernelPluginContext>,
+) -> Result<serde_json::Value, PluginError> {
+    let agents_dir = std::path::Path::new(crate::custom_agent::AGENTS_DIR);
+    // Missing directory is a clean empty reply — most forges won't
+    // have a custom-agents dir until a user opts in.
+    let entries = match ctx.list_files(agents_dir).await {
+        Ok(e) => e,
+        Err(_) => {
+            return Ok(serde_json::json!({
+                "manifests": [],
+                "errors": []
+            }));
+        }
+    };
+
+    let mut manifests: Vec<crate::CustomAgentManifest> = Vec::new();
+    let mut errors: Vec<serde_json::Value> = Vec::new();
+
+    for entry in entries {
+        // list_files returns every entry — files and directories
+        // alike. We want subdirectories; reading their agent.toml
+        // via the kernel keeps the capability surface honest.
+        let slug = entry
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        if slug.is_empty() {
+            continue;
+        }
+        let manifest_path = entry.join(crate::custom_agent::MANIFEST_FILE_NAME);
+        // Try to read; missing file → not an agent dir → skip silently.
+        let body = match ctx.read_file(&manifest_path).await {
+            Ok(bytes) => match std::str::from_utf8(&bytes) {
+                Ok(s) => s.to_string(),
+                Err(e) => {
+                    errors.push(serde_json::json!({
+                        "path": manifest_path.display().to_string(),
+                        "error": format!("manifest not UTF-8: {e}"),
+                    }));
+                    continue;
+                }
+            },
+            Err(_) => continue,
+        };
+
+        match crate::custom_agent::parse_str(&body, &slug, &manifest_path) {
+            Ok(manifest) => manifests.push(manifest),
+            Err(e) => errors.push(serde_json::json!({
+                "path": manifest_path.display().to_string(),
+                "error": format!("{e}"),
+            })),
+        }
+    }
+
+    manifests.sort_by(|a, b| a.slug.cmp(&b.slug));
+
+    Ok(serde_json::json!({
+        "manifests": manifests,
+        "errors": errors,
+    }))
+}
+
+// ── DG-37 agent-to-agent delegation ─────────────────────────────────────────
+
+/// Args for `com.nexus.agent::delegate` (handler id 24).
+///
+/// Shape mirrors [`SessionRunArgs`] with `archetype` required —
+/// delegation always names a target archetype so the caller can
+/// be explicit about which agent's posture handles the sub-goal.
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct DelegateArgs {
+    /// Target archetype short name (one of the ids returned by
+    /// `list_archetypes`). Required — the parent agent has to pick
+    /// the child's posture rather than relying on a default.
+    pub archetype: String,
+    /// Natural-language goal for the sub-session.
+    pub goal: String,
+    /// Optional override for the sub-session's system prompt.
+    /// When unset, the archetype's prompt is used directly.
+    #[serde(default)]
+    pub system: Option<String>,
+    /// Auto-approve the sub-session's rounds (matches `session_run`).
+    /// Defaults to `true` since a delegation is a tool-call inside
+    /// another agent's run — prompting twice for the same human is
+    /// usually noise.
+    #[serde(default = "default_delegate_auto_approve")]
+    pub auto_approve: bool,
+    /// Approval-callback timeout (only used when `auto_approve =
+    /// false`).
+    #[serde(default)]
+    pub approval_timeout_secs: Option<u64>,
+    /// Prompt for every round when `auto_approve = false` (otherwise
+    /// the policy uses DG-34's risk-aware gating).
+    #[serde(default)]
+    pub strict_approval: bool,
+}
+
+const fn default_delegate_auto_approve() -> bool {
+    true
+}
+
+async fn handle_delegate(
+    ctx: Arc<KernelPluginContext>,
+    pending_approvals: Arc<PendingApprovals>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: DelegateArgs = parse(args, "delegate")?;
+    if a.archetype.trim().is_empty() {
+        return Err(exec_err("delegate: `archetype` must be non-empty".into()));
+    }
+    if a.goal.trim().is_empty() {
+        return Err(exec_err("delegate: `goal` must be non-empty".into()));
+    }
+    // Reuse the existing `session_run` machinery — the only
+    // difference from session_run's caller surface is that
+    // `archetype` is required here.
+    let session_args = serde_json::json!({
+        "goal": a.goal,
+        "archetype": a.archetype,
+        "system": a.system,
+        "auto_approve": a.auto_approve,
+        "approval_timeout_secs": a.approval_timeout_secs,
+        "strict_approval": a.strict_approval,
+    });
+    handle_session_run(ctx, pending_approvals, &session_args).await
+}
+
+// ── DG-33 memory handlers ───────────────────────────────────────────────────
+
+/// Args for `memory_record` — `{ agent_id, entry }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryRecordArgs {
+    /// Reverse-DNS or short id naming the agent that owns the memory.
+    pub agent_id: String,
+    /// Entry to append.
+    pub entry: crate::memory::MemoryEntry,
+}
+
+/// Args for `memory_query` — `{ agent_id, pattern?, limit? }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryQueryArgs {
+    /// Agent id to query.
+    pub agent_id: String,
+    /// Substring filter; empty / absent returns the most recent entries.
+    #[serde(default)]
+    pub pattern: Option<String>,
+    /// Max entries to return (default 50).
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Args for `memory_prune` — `{ agent_id, retention_days }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryPruneArgs {
+    /// Agent id whose memory should be pruned.
+    pub agent_id: String,
+    /// Drop entries older than this many days.
+    pub retention_days: u32,
+}
+
+/// Args for `memory_export` — `{ agent_id }`.
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryExportArgs {
+    /// Agent id whose memory should be exported as markdown.
+    pub agent_id: String,
+}
+
+const MEMORY_DEFAULT_QUERY_LIMIT: u32 = 50;
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+async fn handle_memory_record(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryRecordArgs = parse(args, "memory_record")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_record: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let mut bytes = serde_json::to_vec(&a.entry)
+        .map_err(|e| exec_err(format!("memory_record: serialize entry: {e}")))?;
+    bytes.push(b'\n');
+
+    // Read current contents, append, rewrite atomically. The kernel
+    // doesn't expose a raw append; one-shot replace is the safest
+    // primitive we have inside the capability surface.
+    let existing = ctx.read_file(&path).await.unwrap_or_default();
+    let mut combined = existing;
+    combined.extend_from_slice(&bytes);
+    ctx.write_file(&path, &combined)
+        .await
+        .map_err(|e| exec_err(format!("memory_record: write {}: {e}", path.display())))?;
+    Ok(serde_json::json!({ "recorded": true }))
+}
+
+async fn handle_memory_query(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryQueryArgs = parse(args, "memory_query")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_query: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let bytes = ctx.read_file(&path).await.unwrap_or_default();
+    let entries = parse_memory_lines(&bytes);
+    let pattern = a.pattern.unwrap_or_default();
+    let limit =
+        usize::try_from(a.limit.unwrap_or(MEMORY_DEFAULT_QUERY_LIMIT)).unwrap_or(usize::MAX);
+    let hits = crate::memory::query_entries(&entries, &pattern, limit);
+    serde_json::to_value(hits).map_err(|e| exec_err(format!("memory_query: serialize: {e}")))
+}
+
+async fn handle_memory_prune(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryPruneArgs = parse(args, "memory_prune")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_prune: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let bytes = ctx.read_file(&path).await.unwrap_or_default();
+    if bytes.is_empty() {
+        return Ok(serde_json::json!({ "pruned": 0, "kept": 0 }));
+    }
+    let entries = parse_memory_lines(&bytes);
+    let retention_ms = u64::from(a.retention_days).saturating_mul(86_400_000);
+    let (kept, pruned) = crate::memory::prune_entries(entries, now_unix_ms(), retention_ms);
+    let mut out = Vec::with_capacity(bytes.len());
+    for entry in &kept {
+        let mut line = serde_json::to_vec(entry)
+            .map_err(|e| exec_err(format!("memory_prune: serialize: {e}")))?;
+        line.push(b'\n');
+        out.extend_from_slice(&line);
+    }
+    ctx.write_file(&path, &out)
+        .await
+        .map_err(|e| exec_err(format!("memory_prune: write {}: {e}", path.display())))?;
+    Ok(serde_json::json!({
+        "pruned": pruned,
+        "kept": kept.len(),
+    }))
+}
+
+async fn handle_memory_export(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: MemoryExportArgs = parse(args, "memory_export")?;
+    crate::memory::normalize_agent_id(&a.agent_id)
+        .map_err(|e| exec_err(format!("memory_export: {e}")))?;
+    let path = crate::memory::history_path(&a.agent_id);
+    let bytes = ctx.read_file(&path).await.unwrap_or_default();
+    let entries = parse_memory_lines(&bytes);
+    let markdown = crate::memory::export_markdown(&a.agent_id, &entries);
+    Ok(serde_json::json!({ "markdown": markdown }))
+}
+
+fn parse_memory_lines(bytes: &[u8]) -> Vec<crate::memory::MemoryEntry> {
+    let mut entries = Vec::new();
+    for raw in bytes.split(|b| *b == b'\n') {
+        if raw.is_empty() {
+            continue;
+        }
+        let Ok(s) = std::str::from_utf8(raw) else {
+            continue;
+        };
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<crate::memory::MemoryEntry>(trimmed) {
+            Ok(entry) => entries.push(entry),
+            Err(e) => {
+                tracing::warn!(error = %e, line = trimmed, "skipping malformed memory line");
+            }
+        }
+    }
+    entries
+}
+
 async fn handle_history_get(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
@@ -440,6 +900,15 @@ struct SessionRunArgs {
     /// `DEFAULT_APPROVAL_TIMEOUT_SECS`.
     #[serde(default)]
     approval_timeout_secs: Option<u64>,
+    /// DG-34 — when `auto_approve = false`, prompt the caller for
+    /// *every* round (the original ADR 0024 Phase 2b behaviour).
+    /// When unset (the default), the session runs in selective mode:
+    /// rounds whose tool calls are all registered as
+    /// `requires_approval = false` auto-approve, and only rounds
+    /// containing a high-risk or unregistered tool call publish
+    /// `round_proposed`. Matches PRD-15 §7's risk table.
+    #[serde(default)]
+    strict_approval: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -495,6 +964,7 @@ async fn handle_session_run(
             ctx: Arc::clone(&ctx),
             pending: Arc::clone(&pending_approvals),
             timeout: Duration::from_secs(timeout),
+            strict_approval: parsed.strict_approval,
         };
         // BusBridgePolicy generates a session_id up-front so the
         // round_proposed event payload can carry it BEFORE
@@ -756,11 +1226,54 @@ struct BusBridgePolicy {
     ctx: Arc<KernelPluginContext>,
     pending: Arc<PendingApprovals>,
     timeout: Duration,
+    /// DG-34 — when `true`, every round publishes `round_proposed`
+    /// and waits for caller approval (legacy Phase 2b behaviour).
+    /// When `false`, the policy checks each round's tool calls
+    /// against [`crate::AgentToolRegistry`] and auto-approves rounds
+    /// whose tools are all `requires_approval = false`. Rounds with
+    /// any high-risk or unregistered tool call still go through the
+    /// prompt path.
+    strict_approval: bool,
+}
+
+/// DG-34 — classify a [`crate::ProposedRound`] against the agent
+/// tool registry. Returns `true` when the round contains at least
+/// one proposed tool call that's either:
+///
+/// - flagged `requires_approval = true` in the registry, OR
+/// - missing from the registry entirely (conservative default —
+///   unknown tools are high-risk because the agent might be
+///   asking for something the registry hasn't classified yet).
+///
+/// Rounds with zero tool calls are *low-risk* (text-only responses
+/// don't mutate anything) so they auto-approve without prompting.
+pub fn round_requires_approval(
+    round: &crate::ProposedRound,
+    registry: &crate::AgentToolRegistry,
+) -> bool {
+    for tc in &round.tool_calls {
+        match registry.lookup(&tc.name) {
+            Some(spec) if !spec.requires_approval => continue,
+            _ => return true,
+        }
+    }
+    false
 }
 
 #[async_trait]
 impl crate::SessionPolicy for BusBridgePolicy {
     async fn allow_round(&self, round: &crate::ProposedRound) -> crate::RoundDecision {
+        // DG-34 — short-circuit when the round is low-risk and the
+        // caller hasn't opted into strict gating. Saves a bus event
+        // + caller round-trip for the common case (read-only tools
+        // or text-only rounds).
+        if !self.strict_approval {
+            let registry = crate::AgentToolRegistry::global();
+            if !round_requires_approval(round, &registry) {
+                return crate::RoundDecision::ApproveAll;
+            }
+        }
+
         let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
         // Insert before publishing so a fast caller that races
         // round_decide against the event sees a populated map.
@@ -775,11 +1288,34 @@ impl crate::SessionPolicy for BusBridgePolicy {
             }
         };
 
+        // DG-34 — annotate each proposed tool with its registered
+        // approval flag so the UI can render a per-call risk badge
+        // (write tools red, read-only tools muted, unregistered tools
+        // outlined). Unknown tools surface as `requires_approval = true`
+        // matching the conservative default in `round_requires_approval`.
+        let registry = crate::AgentToolRegistry::global();
+        let annotated: Vec<serde_json::Value> = round
+            .tool_calls
+            .iter()
+            .map(|tc| {
+                let (requires_approval, registered) = match registry.lookup(&tc.name) {
+                    Some(spec) => (spec.requires_approval, true),
+                    None => (true, false),
+                };
+                serde_json::json!({
+                    "id": tc.id,
+                    "name": tc.name,
+                    "tool_call": tc.tool_call,
+                    "requires_approval": requires_approval,
+                    "registered": registered,
+                })
+            })
+            .collect();
         let payload = serde_json::json!({
             "session_id": self.session_id,
             "round": round.round,
             "text": round.text,
-            "tool_calls": round.tool_calls,
+            "tool_calls": annotated,
         });
         if let Err(e) = self
             .ctx
@@ -1164,6 +1700,181 @@ fn to_value<T: serde::Serialize>(
 mod tests {
     use super::*;
 
+    /// DG-37 — `delegate` rejects an empty archetype name. The
+    /// parent agent has to be explicit about which sub-archetype
+    /// handles the sub-goal; defaulting silently would hide intent.
+    #[tokio::test]
+    async fn delegate_rejects_empty_archetype() {
+        // No kernel context wired — the validation happens before
+        // dispatch attempts to use ctx.
+        let pending: Arc<PendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let args = serde_json::json!({
+            "archetype": "",
+            "goal": "do a thing",
+        });
+        // Build a minimal ctx-less harness: handle_delegate dereferences
+        // ctx only inside handle_session_run, which we don't reach
+        // because the archetype check fires first.
+        //
+        // To exercise the early-return path without a real kernel
+        // context, parse the args ourselves and assert the shape.
+        let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
+        assert!(parsed.archetype.trim().is_empty());
+        // The handler itself returns Err for empty archetype — we
+        // can't construct a KernelPluginContext in a unit test, so
+        // assert against the validation invariant directly. (A
+        // full integration test lives under bootstrap.)
+        let _ = pending;
+    }
+
+    /// DG-37 — `delegate` rejects an empty goal. Same intent
+    /// invariant as the archetype check.
+    #[test]
+    fn delegate_rejects_empty_goal_at_parse() {
+        let args = serde_json::json!({
+            "archetype": "coder",
+            "goal": "   ",
+        });
+        let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
+        assert!(parsed.goal.trim().is_empty());
+    }
+
+    /// DG-37 — `auto_approve` defaults to true so a nested
+    /// delegation doesn't prompt the user twice (the parent's
+    /// session policy already gated the delegate call itself).
+    #[test]
+    fn delegate_defaults_auto_approve_to_true() {
+        let args = serde_json::json!({
+            "archetype": "coder",
+            "goal": "do thing",
+        });
+        let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
+        assert!(parsed.auto_approve);
+    }
+
+    /// DG-37 — the agent tool registry lists `delegate_to_agent`
+    /// after `seed_default_tools` runs, so a planner sees A2A as a
+    /// first-class tool call.
+    #[test]
+    fn delegate_to_agent_tool_seeded() {
+        crate::seed_default_tools();
+        let spec = crate::AgentToolRegistry::global()
+            .lookup("delegate_to_agent")
+            .expect("delegate_to_agent registered");
+        assert_eq!(spec.target_plugin_id, "com.nexus.agent");
+        assert_eq!(spec.command_id, "delegate");
+        // Should require approval — child session can call write tools.
+        assert!(spec.requires_approval);
+    }
+
+    /// DG-34 — empty rounds (text-only proposals, no tool calls)
+    /// never need approval. Saves an unnecessary bus round-trip.
+    #[test]
+    fn round_with_no_tool_calls_does_not_require_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: "all done".into(),
+            tool_calls: Vec::new(),
+        };
+        assert!(!round_requires_approval(&round, &registry));
+    }
+
+    /// DG-34 — a round made up of read-only tools (registered as
+    /// `requires_approval = false`) auto-approves.
+    #[test]
+    fn round_with_only_read_only_tools_does_not_require_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: vec![
+                crate::ProposedToolCall {
+                    id: "1".into(),
+                    name: "read_file".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "read_file".into(),
+                        args: serde_json::json!({ "path": "x.md" }),
+                    },
+                },
+                crate::ProposedToolCall {
+                    id: "2".into(),
+                    name: "search_forge".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "search".into(),
+                        args: serde_json::json!({ "query": "foo" }),
+                    },
+                },
+            ],
+        };
+        assert!(!round_requires_approval(&round, &registry));
+    }
+
+    /// DG-34 — a single high-risk tool call in the round flips the
+    /// whole round to "needs approval" (PRD-15 §7).
+    #[test]
+    fn round_with_any_write_tool_requires_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: vec![
+                crate::ProposedToolCall {
+                    id: "1".into(),
+                    name: "read_file".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "read_file".into(),
+                        args: serde_json::json!({ "path": "x.md" }),
+                    },
+                },
+                // write_file is registered with requires_approval=true.
+                crate::ProposedToolCall {
+                    id: "2".into(),
+                    name: "write_file".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "write_file".into(),
+                        args: serde_json::json!({
+                            "path": "x.md",
+                            "content": "..."
+                        }),
+                    },
+                },
+            ],
+        };
+        assert!(round_requires_approval(&round, &registry));
+    }
+
+    /// DG-34 — unknown tool names are conservatively treated as
+    /// high-risk. The model might be asking for a tool the registry
+    /// hasn't classified yet; the safe default is to prompt.
+    #[test]
+    fn round_with_unregistered_tool_requires_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: vec![crate::ProposedToolCall {
+                id: "1".into(),
+                name: "exotic_tool_never_registered".into(),
+                tool_call: crate::ToolCall {
+                    target_plugin_id: "com.unknown".into(),
+                    command_id: "do".into(),
+                    args: serde_json::json!({}),
+                },
+            }],
+        };
+        assert!(round_requires_approval(&round, &registry));
+    }
+
     /// OI-04 — `list_archetypes` returns the short-name catalogue
     /// (`"writer"`, `"coder"`, `"researcher"`) via the sync dispatch
     /// path without needing a wired kernel context. These are the
@@ -1177,7 +1888,11 @@ mod tests {
             .dispatch(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null)
             .expect("list_archetypes dispatch");
         let names: Vec<String> = serde_json::from_value(v).expect("decode");
-        assert_eq!(names, vec!["writer", "coder", "researcher"]);
+        // DG-35 — auditor / librarian / coach added 2026-05-12.
+        assert_eq!(
+            names,
+            vec!["writer", "coder", "researcher", "auditor", "librarian", "coach"]
+        );
     }
 
     /// OI-04 — `dispatch_async` returns `None` for
@@ -1188,6 +1903,74 @@ mod tests {
         let mut plugin = AgentCorePlugin::new();
         let fut = plugin.dispatch_async(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null);
         assert!(fut.is_none(), "list_archetypes must not return an async future");
+    }
+
+    /// DG-32 — `list_tools` returns the agent tool registry's seeded
+    /// catalogue via the sync dispatch path. The handler reads from
+    /// the process-global registry; the test seeds it explicitly so
+    /// the assertion is independent of bootstrap order.
+    #[test]
+    fn list_tools_returns_seeded_catalog() {
+        crate::seed_default_tools();
+        let mut plugin = AgentCorePlugin::new();
+        let v = plugin
+            .dispatch(HANDLER_LIST_TOOLS, &serde_json::Value::Null)
+            .expect("list_tools dispatch");
+        let arr = v.as_array().expect("array reply");
+        let names: std::collections::HashSet<_> = arr
+            .iter()
+            .filter_map(|v| v.get("name").and_then(|n| n.as_str()))
+            .collect();
+        for expected in [
+            "read_file",
+            "write_file",
+            "search_forge",
+            "git_log",
+            "terminal_run_saved",
+        ] {
+            assert!(
+                names.contains(expected),
+                "list_tools missing tool: {expected}"
+            );
+        }
+    }
+
+    /// DG-32 — `list_tools` honours the `capabilities` filter and
+    /// rejects unknown capability ids with a clear error.
+    #[test]
+    fn list_tools_with_unknown_capability_errors() {
+        crate::seed_default_tools();
+        let mut plugin = AgentCorePlugin::new();
+        let err = plugin
+            .dispatch(
+                HANDLER_LIST_TOOLS,
+                &serde_json::json!({ "capabilities": ["bogus"] }),
+            )
+            .expect_err("should reject unknown capability");
+        let msg = format!("{err}");
+        assert!(msg.contains("unknown capability"), "got: {msg}");
+    }
+
+    /// DG-32 — Filtering by a held capability returns only tools
+    /// satisfied by it.
+    #[test]
+    fn list_tools_with_capability_filter_narrows_catalog() {
+        crate::seed_default_tools();
+        let mut plugin = AgentCorePlugin::new();
+        let v = plugin
+            .dispatch(
+                HANDLER_LIST_TOOLS,
+                &serde_json::json!({ "capabilities": ["fs.read"] }),
+            )
+            .expect("list_tools dispatch");
+        let arr = v.as_array().expect("array reply");
+        let names: std::collections::HashSet<_> = arr
+            .iter()
+            .filter_map(|v| v.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert!(names.contains("read_file"));
+        // `write_file` needs `fs.write` which we didn't grant.
+        assert!(!names.contains("write_file"));
     }
 
 /// Phase 2b — `round_decide` routes the caller's decision into

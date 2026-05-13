@@ -68,7 +68,7 @@ This directory contains standalone, implementation-ready PRDs for every Nexus su
 
 | # | PRD | Scope |
 |---|-----|-------|
-| 17 | [Cross-Platform Strategy](17-cross-platform-strategy.md) | Desktop (Tauri), Web (WASM), Mobile (UniFFI), platform abstraction, build pipeline |
+| 17 | [Desktop Strategy](17-cross-platform-strategy.md) | Tauri 2.x desktop shell on Linux / macOS / Windows. Web + mobile sections preserved as deferred design rationale (DG-38, 2026-05-12). |
 
 ---
 

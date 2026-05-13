@@ -24,6 +24,7 @@ pub mod core_plugin;
 pub mod error;
 pub mod formula;
 pub mod import_export;
+pub mod relations;
 pub mod types;
 pub mod validate;
 pub mod views;
@@ -40,4 +41,7 @@ pub use validate::{
 };
 pub use views::{
     apply_view, validate_filter_operator, AppliedView, ViewGroup, ViewLayout, MISSING_GROUP_KEY,
+};
+pub use relations::{
+    compute_rollup, parse_aggregation, resolve_relation, RelationError,
 };

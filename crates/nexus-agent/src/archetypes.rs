@@ -45,12 +45,60 @@ tool calls; if a write is needed, end with a single summarising \
 note via `write_file`. Reference source paths in your narration so \
 the user can audit the trail.";
 
+/// Auditor archetype — biases the planner toward critical review of \
+/// existing material. Read-heavy, write-only-for-the-final-report. \
+/// Maps to PRD-15 §8.5 (Review Agent) in spirit.
+pub const AUDITOR_SYSTEM_PROMPT: &str = "\
+You are Nexus's Auditor planner. Your goal is to review existing \
+material for correctness, consistency, and risk. Prefer \
+`read_file`, `search_forge`, `list_backlinks`, and `git_log` to \
+build a complete picture before writing anything. Call out specific \
+problems with file paths and line numbers; explain WHY each finding \
+matters. When you produce a report, write it once at the end via \
+`write_file` to a clearly-named audit note (e.g. \
+`audits/<topic>.md`). Never modify the material you're auditing.";
+
+/// Librarian archetype — biases the planner toward knowledge \
+/// organisation: indexing, cross-linking, deduplication, and \
+/// directory hygiene. Reads broadly, writes narrowly to canonical \
+/// catalogue notes.
+pub const LIBRARIAN_SYSTEM_PROMPT: &str = "\
+You are Nexus's Librarian planner. Your goal is to keep the forge \
+well-organised and discoverable. Use `search_forge` and \
+`list_backlinks` to find related material, `read_file` to confirm \
+content, and `write_file` only to update catalogue / index notes \
+or to add forward links from canonical hubs. Prefer linking over \
+duplicating; never reorganise files without the user's explicit \
+go-ahead. When the goal is ambiguous, propose a structure in \
+your narration first and let the user redirect.";
+
+/// Coach archetype — biases the planner toward guidance, teaching, \
+/// and learning loops rather than execution. Read-heavy; writes \
+/// notes that help the user build their own understanding rather \
+/// than handing back finished work.
+pub const COACH_SYSTEM_PROMPT: &str = "\
+You are Nexus's Coach planner. Your goal is to help the user grow \
+their understanding — not to do their work for them. Prefer \
+`read_file` and `search_forge` to ground your guidance in the \
+user's actual material. Surface questions to clarify the user's \
+real goal before reaching for tools. When you write, write \
+explanations / suggestions / next-step prompts (via `write_file` \
+to a coaching note) rather than finished artefacts. Be \
+encouraging but specific; reference concrete file paths so the \
+user can follow your trail.";
+
 /// Identifier for the Writer archetype — `com.nexus.agent.writer`.
 pub const WRITER_ID: &str = "com.nexus.agent.writer";
 /// Identifier for the Coder archetype — `com.nexus.agent.coder`.
 pub const CODER_ID: &str = "com.nexus.agent.coder";
 /// Identifier for the Researcher archetype — `com.nexus.agent.researcher`.
 pub const RESEARCHER_ID: &str = "com.nexus.agent.researcher";
+/// Identifier for the Auditor archetype — `com.nexus.agent.auditor` (DG-35).
+pub const AUDITOR_ID: &str = "com.nexus.agent.auditor";
+/// Identifier for the Librarian archetype — `com.nexus.agent.librarian` (DG-35).
+pub const LIBRARIAN_ID: &str = "com.nexus.agent.librarian";
+/// Identifier for the Coach archetype — `com.nexus.agent.coach` (DG-35).
+pub const COACH_ID: &str = "com.nexus.agent.coach";
 
 /// Build an [`LlmAgent`] from a caller-supplied archetype name.
 /// Unknown / empty / `"general"` → the default `LlmAgent`. The
@@ -78,6 +126,9 @@ pub(crate) fn resolve_prompt(name: Option<&str>) -> (&'static str, &'static str)
         Some("writer") => (WRITER_ID, WRITER_SYSTEM_PROMPT),
         Some("coder") => (CODER_ID, CODER_SYSTEM_PROMPT),
         Some("researcher") => (RESEARCHER_ID, RESEARCHER_SYSTEM_PROMPT),
+        Some("auditor") => (AUDITOR_ID, AUDITOR_SYSTEM_PROMPT),
+        Some("librarian") => (LIBRARIAN_ID, LIBRARIAN_SYSTEM_PROMPT),
+        Some("coach") => (COACH_ID, COACH_SYSTEM_PROMPT),
         _ => ("com.nexus.agent.llm", DEFAULT_SYSTEM_PROMPT),
     }
 }
@@ -115,6 +166,40 @@ mod tests {
     fn resolve_is_case_insensitive() {
         assert_eq!(resolve_prompt(Some("WRITER")).0, WRITER_ID);
         assert_eq!(resolve_prompt(Some("  Coder ")).0, CODER_ID);
+    }
+
+    /// DG-35 — three new archetypes resolve to their own ids and
+    /// surface a non-empty system prompt distinct from the default.
+    #[test]
+    fn dg35_archetypes_resolve_to_their_own_ids() {
+        for (name, id, prompt) in [
+            ("auditor", AUDITOR_ID, AUDITOR_SYSTEM_PROMPT),
+            ("librarian", LIBRARIAN_ID, LIBRARIAN_SYSTEM_PROMPT),
+            ("coach", COACH_ID, COACH_SYSTEM_PROMPT),
+        ] {
+            let (resolved_id, resolved_prompt) = resolve_prompt(Some(name));
+            assert_eq!(resolved_id, id, "id mismatch for `{name}`");
+            assert_eq!(resolved_prompt, prompt, "prompt mismatch for `{name}`");
+            assert_ne!(
+                resolved_prompt, DEFAULT_SYSTEM_PROMPT,
+                "`{name}` falling back to default prompt"
+            );
+            assert!(!resolved_prompt.is_empty());
+        }
+    }
+
+    /// DG-35 — the three new archetype prompts each describe a
+    /// distinct posture. Anchors the prompt text against a key
+    /// phrase so a refactor that rewrites a prompt has to update
+    /// the test deliberately.
+    #[test]
+    fn dg35_prompts_describe_distinct_postures() {
+        assert!(AUDITOR_SYSTEM_PROMPT.contains("Auditor"));
+        assert!(AUDITOR_SYSTEM_PROMPT.contains("review"));
+        assert!(LIBRARIAN_SYSTEM_PROMPT.contains("Librarian"));
+        assert!(LIBRARIAN_SYSTEM_PROMPT.contains("organis"));
+        assert!(COACH_SYSTEM_PROMPT.contains("Coach"));
+        assert!(COACH_SYSTEM_PROMPT.contains("understanding"));
     }
 
     #[tokio::test]

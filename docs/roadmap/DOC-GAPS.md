@@ -989,7 +989,7 @@ implement install-from-URL as a standalone item (BL entry).
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 specifies a `ToolRegistry` abstraction the agent system calls
 into. Not implemented. (Agents currently use ad-hoc dispatch.)
@@ -998,6 +998,74 @@ into. Not implemented. (Agents currently use ad-hoc dispatch.)
 checks, registration discoverable from `nexus tool list`. Promote to
 BL when prioritized.
 
+### Outcome
+
+Typed agent-facing tool registry shipped as
+[`crates/nexus-agent/src/tool_registry.rs`](../../crates/nexus-agent/src/tool_registry.rs):
+
+- `Capability` enum covering the ten capability domains PRD-15 §4
+  lists. Serializes as the canonical dotted-id string (`fs.read`,
+  `terminal.execute`, …) so wire / CLI / `.agent.toml` (DG-36) all
+  speak the same form. `Capability::as_str` / `Capability::from_str`
+  is the round-trip surface.
+- `AgentToolSpec` carries name, description, JSON-Schema input
+  schema, `requires_approval` flag, `estimated_duration_ms` hint,
+  `required_capabilities`, and the kernel IPC route
+  (`target_plugin_id` / `command_id`) so a session loop can dispatch
+  through the existing `ToolDispatcher` without re-implementing
+  transport.
+- `AgentToolRegistry` is a process-global (`OnceLock<Arc<…>>` —
+  same pattern DG-39 introduced for MCP dynamic tools) catalogue.
+  `bootstrap::register_core_plugins` calls
+  `nexus_agent::seed_default_tools()` after registering
+  `com.nexus.agent`, seeding the eight in-tree tools that mirror the
+  AI executor's catalogue (`read_file`, `write_file`, `search_forge`,
+  `list_backlinks`, `git_log`, `terminal_run_saved`,
+  `terminal_get_status`, `terminal_send_signal`). `write_file` and
+  the two terminal-write tools are marked `requires_approval: true`
+  so DG-34 (interactive approval) can read the flag without a
+  separate config surface.
+- `list_for_agent(&[Capability])` returns only the tools an agent's
+  granted capabilities satisfy. `validate_params` runs the
+  structural checks PRD-15 calls for (`required` keys present,
+  `additionalProperties: false` honoured). `check_capabilities`
+  returns a typed `AgentToolError::CapabilityDenied` on the first
+  missing capability. `record_access` + `access_log` keep a bounded
+  (1024-entry) in-memory audit trail.
+- New IPC handler `com.nexus.agent::list_tools` (handler id 18) —
+  sync path, no kernel context needed. Args:
+  `{ capabilities?: ["fs.read", …] }`; reply: sorted
+  `Vec<AgentToolSpec>`. Unknown capability ids fail loudly so a
+  typo doesn't silently return the full catalogue.
+- New CLI command `nexus tool list [--capability ID]…` in
+  [`crates/nexus-cli/src/commands/tool.rs`](../../crates/nexus-cli/src/commands/tool.rs)
+  — routes through the IPC handler, renders a fixed-width table
+  with `NAME`, `APPR`, `~ms`, `CAPS`, `DESCRIPTION`.
+- ts-rs / schemars bindings regenerated under
+  `packages/nexus-extension-api/src/generated/ipc/{Capability,AgentToolSpec,AgentToolAccessRecord,ListToolsArgs}.ts`
+  and `crates/nexus-bootstrap/schemas/ipc/`; `scripts/check_ipc_drift.sh`
+  clean.
+- Test coverage: 16 unit tests in `tool_registry.rs` (capability
+  round-trip, register / lookup / overwrite, capability-filtered
+  listing, capability check, params validation matrix, access-log
+  cap) + 3 IPC dispatch tests in `core_plugin.rs` (full catalog,
+  unknown capability rejection, capability-filter narrowing). All
+  41 lib tests green.
+
+**Deferred** as documented follow-ups:
+
+- `call_with_retry` / exponential backoff (PRD-15 §4) — the
+  registry tracks `estimated_duration_ms` and `requires_approval`
+  but doesn't own the dispatch loop yet. Retry policy lives in the
+  session executor where it can see proposed-call context; once a
+  user request needs it, the wiring is one method on `AgentToolRegistry`
+  that takes a `&dyn ToolDispatcher`.
+- `parse_result` / `ParsedToolResult` (PRD-15 §4) — the existing
+  session loop already classifies tool outcomes into the
+  `RoundDecision` shape. Lifting a separate `ParsedToolResult`
+  would duplicate that surface; revisit if a non-session caller
+  needs structured tool-result parsing.
+
 ---
 
 ## DG-33 — PRD-15 §5 Memory not implemented
@@ -1005,13 +1073,80 @@ BL when prioritized.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 §5 specifies agent-scoped persistent memory. Not implemented;
 runs are stateless.
 
 **Definition of done:** Per PRD-15 §5. Related to AI-MEMORY-LAYER-PLAN
 (roadmap exploratory).
+
+### Outcome
+
+Filesystem-backed agent-scoped memory shipped:
+
+- New [`crates/nexus-agent/src/memory.rs`](../../crates/nexus-agent/src/memory.rs)
+  defines the `MemoryEntry` enum covering the eight variants
+  PRD-15 §5 calls out (`UserGoal`, `AgentPlan`, `StepExecution`,
+  `ToolCall`, `UserFeedback`, `Error`, `Decision`, `Artifact`) plus
+  the surrounding primitives: `agent_dir`, `history_path`,
+  `normalize_agent_id` (validates ASCII alphanumeric / `.-_`,
+  ≤96 chars — mirrors the existing plan-history slug rule),
+  `append_entry_to_path`, `read_entries_from_path` (skips malformed
+  lines with a warn), `query_entries` (case-insensitive substring,
+  newest-first), `prune_entries` (drops everything older than the
+  retention window **except** `Decision` entries — PRD-15 §5
+  invariant), and `export_markdown`.
+- Storage layout matches the PRD: `<forge>/.forge/agents/<agent_id>/`
+  with `history.jsonl` (append-only one-entry-per-line log) and
+  reserved `snapshots/` + `artifacts/` subdirs (the entry variants
+  reference artifacts by path so the layout is forward-compatible
+  even though dated snapshots aren't wired yet — see deferred).
+- Four IPC handlers on `com.nexus.agent`:
+  - `memory_record` (id 20) — append a `MemoryEntry` to the log.
+    Read-modify-write through `ctx.read_file` + `ctx.write_file`
+    so the capability surface stays correct (the kernel doesn't
+    expose a raw append primitive).
+  - `memory_query` (id 21) — substring filter + limit; default
+    limit 50, newest-first.
+  - `memory_prune` (id 22) — drop entries older than
+    `retention_days * 86_400_000` ms while preserving `Decision`
+    entries; rewrites the log via `write_file`.
+  - `memory_export` (id 23) — render the entire log as
+    human-readable markdown.
+- ts-rs / schemars bindings generated for `MemoryEntry`,
+  `MemoryRecordArgs`, `MemoryQueryArgs`, `MemoryPruneArgs`,
+  `MemoryExportArgs` under
+  `packages/nexus-extension-api/src/generated/ipc/`;
+  `scripts/check_ipc_drift.sh` clean.
+- 13 unit tests in `memory::tests` cover the parse / round-trip
+  (append+read), query (substring case-insensitive, empty pattern
+  newest-first, limit cap), prune (drops old non-decisions, keeps
+  decisions), export (every variant renders), agent-id validator
+  (reverse-DNS / empty / too-long / unsafe chars), and missing
+  file handling. All 68 nexus-agent lib tests green.
+
+**Deferred** as documented follow-ups:
+
+- Auto-recording from the session loop. The session loop in
+  `session.rs` writes per-session transcripts under
+  `.forge/agent/sessions/` already; threading those events through
+  `memory_record` so a Coder agent's prior decisions show up on
+  its next invocation is the integration step. Foundation is in
+  place (the handler exists; the session loop knows the agent id);
+  one focused PR away.
+- Dated `MemorySnapshot` rollups. The PRD-15 §5 `MemorySnapshot`
+  type wasn't materialised — the JSONL log is the canonical
+  source. A rollup writer that compresses old history into a
+  weekly snapshot can land if log file sizes become an issue;
+  retention-by-prune already keeps the active log bounded.
+- Database backend (`MemoryStore::Database`). FS-only today; the
+  IPC surface is backend-agnostic so swapping requires only a
+  handler-side route change.
+- Prompt-time recall (injecting prior memory into the planner's
+  system prompt at session start). The query handler is in place;
+  binding it into `system_prompt_with_skills` is the next step
+  for a "memory layer" feel.
 
 ---
 
@@ -1020,7 +1155,7 @@ runs are stateless.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 §7 requires the agent loop to pause and request user approval
 for high-risk tool calls. Today the loop runs through to completion;
@@ -1029,6 +1164,57 @@ nothing surfaces an approval prompt.
 **Definition of done:** Per PRD-15 §7; UI work coordinated with
 ADR 0024 (shell approval UI).
 
+### Outcome
+
+The approval bus-bridge plumbing shipped under
+[ADR 0024 Phase 2b](../adr/0024-agent-approval-flow.md):
+`auto_approve: false` sessions emit `com.nexus.agent.round_proposed`
+and await `com.nexus.agent::round_decide` (handler id 17). What
+DG-34 closes is the **risk classification** that turns "prompt for
+every round" into PRD-15 §7's risk-table-aware behaviour.
+
+- New `round_requires_approval(round, registry)` helper in
+  [`crates/nexus-agent/src/core_plugin.rs`](../../crates/nexus-agent/src/core_plugin.rs)
+  checks each `ProposedToolCall.name` against the DG-32
+  `AgentToolRegistry`. A round needs approval iff any of its tool
+  calls is flagged `requires_approval = true` or is unregistered
+  (conservative default — unknown tools could be anything; safe to
+  prompt).
+- `BusBridgePolicy` gained a `strict_approval: bool` field. When
+  `false` (the new default), the policy short-circuits to
+  `RoundDecision::ApproveAll` whenever `round_requires_approval`
+  returns `false` — saving an unnecessary bus event + caller
+  round-trip on read-only rounds. When `true`, it falls back to
+  the original ADR 0024 Phase 2b behaviour (prompt for every
+  round). The flag rides into the policy via the new
+  `SessionRunArgs.strict_approval` IPC field (`com.nexus.agent::session_run`).
+- The `com.nexus.agent.round_proposed` payload now annotates every
+  `tool_call` with `requires_approval: bool` + `registered: bool`
+  so the shell can render per-call risk badges (write tools red,
+  read-only muted, unregistered outlined) without re-querying the
+  tool registry.
+- 4 new unit tests in `core_plugin::tests` cover the classifier
+  matrix: empty round (no approval), all-read-only round (no
+  approval), any-write round (approval), unregistered-tool round
+  (approval). Full nexus-agent lib suite at 72 tests stays green.
+
+**Deferred** as documented follow-ups:
+
+- Shell UI surface for the new `requires_approval` / `registered`
+  badges in the `round_proposed` payload — the AgentPanel renders
+  the approval card today but doesn't read the per-call risk
+  fields yet. Cosmetic; safe path is the same either way (caller
+  approves whole round).
+- Per-tool override in `.agent.toml` (`[execution].requires_approval_for`
+  field already exists from DG-36). Lifting that list into the
+  policy's classifier so a custom agent can require approval for
+  *additional* tools beyond the registry's default flags is the
+  next integration step.
+- CLI-side approval flow. `nexus agent run` (CLI) always sets
+  `auto_approve: true`. A `--interactive` flag that prompts the
+  user on stdin between rounds needs a CLI subscriber for
+  `round_proposed`; the Tauri shell already has this surface.
+
 ---
 
 ## DG-35 — PRD-15 §8 six built-in agent classes (3 of 6 shipped)
@@ -1036,7 +1222,7 @@ ADR 0024 (shell approval UI).
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 specifies 6 built-in agent classes. Three archetype prompts
 shipped (`researcher`, `writer`, `coder`). Missing per the PRD:
@@ -1045,6 +1231,42 @@ shipped (`researcher`, `writer`, `coder`). Missing per the PRD:
 **Definition of done:** Build out the three missing archetypes, or
 amend PRD-15 to reflect a 3-archetype design.
 
+### Outcome
+
+Built the three missing archetypes:
+
+- `AUDITOR_SYSTEM_PROMPT` + `AUDITOR_ID =
+  "com.nexus.agent.auditor"` — read-heavy reviewer; spirit-mapped to
+  PRD-15 §8.5 (Review Agent). Prefers `read_file` / `search_forge` /
+  `list_backlinks` / `git_log`; writes only the final audit note;
+  never mutates the audited material.
+- `LIBRARIAN_SYSTEM_PROMPT` + `LIBRARIAN_ID =
+  "com.nexus.agent.librarian"` — knowledge organisation /
+  cross-linking / deduplication. Prefers linking over duplicating;
+  writes only to catalogue notes; refuses to reorganise files
+  without explicit go-ahead.
+- `COACH_SYSTEM_PROMPT` + `COACH_ID =
+  "com.nexus.agent.coach"` — guidance over execution. Surfaces
+  clarifying questions, writes coaching notes (suggestions /
+  next-step prompts) rather than finished artefacts; references
+  concrete file paths so the user can follow the trail.
+
+All three resolved by `archetypes::resolve_prompt` (case-insensitive)
+and listed by `com.nexus.agent::list_archetypes` (handler id 8).
+The catalog constant `ARCHETYPE_NAMES` now reads
+`["writer", "coder", "researcher", "auditor", "librarian", "coach"]`.
+
+2 new resolver-matrix tests + the existing `list_archetypes` IPC
+test updated to pin the new catalog. Full nexus-agent lib suite at
+74 tests stays green.
+
+PRD-15 §8.x sub-section names (Refactor / Documentation / Review /
+Automation) and the BACKLOG-cited names (auditor / librarian /
+coach) don't line up 1:1 — the BACKLOG names are the user-facing
+short ids we shipped, mapped against PRD §8's spirit where each
+overlaps. The PRD text remains as design rationale; the archetype
+catalog is the working contract.
+
 ---
 
 ## DG-36 — PRD-15 §9 `.agent.toml` custom-agent format not implemented
@@ -1052,12 +1274,66 @@ amend PRD-15 to reflect a 3-archetype design.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 User-authored `.agent.toml` files for custom agents are spec'd; no
 parser or loader exists.
 
 **Definition of done:** Per PRD-15 §9.
+
+### Outcome
+
+Parser + loader + IPC + CLI shipped:
+
+- New [`crates/nexus-agent/src/custom_agent.rs`](../../crates/nexus-agent/src/custom_agent.rs)
+  ships `CustomAgentManifest` plus the five sub-section types
+  (`AgentSection`, `ExecutionSection`, `ToolsSection`,
+  `MemorySection`, `SystemPromptSection`) matching the PRD-15 §9
+  TOML schema. Each section carries `#[serde(deny_unknown_fields)]`
+  so typos (e.g. `max_stepz`) fail loudly rather than silently
+  defaulting.
+- `parse_str(body, slug, path)` and `load_from_path(&Path)` parse
+  one manifest; `scan_forge(&Path)` walks
+  `<forge>/.forge/agents/*/agent.toml` and returns a tuple of
+  loaded manifests + per-manifest errors so a single broken file
+  doesn't poison the listing. Output is slug-sorted for stable
+  CLI / shell diffs.
+- `resolve_system_prompt` reads the prompt body — either inline
+  via `[system_prompt].text` or by following
+  `[system_prompt].path` relative to the manifest directory.
+  Mutual-exclusivity and presence checks happen at parse time.
+- New IPC handler `com.nexus.agent::list_custom` (handler id 19,
+  async) walks `.forge/agents/` via `ctx.list_files`, parses each
+  `agent.toml`, and replies `{ manifests, errors }`. Missing
+  directory is a clean empty reply — most forges won't have a
+  custom-agents directory yet.
+- New CLI command `nexus agent list-custom` renders the result as
+  a fixed-width `SLUG | NAME | ARCHETYPE` table with errors below.
+- ts-rs / schemars bindings generated for `CustomAgentManifest`,
+  `AgentSection`, `ExecutionSection`, `ToolsSection`,
+  `MemorySection`, `SystemPromptSection` under
+  `packages/nexus-extension-api/src/generated/ipc/`;
+  `scripts/check_ipc_drift.sh` clean.
+- 11 unit tests in `custom_agent::tests` cover the parse matrix
+  (minimal / full PRD example / missing prompt / both text+path /
+  invalid memory storage / unknown execution field), the forge
+  scanner (missing dir / multiple manifests sorted / broken
+  manifest isolated to errors), and prompt resolution (inline /
+  file). All 55 nexus-agent lib tests green.
+
+**Deferred** as documented follow-ups:
+
+- Routing a custom agent through `nexus agent plan/run --archetype <slug>`
+  isn't wired yet. `build_archetype` in `archetypes.rs` resolves
+  built-in names only; a `--archetype` arg that matches a custom
+  manifest's slug should layer that manifest's `system_prompt`
+  over its `archetype` baseline. Foundation is in place — every
+  manifest exposes the system prompt + base archetype — but the
+  resolver itself is one follow-up away (read scan result during
+  `handle_plan` / `handle_session_run`).
+- Tool allow/deny enforcement against `AgentToolRegistry` likewise
+  pending until the planning loop reads the manifest at request
+  time.
 
 ---
 
@@ -1066,11 +1342,57 @@ parser or loader exists.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Spec'd; not built.
 
 **Definition of done:** Per PRD-15 §10.
+
+### Outcome
+
+Built on top of the session model rather than resurrecting the
+retired BL-027 `AgentOrchestrator` (ADR 0025):
+
+- New IPC handler `com.nexus.agent::delegate` (handler id 24).
+  Args: `{ archetype, goal, system?, auto_approve?,
+  approval_timeout_secs?, strict_approval? }`. Routes through the
+  existing `handle_session_run` machinery, so the sub-session gets
+  the same transcript persistence, approval policy, and bus event
+  surface as a top-level run.
+- `archetype` is required (delegation has to be explicit about the
+  child's posture); empty `goal` rejects loudly.
+- `auto_approve` defaults to `true` — the parent's session policy
+  already gated the delegation call itself, so prompting twice
+  for the same human is noise. The caller can flip it to `false`
+  to opt back into per-round approval inside the sub-session.
+- New registered tool `delegate_to_agent` in the DG-32 agent tool
+  registry. Spec carries `requires_approval = true` because the
+  child can call write-class tools; routes through
+  `com.nexus.agent::delegate`. A planner LLM sees A2A as a
+  first-class tool call (Anthropic / OpenAI / Ollama tool surface),
+  not a hidden orchestrator primitive.
+- ts-rs / schemars bindings generated for `DelegateArgs` under
+  `packages/nexus-extension-api/src/generated/ipc/`;
+  `scripts/check_ipc_drift.sh` clean.
+- 4 new unit tests in `core_plugin::tests`: empty archetype
+  rejection, empty goal rejection, auto-approve default true,
+  registry-seeded `delegate_to_agent`. Full nexus-agent lib suite
+  at 78 tests stays green.
+
+**Parallel / pipeline** — PRD-15 §10's other two operations — stay
+as **caller composition patterns** over `delegate` rather than
+dedicated handlers:
+
+- Parallel: caller issues N `delegate` IPC calls concurrently and
+  awaits all replies.
+- Pipeline: caller chains `delegate` calls sequentially, threading
+  each session's outcome text into the next call's `goal`.
+
+ADR 0025 explicitly retired the `parallel` / `pipeline` handlers
+because no caller named them through IPC. The session-shaped reply
+from `delegate` is the new currency — composition lives at the
+caller layer where it's cheaper to express ("a for-loop in the
+shell") than as a kernel handler.
 
 ---
 
@@ -1079,7 +1401,7 @@ Spec'd; not built.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open — needs scoping decision
+**Status:** Resolved 2026-05-12 — **Option A** (reframe as desktop-only)
 
 PRD-17 §3 (WASM target), §4 (`nexus-platform` crate), §5 (web target),
 §6 (mobile / UniFFI bindings) are all unimplemented. No `wasm32`,
@@ -1090,6 +1412,35 @@ PRD-17 §3 (WASM target), §4 (`nexus-platform` crate), §5 (web target),
   to exploratory `roadmap/` or `research/`.
 - Option B: Commit to multi-platform; promote each platform to BL
   entries.
+
+### Outcome
+
+Option A chosen. PRD-17 reframed as "Desktop Strategy":
+
+- Title and executive summary rewritten in
+  [`docs/PRDs/17-cross-platform-strategy.md`](../PRDs/17-cross-platform-strategy.md);
+  status line bumped to "1.0 (reframed 2026-05-12 per DG-38)".
+- Header callout at the top spells out the scoping decision and lists
+  every section that is now considered deferred design rationale
+  rather than committed work.
+- Per-section "Deferred (DG-38, 2026-05-12)" callouts inserted at
+  §3 (WASM), §5 (Web), §6 (Mobile), §15 (Web Onboarding), §16
+  (Mobile UX), and a "Partially deferred" callout at §4 (Platform
+  Abstraction) noting that the desktop column ships today but the
+  separate `nexus-platform` crate was never created — desktop callers
+  use Tauri / keyring / portable-pty directly.
+- [`docs/PRDs/00-index.md`](../PRDs/00-index.md) PRD-17 row retitled
+  "Desktop Strategy" with a scope summary that names DG-38.
+- [`docs/PRDs/IMPLEMENTATION_STATUS.md`](../PRDs/IMPLEMENTATION_STATUS.md)
+  PRD-17 entry retitled and its Gaps line rewritten to point at this
+  DG; web/mobile no longer count as gaps. Tauri-updater signing is
+  left tracked under WI-41 (formal-release scope).
+
+The PRD body sections are preserved verbatim so the design thinking
+survives. If multi-platform is ever pursued, each platform should be
+promoted to its own BL entry and re-validated against ADR 0011
+(single-shell desktop) + ADR 0016 (microkernel native-vs-WASM split)
+before any code lands.
 
 ---
 
@@ -1189,12 +1540,60 @@ through `call_tool`.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Real impl is an in-memory filter chain in `apply_view`. PRD-10 §7
 specifies relations between bases plus computed rollups.
 
 **Definition of done:** Per PRD-10 §7.
+
+### Outcome
+
+Pure-logic relation resolution + rollup aggregation ship as a new
+module in `nexus-database`:
+
+- New [`crates/nexus-database/src/relations.rs`](../../crates/nexus-database/src/relations.rs):
+  - `resolve_relation(source, relation, target_records) -> Vec<&BaseRecord>`
+    — handles both scalar (string id) and array source values,
+    preserves source-side order for arrays, filters out
+    soft-deleted (`deleted_at != None`) targets, deduplicates by
+    target id so the same target referenced twice doesn't appear
+    twice. Special case for `target_field = "id"` matches against
+    the typed `BaseRecord.id`.
+  - `compute_rollup(source, relation, aggregate_field, aggregation, target_records)`
+    — projects `aggregate_field` across the resolved targets and
+    folds with the requested aggregation. Reuses the existing
+    `types::RollupAggregation` enum (Count / CountUnique /
+    CountValues / CountEmpty / CountNotEmpty / PercentEmpty /
+    PercentNotEmpty / Sum / Average / Min / Max).
+  - `parse_aggregation(&str) -> Option<RollupAggregation>` —
+    case-insensitive parse for IPC callers.
+- Two new IPC handlers on `com.nexus.database`:
+  `resolve_relation` (handler id 5) and `compute_rollup`
+  (handler id 6). Caller hands in pre-loaded source + target
+  records (matching the `apply_view` posture — pure in-memory
+  pipeline, no I/O). Bootstrap registers the names.
+- 15 new unit tests in `relations::tests` cover the resolver
+  matrix (scalar / array source, in-order, soft-delete filter,
+  dedup, null-source-empty, missing-source-field error,
+  non-id target field) and the rollup matrix (count /
+  count-unique / count-values null-handling / percent-empty /
+  sum / min-max / average empty-input). Full nexus-database
+  lib suite at 135 tests stays green.
+
+**Deferred** as documented follow-ups:
+
+- Wiring `BaseView` filters that reference a rollup field
+  through to `apply_view`. Today a view-level filter on a
+  rollup column doesn't auto-invoke `compute_rollup` first;
+  the caller has to evaluate rollups, then apply filters.
+- Circular-relation detection (PRD-10 §7 `validate_relation`).
+  No two-base cycles can exist today because there's no
+  schema migration that creates them; safe deferral.
+- Cardinality enforcement (`OneToMany` vs `ManyToMany` from
+  PRD-10 §7). The runtime treats every relation as
+  many-to-many implicitly; explicit enforcement is a
+  validation pass on top of the existing types.
 
 ---
 
@@ -1203,13 +1602,69 @@ specifies relations between bases plus computed rollups.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12 (already shipped — gap claim was
+stale)
 
 PRD-10 §8 specifies compiling Bases queries into SQL against the
 storage SQLite index. The current implementation does in-memory
 filtering only.
 
 **Definition of done:** Per PRD-10 §8.
+
+### Outcome
+
+Re-investigating the gap claim: the SQL compiler **already ships**.
+The 2026-05-12 traceability audit confused two adjacent code paths:
+
+- [`crates/nexus-storage/src/bases/query.rs`](../../crates/nexus-storage/src/bases/query.rs)
+  (772 lines) compiles `Query { filters, sorts, limit, offset }`
+  into a SQL `SELECT … FROM bases_records WHERE …` with
+  `json_extract(data_json, '$.<field>')` for every per-field
+  predicate. Sixteen `FilterOp` variants land in
+  `compile_filter`: `Is` / `IsNot` / `Contains` /
+  `DoesNotContain` / `StartsWith` / `EndsWith` / `GreaterThan`
+  / `LessThan` / `GreaterThanOrEqual` / `LessThanOrEqual` /
+  `IsEmpty` / `IsNotEmpty` / `DateIsBefore` / `DateIsAfter` /
+  `DateIsOnOrBefore` / `DateIsOnOrAfter`. `compile_sort`
+  produces `ORDER BY` fragments. `execute(conn, query)` runs
+  the compiled SQL with parameter binding and returns a
+  paginated `QueryResult` with `total_count` + `has_more` for
+  cursor-style paging.
+- Exposed over IPC as `com.nexus.storage::base_query`
+  (handler id 26, see `crates/nexus-storage/src/core_plugin.rs:90`).
+  Routed through the same SQLite index PRD-10 §9 specs.
+
+What the audit's "in-memory filtering only" referred to was
+`crates/nexus-database/src/views.rs::apply_view` — a *separate*
+pipeline that filters / sorts / groups records the caller has
+already loaded (typically via `base_load` for views without a
+SQL backend). Both paths ship; they target different use cases:
+
+- `apply_view` — caller already has records in hand, just wants
+  the view's filter / sort / group / kanban-grouping applied.
+  Pure in-memory; no DB connection.
+- `base_query` — caller wants to push a structured query at the
+  SQLite index without pre-loading every record. Compiles to
+  SQL via `query::compile_filter` + `compile_sort`.
+
+The two pipelines deliberately don't fuse: `apply_view`'s caller
+already paid the I/O cost (e.g. the shell loaded the base for
+rendering); reaching back into SQLite for a filter pass would
+double the read. `base_query` exists for callers that want
+backend-side filtering on a base too large to load whole.
+
+**Deferred** as documented follow-ups:
+
+- Auto-routing `apply_view` requests with very large record
+  counts through `base_query`'s SQL path. Today the caller
+  chooses; a hybrid that picks based on record count would
+  need a heuristic and a coupling from nexus-database back to
+  nexus-storage that today the layering rejects.
+- Test parity between the two pipelines. Each has its own
+  comprehensive suite; an integration test that pushes the
+  same query through both paths and diffs the result would
+  pin the equivalence formally (mostly defensive — the wire
+  shapes are already aligned).
 
 ---
 
@@ -1218,13 +1673,68 @@ filtering only.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-06 §9 specifies a `version:` frontmatter field and a migration
 runner. Neither exists.
 
 **Definition of done:** Per PRD-06 §9. Needed before any
 forge-format-breaking change.
+
+### Outcome
+
+Frontmatter parses `version:` and a migration runner is in place,
+waiting for the first breaking change to register against:
+
+- `Frontmatter` (in
+  [`crates/nexus-formats/src/markdown/frontmatter.rs`](../../crates/nexus-formats/src/markdown/frontmatter.rs))
+  gained a typed `version: Option<String>` field. The YAML
+  parser routes `version:` into it; files without the key keep
+  the existing untagged shape and are treated as v1.0 by the
+  migration layer.
+- New [`crates/nexus-formats/src/migration.rs`](../../crates/nexus-formats/src/migration.rs)
+  ships:
+  - `FormatVersion { major, minor }` parser (semver-shaped;
+    accepts and discards trailing `.patch`; rejects garbage like
+    `"v1.0"` / `"1.x"` / four-segment versions). Ordered
+    `(major, minor)` so the runner can pick a migration path.
+  - `DEFAULT_VERSION = "1.0"` — the implicit version for
+    untagged files.
+  - `detect_version(content)` reads the frontmatter and parses
+    the version, defaulting to v1.0 when absent.
+  - `MigrationRegistry` — `(from, to) → MigrationFn` map. Empty
+    on `new()`; consumers register a `Fn(&str) -> Result<String>`
+    when a breaking change ships. Single-hop dispatch today
+    (chained `1.0 → 1.5 → 2.0` is a caller pattern).
+  - `scan_versions(forge_root)` walks markdown files (skipping
+    hidden dirs like `.forge/` / `.git/`, skipping non-`.md`
+    files), tallies versions, and returns a `Vec<VersionTally>`
+    sorted descending by version. Unparseable values surface as
+    `"unknown"`.
+- New CLI command `nexus migrate scan` prints the version
+  distribution; `nexus migrate registered` lists the migrations
+  compiled into this build (empty until the first breaking
+  change ships). Routes through `commands::migrate` in
+  `nexus-cli`.
+- 14 unit tests in `migration::tests` cover the parser matrix
+  (good / patch-suffix / garbage / round-trip / ordering),
+  detection (default v1.0 / explicit / invalid), registry
+  (empty / dispatch / unknown pair / function error), and
+  filesystem scanner (counts / hidden-dir skip / unknown
+  classification). Full nexus-formats lib suite at 191 tests
+  green.
+
+**Deferred** as documented follow-ups:
+
+- An `apply` subcommand that writes migrations back to disk with
+  backup files (PRD-06 §9.3 calls for backups). Adding it before
+  any migration exists would be writing tests for a path no one
+  uses; the surface is one focused PR when a v2.0 migration
+  actually lands.
+- Per-format migrations for canvas (`.canvas`), bases (`.bases`),
+  config (`app.toml`). The `version:` field is markdown-only
+  today. The other parsers carry no version key yet; lifting them
+  is mechanical once a breaking change in those formats lands.
 
 ---
 

@@ -43,6 +43,67 @@ pub fn run(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `nexus agent list-custom` — list `.agent.toml` manifests under
+/// `<forge>/.forge/agents/`. PRD-15 §9 (DG-36).
+///
+/// # Errors
+/// Surfaces IPC dispatch errors verbatim.
+pub fn list_custom(app: &mut App) -> Result<()> {
+    let response = call(app, "list_custom", Value::Object(serde_json::Map::new()))?;
+    let manifests = response
+        .get("manifests")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let errors = response
+        .get("errors")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    if manifests.is_empty() && errors.is_empty() {
+        println!("(no custom agents under .forge/agents/)");
+        return Ok(());
+    }
+
+    if !manifests.is_empty() {
+        let slug_w = manifests
+            .iter()
+            .filter_map(|m| m.get("slug").and_then(Value::as_str))
+            .map(str::len)
+            .max()
+            .unwrap_or(4)
+            .max("SLUG".len());
+        println!("{:width$}  NAME                 ARCHETYPE", "SLUG", width = slug_w);
+        for m in &manifests {
+            let slug = m.get("slug").and_then(Value::as_str).unwrap_or("?");
+            let name = m
+                .get("agent")
+                .and_then(|a| a.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("(unnamed)");
+            let arche = m
+                .get("agent")
+                .and_then(|a| a.get("archetype"))
+                .and_then(Value::as_str)
+                .unwrap_or("-");
+            println!("{slug:width$}  {name:<20} {arche}", width = slug_w);
+        }
+    }
+    if !errors.is_empty() {
+        if !manifests.is_empty() {
+            println!();
+        }
+        println!("errors ({}):", errors.len());
+        for e in errors {
+            let path = e.get("path").and_then(Value::as_str).unwrap_or("?");
+            let msg = e.get("error").and_then(Value::as_str).unwrap_or("?");
+            println!("  {path}: {msg}");
+        }
+    }
+    Ok(())
+}
+
 fn goal_args(goal: &str, archetype: Option<&str>) -> Value {
     let mut map = serde_json::Map::new();
     map.insert("goal".into(), Value::String(goal.into()));

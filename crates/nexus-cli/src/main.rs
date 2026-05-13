@@ -103,6 +103,10 @@ enum Commands {
     Ai(AiArgs),
     /// Agent operations (PRD-15): plan + execute tool-calling loops
     Agent(AgentArgs),
+    /// Agent tool registry (PRD-15 §4) — list catalogued tools
+    Tool(ToolArgs),
+    /// Forge-format versioning + migrations (PRD-06 §9, DG-43)
+    Migrate(MigrateArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
     Skill(SkillArgs),
     /// Workflow operations (PRD-16): list/show/validate `.workflow.toml` files
@@ -401,6 +405,50 @@ enum AiCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Migrate (PRD-06 §9 — DG-43)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct MigrateArgs {
+    #[command(subcommand)]
+    command: MigrateCommand,
+}
+
+#[derive(Subcommand)]
+enum MigrateCommand {
+    /// Walk the forge and print the count of files at each format
+    /// version. Files without a `version:` frontmatter key are
+    /// tallied under `1.0` (the implicit default).
+    Scan,
+    /// Print the migrations registered for this build. Empty until
+    /// a forge-format-breaking change ships.
+    Registered,
+}
+
+// ---------------------------------------------------------------------------
+// Tool registry (PRD-15 §4 — DG-32)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct ToolArgs {
+    #[command(subcommand)]
+    command: ToolCommand,
+}
+
+#[derive(Subcommand)]
+enum ToolCommand {
+    /// List agent tools registered in the process-global catalogue.
+    /// Optional `--capability` filters by what the agent holds.
+    List {
+        /// Restrict to tools the agent could call given these
+        /// capabilities. Repeat to add more. Example:
+        /// `--capability fs.read --capability search.forge`.
+        #[arg(long = "capability", value_name = "ID")]
+        capabilities: Vec<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Agent (PRD-15)
 // ---------------------------------------------------------------------------
 
@@ -430,6 +478,9 @@ enum AgentCommand {
         #[arg(long)]
         archetype: Option<String>,
     },
+    /// List custom agents defined in `<forge>/.forge/agents/*/agent.toml`
+    /// (PRD-15 §9 — DG-36).
+    ListCustom,
 }
 
 // ---------------------------------------------------------------------------
@@ -1684,6 +1735,18 @@ fn main() {
             AgentCommand::Run { goal, archetype } => {
                 commands::agent::run(&mut app, &goal, archetype.as_deref())
             }
+            AgentCommand::ListCustom => commands::agent::list_custom(&mut app),
+        },
+
+        Commands::Tool(args) => match args.command {
+            ToolCommand::List { capabilities } => {
+                commands::tool::list(&mut app, &capabilities)
+            }
+        },
+
+        Commands::Migrate(args) => match args.command {
+            MigrateCommand::Scan => commands::migrate::scan(&mut app),
+            MigrateCommand::Registered => commands::migrate::registered(),
         },
 
         Commands::Skill(args) => match args.command {

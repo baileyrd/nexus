@@ -45,17 +45,33 @@ use thiserror::Error;
 mod agents;
 mod archetypes;
 pub mod core_plugin;
+pub mod custom_agent;
 mod llm;
+pub mod memory;
 pub mod session;
+pub mod tool_registry;
 
 pub use agents::EchoAgent;
 pub use archetypes::{
-    build_archetype, CODER_ID, CODER_SYSTEM_PROMPT, RESEARCHER_ID, RESEARCHER_SYSTEM_PROMPT,
-    WRITER_ID, WRITER_SYSTEM_PROMPT,
+    build_archetype, AUDITOR_ID, AUDITOR_SYSTEM_PROMPT, COACH_ID, COACH_SYSTEM_PROMPT, CODER_ID,
+    CODER_SYSTEM_PROMPT, LIBRARIAN_ID, LIBRARIAN_SYSTEM_PROMPT, RESEARCHER_ID,
+    RESEARCHER_SYSTEM_PROMPT, WRITER_ID, WRITER_SYSTEM_PROMPT,
 };
 pub use core_plugin::{
-    AgentCorePlugin, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST,
-    HANDLER_LIST_ARCHETYPES, HANDLER_PLAN, PLUGIN_ID,
+    AgentCorePlugin, HANDLER_DELEGATE, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET,
+    HANDLER_HISTORY_LIST, HANDLER_LIST_ARCHETYPES, HANDLER_LIST_CUSTOM, HANDLER_LIST_TOOLS,
+    HANDLER_MEMORY_EXPORT, HANDLER_MEMORY_PRUNE, HANDLER_MEMORY_QUERY, HANDLER_MEMORY_RECORD,
+    HANDLER_PLAN, PLUGIN_ID,
+};
+pub use custom_agent::{
+    load_from_path as load_custom_agent, parse_str as parse_custom_agent_str,
+    resolve_system_prompt as resolve_custom_system_prompt, scan_forge as scan_custom_agents,
+    AgentSection, CustomAgentError, CustomAgentManifest, ExecutionSection, MemorySection,
+    SystemPromptSection, ToolsSection, AGENTS_DIR, MANIFEST_FILE_NAME,
+};
+pub use tool_registry::{
+    default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,
+    AgentToolError, AgentToolRegistry, AgentToolSpec, Capability,
 };
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use session::{

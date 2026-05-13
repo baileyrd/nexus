@@ -788,6 +788,15 @@ fn register_core_plugins(
                         "apply_view",
                         nexus_database::core_plugin::HANDLER_APPLY_VIEW,
                     ),
+                    // DG-41 (PRD-10 §7) — relation resolution + rollup.
+                    (
+                        "resolve_relation",
+                        nexus_database::core_plugin::HANDLER_RESOLVE_RELATION,
+                    ),
+                    (
+                        "compute_rollup",
+                        nexus_database::core_plugin::HANDLER_COMPUTE_ROLLUP,
+                    ),
                 ]),
             ),
             forge_root,
@@ -1274,12 +1283,28 @@ fn register_core_plugins(
                     ("session_delete", nexus_agent::core_plugin::HANDLER_SESSION_DELETE),
                     // ADR 0024 Phase 2b — caller-side approval reply.
                     ("round_decide", nexus_agent::core_plugin::HANDLER_ROUND_DECIDE),
+                    // DG-32 (PRD-15 §4) — agent tool registry discovery.
+                    ("list_tools", nexus_agent::HANDLER_LIST_TOOLS),
+                    // DG-36 (PRD-15 §9) — custom .agent.toml manifests.
+                    ("list_custom", nexus_agent::HANDLER_LIST_CUSTOM),
+                    // DG-33 (PRD-15 §5) — agent-scoped persistent memory.
+                    ("memory_record", nexus_agent::HANDLER_MEMORY_RECORD),
+                    ("memory_query", nexus_agent::HANDLER_MEMORY_QUERY),
+                    ("memory_prune", nexus_agent::HANDLER_MEMORY_PRUNE),
+                    ("memory_export", nexus_agent::HANDLER_MEMORY_EXPORT),
+                    // DG-37 (PRD-15 §10) — agent-to-agent delegation.
+                    ("delegate", nexus_agent::HANDLER_DELEGATE),
                 ]),
             ),
             forge_root,
             Box::new(AgentCorePlugin::new()),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.agent")?;
+
+    // DG-32 — seed the agent-tool registry's process-global catalogue
+    // once the agent core plugin is registered. Read by
+    // `com.nexus.agent::list_tools` and by `nexus tool list`.
+    nexus_agent::seed_default_tools();
 
     // MCP Host orchestrator — loads mcp.toml, lazily connects to external MCP
     // servers, exposes list_tools / call_tool / list_resources / list_prompts
