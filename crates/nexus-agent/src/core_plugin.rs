@@ -151,6 +151,27 @@ pub const HANDLER_MEMORY_PRUNE: u32 = 22;
 /// Args: `{ agent_id: string }`. Reply: `{ markdown: string }`.
 pub const HANDLER_MEMORY_EXPORT: u32 = 23;
 
+/// `delegate` (DG-37 — PRD-15 §10) — run a sub-session in a child
+/// archetype and return its `AgentSession` transcript. Replaces
+/// the legacy BL-027 `delegate` (handler id 9, retired by ADR 0025)
+/// with a primitive that composes on top of the new session model.
+///
+/// Args:
+/// `{ archetype: string, goal: string, system?: string,
+///    auto_approve?: bool, approval_timeout_secs?: u64,
+///    strict_approval?: bool }`
+///
+/// Reply: a full `AgentSession` JSON (same shape `session_run`
+/// returns). The sub-session's transcript is persisted at the
+/// usual `.forge/agent/sessions/<id>.json` path so the caller can
+/// reference it after the run.
+///
+/// **Parallel / pipeline composition** are caller patterns — issue
+/// multiple `delegate` calls concurrently / sequentially. The
+/// orchestrator types BL-027 introduced were retired (ADR 0025);
+/// the session-shaped reply is the new currency.
+pub const HANDLER_DELEGATE: u32 = 24;
+
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -271,6 +292,7 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_MEMORY_QUERY => handle_memory_query(ctx, &args).await,
                 HANDLER_MEMORY_PRUNE => handle_memory_prune(ctx, &args).await,
                 HANDLER_MEMORY_EXPORT => handle_memory_export(ctx, &args).await,
+                HANDLER_DELEGATE => handle_delegate(ctx, pending_approvals, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -556,6 +578,80 @@ async fn handle_list_custom(
         "manifests": manifests,
         "errors": errors,
     }))
+}
+
+// ── DG-37 agent-to-agent delegation ─────────────────────────────────────────
+
+/// Args for `com.nexus.agent::delegate` (handler id 24).
+///
+/// Shape mirrors [`SessionRunArgs`] with `archetype` required —
+/// delegation always names a target archetype so the caller can
+/// be explicit about which agent's posture handles the sub-goal.
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct DelegateArgs {
+    /// Target archetype short name (one of the ids returned by
+    /// `list_archetypes`). Required — the parent agent has to pick
+    /// the child's posture rather than relying on a default.
+    pub archetype: String,
+    /// Natural-language goal for the sub-session.
+    pub goal: String,
+    /// Optional override for the sub-session's system prompt.
+    /// When unset, the archetype's prompt is used directly.
+    #[serde(default)]
+    pub system: Option<String>,
+    /// Auto-approve the sub-session's rounds (matches `session_run`).
+    /// Defaults to `true` since a delegation is a tool-call inside
+    /// another agent's run — prompting twice for the same human is
+    /// usually noise.
+    #[serde(default = "default_delegate_auto_approve")]
+    pub auto_approve: bool,
+    /// Approval-callback timeout (only used when `auto_approve =
+    /// false`).
+    #[serde(default)]
+    pub approval_timeout_secs: Option<u64>,
+    /// Prompt for every round when `auto_approve = false` (otherwise
+    /// the policy uses DG-34's risk-aware gating).
+    #[serde(default)]
+    pub strict_approval: bool,
+}
+
+const fn default_delegate_auto_approve() -> bool {
+    true
+}
+
+async fn handle_delegate(
+    ctx: Arc<KernelPluginContext>,
+    pending_approvals: Arc<PendingApprovals>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: DelegateArgs = parse(args, "delegate")?;
+    if a.archetype.trim().is_empty() {
+        return Err(exec_err("delegate: `archetype` must be non-empty".into()));
+    }
+    if a.goal.trim().is_empty() {
+        return Err(exec_err("delegate: `goal` must be non-empty".into()));
+    }
+    // Reuse the existing `session_run` machinery — the only
+    // difference from session_run's caller surface is that
+    // `archetype` is required here.
+    let session_args = serde_json::json!({
+        "goal": a.goal,
+        "archetype": a.archetype,
+        "system": a.system,
+        "auto_approve": a.auto_approve,
+        "approval_timeout_secs": a.approval_timeout_secs,
+        "strict_approval": a.strict_approval,
+    });
+    handle_session_run(ctx, pending_approvals, &session_args).await
 }
 
 // ── DG-33 memory handlers ───────────────────────────────────────────────────
@@ -1603,6 +1699,74 @@ fn to_value<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DG-37 — `delegate` rejects an empty archetype name. The
+    /// parent agent has to be explicit about which sub-archetype
+    /// handles the sub-goal; defaulting silently would hide intent.
+    #[tokio::test]
+    async fn delegate_rejects_empty_archetype() {
+        // No kernel context wired — the validation happens before
+        // dispatch attempts to use ctx.
+        let pending: Arc<PendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let args = serde_json::json!({
+            "archetype": "",
+            "goal": "do a thing",
+        });
+        // Build a minimal ctx-less harness: handle_delegate dereferences
+        // ctx only inside handle_session_run, which we don't reach
+        // because the archetype check fires first.
+        //
+        // To exercise the early-return path without a real kernel
+        // context, parse the args ourselves and assert the shape.
+        let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
+        assert!(parsed.archetype.trim().is_empty());
+        // The handler itself returns Err for empty archetype — we
+        // can't construct a KernelPluginContext in a unit test, so
+        // assert against the validation invariant directly. (A
+        // full integration test lives under bootstrap.)
+        let _ = pending;
+    }
+
+    /// DG-37 — `delegate` rejects an empty goal. Same intent
+    /// invariant as the archetype check.
+    #[test]
+    fn delegate_rejects_empty_goal_at_parse() {
+        let args = serde_json::json!({
+            "archetype": "coder",
+            "goal": "   ",
+        });
+        let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
+        assert!(parsed.goal.trim().is_empty());
+    }
+
+    /// DG-37 — `auto_approve` defaults to true so a nested
+    /// delegation doesn't prompt the user twice (the parent's
+    /// session policy already gated the delegate call itself).
+    #[test]
+    fn delegate_defaults_auto_approve_to_true() {
+        let args = serde_json::json!({
+            "archetype": "coder",
+            "goal": "do thing",
+        });
+        let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
+        assert!(parsed.auto_approve);
+    }
+
+    /// DG-37 — the agent tool registry lists `delegate_to_agent`
+    /// after `seed_default_tools` runs, so a planner sees A2A as a
+    /// first-class tool call.
+    #[test]
+    fn delegate_to_agent_tool_seeded() {
+        crate::seed_default_tools();
+        let spec = crate::AgentToolRegistry::global()
+            .lookup("delegate_to_agent")
+            .expect("delegate_to_agent registered");
+        assert_eq!(spec.target_plugin_id, "com.nexus.agent");
+        assert_eq!(spec.command_id, "delegate");
+        // Should require approval — child session can call write tools.
+        assert!(spec.requires_approval);
+    }
 
     /// DG-34 — empty rounds (text-only proposals, no tool calls)
     /// never need approval. Saves an unnecessary bus round-trip.

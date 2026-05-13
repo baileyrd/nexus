@@ -618,6 +618,43 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             target_plugin_id: "com.nexus.terminal".to_string(),
             command_id: "send_raw_input".to_string(),
         },
+        // DG-37 — agent-to-agent delegation. The "tool" is itself a
+        // sub-session run. `auto_approve` defaults to true on the
+        // server side so the user isn't prompted twice for nested
+        // approvals; the parent's approval gate is sufficient.
+        AgentToolSpec {
+            name: "delegate_to_agent".to_string(),
+            description:
+                "Hand a sub-goal to another agent archetype. Returns the child session's \
+                full transcript (rounds + tool calls + outcome). Use when the work \
+                naturally splits along an archetype boundary (e.g. ask the auditor to \
+                review what the writer just produced)."
+                    .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "archetype": {
+                        "type": "string",
+                        "description": "Target archetype id (writer / coder / researcher / auditor / librarian / coach)."
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "Natural-language sub-goal for the child agent."
+                    }
+                },
+                "required": ["archetype", "goal"],
+                "additionalProperties": false
+            }),
+            // Delegation is itself a write-class action — the child
+            // can call write tools. Flag for approval so the parent's
+            // session policy can decide whether the user wants the
+            // sub-run to proceed.
+            requires_approval: true,
+            estimated_duration_ms: 5_000,
+            required_capabilities: vec![Capability::FileSystemRead],
+            target_plugin_id: "com.nexus.agent".to_string(),
+            command_id: "delegate".to_string(),
+        },
     ]
 }
 
@@ -808,6 +845,7 @@ mod tests {
             "terminal_run_saved",
             "terminal_get_status",
             "terminal_send_signal",
+            "delegate_to_agent",
         ] {
             assert!(names.contains(expected), "missing tool: {expected}");
         }

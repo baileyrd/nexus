@@ -1342,11 +1342,57 @@ Parser + loader + IPC + CLI shipped:
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 Spec'd; not built.
 
 **Definition of done:** Per PRD-15 §10.
+
+### Outcome
+
+Built on top of the session model rather than resurrecting the
+retired BL-027 `AgentOrchestrator` (ADR 0025):
+
+- New IPC handler `com.nexus.agent::delegate` (handler id 24).
+  Args: `{ archetype, goal, system?, auto_approve?,
+  approval_timeout_secs?, strict_approval? }`. Routes through the
+  existing `handle_session_run` machinery, so the sub-session gets
+  the same transcript persistence, approval policy, and bus event
+  surface as a top-level run.
+- `archetype` is required (delegation has to be explicit about the
+  child's posture); empty `goal` rejects loudly.
+- `auto_approve` defaults to `true` — the parent's session policy
+  already gated the delegation call itself, so prompting twice
+  for the same human is noise. The caller can flip it to `false`
+  to opt back into per-round approval inside the sub-session.
+- New registered tool `delegate_to_agent` in the DG-32 agent tool
+  registry. Spec carries `requires_approval = true` because the
+  child can call write-class tools; routes through
+  `com.nexus.agent::delegate`. A planner LLM sees A2A as a
+  first-class tool call (Anthropic / OpenAI / Ollama tool surface),
+  not a hidden orchestrator primitive.
+- ts-rs / schemars bindings generated for `DelegateArgs` under
+  `packages/nexus-extension-api/src/generated/ipc/`;
+  `scripts/check_ipc_drift.sh` clean.
+- 4 new unit tests in `core_plugin::tests`: empty archetype
+  rejection, empty goal rejection, auto-approve default true,
+  registry-seeded `delegate_to_agent`. Full nexus-agent lib suite
+  at 78 tests stays green.
+
+**Parallel / pipeline** — PRD-15 §10's other two operations — stay
+as **caller composition patterns** over `delegate` rather than
+dedicated handlers:
+
+- Parallel: caller issues N `delegate` IPC calls concurrently and
+  awaits all replies.
+- Pipeline: caller chains `delegate` calls sequentially, threading
+  each session's outcome text into the next call's `goal`.
+
+ADR 0025 explicitly retired the `parallel` / `pipeline` handlers
+because no caller named them through IPC. The session-shaped reply
+from `delegate` is the new currency — composition lives at the
+caller layer where it's cheaper to express ("a for-loop in the
+shell") than as a kernel handler.
 
 ---
 

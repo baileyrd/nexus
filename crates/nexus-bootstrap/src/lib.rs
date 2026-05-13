@@ -1283,6 +1283,8 @@ fn register_core_plugins(
                     ("memory_query", nexus_agent::HANDLER_MEMORY_QUERY),
                     ("memory_prune", nexus_agent::HANDLER_MEMORY_PRUNE),
                     ("memory_export", nexus_agent::HANDLER_MEMORY_EXPORT),
+                    // DG-37 (PRD-15 §10) — agent-to-agent delegation.
+                    ("delegate", nexus_agent::HANDLER_DELEGATE),
                 ]),
             ),
             forge_root,
