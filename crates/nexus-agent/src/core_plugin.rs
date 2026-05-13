@@ -797,6 +797,15 @@ struct SessionRunArgs {
     /// `DEFAULT_APPROVAL_TIMEOUT_SECS`.
     #[serde(default)]
     approval_timeout_secs: Option<u64>,
+    /// DG-34 — when `auto_approve = false`, prompt the caller for
+    /// *every* round (the original ADR 0024 Phase 2b behaviour).
+    /// When unset (the default), the session runs in selective mode:
+    /// rounds whose tool calls are all registered as
+    /// `requires_approval = false` auto-approve, and only rounds
+    /// containing a high-risk or unregistered tool call publish
+    /// `round_proposed`. Matches PRD-15 §7's risk table.
+    #[serde(default)]
+    strict_approval: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -852,6 +861,7 @@ async fn handle_session_run(
             ctx: Arc::clone(&ctx),
             pending: Arc::clone(&pending_approvals),
             timeout: Duration::from_secs(timeout),
+            strict_approval: parsed.strict_approval,
         };
         // BusBridgePolicy generates a session_id up-front so the
         // round_proposed event payload can carry it BEFORE
@@ -1113,11 +1123,54 @@ struct BusBridgePolicy {
     ctx: Arc<KernelPluginContext>,
     pending: Arc<PendingApprovals>,
     timeout: Duration,
+    /// DG-34 — when `true`, every round publishes `round_proposed`
+    /// and waits for caller approval (legacy Phase 2b behaviour).
+    /// When `false`, the policy checks each round's tool calls
+    /// against [`crate::AgentToolRegistry`] and auto-approves rounds
+    /// whose tools are all `requires_approval = false`. Rounds with
+    /// any high-risk or unregistered tool call still go through the
+    /// prompt path.
+    strict_approval: bool,
+}
+
+/// DG-34 — classify a [`crate::ProposedRound`] against the agent
+/// tool registry. Returns `true` when the round contains at least
+/// one proposed tool call that's either:
+///
+/// - flagged `requires_approval = true` in the registry, OR
+/// - missing from the registry entirely (conservative default —
+///   unknown tools are high-risk because the agent might be
+///   asking for something the registry hasn't classified yet).
+///
+/// Rounds with zero tool calls are *low-risk* (text-only responses
+/// don't mutate anything) so they auto-approve without prompting.
+pub fn round_requires_approval(
+    round: &crate::ProposedRound,
+    registry: &crate::AgentToolRegistry,
+) -> bool {
+    for tc in &round.tool_calls {
+        match registry.lookup(&tc.name) {
+            Some(spec) if !spec.requires_approval => continue,
+            _ => return true,
+        }
+    }
+    false
 }
 
 #[async_trait]
 impl crate::SessionPolicy for BusBridgePolicy {
     async fn allow_round(&self, round: &crate::ProposedRound) -> crate::RoundDecision {
+        // DG-34 — short-circuit when the round is low-risk and the
+        // caller hasn't opted into strict gating. Saves a bus event
+        // + caller round-trip for the common case (read-only tools
+        // or text-only rounds).
+        if !self.strict_approval {
+            let registry = crate::AgentToolRegistry::global();
+            if !round_requires_approval(round, &registry) {
+                return crate::RoundDecision::ApproveAll;
+            }
+        }
+
         let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
         // Insert before publishing so a fast caller that races
         // round_decide against the event sees a populated map.
@@ -1132,11 +1185,34 @@ impl crate::SessionPolicy for BusBridgePolicy {
             }
         };
 
+        // DG-34 — annotate each proposed tool with its registered
+        // approval flag so the UI can render a per-call risk badge
+        // (write tools red, read-only tools muted, unregistered tools
+        // outlined). Unknown tools surface as `requires_approval = true`
+        // matching the conservative default in `round_requires_approval`.
+        let registry = crate::AgentToolRegistry::global();
+        let annotated: Vec<serde_json::Value> = round
+            .tool_calls
+            .iter()
+            .map(|tc| {
+                let (requires_approval, registered) = match registry.lookup(&tc.name) {
+                    Some(spec) => (spec.requires_approval, true),
+                    None => (true, false),
+                };
+                serde_json::json!({
+                    "id": tc.id,
+                    "name": tc.name,
+                    "tool_call": tc.tool_call,
+                    "requires_approval": requires_approval,
+                    "registered": registered,
+                })
+            })
+            .collect();
         let payload = serde_json::json!({
             "session_id": self.session_id,
             "round": round.round,
             "text": round.text,
-            "tool_calls": round.tool_calls,
+            "tool_calls": annotated,
         });
         if let Err(e) = self
             .ctx
@@ -1520,6 +1596,113 @@ fn to_value<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DG-34 — empty rounds (text-only proposals, no tool calls)
+    /// never need approval. Saves an unnecessary bus round-trip.
+    #[test]
+    fn round_with_no_tool_calls_does_not_require_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: "all done".into(),
+            tool_calls: Vec::new(),
+        };
+        assert!(!round_requires_approval(&round, &registry));
+    }
+
+    /// DG-34 — a round made up of read-only tools (registered as
+    /// `requires_approval = false`) auto-approves.
+    #[test]
+    fn round_with_only_read_only_tools_does_not_require_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: vec![
+                crate::ProposedToolCall {
+                    id: "1".into(),
+                    name: "read_file".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "read_file".into(),
+                        args: serde_json::json!({ "path": "x.md" }),
+                    },
+                },
+                crate::ProposedToolCall {
+                    id: "2".into(),
+                    name: "search_forge".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "search".into(),
+                        args: serde_json::json!({ "query": "foo" }),
+                    },
+                },
+            ],
+        };
+        assert!(!round_requires_approval(&round, &registry));
+    }
+
+    /// DG-34 — a single high-risk tool call in the round flips the
+    /// whole round to "needs approval" (PRD-15 §7).
+    #[test]
+    fn round_with_any_write_tool_requires_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: vec![
+                crate::ProposedToolCall {
+                    id: "1".into(),
+                    name: "read_file".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "read_file".into(),
+                        args: serde_json::json!({ "path": "x.md" }),
+                    },
+                },
+                // write_file is registered with requires_approval=true.
+                crate::ProposedToolCall {
+                    id: "2".into(),
+                    name: "write_file".into(),
+                    tool_call: crate::ToolCall {
+                        target_plugin_id: "com.nexus.storage".into(),
+                        command_id: "write_file".into(),
+                        args: serde_json::json!({
+                            "path": "x.md",
+                            "content": "..."
+                        }),
+                    },
+                },
+            ],
+        };
+        assert!(round_requires_approval(&round, &registry));
+    }
+
+    /// DG-34 — unknown tool names are conservatively treated as
+    /// high-risk. The model might be asking for a tool the registry
+    /// hasn't classified yet; the safe default is to prompt.
+    #[test]
+    fn round_with_unregistered_tool_requires_approval() {
+        crate::seed_default_tools();
+        let registry = crate::AgentToolRegistry::global();
+        let round = crate::ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: vec![crate::ProposedToolCall {
+                id: "1".into(),
+                name: "exotic_tool_never_registered".into(),
+                tool_call: crate::ToolCall {
+                    target_plugin_id: "com.unknown".into(),
+                    command_id: "do".into(),
+                    args: serde_json::json!({}),
+                },
+            }],
+        };
+        assert!(round_requires_approval(&round, &registry));
+    }
 
     /// OI-04 — `list_archetypes` returns the short-name catalogue
     /// (`"writer"`, `"coder"`, `"researcher"`) via the sync dispatch

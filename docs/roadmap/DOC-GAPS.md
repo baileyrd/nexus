@@ -1155,7 +1155,7 @@ Filesystem-backed agent-scoped memory shipped:
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-15 §7 requires the agent loop to pause and request user approval
 for high-risk tool calls. Today the loop runs through to completion;
@@ -1163,6 +1163,57 @@ nothing surfaces an approval prompt.
 
 **Definition of done:** Per PRD-15 §7; UI work coordinated with
 ADR 0024 (shell approval UI).
+
+### Outcome
+
+The approval bus-bridge plumbing shipped under
+[ADR 0024 Phase 2b](../adr/0024-agent-approval-flow.md):
+`auto_approve: false` sessions emit `com.nexus.agent.round_proposed`
+and await `com.nexus.agent::round_decide` (handler id 17). What
+DG-34 closes is the **risk classification** that turns "prompt for
+every round" into PRD-15 §7's risk-table-aware behaviour.
+
+- New `round_requires_approval(round, registry)` helper in
+  [`crates/nexus-agent/src/core_plugin.rs`](../../crates/nexus-agent/src/core_plugin.rs)
+  checks each `ProposedToolCall.name` against the DG-32
+  `AgentToolRegistry`. A round needs approval iff any of its tool
+  calls is flagged `requires_approval = true` or is unregistered
+  (conservative default — unknown tools could be anything; safe to
+  prompt).
+- `BusBridgePolicy` gained a `strict_approval: bool` field. When
+  `false` (the new default), the policy short-circuits to
+  `RoundDecision::ApproveAll` whenever `round_requires_approval`
+  returns `false` — saving an unnecessary bus event + caller
+  round-trip on read-only rounds. When `true`, it falls back to
+  the original ADR 0024 Phase 2b behaviour (prompt for every
+  round). The flag rides into the policy via the new
+  `SessionRunArgs.strict_approval` IPC field (`com.nexus.agent::session_run`).
+- The `com.nexus.agent.round_proposed` payload now annotates every
+  `tool_call` with `requires_approval: bool` + `registered: bool`
+  so the shell can render per-call risk badges (write tools red,
+  read-only muted, unregistered outlined) without re-querying the
+  tool registry.
+- 4 new unit tests in `core_plugin::tests` cover the classifier
+  matrix: empty round (no approval), all-read-only round (no
+  approval), any-write round (approval), unregistered-tool round
+  (approval). Full nexus-agent lib suite at 72 tests stays green.
+
+**Deferred** as documented follow-ups:
+
+- Shell UI surface for the new `requires_approval` / `registered`
+  badges in the `round_proposed` payload — the AgentPanel renders
+  the approval card today but doesn't read the per-call risk
+  fields yet. Cosmetic; safe path is the same either way (caller
+  approves whole round).
+- Per-tool override in `.agent.toml` (`[execution].requires_approval_for`
+  field already exists from DG-36). Lifting that list into the
+  policy's classifier so a custom agent can require approval for
+  *additional* tools beyond the registry's default flags is the
+  next integration step.
+- CLI-side approval flow. `nexus agent run` (CLI) always sets
+  `auto_approve: true`. A `--interactive` flag that prompts the
+  user on stdin between rounds needs a CLI subscriber for
+  `round_proposed`; the Tauri shell already has this surface.
 
 ---
 
