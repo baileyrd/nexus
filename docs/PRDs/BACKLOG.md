@@ -225,19 +225,42 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ### BL-081: DAP debugger integration
 
-**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
-**Effort**: Large (4–6 weeks)
-**Crates**: new `nexus-dap`, new `shell/src/plugins/nexus/debugger/`
-**Related**: BL-076 (nexus-lsp — do first); Debug Adapter Protocol (DAP)
+> **Parked on branch `bl-081-dap-debugger` (2026-05-13)** pending [BL-113](#bl-113-protocol-host-contribution-model-for-lsp--dap--mcp). The first-cut implementation (nexus-dap host crate, 19-handler IPC surface, shell debugger panel, Python mock e2e test, 46 Rust + 17 shell tests, green workspace) builds out the existing flat-`dap.toml` pattern that BL-113 is proposing to replace. Rather than land that pattern on main and then immediately rework it, the work is held on the branch and lands once BL-113's contribution model is decided. Full spec in [BL-081-dap-debugger.md](BL-081-dap-debugger.md) lives on the branch.
 
-DAP is the debugger equivalent of LSP. Requires a `nexus-dap` core plugin (same spawn+bridge architecture as `nexus-lsp`) and a full debug panel shell plugin (Variables, Call Stack, Watch, Breakpoints, toolbar). Breakpoint gutter decorations in CM6. Deferred until the LSP track (BL-075–077) ships — debug without language awareness is painful.
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Large (4–6 weeks). First cut implemented; depends on BL-113 for the adapter-config shape before merging.
+**Crates**: new `nexus-dap`, new `shell/src/plugins/nexus/debugger/`
+**Related**: BL-076 (nexus-lsp — shipped); BL-113 (protocol-host contribution model — gating); Debug Adapter Protocol (DAP)
 
 **Definition of done:**
-- `nexus-dap` spawns configured DAP adapters (e.g. `codelldb`, `js-debug`) from `.forge/dap.toml`
+- `nexus-dap` spawns configured DAP adapters (e.g. `codelldb`, `js-debug`)
 - Debug panel: Variables, Call Stack, Watch, Breakpoints panels visible in shell
 - CM6 breakpoint gutter: click to set/clear, red dot indicator
 - Debug toolbar: Continue, Step Over, Step Into, Step Out, Restart, Stop
 - `com.nexus.dap` IPC surface mirrors DAP request/response types
+- Adapter configuration shape settled per BL-113
+
+---
+
+### BL-113: Protocol-host contribution model for LSP / DAP / MCP
+
+**Source**: BL-081 review (2026-05-13) — full design in [ADR 0027](../adr/0027-protocol-host-contribution-model.md).
+**Effort**: Large. Phase 0 (ADR + spike) ~1–2 days; Phase 1 (DAP on the new shape) ~1 wk; Phases 2–3 (LSP, MCP) ~1 wk each.
+**Crates**: `nexus-lsp`, `nexus-dap` (on the parked branch), `nexus-mcp`, `nexus-plugins` (contribution loader), shell-side plugin manifest schema.
+**Related**: ADR 0011 (plugin-first shell), [BL-081](#bl-081-dap-debugger-integration) (parked pending this), [BL-076](BACKLOG_COMPLETED.md) (nexus-lsp host — shipped under the legacy flat-TOML pattern this would replace).
+
+Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML config (`lsp.toml` / `mcp.toml` / `dap.toml`) listing their external adapters. The pattern is consistent with the microkernel invariant but blocks per-adapter UX (launch-config schemas, variable renderers, hover providers), has no marketplace/install path, and duplicates ~80%-identical config shapes across three crates.
+
+**Proposed**: lift adapter declarations from TOML to a shared plugin contribution point (`contributes.protocolHosts.{lsp,dap,mcp}`). The host crates stay core and protocol-only; community/first-party plugins contribute adapter definitions plus optional shell-side exports (launch-config form schema, value renderers, hover provider). Phased rollout: ADR + spike on DAP first (since BL-081 is already on a branch), then LSP, then MCP. Flat TOML stays as legacy fallback during the transition.
+
+**Definition of done:**
+- ADR 0027 accepted with open-question section resolved
+- New `contributes.protocolHosts.dap` contribution path lands in plugin-manifest schema + loader
+- `nexus-dap` reads contributions alongside `dap.toml`; one example first-party plugin (e.g. `first-party.dap.rust`) demonstrates the new shape end-to-end including a typed launch-config form on the shell side
+- BL-081 rebases onto the new shape and lands on main
+- `nexus-lsp` migrates next; `lsp.toml` keeps working
+- `nexus-mcp.host` migrates last; `mcp.toml` keeps working
+- Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path)
 
 ---
 
