@@ -27,6 +27,7 @@ pub mod config;
 pub mod core_plugin;
 pub mod error;
 pub mod markdown;
+pub mod migration;
 pub mod notion;
 pub mod util;
 
@@ -56,4 +57,9 @@ pub use config::{
 pub use markdown::{
     Block, BlockKind, Frontmatter, MathSpan, ParsedMarkdown, Tag, TagSource, Task, WikiLink,
     LinkType, parse as parse_markdown, parse_frontmatter, resolve_wikilink,
+};
+
+pub use migration::{
+    detect_version, scan_versions, FormatVersion, MigrationError, MigrationFn,
+    MigrationRegistry, VersionTally, DEFAULT_VERSION,
 };

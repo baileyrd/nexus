@@ -105,6 +105,8 @@ enum Commands {
     Agent(AgentArgs),
     /// Agent tool registry (PRD-15 §4) — list catalogued tools
     Tool(ToolArgs),
+    /// Forge-format versioning + migrations (PRD-06 §9, DG-43)
+    Migrate(MigrateArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
     Skill(SkillArgs),
     /// Workflow operations (PRD-16): list/show/validate `.workflow.toml` files
@@ -400,6 +402,27 @@ enum AiCommand {
         #[arg(long = "context")]
         context_lines: Option<usize>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Migrate (PRD-06 §9 — DG-43)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct MigrateArgs {
+    #[command(subcommand)]
+    command: MigrateCommand,
+}
+
+#[derive(Subcommand)]
+enum MigrateCommand {
+    /// Walk the forge and print the count of files at each format
+    /// version. Files without a `version:` frontmatter key are
+    /// tallied under `1.0` (the implicit default).
+    Scan,
+    /// Print the migrations registered for this build. Empty until
+    /// a forge-format-breaking change ships.
+    Registered,
 }
 
 // ---------------------------------------------------------------------------
@@ -1719,6 +1742,11 @@ fn main() {
             ToolCommand::List { capabilities } => {
                 commands::tool::list(&mut app, &capabilities)
             }
+        },
+
+        Commands::Migrate(args) => match args.command {
+            MigrateCommand::Scan => commands::migrate::scan(&mut app),
+            MigrateCommand::Registered => commands::migrate::registered(),
         },
 
         Commands::Skill(args) => match args.command {

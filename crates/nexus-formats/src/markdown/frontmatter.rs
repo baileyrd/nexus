@@ -37,6 +37,11 @@ pub struct Frontmatter {
     pub created: Option<String>,
     /// Last modification date (`YYYY-MM-DD`).
     pub modified: Option<String>,
+    /// Forge-format version this file declares (PRD-06 §9.1 — DG-43).
+    /// Untagged files (no `version:` key) are treated as legacy /
+    /// implicitly v1.0 by the migration runner; this field carries
+    /// only what the user wrote.
+    pub version: Option<String>,
     /// All unrecognised keys, preserved as raw JSON values.
     pub custom: HashMap<String, serde_json::Value>,
 }
@@ -109,6 +114,7 @@ fn parse_yaml_frontmatter(yaml: &serde_yml::Value) -> Frontmatter {
             "date"     => fm.date     = yaml_as_string(v),
             "created"  => fm.created  = yaml_as_string(v),
             "modified" => fm.modified = yaml_as_string(v),
+            "version"  => fm.version  = yaml_as_string(v),
             "aliases"  => fm.aliases  = yaml_as_string_list(v),
             "tags"     => fm.tags     = yaml_as_string_list(v),
             _          => {

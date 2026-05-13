@@ -14,6 +14,7 @@ pub mod graph;
 pub mod import;
 pub mod logs;
 pub mod mcp;
+pub mod migrate;
 pub mod plugin;
 pub mod proc;
 pub mod skill;

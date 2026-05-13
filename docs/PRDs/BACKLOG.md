@@ -456,7 +456,7 @@ Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 d
 - [x] **DG-40: PRD-14 §12.2 MCP audit logging** — closed 2026-05-12 via `nexus_kernel::audit::log_mcp_tool_call` + `log_mcp_resource_read` wired through `crates/nexus-mcp/src/server.rs`. See [../roadmap/DOC-GAPS.md#dg-40](../roadmap/DOC-GAPS.md).
 - [ ] **DG-41: PRD-10 §7 relations + rollup** — current impl is in-memory filter chain.
 - [ ] **DG-42: PRD-10 §8 SQL compilation** — Bases queries should compile to SQL against the storage index.
-- [ ] **DG-43: PRD-06 §9 frontmatter versioning + migration** — no `version:` handling; needed before forge-format-breaking changes.
+- [x] **DG-43: PRD-06 §9 frontmatter versioning + migration** — closed 2026-05-12. `Frontmatter.version` typed field + new `nexus-formats::migration` module (FormatVersion parser, MigrationRegistry, scan_versions walker) + `nexus migrate scan|registered` CLI. Registry is empty in this build — no breaking change has shipped yet — but the infrastructure is in place. See [../roadmap/DOC-GAPS.md#dg-43](../roadmap/DOC-GAPS.md).
 - [x] **DG-44: PRD-04 §10 dynamic .so/.dll loading** — rejected 2026-05-12; PRD-04 §10 gained a "Superseded by ADR 0011 + ADR 0016" callout.
 - [x] **DG-45: ADR 0013 macOS menu-bar plugin** — re-phased 2026-05-12 to formal-release WI-45 alongside Mac packaging/notarization (WI-41). ADR 0013 addendum documents the slip; decision stands. See [../roadmap/DOC-GAPS.md#dg-45](../roadmap/DOC-GAPS.md).
 - [ ] **DG-46: ADR 0006 first in-tree consumer** — convention-only ADR; no in-tree user yet because community WASM plugins haven't shipped.

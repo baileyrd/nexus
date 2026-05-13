@@ -1569,13 +1569,68 @@ filtering only.
 **Severity:** Should-fix (product-gap)
 **Kind:** `product-gap`
 **Surfaced by:** [../audits/traceability-2026-05-12.md](../audits/traceability-2026-05-12.md) §PRDs
-**Status:** Open
+**Status:** Resolved 2026-05-12
 
 PRD-06 §9 specifies a `version:` frontmatter field and a migration
 runner. Neither exists.
 
 **Definition of done:** Per PRD-06 §9. Needed before any
 forge-format-breaking change.
+
+### Outcome
+
+Frontmatter parses `version:` and a migration runner is in place,
+waiting for the first breaking change to register against:
+
+- `Frontmatter` (in
+  [`crates/nexus-formats/src/markdown/frontmatter.rs`](../../crates/nexus-formats/src/markdown/frontmatter.rs))
+  gained a typed `version: Option<String>` field. The YAML
+  parser routes `version:` into it; files without the key keep
+  the existing untagged shape and are treated as v1.0 by the
+  migration layer.
+- New [`crates/nexus-formats/src/migration.rs`](../../crates/nexus-formats/src/migration.rs)
+  ships:
+  - `FormatVersion { major, minor }` parser (semver-shaped;
+    accepts and discards trailing `.patch`; rejects garbage like
+    `"v1.0"` / `"1.x"` / four-segment versions). Ordered
+    `(major, minor)` so the runner can pick a migration path.
+  - `DEFAULT_VERSION = "1.0"` — the implicit version for
+    untagged files.
+  - `detect_version(content)` reads the frontmatter and parses
+    the version, defaulting to v1.0 when absent.
+  - `MigrationRegistry` — `(from, to) → MigrationFn` map. Empty
+    on `new()`; consumers register a `Fn(&str) -> Result<String>`
+    when a breaking change ships. Single-hop dispatch today
+    (chained `1.0 → 1.5 → 2.0` is a caller pattern).
+  - `scan_versions(forge_root)` walks markdown files (skipping
+    hidden dirs like `.forge/` / `.git/`, skipping non-`.md`
+    files), tallies versions, and returns a `Vec<VersionTally>`
+    sorted descending by version. Unparseable values surface as
+    `"unknown"`.
+- New CLI command `nexus migrate scan` prints the version
+  distribution; `nexus migrate registered` lists the migrations
+  compiled into this build (empty until the first breaking
+  change ships). Routes through `commands::migrate` in
+  `nexus-cli`.
+- 14 unit tests in `migration::tests` cover the parser matrix
+  (good / patch-suffix / garbage / round-trip / ordering),
+  detection (default v1.0 / explicit / invalid), registry
+  (empty / dispatch / unknown pair / function error), and
+  filesystem scanner (counts / hidden-dir skip / unknown
+  classification). Full nexus-formats lib suite at 191 tests
+  green.
+
+**Deferred** as documented follow-ups:
+
+- An `apply` subcommand that writes migrations back to disk with
+  backup files (PRD-06 §9.3 calls for backups). Adding it before
+  any migration exists would be writing tests for a path no one
+  uses; the surface is one focused PR when a v2.0 migration
+  actually lands.
+- Per-format migrations for canvas (`.canvas`), bases (`.bases`),
+  config (`app.toml`). The `version:` field is markdown-only
+  today. The other parsers carry no version key yet; lifting them
+  is mechanical once a breaking change in those formats lands.
 
 ---
 
