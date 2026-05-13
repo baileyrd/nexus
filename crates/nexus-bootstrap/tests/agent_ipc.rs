@@ -53,15 +53,21 @@ async fn history_get_errors_for_invalid_plan_id() {
 }
 
 /// ADR 0025 Phase 2 — retired handlers must surface CommandNotFound
-/// rather than silently routing somewhere unexpected. Pin the four
-/// most-called retirees so a future "let's restore one for back-compat"
-/// attempt has to update this test.
+/// rather than silently routing somewhere unexpected. Pin the most-called
+/// retirees so a future "let's restore one for back-compat" attempt has
+/// to update this test.
+///
+/// Note: `delegate` was originally retired by ADR 0025, then re-introduced
+/// for DG-37 (2026-05-12) on top of the new session model — it now routes
+/// through `handle_session_run` rather than the old BL-027 orchestrator.
+/// `parallel` / `pipeline` / `trace_get` stay retired (caller composition
+/// patterns over `delegate` cover the same use cases).
 #[tokio::test]
 async fn retired_handlers_return_command_not_found() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
 
-    for cmd in ["run", "run_plan", "execute_step", "delegate"] {
+    for cmd in ["run", "run_plan", "execute_step", "parallel", "pipeline", "trace_get"] {
         let err = call(&runtime, cmd, serde_json::json!({}))
             .await
             .unwrap_err();
