@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapSetExceptionBreakpointsArgs",
+  "description": "Args for `set_exception_breakpoints` (handler `9`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "filters": {
+      "description": "Filter ids from the adapter's `exceptionBreakpointFilters`\ncapability (typically `raised` / `uncaught`).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "filters"
+  ]
+}

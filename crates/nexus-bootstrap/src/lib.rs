@@ -537,6 +537,7 @@ fn register_core_plugins(
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
     use nexus_lsp::LspCorePlugin;
+    use nexus_dap::DapCorePlugin;
     use nexus_mcp::McpHostPlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
@@ -1573,6 +1574,50 @@ fn register_core_plugins(
             )),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.lsp")?;
+
+    // DAP host orchestrator — loads `<forge>/.forge/dap.toml`, lazily spawns
+    // configured debug adapters, proxies DAP requests over IPC, and
+    // republishes adapter-pushed events on the kernel bus as
+    // `com.nexus.dap.<event>`. BL-081.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.dap",
+                "DAP Host",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: true,
+                    on_stop: true,
+                },
+                &with_v1_aliases(&[
+                    ("list_adapters", nexus_dap::core_plugin::HANDLER_LIST_ADAPTERS),
+                    ("launch", nexus_dap::core_plugin::HANDLER_LAUNCH),
+                    ("attach", nexus_dap::core_plugin::HANDLER_ATTACH),
+                    ("configuration_done", nexus_dap::core_plugin::HANDLER_CONFIGURATION_DONE),
+                    ("disconnect", nexus_dap::core_plugin::HANDLER_DISCONNECT),
+                    ("terminate", nexus_dap::core_plugin::HANDLER_TERMINATE),
+                    ("set_breakpoints", nexus_dap::core_plugin::HANDLER_SET_BREAKPOINTS),
+                    ("set_function_breakpoints", nexus_dap::core_plugin::HANDLER_SET_FUNCTION_BREAKPOINTS),
+                    ("set_exception_breakpoints", nexus_dap::core_plugin::HANDLER_SET_EXCEPTION_BREAKPOINTS),
+                    ("continue", nexus_dap::core_plugin::HANDLER_CONTINUE),
+                    ("next", nexus_dap::core_plugin::HANDLER_NEXT),
+                    ("step_in", nexus_dap::core_plugin::HANDLER_STEP_IN),
+                    ("step_out", nexus_dap::core_plugin::HANDLER_STEP_OUT),
+                    ("pause", nexus_dap::core_plugin::HANDLER_PAUSE),
+                    ("threads", nexus_dap::core_plugin::HANDLER_THREADS),
+                    ("stack_trace", nexus_dap::core_plugin::HANDLER_STACK_TRACE),
+                    ("scopes", nexus_dap::core_plugin::HANDLER_SCOPES),
+                    ("variables", nexus_dap::core_plugin::HANDLER_VARIABLES),
+                    ("evaluate", nexus_dap::core_plugin::HANDLER_EVALUATE),
+                ]),
+            ),
+            forge_root,
+            Box::new(DapCorePlugin::new(
+                forge_root.to_path_buf(),
+                Some(Arc::clone(event_bus)),
+            )),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.dap")?;
 
     // Git integration — wraps GitWorker behind IPC and publishes bus events
     // (branch_changed, commit, dirty_changed) for any plugin or UI that

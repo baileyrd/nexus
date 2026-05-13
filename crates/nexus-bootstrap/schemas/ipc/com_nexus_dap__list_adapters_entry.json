@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapAdapterEntry",
+  "description": "Reply entry from `list_adapters` (handler `1`).",
+  "type": "object",
+  "properties": {
+    "adapter_type": {
+      "description": "Optional cosmetic type hint.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "args": {
+      "description": "CLI args.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Executable path or name.",
+      "type": "string"
+    },
+    "connected": {
+      "description": "`true` if currently connected via the pool.",
+      "type": "boolean"
+    },
+    "disabled": {
+      "description": "`true` if disabled in `dap.toml`.",
+      "type": "boolean"
+    },
+    "file_types": {
+      "description": "File extensions this adapter handles.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "description": "Configured adapter name.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "command",
+    "args",
+    "file_types",
+    "disabled",
+    "connected"
+  ]
+}

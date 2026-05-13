@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapOk",
+  "description": "Tiny ack reply for fire-and-forget verbs\n(`configuration_done`, `disconnect`, `terminate`, `continue`,\n`next`, `step_in`, `step_out`, `pause`,\n`set_exception_breakpoints`).",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `true`.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok"
+  ]
+}

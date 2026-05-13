@@ -1,0 +1,193 @@
+/* BL-081 debugger panel styles. Mirrors the visual rhythm of the
+ * search / health panels (compact, monospace-ish bodies, themed via
+ * --nx-* tokens). */
+
+.nx-debugger-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  font-size: 13px;
+}
+
+.nx-debugger-toolbar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--nx-border-color, rgba(0, 0, 0, 0.1));
+}
+
+.nx-debugger-toolbar button {
+  background: transparent;
+  border: 1px solid var(--nx-border-color, rgba(0, 0, 0, 0.1));
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.nx-debugger-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nx-debugger-toolbar button:not(:disabled):hover {
+  background: var(--nx-interactive-hover, rgba(0, 0, 0, 0.05));
+}
+
+.nx-debugger-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--nx-text-muted, #888);
+}
+
+.nx-debugger-status-running {
+  color: var(--nx-color-accent, #4a9eff);
+}
+
+.nx-debugger-status-stopped {
+  color: var(--nx-color-warning, #d9a23e);
+}
+
+.nx-debugger-error {
+  color: var(--nx-color-error, #d04848);
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-debugger-section {
+  border: 1px solid var(--nx-border-color, rgba(0, 0, 0, 0.1));
+  border-radius: 4px;
+}
+
+.nx-debugger-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--nx-text-muted, #888);
+  background: var(--nx-background-secondary, rgba(0, 0, 0, 0.02));
+}
+
+.nx-debugger-section-count {
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.nx-debugger-section-body {
+  padding: 4px 8px;
+}
+
+.nx-debugger-empty {
+  color: var(--nx-text-muted, #888);
+  font-style: italic;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.nx-debugger-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--nx-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.nx-debugger-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-debugger-list-key {
+  font-weight: 600;
+  color: var(--nx-text-normal, inherit);
+}
+
+.nx-debugger-list-meta {
+  color: var(--nx-text-muted, #888);
+}
+
+.nx-debugger-list-value {
+  margin-left: auto;
+  color: var(--nx-text-normal, inherit);
+}
+
+.nx-debugger-scope {
+  margin-bottom: 4px;
+}
+
+.nx-debugger-scope-title {
+  font-weight: 600;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.nx-debugger-vars {
+  list-style: none;
+  margin: 0 0 0 8px;
+  padding: 0;
+  font-family: var(--nx-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.nx-debugger-var-name {
+  color: var(--nx-color-accent, #4a9eff);
+}
+
+.nx-debugger-var-value {
+  color: var(--nx-text-normal, inherit);
+}
+
+.nx-debugger-var-type {
+  color: var(--nx-text-muted, #888);
+}
+
+.nx-debugger-watch-form {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.nx-debugger-watch-form input {
+  flex: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--nx-border-color, rgba(0, 0, 0, 0.1));
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.nx-debugger-row-remove {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--nx-text-muted, #888);
+}
+
+.nx-debugger-row-remove:hover {
+  color: var(--nx-color-error, #d04848);
+}
+
+.nx-debugger-output {
+  margin: 0;
+  font-family: var(--nx-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapAdapterArgs",
+  "description": "Args for `configuration_done` (`4`) / `disconnect` (`5`) /\n`terminate` (`6`) / `threads` (`15`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name from `dap.toml`.",
+      "type": "string"
+    },
+    "terminate_debuggee": {
+      "description": "`disconnect`-only: ask the adapter to terminate the debuggee\nalongside the disconnect. Ignored for other handlers.",
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter"
+  ]
+}
