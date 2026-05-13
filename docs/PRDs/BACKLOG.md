@@ -16,6 +16,67 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-109: Virtualize the files tree
+
+**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
+**Effort**: Small (~1 day)
+**Crates**: `shell/src/plugins/nexus/files/`
+**Related**: `experiments/zed-frontend-analysis.md` (`uniform_list` pattern); BL-053 (visual target)
+
+`FilesTree.tsx` renders every expanded `TreeNode` recursively — no windowing. At ~200 visible rows the cost is invisible; at a 10k-file forge with deep expansion, paint and event-handler attachment scale linearly with row count. `@tanstack/react-virtual` is already a dependency (used by `BasesTable.tsx`), so the change is local: flatten the visible tree into an index-addressable array and let the virtualizer mount only the rows in view. This is the single highest-ROI frontend performance change available today and directly closes the Zed analysis's `uniform_list` gap.
+
+**Definition of done:**
+- `FilesTree.tsx` mounts at most `O(viewport_height / row_height)` `<Row>` nodes regardless of expansion depth
+- Drag/drop, keyboard nav, auto-reveal, and context-menu wiring all continue to work
+- Selected-row `scrollIntoView` still works through the virtualizer's `scrollToIndex`
+- Benchmark: cold open of a forge with 10k files + every folder expanded produces a smooth scroll on the dev box
+
+### BL-110: Per-frame snapshot idiom for multi-store editor renders
+
+**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
+**Effort**: Small–Medium (~2 days)
+**Crates**: `shell/src/plugins/nexus/editor/`, `shell/src/stores/`
+**Related**: `experiments/zed-frontend-analysis.md` §3.1 (`EditorSnapshot`)
+
+Components that compose editor + LSP diagnostics + git blame + outline today do so through independent Zustand selectors, each firing on its own cadence. The Zed analogue is `EditorSnapshot`: at the start of each frame, freeze a coherent tuple of all relevant stores and render against that tuple, accept mutations afterward. The React equivalent is a `useFrameSnapshot()` hook that returns a memoized object scoped to a `requestAnimationFrame` tick, eliminating the "three selectors fire on three different ticks" class of jank without changing the architecture.
+
+**Definition of done:**
+- New `useFrameSnapshot(selectors)` hook in `shell/src/stores/` returns a memoized tuple per frame
+- At least one hot composition site (e.g. editor gutter that reads diagnostics + blame + git status together) migrated as the reference example
+- Unit tests for the hook cover (a) tuple identity stability within a frame, (b) tuple invalidation when any selector value changes across frames
+
+### BL-111: Defer Mermaid + heavy diagram libs until first use
+
+**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
+**Effort**: Small (~½ day)
+**Crates**: `shell/src/plugins/nexus/editor/` (markdown-render path), `shell/vite.config.ts`
+**Related**: `vendor-mermaid` manual chunk; markdown live preview
+
+`mermaid` + `d3` + `dagre` are grouped into the `vendor-mermaid` chunk — good. Need to verify the markdown extension does not pull the chunk on editor mount: it should only fetch when a `\`\`\`mermaid` fence is actually about to render in the viewport. Today's behavior is uninstrumented; first user touch is the wrong place to find this out.
+
+**Definition of done:**
+- Confirmed via Vite bundle analysis that opening a markdown file with no mermaid block does NOT load `vendor-mermaid`
+- A diagram fence triggers exactly one dynamic import; subsequent fences in the same session reuse the cached module
+- Same audit applied to other heavy renderers gated behind code fences (e.g. `jspdf`, `html-to-image`)
+
+### BL-112: Frontend performance benchmark harness
+
+**Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6
+**Effort**: Medium (~3–5 days)
+**Crates**: new `experiments/perf/`, possibly `shell/e2e/` extensions
+**Related**: `experiments/zed-frontend-analysis.md` (independent measurements are what give that doc its analytical power); WI-IDs for future regression gates
+
+The assessment table is engineering estimates because no published Nexus benchmarks exist. The fix is a small repo-committed harness that runs a fixed set of scenarios on a known machine and produces a numeric, diff-able output: cold start trace, "open 50 MB file", "scroll a 10k-row file tree", "render outline for a 500-heading document", "type 5 chars in a 5k-line markdown file". Output committed under `experiments/perf/<date>.json` so regressions are visible at PR review time even before a CI gate exists.
+
+**Definition of done:**
+- `experiments/perf/run.ts` (or equivalent) exercises ≥5 scenarios under WebDriver/Tauri and records timings + RSS
+- Output schema is stable JSON that diffs cleanly between runs
+- README documents the host-machine assumption and how to run it
+- One baseline run committed under `experiments/perf/`
+- Stretch: a wdio-based regression check that fails CI if any metric regresses >20% against the committed baseline (deferred — needs a stable runner)
+
+---
+
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-108 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._

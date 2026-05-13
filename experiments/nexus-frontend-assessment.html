@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexus Frontend — Performance Assessment</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #1c2230;
+      --border: #2a3142;
+      --text: #e6e9ef;
+      --muted: #9aa4b8;
+      --accent: #7aa2ff;
+      --good: #6ee7a0;
+      --warn: #f3c97a;
+      --bad: #f08a8a;
+      --code-bg: #11141b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+    header .eyebrow { color: var(--muted); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    header h1 { margin: 8px 0 4px; font-size: 28px; letter-spacing: -.01em; }
+    header .sub { color: var(--muted); }
+    h2 { margin-top: 48px; font-size: 20px; letter-spacing: -.01em; border-left: 3px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 28px; font-size: 16px; color: var(--text); }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+      font-size: 13px;
+      background: var(--code-bg);
+    }
+    code { padding: 1px 5px; border-radius: 4px; }
+    pre { padding: 14px 16px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 6px;
+      font-size: 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { background: var(--panel-2); font-weight: 600; color: var(--text); }
+    tr:last-child td { border-bottom: 0; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 22px;
+      margin: 14px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin: 12px 0;
+    }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .stat .k { color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    .stat .v { font-size: 22px; font-weight: 600; margin: 4px 0 0; }
+    .stat .n { color: var(--muted); font-size: 12px; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: .04em;
+      font-weight: 600;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+    .pill.good { background: rgba(110,231,160,.12); color: var(--good); border: 1px solid rgba(110,231,160,.3); }
+    .pill.warn { background: rgba(243,201,122,.12); color: var(--warn); border: 1px solid rgba(243,201,122,.3); }
+    .pill.bad  { background: rgba(240,138,138,.12); color: var(--bad); border: 1px solid rgba(240,138,138,.3); }
+    .pill.neutral { background: rgba(154,164,184,.12); color: var(--muted); border: 1px solid rgba(154,164,184,.3); }
+    ul.tight li { margin: 4px 0; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .legend { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .footnote { color: var(--muted); font-size: 12px; }
+    a { color: var(--accent); }
+    blockquote {
+      border-left: 3px solid var(--border);
+      padding: 6px 14px;
+      margin: 14px 0;
+      color: var(--muted);
+      background: var(--panel-2);
+      border-radius: 0 6px 6px 0;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Internal Assessment · 2026-05-11</div>
+  <h1>Nexus frontend — performance assessment</h1>
+  <div class="sub">Honest read of the Nexus desktop shell against the bar Zed sets in <code>experiments/zed-frontend-analysis.md</code>.</div>
+</header>
+
+<h2>1. Executive summary</h2>
+
+<div class="card">
+  <p>
+    Nexus's frontend is a <strong>Tauri 2 + React 18 + Vite</strong> WebView app with a CodeMirror 6 editor, an
+    xterm.js + WebGL terminal, a Zustand-backed plugin shell, and ~53 first-party plugins lazy-loaded as Vite
+    chunks. It is architecturally closer to <strong>VS Code minus Electron</strong> than to Zed: the rendering
+    path is still the platform compositor through a Chromium/WebKit DOM, not a GPU scene graph. The
+    differentiator vs. VS Code is the host runtime (native Tauri shell, no Node main process, no Electron
+    bundle) and the disciplined plugin boundary (IPC-only kernel access, WASM-sandboxed community plugins).
+  </p>
+  <p>
+    Realistic expectations versus the Zed/VS Code numbers in the source doc: cold start and memory should
+    land roughly in the middle &mdash; <strong>2–3× better than VS Code, 2–4× worse than Zed</strong> &mdash; with input
+    latency and frame rate bounded by the WebView's compositor (16 ms / 60 FPS practical ceiling, with
+    React reconciliation eating into that budget). The two largest concrete performance risks today are
+    (a) the <strong>non-virtualized files tree</strong> and (b) the React reconciliation cost on hot paths
+    like outline / search results. Both are fixable without architectural change.
+  </p>
+</div>
+
+<div class="grid">
+  <div class="stat"><div class="k">Renderer</div><div class="v">WebView2 / WKWebView / WebKitGTK</div><div class="n">via Tauri 2</div></div>
+  <div class="stat"><div class="k">UI runtime</div><div class="v">React 18 + Zustand</div><div class="n">StrictMode in dev</div></div>
+  <div class="stat"><div class="k">Editor</div><div class="v">CodeMirror 6</div><div class="n">viewport-based, vendor-chunked</div></div>
+  <div class="stat"><div class="k">Terminal</div><div class="v">xterm.js + WebGL</div><div class="n">GPU-accelerated glyphs</div></div>
+  <div class="stat"><div class="k">Plugins</div><div class="v">~53 first-party</div><div class="n">dynamic imports, lazy-on-demand</div></div>
+  <div class="stat"><div class="k">Sandbox</div><div class="v">iframe + postMessage</div><div class="n">community plugins, capability-gated</div></div>
+</div>
+
+<h2>2. The stack, mapped to Zed's pipeline</h2>
+
+<p>
+  Zed's GPUI pipeline is <code>prepaint → paint → present</code> against a Metal/DX/Vulkan backend at a
+  120 FPS target. Nexus's analogue is the browser engine: <code>React reconciliation → DOM/CSSOM →
+  compositor</code>, vsync-locked at 60 FPS in every platform WebView Tauri targets. The architectural
+  layers map roughly as:
+</p>
+
+<table>
+  <thead><tr><th>Concern</th><th>Zed (GPUI)</th><th>Nexus (shell/)</th></tr></thead>
+  <tbody>
+    <tr><td>Window / event loop</td><td><code>Platform</code> trait → Metal/DX/Vulkan</td><td>Tauri 2 → WebView2 / WKWebView / WebKitGTK</td></tr>
+    <tr><td>Reactive state</td><td><code>Entity&lt;T&gt;</code> + observers</td><td>Zustand stores + React hooks <span class="pill neutral">parity</span></td></tr>
+    <tr><td>Layout</td><td>Taffy flexbox in prepaint</td><td>Browser layout engine (Blink/WebKit)</td></tr>
+    <tr><td>Paint</td><td>Scene primitives → GPU command buffers</td><td>Browser compositor; no app-level scene</td></tr>
+    <tr><td>Text rendering</td><td>OS rasterization → texture atlas → instanced quads on GPU</td><td>CSS text; CodeMirror 6 viewport DOM; xterm uses WebGL addon for glyphs <span class="pill warn">partial</span></td></tr>
+    <tr><td>Virtualized lists</td><td><code>uniform_list</code> primitive</td><td><code>@tanstack/react-virtual</code> available; <strong>files tree not yet virtualized</strong> <span class="pill bad">gap</span></td></tr>
+    <tr><td>Snapshot-per-frame</td><td><code>EditorSnapshot</code> at prepaint</td><td>Implicit via Zustand selector caching; no explicit per-frame freeze</td></tr>
+    <tr><td>Sandboxed plugins</td><td>WASM, host-driven</td><td>iframe + postMessage via <code>SandboxOrchestrator</code> <span class="pill good">aligned</span></td></tr>
+  </tbody>
+</table>
+
+<h2>3. Where Nexus is doing the right things</h2>
+
+<h3>3.1 Lazy, code-split plugin loading</h3>
+<p>
+  <code>shell/src/plugins/catalog.ts</code> uses dynamic <code>import()</code> per plugin, and
+  <code>vite.config.ts</code> groups heavy vendor libs into named chunks
+  (<code>vendor-codemirror</code>, <code>vendor-xterm</code>, <code>vendor-mermaid</code>,
+  <code>vendor-react</code>). Default-off plugins are not loaded at all until the user opts in. This is the
+  right pattern for keeping the initial bundle small, and it mirrors how VS Code handles its extension host
+  (but at a finer grain &mdash; per-plugin chunks rather than a single extension-host process). Boot wall-clock
+  scales with <code>DEFAULT_ON_PLUGINS</code>, not with the full 53-entry catalog.
+</p>
+
+<h3>3.2 Per-platform build targets</h3>
+<pre>// shell/vite.config.ts
+target: process.env.TAURI_PLATFORM === 'windows' ? 'chrome105'
+      : process.env.TAURI_PLATFORM === 'macos'   ? 'safari15'
+      : 'es2022'</pre>
+<p>
+  Branching the esbuild target per OS means each platform bundle ships only the transforms that platform's
+  WebView actually needs &mdash; smaller bytes, faster parse, no dead polyfills. This is a small win that is
+  easy to skip, and Nexus didn't.
+</p>
+
+<h3>3.3 IPC-only kernel boundary</h3>
+<p>
+  Every backend capability the UI consumes routes through <code>context.ipc_call(plugin_id, command, args)</code>.
+  That keeps the frontend's job constrained to "render and dispatch", and makes the WebView fundamentally
+  cheap: it doesn't load heavy data into JS heap, it asks the kernel and renders the result. This is the
+  architectural twin of Zed's snapshot model &mdash; the frame's data is a query result, not a live mutation
+  target.
+</p>
+
+<h3>3.4 GPU-accelerated terminal</h3>
+<p>
+  <code>@xterm/addon-webgl</code> is on. The terminal is one of the two glyph-heavy surfaces (the editor
+  being the other), and getting it onto WebGL closes a real gap; this matches Zed's "let the GPU draw the
+  letters" principle in the one place the browser cleanly allows it.
+</p>
+
+<h3>3.5 Sandboxed community plugins</h3>
+<p>
+  The <code>SandboxOrchestrator</code> mounts each community plugin in an iframe with a shared bootstrap
+  runtime (Blob-cached once per session), wired through postMessage and capability-gated by the kernel.
+  This delivers exactly the Zed pitch quoted in the source doc &mdash; "extensions can't freeze the main
+  thread" &mdash; and the implementation is sound: per-plugin <code>PluginAPI</code>, storage namespacing on
+  the authoritative pluginId, and a single shared runtime URL to amortize the bootstrap cost.
+</p>
+
+<h2>4. Where Nexus is leaving performance on the table</h2>
+
+<h3>4.1 Files tree is not virtualized <span class="pill bad">high impact</span></h3>
+<p>
+  <code>shell/src/plugins/nexus/files/FilesTree.tsx</code> renders the tree recursively &mdash; every expanded
+  <code>TreeNode</code> is a real React component with its own subscriptions, refs, and DOM nodes. There is
+  no windowing. The Zed analysis calls out <code>uniform_list</code> as <em>the</em> file-tree pattern, and
+  the source doc explicitly flags it as something Nexus should adopt regardless of framework. At ~200 visible
+  rows the cost is invisible; at a 10k-file forge with deep expansion, paint and event-handler attachment
+  scale linearly. <code>@tanstack/react-virtual</code> is already a dependency (used in
+  <code>BasesTable.tsx</code>) so the fix is local.
+</p>
+
+<h3>4.2 React StrictMode double-renders in dev <span class="pill warn">dev-only, but misleading</span></h3>
+<p>
+  <code>main.tsx</code> wraps both <code>&lt;App /&gt;</code> and <code>&lt;PopoutShell /&gt;</code> in
+  <code>&lt;React.StrictMode&gt;</code>. This is correct for catching effect bugs but it doubles every
+  effect and render in dev. When profiling locally, this masks real wins and inflates apparent costs. Worth
+  remembering when reading <code>tauri:dev</code> traces.
+</p>
+
+<h3>4.3 No explicit per-frame snapshot for cross-subsystem state</h3>
+<p>
+  Zed's <code>EditorSnapshot</code> is the answer to "the LSP reply arrived mid-frame and you painted a torn
+  view." Nexus mostly avoids the problem by routing through the IPC kernel (one-shot queries, not live
+  refs), but features that compose multiple stores at render time &mdash; e.g. editor + git blame + LSP
+  diagnostics + outline &mdash; could benefit from a deliberate <code>useSnapshot()</code> pattern that picks
+  a coherent tuple per frame, rather than independent selectors that each re-render on their own cadence.
+  This isn't a bug today; it's the kind of thing that bites once any one of those streams gets noisy.
+</p>
+
+<h3>4.4 Mermaid is heavy <span class="pill warn">budget the chunk</span></h3>
+<p>
+  <code>mermaid</code> + <code>d3</code> + <code>dagre</code> are grouped into <code>vendor-mermaid</code>;
+  good. But Mermaid pulled in eagerly the first time a markdown file contains a diagram fence will add
+  noticeable hitch to the first paint of that document. Worth verifying the diagram extension defers
+  Mermaid until a <code>```mermaid</code> block is actually visible, not on editor mount.
+</p>
+
+<h3>4.5 React vs. fine-grained reactivity</h3>
+<p>
+  The source doc explicitly recommends Solid.js for the editor shell as "the pragmatic shortcut where it
+  doesn't hurt the product." Nexus chose React. That's defensible &mdash; the ecosystem is bigger, hiring is
+  easier, plugin authors expect it &mdash; but it does mean the framework's reconciliation cost is permanent
+  overhead the team is paying versus Solid's compile-to-DOM-ops approach. The right mitigation isn't to
+  rewrite; it's to be disciplined about <code>memo</code> / store-selector granularity on hot rows
+  (file-tree row, outline item, search-result row, gutter line). The existing <code>RowStatusDot</code>
+  pattern in <code>FilesTree.tsx</code> &mdash; pulled into its own component so the parent doesn't re-render on
+  every cache mutation &mdash; is the right idea applied locally; it should be the norm, not the exception.
+</p>
+
+<h2>5. Quantitative expectations</h2>
+
+<p>
+  The Zed analysis lists hard numbers (0.12 s cold start, &lt;10 ms input latency, ~222 MB RSS). Nexus has
+  no published benchmarks, so the table below is an <strong>engineering estimate</strong>: derived from the
+  stack's known characteristics (Tauri RSS profile, WebView paint pipeline, CodeMirror viewport rendering)
+  plus public Tauri-vs-Electron comparisons, not from a measured run on this codebase.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Metric</th><th>Zed (measured)</th><th>VS Code (measured)</th><th>Nexus (estimated)</th><th>Bound by</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Cold start</td>
+      <td>0.12–1.0 s</td>
+      <td>1.2–5.0 s</td>
+      <td>~0.6–1.2 s</td>
+      <td>WebView init + JS parse + default-on plugin <code>activate()</code></td>
+    </tr>
+    <tr>
+      <td>Idle RSS</td>
+      <td>~150 MB</td>
+      <td>~600 MB</td>
+      <td>~180–280 MB</td>
+      <td>WebView process + Rust kernel + Tantivy/SQLite caches</td>
+    </tr>
+    <tr>
+      <td>Keystroke latency (editor)</td>
+      <td>&lt;10 ms</td>
+      <td>15–25 ms</td>
+      <td>~14–22 ms</td>
+      <td>WebView vsync + CM6 transaction + React update on dependent UI</td>
+    </tr>
+    <tr>
+      <td>Sustained frame rate</td>
+      <td>120 FPS target</td>
+      <td>60 FPS</td>
+      <td>60 FPS</td>
+      <td>Browser compositor vsync</td>
+    </tr>
+    <tr>
+      <td>50 MB JS file open</td>
+      <td>~0.8 s</td>
+      <td>~3.2 s</td>
+      <td>~1.5–2.5 s</td>
+      <td>CodeMirror 6 viewport render + tree-sitter highlight if enabled</td>
+    </tr>
+  </tbody>
+</table>
+<div class="legend">
+  Estimates assume a clean default-on plugin set on Apple Silicon / Linux WebKitGTK 2.40+. Windows WebView2
+  cold start tends to be 100–200 ms slower than macOS / Linux. The largest variance driver is whether
+  optional heavy plugins (graph, semantic search, AI) are enabled by default.
+</div>
+
+<h2>6. What Zed's lessons actually mean for Nexus</h2>
+
+<div class="card">
+  <h3>Adopt the "snapshot" idiom for multi-store renders</h3>
+  <p>
+    Where a component reads from editor + LSP + git + theme together, write a single <code>useFrameSnapshot</code>
+    hook that pulls a coherent tuple and memoizes it. This is the React analogue of <code>EditorSnapshot</code>,
+    and it eliminates the "three selectors fire on three different ticks" class of jank.
+  </p>
+</div>
+
+<div class="card">
+  <h3>Virtualize the files tree</h3>
+  <p>
+    <code>@tanstack/react-virtual</code> is already in <code>package.json</code> and used in
+    <code>BasesTable.tsx</code>. Apply the same pattern to <code>FilesTree.tsx</code>. This is the single
+    highest-ROI change available for users with large forges, and it directly closes the
+    <code>uniform_list</code> gap the source doc flags.
+  </p>
+</div>
+
+<div class="card">
+  <h3>Treat the WebView like a GPU consumer where possible</h3>
+  <p>
+    The xterm WebGL addon proves the model works. Three more places could plausibly benefit:
+    the graph view (already using force-directed layout), the canvas plugin, and the markdown live-preview
+    syntax highlighting on the active line. Anywhere a primitive can be drawn to a <code>&lt;canvas&gt;</code>
+    instead of a DOM subtree, the browser stops re-running layout on every keystroke.
+  </p>
+</div>
+
+<div class="card">
+  <h3>Publish a benchmark suite</h3>
+  <p>
+    The source doc's analytical power comes from independent measurements. Nexus would benefit from a small
+    in-repo benchmark harness &mdash; cold-start trace, "open 50 MB file", "scroll 10k-row file tree",
+    "render outline for 500-heading document" &mdash; with output committed under <code>experiments/perf/</code>
+    and run on a known machine. Without numbers, performance regressions land silently.
+  </p>
+</div>
+
+<h2>7. Bottom line</h2>
+
+<p>
+  Nexus is not chasing Zed's frontend ceiling, and shouldn't &mdash; the cost of building a from-scratch
+  GPU UI framework is exactly what the Zed doc enumerates (accessibility, IME, RTL, browser-native form
+  controls, no web target). Nexus's design choice &mdash; Tauri + React + a disciplined IPC kernel &mdash; trades
+  Zed's absolute performance for ecosystem reach, plugin-author ergonomics, and a meaningfully smaller
+  surface area to maintain.
+</p>
+
+<p>
+  Inside that envelope, the work that pays for itself is concrete and local: <strong>virtualize the tree,
+  budget the heavy vendor chunks, formalize per-frame snapshots, ship a benchmark harness</strong>. None of
+  these requires changing the architectural bets. All of them close the gap between "this is acceptable" and
+  "this feels right" on the surfaces a user touches dozens of times a day.
+</p>
+
+<p class="footnote">
+  References: <code>shell/package.json</code>, <code>shell/vite.config.ts</code>, <code>shell/src/main.tsx</code>,
+  <code>shell/src/plugins/nexus/files/FilesTree.tsx</code>, <code>shell/src/host/sandbox/SandboxOrchestrator</code>,
+  <code>experiments/zed-frontend-analysis.md</code> (source comparison doc), <code>docs/architecture/C4.md</code>.
+</p>
+
+</div>
+</body>
+</html>
