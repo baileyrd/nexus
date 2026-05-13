@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { flattenTree, isBundleDir } from './flattenTree'
-import type { FilesDirEntry } from './filesStore'
+import { flattenTree, isBundleDir } from '../src/plugins/nexus/files/flattenTree'
+import type { FilesDirEntry } from '../src/plugins/nexus/files/filesStore'
 
 const dir = (name: string, relpath: string): FilesDirEntry => ({
   name,

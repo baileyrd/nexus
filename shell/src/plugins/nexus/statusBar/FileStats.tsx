@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useEditorStore } from '../editor/editorStore'
 import { useBacklinksStore } from '../backlinks/backlinksStore'
+import { snap, useFrameSnapshot } from '../../../stores/useFrameSnapshot'
 
 function fileExt(name: string): string | null {
   const i = name.lastIndexOf('.')
@@ -14,11 +15,21 @@ const SEP_STYLE: React.CSSProperties = {
   userSelect: 'none',
 }
 
+// BL-110: pull the four selectors that drive this status-bar slice
+// through one rAF-coalesced snapshot. Editor tabs + backlinks are
+// updated from independent async sources (kernel watch events vs
+// post-save backlinks rescan); pre-BL-110 a save followed by a
+// backlinks refresh produced two paint commits, now one per frame.
+const FILE_STATS_ENTRIES = [
+  snap(useEditorStore, (s) => s.tabs),
+  snap(useEditorStore, (s) => s.activeRelpath),
+  snap(useBacklinksStore, (s) => s.links.length),
+  snap(useBacklinksStore, (s) => s.loading),
+] as const
+
 export function FileStats() {
-  const tabs = useEditorStore((s) => s.tabs)
-  const activeRelpath = useEditorStore((s) => s.activeRelpath)
-  const backlinksCount = useBacklinksStore((s) => s.links.length)
-  const backlinksLoading = useBacklinksStore((s) => s.loading)
+  const [tabs, activeRelpath, backlinksCount, backlinksLoading] =
+    useFrameSnapshot(FILE_STATS_ENTRIES)
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
