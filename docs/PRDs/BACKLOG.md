@@ -416,6 +416,108 @@ FTS5 virtual table over the agent's persisted session transcripts (which DG-33 a
 
 ---
 
+### BL-122: Typing-latency measurement scaffold (Phase 0 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Small. Prerequisite for BL-123..BL-126.
+**Crates**: `nexus-editor` (instrument span); `experiments/perf` (new scenarios).
+
+Extend the BL-112 perf harness with three direct microbenchmark scenarios (`editor.apply_transaction.{small,medium,large}`, `editor.livePreview.decorate.{small,medium,large}`, `editor.markdownRender.large`) plus a `tracing::info_span!("apply_transaction", ...)` around `handle_apply_transaction` in `crates/nexus-editor/src/core_plugin.rs:1150-1211`. The microbench drives the kernel directly through an integration test (no Tauri); the span gives us per-op wall-time, op count, and bytes in/out for future regressions. Commits a fresh baseline at `experiments/perf/baselines/<date>.json` after the scenarios run clean.
+
+**Definition of done:**
+- `experiments/perf/run.ts` emits the three new scenario sections in stable-sorted JSON
+- New `crates/nexus-editor/tests/perf_apply_transaction.rs` integration harness backs the kernel-side scenarios
+- `apply_transaction` tracing span gated behind subscriber filter (no-op outside the harness)
+- Baseline JSON committed; numbers show the N-linear shape today so the BL-123 win is visible as a flat curve
+
+---
+
+### BL-123: Slim `apply_transaction` response for text-only ops (Phase 1 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Medium. Single biggest typing-latency fix; depends on BL-122 for the regression gate.
+**Crates**: `nexus-editor`, shell `nexus.editor` plugin, IPC bindings.
+
+Today every successful `apply_transaction` returns a full `EditorSnapshot` — `crates/nexus-editor/src/core_plugin.rs:1203` clones the entire `BlockTree` (`snapshot_of` at `:1538`) and serializes it via `snapshot_to_value` (`:1573-1576`). For text-only ops (insert/delete on a single block) the webview already discards the snapshot via the `skipReconcile` shortcut at `shell/src/plugins/nexus/editor/cm/transactionBridge.ts:362-367`, but the kernel still does the O(N blocks) work. Returning just `{ revision }` for text-only ops makes the kernel-side cost O(1) and removes the largest IPC payload on the typing hot path.
+
+**Definition of done:**
+- New `ApplyTransactionResponse` enum: `Slim { revision }` vs `Full(EditorSnapshot)`
+- `handle_apply_transaction` inspects op kinds: all-`insert_text`/`delete_text` → `Slim`; structural ops → `Full`
+- `EditorKernelClient.applyTransaction` types the response as a discriminated union; bridge handles both shapes
+- Slim path drops the existing `setSnapshot?.(...)` call on the bridge side; downstream consumers (drag-bridge, comments, block-link nav) either refresh on demand via `get_tree` or get a periodic refresh — pick one as part of the PR after auditing consumers
+- IPC drift check passes (`scripts/check_ipc_drift.sh`)
+- `editor.apply_transaction.large` p95 server-side time flat in N for text-only ops (target < 1 ms regardless of doc size)
+- New Rust test asserts response shape per op kind; new shell test asserts bridge coherency on both shapes
+- Open question: whether `update_annotations` joins the slim path (default in plan: exclude, since the optimistic mirror doesn't track annotation changes)
+
+---
+
+### BL-124: `useFrameSnapshot` adoption in `EditorView` (Phase 2 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Small. Independent of BL-123; both can land in parallel.
+**Crates**: shell `nexus.editor` plugin.
+
+The current `useEditorStore((s) => s.tabs)` at `shell/src/plugins/nexus/editor/EditorView.tsx:172` subscribes to the entire `tabs` array, so every keystroke re-renders `EditorView` + `TabBody` + `ViewHeader` + `BreadcrumbSegments` + `ModeToggle`. The BL-110 `useFrameSnapshot` hook coalesces multi-store notifications into one rAF flush and lets selectors actually shed irrelevant slices. The hook is in place and reference-used by `FileStats.tsx`; this BL wires it into the editor.
+
+**Definition of done:**
+- `EditorView` switches to `useFrameSnapshot` with narrowed entries (active tab content/mode/loading/error, active relpath, dirty flag)
+- `TabBody`, `ViewHeader`, `BreadcrumbSegments`, `ModeToggle` follow the same pattern, each reading only what it needs
+- Render-count test: typing 10 characters into the active tab produces ≤ 10 `EditorView` re-renders and zero re-renders for non-active-tab components
+- Snapshot tests confirm `editorStore.setContent` preserves identity for non-target tabs (the `.map(...)` already does this; pin it)
+- `typing.small` shows a measurable improvement on the post-paint React phase
+
+---
+
+### BL-125: Viewport-scoped live-preview decorations (Phase 3 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Medium. Independent of BL-123/BL-124.
+**Crates**: shell `nexus.editor` plugin (CM6 extensions).
+
+`buildLivePreviewDecorations` at `shell/src/plugins/nexus/editor/cm/livePreviewDecorations.ts:141-153` walks the full Lezer syntax tree on every `docChanged` *and* every selection change (the `StateField.update` at `cm/livePreview.ts:30-43` checks both). This runs pre-paint, so on a 10k-line doc with a 50k-node tree it directly delays the glyph. Scope the walk to the visible viewport + the changed range; for selection-only updates, rebuild only lines that crossed the active-set boundary.
+
+**Definition of done:**
+- Decoration source restructured so the walk reads `view.visibleRanges` plus `tr.changes.iterChangedRanges` for `docChanged` and the active-line delta for selection-only updates
+- Block decorations (table widget, HR) remain `StateField`-sourced per CM6's rule against block decorations from `ViewPlugin`s; resolve the split (effect-passed viewport vs separate StateField for blocks) in the PR
+- `EditorView.atomicRanges.of(...)` wiring preserved so cursor motion still respects atomic ranges
+- `editor.livePreview.decorate.large` p95 ≤ p95 of `.small` (cost becomes viewport-bounded)
+- Visual snapshot tests pass: emphasis / strong / inline code / headings across viewport edges; selection-driven reveal/hide transitions on the line the cursor enters
+
+---
+
+### BL-126: Drop redundant size-cap serialize + tighten session-mutex span (Phase 4 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Small. Independent of BL-123/BL-124/BL-125; mostly cleanup.
+**Crates**: `nexus-editor`.
+
+Two small cleanups in `handle_apply_transaction` (`crates/nexus-editor/src/core_plugin.rs:1146-1211`). First, the 16 MiB payload-size check at `:1169` re-serializes the already-deserialized `tx_value` via `serde_json::to_vec(&tx_value)` purely to measure bytes — replace with a structural bound (sum of inserted text/block-content lengths on the typed `Transaction`). Second, the sessions mutex at `:1183` is held across mutation + tree clone + JSON serialize; with BL-123's slim path the serialize is rare, but tightening the lock to "mutation + revision bump" anyway lets concurrent edits to different files actually run concurrently.
+
+**Definition of done:**
+- `serde_json::to_vec(&tx_value)` removed; structural bound check trips on the same 16 MiB pathological-payload test
+- Snapshot serialization moves outside the mutex scope (collect `(snapshot, rev, ops)` under the lock, serialize after)
+- New multi-relpath concurrency test exercises two sessions being mutated simultaneously; tracing spans show overlap
+
+---
+
+### BL-127: Runtime typing-latency perf scenarios (Phase 5 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Medium. Gated on the WDIO-Tauri runner that BL-112 also defers.
+**Crates**: `experiments/perf` + a small instrumentation hook in shell `nexus.editor`.
+
+The microbenchmarks from BL-122 gate the kernel and decoration paths but miss IPC, Tauri serialization, webview paint, and React re-render. This BL fills in the runtime side from BL-112's deferred slot — `typing.small/medium/large` scenarios that boot the shell against a synthetic forge, open a markdown tab, programmatically dispatch keydown events, and measure keystroke → next-frame-paint via `performance.mark`/`performance.measure`. Wires into CI as non-blocking first, then promotes to a regression gate once variance settles.
+
+**Definition of done:**
+- WDIO-Tauri runner stood up (track separately; reference here)
+- `typing.{small,medium,large}` scenarios produce stable numbers (< 10% variance across 3 runs)
+- Targets: p95 keystroke → paint < 16 ms (small/medium), < 33 ms (large)
+- Instrumentation hook in `EditorView.tsx` gated by `NEXUS_PERF_TYPING=1` so production paths aren't paying for it
+- Regression in any of BL-123/BL-124/BL-125/BL-126 surfaces as a CI delta
+
+---
+
 _BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Almost everything in the DoD already shipped under `nexus.files` (sidebar tree, expand/collapse, drag-to-reorder, full context menu, live `com.nexus.storage` event sync). The only material gap was the file-type icon set, now closed via a `getFileIcon(name)` helper covering `.md` / source files / structured config and a generic fallback._
 
 ---
