@@ -765,62 +765,9 @@ _BL-055 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-068: Theme Builder — visual token editor with live preview
+_BL-068 closed 2026-05-14 (umbrella close — every phase shipped 2026-05-06 through 2026-05-09; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md))._
 
-> **Fully shipped 2026-05-06.** BL-105 (contrast checker) and BL-106 (light/dark dual mode + hue-lock) both closed. Phase 4 split-view preview (the last DoD item that was previously deferred to "uses live shell as preview instead") shipped 2026-05-09. Original spec: [BL-067-068-builders.md](BL-067-068-builders.md).
-
-**Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
-**Effort**: ~1 week (0.5d `preview_override` handler + 4d UI + 0.5d export)
-**Crates**: `nexus-theme` (new `preview_override` IPC handler), new `shell/src/plugins/nexus/themeBuilder/`
-**Related**: PRD-07 (theming system), BL-053 (forge visual target), bundled ember themes
-
-Nexus themes are TOML files that override 400+ CSS variables (`--nx-{category}-{property}-{variant}`). Today, authoring one means editing the file externally and waiting for the file-watcher to hot-reload. The Theme Builder closes that loop inside the shell: a visual token editor with live preview, WCAG contrast checking, and one-click export to `.forge/themes/<name>/`.
-
-The theme system already has live reload; the only new backend work is a `preview_override` handler that applies an in-memory token overlay without touching any files — cleared on cancel, persisted on save.
-
-**Key surfaces:**
-- Token palette grouped by category (Surface, Text, Accent, Border, Editor/Syntax) with color pickers and sliders ✅ shipped
-- Base theme selector — start from any installed theme, write only the delta ✅ shipped
-- Export writes `.theme.toml` to `.forge/themes/` and activates via hot-reload ✅ shipped (save-to-disk + `reload` handler call)
-- Live split-view preview against a representative forge document ✅ shipped 2026-05-09
-- Per-token WCAG AA/AAA contrast pass/fail ✅ BL-105 closed 2026-05-06
-- Light/dark side-by-side when theme supports both modes ✅ BL-106 closed 2026-05-06
-
-**Definition of done:** ✅ All items shipped.
-
-**Phase 4 — split-view preview (shipped 2026-05-09).** New `BuilderPreview` component (`shell/src/plugins/nexus/themePicker/BuilderPreview.tsx`) renders a representative forge document — H1/H2/H3 prose, body paragraph with link + inline code + secondary/tertiary text, syntax-coloured Rust code block, callout, table, and primary/secondary/muted button row — inside a CSS-variable scope. The wrapper applies `composeOverridesForPreview(baseVars, overrides)` as inline `style={{...}}` so every `var(--nx-*)` reference inside resolves against the user's current edits, independent of the live shell's kernel-mode setting. Pure helper lives in `builderPreview.ts` (`PREVIEW_SCOPED_KEYS` covers all 24 tokens edited by `BUILDER_GROUPS`; a test pins the contract so a new builder-group token without a preview projection rule fails the suite). `builderModalWidth(activeTab, dual, preview)` (also pure) widens the picker modal to 1100 (single + preview) / 1300 (dual + preview) when the preview is on, and the existing 660 / 960 sizes when off. New `builderShowPreview` store flag toggled by a "Preview" checkbox in the existing build-tab controls row. Dual mode renders both light + dark preview snippets stacked vertically, each scoped to its own per-mode override map. 12 tests across composer + modal-width helper.
-
----
-
-### BL-067: Shell View Builder — visual layout composer for plugin panels
-
-> **Phase 1 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Programmatic save / switch / delete of named workspace layouts under `<forge>/.forge/layouts/<name>.layout.json`, a sidebar panel that lists saved layouts + the live layout snapshot + the registered viewType inventory, and three commands (`nexus.viewBuilder.show` / `.saveLayoutAs` / `.switchLayout`).
->
-> **Phase 2a + 2d closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Catalog became click-to-add (per-row inline `left | right | bottom | main` picker dispatching `workspace.ensureLeafOfType` + `revealLeaf`); per-leaf `×` close button on every snapshot row routing through `workspace.detachLeaf`; saved-layout rows gained an **Export** action that writes `manifest.toml` + `index.ts` + `<slug>.layout.json` + `README.md` under `<forge>/.forge/exports/<slug>/`. The emitted index.ts is a first-party-style shell-plugin source (re-applies the snapshot via `api.workspace.applySnapshot`); the README documents both install paths (drop the layout JSON into a forge to import via the View Builder UI vs. drop the directory into `shell/src/plugins/nexus/` for a baked-in build). Community-plugin / marketplace install (option C in the README) is gated on WI-44.
->
-> **Phase 2b closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `workspace.moveLeafToDock(leaf, side)` mutator (leaf is unmounted from its source Tabs, pushed onto the destination dock's first Tabs, parent pointer rewritten, view instance preserved). View Builder snapshot rows gain a per-leaf `↔` "Move to" affordance with four target buttons (left / right / bottom / main) and per-dock collapse-toggle + −/+ size step controls in the section heading. The existing `setSidedockSize` / `setSidedockCollapsed` mutators carry the size/collapse work; the new code is the move surface plus the UI plumbing.
->
-> **Phase 2c closed 2026-05-09** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Visual layout canvas (`LayoutCanvas` component, 360×220 px box-model preview at the top of the View Builder panel) renders the live workspace as a scaled-down 2D layout — left | main | right with bottom spanning beneath, dock proportions scaled against `TYPICAL_WORKSPACE_WIDTH = 1200` / `TYPICAL_WORKSPACE_HEIGHT = 800` and clamped to `MAX_DOCK_FRACTION = 35%` of canvas. Two pointer-driven interactions: drag a leaf chip onto a different region's box to move it (fires `workspace.moveLeafToDock(leaf, side)` on release; same mutator the Phase 2b inline-buttons call), and drag a divider line continuously to resize a dock (fires `workspace.setSidedockSize(side, realPx)` on every move; the workspace store's 150-real-px floor still clamps). All geometry math lives in `canvasGeometry.ts` (pure module: `computeLayout`, `regionAt`, `dividerAt`, `dragDividerToRealPx`, `extractCanvasState`); the React component is render + pointer-event wiring only. 21 new tests cover the geometry helpers (scale fns + their inverses, layout composition, hit-tests against interior/exterior/divider zones, divider-drag math, and the snapshot extractor's region-walking + active-flag + missing-dock cases). Drop-target highlight (`var(--interactive-accent)` outline + hover background) appears while a leaf is being dragged over a non-source region. Click-button surface from Phase 2a/2b kept untouched — the canvas is additive.
->
-> **Phase 0 introspection API shipped 2026-05-14.** Audit during the Phase 0 follow-up found the pre-existing `nexus.viewBuilder` had walked `workspace.layoutSnapshot()` directly but left the chrome-slot inventory and view-type catalog unexposed. New `shell/src/host/layoutSnapshot.ts` ships `getLayoutSnapshot(pluginRegistry?) → { slots, viewTypes, extensions, layout, takenAtMs }` plus `globalSnapshot()` paired with `bindPluginRegistry()` (wired in `shell/src/main.tsx`). New `SlotRegistry.snapshot()` projects `SlotEntrySnapshot { id, pluginId, priority }` per chrome contribution (drops the React component refs); `viewRegistry.registeredTypes()` / `registeredExtensions()` expose the creator + extension inventory. `countLeavesInLayout(json)` walks splits / tabs / floating for a "N leaves" status line. 7 unit tests. Ownership resolution flows through `PluginRegistry.ownerOfViewType` — shell built-ins (`empty`) report `pluginId: null`.
->
-> **Finish polish shipped 2026-05-14.** `ChromeSlotsSection` in `ViewBuilderView` consumes `globalSnapshot()` and surfaces every chrome contribution (titleBar, activityBar, statusBarLeft/Right, overlay, paneMode) with the registering plugin id + priority; subscribes to `useSlotStore` so the inventory refreshes when a plugin registers mid-session. "Add panel" gained the PRD's "searchable palette" — case-insensitive substring filter with `N of M` header counter. Genuine remainder: per-panel authoring options on the export form (min-width / min-height / float-vs-dock) — deferred because the live snapshot already captures whatever sizes the user has dragged the canvas to. Community-plugin distribution still gated on WI-44.
-
-**Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
-**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b ~1 day _(shipped)_ · Phase 2c ~1 day _(shipped)_ · Phase 0 introspection API + finish polish ~0.5 day _(shipped 2026-05-14)_
-**Crates**: `ExtensionHost` (JS introspection API), new `shell/src/plugins/nexus/viewBuilder/`
-**Related**: ADR 0011 (plugin-first shell), BL-053 (forge visual target), BL-054 (Nexus OS Mode)
-
-Every panel, sidebar, and pane in the Nexus shell is a registered plugin contribution loaded by `ExtensionHost`. The original BL-067 plan was a WYSIWYG drag-drop canvas + a per-panel options surface + an "Export as plugin" code generator on top of a layout introspection API.
-
-**Phase 1 closed.** The introspection API was already there — `workspace.serialize()` produces a `WorkspaceJSON` and `workspace.hydrate(json)` round-trips it cleanly — so the bottleneck was a programmatic save/load surface, not new infrastructure. The View Builder ships as `nexus.viewBuilder` (default-on) with a sidebar panel that lists saved layouts, surfaces the live layout snapshot, and lists every registered viewType in a read-only inventory. `workspace.layoutSnapshot()` and `workspace.applySnapshot(json)` are the documented introspection / write-back surface.
-
-**Phase 2 progress:**
-- ✅ Plugin-contribution palette as an interactive add-panel surface (Phase 2a)
-- ✅ Per-leaf close affordances on the live snapshot (Phase 2a)
-- ✅ "Export as plugin" code generator that emits `manifest.toml` + `index.ts` + layout JSON + README (Phase 2d)
-- ✅ Per-panel configuration UI — move-between-docks + dock size/collapse (Phase 2b — shipped 2026-05-08)
-- ✅ WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize (Phase 2c — shipped 2026-05-09)
+_BL-067 closed 2026-05-14 (umbrella close — Phase 1 / 2a / 2b / 2c / 2d / Phase 0 introspection / finish polish all shipped 2026-05-07 through 2026-05-14; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md))._
 
 ---
 
