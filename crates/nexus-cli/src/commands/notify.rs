@@ -55,8 +55,9 @@ fn validate_channel(s: &str) -> Result<&'static str> {
     match s.to_ascii_lowercase().as_str() {
         "desktop" => Ok("desktop"),
         "discord" => Ok("discord"),
+        "telegram" => Ok("telegram"),
         other => Err(anyhow::anyhow!(
-            "unknown channel '{other}': expected one of desktop / discord"
+            "unknown channel '{other}': expected one of desktop / discord / telegram"
         )),
     }
 }
@@ -72,6 +73,9 @@ mod tests {
         assert_eq!(validate_channel("DESKTOP").unwrap(), "desktop");
         assert_eq!(validate_channel("discord").unwrap(), "discord");
         assert_eq!(validate_channel("Discord").unwrap(), "discord");
+        assert_eq!(validate_channel("telegram").unwrap(), "telegram");
+        assert_eq!(validate_channel("Telegram").unwrap(), "telegram");
+        assert_eq!(validate_channel("TELEGRAM").unwrap(), "telegram");
     }
 
     #[test]

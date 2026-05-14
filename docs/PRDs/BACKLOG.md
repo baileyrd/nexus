@@ -371,17 +371,16 @@ _BL-133 closed 2026-05-14 (v1 scope; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETE
 
 ---
 
-### Follow-up: Telegram + SMTP transports (from BL-133)
+_BL-133 follow-up (Telegram bot transport) closed 2026-05-14. New `TelegramBot` transport in `nexus-notifications` posts to `https://api.telegram.org/bot<TOKEN>/sendMessage` with `{chat_id, text}`. The 4096-byte message limit is enforced via a new `split_at_byte_limit` helper that snaps to UTF-8 character boundaries so multi-byte codepoints (emoji, accented chars) never split mid-character. Bot token + chat id sourced from `<forge>/.forge/config.toml::[notifications.telegram]` via new `load_telegram_config` helper in `nexus-bootstrap`; either field empty → `SendError::NotConfigured("telegram")` at dispatch time. `Channel::Telegram` variant + CLI channel-name validator coverage + 6 new module tests (channel serde, both empty-config NotConfigured paths, split helper round-trip + UTF-8 boundary safety). `cargo test -p nexus-notifications` 18/18; `cargo test -p nexus-cli` 55+10+3; clippy clean._
+
+---
+
+### Follow-up: SMTP transport (from BL-133)
 
 **Source**: BL-133 deferral. Filed 2026-05-14.
-**Effort**: Small per transport. Each adds one `impl Transport` next to `DiscordWebhook`.
+**Effort**: Small. Adds one `impl Transport` next to `DiscordWebhook` / `TelegramBot`.
 
-`nexus-notifications` ships Desktop + Discord today. The remaining v1-scope channels are:
-
-- **Telegram**: HTTP POST to `https://api.telegram.org/bot<TOKEN>/sendMessage` with `chat_id` + `text`. Bot token + authorised chat id stored in `nexus-security` keyring; `[notifications.telegram] enabled = true` in config. Split message at the 4096-char limit.
-- **SMTP**: `lettre` crate; TLS by default; credential in keyring; `[notifications.email]` block with from / to / subject template.
-
-Both follow the existing `DesktopTransport` / `DiscordWebhook` pattern (one struct + `impl Transport` + a config-loader helper in `nexus-bootstrap`).
+The third v1-scope channel from the original BL-133 DoD. `lettre` crate; TLS by default; credential in keyring; `[notifications.email]` block with from / to / subject template. Follows the existing `DesktopTransport` / `DiscordWebhook` / `TelegramBot` pattern (one struct + `impl Transport` + a config-loader helper in `nexus-bootstrap`). The keyring routing (vs plain config.toml) is the only meaningful new decision — for production deployments the password shouldn't sit in plain text on disk.
 
 ---
 

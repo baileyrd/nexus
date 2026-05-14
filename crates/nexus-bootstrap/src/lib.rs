@@ -1285,15 +1285,17 @@ fn register_core_plugins(
         )
         .or_lifecycle_skip(event_bus, "com.nexus.linkpreview")?;
 
-    // BL-133 — multi-channel notification dispatcher. v1 wires the
-    // bus-event-based Desktop transport (shell renders the toast)
-    // and the Discord webhook transport. The webhook URL is sourced
+    // BL-133 — multi-channel notification dispatcher. Wires the
+    // bus-event-based Desktop transport (shell renders the toast),
+    // the Discord webhook transport, and the Telegram bot
+    // transport. All three URLs / tokens / chat ids are sourced
     // from the forge config — empty when not configured, in which
-    // case `send(channel: discord, ...)` returns `NotConfigured` at
-    // dispatch time rather than crashing at boot. Telegram / SMTP
-    // and shell-side settings UI / workflow-step / agent-auto
-    // wiring are filed as follow-ups.
+    // case `send(channel: <c>, ...)` returns `NotConfigured` at
+    // dispatch time rather than crashing at boot. SMTP, shell-side
+    // settings UI, workflow-step, and agent-auto-notify wiring are
+    // filed as follow-ups.
     let discord_webhook_url = load_discord_webhook_url(forge_root);
+    let (telegram_bot_token, telegram_chat_id) = load_telegram_config(forge_root);
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -1309,6 +1311,8 @@ fn register_core_plugins(
             Box::new(NotificationsCorePlugin::with_defaults(
                 Some(Arc::clone(event_bus)),
                 discord_webhook_url,
+                telegram_bot_token,
+                telegram_chat_id,
             )),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.notifications")?;
@@ -2068,6 +2072,60 @@ fn load_discord_webhook_url(forge_root: &std::path::Path) -> String {
                 "config.toml: [notifications.discord] failed to parse; webhook url unset"
             );
             String::new()
+        }
+    }
+}
+
+/// BL-133 follow-up — pull `[notifications.telegram].bot_token` +
+/// `chat_id` out of `<forge>/.forge/config.toml`. Returns
+/// `(bot_token, chat_id)`; either field missing falls back to an
+/// empty string, surfacing at send-time as
+/// `SendError::NotConfigured`. Same fallback behaviour as
+/// [`load_discord_webhook_url`]. Future-compat: when the keyring
+/// path lands, swap the inner reads for `nexus-security` IPC calls
+/// while keeping the same return shape.
+fn load_telegram_config(forge_root: &std::path::Path) -> (String, String) {
+    #[derive(serde::Deserialize, Default)]
+    struct Wrapper {
+        #[serde(default)]
+        notifications: Notifications,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct Notifications {
+        #[serde(default)]
+        telegram: TelegramCfg,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct TelegramCfg {
+        #[serde(default)]
+        bot_token: String,
+        #[serde(default)]
+        chat_id: String,
+    }
+    let path = forge_root.join(".forge").join("config.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return (String::new(), String::new());
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: read failed; telegram credentials unset"
+            );
+            return (String::new(), String::new());
+        }
+    };
+    match toml::from_str::<Wrapper>(&text) {
+        Ok(w) => (w.notifications.telegram.bot_token, w.notifications.telegram.chat_id),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: [notifications.telegram] failed to parse; credentials unset"
+            );
+            (String::new(), String::new())
         }
     }
 }

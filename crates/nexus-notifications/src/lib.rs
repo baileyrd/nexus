@@ -72,6 +72,9 @@ pub enum Channel {
     Desktop,
     /// Discord webhook — HTTP POST to a configured URL.
     Discord,
+    /// Telegram bot — HTTP POST to
+    /// `https://api.telegram.org/bot<TOKEN>/sendMessage`.
+    Telegram,
 }
 
 impl Channel {
@@ -82,6 +85,7 @@ impl Channel {
         match self {
             Channel::Desktop => "desktop",
             Channel::Discord => "discord",
+            Channel::Telegram => "telegram",
         }
     }
 }
@@ -224,6 +228,118 @@ impl Transport for DiscordWebhook {
     }
 }
 
+/// Telegram bot transport. Posts to
+/// `https://api.telegram.org/bot<BOT_TOKEN>/sendMessage` with
+/// `{ chat_id, text }`. The 4096-char message limit is enforced by
+/// splitting at character boundaries and posting each chunk
+/// sequentially so the original message arrives in order.
+pub struct TelegramBot {
+    bot_token: String,
+    chat_id: String,
+    client: reqwest::blocking::Client,
+}
+
+impl TelegramBot {
+    /// Build a Telegram transport with the bot token + authorised
+    /// chat id from `.forge/config.toml::[notifications.telegram]`.
+    /// Empty `bot_token` OR empty `chat_id` surfaces as
+    /// [`SendError::NotConfigured`] at [`Transport::send`] time —
+    /// matches the Discord transport's "fail at dispatch, not at
+    /// boot" stance so missing config doesn't crash the runtime.
+    #[must_use]
+    pub fn new(bot_token: String, chat_id: String) -> Self {
+        Self {
+            bot_token,
+            chat_id,
+            client: reqwest::blocking::Client::new(),
+        }
+    }
+
+    /// Split a UTF-8 string into chunks of at most `max_chars` bytes
+    /// at character boundaries. Public for unit-testing the
+    /// 4096-char limit-enforcement path. Empty input returns a
+    /// single empty chunk so a "test ping" with no message body
+    /// still hits the API.
+    #[must_use]
+    pub fn split_at_byte_limit(text: &str, max_bytes: usize) -> Vec<&str> {
+        if text.len() <= max_bytes {
+            return vec![text];
+        }
+        let mut chunks = Vec::new();
+        let mut start = 0;
+        while start < text.len() {
+            let end_target = (start + max_bytes).min(text.len());
+            // Snap to the previous char boundary if `end_target`
+            // lands mid-character.
+            let mut end = end_target;
+            while end > start && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end == start {
+                // Pathological: a single character is wider than
+                // max_bytes. Force forward by snapping to the next
+                // boundary so we don't infinite-loop. Telegram's
+                // 4096-byte limit is well above any single-char
+                // width so this is defensive only.
+                end = end_target;
+                while end < text.len() && !text.is_char_boundary(end) {
+                    end += 1;
+                }
+            }
+            chunks.push(&text[start..end]);
+            start = end;
+        }
+        chunks
+    }
+}
+
+impl Transport for TelegramBot {
+    fn channel(&self) -> Channel {
+        Channel::Telegram
+    }
+    fn send(&self, notif: &Notification) -> Result<(), SendError> {
+        if self.bot_token.is_empty() || self.chat_id.is_empty() {
+            return Err(SendError::NotConfigured("telegram"));
+        }
+        let body = format!(
+            "{}{}",
+            notif
+                .title
+                .as_deref()
+                .map(|t| format!("*{t}*\n"))
+                .unwrap_or_default(),
+            notif.message,
+        );
+        // Telegram caps sendMessage `text` at 4096 chars (UTF-16
+        // code units in their docs, but the safer 4096-byte cap
+        // post-UTF-8 is what we enforce — at worst we send fewer
+        // characters than the API permits, which is fine).
+        const TELEGRAM_MAX_BYTES: usize = 4096;
+        let url = format!(
+            "https://api.telegram.org/bot{}/sendMessage",
+            self.bot_token
+        );
+        for chunk in Self::split_at_byte_limit(&body, TELEGRAM_MAX_BYTES) {
+            let resp = self
+                .client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "chat_id": self.chat_id,
+                    "text": chunk,
+                }))
+                .send()
+                .map_err(|e| SendError::Http(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(SendError::Http(format!(
+                    "telegram sendMessage returned {}",
+                    resp.status()
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,5 +431,77 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, SendError::NotConfigured("discord")));
+    }
+
+    // ── Telegram transport ──────────────────────────────────────
+
+    #[test]
+    fn channel_telegram_serde_round_trip() {
+        let t: Channel = serde_json::from_str("\"telegram\"").unwrap();
+        assert_eq!(t, Channel::Telegram);
+        let s = serde_json::to_value(Channel::Telegram).unwrap();
+        assert_eq!(s, serde_json::Value::String("telegram".into()));
+        assert_eq!(Channel::Telegram.as_str(), "telegram");
+    }
+
+    #[test]
+    fn telegram_transport_empty_bot_token_reports_not_configured() {
+        let t = TelegramBot::new(String::new(), "12345".into());
+        let err = t
+            .send(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, SendError::NotConfigured("telegram")));
+    }
+
+    #[test]
+    fn telegram_transport_empty_chat_id_reports_not_configured() {
+        let t = TelegramBot::new("bot:token".into(), String::new());
+        let err = t
+            .send(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, SendError::NotConfigured("telegram")));
+    }
+
+    #[test]
+    fn telegram_split_at_byte_limit_short_text_single_chunk() {
+        let chunks = TelegramBot::split_at_byte_limit("hello", 100);
+        assert_eq!(chunks, vec!["hello"]);
+    }
+
+    #[test]
+    fn telegram_split_at_byte_limit_long_text_chunks() {
+        let text = "x".repeat(10_000);
+        let chunks = TelegramBot::split_at_byte_limit(&text, 4096);
+        assert_eq!(chunks.len(), 3); // 4096 + 4096 + 1808
+        assert_eq!(chunks[0].len(), 4096);
+        assert_eq!(chunks[1].len(), 4096);
+        assert_eq!(chunks[2].len(), 10_000 - 4096 - 4096);
+        // Round-trip: chunks concatenated equal the original.
+        let joined: String = chunks.into_iter().collect();
+        assert_eq!(joined, text);
+    }
+
+    #[test]
+    fn telegram_split_at_byte_limit_respects_utf8_boundaries() {
+        // 4-byte emoji 🦀 (4 bytes) placed at a position where a
+        // naive cut would split mid-codepoint. With max=5, the
+        // limit lands at byte 5 → snap back to byte 4 (after 🦀)
+        // → first chunk = "🦀".
+        let text = "🦀🦀";
+        let chunks = TelegramBot::split_at_byte_limit(text, 5);
+        for c in &chunks {
+            // Every chunk must be valid UTF-8 (slicing wouldn't
+            // even produce a Vec<&str> otherwise — but pin the
+            // invariant explicitly).
+            assert!(std::str::from_utf8(c.as_bytes()).is_ok());
+        }
+        let joined: String = chunks.into_iter().collect();
+        assert_eq!(joined, text);
     }
 }

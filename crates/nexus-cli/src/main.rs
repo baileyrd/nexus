@@ -478,7 +478,7 @@ enum NotifyCommand {
     /// follow-ups) need their transport configured in
     /// `.forge/config.toml::[notifications.<channel>]`.
     Send {
-        /// Channel: `desktop` | `discord`.
+        /// Channel: `desktop` | `discord` | `telegram`.
         #[arg(long)]
         channel: String,
         /// Message body.

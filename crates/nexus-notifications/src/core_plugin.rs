@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use crate::{Channel, DesktopTransport, DiscordWebhook, Notification, Transport};
+use crate::{Channel, DesktopTransport, DiscordWebhook, Notification, TelegramBot, Transport};
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.notifications";
@@ -80,25 +80,34 @@ pub struct NotificationsCorePlugin {
 }
 
 impl NotificationsCorePlugin {
-    /// Build a fresh plugin with the BL-133 v1 default transports
+    /// Build a fresh plugin with the BL-133 default transports
     /// wired in:
     ///
     /// - `Channel::Desktop` → [`DesktopTransport`] bound to the
     ///   supplied event bus (no bus → `SendError::NotConfigured`).
     /// - `Channel::Discord` → [`DiscordWebhook`] bound to
-    ///   `discord_webhook_url`. An empty string surfaces
+    ///   `discord_webhook_url`. Empty string surfaces
     ///   `SendError::NotConfigured` at send time so missing config
     ///   doesn't crash at boot.
+    /// - `Channel::Telegram` → [`TelegramBot`] bound to
+    ///   `telegram_bot_token` + `telegram_chat_id`. Either empty
+    ///   surfaces `SendError::NotConfigured` at send time.
     #[must_use]
     pub fn with_defaults(
         bus: Option<Arc<EventBus>>,
         discord_webhook_url: String,
+        telegram_bot_token: String,
+        telegram_chat_id: String,
     ) -> Self {
         let mut transports: HashMap<Channel, Box<dyn Transport>> = HashMap::new();
         transports.insert(Channel::Desktop, Box::new(DesktopTransport::new(bus)));
         transports.insert(
             Channel::Discord,
             Box::new(DiscordWebhook::new(discord_webhook_url)),
+        );
+        transports.insert(
+            Channel::Telegram,
+            Box::new(TelegramBot::new(telegram_bot_token, telegram_chat_id)),
         );
         Self { transports }
     }
@@ -289,7 +298,7 @@ mod tests {
     #[test]
     fn send_rejects_missing_message() {
         let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new());
+            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new());
         let err = plugin
             .dispatch(HANDLER_SEND, &serde_json::json!({ "channel": "desktop" }))
             .unwrap_err();
@@ -299,7 +308,7 @@ mod tests {
     #[test]
     fn send_rejects_unknown_field() {
         let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new());
+            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new());
         let err = plugin
             .dispatch(
                 HANDLER_SEND,
@@ -316,7 +325,7 @@ mod tests {
     #[test]
     fn unknown_handler_id_errors() {
         let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new());
+            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new());
         let err = plugin.dispatch(99, &serde_json::json!({})).unwrap_err();
         assert!(format!("{err}").contains("unknown handler id 99"));
     }
