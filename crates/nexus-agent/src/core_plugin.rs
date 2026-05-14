@@ -1203,6 +1203,84 @@ struct SessionIdArgs {
     id: String,
 }
 
+/// DG-33 follow-up — auto-record the completed session into the
+/// agent's `history.jsonl`. Derived events come from
+/// [`crate::memory::events_from_session`]; the batch is appended
+/// in a single read-once / write-once IPC round-trip via the same
+/// `ctx.read_file` + `ctx.write_file` primitive that
+/// [`handle_memory_record`] uses for one entry.
+///
+/// Non-fatal: a memory-layer failure here is *logged* but does not
+/// block the session result. The session loop has already
+/// completed; the caller cares about the result, not the audit
+/// trail. A future enhancement can mirror this onto the kernel
+/// bus so a watchdog can re-attempt on failure.
+///
+/// Skipped entirely when:
+/// - the agent has no archetype (the default agent doesn't get a
+///   per-agent log; nothing to record),
+/// - the session produced no recordable events (no tool calls, no
+///   compactions, no error outcome),
+/// - the archetype slug fails `normalize_agent_id` validation
+///   (defensive — would only fire if the resolver let an invalid
+///   slug through, which it doesn't today).
+async fn record_session_memory(
+    ctx: &KernelPluginContext,
+    session: &crate::session::AgentSession,
+) {
+    let Some(archetype) = session.archetype.as_deref() else {
+        return;
+    };
+    let agent_id = archetype.trim();
+    if agent_id.is_empty() {
+        return;
+    }
+    if let Err(e) = crate::memory::normalize_agent_id(agent_id) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            archetype = agent_id,
+            error = %e,
+            "DG-33 auto-record: rejecting invalid agent id; skipping",
+        );
+        return;
+    }
+    let now = now_unix_ms();
+    let events = crate::memory::events_from_session(session, now);
+    if events.is_empty() {
+        return;
+    }
+    let path = crate::memory::history_path(agent_id);
+    let appended = match crate::memory::serialize_entries_jsonl(&events, &path) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(
+                plugin_id = PLUGIN_ID,
+                error = %e,
+                "DG-33 auto-record: serialize failed; skipping",
+            );
+            return;
+        }
+    };
+    let existing = ctx.read_file(&path).await.unwrap_or_default();
+    let mut combined = existing;
+    combined.extend_from_slice(&appended);
+    if let Err(e) = ctx.write_file(&path, &combined).await {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            path = %path.display(),
+            error = %e,
+            "DG-33 auto-record: write failed; not blocking session result",
+        );
+        return;
+    }
+    tracing::debug!(
+        plugin_id = PLUGIN_ID,
+        agent_id,
+        entry_count = events.len(),
+        "DG-33 auto-record: appended session events to history.jsonl",
+    );
+}
+
 /// DG-36 follow-up — run a session with an optional
 /// [`crate::ManifestPolicyGate`] wrapping the base policy. Centralises
 /// the "wrap if Some, pass through if None" branching so
@@ -1360,6 +1438,14 @@ async fn handle_session_run(
         drop_pending(&pending_approvals, &session.id);
         session
     };
+
+    // DG-33 follow-up — auto-record the session into the agent's
+    // memory log so the next invocation can recall prior tool
+    // calls, errors, and compactions without the planner having to
+    // ask. Derived from the completed `AgentSession`; non-fatal
+    // failures are logged so a memory-layer hiccup never blocks the
+    // session result.
+    record_session_memory(&ctx, &session).await;
 
     // Persist before returning so a crash mid-call still leaves a
     // record on disk.

@@ -242,6 +242,125 @@ pub fn history_path(agent_id: &str) -> PathBuf {
     agent_dir(agent_id).join(HISTORY_FILE)
 }
 
+/// DG-33 auto-recording — derive the stream of [`MemoryEntry`]
+/// values the session loop should auto-record for a completed
+/// [`crate::AgentSession`].
+///
+/// Three classes of entry are emitted:
+///
+/// - **Compaction events.** `session.compactions` carries the
+///   per-rollup `CompactionEvent`s the BL-120 compressor produced;
+///   each one becomes a [`MemoryEntry::CompactedTurns`].
+///   `rounds_compressed` is `last_round - first_round + 1`. The PRD
+///   guarantees `>= 1`.
+/// - **Tool calls.** One [`MemoryEntry::ToolCall`] per
+///   `ToolCallRecord` in every round. `success = approved &&
+///   error.is_empty()`. `duration_ms = 0` for now — the session
+///   loop doesn't measure dispatch latency (a future enhancement
+///   can populate it). The wall-clock `timestamp_ms` is the value
+///   `now_ms` the caller passes in; the session record itself
+///   carries no per-call timestamp.
+/// - **Errors.** One [`MemoryEntry::Error`] per tool call whose
+///   `error` field is non-empty (denied or dispatch-failed), plus
+///   one session-level error when `outcome` is
+///   [`crate::session::SessionOutcome::Errored`].
+///
+/// `now_ms` is taken once at call time and reused for every emitted
+/// entry so they sort together when interleaved with timestamps
+/// from `CompactionEvent` (which the loop stamped at compression
+/// time). Callers should call this exactly once per finished
+/// session.
+///
+/// Pure — no I/O, no clocks. The caller provides `now_ms`. Returns
+/// an empty `Vec` for a session with no rounds + no compactions +
+/// no error outcome, so the caller can short-circuit on
+/// `is_empty()` without further checks.
+#[must_use]
+pub fn events_from_session(
+    session: &crate::session::AgentSession,
+    now_ms: u64,
+) -> Vec<MemoryEntry> {
+    let mut out = Vec::new();
+
+    // Compactions first — they ran before the final rounds and
+    // carry their own timestamp from the compressor.
+    for c in &session.compactions {
+        let rounds_compressed = c
+            .last_round
+            .saturating_sub(c.first_round)
+            .saturating_add(1);
+        if rounds_compressed == 0 {
+            // Defensive — invariant says >= 1, but a future bug in
+            // the compressor shouldn't poison the memory log.
+            continue;
+        }
+        out.push(MemoryEntry::CompactedTurns {
+            rounds_compressed,
+            summary: c.summary.clone(),
+            timestamp_ms: c.timestamp_ms,
+        });
+    }
+
+    // Tool calls + per-call errors.
+    for round in &session.rounds {
+        for tc in &round.tool_calls {
+            let success = tc.approved && tc.error.is_empty();
+            out.push(MemoryEntry::ToolCall {
+                tool: tc.name.clone(),
+                success,
+                duration_ms: 0,
+                timestamp_ms: now_ms,
+            });
+            if !tc.error.is_empty() {
+                out.push(MemoryEntry::Error {
+                    message: format!("{}: {}", tc.name, tc.error),
+                    step_id: Some(tc.id.clone()),
+                    timestamp_ms: now_ms,
+                });
+            }
+        }
+    }
+
+    // Session-level error outcome.
+    if matches!(session.outcome, crate::session::SessionOutcome::Errored) {
+        out.push(MemoryEntry::Error {
+            message: format!("session {} ended with outcome=Errored", session.id),
+            step_id: None,
+            timestamp_ms: now_ms,
+        });
+    }
+
+    out
+}
+
+/// Serialise a batch of [`MemoryEntry`] values as newline-terminated
+/// JSON. Used by the session-loop auto-record path that appends
+/// many entries in one IPC round-trip via the kernel context's
+/// `read_file` + `write_file` pair (the same primitive
+/// `handle_memory_record` uses for a single entry).
+///
+/// Empty input returns an empty buffer; callers should check first.
+///
+/// # Errors
+/// Returns [`MemoryError::Json`] if any entry fails to serialise.
+/// The path field is the caller-supplied tag — typically the
+/// agent's `history.jsonl` — so the error message is locatable.
+pub fn serialize_entries_jsonl(
+    entries: &[MemoryEntry],
+    tag_path: &Path,
+) -> Result<Vec<u8>, MemoryError> {
+    let mut out = Vec::new();
+    for entry in entries {
+        let mut line = serde_json::to_vec(entry).map_err(|source| MemoryError::Json {
+            path: tag_path.to_path_buf(),
+            source,
+        })?;
+        line.push(b'\n');
+        out.extend_from_slice(&line);
+    }
+    Ok(out)
+}
+
 /// Append one entry to the agent's `history.jsonl`.
 ///
 /// Pure filesystem operation — used by callers that already hold a
@@ -712,5 +831,212 @@ mod tests {
             agent_dir("com.nexus.agent.writer"),
             PathBuf::from(".forge/agents/com.nexus.agent.writer")
         );
+    }
+
+    // ── DG-33 follow-up — events_from_session ──────────────────────────────────
+
+    use crate::compression::CompactionEvent;
+    use crate::llm::ProposedToolCall;
+    use crate::session::{
+        AgentSession, RoundRecord, SessionOutcome, ToolCallRecord,
+    };
+    use crate::ToolCall;
+
+    fn record(id: &str, name: &str, approved: bool, error: &str) -> ToolCallRecord {
+        let _ = ProposedToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            tool_call: ToolCall {
+                target_plugin_id: "com.nexus.storage".to_string(),
+                command_id: name.to_string(),
+                args: serde_json::json!({}),
+            },
+        };
+        ToolCallRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            tool_call: ToolCall {
+                target_plugin_id: "com.nexus.storage".to_string(),
+                command_id: name.to_string(),
+                args: serde_json::json!({}),
+            },
+            approved,
+            reason: String::new(),
+            response: None,
+            error: error.to_string(),
+        }
+    }
+
+    fn session_with(
+        outcome: SessionOutcome,
+        rounds: Vec<Vec<ToolCallRecord>>,
+        compactions: Vec<CompactionEvent>,
+    ) -> AgentSession {
+        AgentSession {
+            id: "sess-1".to_string(),
+            goal: "do thing".to_string(),
+            archetype: Some("com.nexus.agent.coder".to_string()),
+            started_at: String::new(),
+            ended_at: String::new(),
+            rounds: rounds
+                .into_iter()
+                .enumerate()
+                .map(|(i, calls)| RoundRecord {
+                    round: (i + 1) as u32,
+                    text: String::new(),
+                    tool_calls: calls,
+                })
+                .collect(),
+            outcome,
+            compactions,
+        }
+    }
+
+    #[test]
+    fn events_from_empty_session_is_empty() {
+        let s = session_with(SessionOutcome::Complete, vec![], vec![]);
+        assert!(events_from_session(&s, 1_700_000_000_000).is_empty());
+    }
+
+    #[test]
+    fn events_from_session_emits_one_tool_call_per_record() {
+        let s = session_with(
+            SessionOutcome::Complete,
+            vec![vec![
+                record("a", "read_file", true, ""),
+                record("b", "write_file", true, ""),
+            ]],
+            vec![],
+        );
+        let entries = events_from_session(&s, 1_700_000_000_000);
+        assert_eq!(entries.len(), 2);
+        for e in &entries {
+            match e {
+                MemoryEntry::ToolCall { success, .. } => assert!(success),
+                other => panic!("expected ToolCall, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn events_from_session_emits_error_alongside_failed_tool_call() {
+        let s = session_with(
+            SessionOutcome::Complete,
+            vec![vec![record("a", "write_file", true, "ENOSPC")]],
+            vec![],
+        );
+        let entries = events_from_session(&s, 1_700_000_000_000);
+        // One ToolCall + one Error.
+        assert_eq!(entries.len(), 2);
+        match &entries[0] {
+            MemoryEntry::ToolCall { success, tool, .. } => {
+                assert!(!success);
+                assert_eq!(tool, "write_file");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+        match &entries[1] {
+            MemoryEntry::Error { message, step_id, .. } => {
+                assert!(message.contains("write_file"));
+                assert!(message.contains("ENOSPC"));
+                assert_eq!(step_id.as_deref(), Some("a"));
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn events_from_session_records_denied_call_as_unsuccessful() {
+        // approved=false → success=false, error carries the denial
+        // reason which also produces an Error entry.
+        let s = session_with(
+            SessionOutcome::Complete,
+            vec![vec![record(
+                "x",
+                "terminal_send_signal",
+                false,
+                "denied by policy",
+            )]],
+            vec![],
+        );
+        let entries = events_from_session(&s, 1_700_000_000_000);
+        assert_eq!(entries.len(), 2);
+        match &entries[0] {
+            MemoryEntry::ToolCall { success, .. } => assert!(!success),
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+        assert!(matches!(&entries[1], MemoryEntry::Error { .. }));
+    }
+
+    #[test]
+    fn events_from_session_emits_compacted_turns_first() {
+        let compaction = CompactionEvent {
+            first_round: 1,
+            last_round: 4,
+            summary: "earlier rounds rolled up".to_string(),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let s = session_with(
+            SessionOutcome::Complete,
+            vec![vec![record("a", "read_file", true, "")]],
+            vec![compaction],
+        );
+        let entries = events_from_session(&s, 1_700_000_001_000);
+        assert_eq!(entries.len(), 2);
+        match &entries[0] {
+            MemoryEntry::CompactedTurns {
+                rounds_compressed,
+                summary,
+                ..
+            } => {
+                assert_eq!(*rounds_compressed, 4);
+                assert!(summary.contains("rolled up"));
+            }
+            other => panic!("expected CompactedTurns, got {other:?}"),
+        }
+        assert!(matches!(&entries[1], MemoryEntry::ToolCall { .. }));
+    }
+
+    #[test]
+    fn events_from_session_appends_session_level_error_when_outcome_errored() {
+        let s = session_with(SessionOutcome::Errored, vec![], vec![]);
+        let entries = events_from_session(&s, 1_700_000_000_000);
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            MemoryEntry::Error { message, step_id, .. } => {
+                assert!(message.contains("sess-1"));
+                assert!(message.contains("Errored"));
+                assert!(step_id.is_none());
+            }
+            other => panic!("expected session-level Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serialize_entries_jsonl_round_trips_through_parse_memory_lines_equivalent() {
+        let entries = vec![
+            MemoryEntry::ToolCall {
+                tool: "read_file".to_string(),
+                success: true,
+                duration_ms: 0,
+                timestamp_ms: 1,
+            },
+            MemoryEntry::Error {
+                message: "boom".to_string(),
+                step_id: Some("step-1".to_string()),
+                timestamp_ms: 2,
+            },
+        ];
+        let bytes = serialize_entries_jsonl(&entries, Path::new("/tmp/h.jsonl")).unwrap();
+        // Two newline-terminated records.
+        assert_eq!(bytes.iter().filter(|b| **b == b'\n').count(), 2);
+        let parsed: Vec<MemoryEntry> = bytes
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect();
+        assert_eq!(parsed.len(), 2);
+        assert!(matches!(parsed[0], MemoryEntry::ToolCall { .. }));
+        assert!(matches!(parsed[1], MemoryEntry::Error { .. }));
     }
 }
