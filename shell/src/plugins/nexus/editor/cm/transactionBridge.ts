@@ -43,6 +43,7 @@ import type {
 } from '../types.ts'
 import { useEditorStore } from '../editorStore.ts'
 import { resolveBlockPos, resolveBlockRange } from './blockPosMap.ts'
+import { beginKeystroke } from '../typingPerf.ts'
 
 /**
  * Optional surface for surfacing errors. The bridge gets a `KernelAPI`
@@ -354,6 +355,11 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
 
   const dispatchTransaction = (view: BridgeViewLike, tx: Transaction): void => {
     useEditorStore.getState().addPendingLocalRevision(tx.id)
+    // BL-127 Phase A — bracket the kernel apply path so a developer
+    // running with `VITE_NEXUS_PERF_TYPING=1` sees per-keystroke
+    // durations in the browser's Performance panel. No-op when the
+    // env var is off — a cached-bool read + a returned noop closure.
+    const endKeystrokeMeasure = beginKeystroke()
     // Text-only ops can't diverge from CM — the kernel just mutates
     // block content verbatim, no serializer normalisation. Skip the
     // post-apply `getMarkdown` round-trip for these; structural ops
@@ -430,6 +436,10 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
         } catch {
           mirror = null
         }
+      } finally {
+        // BL-127 Phase A — close the perf measure regardless of
+        // success/failure so a measure entry lands per keystroke.
+        endKeystrokeMeasure()
       }
     })
   }

@@ -265,20 +265,22 @@ BL-126's DoD asked for a "multi-relpath concurrency test [that] exercises two se
 
 ---
 
-### BL-127: Runtime typing-latency perf scenarios (Phase 5 of TYPING-LATENCY-PLAN)
+_BL-127 Phase A closed 2026-05-14 (partial close — the WDIO-Tauri runtime runner remains a deferred follow-up). New `editor.typing.{small,medium,large}` scenarios in `experiments/perf/run.ts` mount a real CodeMirror `EditorView` under happy-dom with `livePreviewExt` + `markdown()`, dispatch N keystroke-shaped transactions per size, and measure each dispatch's wall time. Baseline numbers (50 / 500 / 5000 lines): small p50 510 µs / p95 803 µs; medium 702 / 2351 µs; large 2964 / 5542 µs — well under the BL-127 DoD targets (p95 < 16 ms small/medium, < 33 ms large). The shape captures CM6 → syntax-tree → StateField/ViewPlugin recompute → DOM commit on a happy-dom layout engine; **not** captured: Tauri IPC, real GPU paint, React commit through the EditorView prop pipeline. The full WDIO-Tauri runtime measurement that would capture those layers remains a deferred follow-up — same gating BL-112 called out, same runner this BL is gated on. New production-side `VITE_NEXUS_PERF_TYPING=1` instrumentation hook in `shell/src/plugins/nexus/editor/typingPerf.ts`: `beginKeystroke()` returns a `performance.mark`/`measure`-wrapping end callback, no-op when the env var is off. Wired into `transactionBridge.ts::dispatchTransaction` so every kernel-routed keystroke produces a measure entry when enabled. 7 helper tests pin the hook (disabled-no-op, enabled-measure-recorded, overlapping calls produce independent measures, dropped end is safe, limit cap, clear). `cargo test -p nexus-editor` 232/232; `pnpm --filter nexus-shell test` 1408/1409 (+7 new); typecheck + lint clean._
 
-**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
-**Effort**: Medium. Gated on the WDIO-Tauri runner that BL-112 also defers.
-**Crates**: `experiments/perf` + a small instrumentation hook in shell `nexus.editor`.
+---
 
-The microbenchmarks from BL-122 gate the kernel and decoration paths but miss IPC, Tauri serialization, webview paint, and React re-render. This BL fills in the runtime side from BL-112's deferred slot — `typing.small/medium/large` scenarios that boot the shell against a synthetic forge, open a markdown tab, programmatically dispatch keydown events, and measure keystroke → next-frame-paint via `performance.mark`/`performance.measure`. Wires into CI as non-blocking first, then promotes to a regression gate once variance settles.
+### Follow-up: WDIO-Tauri runner (from BL-127)
 
-**Definition of done:**
-- WDIO-Tauri runner stood up (track separately; reference here)
-- `typing.{small,medium,large}` scenarios produce stable numbers (< 10% variance across 3 runs)
-- Targets: p95 keystroke → paint < 16 ms (small/medium), < 33 ms (large)
-- Instrumentation hook in `EditorView.tsx` gated by `NEXUS_PERF_TYPING=1` so production paths aren't paying for it
-- Regression in any of BL-123/BL-124/BL-125/BL-126 surfaces as a CI delta
+**Source**: BL-127 deferral. Filed 2026-05-14. Original gate also blocks BL-112's runtime scenarios.
+**Effort**: Medium — stand up a WebDriver-based runner that boots the Tauri shell, scripts pointer / keyboard events, and reads `performance.measure` entries back through the bridge.
+
+BL-127 Phase A's editor-engine measurements capture the CM6 → StateField / ViewPlugin → DOM commit path on a happy-dom layout engine. What's still missing is the **runtime** end-to-end measurement that includes:
+
+- Tauri IPC serialisation (kernel ↔ webview)
+- Real GPU paint (happy-dom has no layout / paint pipeline)
+- React commit through `EditorView`'s prop pipeline
+
+`shell/e2e/` already has WDIO scaffolding for the E2E tests; the typing-perf runner would extend that surface with timing-aware scenarios. Once the runner exists, the existing `VITE_NEXUS_PERF_TYPING=1` hook drops the per-keystroke `performance.measure` entries into the buffer; the WDIO scenario reads them back and produces the same `MicrobenchResult` shape the BL-122 harness already writes. Targets stay: p95 keystroke → paint < 16 ms (small/medium), < 33 ms (large).
 
 ---
 

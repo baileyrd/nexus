@@ -471,6 +471,76 @@ function buildMarkdownDoc(lineCount: number): string {
  * absorbs the full-tree pass (which is cheap because block
  * constructs are rare).
  */
+/**
+ * BL-127 Phase A — `editor.typing.{small,medium,large}` scenarios.
+ *
+ * Mounts a real CodeMirror EditorView under happy-dom with the
+ * production `livePreviewExt` (BL-125's StateField + ViewPlugin
+ * split) + the markdown language extension. Dispatches N
+ * keystroke-shaped transactions and measures each dispatch's wall
+ * time. The number reflects the CM6 → syntax-tree → StateField /
+ * ViewPlugin recompute → DOM render path on a happy-dom layout
+ * engine — which is what BL-123 / BL-124 / BL-125 / BL-126
+ * collectively optimise on the editor side.
+ *
+ * **Not measured**: Tauri IPC serialisation, real GPU paint, React
+ * re-render through `EditorView.tsx`'s prop pipeline. Those need a
+ * WDIO-Tauri runner that doesn't exist yet — same gating BL-112's
+ * runtime scenarios called out. The Phase A baseline + the
+ * `VITE_NEXUS_PERF_TYPING=1` production hook (see EditorView.tsx)
+ * cover the editor-engine half today.
+ */
+async function microbenchEditorTyping(): Promise<Record<string, MicrobenchResult>> {
+  await ensureDom()
+  const { EditorState } = await importFromShell<typeof import('@codemirror/state')>(
+    '@codemirror/state',
+  )
+  const { EditorView } = await importFromShell<typeof import('@codemirror/view')>(
+    '@codemirror/view',
+  )
+  const { markdown } = await importFromShell<typeof import('@codemirror/lang-markdown')>(
+    '@codemirror/lang-markdown',
+  )
+  const { ensureSyntaxTree } = await importFromShell<typeof import('@codemirror/language')>(
+    '@codemirror/language',
+  )
+  const { livePreviewExt } = await import(
+    '../../shell/src/plugins/nexus/editor/cm/livePreview.ts'
+  )
+  const results: Record<string, MicrobenchResult> = {}
+  // Re-use the same size buckets as live-preview so a per-keystroke
+  // regression in BL-123 / BL-125 shows up here at the matching
+  // scale.
+  for (const sz of LIVE_PREVIEW_SIZES) {
+    const doc = buildMarkdownDoc(sz.lineCount)
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = new EditorView({
+      state: EditorState.create({
+        doc,
+        extensions: [markdown(), livePreviewExt()],
+      }),
+      parent,
+    })
+    // Force a complete lezer parse before the first measured
+    // dispatch — same reason as the decoration scenario.
+    ensureSyntaxTree(view.state, view.state.doc.length, 30_000)
+    let insertPos = view.state.doc.length
+    try {
+      results[`editor.typing.${sz.name}`] = timeBlock(() => {
+        view.dispatch({
+          changes: { from: insertPos, to: insertPos, insert: 'x' },
+        })
+        insertPos += 1
+      }, sz.iterations)
+    } finally {
+      view.destroy()
+      parent.remove()
+    }
+  }
+  return results
+}
+
 async function microbenchLivePreviewDecorate(): Promise<Record<string, MicrobenchResult>> {
   await ensureDom()
   const { EditorState } = await importFromShell<typeof import('@codemirror/state')>(
@@ -541,6 +611,8 @@ async function main(): Promise<void> {
   const apply = microbenchKernelApplyTransaction()
   console.error('[perf] running editor.livePreview.decorate.* (happy-dom + CM6)...')
   const livePreview = await microbenchLivePreviewDecorate()
+  console.error('[perf] running editor.typing.* (BL-127 — mounted CM6 keystrokes)...')
+  const typing = await microbenchEditorTyping()
   console.error('[perf] running editor.markdownRender.large (marked + DOMPurify)...')
   const markdownLarge = await microbenchMarkdownRenderLarge()
 
@@ -553,6 +625,7 @@ async function main(): Promise<void> {
     'frameSnapshot.4stores.flush': frame,
     ...sortRecord(apply),
     ...sortRecord(livePreview),
+    ...sortRecord(typing),
     'editor.markdownRender.large': markdownLarge,
   }
 
