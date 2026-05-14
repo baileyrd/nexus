@@ -1137,8 +1137,9 @@ without the planner having to ask.
   classes: `CompactedTurns` (one per BL-120 `CompactionEvent`,
   `rounds_compressed = last_round - first_round + 1`), `ToolCall`
   (one per `ToolCallRecord`, `success = approved && error.is_empty()`,
-  `duration_ms = 0` until the session loop measures dispatch
-  latency), `Error` (one per failed call carrying `tool: error`
+  `duration_ms` carries the dispatcher-measured wall-clock latency
+  from `session::dispatch_one`'s `Instant::now()` instrumentation
+  shipped 2026-05-14), `Error` (one per failed call carrying `tool: error`
   plus the per-call `step_id`, plus one session-level entry when
   `outcome == Errored`). `Decision` / `Artifact` deliberately stay
   out — those need explicit model / user intent.

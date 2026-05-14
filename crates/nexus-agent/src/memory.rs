@@ -301,14 +301,18 @@ pub fn events_from_session(
         });
     }
 
-    // Tool calls + per-call errors.
+    // Tool calls + per-call errors. `duration_ms` is the
+    // dispatcher-measured wall-clock latency from
+    // `session::dispatch_one`; `0` for denied calls (no dispatch) +
+    // for entries loaded from a pre-DG-33-duration on-disk
+    // transcript (the serde default rides over the missing field).
     for round in &session.rounds {
         for tc in &round.tool_calls {
             let success = tc.approved && tc.error.is_empty();
             out.push(MemoryEntry::ToolCall {
                 tool: tc.name.clone(),
                 success,
-                duration_ms: 0,
+                duration_ms: tc.duration_ms,
                 timestamp_ms: now_ms,
             });
             if !tc.error.is_empty() {
@@ -432,10 +436,18 @@ pub fn format_memory_preamble(
                     );
                 }
                 MemoryEntry::ToolCall {
-                    tool, success, ..
+                    tool,
+                    success,
+                    duration_ms,
+                    ..
                 } => {
                     let marker = if *success { "ok" } else { "FAILED" };
-                    let _ = writeln!(out, "- {marker} tool `{tool}`");
+                    if *duration_ms > 0 {
+                        let _ =
+                            writeln!(out, "- {marker} tool `{tool}` ({duration_ms}ms)");
+                    } else {
+                        let _ = writeln!(out, "- {marker} tool `{tool}`");
+                    }
                 }
                 MemoryEntry::StepExecution { step_id, success, summary, .. } => {
                     let marker = if *success { "ok" } else { "FAILED" };
@@ -969,6 +981,18 @@ mod tests {
     };
     use crate::ToolCall;
 
+    fn record_with_duration(
+        id: &str,
+        name: &str,
+        approved: bool,
+        error: &str,
+        duration_ms: u64,
+    ) -> ToolCallRecord {
+        let mut r = record(id, name, approved, error);
+        r.duration_ms = duration_ms;
+        r
+    }
+
     fn record(id: &str, name: &str, approved: bool, error: &str) -> ToolCallRecord {
         let _ = ProposedToolCall {
             id: id.to_string(),
@@ -991,6 +1015,7 @@ mod tests {
             reason: String::new(),
             response: None,
             error: error.to_string(),
+            duration_ms: 0,
         }
     }
 
@@ -1023,6 +1048,66 @@ mod tests {
     fn events_from_empty_session_is_empty() {
         let s = session_with(SessionOutcome::Complete, vec![], vec![]);
         assert!(events_from_session(&s, 1_700_000_000_000).is_empty());
+    }
+
+    #[test]
+    fn events_from_session_carries_dispatch_duration() {
+        // DG-33 follow-up — the dispatcher-measured `duration_ms` on
+        // each `ToolCallRecord` must surface verbatim on the emitted
+        // `MemoryEntry::ToolCall` so prompt-time recall can show
+        // "tool X took 12ms last time".
+        let s = session_with(
+            SessionOutcome::Complete,
+            vec![vec![
+                record_with_duration("a", "read_file", true, "", 7),
+                record_with_duration("b", "write_file", true, "ENOSPC", 1234),
+            ]],
+            vec![],
+        );
+        let entries = events_from_session(&s, 1_700_000_000_000);
+        // 1 ToolCall for `a` + 1 ToolCall + 1 Error for `b`.
+        assert_eq!(entries.len(), 3);
+        match &entries[0] {
+            MemoryEntry::ToolCall {
+                tool, duration_ms, ..
+            } => {
+                assert_eq!(tool, "read_file");
+                assert_eq!(*duration_ms, 7);
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+        match &entries[1] {
+            MemoryEntry::ToolCall {
+                tool, duration_ms, ..
+            } => {
+                assert_eq!(tool, "write_file");
+                assert_eq!(*duration_ms, 1234);
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preamble_shows_duration_for_measured_tool_calls() {
+        let entries = vec![
+            MemoryEntry::ToolCall {
+                tool: "slow_tool".to_string(),
+                success: true,
+                duration_ms: 1234,
+                timestamp_ms: 10,
+            },
+            MemoryEntry::ToolCall {
+                tool: "unmeasured".to_string(),
+                success: true,
+                duration_ms: 0,
+                timestamp_ms: 5,
+            },
+        ];
+        let out = format_memory_preamble(&entries, 0, 10).unwrap();
+        assert!(out.contains("ok tool `slow_tool` (1234ms)"));
+        // Zero duration → no parenthetical.
+        assert!(out.contains("ok tool `unmeasured`\n"));
+        assert!(!out.contains("unmeasured` ("));
     }
 
     #[test]

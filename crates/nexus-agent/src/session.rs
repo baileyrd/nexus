@@ -306,6 +306,25 @@ pub struct ToolCallRecord {
     /// successfully.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub error: String,
+    /// DG-33 follow-up — wall-clock duration the dispatcher took to
+    /// run this tool call, measured by [`dispatch_one`] across the
+    /// async `dispatcher.dispatch(...)` await. `0` for denied calls
+    /// (which never invoke the dispatcher) and for sessions
+    /// deserialised from a pre-DG-33-duration transcript on disk
+    /// (the `#[serde(default)]` rides over the missing field).
+    /// Surfaces in `MemoryEntry::ToolCall.duration_ms` through
+    /// `crate::memory::events_from_session` so the prompt-time
+    /// recall preamble can show "tool X took 12ms last time".
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub duration_ms: u64,
+}
+
+/// `serde(skip_serializing_if)` helper used by `ToolCallRecord`'s
+/// `duration_ms` field — keeps the on-disk JSON small for entries
+/// that didn't run (denied) or weren't measured (pre-DG-33).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 /// One round in a recorded session.
@@ -730,6 +749,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     reason: reason.clone(),
                     response: None,
                     error: format!("session aborted: {reason}"),
+                    duration_ms: 0,
                 })
                 .collect(),
             Some(RoundStopReason::Aborted(reason)),
@@ -745,6 +765,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     reason: reason.clone(),
                     response: None,
                     error: format!("approval timeout: {reason}"),
+                    duration_ms: 0,
                 })
                 .collect(),
             Some(RoundStopReason::Timeout(reason)),
@@ -794,9 +815,20 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             } else {
                 reason
             },
+            duration_ms: 0,
         };
     }
-    match dispatcher.dispatch(&proposed.tool_call).await {
+    // DG-33 follow-up — measure wall-clock dispatch latency so
+    // `events_from_session` can populate `MemoryEntry::ToolCall.duration_ms`
+    // with a real value rather than a placeholder zero. The clock
+    // start happens *after* the approval gate so denials don't
+    // pollute the metric; the saturating cast caps at u64::MAX in
+    // the pathological case where a dispatch hangs longer than ~584
+    // million years.
+    let started = std::time::Instant::now();
+    let outcome = dispatcher.dispatch(&proposed.tool_call).await;
+    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match outcome {
         Ok(value) => ToolCallRecord {
             id: proposed.id,
             name: proposed.name,
@@ -805,6 +837,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             reason,
             response: Some(value),
             error: String::new(),
+            duration_ms,
         },
         Err(e) => ToolCallRecord {
             id: proposed.id,
@@ -814,6 +847,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             reason,
             response: None,
             error: e,
+            duration_ms,
         },
     }
 }
