@@ -384,12 +384,16 @@ The third v1-scope channel from the original BL-133 DoD. `lettre` crate; TLS by 
 
 ---
 
+_BL-133 follow-up (shell-side subscriber for `com.nexus.notifications.delivered`) closed 2026-05-14. New `shell/src/plugins/nexus/notifications/index.ts` plugin subscribes to the `com.nexus.notifications.delivered` bus event published by the `DesktopTransport` and routes each payload through `api.notifications.show` (the existing in-app toast surface). Two pure helpers: `toastTypeFor` picks `info` / `warning` / `error` / `success` from title keywords (error / warn / done / complete / success — error wins on mixed titles); `composeToastMessage` prepends a non-default title with `:`. Plugin self-registered in `shell/src/plugins/catalog.ts` as `nexus.notifications` (default-on, onStartup activation). 9 helper tests in `shell/tests/notifications-plugin.test.ts`. `pnpm --filter nexus-shell test` 1401 passing (+9 new); typecheck + lint clean. **Still deferred** (filed below): the richer "OS notification that survives a closed window" path requires hooking up the Tauri `notification` plugin in `shell/src-tauri/Cargo.toml` + a small Rust bridge command — bus contract stays the same, only the consumer changes._
+
+---
+
 ### Follow-up: Tauri `notification` plugin integration (from BL-133)
 
-**Source**: BL-133 deferral. Filed 2026-05-14.
-**Effort**: Small. Shell-side only.
+**Source**: BL-133 deferral. Filed 2026-05-14. Updated 2026-05-14 after the in-app subscriber landed.
+**Effort**: Small. Shell-side Tauri integration only.
 
-Today's `DesktopTransport` publishes a `com.nexus.notifications.delivered` event; the Tauri shell can subscribe and render through its existing toast surface. The richer "OS notification that survives a closed window" path requires hooking up the Tauri `notification` plugin in `shell/src-tauri/Cargo.toml` + a small Rust bridge command. The bus event contract stays the same — only the consumer changes.
+The in-app toast subscriber landed; the next refinement is hooking the bus event into the OS-level notification plugin so notifications fire even when the Nexus window doesn't have focus. Add `tauri-plugin-notification` to `shell/src-tauri/Cargo.toml`, expose a `notify_desktop(title, message)` bridge command, and have `nexus.notifications` call it alongside (or instead of) `api.notifications.show`. The bus contract stays the same; only the renderer changes.
 
 ---
 

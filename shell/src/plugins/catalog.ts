@@ -216,6 +216,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
       'BL-007 / BL-074 — surfaces CRDT pull-landing conflicts (concurrent block edits, delete-vs-edit) as a toast so the user knows a merge needs review. Resolver modal is a deferred follow-up.',
     load: () => import('./nexus/crdtConflict').then(m => m.crdtConflictPlugin),
   },
+  {
+    id: 'nexus.notifications', name: 'Notifications',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description:
+      'BL-133 — subscribes to com.nexus.notifications.delivered (Desktop channel) and routes the payload through api.notifications.show. Without this plugin the bus event fires with no observable effect.',
+    load: () => import('./nexus/notifications').then(m => m.notificationsPlugin),
+  },
   // ── UX primitives ──────────────────────────────────────────────────────────
   {
     id: 'nexus.commandPalette', name: 'Command Palette',
