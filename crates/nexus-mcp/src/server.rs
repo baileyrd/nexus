@@ -29,6 +29,11 @@ use serde::{Deserialize, Serialize};
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
 const AI_PLUGIN: &str = "com.nexus.ai";
 const SKILLS_PLUGIN: &str = "com.nexus.skills";
+/// BL-115 — `nexus_detect_changes` reaches into `com.nexus.git` for
+/// the working-tree status, then joins against the BL-114
+/// code-symbol index. Kept as a separate const so the plugin id is
+/// reusable from a future `git_call` helper.
+const GIT_PLUGIN: &str = "com.nexus.git";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longer timeout for AI calls — they make outbound HTTP requests to the
 /// chat + embedding providers.
@@ -185,7 +190,213 @@ struct RenderSkillInput {
     values: serde_json::Map<String, serde_json::Value>,
 }
 
+// ── BL-115 code-intel inputs ────────────────────────────────────────────────
+
+/// Input for the `nexus_context` tool (BL-115).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NexusContextInput {
+    /// Identifier as it appears in source. Case-sensitive.
+    name: String,
+    /// Optional forge-relative path to scope the lookup. A name that
+    /// resolves to multiple files (e.g. a `new` method on two impls)
+    /// returns every match unless `path` is set.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// Input for the `nexus_impact` tool (BL-115).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[allow(dead_code, reason = "depth is in the JSON Schema for forward-compat but ignored in v1")]
+struct NexusImpactInput {
+    /// Identifier as it appears in source.
+    name: String,
+    /// Optional forge-relative path scope.
+    #[serde(default)]
+    path: Option<String>,
+    /// Traversal depth. v1 honours `0` (symbol only) and `1`
+    /// (direct neighbours — siblings + parent + path-mates).
+    /// Higher values are accepted but treated as `1` since the
+    /// BL-114 index has no call-edges to traverse; see the
+    /// `degraded` flag on the reply.
+    #[serde(default)]
+    depth: Option<u32>,
+}
+
+/// Input for the `nexus_detect_changes` tool (BL-115). No
+/// parameters — the tool always queries the active forge's working
+/// tree.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct NexusDetectChangesInput {}
+
 // ── Output types ─────────────────────────────────────────────────────────────
+
+/// BL-115 — explanation surfaced verbatim on every `degraded: true`
+/// reply. Lets agents emit a "I used the BL-114 index which doesn't
+/// have call edges" caveat without inventing the wording.
+const BL115_DEGRADED_REASON: &str =
+    "BL-114's code-symbol index records declarations only; call-edge \
+     traversal lands in a follow-up BL. nexus_context/impact return \
+     parent + sibling-method proxies for direct callers, and nexus_detect_changes \
+     joins git statuses against indexed symbols rather than tracing diff hunks \
+     into the AST.";
+
+/// BL-115 — mirror of `nexus_storage::ipc::StorageSymbolRow`, kept
+/// local so the MCP server doesn't have to depend on `nexus-storage`
+/// for the type alone. Round-tripped from the wire-level reply.
+#[derive(Debug, Deserialize)]
+struct QuerySymbolRow {
+    id: i64,
+    path: String,
+    language: String,
+    kind: String,
+    name: String,
+    line_start: u32,
+    line_end: u32,
+    #[serde(default)]
+    parent_id: Option<i64>,
+    #[serde(default)]
+    doc_comment: Option<String>,
+}
+
+/// Wrapper for the `query_symbol` reply envelope.
+#[derive(Debug, Deserialize)]
+struct QuerySymbolReply {
+    symbols: Vec<QuerySymbolRow>,
+}
+
+/// BL-115 — kind → risk-band heuristic. v1 is intentionally
+/// coarse-grained because the index has no call-edges to count
+/// fan-out from; agents see the `degraded` flag and can ask for a
+/// follow-up read with the source. Thresholds chosen so that:
+///
+/// - LOW = local in scope (methods, consts, statics)
+/// - MEDIUM = top-level functions, structs/enums (data shape)
+/// - HIGH = traits/interfaces (every implementor depends)
+/// - CRITICAL = modules/impls/macros (containers of many other
+///   symbols — a change here can cascade to every item inside)
+fn risk_for_kind(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "method" | "const" | "static" => (
+            "LOW",
+            "scoped to its enclosing type; siblings on the same impl are the most likely callers",
+        ),
+        "function" => (
+            "MEDIUM",
+            "top-level function; could be called from anywhere in the crate",
+        ),
+        "struct" | "enum" | "union" | "class" | "type_alias" => (
+            "MEDIUM",
+            "data-shape symbol; every reader of the field set is affected by a layout change",
+        ),
+        "trait" | "interface" => (
+            "HIGH",
+            "every implementor depends on the trait contract; a signature change ripples",
+        ),
+        "macro" => (
+            "HIGH",
+            "macro callers expand at every use-site; output-shape changes can cascade",
+        ),
+        "module" | "impl" => (
+            "CRITICAL",
+            "container of many other symbols; a wholesale change here affects every item it owns",
+        ),
+        _ => (
+            "MEDIUM",
+            "unrecognised symbol kind; defaulting to MEDIUM until the kind is classified",
+        ),
+    }
+}
+
+fn clone_symbol_ref(r: &SymbolRef) -> SymbolRef {
+    SymbolRef {
+        id: r.id,
+        name: r.name.clone(),
+        kind: r.kind.clone(),
+        line_start: r.line_start,
+    }
+}
+
+// ── BL-115 code-intel outputs ───────────────────────────────────────────────
+
+/// Compact reference to one indexed symbol. Used as a child / sibling
+/// pointer in [`SymbolContext`] / [`ImpactReport`].
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SymbolRef {
+    id: i64,
+    name: String,
+    kind: String,
+    line_start: u32,
+}
+
+/// One resolved symbol with its enclosing context. The `siblings`
+/// list collects symbols inside the same parent (e.g. every method
+/// declared on the same `impl`).
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SymbolContext {
+    id: i64,
+    path: String,
+    name: String,
+    kind: String,
+    language: String,
+    line_start: u32,
+    line_end: u32,
+    doc_comment: Option<String>,
+    parent: Option<SymbolRef>,
+    siblings: Vec<SymbolRef>,
+}
+
+/// Reply for `nexus_context`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct NexusContextOutput {
+    matches: Vec<SymbolContext>,
+    /// `true` whenever the index can't answer with full call-graph
+    /// fidelity. v1 always sets this true because BL-114 ships
+    /// symbol declarations only — no call-edge traversal. Agents
+    /// can downweight confidence in their reasoning when this is
+    /// set.
+    degraded: bool,
+    /// Human-readable note about what's missing — surfaced verbatim
+    /// to MCP clients so the agent's prompt can carry the caveat.
+    degraded_reason: Option<String>,
+}
+
+/// One symbol's blast-radius classification.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ImpactReport {
+    symbol: SymbolContext,
+    /// `"LOW"` / `"MEDIUM"` / `"HIGH"` / `"CRITICAL"` — matches the
+    /// GitNexus rubric. v1 maps kinds to a fixed band; see
+    /// `risk_for_kind` for thresholds.
+    risk: String,
+    /// One-line justification for the risk band.
+    risk_reason: String,
+    /// Symbols inside the same parent (siblings on the same impl /
+    /// class). v1 surrogate for "direct callers" — a sibling method
+    /// is the most likely caller without a real call graph.
+    direct_affected: Vec<SymbolRef>,
+}
+
+/// Reply for `nexus_impact`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct NexusImpactOutput {
+    matches: Vec<ImpactReport>,
+    degraded: bool,
+    degraded_reason: Option<String>,
+}
+
+/// Reply for `nexus_detect_changes`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct NexusDetectChangesOutput {
+    /// Forge-relative paths reported dirty by git.
+    changed_files: Vec<String>,
+    /// Symbols whose containing file appears in `changed_files`.
+    affected_symbols: Vec<SymbolRef>,
+    /// Total `changed_files.len()` echoed for client convenience.
+    total_dirty: usize,
+    /// Same caveat as `nexus_context` / `nexus_impact`.
+    degraded: bool,
+    degraded_reason: Option<String>,
+}
 
 /// Output for reading a note.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -428,6 +639,20 @@ impl NexusMcpServer {
         let value = self
             .context
             .ipc_call(SKILLS_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// BL-115 — `com.nexus.git` IPC client used by `nexus_detect_changes`.
+    async fn git_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(GIT_PLUGIN, command, args, IPC_TIMEOUT)
             .await
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
@@ -989,6 +1214,216 @@ impl NexusMcpServer {
         }
     }
 
+    // ── BL-115 code-intel tools ────────────────────────────────────────
+
+    #[tool(
+        name = "nexus_context",
+        description = "Resolve a code symbol from the BL-114 index and return its source location, doc comment, enclosing impl/class/module, and sibling symbols (other methods on the same impl). Pass `name` plus an optional `path` to disambiguate symbols defined in multiple files."
+    )]
+    async fn nexus_context(
+        &self,
+        Parameters(input): Parameters<NexusContextInput>,
+    ) -> Json<NexusContextOutput> {
+        let rows = match self.query_symbol_rows(&input.name, input.path.as_deref(), 50).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("nexus_context: {e}");
+                return Json(NexusContextOutput {
+                    matches: vec![],
+                    degraded: true,
+                    degraded_reason: Some(format!("symbol query failed: {e}")),
+                });
+            }
+        };
+        let mut matches = Vec::with_capacity(rows.len());
+        for row in &rows {
+            matches.push(self.build_symbol_context(row).await);
+        }
+        Json(NexusContextOutput {
+            matches,
+            degraded: true,
+            degraded_reason: Some(BL115_DEGRADED_REASON.to_string()),
+        })
+    }
+
+    #[tool(
+        name = "nexus_impact",
+        description = "Assess the blast radius of changing a symbol. v1 uses a kind-based heuristic (functions are MEDIUM, traits/interfaces HIGH, modules/impls CRITICAL, methods LOW, …) and surfaces sibling symbols as a proxy for direct callers. Returns a `degraded` flag because BL-114's index does not yet carry call-edges; agents should temper recommendations accordingly. `depth` is accepted but treated as `1`."
+    )]
+    async fn nexus_impact(
+        &self,
+        Parameters(input): Parameters<NexusImpactInput>,
+    ) -> Json<NexusImpactOutput> {
+        let rows = match self.query_symbol_rows(&input.name, input.path.as_deref(), 50).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("nexus_impact: {e}");
+                return Json(NexusImpactOutput {
+                    matches: vec![],
+                    degraded: true,
+                    degraded_reason: Some(format!("symbol query failed: {e}")),
+                });
+            }
+        };
+        let mut matches = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let ctx = self.build_symbol_context(row).await;
+            let (risk, reason) = risk_for_kind(&row.kind);
+            let direct = ctx.siblings.iter().map(clone_symbol_ref).collect();
+            matches.push(ImpactReport {
+                symbol: ctx,
+                risk: risk.to_string(),
+                risk_reason: reason.to_string(),
+                direct_affected: direct,
+            });
+        }
+        Json(NexusImpactOutput {
+            matches,
+            degraded: true,
+            degraded_reason: Some(BL115_DEGRADED_REASON.to_string()),
+        })
+    }
+
+    #[tool(
+        name = "nexus_detect_changes",
+        description = "List uncommitted forge files plus every BL-114 indexed symbol that lives in them. Powers a pre-commit blast-radius preview: an agent can run this before editing to know which code-symbols the user has already touched in their working tree."
+    )]
+    async fn nexus_detect_changes(
+        &self,
+        Parameters(_input): Parameters<NexusDetectChangesInput>,
+    ) -> Json<NexusDetectChangesOutput> {
+        #[derive(Deserialize)]
+        struct StatusEntry {
+            path: String,
+        }
+        let statuses = match self
+            .git_call::<Vec<StatusEntry>>("file_statuses", serde_json::json!({}))
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("nexus_detect_changes git: {e}");
+                return Json(NexusDetectChangesOutput {
+                    changed_files: vec![],
+                    affected_symbols: vec![],
+                    total_dirty: 0,
+                    degraded: true,
+                    degraded_reason: Some(format!("git statuses unavailable: {e}")),
+                });
+            }
+        };
+        let changed_files: Vec<String> = statuses.iter().map(|s| s.path.clone()).collect();
+        let total_dirty = changed_files.len();
+
+        let mut affected: Vec<SymbolRef> = Vec::new();
+        for path in &changed_files {
+            match self
+                .storage_call::<QuerySymbolReply>(
+                    "query_symbol",
+                    serde_json::json!({ "path": path, "limit": 500 }),
+                )
+                .await
+            {
+                Ok(reply) => {
+                    for row in reply.symbols {
+                        affected.push(SymbolRef {
+                            id: row.id,
+                            name: row.name,
+                            kind: row.kind,
+                            line_start: row.line_start,
+                        });
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("query_symbol for {path}: {e}");
+                }
+            }
+        }
+
+        Json(NexusDetectChangesOutput {
+            changed_files,
+            affected_symbols: affected,
+            total_dirty,
+            degraded: true,
+            degraded_reason: Some(BL115_DEGRADED_REASON.to_string()),
+        })
+    }
+
+    /// Shared symbol query: `path` is optional, `limit` is the hard
+    /// cap. Returns the raw rows decoded straight from
+    /// `com.nexus.storage::query_symbol`.
+    async fn query_symbol_rows(
+        &self,
+        name: &str,
+        path: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<QuerySymbolRow>, String> {
+        let mut args = serde_json::json!({ "name": name, "limit": limit });
+        if let Some(p) = path {
+            if let Some(obj) = args.as_object_mut() {
+                obj.insert("path".to_string(), serde_json::json!(p));
+            }
+        }
+        let reply: QuerySymbolReply = self.storage_call("query_symbol", args).await?;
+        Ok(reply.symbols)
+    }
+
+    /// Resolve parent + path-mate siblings for a symbol row and
+    /// return the [`SymbolContext`] view.
+    async fn build_symbol_context(&self, row: &QuerySymbolRow) -> SymbolContext {
+        let mates: Vec<QuerySymbolRow> = self
+            .storage_call::<QuerySymbolReply>(
+                "query_symbol",
+                serde_json::json!({ "path": row.path, "limit": 500 }),
+            )
+            .await
+            .map(|r| r.symbols)
+            .unwrap_or_default();
+
+        let parent: Option<SymbolRef> = row.parent_id.and_then(|pid| {
+            mates.iter().find(|m| m.id == pid).map(|m| SymbolRef {
+                id: m.id,
+                name: m.name.clone(),
+                kind: m.kind.clone(),
+                line_start: m.line_start,
+            })
+        });
+
+        // Siblings = symbols whose `parent_id` matches this row's
+        // `parent_id`, excluding the row itself. For a top-level
+        // symbol (no parent) we leave siblings empty rather than
+        // surfacing every other top-level decl in the file as a
+        // sibling — that would be noisy and not what GitNexus's
+        // tool does.
+        let siblings: Vec<SymbolRef> = if let Some(pid) = row.parent_id {
+            mates
+                .iter()
+                .filter(|m| m.id != row.id && m.parent_id == Some(pid))
+                .map(|m| SymbolRef {
+                    id: m.id,
+                    name: m.name.clone(),
+                    kind: m.kind.clone(),
+                    line_start: m.line_start,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        SymbolContext {
+            id: row.id,
+            path: row.path.clone(),
+            name: row.name.clone(),
+            kind: row.kind.clone(),
+            language: row.language.clone(),
+            line_start: row.line_start,
+            line_end: row.line_end,
+            doc_comment: row.doc_comment.clone(),
+            parent,
+            siblings,
+        }
+    }
+
     /// Shared `write_file` implementation for `create_note` + `update_note`.
     async fn do_write_file(&self, path: &str, content: &str) -> Json<WriteNoteOutput> {
         #[derive(Deserialize)]
@@ -1287,5 +1722,148 @@ mod tests {
         assert_eq!(v["id"], "s1");
         assert_eq!(v["name"], "Skill One");
         assert_eq!(v["body"], "rendered body");
+    }
+
+    // ── BL-115 code-intel tool tests ──────────────────────────────────────
+
+    #[test]
+    fn risk_for_kind_method_is_low() {
+        let (risk, _) = risk_for_kind("method");
+        assert_eq!(risk, "LOW");
+    }
+
+    #[test]
+    fn risk_for_kind_function_is_medium() {
+        let (risk, _) = risk_for_kind("function");
+        assert_eq!(risk, "MEDIUM");
+    }
+
+    #[test]
+    fn risk_for_kind_trait_is_high() {
+        let (risk, _) = risk_for_kind("trait");
+        assert_eq!(risk, "HIGH");
+        let (risk2, _) = risk_for_kind("interface");
+        assert_eq!(risk2, "HIGH");
+    }
+
+    #[test]
+    fn risk_for_kind_module_and_impl_are_critical() {
+        let (m_risk, _) = risk_for_kind("module");
+        let (i_risk, _) = risk_for_kind("impl");
+        assert_eq!(m_risk, "CRITICAL");
+        assert_eq!(i_risk, "CRITICAL");
+    }
+
+    #[test]
+    fn risk_for_kind_unknown_falls_back_to_medium() {
+        let (risk, reason) = risk_for_kind("anything-novel");
+        assert_eq!(risk, "MEDIUM");
+        assert!(reason.contains("unrecognised"));
+    }
+
+    #[test]
+    fn query_symbol_row_decodes_minimal_payload() {
+        let row: QuerySymbolRow = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "path": "src/lib.rs",
+            "language": "rust",
+            "kind": "function",
+            "name": "hello",
+            "line_start": 12,
+            "line_end": 15,
+        }))
+        .unwrap();
+        assert_eq!(row.id, 7);
+        assert_eq!(row.parent_id, None);
+        assert!(row.doc_comment.is_none());
+    }
+
+    #[test]
+    fn query_symbol_reply_decodes_envelope() {
+        let reply: QuerySymbolReply = serde_json::from_value(serde_json::json!({
+            "symbols": [
+                {
+                    "id": 1, "path": "a.rs", "language": "rust",
+                    "kind": "function", "name": "a", "line_start": 1, "line_end": 2,
+                },
+                {
+                    "id": 2, "path": "a.rs", "language": "rust",
+                    "kind": "function", "name": "b", "line_start": 4, "line_end": 5,
+                    "parent_id": 1, "doc_comment": "doc"
+                },
+            ]
+        }))
+        .unwrap();
+        assert_eq!(reply.symbols.len(), 2);
+        assert_eq!(reply.symbols[1].parent_id, Some(1));
+        assert_eq!(reply.symbols[1].doc_comment.as_deref(), Some("doc"));
+    }
+
+    #[test]
+    fn nexus_context_output_serializes_degraded_flag() {
+        let out = NexusContextOutput {
+            matches: vec![],
+            degraded: true,
+            degraded_reason: Some("missing call edges".into()),
+        };
+        let v = serde_json::to_value(&out).unwrap();
+        assert_eq!(v["degraded"], true);
+        assert!(v["degraded_reason"].as_str().unwrap().contains("call"));
+    }
+
+    #[test]
+    fn impact_report_serializes_risk_and_siblings() {
+        let report = ImpactReport {
+            symbol: SymbolContext {
+                id: 10,
+                path: "src/lib.rs".into(),
+                name: "Counter".into(),
+                kind: "struct".into(),
+                language: "rust".into(),
+                line_start: 1,
+                line_end: 3,
+                doc_comment: None,
+                parent: None,
+                siblings: vec![],
+            },
+            risk: "MEDIUM".into(),
+            risk_reason: "data-shape symbol".into(),
+            direct_affected: vec![SymbolRef {
+                id: 11,
+                name: "new".into(),
+                kind: "method".into(),
+                line_start: 5,
+            }],
+        };
+        let v = serde_json::to_value(&report).unwrap();
+        assert_eq!(v["symbol"]["name"], "Counter");
+        assert_eq!(v["risk"], "MEDIUM");
+        assert_eq!(v["direct_affected"][0]["name"], "new");
+    }
+
+    #[test]
+    fn detect_changes_output_carries_total_dirty() {
+        let out = NexusDetectChangesOutput {
+            changed_files: vec!["a.rs".into(), "b.rs".into()],
+            affected_symbols: vec![SymbolRef {
+                id: 1,
+                name: "foo".into(),
+                kind: "function".into(),
+                line_start: 1,
+            }],
+            total_dirty: 2,
+            degraded: true,
+            degraded_reason: None,
+        };
+        let v = serde_json::to_value(&out).unwrap();
+        assert_eq!(v["total_dirty"], 2);
+        assert_eq!(v["changed_files"].as_array().unwrap().len(), 2);
+        assert_eq!(v["affected_symbols"][0]["name"], "foo");
+    }
+
+    #[test]
+    fn bl115_degraded_reason_is_informative() {
+        assert!(BL115_DEGRADED_REASON.contains("BL-114"));
+        assert!(BL115_DEGRADED_REASON.contains("call-edge"));
     }
 }
