@@ -655,6 +655,84 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             target_plugin_id: "com.nexus.agent".to_string(),
             command_id: "delegate".to_string(),
         },
+        // ── BL-132 follow-up: destructive operations ────────────
+        // BL-132 + DG-34 set up the approval gate (BusBridgePolicy
+        // auto-approves rounds whose tool calls are all
+        // `requires_approval = false`, prompts otherwise). The
+        // following three handlers correspond to the BL-132 DoD's
+        // "approval_required flag on at minimum: nexus-storage::
+        // delete_file, nexus-git::push (force flag path),
+        // nexus-storage::replace_in_files (> N files)" list. Adding
+        // them here gives agents the capability + flags them
+        // destructive so the prompt fires under `--interactive` /
+        // strict_approval. `execute_command` (the fourth item on the
+        // DoD list) is already covered by `terminal_run_saved` above.
+        AgentToolSpec {
+            name: "delete_file".to_string(),
+            description: "Delete a forge-relative file. Destructive — \
+                no built-in undo; the user should confirm before \
+                approving."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+            requires_approval: true,
+            estimated_duration_ms: 50,
+            required_capabilities: vec![Capability::FileSystemWrite],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "delete_file".to_string(),
+        },
+        AgentToolSpec {
+            name: "replace_in_files".to_string(),
+            description: "Find-and-replace across forge files \
+                (literal or regex). Destructive — touches multiple \
+                files; review the affected file count before approving."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "replace": { "type": "string" },
+                    "regex": { "type": "boolean" },
+                    "case_sensitive": { "type": "boolean" },
+                    "whole_word": { "type": "boolean" },
+                    "max_files": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["query", "replace"],
+                "additionalProperties": false
+            }),
+            requires_approval: true,
+            estimated_duration_ms: 500,
+            required_capabilities: vec![Capability::FileSystemWrite],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "replace_in_files".to_string(),
+        },
+        AgentToolSpec {
+            name: "git_push".to_string(),
+            description: "Push the current branch to its remote. \
+                Destructive — visible to collaborators; force pushes \
+                rewrite history."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "remote": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "force": { "type": "boolean" }
+                },
+                "additionalProperties": false
+            }),
+            requires_approval: true,
+            estimated_duration_ms: 3_000,
+            required_capabilities: vec![Capability::GitWrite],
+            target_plugin_id: "com.nexus.git".to_string(),
+            command_id: "push".to_string(),
+        },
     ]
 }
 
@@ -678,6 +756,55 @@ mod tests {
             target_plugin_id: "com.test".to_string(),
             command_id: "noop".to_string(),
         }
+    }
+
+    /// BL-132 follow-up: the agent tool registry now exposes the four
+    /// destructive operations the BL-132 DoD called for (the fourth —
+    /// `execute_command` — is covered by `terminal_run_saved`). Every
+    /// one must carry `requires_approval = true` so the BL-132
+    /// `--interactive` prompt fires before dispatch.
+    #[test]
+    fn bl132_destructive_tools_registered_with_requires_approval() {
+        let catalog = default_tool_catalog();
+        for name in ["delete_file", "replace_in_files", "git_push"] {
+            let spec = catalog
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("missing destructive tool: {name}"));
+            assert!(
+                spec.requires_approval,
+                "tool {name} must be flagged requires_approval = true",
+            );
+            assert!(
+                !spec.required_capabilities.is_empty(),
+                "tool {name} must declare a write capability",
+            );
+        }
+    }
+
+    /// Cross-check that the new tools point at handler ids that
+    /// actually exist on the target plugin. Static pin only — the
+    /// IPC dispatcher is what enforces this at runtime, but the
+    /// command_id strings have to match the manifest registrations
+    /// or the call returns a "no handler" error before approval even
+    /// runs.
+    #[test]
+    fn bl132_destructive_tools_target_known_handlers() {
+        let catalog = default_tool_catalog();
+        let by_name: std::collections::HashMap<_, _> =
+            catalog.iter().map(|s| (s.name.as_str(), s)).collect();
+
+        let delete = by_name["delete_file"];
+        assert_eq!(delete.target_plugin_id, "com.nexus.storage");
+        assert_eq!(delete.command_id, "delete_file");
+
+        let replace = by_name["replace_in_files"];
+        assert_eq!(replace.target_plugin_id, "com.nexus.storage");
+        assert_eq!(replace.command_id, "replace_in_files");
+
+        let push = by_name["git_push"];
+        assert_eq!(push.target_plugin_id, "com.nexus.git");
+        assert_eq!(push.command_id, "push");
     }
 
     #[test]

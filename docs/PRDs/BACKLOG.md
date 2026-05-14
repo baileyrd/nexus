@@ -345,19 +345,7 @@ _BL-132 closed 2026-05-14 (partial close; see [BACKLOG_COMPLETED.md](BACKLOG_COM
 
 ---
 
-### Follow-up: agent-tool registry coverage for destructive operations (from BL-132)
-
-**Source**: BL-132 deferral. Filed 2026-05-14.
-**Effort**: Small. Add to `nexus-agent::tool_registry::seed_default_tools`.
-
-Today's seeded agent tools include `write_file` (`requires_approval=true`), `terminal_run_saved` (true), `terminal_send_signal` (true), `delegate_to_agent` (true) — plus several read-only tools. The BL-132 DoD listed four destructive operations the agent surface doesn't expose yet:
-
-- `delete_file` — `com.nexus.storage::delete_file` exists; needs a registry entry with `requires_approval=true`.
-- `git_push_force` — `com.nexus.git::push` exists; needs a registry entry that detects / opts into the `--force` path.
-- `replace_in_files` — `com.nexus.storage::replace_in_files` exists; needs registry entry that flags writes spanning > N files.
-- `execute_command` — covered by `terminal_run_saved` today; an ad-hoc command path would need a separate registry entry.
-
-When agents need any of these capabilities, the BL-132 interactive prompt + bus bridge will surface them automatically once they're seeded with `requires_approval=true`.
+_BL-132 follow-up (agent-tool registry coverage for destructive ops) closed 2026-05-14. Three new entries added to `nexus-agent::tool_registry::default_tool_catalog`: `delete_file` → `com.nexus.storage::delete_file` (`FileSystemWrite`), `replace_in_files` → `com.nexus.storage::replace_in_files` (`FileSystemWrite`), `git_push` → `com.nexus.git::push` (`GitWrite`). All three flag `requires_approval = true` so the BL-132 interactive prompt fires before dispatch. 2 new tests pin (a) every destructive tool carries the flag + declares a write capability, (b) the `target_plugin_id` + `command_id` match the actual handler-side registrations. `cargo test -p nexus-agent` 151/151; clippy clean. The fourth BL-132 DoD item — ad-hoc `execute_command` — stays covered by the existing `terminal_run_saved` registration._
 
 ---
 
