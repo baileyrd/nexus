@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioSynthesizeArgs",
+  "description": "Args for `com.nexus.audio::synthesize` (handler id `2`).",
+  "type": "object",
+  "properties": {
+    "format": {
+      "description": "Requested container format. The reply echoes the actual\nformat in `format` since the backend may downgrade (e.g.\nOpenAI doesn't ship WebM — WebM requests come back as MP3).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "description": "Text to speak. UTF-8; the provider may impose its own length\ncap (OpenAI: 4096 chars).",
+      "type": "string"
+    },
+    "voice": {
+      "description": "Voice identifier. Provider-specific (OpenAI: `alloy` /\n`echo` / `fable` / `onyx` / `nova` / `shimmer`). `None`\nfalls back to the configured default.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "text"
+  ]
+}

@@ -1,0 +1,40 @@
+[package]
+name = "nexus-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus audio subsystem: STT + TTS provider traits with local / provider-routed / platform backends (BL-117)"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+toml = { workspace = true }
+base64 = { workspace = true }
+# Provider-routed backend talks to OpenAI's `/v1/audio/{transcriptions,speech}`
+# directly so it doesn't have to round-trip through `nexus-ai`'s
+# session-bound chat stack. The reqwest feature surface matches
+# `nexus-ai`'s so the dep graph collapses to one rustls.
+reqwest = { workspace = true, features = ["multipart"] }
+tokio = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Emit TypeScript + JSON Schema bindings. Off by default; enable via
+# `cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export`.
+ts-export = ["dep:ts-rs", "dep:schemars"]
+
+# BL-117: opt-in local Whisper backend. Pulls in whisper.cpp via
+# whisper-rs (~5min build cost + a 75 MB+ model that downloads on
+# first run), so the default workspace build stays fast. Operators
+# flip this on once they're ready to pay the cost.
+local-whisper = []
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }

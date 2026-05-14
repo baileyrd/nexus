@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioTranscribeResult",
+  "description": "Reply from `com.nexus.audio::transcribe`.",
+  "type": "object",
+  "properties": {
+    "backend": {
+      "description": "Backend identifier (`\"local\"` / `\"provider\"` / `\"platform\"`)\nthat handled this call. Useful for audit-log attribution.",
+      "type": "string"
+    },
+    "language": {
+      "description": "Detected language code, when the backend reports it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "description": "Recognised text. Empty when nothing was recognised — that is\nnot an error.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "text",
+    "backend"
+  ]
+}

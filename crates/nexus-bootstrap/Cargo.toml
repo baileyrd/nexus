@@ -29,6 +29,8 @@ ts-export = [
     "nexus-database/ts-export",
     # BL-052 — activity-timeline types live in `nexus-types::activity`.
     "nexus-types/ts-export",
+    # BL-117 — audio subsystem IPC types.
+    "nexus-audio/ts-export",
 ]
 
 [dependencies]
@@ -54,6 +56,7 @@ nexus-templates = { path = "../nexus-templates" }
 nexus-workflow = { path = "../nexus-workflow" }
 nexus-linkpreview = { path = "../nexus-linkpreview" }
 nexus-comments = { path = "../nexus-comments" }
+nexus-audio = { path = "../nexus-audio" }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

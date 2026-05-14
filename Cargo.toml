@@ -30,6 +30,7 @@ members = [
     "crates/nexus-panic-log",
     "crates/nexus-crdt",
     "crates/nexus-fuzz",
+    "crates/nexus-audio",
 ]
 
 [workspace.package]

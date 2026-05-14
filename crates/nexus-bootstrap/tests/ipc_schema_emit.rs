@@ -111,6 +111,11 @@ use nexus_templates::core_plugin::{
 };
 // nexus-formats: Notion zip-import / format-export args.
 use nexus_formats::core_plugin::{ExportNotionArgs, ImportNotionArgs};
+// nexus-audio (BL-117): STT + TTS IPC types.
+use nexus_audio::ipc::{
+    AudioStatusResult, AudioSynthesizeArgs, AudioSynthesizeResult, AudioTranscribeArgs,
+    AudioTranscribeResult,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -370,6 +375,13 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.formats ────────────────────────────────────────────────
     write_schema::<ImportNotionArgs>("com_nexus_formats__import_notion", "args");
     write_schema::<ExportNotionArgs>("com_nexus_formats__export_notion", "args");
+
+    // ── com.nexus.audio (BL-117) ─────────────────────────────────────────
+    write_schema::<AudioTranscribeArgs>("com_nexus_audio__transcribe", "args");
+    write_schema::<AudioTranscribeResult>("com_nexus_audio__transcribe", "result");
+    write_schema::<AudioSynthesizeArgs>("com_nexus_audio__synthesize", "args");
+    write_schema::<AudioSynthesizeResult>("com_nexus_audio__synthesize", "result");
+    write_schema::<AudioStatusResult>("com_nexus_audio__status", "result");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

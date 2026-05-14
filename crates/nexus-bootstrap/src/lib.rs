@@ -476,6 +476,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
+    use nexus_audio::AudioCorePlugin;
     use nexus_comments::core_plugin::CommentsCorePlugin;
     use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
     use nexus_formats::FormatsCorePlugin;
@@ -1220,6 +1221,33 @@ fn register_core_plugins(
             Box::new(LinkPreviewCorePlugin::new()),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.linkpreview")?;
+
+    // Audio — BL-117 STT + TTS subsystem. on_init loads the
+    // `<forge>/.forge/config.toml::[audio]` block and builds the
+    // configured backend pair (local / provider / platform). The
+    // shipped build stubs `local` + `platform` so a forge without
+    // an OPENAI_API_KEY surfaces a clear "backend not enabled"
+    // error from the first dispatch rather than a panic.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.audio",
+                "Audio",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: false,
+                    on_stop: false,
+                },
+                &with_v1_aliases(&[
+                    ("transcribe", nexus_audio::core_plugin::HANDLER_TRANSCRIBE),
+                    ("synthesize", nexus_audio::core_plugin::HANDLER_SYNTHESIZE),
+                    ("status", nexus_audio::core_plugin::HANDLER_STATUS),
+                ]),
+            ),
+            forge_root,
+            Box::new(AudioCorePlugin::new(forge_root.to_path_buf())),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.audio")?;
 
     // Comments — BL-050. Side-margin comment threads anchored to
     // stable block ids (ADR 0017). Storage in
