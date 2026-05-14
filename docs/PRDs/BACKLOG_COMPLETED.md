@@ -253,6 +253,114 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-121: Session-transcript FTS5 search (Hermes Feature 5) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `d620b2b0`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-agent` (new `transcript_search` module).
+**Related**: BL-119 + BL-120 (Hermes Features 1 + 4 — composes with the same agent surface but independent at the implementation level), BL-063 (terminal cross-session search — agent equivalent of the same idea), DG-33 (history.jsonl path the FTS rebuilds from).
+
+FTS5 virtual table over the agent's persisted session transcripts (which DG-33 already lays down at `.forge/agents/<id>/history.jsonl`). Indexed by role + content body, queryable from a new `com.nexus.agent::search_transcripts(query, [agent_id], [since_ts])` IPC handler. Powers a "recall what we discussed when we were debugging X" surface — the agent equivalent of BL-063's terminal cross-session search.
+
+**What landed:**
+- New `crates/nexus-agent/src/transcript_search.rs` ships `TranscriptStore` backed by `Arc<Mutex<Connection>>` (`rusqlite::Connection` is `Send` but not `Sync`, so the Mutex makes the store `Sync` for the kernel).
+- FTS5 virtual table colocated with the agent SQLite store.
+- `com.nexus.agent::search_transcripts(query, [agent_id], [since_ts])` IPC handler returns ranked snippets `(agent_id, session_id, turn_idx, role, snippet)`.
+- Rebuild path walks `<forge>/.forge/agents/<id>/history.jsonl` files when the FTS table is missing.
+- `MemoryEntry::CompactedTurns` records (added by BL-120) are indexed alongside regular turns so search hits cover the compressed history too.
+
+**Definition of done coverage**: ✅ FTS5 virtual table colocated with the existing agent SQLite store; ✅ `com.nexus.agent::search_transcripts` returns ranked snippets with `(agent_id, session_id, turn_idx, role, snippet)`; ✅ rebuild path walks `history.jsonl` files on first boot; ⏸ shell-side search-bar UI deferred as a follow-up (the DoD called this out as a deferral option).
+
+---
+
+### BL-120: Context compression in the agent session loop (Hermes Feature 4) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `a3adfd08`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-agent` (new `compression` module).
+**Related**: BL-119 (`SessionConfig` carries the `max_context_tokens` threshold this consumes), BL-121 (transcript-search indexes the `CompactedTurns` records this writes), DG-33 (the `MemoryEntry` enum this extends).
+
+When the session-loop's running context approaches the provider's token budget, summarise the oldest turns into a compact `<system>`-tagged digest and drop them from the live transcript. Mirrors what Anthropic's `compaction` feature does for the Messages API but driven from the agent loop so it works across providers. Keeps tool-call results verbatim for the most recent N turns (the working set) and replaces older turns with a single rolling summary. Pluggable via a `Compressor` trait so the strategy can swap.
+
+**What landed:**
+- New `crates/nexus-agent/src/compression.rs` ships the `Compressor` trait + three implementations:
+  - `LlmCompressor` — default; summarises the oldest turns through the configured AI provider into a single `<system>`-tagged digest.
+  - `KeepDecisionsCompressor` — deterministic decisions-only fallback (no provider dependency).
+  - `NoopCompressor` — testing.
+- Working-set windowing keeps the most recent rounds verbatim — pinned at `WORKING_SET_ROUNDS = 4`. (A configurable working-set is deferred to a future BL — the constant is a deliberate choice, not a hard-code.)
+- Triggers when `estimate_tokens(transcript) > SessionConfig.max_context_tokens`.
+- New `MemoryEntry::CompactedTurns` variant (extending DG-33) records what got compressed.
+- `AgentSession.compactions` array carries the audit trail.
+
+**Tested**: 50-turn synthetic session compresses cleanly without losing decisions — pinned via the `compression::tests::decisions_preserved_through_compression` test.
+
+**Definition of done coverage**: ✅ `Compressor` trait + default LLM-backed implementation; ✅ triggers when context-token estimate exceeds `SessionConfig.max_context_tokens`; ✅ working-set N keeps the most recent turns + every tool result they depend on; ✅ `MemoryEntry::CompactedTurns` variant; ✅ 50-turn synthetic-session test pins decision preservation.
+
+---
+
+### BL-119: `SessionConfig` + iteration budget (Hermes Feature 1) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `d1ad15e4`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-agent` (new `SessionConfig`).
+**Related**: BL-120 (consumes `max_context_tokens`), BL-121 (independent but composes with the same agent surface), Hermes Features 4–6 which all depended on this lift.
+
+Raise the agent's iteration budget cap and introduce a typed `SessionConfig` carrying `max_iterations`, `max_tool_calls_per_iteration`, `max_context_tokens`, and provider-routing hints. The pre-BL-119 implementation hard-coded the budget in `nexus-agent::session::run`; lifting it to config unblocks longer-running agents (the Hermes plan calls 8 iterations "the floor for non-trivial multi-step tasks") and lets BL-120's context compression slot in as a `SessionConfig` field.
+
+**What landed:**
+- New `SessionConfig` struct in `crates/nexus-agent/src/session.rs` carrying `max_iterations` (default **32**, raised from 8), `max_tool_calls_per_iteration`, `max_context_tokens`, and provider-routing hints.
+- New `run_session_with_config` entry point alongside the legacy `run_session`.
+- `com.nexus.agent::run` accepts an optional `session_config` arg.
+- `SessionConfig::legacy_phase2a()` pins the old 8-iteration default for the `max_rounds_cap_is_honoured` test that pre-dated the lift.
+- Companion `run_session_with_compressor` slot reserved for BL-120 to plug in (which it now does).
+
+**Definition of done coverage**: ✅ `SessionConfig` struct with documented defaults; ✅ `com.nexus.agent::run` accepts an optional `session_config` arg; ✅ defaults raise `max_iterations` from 8 to 32 per Hermes Feature 1; ✅ legacy default pinned through the new config path so the pre-existing iteration-cap test still represents the legacy behaviour.
+
+---
+
+### BL-118: Web Speech API shell integration (Anything-LLM port) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `3bedd31f`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: shell-side `nexus.audio` plugin.
+**Related**: BL-117 (fills the `PlatformSpeech` shell-side stub the audio crate reserved), BL-113 (future home for the contribution-path registration).
+
+Native browser STT/TTS via the Web Speech API exposed through the Tauri webview. Implements the `SttProvider` / `TtsProvider` traits from BL-117 by calling `webkitSpeechRecognition` / `SpeechSynthesisUtterance` and bridging the result back to the kernel through a thin IPC adapter. Zero local-model footprint; uses the OS's built-in services on macOS / Windows / Linux-with-speech-dispatcher.
+
+**What landed:**
+- New `shell/src/plugins/nexus/audio/` plugin wraps `webkitSpeechRecognition` (continuous-mode STT) and `SpeechSynthesisUtterance` (voice + rate selection).
+- `speechApi.ts` + `runtime.ts` registered through `catalog.ts`.
+- Plugin falls back gracefully when browser speech support is missing.
+- Self-registers via the same plugin mechanism the audio crate's `PlatformSpeech` stub expects; BL-113's contribution path is the natural future home but not yet required.
+
+**Definition of done coverage**: ✅ shell plugin registers itself as an `nexus-audio` backend; ✅ wraps `webkitSpeechRecognition` with continuous-mode support; ✅ wraps `SpeechSynthesisUtterance` with voice + rate selection; ✅ falls back gracefully when browser support is missing.
+
+---
+
+### BL-117: `nexus-audio` STT + TTS crate (Anything-LLM port) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13. Scope refined 2026-05-13 to require a local-first path.
+**Shipped**: 2026-05-13 across commits `4d39016d` (crate scaffold) and `5c81d173` (three remaining gaps). Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: new `nexus-audio`.
+**Related**: BL-118 (fills the `PlatformSpeech` shell-side stub), BL-043 (voice-driven memory capture consumer), `nexus-ai` provider keyring (audio crate routes auth through `com.nexus.ai::resolve_credentials` instead of maintaining its own).
+
+Audio I/O for capture + read-aloud. Mirror the `nexus-ai` provider-trait pattern: a `SttProvider` trait and a `TtsProvider` trait, each with three backends so the user can choose between on-device privacy and provider quality. The default is `local` so a fresh forge works out-of-the-box without an API key.
+
+**What landed:**
+- New `crates/nexus-audio` crate with `SttProvider` + `TtsProvider` traits and three backends each:
+  - **`LocalWhisper` / `LocalTts`** (default; feature-gated behind `local-audio`). Whisper-rs against `tiny.en` / `base.en` / `small.en` models. Zero network egress; runs entirely on-device.
+  - **`ProviderRouted`** delegates to whichever `nexus-ai` provider is configured. OpenAI Whisper / TTS today; Anthropic falls back to local.
+  - **`PlatformSpeech`** — shell-side stub filled by BL-118 (Web Speech API in the Tauri webview).
+- New caps `audio.record` + `audio.synthesize` registered in `nexus-plugin-api` + `nexus-security`.
+- New `com.nexus.ai::resolve_credentials` handler (id 21) routes provider auth so the audio crate doesn't need its own API-key path — uses the configured AI provider, falls back to env.
+- Backend selection via `<forge>/.forge/config.toml::[audio]` (`stt_backend` / `tts_backend` / `local_model_size`).
+
+Powers two near-term use cases: voice-driven memory capture (extends BL-043's quick-capture) and read-aloud for long agent transcripts.
+
+**Definition of done coverage**: ✅ crate compiles standalone; ✅ three backends each for STT + TTS (`LocalWhisper`/`LocalTts`, `ProviderRouted`, `PlatformSpeech`); ✅ local Whisper at `tiny.en` size with optional first-launch download path to `base.en`/`small.en`; ✅ provider-routed backend reuses `nexus-ai`'s `default_provider` + keyring; ✅ `com.nexus.audio::transcribe` accepts WebM/WAV/Opus + `synthesize` returns WAV bytes; ✅ backend selection via `.forge/config.toml::[audio]`; ✅ capability gates `audio.record` + `audio.synthesize`; ✅ test matrix for `LocalWhisper` against a recorded WAV fixture + `ProviderRouted` against a mocked invoker (PlatformSpeech tests live under BL-118).
+
+---
+
 ### BL-116: `ai.generate_docs` symbol-aware doc generator (GitNexus port) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
 
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
