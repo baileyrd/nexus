@@ -27,6 +27,7 @@ use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface};
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
+use crate::generate_docs::handle_generate_docs;
 use crate::indexing_daemon::{self, DaemonMsg, EmbedderFactory, IndexingDaemon, SharedStatus};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::ipc::{
@@ -231,6 +232,16 @@ pub const HANDLER_ACTIVITY_CLEAR: u32 = 19;
 /// approval-gated execution. Args [`AiProposeArgs`], reply
 /// [`AiProposeReply`].
 pub const HANDLER_PROPOSE_TOOL_CALLS: u32 = 20;
+
+/// BL-116 — `generate_docs`. Args: [`crate::ipc::AiGenerateDocsArgs`];
+/// reply [`crate::ipc::AiGenerateDocsReply`]. Resolves a symbol from
+/// the BL-114 `code_symbols` index, reads its source range,
+/// assembles a 1-hop context (parent + sibling symbols, since
+/// BL-114's index has no call-edges), prompts the configured AI
+/// provider for a language-appropriate docblock, and returns the
+/// formatted output. The caller is responsible for splicing the
+/// docblock above `insert_line` — write-back is not performed here.
+pub const HANDLER_GENERATE_DOCS: u32 = 22;
 
 /// BL-117 — return the live AI chat provider's resolved credentials
 /// (provider name, base URL, api_key) so sibling subsystems like
@@ -490,6 +501,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_PROPOSE_TOOL_CALLS => {
                     handle_propose_tool_calls(ctx, ai_cfg, tools, &args).await
                 }
+                HANDLER_GENERATE_DOCS => handle_generate_docs(ctx, ai_cfg, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -2049,7 +2061,7 @@ async fn handle_session_delete(
 
 // ─── Provider factories ─────────────────────────────────────────────────────
 
-fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, String> {
+pub(crate) fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, String> {
     match cfg.provider.as_str() {
         "anthropic" => Ok(Box::new(AnthropicProvider::new(
             cfg.api_key.clone().unwrap_or_default(),

@@ -19,9 +19,10 @@ use std::path::PathBuf;
 use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
-    AiActivityListArgs, AiActivityListResult, AiProposeArgs, AiProposeReply, AiProposedToolCall,
-    AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
-    AiStreamChatArgs, AiStreamChatMode, AiToolPolicy, AiUnmappedToolCall,
+    AiActivityListArgs, AiActivityListResult, AiGenerateDocsArgs, AiGenerateDocsReply,
+    AiProposeArgs, AiProposeReply, AiProposedToolCall, AiStreamAskArgs, AiStreamAskMessage,
+    AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
+    AiToolPolicy, AiUnmappedToolCall,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
@@ -218,6 +219,10 @@ fn emit_all_schemas_impl() {
     // honest as `Citation` evolves.
     write_schema::<Citation>("com_nexus_ai__ask", "citation");
     write_schema::<RagResponse>("com_nexus_ai__ask", "result");
+
+    // ── com.nexus.ai::generate_docs (BL-116) ─────────────────────────────
+    write_schema::<AiGenerateDocsArgs>("com_nexus_ai__generate_docs", "args");
+    write_schema::<AiGenerateDocsReply>("com_nexus_ai__generate_docs", "reply");
 
     // ── com.nexus.ai::activity_list (BL-037) ─────────────────────────────
     // Per-forge AI activity timeline. The shell pane consumes

@@ -240,6 +240,10 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         ("semantic_search", Capability::AiChat),
         ("enrich_file", Capability::AiChat),
         ("propose_tool_calls", Capability::AiChat),
+        // BL-116 — generate_docs dispatches a single-turn chat
+        // completion, gated under the same ai.chat capability the
+        // rest of the chat surface uses.
+        ("generate_docs", Capability::AiChat),
         ("index_file", Capability::AiIndex),
         ("index_trigger", Capability::AiIndex),
         ("session_load", Capability::AiSessionRead),
@@ -1090,6 +1094,15 @@ fn register_core_plugins(
                     (
                         "resolve_credentials",
                         nexus_ai::core_plugin::HANDLER_RESOLVE_CREDENTIALS,
+                    ),
+                    // BL-116 — symbol-aware doc generator. Resolves a
+                    // symbol from the BL-114 index, reads its source
+                    // range, packs in parent + sibling 1-hop context
+                    // (call-edges land in a follow-up BL), prompts
+                    // the configured AI provider for a docblock.
+                    (
+                        "generate_docs",
+                        nexus_ai::core_plugin::HANDLER_GENERATE_DOCS,
                     ),
                 ]),
             ),
