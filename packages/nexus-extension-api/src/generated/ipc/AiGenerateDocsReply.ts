@@ -6,7 +6,7 @@
 export type AiGenerateDocsReply = { 
 /**
  * Generated docblock — already wrapped in the chosen comment
- * syntax (rustdoc `///` lines, JSDoc `/** */`, godoc `//`,
+ * syntax (rustdoc `///` lines, JSDoc block comments, godoc `//`,
  * Python `"""…"""`). Caller can splice this directly above the
  * symbol's source range.
  */

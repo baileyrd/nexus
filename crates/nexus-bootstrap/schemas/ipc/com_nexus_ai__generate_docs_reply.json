@@ -16,7 +16,7 @@
       ]
     },
     "docblock": {
-      "description": "Generated docblock — already wrapped in the chosen comment\nsyntax (rustdoc `///` lines, JSDoc `/** */`, godoc `//`,\nPython `\"\"\"…\"\"\"`). Caller can splice this directly above the\nsymbol's source range.",
+      "description": "Generated docblock — already wrapped in the chosen comment\nsyntax (rustdoc `///` lines, JSDoc block comments, godoc `//`,\nPython `\"\"\"…\"\"\"`). Caller can splice this directly above the\nsymbol's source range.",
       "type": "string"
     },
     "insert_line": {

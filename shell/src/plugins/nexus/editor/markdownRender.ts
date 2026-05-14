@@ -81,14 +81,17 @@ function ensureFencedRendererPatch(): void {
         }
         return `<code>${escapeHtml(text)}</code>`
       },
-      tablecell(token: Tokens.TableCell): string {
+      tablecell(
+        this: { parser: { parseInline: (tokens: Tokens.Generic[]) => string } },
+        token: Tokens.TableCell,
+      ): string {
         // BL-053 Phase 4a — status pills in table cells. Cell
         // bodies that are exactly a known status label render as
         // a pill; everything else falls through to the default
         // text rendering with inline markdown re-parsed.
         const tag = token.header ? 'th' : 'td'
         const align = token.align ? ` style="text-align: ${token.align}"` : ''
-        const plain = renderTokensInline(token.tokens ?? []).trim()
+        const plain = this.parser.parseInline((token.tokens ?? []) as Tokens.Generic[]).trim()
         const stripped = stripTags(plain).trim()
         const status = STATUS_KIND[stripped]
         if (status) {
@@ -98,13 +101,6 @@ function ensureFencedRendererPatch(): void {
       },
     },
   })
-}
-
-/** Render a list of marked tokens to inline HTML. Used by the
- *  tablecell override to keep marked's inline parsing of bold /
- *  italic / links inside cells. */
-function renderTokensInline(tokens: Tokens.Generic[]): string {
-  return marked.parser(tokens as unknown as Tokens.Generic[])
 }
 
 function stripTags(html: string): string {
