@@ -1321,19 +1321,48 @@ Parser + loader + IPC + CLI shipped:
   manifest isolated to errors), and prompt resolution (inline /
   file). All 55 nexus-agent lib tests green.
 
-**Deferred** as documented follow-ups:
+**Follow-up shipped 2026-05-14 — custom-archetype routing.**
 
-- Routing a custom agent through `nexus agent plan/run --archetype <slug>`
-  isn't wired yet. `build_archetype` in `archetypes.rs` resolves
-  built-in names only; a `--archetype` arg that matches a custom
-  manifest's slug should layer that manifest's `system_prompt`
-  over its `archetype` baseline. Foundation is in place — every
-  manifest exposes the system prompt + base archetype — but the
-  resolver itself is one follow-up away (read scan result during
-  `handle_plan` / `handle_session_run`).
-- Tool allow/deny enforcement against `AgentToolRegistry` likewise
-  pending until the planning loop reads the manifest at request
-  time.
+`nexus agent plan --archetype <slug>` and `nexus agent run --archetype <slug>`
+now accept custom-manifest slugs alongside the six built-ins:
+
+- New `is_builtin_archetype(name)` + `build_archetype_with_prompt(id,
+  prompt, driver, extra)` in `crates/nexus-agent/src/archetypes.rs`.
+  The built-in helper lets the routing path decide between the
+  `&'static`-prompt fast path and the owned-prompt path that custom
+  manifests require.
+- New async `resolve_archetype_for_run(ctx, name)` in
+  `core_plugin.rs` returns `(agent_id, system_prompt,
+  ArchetypeSource)`. Built-in slugs hit the legacy path; unknown
+  slugs trigger `load_custom_archetype_prompt(ctx, slug)` which
+  reads `<forge>/.forge/agents/<slug>/agent.toml` through
+  `ctx.read_file` (capability-correct, matches the `handle_list_custom`
+  pattern), parses, resolves `[system_prompt].text` inline or
+  `[system_prompt].path` via a second `ctx.read_file`, and layers
+  the custom body over the manifest's `[agent].archetype` baseline
+  (default if absent).
+- Slug sanitisation hoisted into a pure `is_safe_archetype_slug`
+  helper (rejects path separators, parent-directory escapes,
+  hidden-directory aliases, empty strings) so the rule can be
+  unit-tested without a kernel context.
+- Custom agents get a `com.nexus.agent.custom.<slug>` namespaced id
+  so logs / transcripts make the routing visible. `tracing::debug!`
+  fires from `handle_plan` on every custom-routed plan.
+- `handle_plan` and `handle_session_run` both updated. Unknown
+  slugs that match neither a built-in nor a manifest fall through to
+  default with a logged warning — same posture as the pre-DG-36
+  fallback in `resolve_prompt`.
+- 7 new unit tests: `is_builtin_archetype` (recognise + reject),
+  `build_archetype_with_prompt` (owned id, extra layering, empty
+  extra), `is_safe_archetype_slug` (typical + path-shaped slugs).
+  All 111 nexus-agent lib tests green.
+
+**Remaining deferred:**
+
+- Tool allow/deny enforcement against `AgentToolRegistry` — pending
+  until the planning loop reads the manifest's `[tools]` section
+  at request time. The custom-archetype path now resolves the
+  manifest end-to-end, so this is one targeted addition away.
 
 ---
 

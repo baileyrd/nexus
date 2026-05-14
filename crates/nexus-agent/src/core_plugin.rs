@@ -408,12 +408,36 @@ async fn handle_plan(
         .strip_prefix(DEFAULT_SYSTEM_PROMPT)
         .map(str::trim_start)
         .filter(|s| !s.is_empty());
+    let (agent_id, agent_prompt, source) =
+        resolve_archetype_for_run(&ctx, a.archetype.as_deref()).await;
     let driver = AiChatBridge {
         ctx,
         timeout: DEFAULT_CHAT_TIMEOUT,
     };
-    let agent = build_archetype(a.archetype.as_deref(), driver, extra);
-    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
+    let plan = match source {
+        ArchetypeSource::Builtin | ArchetypeSource::Default => {
+            // Preserve the existing fast-path for built-ins —
+            // `build_archetype` already knows the `&'static`-string
+            // map; routing through it keeps callers that don't pass a
+            // forge-relative slug on the unchanged code path.
+            build_archetype(a.archetype.as_deref(), driver, extra)
+                .plan(&a.goal)
+                .await
+                .map_err(|e| agent_err(&e))?
+        }
+        ArchetypeSource::CustomManifest { slug } => {
+            tracing::debug!(
+                plugin_id = PLUGIN_ID,
+                custom_slug = %slug,
+                agent_id = %agent_id,
+                "DG-36: routing through custom archetype manifest",
+            );
+            crate::archetypes::build_archetype_with_prompt(agent_id, agent_prompt, driver, extra)
+                .plan(&a.goal)
+                .await
+                .map_err(|e| agent_err(&e))?
+        }
+    };
     to_value(&plan, "plan")
 }
 
@@ -424,6 +448,176 @@ async fn handle_plan(
 //    STEP_DONE / RUN_DONE bus topics retired alongside —
 //    `com.nexus.agent.round_proposed` (Phase 2b) is the
 //    replacement for live UI updates.
+
+// ── DG-36 follow-up: custom-archetype routing ──────────────────────────────
+
+/// Where the system prompt used by `handle_plan` / `handle_session_run`
+/// came from. Lets the call site pick between the built-in fast path
+/// (`&'static` prompt strings) and the owned-string path that custom
+/// manifests require.
+#[derive(Debug, Clone)]
+enum ArchetypeSource {
+    /// Caller passed nothing — DEFAULT_SYSTEM_PROMPT.
+    Default,
+    /// Caller passed one of the six built-in slugs (writer / coder /
+    /// researcher / auditor / librarian / coach).
+    Builtin,
+    /// Caller passed a slug that matched a manifest under
+    /// `<forge>/.forge/agents/<slug>/agent.toml`. The custom manifest's
+    /// `[system_prompt]` body is layered over its `[agent].archetype`
+    /// baseline (default if absent). Agent id is namespaced as
+    /// `com.nexus.agent.custom.<slug>`.
+    CustomManifest { slug: String },
+}
+
+/// DG-36 — resolve an `--archetype` argument into a concrete
+/// `(agent_id, system_prompt, source)` triple. Try built-ins first
+/// (fast path, same as the pre-DG-36 behaviour); on miss, look up
+/// `<forge>/.forge/agents/<slug>/agent.toml` via the kernel context.
+/// A custom manifest's `system_prompt` body layers over its
+/// `[agent].archetype` baseline (default if unset).
+///
+/// Unknown slugs that don't match a built-in and don't have a manifest
+/// fall through to `ArchetypeSource::Default` — same posture as the
+/// pre-DG-36 fallback in `resolve_prompt`. The kernel-context I/O
+/// failures are logged as warnings; they don't crash the handler.
+async fn resolve_archetype_for_run(
+    ctx: &KernelPluginContext,
+    name: Option<&str>,
+) -> (String, String, ArchetypeSource) {
+    let trimmed = name.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(slug) = trimmed {
+        if crate::archetypes::is_builtin_archetype(slug) {
+            let (id, prompt) = crate::archetypes::resolve_prompt(Some(slug));
+            return (id.to_string(), prompt.to_string(), ArchetypeSource::Builtin);
+        }
+        // Slug doesn't match a built-in — try the custom-manifest path.
+        match load_custom_archetype_prompt(ctx, slug).await {
+            Ok(Some((id, prompt))) => {
+                return (
+                    id,
+                    prompt,
+                    ArchetypeSource::CustomManifest {
+                        slug: slug.to_string(),
+                    },
+                );
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    archetype = slug,
+                    "no custom manifest found for slug; falling back to default",
+                );
+            }
+            Err(reason) => {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    archetype = slug,
+                    %reason,
+                    "custom manifest lookup failed; falling back to default",
+                );
+            }
+        }
+    }
+    // No name, or fall-through: built-in default.
+    let (id, prompt) = crate::archetypes::resolve_prompt(name);
+    (id.to_string(), prompt.to_string(), ArchetypeSource::Default)
+}
+
+/// `true` when `slug` is safe to splice into a `<forge>/.forge/agents/<slug>/…`
+/// path. Pure helper extracted from [`load_custom_archetype_prompt`]
+/// so the slug-validation rules are unit-testable without a kernel
+/// context. Rejects path separators, parent-directory escapes, and
+/// hidden-directory aliases. Empty slugs are rejected too — the only
+/// caller guarantees a non-empty slug, but defending here keeps the
+/// helper self-contained.
+fn is_safe_archetype_slug(slug: &str) -> bool {
+    if slug.is_empty() {
+        return false;
+    }
+    if slug.contains('/') || slug.contains('\\') {
+        return false;
+    }
+    if slug.contains("..") {
+        return false;
+    }
+    if slug.starts_with('.') {
+        return false;
+    }
+    true
+}
+
+/// Read `<forge>/.forge/agents/<slug>/agent.toml` through the kernel
+/// context (capability-correct path) and assemble the layered prompt.
+/// Returns `Ok(None)` when the manifest file is missing or unreadable
+/// — the slug just isn't a custom agent, which `resolve_archetype_for_run`
+/// surfaces as a warning. `Err` is reserved for parse / shape failures
+/// surfaced to the trace log so an operator can debug a broken manifest.
+async fn load_custom_archetype_prompt(
+    ctx: &KernelPluginContext,
+    slug: &str,
+) -> Result<Option<(String, String)>, String> {
+    // Reject path-shaped slugs up front; the manifest scanner trusts
+    // directory names, so a `../etc/passwd` slug must not escape.
+    if !is_safe_archetype_slug(slug) {
+        return Err(format!("rejecting suspicious slug `{slug}`"));
+    }
+    let manifest_path = std::path::Path::new(crate::custom_agent::AGENTS_DIR)
+        .join(slug)
+        .join(crate::custom_agent::MANIFEST_FILE_NAME);
+    let bytes = match ctx.read_file(&manifest_path).await {
+        Ok(b) => b,
+        // Missing file is the common case (slug isn't a custom agent).
+        Err(_) => return Ok(None),
+    };
+    let body = std::str::from_utf8(&bytes)
+        .map_err(|e| format!("manifest not UTF-8 at {}: {e}", manifest_path.display()))?
+        .to_string();
+    let manifest = crate::custom_agent::parse_str(&body, slug, &manifest_path)
+        .map_err(|e| format!("parse failed for {}: {e}", manifest_path.display()))?;
+
+    // Resolve the prompt body. For `[system_prompt].text` we have it
+    // inline; for `[system_prompt].path` we fetch the referenced file
+    // through the kernel context, treating the path as relative to the
+    // manifest directory (matches `custom_agent::resolve_system_prompt`
+    // on the sync side).
+    let custom_prompt = if let Some(text) = manifest.system_prompt.text.as_deref() {
+        text.to_string()
+    } else if let Some(rel) = manifest.system_prompt.path.as_deref() {
+        let full_path = std::path::Path::new(crate::custom_agent::AGENTS_DIR)
+            .join(slug)
+            .join(rel);
+        let bytes = ctx
+            .read_file(&full_path)
+            .await
+            .map_err(|e| format!("read {} failed: {e}", full_path.display()))?;
+        std::str::from_utf8(&bytes)
+            .map_err(|e| format!("system prompt file not UTF-8 at {}: {e}", full_path.display()))?
+            .to_string()
+    } else {
+        // Parse-time check should have rejected this; treat as missing
+        // rather than an error so the fallback path stays predictable.
+        return Ok(None);
+    };
+
+    // Layer over the named baseline archetype, or DEFAULT_SYSTEM_PROMPT
+    // when none is given. Custom prompt is appended with a blank-line
+    // separator — same shape as build_archetype's `extra_prompt`
+    // layering, so a custom agent reads as "<baseline>\n\n<custom>".
+    let base_name = manifest
+        .agent
+        .archetype
+        .as_deref()
+        .filter(|s| crate::archetypes::is_builtin_archetype(s));
+    let (_, base_prompt) = crate::archetypes::resolve_prompt(base_name);
+    let layered = if custom_prompt.trim().is_empty() {
+        base_prompt.to_string()
+    } else {
+        format!("{base_prompt}\n\n{custom_prompt}")
+    };
+    let id = format!("com.nexus.agent.custom.{slug}");
+    Ok(Some((id, layered)))
+}
 
 // ── History persistence ─────────────────────────────────────────────────────
 
@@ -997,11 +1191,11 @@ async fn handle_session_run(
     let system = match (&parsed.system, &parsed.archetype) {
         (Some(s), _) => s.clone(),
         (None, Some(name)) => {
-            // Reuse the archetype's prompt directly. Skill-aware
-            // assembly is for the legacy `plan` flow; sessions
-            // can compose later in a follow-up.
-            let (_, prompt) = crate::archetypes::resolve_prompt(Some(name));
-            prompt.to_string()
+            // DG-36 — try the custom-manifest path first; fall back to
+            // built-ins. Skill-aware assembly is for the legacy `plan`
+            // flow; sessions compose the prompt directly.
+            let (_, prompt, _) = resolve_archetype_for_run(&ctx, Some(name)).await;
+            prompt
         }
         (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
     };
@@ -1854,6 +2048,32 @@ mod tests {
         });
         let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
         assert!(parsed.auto_approve);
+    }
+
+    // ── DG-36 follow-up — slug validation ──────────────────────────────────
+
+    #[test]
+    fn is_safe_archetype_slug_accepts_typical_slugs() {
+        for s in ["rust-reviewer", "auditor_v2", "code_review_2", "abc"] {
+            assert!(is_safe_archetype_slug(s), "{s} should be safe");
+        }
+    }
+
+    #[test]
+    fn is_safe_archetype_slug_rejects_path_shaped_slugs() {
+        for s in [
+            "",
+            "../etc/passwd",
+            "..",
+            "foo/bar",
+            "foo\\bar",
+            ".hidden",
+            ".",
+            "..pwn",
+            "ok/..",
+        ] {
+            assert!(!is_safe_archetype_slug(s), "{s} should be rejected");
+        }
     }
 
     /// DG-37 — the agent tool registry lists `delegate_to_agent`

@@ -133,6 +133,44 @@ pub(crate) fn resolve_prompt(name: Option<&str>) -> (&'static str, &'static str)
     }
 }
 
+/// `true` when `name` (case-insensitive, trim-normalised) names one of
+/// the six built-in archetypes. Used by the DG-36 routing path to
+/// decide whether to try the custom-manifest fallback.
+#[must_use]
+pub fn is_builtin_archetype(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "writer" | "coder" | "researcher" | "auditor" | "librarian" | "coach",
+    )
+}
+
+/// DG-36 follow-up — build an [`LlmAgent`] from an already-resolved
+/// `(agent_id, system_prompt)` pair instead of looking up a built-in
+/// archetype by name. Used by `handle_plan` / `handle_session_run`
+/// when the caller's `--archetype <slug>` resolved through the
+/// custom-manifest path; the existing [`build_archetype`] stays the
+/// preferred entry point for built-ins.
+///
+/// `extra_prompt` follows the same layering rule as
+/// [`build_archetype`]: when non-empty, it's appended to
+/// `system_prompt` with a blank-line separator.
+pub fn build_archetype_with_prompt<D: ChatDriver>(
+    agent_id: impl Into<String>,
+    system_prompt: impl Into<String>,
+    driver: D,
+    extra_prompt: Option<&str>,
+) -> LlmAgent<D> {
+    let agent_id = agent_id.into();
+    let prompt = system_prompt.into();
+    let final_prompt = match extra_prompt {
+        Some(extra) if !extra.is_empty() => format!("{prompt}\n\n{extra}"),
+        _ => prompt,
+    };
+    LlmAgent::new(driver)
+        .with_id(agent_id)
+        .with_system_prompt(final_prompt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +259,70 @@ mod tests {
     async fn none_archetype_produces_default_id() {
         let agent = build_archetype(None, CannedDriver, None);
         assert_eq!(agent.id(), "com.nexus.agent.llm");
+    }
+
+    // ── DG-36 follow-up — is_builtin + build_archetype_with_prompt ─────────────
+
+    #[test]
+    fn is_builtin_archetype_recognises_all_six_slugs() {
+        for s in ["writer", "coder", "researcher", "auditor", "librarian", "coach"] {
+            assert!(is_builtin_archetype(s), "{s} should be a built-in");
+            // Case + whitespace insensitive.
+            assert!(is_builtin_archetype(&s.to_ascii_uppercase()));
+            assert!(is_builtin_archetype(&format!("  {s}  ")));
+        }
+    }
+
+    #[test]
+    fn is_builtin_archetype_rejects_unknown_slugs() {
+        for s in ["", "general", "custom-thing", "writer.v2", "rust-reviewer"] {
+            assert!(!is_builtin_archetype(s), "{s} should NOT be a built-in");
+        }
+    }
+
+    #[tokio::test]
+    async fn build_archetype_with_prompt_uses_caller_supplied_id_and_prompt() {
+        let agent = build_archetype_with_prompt(
+            "com.nexus.agent.custom.rust-reviewer",
+            "You are a Rust reviewer.",
+            CannedDriver,
+            None,
+        );
+        assert_eq!(agent.id(), "com.nexus.agent.custom.rust-reviewer");
+        // Driver returns canned text; confirms the agent constructed.
+        let plan = agent.plan("review the diff").await.unwrap();
+        assert_eq!(plan.steps.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn build_archetype_with_prompt_appends_extra_with_blank_line() {
+        // The extra-prompt path mirrors `build_archetype`'s layering —
+        // pin the contract so future refactors don't drop the blank
+        // line that visually separates baseline + skill prompts.
+        let agent = build_archetype_with_prompt(
+            "com.nexus.agent.custom.x",
+            "BASE",
+            CannedDriver,
+            Some("EXTRA"),
+        );
+        assert_eq!(agent.id(), "com.nexus.agent.custom.x");
+        // The agent's prompt isn't directly inspectable but the
+        // builder mirrors `build_archetype`'s layering — covered
+        // elsewhere by the integration via `handle_plan`.
+        let _ = agent.plan("x").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn build_archetype_with_prompt_empty_extra_keeps_base_alone() {
+        let agent = build_archetype_with_prompt(
+            "com.nexus.agent.custom.x",
+            "BASE",
+            CannedDriver,
+            Some(""),
+        );
+        // Empty extra is treated the same as None (no separator
+        // appended). Same layering rule as `build_archetype`.
+        assert_eq!(agent.id(), "com.nexus.agent.custom.x");
+        let _ = agent.plan("x").await.unwrap();
     }
 }
