@@ -1,8 +1,23 @@
 # BL-053 — Forge visual target: from current shell to the mockup
 
 > **Source:** Forge Color System mockup + ember-on-slate design exploration (2026-05-06).
-> **Status:** Plan only. No phases committed; gated on the open questions in §5.
+> **Status:** **Phase 1 shipped.** Phases 2–4 remain plan-only and stay gated on the open questions in §5.
 > **Related:** the bundled themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the token values this plan styles against.
+
+## Phase 1 — Chrome polish (shipped)
+
+| Mockup element | Status |
+|----|----|
+| A. Cool-slate chrome with single ember accent | ✅ Already shipped (bundled ember themes; this BL preserves) |
+| B. Pill-shaped editor tabs + ember underline + soft fill on active | ✅ `shell.css` `.forge-tab` + `.forge-tab.active::after` (annotated "BL-053 Phase 1: ember pills") |
+| C. Active sidebar row + ember left rail | ✅ Pre-existing |
+| M. Inspector panel segmented control (Outline / Backlinks / Graph) | ✅ `shell.css` `.rtab` / `.rtab.active` (annotated "BL-053 Phase 1: segmented control treatment") |
+| P. Status bar bottom-right: forge name + ember dot | ✅ `WorkspaceStatus` registered into `statusBarRight` at priority 5; dot uses `--interactive-accent` |
+| E. Fraunces serif H1 / H2 in editor | ✅ `--font-serif` declared in `shell.css :root`; applied to `.cm-content .cm-md-h1/h2` (live preview) + `.nexus-markdown-body h1/h2` (rendered viewer) |
+
+**Deferred from Phase 1:** font bundling. The theme's `[typography].font_imports` is still the only path that pulls `Fraunces` (Google Fonts URL). Network-free first launches see the Georgia fallback, which is acceptable per §5 Q3 ("nobody's loaded it yet"). Bundling the woff2 is a separate workstream when offline-first matters.
+
+Phases 2–4 below stay open and depend on the §5 product decisions.
 
 The bundled ember themes ship the token values the mockup uses, but the shell renders a much plainer surface than the mockup. Closing the gap is partly theme/CSS work and partly markdown-rendering / plugin work. This document inventories the gap, splits it into phases by ROI, and lists the decisions that have to land before code does.
 

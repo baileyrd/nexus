@@ -33,6 +33,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* BL-053 Phase 1 — shell-level fallback for the serif font stack
+   the bundled ember themes declare via `[typography] serif_font`
+   in their `NEXUS.toml`. The theme manifest's typography block
+   isn't routed through the resolver yet (TODO: future BL); until
+   then, declaring it here keeps the editor's h1/h2 styles able to
+   reach a sensible fallback without depending on the theme apply
+   path. Fraunces ships as a Google Font (the theme's font_imports
+   pulls it on demand); when absent the chain degrades to Georgia
+   then the platform serif. */
+:root {
+  --font-serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+}
+
 /* ─── Form controls (theme-aware) ────────────────────────────────────────────
    WebKitGTK / Tauri renders <select> and <input> with native widget chrome by
    default, which ignores our background/color tokens. Strip the native look

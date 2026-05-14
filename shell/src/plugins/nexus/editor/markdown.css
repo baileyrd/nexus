@@ -81,8 +81,22 @@
   margin: 1.6em 0 0.6em;
 }
 
-.nexus-markdown-body h1 { font-size: 28px; }
-.nexus-markdown-body h2 { font-size: 22px; }
+/* BL-053 Phase 1 — H1 / H2 use the serif font stack
+   (--font-serif declared in shell.css). Tightened letter-spacing
+   matches the display-headline rhythm in the mockup; body text +
+   lower-level headings keep the sans inheritance. */
+.nexus-markdown-body h1 {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.nexus-markdown-body h2 {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
 .nexus-markdown-body h3 { font-size: 18px; }
 .nexus-markdown-body h4,
 .nexus-markdown-body h5,

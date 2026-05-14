@@ -1,6 +1,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { FileStats } from './FileStats'
 import { IndexingStatus } from './IndexingStatus'
+import { WorkspaceStatus } from './WorkspaceStatus'
 
 export const statusBarPlugin: Plugin = {
   manifest: {
@@ -18,6 +19,15 @@ export const statusBarPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
+    // BL-053 Phase 1 — leftmost item in the status bar's right group:
+    // forge name with an ember status dot when the workspace is in
+    // sync. Mockup's bottom-right "lap-working · •" pattern.
+    api.views.register('nexus.statusBar.workspace', {
+      slot: 'statusBarRight',
+      component: WorkspaceStatus,
+      priority: 5,
+    })
+
     api.views.register('nexus.statusBar.fileStats', {
       slot: 'statusBarRight',
       component: FileStats,
