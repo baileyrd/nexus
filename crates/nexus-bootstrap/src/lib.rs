@@ -524,6 +524,7 @@ fn register_core_plugins(
     use nexus_audio::AudioCorePlugin;
     use nexus_comments::core_plugin::CommentsCorePlugin;
     use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
+    use nexus_notifications::core_plugin::NotificationsCorePlugin;
     use nexus_formats::FormatsCorePlugin;
     use nexus_skills::SkillsCorePlugin;
     use nexus_templates::TemplatesCorePlugin;
@@ -1284,6 +1285,34 @@ fn register_core_plugins(
         )
         .or_lifecycle_skip(event_bus, "com.nexus.linkpreview")?;
 
+    // BL-133 — multi-channel notification dispatcher. v1 wires the
+    // bus-event-based Desktop transport (shell renders the toast)
+    // and the Discord webhook transport. The webhook URL is sourced
+    // from the forge config — empty when not configured, in which
+    // case `send(channel: discord, ...)` returns `NotConfigured` at
+    // dispatch time rather than crashing at boot. Telegram / SMTP
+    // and shell-side settings UI / workflow-step / agent-auto
+    // wiring are filed as follow-ups.
+    let discord_webhook_url = load_discord_webhook_url(forge_root);
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.notifications",
+                "Notifications",
+                LifecycleFlags::NONE,
+                &with_v1_aliases(&[(
+                    "send",
+                    nexus_notifications::core_plugin::HANDLER_SEND,
+                )]),
+            ),
+            forge_root,
+            Box::new(NotificationsCorePlugin::with_defaults(
+                Some(Arc::clone(event_bus)),
+                discord_webhook_url,
+            )),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.notifications")?;
+
     // Audio — BL-117 STT + TTS subsystem. on_init loads the
     // `<forge>/.forge/config.toml::[audio]` block and builds the
     // configured backend pair (local / provider / platform). The
@@ -1994,6 +2023,53 @@ pub fn workflow_capabilities() -> CapabilitySet {
     [Capability::IpcCall, Capability::AiChat]
         .into_iter()
         .collect()
+}
+
+/// BL-133 — pull `[notifications.discord].webhook_url` out of
+/// `<forge>/.forge/config.toml`. Missing file / section / field all
+/// fall back to an empty string, which surfaces at
+/// `send(channel: discord, ...)` time as
+/// `SendError::NotConfigured` rather than crashing at boot.
+fn load_discord_webhook_url(forge_root: &std::path::Path) -> String {
+    #[derive(serde::Deserialize, Default)]
+    struct Wrapper {
+        #[serde(default)]
+        notifications: Notifications,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct Notifications {
+        #[serde(default)]
+        discord: DiscordCfg,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct DiscordCfg {
+        #[serde(default)]
+        webhook_url: String,
+    }
+    let path = forge_root.join(".forge").join("config.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return String::new(),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: read failed; discord webhook url unset"
+            );
+            return String::new();
+        }
+    };
+    match toml::from_str::<Wrapper>(&text) {
+        Ok(w) => w.notifications.discord.webhook_url,
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: [notifications.discord] failed to parse; webhook url unset"
+            );
+            String::new()
+        }
+    }
 }
 
 /// BL-028g — pull `[webhooks]` out of `<forge>/.forge/config.toml`.

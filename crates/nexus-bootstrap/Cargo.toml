@@ -15,6 +15,7 @@ ts-export = [
     "nexus-storage/ts-export",
     "nexus-ai/ts-export",
     "nexus-linkpreview/ts-export",
+    "nexus-notifications/ts-export",
     "nexus-git/ts-export",
     "nexus-mcp/ts-export",
     "nexus-lsp/ts-export",
@@ -55,6 +56,7 @@ nexus-skills = { path = "../nexus-skills" }
 nexus-templates = { path = "../nexus-templates" }
 nexus-workflow = { path = "../nexus-workflow" }
 nexus-linkpreview = { path = "../nexus-linkpreview" }
+nexus-notifications = { path = "../nexus-notifications" }
 nexus-comments = { path = "../nexus-comments" }
 nexus-audio = { path = "../nexus-audio" }
 async-trait = { workspace = true }

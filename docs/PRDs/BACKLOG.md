@@ -379,40 +379,58 @@ DG-34 / BL-132 ship the flag at the agent-tool level (`AgentToolSpec.requires_ap
 
 ---
 
-### BL-133: Multi-channel notification output (Thoth port)
+_BL-133 closed 2026-05-14 (v1 scope; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)). New `crates/nexus-notifications` core plugin shipped with the `Transport` trait + two backends — `DesktopTransport` (publishes `com.nexus.notifications.delivered` on the kernel bus for shell-side toast rendering) and `DiscordWebhook` (HTTP POST to a `.forge/config.toml::[notifications.discord] webhook_url`). Single IPC handler `com.nexus.notifications::send(channel, message, [title])` with strict-shape `SendArgs` + `SendReply`; unknown fields rejected. Registered in `nexus-bootstrap` after `nexus-linkpreview` via the standard `LifecycleFlags::NONE` path. New CLI verb `nexus notify send --channel <desktop|discord> "<message>" [--title <t>]` with local channel-name validation before IPC. 14 unit tests cover the channel enum serde, both transports (positive + `NotConfigured`), the IPC handler (every error path + a mock-transport routing positive), and the CLI channel-name parser. `cargo test -p nexus-notifications` 12/12; `cargo test -p nexus-cli` 55+10+3; `cargo test -p nexus-bootstrap --lib` 37; `dep_invariants` clean; clippy clean. **Deferred (filed as follow-ups below)**: Telegram + SMTP transports; the actual Tauri `notification` plugin invocation (today's Desktop transport is bus-event-only; shell-side renders); workflow `.workflow.toml::[[steps]] notify` step option; agent auto-notify on `com.nexus.agent.run_done` > threshold; shell settings panel; per-channel keyring storage._
 
-**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
-**Effort**: Medium. New crate; does not touch existing service plugins.
-**Crates**: new `nexus-notifications` core plugin.
+---
 
-Nexus agent and workflow outputs are surfaced only in the active frontend session. A background workflow that completes at 02:00 (e.g., the Dream Cycle, a scheduled agent run, a file-event workflow) has no delivery channel if the Tauri shell is closed. Thoth ships five messaging backends; Nexus needs at minimum desktop OS notifications and one async channel.
+### Follow-up: Telegram + SMTP transports (from BL-133)
 
-**v1 scope:**
+**Source**: BL-133 deferral. Filed 2026-05-14.
+**Effort**: Small per transport. Each adds one `impl Transport` next to `DiscordWebhook`.
 
-| Channel | Transport | Trigger |
-|---|---|---|
-| Desktop OS notification | Tauri `notification` plugin | All workflow / agent completions |
-| Telegram bot | HTTP polling via `reqwest` | Opt-in; configured in `[notifications.telegram]` |
-| Discord webhook | HTTP POST to webhook URL | Opt-in; configured in `[notifications.discord]` |
-| Email (SMTP) | `lettre` crate | Opt-in; TLS, credential in `nexus-security` keyring |
+`nexus-notifications` ships Desktop + Discord today. The remaining v1-scope channels are:
 
-**Integration points:**
+- **Telegram**: HTTP POST to `https://api.telegram.org/bot<TOKEN>/sendMessage` with `chat_id` + `text`. Bot token + authorised chat id stored in `nexus-security` keyring; `[notifications.telegram] enabled = true` in config. Split message at the 4096-char limit.
+- **SMTP**: `lettre` crate; TLS by default; credential in keyring; `[notifications.email]` block with from / to / subject template.
 
-- Workflows: the `.workflow.toml` `[[steps]]` spec gains an optional `notify: [telegram, discord]` key; if set, the workflow executor publishes a `com.nexus.notifications::send` IPC call on step or run completion.
-- Agents: `com.nexus.agent.run_done` kernel-bus subscribers in `nexus-notifications` send a summary automatically if a notification channel is configured and the run took > 30 s (configurable threshold).
-- Any plugin can call `com.nexus.notifications::send(channel, message)` directly.
+Both follow the existing `DesktopTransport` / `DiscordWebhook` pattern (one struct + `impl Transport` + a config-loader helper in `nexus-bootstrap`).
 
-**Definition of done:**
-- `nexus-notifications` registered by `nexus-bootstrap` after `nexus-workflow`
-- `com.nexus.notifications::send(channel, message, [title])` IPC handler
-- Desktop notification: Tauri `notification` plugin call, falls back gracefully on Linux without `libnotify`
-- Telegram: bot token + authorised chat ID stored in `nexus-security` keyring; `notifications.telegram.enabled = true` in config; message split at 4096-char limit
-- Discord: webhook URL in keyring; `notifications.discord.enabled = true`
-- SMTP: `[notifications.email]` block in config; credential in keyring
-- Workflow TOML: `notify` key on `[[steps]]` and at `[metadata]` level (run-level)
-- Agent auto-notify on run completion > threshold
-- Shell settings panel for configuring channels and testing delivery
-- CLI: `nexus notify send --channel telegram "message"` for ad-hoc delivery
+---
+
+### Follow-up: Tauri `notification` plugin integration (from BL-133)
+
+**Source**: BL-133 deferral. Filed 2026-05-14.
+**Effort**: Small. Shell-side only.
+
+Today's `DesktopTransport` publishes a `com.nexus.notifications.delivered` event; the Tauri shell can subscribe and render through its existing toast surface. The richer "OS notification that survives a closed window" path requires hooking up the Tauri `notification` plugin in `shell/src-tauri/Cargo.toml` + a small Rust bridge command. The bus event contract stays the same — only the consumer changes.
+
+---
+
+### Follow-up: workflow `notify` step + agent auto-notify (from BL-133)
+
+**Source**: BL-133 deferral. Filed 2026-05-14.
+**Effort**: Medium. Touches `nexus-workflow` step grammar + a new subscriber in `nexus-bootstrap`.
+
+The BL-133 DoD called for:
+
+- Workflow `.workflow.toml::[[steps]] notify: [discord]` key — set to fire `com.nexus.notifications::send` on step / run completion. The `nexus-workflow` step grammar needs the new key + a per-step IPC call.
+- Agent auto-notify: subscribe to `com.nexus.agent.run_done` in `nexus-bootstrap` and dispatch a `notifications::send` call when the run took > a configurable threshold (`[agent] auto_notify_threshold_s`, default 30s).
+
+Both can land independently once a Telegram / SMTP transport is wired (or sooner for Discord-only deployments).
+
+---
+
+### Follow-up: shell settings panel for notifications (from BL-133)
+
+**Source**: BL-133 deferral. Filed 2026-05-14.
+**Effort**: Small. Shell-side UI.
+
+A dedicated panel under Settings → Notifications would let users:
+- Toggle each channel on/off.
+- Enter the Discord webhook URL / Telegram credentials / SMTP server (stored via the existing `nexus-security` keyring IPC).
+- "Send test" button per channel that dispatches a hello-world notification.
+
+Today config lives in `.forge/config.toml` only; the panel would mediate the same keys behind a UI.
 
 ---
 

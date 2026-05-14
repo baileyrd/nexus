@@ -253,6 +253,53 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-133: Multi-channel notification output (Thoth port) ✅ (2026-05-14 — v1 scope: Desktop + Discord)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Files**: `crates/nexus-notifications/Cargo.toml` (new); `crates/nexus-notifications/src/lib.rs` (new — `Transport` trait + `DesktopTransport` + `DiscordWebhook`); `crates/nexus-notifications/src/core_plugin.rs` (new — `NotificationsCorePlugin` + `SendArgs` / `SendReply`); `Cargo.toml` (workspace member); `crates/nexus-bootstrap/Cargo.toml` (dep + ts-export feature); `crates/nexus-bootstrap/src/lib.rs` (registration + `load_discord_webhook_url` config loader); `crates/nexus-cli/src/main.rs` (`Notify(NotifyArgs)` command); `crates/nexus-cli/src/commands/notify.rs` (new — `send` + channel-name validator); `crates/nexus-cli/src/commands/mod.rs` (module list).
+**Related**: Sibling Thoth ports BL-128 / BL-129 / BL-130 / BL-131 / BL-132.
+
+Background-emitted agent and workflow events used to surface only in the active frontend session — a workflow that completes at 02:00 with the Tauri shell closed had no delivery channel. BL-133 ships the dispatch surface so plugins, the CLI, and (eventually) the workflow + agent emitters can route a single `send` call to one or more configured channels.
+
+**What landed.**
+
+- **New `nexus-notifications` core plugin.** Registered in `nexus-bootstrap` after `nexus-linkpreview` with the standard `LifecycleFlags::NONE` path. Plugin id `com.nexus.notifications`. Single IPC handler `send` (id 1) with strict-shape `SendArgs` (`channel` + `message` + optional `title`) and `SendReply` (`delivered` + echoed `channel`). `deny_unknown_fields` on both wire types so a typo at the call site fails fast.
+- **`Transport` trait** — synchronous `send(&self, &Notification) -> Result<(), SendError>`. `SendError` has three variants: `NotConfigured(&'static str)`, `Http(String)`, `Bus(String)`. Trait-objected via `Box<dyn Transport>` in a `HashMap<Channel, _>` so future transports drop in without churning the plugin shell.
+- **`DesktopTransport`** — publishes a `com.nexus.notifications.delivered` event on the kernel bus with `{ channel, title, message }`. The shell subscribes and routes the payload through its existing toast surface. Future-compat: a richer "OS notification that survives a closed window" path can swap in the Tauri `notification` plugin without changing the bus contract. When constructed without an event bus (test fixtures), `send` returns `SendError::NotConfigured("desktop")`.
+- **`DiscordWebhook`** — HTTP POST to a webhook URL via `reqwest::blocking`. Body shape: `{ username: "Nexus", content: "**<title>**\n<message>" }`. Empty URL → `SendError::NotConfigured("discord")` at send time (not boot time, so missing config doesn't crash the runtime).
+- **Config loader** — `nexus-bootstrap::load_discord_webhook_url(forge_root)` reads `<forge>/.forge/config.toml::[notifications.discord] webhook_url`. Missing file / section / field all return `""` and surface as `NotConfigured` at dispatch.
+- **CLI verb** — new `nexus notify send --channel <desktop|discord> "<message>" [--title <t>]`. Local channel-name validation before IPC so a typo produces a friendly error rather than a serde rejection. Output: `delivered to <channel>` on success, `not delivered (channel <c>): <response>` on failure.
+
+**Tests**:
+
+- `nexus-notifications` 12 tests:
+  - `Channel` serializes / deserializes as snake_case (`"desktop"`, `"discord"`).
+  - `DesktopTransport` without a bus → `NotConfigured("desktop")`.
+  - `DesktopTransport` with a bus → publishes a `com.nexus.notifications.delivered` event with the right payload; default `title` is `"Nexus"`.
+  - `DiscordWebhook` empty URL → `NotConfigured("discord")`.
+  - Core-plugin: routes to the configured transport (mock with shared `Arc`); unknown channel id errors; transport-failure surfaces as IPC error; rejects missing `message`; rejects unknown field; unknown handler id errors.
+- `nexus-cli` 2 new tests on the `validate_channel` helper (case-insensitive accept, friendly error on unknown).
+- `nexus-bootstrap --lib` 37/37 pass with the new registration; `dep_invariants` test confirms `nexus-notifications` doesn't violate microkernel isolation.
+
+**Deferred (filed as follow-ups under the BL-133 marker in `BACKLOG.md`)**:
+
+- **Telegram + SMTP transports** — each adds one `impl Transport` + a config-loader helper. Same shape as `DiscordWebhook`.
+- **Tauri `notification` plugin invocation** — the current Desktop transport is bus-event-only; the shell renders. A future shell-side hook can call the Tauri plugin so notifications survive a closed window.
+- **Workflow `notify` step + agent auto-notify** — touches `nexus-workflow` step grammar + a `com.nexus.agent.run_done` subscriber in bootstrap.
+- **Shell settings panel** — toggle channels on/off, enter credentials, "send test" button per channel.
+- **Per-channel keyring storage** — today the Discord webhook URL is read from `config.toml`; for production Telegram bot tokens / SMTP creds, route through `nexus-security`'s keyring IPC.
+
+**Tested**:
+- `cargo test -p nexus-notifications` 12/12 passed.
+- `cargo test -p nexus-cli` 55 + 10 + 3 passed (+2 new for channel validator).
+- `cargo test -p nexus-bootstrap --lib` 37/37; `dep_invariants` 2/2.
+- `cargo clippy -p nexus-notifications --all-targets` clean.
+- `cargo build -p nexus-bootstrap` clean (workspace builds end-to-end with the new crate).
+
+**Definition of done coverage**: ✅ `nexus-notifications` registered by `nexus-bootstrap` after `nexus-workflow` (and `nexus-linkpreview`); ✅ `com.nexus.notifications::send(channel, message, [title])` IPC handler; ✅ Discord webhook (config-driven URL); ⏸ Desktop notification via the Tauri `notification` plugin — today's transport is bus-event-only; shell-side toast renders; Tauri integration filed as a follow-up; ⏸ Telegram / SMTP — filed as follow-ups; ⏸ workflow TOML `notify` key, agent auto-notify, shell settings panel — all filed as follow-ups; ✅ CLI `nexus notify send --channel <c> "message"` ad-hoc delivery.
+
+---
+
 ### BL-132: Runtime approval gates in the agent loop (Thoth port) ✅ (2026-05-14 — partial close, CLI half)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.

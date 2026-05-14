@@ -1,0 +1,23 @@
+[package]
+name = "nexus-notifications"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus multi-channel notification dispatcher (BL-133): desktop OS notifications + Discord webhooks; Telegram / SMTP filed as follow-ups."
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json"] }
+ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Emit TypeScript + JSON Schema bindings for the IPC handler types.
+# Off by default. Matches the linkpreview / storage / ai pattern.
+ts-export = ["dep:ts-rs", "dep:schemars"]

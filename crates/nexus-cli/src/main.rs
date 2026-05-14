@@ -111,6 +111,8 @@ enum Commands {
     Skill(SkillArgs),
     /// Workflow operations (PRD-16): list/show/validate `.workflow.toml` files
     Workflow(WorkflowArgs),
+    /// BL-133 — send a notification through `com.nexus.notifications::send`.
+    Notify(NotifyArgs),
     /// Process / saved-command management (PRD-09 §14.1)
     Proc(ProcArgs),
     /// Terminal / PTY session operations (PRD-09)
@@ -456,6 +458,36 @@ enum ToolCommand {
 struct AgentArgs {
     #[command(subcommand)]
     command: AgentCommand,
+}
+
+// ---------------------------------------------------------------------------
+// Notify (BL-133)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct NotifyArgs {
+    #[command(subcommand)]
+    command: NotifyCommand,
+}
+
+#[derive(Subcommand)]
+enum NotifyCommand {
+    /// Send a notification through `com.nexus.notifications::send`.
+    /// `desktop` routes through the kernel bus → shell toast; other
+    /// channels (Discord today; Telegram / SMTP filed as
+    /// follow-ups) need their transport configured in
+    /// `.forge/config.toml::[notifications.<channel>]`.
+    Send {
+        /// Channel: `desktop` | `discord`.
+        #[arg(long)]
+        channel: String,
+        /// Message body.
+        message: String,
+        /// Optional title — transports that need a header fall back
+        /// to `"Nexus"` when omitted.
+        #[arg(long)]
+        title: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1882,6 +1914,12 @@ fn main() {
             generate(shell, &mut cmd, "nexus", &mut std::io::stdout());
             Ok(())
         }
+
+        Commands::Notify(args) => match args.command {
+            NotifyCommand::Send { channel, message, title } => {
+                commands::notify::send(&mut app, &channel, &message, title.as_deref())
+            }
+        },
 
         Commands::Import(args) => match args.command {
             ImportCommand::Notion { source, dest } => {
