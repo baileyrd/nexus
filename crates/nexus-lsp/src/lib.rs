@@ -22,7 +22,11 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod client;
-mod config;
+/// `<forge>/.forge/lsp.toml` parser + the BL-113 / ADR 0027
+/// `merge_contributed` API. `pub` so `nexus-bootstrap` can construct
+/// `LspServerSpec` values for `merge_contributed`; outside the crate
+/// the re-exports at the root are the supported surface.
+pub mod config;
 pub mod core_plugin;
 /// Wire-mirror IPC arg/reply types for the schema generator.
 pub mod ipc;
@@ -30,6 +34,9 @@ pub mod pool;
 mod transport;
 
 pub use client::{LspClient, LspClientError, OpenDocument};
-pub use config::{LspHostConfig, LspServerSpec, LspConfigError};
+pub use config::{
+    LspConfigError, LspHostConfig, LspServerSpec, MergeSkip as LspMergeSkip,
+    MergeSkipReason as LspMergeSkipReason,
+};
 pub use core_plugin::LspCorePlugin;
 pub use pool::{ConnectionPool, PoolConfig};

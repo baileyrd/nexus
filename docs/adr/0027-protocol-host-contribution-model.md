@@ -165,9 +165,40 @@ The minimal foundational landing on `main`:
   family vectors. 4 unit tests cover the tagger + the all-empty
   fast-path.
 
-The host crates do not yet consume the aggregator — that's Phase 1
-(DAP first, on the parked `bl-081-dap-debugger` branch), Phase 2 (LSP),
-Phase 3 (MCP), Phase 4 (ACP — greenfield from day one).
+## Phase 2a + 3a — shipped 2026-05-14
+
+The host-side merge primitives on `main`. Phase 2a covers LSP, Phase 3a
+covers MCP. The bootstrap-side activation (Phase 2b/3b) is deferred
+behind the Phase 1 (DAP) lifecycle-callback design — the merge
+primitives are everything the future activation will call:
+
+- **`LspHostConfig::merge_contributed(Vec<(LspServerSpec, plugin_id)>)`** —
+  accepts contributed servers + the originating plugin id, merges
+  with TOML-wins precedence, returns `Vec<LspMergeSkip>` carrying
+  `(name, plugin_id, reason ∈ { TomlOverride, InvalidName, InvalidCommand })`.
+  Same validation rules as `read_from`. 4 new unit tests.
+- **`McpHostConfig::merge_contributed(Vec<(name, McpServerSpec, plugin_id)>)`** —
+  same shape and precedence; reason variant is `McpMergeSkipReason::{
+  TomlOverride, InvalidName, Invalid(String) }` because MCP's per-spec
+  validation varies by transport (stdio needs `command`, remote needs
+  `url`). The transport-aware `validate_spec` rule is factored out so
+  both `read_from` and `merge_contributed` share it. 4 new unit tests.
+- **`nexus-bootstrap::protocol_host_specs`** — the only place in tree
+  that maps `nexus_plugins::ContributedAdapter<{Lsp,Mcp}ProtocolHostReg>`
+  to the host-side spec triple shape `merge_contributed` expects.
+  `lsp_contribution_to_spec`, `lsp_contributions_to_specs`,
+  `mcp_contribution_to_spec`, `mcp_contributions_to_specs` —
+  preserves order, parses MCP's free-form transport string (`http` /
+  `ws|websocket`; unknown values fall back to `stdio` matching the
+  manifest TOML default). 4 new unit tests run a full parse →
+  collect → convert chain so the manifest schema and host-spec shape
+  are pinned together.
+
+Phase 1 (DAP) lands next, on its parked `bl-081-dap-debugger` branch.
+Phase 2b/3b (bootstrap activation: post-plugin-scan call into
+`merge_contributed`, plus a `register_adapter` / `unregister_adapter`
+IPC pair for live plugin enable/disable) waits for the Phase 1
+lifecycle-callback design.
 
 ## References
 

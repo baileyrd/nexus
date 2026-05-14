@@ -42,6 +42,12 @@ pub mod crdt_publisher;
 pub mod database;
 pub mod storage;
 pub mod terminal;
+/// BL-113 / ADR 0027 — manifest-side `ContributedAdapter` → host-side
+/// `{Lsp,Mcp}ServerSpec` converters. Phase 2a/3a primitive; the
+/// bootstrap-side wiring that calls these converters and feeds the
+/// result through `merge_contributed` lands in Phase 2b/3b once the
+/// plugin-lifecycle callback shape is settled by Phase 1.
+pub mod protocol_host_specs;
 
 /// Render a markdown note to a standalone HTML string.
 ///

@@ -21,7 +21,11 @@
 
 mod auth;
 mod client;
-mod config;
+/// `<forge>/.forge/mcp.toml` parser + the BL-113 / ADR 0027
+/// `merge_contributed` API. `pub` so `nexus-bootstrap` can construct
+/// `McpServerSpec` values for `merge_contributed`; outside the crate
+/// the re-exports at the root are the supported surface.
+pub mod config;
 pub mod core_plugin;
 /// DG-39 / PRD-14 §10 — runtime registry that lets plugins publish
 /// tools to the MCP server's exposed surface.
@@ -34,7 +38,9 @@ mod server;
 
 pub use auth::{AuthError, McpAuth, McpAuthSecret, ResolvedAuth};
 pub use client::{McpClient, McpClientError};
-pub use config::{McpConfigError, McpHostConfig, McpServerSpec, McpTransport};
+pub use config::{
+    McpConfigError, McpHostConfig, McpMergeSkip, McpMergeSkipReason, McpServerSpec, McpTransport,
+};
 pub use core_plugin::McpHostPlugin;
 pub use dynamic_tools::{DynamicTool, DynamicToolRegistry, RegistryError as ToolRegistryError};
 pub use pool::{ConnectionPool, PoolConfig};
