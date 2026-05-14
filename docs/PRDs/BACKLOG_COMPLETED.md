@@ -253,6 +253,42 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-131: Pre-invocation message sanitisation in the agent loop (Thoth port) ✅ (2026-05-14)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Files**: `crates/nexus-agent/src/context_sanitize.rs` (new); `crates/nexus-agent/src/lib.rs` (re-export); `crates/nexus-agent/src/session.rs` (per-iteration wire-up in `run_session_with_compressor`); `crates/nexus-agent/Cargo.toml` (`regex-lite` dep).
+**Related**: BL-120 (LLM-driven semantic summarisation — this PR ships the *mechanical-waste* complement; both layers run per round), BL-119 (`SessionConfig::max_context_tokens` — this PR reuses the same budget), BL-130 (companion inbound-content scanner; different concern: adversarial patterns vs. mechanical waste).
+
+BL-120 folds older turns into a rolling LLM summary when the context budget gets tight; this PR ships the cheaper, deterministic complement — four pure-string passes that strip *mechanical* waste (duplicate result lines, inert binary data, stale snapshots, raw over-budget length) from the assembled prompt just before each chat-driver invocation. Per-pass cost is O(n) over the prompt length; no LLM call.
+
+**What landed.**
+
+- **`context_sanitize.rs` module** with four pure passes:
+  - **`dedup_repeated_results`** — collapses consecutive lines whose RESULT BODY (the string after `- round N: `) is byte-for-byte identical into the first occurrence plus an `(result repeated N more times)` annotation. The round-number prefix is normalised before comparison so two lines like `- round 4: foo ok` and `- round 5: foo ok` are treated as duplicates (they carry zero new information about what the tool returned). Non-adjacent repeats are preserved (deliberate — independent retries the model needs to distinguish).
+  - **`strip_base64_data_uris`** — replaces inline `data:image/[A-Za-z0-9.+-]+;base64,...` URIs with `[image data stripped — N bytes]`. ≥50-char base64 lower bound avoids false positives on test-fixture 1×1 gifs.
+  - **`compress_stale_snapshots`** — finds `[browser snapshot ...]` markers older than `recent_window_rounds` (default 2 per the BL DoD) and replaces them with a stub. The "rounds boundary" heuristic indexes `- round N:` line starts in the prompt and compares snapshot offsets against the cutoff round-start.
+  - **`hard_trim_oldest`** — when the post-pass prompt still exceeds `max_chars`, drops oldest content from the `Results so far:` section until under budget. The `Original goal:` line and the trailing `Decide the next tool call(s).` instruction stay intact; only the body lines are trimmed. Falls back to a leading-drop with an `[…N bytes elided…]` placeholder when the prompt doesn't match the canonical compose shape.
+- **`sanitize_prompt(&str, &SanitizeOptions) -> SanitizeResult`** runs all four. `SanitizeMetrics` carries per-pass counters (`dedup_count`, `base64_bytes_stripped`, `snapshot_compressed_count`, `trimmed_bytes`); `any_fired()` is a convenience predicate so the session-loop hop can skip the log emit on no-op iterations.
+- **Wire-up in `session::run_session_with_compressor`**. Per-iteration sanitisation pass before each `driver.propose` call. `SanitizeOptions` reuse `SessionConfig::max_context_tokens` (×4 for the chars/token approximation — coarse safety net under BL-120's compressor). Metrics emit through `tracing::info` under target `nexus_agent::context_sanitize`.
+
+**Forward-looking infrastructure.** Today's `compose_followup_prompt_compressed` emits minimal `- round N: tool ok` lines so most passes are no-ops against current outputs. The wiring is in place for when richer tool results land in the prompt — a browser-snapshot tool, a vision tool, or any dispatcher that surfaces raw stdout. The BL DoD's "synthetic 30-turn session with embedded base64 URIs and repeated tool results is visibly smaller after the pass" target is exercised on synthetic inputs in the module test suite rather than against today's composer (which doesn't produce the patterns).
+
+**Deferrals documented in the closure note:**
+
+- **Bus-event publishing** — `com.nexus.agent.context_sanitize` event with the metrics. The session loop is a pure async function with no kernel-context handle today; threading one in is a touchpoint refactor wider than this BL warrants. `tracing::info` logging is the current operator-visible surface.
+- **Tiktoken-equivalent token estimation** — the hard-trim uses a coarse `tokens × 4 = chars` conversion. BL-018's `ApproxTokenCounter` is in `nexus-ai` and pulling it into `nexus-agent` would create a circular dep with `nexus-ai → nexus-agent` (via the tool-loop bridge). A future refactor could lift the counter into `nexus-types` or `nexus-kernel` and route both crates through it.
+
+**Tests:** 14 module tests covering every pass × representative inputs (positive + carefully-chosen negative pairs to pin behaviour at the edges — e.g. non-adjacent duplicates pass through, snapshots fewer than the window count don't compress, hard-trim no-op when under budget, hard-trim leading-drop fallback when the canonical compose shape is missing). Full-pipeline test exercises all four passes against a synthetic prompt mixing duplicate result lines + a stale snapshot + an inline base64 payload and asserts every metric increments.
+
+**Tested**:
+- `cargo test -p nexus-agent` 149/149 passed.
+- `cargo clippy -p nexus-agent --all-targets` clean for new code (module-level `allow` for three pedantic lints — `format_push_string`, `map_unwrap_or`, `single_char_pattern` — that read worse in their suggested form for string-builder code; matches the `compose_followup_prompt_*` neighbour in `session.rs`).
+- `cargo check --workspace` clean.
+
+**Definition of done coverage**: ✅ four passes implemented and unit-tested individually; ✅ integrated into the agent plan executor just before each chat-driver invocation; ⏸ token-estimation reuses a coarse chars-per-token approximation — full tiktoken equivalence is gated on lifting `ApproxTokenCounter` out of `nexus-ai` to break the circular dep; ⏸ bus-event publishing deferred — pure-function session loop has no kernel-context handle today; ✅ synthetic-input pipeline test pins that every pass fires + every metric increments.
+
+---
+
 ### BL-130: Prompt injection detection (Thoth port) ✅ (2026-05-14)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.

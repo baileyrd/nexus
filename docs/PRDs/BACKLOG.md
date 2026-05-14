@@ -337,27 +337,7 @@ _BL-130 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-131: Pre-invocation message sanitisation in the agent loop (Thoth port)
-
-**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
-**Effort**: Small. Complements BL-120's summarisation approach; independent.
-**Crates**: `nexus-agent` (new `context_sanitize` module).
-
-BL-120 handles context budget exhaustion by summarising oldest turns. This item is a complementary, cheaper pass that runs **before every LLM invocation** to eliminate waste that inflates context without adding information:
-
-1. **Deduplication**: if two consecutive tool call results are byte-for-byte identical, keep only the first and annotate it `(result repeated N more times)`.
-2. **Base64 URI stripping**: scan message content for inline `data:image/...;base64,...` URIs; replace with `[image data stripped — N bytes]`. These typically come from browser snapshot or vision tool results that were already consumed.
-3. **Stale snapshot compression**: browser/DOM snapshots older than the last 2 turns are compressed to a one-line stub `[browser snapshot from <timestamp>, <N> nodes — compressed]`.
-4. **Hard trim**: if total estimated token count (using the provider's tiktoken equivalent) still exceeds 85% of the configured `max_context_tokens` after the above passes, trim from the oldest non-system messages until under budget, logging what was dropped.
-
-This is distinct from BL-120's LLM-based turn summarisation: it targets mechanical waste (duplicates, inert binary data) rather than semantic redundancy, and is O(n) without an LLM call.
-
-**Definition of done:**
-- `nexus-agent/src/context_sanitize.rs`: four passes implemented and unit-tested individually
-- Integrated into the agent plan executor just before each `com.nexus.ai::stream_chat` invocation
-- Token estimation: reuse the `token_budget` counter already present in `nexus-ai` (BL-018 path)
-- Metrics: count of deduplicated results, stripped bytes, and trimmed turns emitted on the kernel bus as `com.nexus.agent.context_sanitize` event so the shell health panel (BL-093 follow-up) can surface them
-- Test: synthetic 30-turn session with embedded base64 URIs and repeated tool results is visibly smaller after the pass
+_BL-131 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `crates/nexus-agent/src/context_sanitize.rs` ships four pure pre-invocation passes — `dedup_repeated_results` (collapses consecutive `- round N: <body>` lines whose body is byte-for-byte identical into `(result repeated N more times)`), `strip_base64_data_uris` (replaces inline `data:image/...;base64,...` with `[image data stripped — N bytes]`; ≥50-char base64 lower bound avoids false positives on test-fixture 1×1 gifs), `compress_stale_snapshots` (finds `[browser snapshot ...]` markers older than the configured `recent_window_rounds` and stubs them), and `hard_trim_oldest` (drops oldest result lines from the `Results so far:` section until under `max_chars`, preserving the original goal + trailing instruction). `sanitize_prompt(&str, &SanitizeOptions)` runs all four; `SanitizeMetrics` carries per-pass counters. Wired into `session::run_session_with_compressor` immediately before each `driver.propose` call; metrics emit through `tracing::info` under target `nexus_agent::context_sanitize` (bus-event publishing deferred — the session loop's pure-function shape has no kernel-context handle today). Today's `compose_followup_prompt_compressed` emits minimal `- round N: tool ok` lines so the passes are mostly no-ops against current outputs; this is forward-looking infrastructure ready to fire when richer tool results land (browser-snapshot tool, vision tool, verbose stdout). 14 module tests cover every pass × representative inputs (positive + negative pairs); `cargo test -p nexus-agent` 149/149; clippy clean for the new code (module-level `allow` for three pedantic lints that are noisier than the underlying patterns)._
 
 ---
 

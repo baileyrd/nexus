@@ -90,6 +90,12 @@ pub mod transcript_search;
 /// deterministic, and no-op implementations.
 pub mod compression;
 
+/// BL-131 — pre-invocation context sanitisation. Four pure passes
+/// (dedup repeated results, strip base64 data URIs, compress stale
+/// browser snapshots, hard-trim to budget) applied to the assembled
+/// prompt just before each chat-driver invocation.
+pub mod context_sanitize;
+
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that
 /// need branching or loops return a flat list today and re-plan if

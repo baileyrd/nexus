@@ -555,7 +555,38 @@ where
     // even after older rounds have been rolled up.
     const WORKING_SET_ROUNDS: usize = 4;
 
+    // BL-131 — per-iteration mechanical-waste passes on the
+    // assembled prompt. Today's `compose_followup_prompt_compressed`
+    // emits minimal `- round N: tool ok` lines so the passes are
+    // mostly no-ops, but the wiring is in place for when richer
+    // tool results land. Each pass is bounded by the configured
+    // budget; metrics emit through `tracing::info` (bus-event
+    // wiring deferred — see BL-131 closure note).
+    let sanitize_opts = crate::context_sanitize::SanitizeOptions {
+        // Reuse the BL-119 / BL-120 context-token budget. Multiply
+        // by 4 to approximate chars-per-token; the trim is a coarse
+        // safety net under BL-120's compressor, so the conversion
+        // doesn't need to be precise.
+        max_chars: (config.max_context_tokens as usize).saturating_mul(4),
+        recent_window_rounds: 2,
+    };
+
     for round_idx in 1..=config.max_iterations {
+        // BL-131 sanitisation pass before each driver invocation.
+        let sanitized = crate::context_sanitize::sanitize_prompt(&current_prompt, &sanitize_opts);
+        if sanitized.metrics.any_fired() {
+            tracing::info!(
+                target: "nexus_agent::context_sanitize",
+                round = round_idx,
+                dedup_count = sanitized.metrics.dedup_count,
+                base64_bytes_stripped = sanitized.metrics.base64_bytes_stripped,
+                snapshot_compressed = sanitized.metrics.snapshot_compressed_count,
+                trimmed_bytes = sanitized.metrics.trimmed_bytes,
+                "BL-131: context sanitisation passes fired",
+            );
+            current_prompt = sanitized.text;
+        }
+
         // Ask the model for this round's tool calls.
         let mut proposal = match driver.propose(system, &current_prompt).await {
             Ok(p) => p,

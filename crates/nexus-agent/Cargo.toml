@@ -24,6 +24,10 @@ nexus-plugins = { path = "../nexus-plugins" }
 # rusqlite bundled SQLite, same shape every other in-tree SQLite consumer
 # uses.
 rusqlite = { workspace = true }
+# BL-131 — pattern matching for context-sanitisation passes (base64
+# data URIs, stale browser-snapshot markers). Same dep `nexus-ai` uses
+# for the BL-017 / BL-130 scanners.
+regex-lite = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
 schemars = { workspace = true, optional = true }
 
