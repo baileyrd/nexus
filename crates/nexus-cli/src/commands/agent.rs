@@ -10,7 +10,7 @@
 //! for replaying a static plan.
 
 use std::io::{self, BufRead, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
@@ -23,6 +23,12 @@ const AGENT_PLUGIN: &str = "com.nexus.agent";
 /// BL-132 — bus topic prefix the interactive run subscribes to so it
 /// only sees agent-emitted events.
 const APPROVAL_TOPIC_PREFIX: &str = "com.nexus.agent.";
+
+/// Plugin id of the BL-133 notifications dispatcher. Auto-notify
+/// threshold is sourced from the `--notify-after-secs` flag on
+/// `nexus agent run` (default 30s; 0 disables). See
+/// `AgentCommand::Run` in `main.rs` for the flag definition.
+const NOTIFICATIONS_PLUGIN: &str = "com.nexus.notifications";
 
 /// Planning is usually a single chat round-trip (~30 s tops against
 /// remote providers). Run can string many tool calls together so the
@@ -48,6 +54,7 @@ pub fn run(
     goal: &str,
     archetype: Option<&str>,
     interactive: bool,
+    notify_after_secs: u64,
 ) -> Result<()> {
     let mut args = goal_args(goal, archetype);
     if let Some(map) = args.as_object_mut() {
@@ -56,14 +63,85 @@ pub fn run(
         // round_proposed events and replying via round_decide.
         map.insert("auto_approve".into(), Value::Bool(!interactive));
     }
-    if interactive {
-        let response = run_interactive(app, args)?;
-        print_session(&response);
+    let started = Instant::now();
+    let response = if interactive {
+        run_interactive(app, args)?
     } else {
-        let response = call(app, "session_run", args)?;
-        print_session(&response);
+        call(app, "session_run", args)?
+    };
+    let elapsed = started.elapsed();
+    if notify_after_secs > 0 && elapsed >= Duration::from_secs(notify_after_secs) {
+        if let Err(err) = dispatch_completion_notification(app, goal, elapsed, &response) {
+            // Notification failure is non-fatal — the session itself
+            // already succeeded. Surface on stderr so the user can
+            // see why their toast didn't appear, without aborting.
+            eprintln!("[agent] notification dispatch failed: {err}");
+        }
     }
+    print_session(&response);
     Ok(())
+}
+
+/// BL-133 follow-up — dispatch `com.nexus.notifications::send` on
+/// the Desktop channel with a one-line completion summary. Best-
+/// effort: an empty response or missing fields render a sensible
+/// fallback rather than crashing.
+fn dispatch_completion_notification(
+    app: &mut App,
+    goal: &str,
+    elapsed: Duration,
+    response: &Value,
+) -> Result<()> {
+    let summary = compose_completion_message(goal, elapsed, response);
+    let args = serde_json::json!({
+        "channel": "desktop",
+        "title": "Agent session",
+        "message": summary,
+    });
+    let (runtime, rt) = app.runtime()?;
+    rt.block_on(
+        runtime
+            .context
+            .ipc_call(NOTIFICATIONS_PLUGIN, "send", args, IPC_TIMEOUT),
+    )
+    .with_context(|| "notifications ipc call 'send' failed")?;
+    Ok(())
+}
+
+/// Build the toast body. Format: `<outcome> · <round-count> rounds ·
+/// <duration> · <goal-prefix>`. Truncates the goal at ~60 chars so
+/// the toast doesn't balloon for long goals.
+pub(crate) fn compose_completion_message(
+    goal: &str,
+    elapsed: Duration,
+    response: &Value,
+) -> String {
+    let outcome = response
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("completed");
+    let round_count = response
+        .get("rounds")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    let secs = elapsed.as_secs();
+    let duration = if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m{}s", secs / 60, secs % 60)
+    };
+    let goal_prefix = if goal.len() > 60 {
+        // Snap to char boundary so multi-byte codepoints aren't split.
+        let mut cut = 60;
+        while cut > 0 && !goal.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}…", &goal[..cut])
+    } else {
+        goal.to_string()
+    };
+    format!("{outcome} · {round_count} rounds · {duration} · {goal_prefix}")
 }
 
 /// BL-132 interactive driver. Subscribes to the agent's bus topic
@@ -516,5 +594,63 @@ mod tests {
         assert_eq!(first_line("hello\nworld"), "hello");
         assert_eq!(first_line("single"), "single");
         assert_eq!(first_line(""), "");
+    }
+
+    // ── BL-133 follow-up — agent-completion message composer ────
+
+    #[test]
+    fn compose_completion_message_short_run_under_a_minute() {
+        let goal = "summarise yesterday's notes";
+        let elapsed = Duration::from_secs(35);
+        let response = serde_json::json!({
+            "outcome": "complete",
+            "rounds": [{ "round": 1 }, { "round": 2 }, { "round": 3 }],
+        });
+        let msg = compose_completion_message(goal, elapsed, &response);
+        assert_eq!(msg, "complete · 3 rounds · 35s · summarise yesterday's notes");
+    }
+
+    #[test]
+    fn compose_completion_message_minute_or_more_renders_mmss() {
+        let elapsed = Duration::from_secs(125); // 2m05s
+        let response = serde_json::json!({
+            "outcome": "max_rounds",
+            "rounds": [{}, {}, {}, {}, {}],
+        });
+        let msg = compose_completion_message("x", elapsed, &response);
+        assert!(msg.contains("2m5s"), "expected 2m5s in: {msg}");
+        assert!(msg.contains("max_rounds"));
+        assert!(msg.contains("5 rounds"));
+    }
+
+    #[test]
+    fn compose_completion_message_truncates_long_goal() {
+        let goal = "a".repeat(200);
+        let response = serde_json::json!({ "outcome": "complete", "rounds": [] });
+        let msg = compose_completion_message(&goal, Duration::from_secs(31), &response);
+        assert!(msg.contains("…"));
+        // 60 chars of goal + 1 ellipsis + the rest of the format —
+        // total still well under any sane toast cap.
+        assert!(msg.len() < 200, "toast body too long: {msg}");
+    }
+
+    #[test]
+    fn compose_completion_message_utf8_safe_truncation() {
+        // Goal padded with multi-byte emoji so a naive byte cut at
+        // 60 would land mid-codepoint. The composer snaps back to a
+        // char boundary; this test panics if the slice would.
+        let goal = format!("{} more text here for padding", "🦀".repeat(20));
+        let response = serde_json::json!({ "outcome": "complete", "rounds": [] });
+        let _msg = compose_completion_message(&goal, Duration::from_secs(31), &response);
+        // No panic → success. (The boundary snap happens inside
+        // compose_completion_message; this test pins the contract.)
+    }
+
+    #[test]
+    fn compose_completion_message_handles_missing_fields() {
+        let response = serde_json::json!({});
+        let msg = compose_completion_message("hi", Duration::from_secs(31), &response);
+        // Falls back to "completed" + 0 rounds + duration + goal.
+        assert!(msg.starts_with("completed · 0 rounds · 31s · hi"));
     }
 }

@@ -517,6 +517,11 @@ enum AgentCommand {
         /// flag, every round auto-approves (pre-BL-132 default).
         #[arg(long)]
         interactive: bool,
+        /// BL-133 follow-up — dispatch a desktop notification when
+        /// the session takes longer than this. `0` disables the
+        /// auto-notify path. Default 30s.
+        #[arg(long, default_value_t = 30)]
+        notify_after_secs: u64,
     },
     /// List custom agents defined in `<forge>/.forge/agents/*/agent.toml`
     /// (PRD-15 §9 — DG-36).
@@ -1776,9 +1781,14 @@ fn main() {
                 goal,
                 archetype,
                 interactive,
-            } => {
-                commands::agent::run(&mut app, &goal, archetype.as_deref(), interactive)
-            }
+                notify_after_secs,
+            } => commands::agent::run(
+                &mut app,
+                &goal,
+                archetype.as_deref(),
+                interactive,
+                notify_after_secs,
+            ),
             AgentCommand::ListCustom => commands::agent::list_custom(&mut app),
         },
 

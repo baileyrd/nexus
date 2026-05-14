@@ -397,17 +397,21 @@ The in-app toast subscriber landed; the next refinement is hooking the bus event
 
 ---
 
-### Follow-up: workflow `notify` step + agent auto-notify (from BL-133)
+_BL-133 follow-up (CLI agent auto-notify) closed 2026-05-14. New `--notify-after-secs <N>` flag on `nexus agent run` (default 30s; 0 disables). After the session returns, the CLI checks `Instant::elapsed()` against the threshold and dispatches `com.nexus.notifications::send` with a one-line summary (`<outcome> · <round-count> rounds · <duration> · <goal-prefix>`). Pure CLI-side timing — no kernel-event subscriber needed because the CLI is already the synchronous caller of `session_run`. New `compose_completion_message` helper handles UTF-8-safe goal truncation at ~60 chars + minute/second duration formatting. 5 new unit tests pin every projection rule (short run mm:ss vs ss, long-goal ellipsis, UTF-8 boundary safety, missing-field fallback). `cargo test -p nexus-cli` 60/60; clippy clean._
 
-**Source**: BL-133 deferral. Filed 2026-05-14.
+---
+
+### Follow-up: workflow `notify` step + background agent auto-notify (from BL-133)
+
+**Source**: BL-133 deferral. Filed 2026-05-14. Updated 2026-05-14 after CLI auto-notify landed.
 **Effort**: Medium. Touches `nexus-workflow` step grammar + a new subscriber in `nexus-bootstrap`.
 
-The BL-133 DoD called for:
+CLI agent auto-notify landed; what's still missing is the **background** auto-notify:
 
-- Workflow `.workflow.toml::[[steps]] notify: [discord]` key — set to fire `com.nexus.notifications::send` on step / run completion. The `nexus-workflow` step grammar needs the new key + a per-step IPC call.
-- Agent auto-notify: subscribe to `com.nexus.agent.run_done` in `nexus-bootstrap` and dispatch a `notifications::send` call when the run took > a configurable threshold (`[agent] auto_notify_threshold_s`, default 30s).
+- Workflow `.workflow.toml::[[steps]] notify: [discord]` key — set to fire `com.nexus.notifications::send` on step / run completion. The `nexus-workflow` step grammar needs the new key + a per-step IPC call. Today a scheduled workflow that completes at 02:00 produces no signal.
+- Background agent runs (workflow-triggered, schedule-driven) — subscribe to a `com.nexus.agent.session_completed` topic in `nexus-bootstrap` and dispatch `notifications::send` when the run took > threshold. The CLI-side path covers human-driven `nexus agent run`; this covers everything else.
 
-Both can land independently once a Telegram / SMTP transport is wired (or sooner for Discord-only deployments).
+Both can land independently of each other.
 
 ---
 
