@@ -6,7 +6,13 @@
 
 import type { KernelAPI } from '../../../types/plugin.ts'
 import type { EditorSnapshot, Transaction } from './types.ts'
-import { EDITOR_PLUGIN_ID, makeEditorClient } from './kernelClient.ts'
+import {
+  EDITOR_PLUGIN_ID,
+  applyTransactionRevision,
+  applyTransactionSnapshot,
+  makeEditorClient,
+  type ApplyTransactionResponse,
+} from './kernelClient.ts'
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -64,7 +70,9 @@ function emptySnapshot(relpath: string): EditorSnapshot {
 
 test('applyTransaction routes to the editor plugin with the right command + args shape', async () => {
   const relpath = 'notes/a.md'
-  const expected = emptySnapshot(relpath)
+  // BL-123: the kernel returns a discriminated union. Mock the slim
+  // shape here — the bridge happy-path for a single InsertText op.
+  const expected: ApplyTransactionResponse = { kind: 'slim', revision: 1 }
   const { api, calls } = makeMockApi(expected)
   const client = makeEditorClient(api)
 
@@ -87,7 +95,7 @@ test('applyTransaction routes to the editor plugin with the right command + args
     },
   }
 
-  const snap = await client.applyTransaction(relpath, tx)
+  const response = await client.applyTransaction(relpath, tx)
 
   // The mock received exactly one invocation with the expected shape.
   assert.equal(calls.length, 1)
@@ -99,8 +107,45 @@ test('applyTransaction routes to the editor plugin with the right command + args
   // wire shape (snake_case + `kind` discriminator) must match Rust.
   assert.deepEqual(call.args, { relpath, transaction: tx })
 
-  // Snapshot is threaded through unchanged.
-  assert.deepEqual(snap, expected)
+  // Response is threaded through unchanged.
+  assert.deepEqual(response, expected)
+  assert.equal(applyTransactionRevision(response), 1)
+  assert.equal(applyTransactionSnapshot(response), null)
+})
+
+test('applyTransaction returns a full snapshot when the kernel responds with `full`', async () => {
+  const relpath = 'notes/b.md'
+  const snapshot = emptySnapshot(relpath)
+  const expected: ApplyTransactionResponse = { kind: 'full', ...snapshot }
+  const { api } = makeMockApi(expected)
+  const client = makeEditorClient(api)
+
+  const tx: Transaction = {
+    id: '00000000-0000-4000-8000-000000000002',
+    operations: [
+      {
+        kind: 'update_block_content',
+        id: '22222222-2222-4222-8222-222222222222',
+        old_content: 'foo',
+        new_content: 'bar',
+        old_annotations: [],
+        new_annotations: [],
+      },
+    ],
+    created_at: 1_700_000_000_000,
+    metadata: {
+      user_action: { kind: 'paste' },
+      source: 'user',
+      ai_edit: false,
+    },
+  }
+
+  const response = await client.applyTransaction(relpath, tx)
+  assert.equal(response.kind, 'full')
+  assert.equal(applyTransactionRevision(response), 1)
+  // The helper strips the discriminator so consumers see a clean
+  // EditorSnapshot.
+  assert.deepEqual(applyTransactionSnapshot(response), snapshot)
 })
 
 test('getMarkdown routes to get_markdown and returns the raw string payload', async () => {

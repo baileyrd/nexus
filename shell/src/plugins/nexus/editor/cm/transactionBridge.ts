@@ -378,7 +378,24 @@ export function createBridgeCore(opts: TransactionBridgeOptions): BridgeCore {
         return
       }
       try {
-        const snapshot = await kernelClient.applyTransaction(relpath, tx)
+        const response = await kernelClient.applyTransaction(relpath, tx)
+        // BL-123: slim response (text-only ops) carries just the
+        // revision — no snapshot to push back, no reconcile to run.
+        // The sessionManager cache stays at its pre-tx contents; block
+        // IDs and structure are unchanged for text-only ops, so the
+        // downstream consumers (drag-bridge, comments, block-link
+        // nav) keep working off correct structure. Stale text content
+        // doesn't matter because those consumers either re-read the
+        // tree on demand or use `getTree`/`stamp_block` directly.
+        if (response.kind === 'slim') {
+          useEditorStore.getState().setSessionRevision(relpath, response.revision)
+          return
+        }
+        // Full response — same wire shape as pre-BL-123 plus the
+        // `kind` discriminator. Strip the discriminator before
+        // handing to setSnapshot so consumers see a clean
+        // EditorSnapshot.
+        const { kind: _kind, ...snapshot } = response
         // Push the authoritative snapshot back to sessionManager so
         // external consumers (drag-bridge, comments) see fresh data.
         // The bridge itself keeps using its own mirror.

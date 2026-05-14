@@ -45,6 +45,23 @@ export interface StampBlockResult {
 }
 
 /**
+ * Response shape for `apply_transaction` (BL-123). Tagged
+ * discriminated union mirroring
+ * `crates/nexus-editor/src/core_plugin.rs::ApplyTransactionResponse`:
+ *
+ * - `{ kind: 'slim', revision }` for text-only ops (`insert_text` /
+ *   `delete_text`). The webview already discards the snapshot via the
+ *   `skipReconcile` shortcut on these ops, so the kernel skips the
+ *   O(N blocks) tree clone + serialize entirely.
+ * - `{ kind: 'full', ...snapshot }` for structural ops (everything
+ *   else). The snapshot fields are flattened next to `kind` — same
+ *   shape as the pre-BL-123 response plus the `kind` discriminator.
+ */
+export type ApplyTransactionResponse =
+  | { kind: 'slim'; revision: number }
+  | ({ kind: 'full' } & EditorSnapshot)
+
+/**
  * Client that exposes the editor plugin's IPC surface as typed methods.
  *
  * Takes the `KernelAPI` as a constructor argument so unit tests can mock
@@ -76,12 +93,24 @@ export class EditorKernelClient {
     })
   }
 
-  /** Apply a transaction and return the post-state snapshot. */
+  /**
+   * Apply a transaction. Returns either a [`slim`] response carrying
+   * just the post-apply revision (for text-only ops — `insert_text` /
+   * `delete_text`) or a [`full`] response carrying the post-apply
+   * snapshot (for structural ops). See BL-123 / `ApplyTransactionResponse`.
+   *
+   * Callers that only need the revision (the transaction bridge in
+   * its text-only `skipReconcile` path) can read `response.revision`
+   * uniformly via the helper [`applyTransactionRevision`]. Callers
+   * that need the snapshot must check `response.kind === 'full'` and
+   * either consume the inline snapshot fields or fall back to a fresh
+   * `getTree(relpath)` when slim came back.
+   */
   applyTransaction(
     relpath: string,
     transaction: Transaction,
-  ): Promise<EditorSnapshot> {
-    return this.api.invoke<EditorSnapshot>(
+  ): Promise<ApplyTransactionResponse> {
+    return this.api.invoke<ApplyTransactionResponse>(
       EDITOR_PLUGIN_ID,
       CMD.applyTransaction,
       { relpath, transaction },
@@ -316,4 +345,28 @@ export interface ExecuteDatabaseViewResponse {
  */
 export function makeEditorClient(api: KernelAPI): EditorKernelClient {
   return new EditorKernelClient(api)
+}
+
+/** Pull the post-apply revision out of an `apply_transaction`
+ *  response regardless of variant. The `revision` field is present
+ *  in both shapes — slim carries it directly, full inherits it from
+ *  the flattened [`EditorSnapshot`]. */
+export function applyTransactionRevision(
+  response: ApplyTransactionResponse,
+): number {
+  return response.revision
+}
+
+/** Extract the inline snapshot from an `apply_transaction` response,
+ *  or `null` when the response was slim (text-only op). Callers that
+ *  need a fresh snapshot on the slim path should follow up with a
+ *  `getTree(relpath)` call. */
+export function applyTransactionSnapshot(
+  response: ApplyTransactionResponse,
+): EditorSnapshot | null {
+  if (response.kind === 'full') {
+    const { kind: _kind, ...snapshot } = response
+    return snapshot
+  }
+  return null
 }

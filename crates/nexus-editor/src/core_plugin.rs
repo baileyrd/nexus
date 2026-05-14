@@ -123,7 +123,10 @@ pub const HANDLER_CLOSE: u32 = 2;
 pub const HANDLER_GET_TREE: u32 = 3;
 /// Handler id for `save`. Args: `{ "relpath": String }`; Returns: `{}`.
 pub const HANDLER_SAVE: u32 = 4;
-/// Handler id for `apply_transaction`. Args: `{ "relpath": String, "transaction": Transaction }`; Returns: [`EditorSnapshot`].
+/// Handler id for `apply_transaction`. Args: `{ "relpath": String, "transaction": Transaction }`;
+/// Returns: [`ApplyTransactionResponse`] — a tagged union of `slim`
+/// (text-only ops; just `{ revision }`) or `full` (structural ops;
+/// the post-apply [`EditorSnapshot`]). See BL-123.
 pub const HANDLER_APPLY_TRANSACTION: u32 = 5;
 /// Handler id for `undo`. Args: `{ "relpath": String }`; Returns: [`EditorSnapshot`].
 pub const HANDLER_UNDO: u32 = 6;
@@ -218,6 +221,72 @@ pub const HANDLER_EXECUTE_DATABASE_VIEW: u32 = 12;
 pub const HANDLER_RESOLVE_BLOCK_LINK: u32 = 13;
 
 // ── Wire types ───────────────────────────────────────────────────────────────
+
+/// Response shape for [`HANDLER_APPLY_TRANSACTION`] (BL-123).
+///
+/// Text-only ops (`insert_text` / `delete_text`) get a [`Slim`] reply
+/// carrying just the post-apply revision counter. The webview already
+/// short-circuits the snapshot reconcile for these ops via the
+/// `skipReconcile` shortcut in `transactionBridge.ts`, so the only
+/// thing it needs from the kernel is the new revision number — which
+/// makes the kernel-side cost O(1) instead of O(N blocks) (the
+/// snapshot serialize is the dominant term in BL-122's baseline:
+/// 39 → 330 → 24190 µs p50 across 10/100/5000-block docs).
+///
+/// Structural ops (`insert_block`, `delete_block`, `reparent_block`,
+/// `update_block_content`, `update_annotations`) still get a full
+/// [`EditorSnapshot`] so the shell can reflow block IDs, annotations,
+/// and any other tree-shape change. `update_annotations` is in the
+/// full path on purpose: the bridge's optimistic mirror doesn't track
+/// annotation changes, so the snapshot is the only authoritative
+/// source for the post-apply annotation list.
+///
+/// Wire shape (tagged union, `snake_case`):
+/// - `{ "kind": "slim", "revision": 5 }`
+/// - `{ "kind": "full", "relpath": "...", "tree": {...}, ... }`
+///
+/// [`Slim`]: ApplyTransactionResponse::Slim
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+// The Full variant carries an EditorSnapshot (block tree + counters);
+// Slim is just a revision counter. The size delta is intentional —
+// boxing Full would force a heap allocation for every structural op
+// response, where the snapshot's own internal allocations already
+// dominate, so the optimization is a wash. The Slim path (the
+// typing-hot one) doesn't pay for the variant size.
+#[allow(clippy::large_enum_variant)]
+pub enum ApplyTransactionResponse {
+    /// Text-only op response — just the post-apply revision counter.
+    Slim {
+        /// Post-apply value of the session's monotonic revision
+        /// counter. Same field used by `com.nexus.editor.changed.*`.
+        revision: u64,
+    },
+    /// Structural op response — the full post-apply session snapshot.
+    Full(EditorSnapshot),
+}
+
+impl ApplyTransactionResponse {
+    /// Post-apply revision counter, regardless of variant.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        match self {
+            Self::Slim { revision } => *revision,
+            Self::Full(snapshot) => snapshot.revision,
+        }
+    }
+
+    /// Borrow the inner snapshot if this is a [`Full`] response.
+    ///
+    /// [`Full`]: ApplyTransactionResponse::Full
+    #[must_use]
+    pub fn snapshot(&self) -> Option<&EditorSnapshot> {
+        match self {
+            Self::Full(snapshot) => Some(snapshot),
+            Self::Slim { .. } => None,
+        }
+    }
+}
 
 /// Snapshot of an open editor session, suitable for IPC return.
 ///
@@ -1179,17 +1248,34 @@ fn handle_apply_transaction(
         .map_err(|e| exec_err(format!("apply_transaction: invalid transaction: {e}")))?;
     let tx_id = tx.id;
     let op_count = tx.operations.len();
+    // BL-123: text-only ops (insert_text / delete_text) get a slim
+    // response. UpdateAnnotations stays on the full path because the
+    // bridge's optimistic mirror doesn't track annotations — the
+    // snapshot is the only authoritative source for the post-apply
+    // annotation list.
+    let text_only = !tx.operations.is_empty()
+        && tx.operations.iter().all(|op| {
+            matches!(
+                op,
+                crate::Operation::InsertText { .. } | crate::Operation::DeleteText { .. }
+            )
+        });
 
     // BL-122: instrumentation span for the typing-latency perf
     // harness. Records per-call op count + transaction bytes-in, and
     // (after serialize) bytes-out. A subscriber installed at
     // `info` level captures wall-time via `span.enter()`/exit; with
     // no subscriber the span is a no-op pointer bump.
-    let span =
-        tracing::info_span!("apply_transaction", op_count, bytes_in = tx_json_size, bytes_out = tracing::field::Empty);
+    let span = tracing::info_span!(
+        "apply_transaction",
+        op_count,
+        text_only,
+        bytes_in = tx_json_size,
+        bytes_out = tracing::field::Empty,
+    );
     let _enter = span.enter();
 
-    let (value, revision, applied_ops) = {
+    let (response, revision, applied_ops) = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
         let s = guard.get_mut(&relpath).ok_or_else(|| {
             exec_err(format!(
@@ -1210,14 +1296,16 @@ fn handle_apply_transaction(
         auto_stamp_inbound_targets(&mut s.tree, &ops);
         s.revision = s.revision.saturating_add(1);
         let rev = s.revision;
-        let val = snapshot_to_value(&snapshot_of(s), "apply_transaction")?;
-        (val, rev, ops)
+        let response = if text_only {
+            ApplyTransactionResponse::Slim { revision: rev }
+        } else {
+            ApplyTransactionResponse::Full(snapshot_of(s))
+        };
+        (response, rev, ops)
     };
-    // Record the serialized snapshot size on the active span (no-op
-    // when no subscriber is recording the field).
-    if let Some(s) = value.as_str() {
-        span.record("bytes_out", s.len());
-    } else if let Ok(buf) = serde_json::to_vec(&value) {
+    let value = serde_json::to_value(&response)
+        .map_err(|e| exec_err(format!("apply_transaction: serialize response: {e}")))?;
+    if let Ok(buf) = serde_json::to_vec(&value) {
         span.record("bytes_out", buf.len());
     }
     if let Some(obs) = observer {
@@ -1852,14 +1940,14 @@ mod tests {
         );
         let _ = AnnotationType::Bold; // ensure the re-export is reachable
 
-        let tx_value = serde_json::to_value(&tx).unwrap();
-        let resp = p
-            .dispatch(
-                HANDLER_APPLY_TRANSACTION,
-                &serde_json::json!({ "relpath": "notes/a.md", "transaction": tx_value }),
-            )
-            .unwrap();
-        let snap: EditorSnapshot = serde_json::from_value(resp).unwrap();
+        // BL-123: InsertText is text-only → slim response. The full
+        // snapshot is fetched separately via get_tree for the asserts.
+        let response = apply_value(&mut p, "notes/a.md", &tx);
+        assert!(
+            matches!(response, ApplyTransactionResponse::Slim { revision: 1 }),
+            "expected slim response with revision 1, got {response:?}",
+        );
+        let snap = get_tree_value(&mut p, "notes/a.md");
         assert_eq!(snap.undo_len, 1);
         assert_eq!(snap.undo_position, Some(0));
         assert!(snap.can_undo);
@@ -2033,6 +2121,132 @@ mod tests {
         assert!(md.contains("Hello world"));
     }
 
+    /// BL-123: response-shape contract. Text-only ops (`insert_text`,
+    /// `delete_text`, and any mix of the two) get a slim response;
+    /// every other op kind — including `update_annotations` — gets a
+    /// full snapshot. Empty op lists get the full response too (no
+    /// text-only ops to apply, but the safe default is to return the
+    /// snapshot so callers can detect the no-op via revision parity).
+    #[test]
+    fn apply_transaction_response_shape_per_op_kind() {
+        use crate::{
+            Annotation, AnnotationType, Operation, Transaction, TransactionMetadata,
+        };
+        let (_tmp, root) = setup_forge();
+        write_note(
+            &root,
+            "notes/a.md",
+            "first paragraph\n\nsecond paragraph\n",
+        );
+        let mut p = new_plugin(root);
+        let snap = open_value(&mut p, "notes/a.md");
+        let block_id = snap.tree.root_blocks[0];
+        let block = &snap.tree.blocks[&block_id];
+
+        // 1. InsertText → slim.
+        let insert = Transaction::new(
+            vec![Operation::InsertText {
+                block_id,
+                pos: block.content.len(),
+                text: " more".into(),
+                pre_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        let resp = apply_value(&mut p, "notes/a.md", &insert);
+        assert!(matches!(resp, ApplyTransactionResponse::Slim { .. }));
+
+        // 2. DeleteText → slim.
+        let post = get_tree_value(&mut p, "notes/a.md");
+        let post_block = &post.tree.blocks[&block_id];
+        let delete = Transaction::new(
+            vec![Operation::DeleteText {
+                block_id,
+                pos: 0,
+                deleted_text: post_block.content.chars().next().unwrap().to_string(),
+                pre_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        let resp = apply_value(&mut p, "notes/a.md", &delete);
+        assert!(matches!(resp, ApplyTransactionResponse::Slim { .. }));
+
+        // 3. InsertText + DeleteText combined → still slim.
+        let post = get_tree_value(&mut p, "notes/a.md");
+        let post_block = &post.tree.blocks[&block_id];
+        let combined = Transaction::new(
+            vec![
+                Operation::InsertText {
+                    block_id,
+                    pos: 0,
+                    text: "X".into(),
+                    pre_annotations: post_block.annotations.clone(),
+                },
+                Operation::DeleteText {
+                    block_id,
+                    pos: 0,
+                    deleted_text: "X".into(),
+                    pre_annotations: post_block.annotations.clone(),
+                },
+            ],
+            TransactionMetadata::default(),
+        );
+        let resp = apply_value(&mut p, "notes/a.md", &combined);
+        assert!(matches!(resp, ApplyTransactionResponse::Slim { .. }));
+
+        // 4. UpdateAnnotations → full (the bridge's optimistic mirror
+        //    doesn't track annotations, so the snapshot is the only
+        //    authoritative source for the post-apply annotation list).
+        let post = get_tree_value(&mut p, "notes/a.md");
+        let post_block = &post.tree.blocks[&block_id];
+        let ann_tx = Transaction::new(
+            vec![Operation::UpdateAnnotations {
+                block_id,
+                old_annotations: post_block.annotations.clone(),
+                new_annotations: vec![Annotation {
+                    start: 0,
+                    end: 1,
+                    ty: AnnotationType::Bold,
+                }],
+            }],
+            TransactionMetadata::default(),
+        );
+        let resp = apply_value(&mut p, "notes/a.md", &ann_tx);
+        assert!(matches!(resp, ApplyTransactionResponse::Full(_)));
+
+        // 5. UpdateBlockContent → full.
+        let post = get_tree_value(&mut p, "notes/a.md");
+        let post_block = &post.tree.blocks[&block_id];
+        let ubc = Transaction::new(
+            vec![Operation::UpdateBlockContent {
+                id: block_id,
+                old_content: post_block.content.clone(),
+                new_content: "rewritten".to_string(),
+                old_annotations: post_block.annotations.clone(),
+                new_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        let resp = apply_value(&mut p, "notes/a.md", &ubc);
+        assert!(matches!(resp, ApplyTransactionResponse::Full(_)));
+
+        // Wire shape spot-check: slim serializes with the discriminator
+        // and just the revision field; full serializes with the
+        // discriminator and the flattened EditorSnapshot fields.
+        let slim = ApplyTransactionResponse::Slim { revision: 7 };
+        let slim_json = serde_json::to_value(&slim).unwrap();
+        assert_eq!(slim_json["kind"], "slim");
+        assert_eq!(slim_json["revision"], 7);
+        assert!(slim_json.get("tree").is_none());
+
+        let snap = get_tree_value(&mut p, "notes/a.md");
+        let full = ApplyTransactionResponse::Full(snap);
+        let full_json = serde_json::to_value(&full).unwrap();
+        assert_eq!(full_json["kind"], "full");
+        assert!(full_json.get("tree").is_some());
+        assert!(full_json.get("revision").is_some());
+    }
+
     #[test]
     fn get_markdown_on_unopen_errors() {
         let (_tmp, root) = setup_forge();
@@ -2082,18 +2296,13 @@ mod tests {
             TransactionMetadata::default(),
         );
         let tx_id = tx.id;
-        let snap: EditorSnapshot = serde_json::from_value(
-            p.dispatch(
-                HANDLER_APPLY_TRANSACTION,
-                &serde_json::json!({
-                    "relpath": "notes/a.md",
-                    "transaction": serde_json::to_value(&tx).unwrap(),
-                }),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(snap.revision, 1, "apply_transaction bumps revision");
+        // BL-123: InsertText is text-only → slim response.
+        let response = apply_value(&mut p, "notes/a.md", &tx);
+        assert_eq!(
+            response.revision(),
+            1,
+            "apply_transaction bumps revision (slim path)",
+        );
 
         let event = sub.try_recv().unwrap().unwrap();
         match &event.event {
@@ -2604,16 +2813,13 @@ mod tests {
             }],
             TransactionMetadata::default(),
         );
-        let resp = p
-            .dispatch(
-                HANDLER_APPLY_TRANSACTION,
-                &serde_json::json!({
-                    "relpath": "notes/a.md",
-                    "transaction": serde_json::to_value(&tx).unwrap(),
-                }),
-            )
-            .unwrap();
-        let snap: EditorSnapshot = serde_json::from_value(resp).unwrap();
+        // UpdateAnnotations is structural → full response carrying the
+        // post-apply snapshot.
+        let response = apply_value(&mut p, "notes/a.md", &tx);
+        let snap = response
+            .snapshot()
+            .cloned()
+            .expect("UpdateAnnotations must yield a full snapshot");
         // The target's positional id has been rekeyed; root_blocks[1]
         // now holds the new stamped id.
         let stamped_id = snap.tree.root_blocks[1];
@@ -2665,16 +2871,13 @@ mod tests {
             }],
             TransactionMetadata::default(),
         );
-        let resp = p
-            .dispatch(
-                HANDLER_APPLY_TRANSACTION,
-                &serde_json::json!({
-                    "relpath": "notes/a.md",
-                    "transaction": serde_json::to_value(&tx).unwrap(),
-                }),
-            )
-            .unwrap();
-        let snap: EditorSnapshot = serde_json::from_value(resp).unwrap();
+        // UpdateBlockContent is structural → full response carrying
+        // the post-apply snapshot.
+        let response = apply_value(&mut p, "notes/a.md", &tx);
+        let snap = response
+            .snapshot()
+            .cloned()
+            .expect("UpdateBlockContent must yield a full snapshot");
         let stamped_id = snap.tree.root_blocks[1];
         assert_ne!(stamped_id, target_id, "auto-stamp rekeys to a fresh uuid");
         let stamped = &snap.tree.blocks[&stamped_id];
@@ -2685,6 +2888,36 @@ mod tests {
         let resp = p
             .dispatch(
                 HANDLER_OPEN,
+                &serde_json::json!({ "relpath": relpath }),
+            )
+            .unwrap();
+        serde_json::from_value(resp).unwrap()
+    }
+
+    /// Dispatch `apply_transaction` and return the response, decoded
+    /// as a [`ApplyTransactionResponse`] discriminated union (BL-123).
+    fn apply_value(
+        p: &mut EditorCorePlugin,
+        relpath: &str,
+        tx: &crate::Transaction,
+    ) -> ApplyTransactionResponse {
+        let resp = p
+            .dispatch(
+                HANDLER_APPLY_TRANSACTION,
+                &serde_json::json!({
+                    "relpath": relpath,
+                    "transaction": serde_json::to_value(tx).unwrap(),
+                }),
+            )
+            .unwrap();
+        serde_json::from_value(resp).unwrap()
+    }
+
+    /// Fetch the current snapshot via `get_tree` (always full).
+    fn get_tree_value(p: &mut EditorCorePlugin, relpath: &str) -> EditorSnapshot {
+        let resp = p
+            .dispatch(
+                HANDLER_GET_TREE,
                 &serde_json::json!({ "relpath": relpath }),
             )
             .unwrap();

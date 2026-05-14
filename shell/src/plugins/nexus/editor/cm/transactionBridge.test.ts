@@ -460,7 +460,8 @@ test('bridge core: five keystrokes batch into ONE transaction with composed op',
   const { api } = makeMockApi({
     apply_transaction: (args) => {
       received.push((args as { transaction: Transaction }).transaction)
-      return snapshotForParagraph('abcdef')
+      // BL-123: InsertText is text-only → slim response.
+      return { kind: 'slim', revision: 1 }
     },
     get_markdown: () => 'abcdef',
   })
@@ -515,10 +516,8 @@ test('bridge core: text-only ops skip getMarkdown to halve per-keystroke IPC cos
   resetStore()
   let getMarkdownCalls = 0
   const { api } = makeMockApi({
-    apply_transaction: () => ({
-      ...snapshotForParagraph('oldX'),
-      revision: 7,
-    }),
+    // BL-123: InsertText is text-only → slim response.
+    apply_transaction: () => ({ kind: 'slim', revision: 7 }),
     get_markdown: () => {
       getMarkdownCalls++
       return 'oldX'
@@ -552,23 +551,35 @@ test('bridge core: text-only ops skip getMarkdown to halve per-keystroke IPC cos
   )
 })
 
-// ── Snapshot is refreshed after apply ────────────────────────────────────────
+// ── BL-123: bridge coherency on both response shapes ────────────────────────
 
-test('bridge core: setSnapshot is called with the post-apply snapshot', async () => {
+test('bridge core: slim response (text-only op) does NOT call setSnapshot', async () => {
+  // BL-123: text-only ops (InsertText / DeleteText) get a slim
+  // response carrying just the new revision. The bridge skips
+  // setSnapshot in that case — the cached snapshot stays at its
+  // pre-tx contents, but block IDs and structure are unchanged for
+  // text-only ops so downstream consumers (drag-bridge, comments)
+  // still see correct structure. Stale text content doesn't matter
+  // because those consumers either re-read the tree on demand or use
+  // `getTree` directly. Drops the snapshot-clone cost from the
+  // kernel's hot path (BL-122 baseline: 39 → 24190 µs p50 across
+  // 10 / 5000-block docs).
   resetStore()
-  const postApplySnap = snapshotForParagraph('hello!')
+  let setSnapshotCalls = 0
+  const initialSnap = snapshotForParagraph('hello')
+  let cached = initialSnap
   const { api } = makeMockApi({
-    apply_transaction: () => postApplySnap,
+    apply_transaction: () => ({ kind: 'slim', revision: 9 }),
     get_markdown: () => 'hello!',
   })
   const client = new EditorKernelClient(api)
-  let cached = snapshotForParagraph('hello')
   const view = makeStubView('hello')
   const core = createBridgeCore({
-    relpath: 'notes/s.md',
+    relpath: 'notes/s-slim.md',
     kernelClient: client,
     getSnapshot: () => cached,
     setSnapshot: (snap) => {
+      setSnapshotCalls++
       cached = snap
     },
   })
@@ -583,10 +594,92 @@ test('bridge core: setSnapshot is called with the post-apply snapshot', async ()
   await new Promise((r) => setTimeout(r, 0))
   await Promise.resolve()
 
+  assert.equal(setSnapshotCalls, 0, 'slim path skips setSnapshot')
+  assert.equal(
+    cached,
+    initialSnap,
+    'cached snapshot still references the pre-tx object',
+  )
+  assert.equal(
+    useEditorStore.getState().sessionRevision.get('notes/s-slim.md'),
+    9,
+    'slim revision propagates to the session-revision store',
+  )
+})
+
+test('bridge core: full response (structural op) calls setSnapshot with the post-apply tree', async () => {
+  // BL-123: structural ops (everything other than InsertText /
+  // DeleteText) still get a full response carrying the post-apply
+  // snapshot, and the bridge still pushes that snapshot back to
+  // sessionManager so external consumers see fresh data. This test
+  // wires a UpdateBlockContent-style structural op (the same op kind
+  // the CRDT-conflict resolver dispatches) and asserts the full
+  // path's behaviour is unchanged from pre-BL-123.
+  resetStore()
+  let setSnapshotCalls = 0
+  const postApplySnap = snapshotForParagraph('hello!')
+  const { api } = makeMockApi({
+    apply_transaction: () => ({ kind: 'full', ...postApplySnap }),
+    get_markdown: () => 'hello!',
+  })
+  const client = new EditorKernelClient(api)
+  let cached = snapshotForParagraph('hello')
+  const view = makeStubView('hello')
+  const core = createBridgeCore({
+    relpath: 'notes/s-full.md',
+    kernelClient: client,
+    getSnapshot: () => cached,
+    setSnapshot: (snap) => {
+      setSnapshotCalls++
+      cached = snap
+    },
+  })
+
+  // Drive a transaction directly through the dispatch chain instead
+  // of the CM translator — the translator only emits text-only ops
+  // (insert_text / delete_text / update_annotations), so a structural
+  // op can't be triggered by a single keystroke alone.
+  await client.applyTransaction('notes/s-full.md', {
+    id: '00000000-0000-4000-8000-0000000000ff',
+    operations: [
+      {
+        kind: 'update_block_content',
+        id: ROOT_ID,
+        old_content: 'hello',
+        new_content: 'hello!',
+        old_annotations: [],
+        new_annotations: [],
+      },
+    ],
+    created_at: 0,
+    metadata: {
+      user_action: { kind: 'paste' },
+      source: 'user',
+      ai_edit: false,
+    },
+  })
+  // Drive a no-op CM keystroke through the bridge so its dispatch
+  // chain runs and we can verify the bridge handles full responses
+  // on the same code path.
+  const start = mdState('hello')
+  const tr = start.update({ changes: { from: 5, to: 5, insert: '!' } })
+  core.push(realUpdate(start, tr, view))
+  core.flushSync()
+
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((r) => setTimeout(r, 0))
+  await Promise.resolve()
+
+  assert.ok(setSnapshotCalls >= 1, 'full path calls setSnapshot')
   assert.equal(
     cached.tree.blocks[ROOT_ID]?.content,
     'hello!',
-    'cached snapshot now reflects the post-apply block content',
+    'cached snapshot reflects the post-apply block content',
+  )
+  assert.ok(
+    !('kind' in cached),
+    'setSnapshot receives a clean EditorSnapshot — discriminator stripped',
   )
 })
 
@@ -596,12 +689,16 @@ test('bridge core: a keystroke arriving during an in-flight apply waits + drains
   resetStore()
   let applyCount = 0
   let snap = snapshotForParagraph('old')
+  let kernelRevision = snap.revision
   const { api } = makeMockApi({
     apply_transaction: (args) => {
       applyCount++
       // Advance the kernel-side snapshot to mirror what the real
       // kernel would do — the second keystroke's translation needs a
-      // post-apply view of the block content.
+      // post-apply view of the block content. Even though BL-123
+      // returns slim for the InsertText path, the mock still keeps
+      // its own local mutation of `snap` so its `getSnapshot` reflects
+      // the post-op state for the bridge's lazy mirror init.
       const op = (args as { transaction: Transaction }).transaction.operations[0]
       if (op?.kind === 'insert_text') {
         const block = snap.tree.blocks[op.block_id]!
@@ -617,7 +714,9 @@ test('bridge core: a keystroke arriving during an in-flight apply waits + drains
           },
         }
       }
-      return snap
+      kernelRevision += 1
+      // BL-123: InsertText is text-only → slim response.
+      return { kind: 'slim', revision: kernelRevision }
     },
   })
   const client = new EditorKernelClient(api)

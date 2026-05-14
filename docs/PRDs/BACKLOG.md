@@ -442,25 +442,7 @@ FTS5 virtual table over the agent's persisted session transcripts (which DG-33 a
 
 _BL-122 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
----
-
-### BL-123: Slim `apply_transaction` response for text-only ops (Phase 1 of TYPING-LATENCY-PLAN)
-
-**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
-**Effort**: Medium. Single biggest typing-latency fix; depends on BL-122 for the regression gate.
-**Crates**: `nexus-editor`, shell `nexus.editor` plugin, IPC bindings.
-
-Today every successful `apply_transaction` returns a full `EditorSnapshot` — `crates/nexus-editor/src/core_plugin.rs:1203` clones the entire `BlockTree` (`snapshot_of` at `:1538`) and serializes it via `snapshot_to_value` (`:1573-1576`). For text-only ops (insert/delete on a single block) the webview already discards the snapshot via the `skipReconcile` shortcut at `shell/src/plugins/nexus/editor/cm/transactionBridge.ts:362-367`, but the kernel still does the O(N blocks) work. Returning just `{ revision }` for text-only ops makes the kernel-side cost O(1) and removes the largest IPC payload on the typing hot path.
-
-**Definition of done:**
-- New `ApplyTransactionResponse` enum: `Slim { revision }` vs `Full(EditorSnapshot)`
-- `handle_apply_transaction` inspects op kinds: all-`insert_text`/`delete_text` → `Slim`; structural ops → `Full`
-- `EditorKernelClient.applyTransaction` types the response as a discriminated union; bridge handles both shapes
-- Slim path drops the existing `setSnapshot?.(...)` call on the bridge side; downstream consumers (drag-bridge, comments, block-link nav) either refresh on demand via `get_tree` or get a periodic refresh — pick one as part of the PR after auditing consumers
-- IPC drift check passes (`scripts/check_ipc_drift.sh`)
-- `editor.apply_transaction.large` p95 server-side time flat in N for text-only ops (target < 1 ms regardless of doc size)
-- New Rust test asserts response shape per op kind; new shell test asserts bridge coherency on both shapes
-- Open question: whether `update_annotations` joins the slim path (default in plan: exclude, since the optimistic mirror doesn't track annotation changes)
+_BL-123 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `ApplyTransactionResponse` tagged union (`{ kind: 'slim', revision }` vs `{ kind: 'full', ...EditorSnapshot }`); `handle_apply_transaction` returns Slim for any all-`insert_text`/`delete_text` transaction and Full for anything structural (including `update_annotations` — the bridge's optimistic mirror doesn't track annotations, so the snapshot is the only authoritative source for the post-apply annotation list). Bridge updated to skip `setSnapshot?.(...)` on slim, strip the discriminator on full; downstream consumers (drag-bridge, comments) keep correct block IDs + structure across text-only ops since neither changes under InsertText/DeleteText. BL-122's `editor.apply_transaction.*` baseline collapses from 39 / 330 / 24190 µs p50 (small/medium/large) to **4 / 4.45 / 4 µs** — flat curve, ≈ 6000x speedup on the 5000-block case, well under the DoD's < 1 ms target. New Rust response-shape test (`apply_transaction_response_shape_per_op_kind`) exercises every op kind plus the wire-shape JSON. New shell coherency tests cover the slim path (setSnapshot NOT called, revision propagates) and the full path (setSnapshot called with the post-apply tree, discriminator stripped). `scripts/check_ipc_drift.sh` clean — `EditorSnapshot` isn't a ts-rs-generated binding (defined manually in `shell/src/plugins/nexus/editor/types.ts`), so the new discriminator type ships as a hand-written `ApplyTransactionResponse` in `kernelClient.ts`._
 
 ---
 
