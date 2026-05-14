@@ -540,6 +540,178 @@ The microbenchmarks from BL-122 gate the kernel and decoration paths but miss IP
 
 ---
 
+### BL-128: Personal entity knowledge graph (Thoth port)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Effort**: Large. Independent of other Thoth ports.
+**Crates**: `nexus-storage` (indexing + graph extension), new shell plugin `nexus.entityGraph`.
+
+Nexus's petgraph today is a document-link graph: nodes are files, edges are wikilinks. Thoth proves there is significant value in a second, orthogonal layer — a **personal entity graph** where nodes are typed entities (people, places, events, projects, concepts, etc.) and edges are typed directional relationships with confidence scores. The two graphs are complementary: the document graph answers "what files reference what?"; the entity graph answers "what do I know about this person / event / concept?"
+
+**Design constraint (file-as-truth):** Entities must live as Markdown files, not as opaque DB rows. Each entity is a `.md` file in a user-designated folder (e.g. `<forge>/entities/`) with YAML frontmatter carrying `entity_type`, `aliases`, `tags`, and `relations` (a list of `{target, type, confidence}` objects). `nexus-storage` indexes these files like any other, extending the existing petgraph with typed-edge support and a FAISS-backed semantic recall index over entity descriptions.
+
+**Entity types (11 canonical):** `person`, `preference`, `fact`, `event`, `place`, `project`, `organisation`, `concept`, `skill`, `media`, `self_knowledge`.
+
+**Relation types (40+ controlled vocabulary):** family/social (`knows`, `friend_of`, `married_to`), location (`lives_in`, `works_at`, `born_in`), work (`works_on`, `manages`, `employed_by`), knowledge (`proficient_in`, `certified_in`, `studies`), media (`reading`, `watching`, `authored`), plus temporal, ownership, membership, and causality variants. A `normalize_relation_type` lookup maps LLM-generated variants to canonical forms.
+
+**IPC handlers** (new, in `nexus-storage`): `entity_search(query, [type])` — semantic recall via FAISS; `entity_get(id)` — fetch by ID or subject; `entity_relations(id, [direction])` — graph traversal; `entity_upsert(frontmatter)` — write-through to disk; `entity_find_duplicates(threshold)` — similarity scan for Dream Cycle (BL-129).
+
+**Definition of done:**
+- `nexus-storage` parses `entity_type` + `relations` frontmatter; extends petgraph edges with `type: String` and `confidence: f32`
+- FAISS embedding index (reuse `nexus-ai`'s embedding provider) built over entity `description` fields; incremental upsert on file-watch events
+- `normalize_relation_type` table covering at least the 40 relation types from the Thoth vocabulary
+- Five new `com.nexus.storage` IPC handlers: `entity_search`, `entity_get`, `entity_relations`, `entity_upsert`, `entity_find_duplicates`
+- `nexus.entityGraph` shell plugin: visual node/edge explorer (reuses existing graph canvas), sidebar entity detail panel, entity-creation palette command
+- Agent integration: `nexus-agent` system-prompt assembly queries `entity_search` for context-relevant entities and prepends them, mirroring the existing RAG retrieval path
+- CLI: `nexus graph entity list|show|search|related`
+
+---
+
+### BL-129: Dream Cycle — knowledge refinement engine (Thoth port)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Effort**: Medium. Depends on BL-128 (entity graph).
+**Crates**: `nexus-workflow` (new built-in workflow type), `nexus-storage` (dedup API), `nexus-ai` (enrichment handler).
+
+A scheduled background pass that keeps the entity knowledge graph (BL-128) clean and enriched without manual curation. Modelled on Thoth's "Dream Cycle" daemon. Four phases run in sequence during a user-configured maintenance window (default: daily at 02:00 local, or on-demand via `nexus graph dream-cycle run`):
+
+1. **Duplicate detection** — calls `entity_find_duplicates(threshold: 0.92)` to surface semantically near-identical entity pairs; auto-merges pairs above a higher threshold (0.97), queues the rest for user review via a shell notification.
+2. **Description enrichment** — for entities whose `description` field is short (< 80 chars) or was not updated in the last 30 days, asks the AI to expand it using existing relations and linked document context.
+3. **Confidence decay** — reduces `confidence` on relations not corroborated by any document link within the last 90 days (multiplicative decay factor 0.95 per cycle, floor 0.1).
+4. **Relationship inference** — presents entity clusters to the AI and asks it to propose new relations; each proposal written as a draft relation with `confidence: 0.5` pending user confirmation.
+
+**Definition of done:**
+- Built-in Dream Cycle workflow registered by `nexus-bootstrap` alongside user-defined workflows; uses the existing cron trigger engine
+- `com.nexus.storage::entity_find_duplicates` returns ranked pairs with similarity scores
+- `com.nexus.ai::enrich_entity(entity_id)` handler: RAG-retrieves linked document context and calls the LLM to expand the description
+- Decay logic: SQL update over the entity SQLite table; skips entities with `confidence` already at floor
+- Inference proposals written as draft `.md` relation frontmatter; shell notification surfaces "N new relation proposals from Dream Cycle" with an approve/skip action
+- Configurable in `<forge>/.forge/config.toml`: `[dream_cycle] enabled = true`, `schedule = "0 2 * * *"`, `merge_threshold = 0.97`, `review_threshold = 0.92`, `decay_factor = 0.95`
+- CLI: `nexus graph dream-cycle run [--phase <dedup|enrich|decay|infer>]`
+
+---
+
+### BL-130: Prompt injection detection (Thoth port)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Effort**: Small. Self-contained; adds one pre-prompt sanitisation pass.
+**Crates**: `nexus-ai` (new `sanitize` module).
+
+Nexus's `PrivacyPolicy` redactor (BL-017, shipped) handles outbound PII. The missing piece is inbound content sanitisation: RAG chunks, tool call results, channel-sourced messages, and MCP tool outputs can all carry adversarially crafted content targeting the agent's LLM context. Thoth's `_check_prompt_injection()` proves a lightweight pattern scan catches the most common attack vectors before the prompt is assembled.
+
+**Scanning targets** (applied to every string that flows into prompt assembly — RAG chunks, tool results, MCP outputs, entity descriptions prepended by BL-128):
+
+- **Role-override patterns**: case-insensitive match for `"ignore previous instructions"`, `"you are now"`, `"disregard your"`, `"act as"` combined with `"without restrictions"`, `"your new instructions"`, and similar.
+- **Invisible Unicode**: scan for U+200B (zero-width space), U+200C/D (joiners), U+FEFF (BOM), U+2060 (word joiner), and other zero-width / directional override code points.
+- **Hidden HTML directives**: detect `<!--`, `<script`, `<style` as markers of embedded HTML injection attempts.
+- **Data exfiltration patterns**: `base64` + `curl`/`wget` in close proximity; unusually long URL query strings (> 500 chars with high entropy).
+
+**Response options per detection:**
+- `Warn` (default): log to audit store, prepend `[INJECTION RISK]` tag to the flagged chunk, continue.
+- `Redact` (opt-in): replace the flagged chunk with a placeholder.
+- `Reject`: surface an error to the caller, do not invoke the LLM.
+
+Mode is configurable per source type in `<forge>/.forge/config.toml::[ai.injection_policy]`.
+
+**Definition of done:**
+- `nexus-ai/src/sanitize.rs` exports `fn scan(text: &str, policy: InjectionPolicy) -> ScanResult`
+- Called by `stream_ask` (RAG chunks), `stream_chat` (tool results), and `nexus-agent` context assembly (entity prepend, MCP tool outputs)
+- Audit log entry for every flagged chunk (source, detection type, policy applied)
+- Test matrix: each pattern class fires on a crafted fixture; legitimate content passes clean
+- Config: `[ai.injection_policy] rag_chunks = "warn"`, `tool_results = "warn"`, `mcp_outputs = "redact"`
+
+---
+
+### BL-131: Pre-invocation message sanitisation in the agent loop (Thoth port)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Effort**: Small. Complements BL-120's summarisation approach; independent.
+**Crates**: `nexus-agent` (new `context_sanitize` module).
+
+BL-120 handles context budget exhaustion by summarising oldest turns. This item is a complementary, cheaper pass that runs **before every LLM invocation** to eliminate waste that inflates context without adding information:
+
+1. **Deduplication**: if two consecutive tool call results are byte-for-byte identical, keep only the first and annotate it `(result repeated N more times)`.
+2. **Base64 URI stripping**: scan message content for inline `data:image/...;base64,...` URIs; replace with `[image data stripped — N bytes]`. These typically come from browser snapshot or vision tool results that were already consumed.
+3. **Stale snapshot compression**: browser/DOM snapshots older than the last 2 turns are compressed to a one-line stub `[browser snapshot from <timestamp>, <N> nodes — compressed]`.
+4. **Hard trim**: if total estimated token count (using the provider's tiktoken equivalent) still exceeds 85% of the configured `max_context_tokens` after the above passes, trim from the oldest non-system messages until under budget, logging what was dropped.
+
+This is distinct from BL-120's LLM-based turn summarisation: it targets mechanical waste (duplicates, inert binary data) rather than semantic redundancy, and is O(n) without an LLM call.
+
+**Definition of done:**
+- `nexus-agent/src/context_sanitize.rs`: four passes implemented and unit-tested individually
+- Integrated into the agent plan executor just before each `com.nexus.ai::stream_chat` invocation
+- Token estimation: reuse the `token_budget` counter already present in `nexus-ai` (BL-018 path)
+- Metrics: count of deduplicated results, stripped bytes, and trimmed turns emitted on the kernel bus as `com.nexus.agent.context_sanitize` event so the shell health panel (BL-093 follow-up) can surface them
+- Test: synthetic 30-turn session with embedded base64 URIs and repeated tool results is visibly smaller after the pass
+
+---
+
+### BL-132: Runtime approval gates in the agent loop (Thoth port)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Effort**: Medium. Touches kernel event system, agent executor, and all three frontends.
+**Crates**: `nexus-kernel` (new event type), `nexus-agent` (executor gate), shell plugin `nexus.agentApproval`, TUI modal, CLI `--interactive` flag.
+
+Nexus's capability system enforces access at IPC dispatch time — a plugin either holds `exec.spawn` or it doesn't. There is no runtime checkpoint: when an agent step is about to execute a destructive action (shell command, file deletion, git force-push), it proceeds without surfacing the pending action to the user. Thoth's `LangGraph interrupt()` pattern shows that pausing the agent mid-plan and routing an approval request to the active frontend is both implementable and significantly improves trust in agentic workflows.
+
+**Mechanism:**
+
+1. A new `approval_required: bool` flag on IPC handlers (set in the handler registration, not in capabilities). Handlers that mutate the filesystem destructively, execute arbitrary shell commands, or perform git operations with `--force` semantics set this flag.
+2. Before dispatching a flagged handler, the agent plan executor emits `com.nexus.agent.approval_required { plan_id, step_idx, handler_id, args_summary }` on the kernel bus, then `await`s a `com.nexus.agent.approval_response { plan_id, step_idx, approved: bool }` event with a configurable timeout (default 120 s; configurable in `[agent] approval_timeout_s`).
+3. Frontends subscribe to `approval_required` and surface an approve/cancel UI:
+   - **Shell**: inline card in the active chat panel with action summary and ✓ / ✗ buttons
+   - **TUI**: modal overlay over the current pane
+   - **CLI**: `--interactive` flag; non-interactive runs auto-reject destructive steps with a clear error
+4. If the timeout elapses without a response, the step is cancelled and the plan marked `AwaitingApproval` (resumable).
+
+**Definition of done:**
+- `approval_required` flag on at minimum: `nexus-terminal::execute_command`, `nexus-storage::delete_file`, `nexus-git::push` (force flag path), `nexus-storage::replace_in_files` (> N files)
+- Kernel event pair (`approval_required` / `approval_response`) with typed payload
+- Agent executor awaits the response event with timeout; plan state tracks `AwaitingApproval`
+- Shell plugin: card-style approval UI, dismissable, auto-expires at timeout
+- TUI: modal overlay (reuse existing dialog pattern)
+- CLI: `--interactive` flag honours approvals; without it, destructive steps log a clear skip message
+- Test: mock executor with injected `approval_response` events; timeout path cancels correctly
+
+---
+
+### BL-133: Multi-channel notification output (Thoth port)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Effort**: Medium. New crate; does not touch existing service plugins.
+**Crates**: new `nexus-notifications` core plugin.
+
+Nexus agent and workflow outputs are surfaced only in the active frontend session. A background workflow that completes at 02:00 (e.g., the Dream Cycle, a scheduled agent run, a file-event workflow) has no delivery channel if the Tauri shell is closed. Thoth ships five messaging backends; Nexus needs at minimum desktop OS notifications and one async channel.
+
+**v1 scope:**
+
+| Channel | Transport | Trigger |
+|---|---|---|
+| Desktop OS notification | Tauri `notification` plugin | All workflow / agent completions |
+| Telegram bot | HTTP polling via `reqwest` | Opt-in; configured in `[notifications.telegram]` |
+| Discord webhook | HTTP POST to webhook URL | Opt-in; configured in `[notifications.discord]` |
+| Email (SMTP) | `lettre` crate | Opt-in; TLS, credential in `nexus-security` keyring |
+
+**Integration points:**
+
+- Workflows: the `.workflow.toml` `[[steps]]` spec gains an optional `notify: [telegram, discord]` key; if set, the workflow executor publishes a `com.nexus.notifications::send` IPC call on step or run completion.
+- Agents: `com.nexus.agent.run_done` kernel-bus subscribers in `nexus-notifications` send a summary automatically if a notification channel is configured and the run took > 30 s (configurable threshold).
+- Any plugin can call `com.nexus.notifications::send(channel, message)` directly.
+
+**Definition of done:**
+- `nexus-notifications` registered by `nexus-bootstrap` after `nexus-workflow`
+- `com.nexus.notifications::send(channel, message, [title])` IPC handler
+- Desktop notification: Tauri `notification` plugin call, falls back gracefully on Linux without `libnotify`
+- Telegram: bot token + authorised chat ID stored in `nexus-security` keyring; `notifications.telegram.enabled = true` in config; message split at 4096-char limit
+- Discord: webhook URL in keyring; `notifications.discord.enabled = true`
+- SMTP: `[notifications.email]` block in config; credential in keyring
+- Workflow TOML: `notify` key on `[[steps]]` and at `[metadata]` level (run-level)
+- Agent auto-notify on run completion > threshold
+- Shell settings panel for configuring channels and testing delivery
+- CLI: `nexus notify send --channel telegram "message"` for ad-hoc delivery
+
+---
+
 _BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Almost everything in the DoD already shipped under `nexus.files` (sidebar tree, expand/collapse, drag-to-reorder, full context menu, live `com.nexus.storage` event sync). The only material gap was the file-type icon set, now closed via a `getFileIcon(name)` helper covering `.md` / source files / structured config and a generic fallback._
 
 ---
@@ -855,6 +1027,14 @@ Four external-project assessments under [`../research/`](../research/) each carr
     - Feature 5 — session-transcript FTS5 search (M) → **[BL-121](#bl-121-session-transcript-fts5-search-hermes-feature-5)**
     - Feature 6 — multi-agent delegation → **already shipped as DG-37**
     - Feature 7 — ACP protocol adapter crate → **covered by [BL-113](#bl-113-protocol-host-contribution-model-for-lsp--dap--mcp--acp) Phase 4**
+- **Thoth capability assessment** — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Thoth is a local-first Python AI assistant (NiceGUI + LangGraph + Ollama + FAISS + NetworkX) with broad tool coverage and a personal entity knowledge graph. Six high-priority ports promoted (2026-05-14); eight medium-priority items held here. Voice (STT/TTS) already covered by BL-117 / BL-118 from the Anything-LLM assessment; context compression overlap noted with BL-120 but BL-125 targets the cheaper pre-invocation sanitisation pass rather than LLM-based summarisation.
+    - Typed personal entity graph (people/places/events/concepts, 40+ relation types, FAISS recall) → **[BL-128](#bl-128-personal-entity-knowledge-graph-thoth-port)**
+    - Dream Cycle refinement engine (nightly dedup, decay, enrich, infer) → **[BL-129](#bl-129-dream-cycle--knowledge-refinement-engine-thoth-port)**
+    - Prompt injection detection (role-override patterns, invisible Unicode, HTML directives) → **[BL-130](#bl-130-prompt-injection-detection-thoth-port)**
+    - Pre-invocation message sanitisation (dedup tool results, strip base64 URIs, 85% trim) → **[BL-131](#bl-131-pre-invocation-message-sanitisation-in-the-agent-loop-thoth-port)**
+    - Runtime approval gates in the agent loop (pause-and-ask before destructive steps) → **[BL-132](#bl-132-runtime-approval-gates-in-the-agent-loop-thoth-port)**
+    - Multi-channel notification output (OS, Telegram, Discord, SMTP) → **[BL-133](#bl-133-multi-channel-notification-output-thoth-port)**
+  Medium-priority items held here until capacity opens: vision (`nexus-vision` plugin — screen/file image analysis via local Ollama vision model); built-in web search (Tavily + DuckDuckGo handlers in `nexus-ai`); browser automation (Playwright via `nexus-browser` plugin); chart generation (10 Plotly-equivalent chart types in `nexus-formats` or `nexus-ai`); health/habit tracker (`nexus-tracker` plugin or Bases extension); Docker sandbox for terminal sessions (shadow workspace + patch-apply in `nexus-terminal`); custom tool builder UX (wizard shell plugin wrapping `nexus plugin scaffold`). Skip items (Gmail, Calendar, image/video gen, X/Twitter, Arxiv/Wolfram/Weather — all reachable via MCP): these are community plugin territory.
 
 ---
 
