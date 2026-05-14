@@ -1,23 +1,61 @@
 # BL-053 — Forge visual target: from current shell to the mockup
 
 > **Source:** Forge Color System mockup + ember-on-slate design exploration (2026-05-06).
-> **Status:** **Phase 1 shipped.** Phases 2–4 remain plan-only and stay gated on the open questions in §5.
+> **Status:** **Phases 1, 2, 3, and 4a shipped.** Phase 4b (file-tree dots from frontmatter) remains deferred — wiring frontmatter into every visible tree node is its own multi-file IPC dance.
 > **Related:** the bundled themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the token values this plan styles against.
+
+## Decisions locked in (§5 open questions)
+
+1. **Callout syntax** → Obsidian-style `> [!type] Title\n> body`. The PRD called this "the safest call"; no migration cost since none of the in-repo fixtures use the other dialect.
+2. **Status-pill source** → YAML frontmatter `status:` key, plus inline `Complete` / `Partial` / `Substantial` / `Scaffolded` / `Not started` / `Deferred` keywords in table cells and inline code. No Bases dependency, no new inline syntax. Matches the tree-dots hypothesis in §1 row D.
+3. **Font bundling** → skipped. `[typography].font_imports` in the bundled themes points at the Google Fonts URL; Georgia is the offline fallback. Bundling the woff2 is a separate offline-first workstream.
 
 ## Phase 1 — Chrome polish (shipped)
 
 | Mockup element | Status |
 |----|----|
 | A. Cool-slate chrome with single ember accent | ✅ Already shipped (bundled ember themes; this BL preserves) |
-| B. Pill-shaped editor tabs + ember underline + soft fill on active | ✅ `shell.css` `.forge-tab` + `.forge-tab.active::after` (annotated "BL-053 Phase 1: ember pills") |
+| B. Pill-shaped editor tabs + ember underline + soft fill on active | ✅ `shell.css` `.forge-tab` + `.forge-tab.active::after` |
 | C. Active sidebar row + ember left rail | ✅ Pre-existing |
-| M. Inspector panel segmented control (Outline / Backlinks / Graph) | ✅ `shell.css` `.rtab` / `.rtab.active` (annotated "BL-053 Phase 1: segmented control treatment") |
+| M. Inspector segmented control (Outline / Backlinks / Graph) | ✅ `shell.css` `.rtab` / `.rtab.active` |
 | P. Status bar bottom-right: forge name + ember dot | ✅ `WorkspaceStatus` registered into `statusBarRight` at priority 5; dot uses `--interactive-accent` |
 | E. Fraunces serif H1 / H2 in editor | ✅ `--font-serif` declared in `shell.css :root`; applied to `.cm-content .cm-md-h1/h2` (live preview) + `.nexus-markdown-body h1/h2` (rendered viewer) |
 
-**Deferred from Phase 1:** font bundling. The theme's `[typography].font_imports` is still the only path that pulls `Fraunces` (Google Fonts URL). Network-free first launches see the Georgia fallback, which is acceptable per §5 Q3 ("nobody's loaded it yet"). Bundling the woff2 is a separate workstream when offline-first matters.
+## Phase 2 — Inline rendering (shipped)
 
-Phases 2–4 below stay open and depend on the §5 product decisions.
+| Mockup element | Status |
+|----|----|
+| F. Frontmatter metadata bar under H1 | ✅ `parseFrontmatter` + `renderFrontmatterBar` in `markdownRender.ts`; spliced after the first `<h1>` |
+| G. Path / version-shaped inline `code` tinted ember | ✅ `codespan` renderer override; `nx-codepath` class in `markdown.css` |
+| H. `[[wikilinks]]` rendered ember | ✅ Custom marked inline tokenizer; emits `<a class="nx-wikilink">` with `[[target\|alias#fragment]]` support |
+
+## Phase 3 — Callouts (shipped)
+
+| Mockup element | Status |
+|----|----|
+| I. `> [!info] Title\n> body` callout boxes | ✅ Custom marked block tokenizer; renders `<div class="nx-callout nx-callout--{kind}">` with dot + head + body slots |
+
+Supported kinds: `info`, `note`, `tip`, `success` / `ok`, `warn` / `warning` / `todo`, `risk` / `danger` / `error`, `update`. Unknown kinds stay as plain blockquotes so a typo doesn't silently swallow the content.
+
+## Phase 4 — Status pills + tree dots (Phase 4a shipped; Phase 4b deferred)
+
+| Mockup element | Status |
+|----|----|
+| K. Status pills in table cells (Complete / Substantial / Partial / Scaffolded / Not started / Deferred) | ✅ `tablecell` renderer override — known status labels render as `<span class="nx-status-pill nx-status-pill__chip--{tone}">`; unknown cells fall through unchanged |
+| K-inline. Status keywords in inline `code` | ✅ Same `STATUS_KIND` table is consulted by the `codespan` renderer |
+| K-frontmatter. Frontmatter `status:` value as a pill in the metadata bar | ✅ `renderFrontmatterBar` swaps the chip for a pill when the value matches a known status |
+| D. File-tree status dots driven by frontmatter `status:` | 🕗 **Deferred** — needs a per-file frontmatter cache backed by `com.nexus.storage::read_frontmatter` (handler 59); the kernel surface exists but feeding it through the file-tree plugin's rendering loop is its own follow-up |
+
+**Deferred follow-ups:**
+
+- **Font bundling** — `font_imports` pulls Fraunces from Google Fonts; first-boot-offline launches see Georgia. Bundling woff2 is a separate workstream.
+- **File-tree dots (Phase 4b)** — needs the file-tree plugin to call `read_frontmatter` per visible node and tint the row's leading dot. Out of scope for this BL because the volume of IPC calls + the eviction policy need their own design.
+- **Markdown table chrome (J)** — the mockup shows rounded surfaces + dashed row separators on tables. Marked emits plain `<table>`; styling is a CSS-only follow-up that can land any time.
+- **Outline plugin numbered prefix (N) + word-count badge** — the outline plugin already exists; this is feature work on top, and the outline plugin is currently in a different visual band.
+
+## Tests
+
+23 new live-preview pipeline tests in `markdownRender.test.ts` cover Phase 2/3/4: path-shaped inline code detection, wikilink rendering including pipe-aliases + fragments, frontmatter parse + CRLF + list values + unclosed blocks, metadata bar splicing position, status-pill substitution in table cells / inline code / frontmatter, and callout rendering including unknown-kind rejection. Legacy `MarkdownDoc` tests at `tests/markdown-doc-bl053.test.ts` continue to pin the dormant `core/editorArea` path. Shell suite green at 1370/0 fail.
 
 The bundled ember themes ship the token values the mockup uses, but the shell renders a much plainer surface than the mockup. Closing the gap is partly theme/CSS work and partly markdown-rendering / plugin work. This document inventories the gap, splits it into phases by ROI, and lists the decisions that have to land before code does.
 

@@ -97,6 +97,152 @@
   font-weight: 600;
   letter-spacing: -0.015em;
 }
+
+/* ─── BL-053 Phase 2c — frontmatter metadata bar ──────────────────
+   Spliced in by the markdown renderer directly after the first H1.
+   Renders as a row of small chips; the design mockup labels them
+   "FORGE · NEXUS_WORK · UPDATED …".                                   */
+.nexus-markdown-body .nx-frontmatter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -0.4em 0 1.6em;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.nexus-markdown-body .nx-frontmatter__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--background-secondary-alt);
+  border: 1px solid var(--divider-color);
+}
+.nexus-markdown-body .nx-frontmatter__chip strong {
+  color: var(--text-normal);
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* ─── BL-053 Phase 2a — path / version-shaped inline code ────────
+   Tinted ember to distinguish navigation references from prose
+   code. The base `<code>` styling stays neutral; only the
+   path-flavoured variant flips colour.                                  */
+.nexus-markdown-body code.nx-codepath {
+  color: var(--interactive-accent);
+  background: var(--interactive-accent-soft);
+  border: 1px solid color-mix(in oklch, var(--interactive-accent) 24%, transparent);
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: 0.92em;
+}
+
+/* ─── BL-053 Phase 2b — wikilinks ─────────────────────────────────
+   `[[X]]` parsed by the wikilink extension lands as
+   `<a class="nx-wikilink">`. Reusing the link colour token keeps
+   the styling consistent with regular markdown links but the
+   underline disappears so a paragraph studded with refs stays
+   readable.                                                            */
+.nexus-markdown-body .nx-wikilink {
+  color: var(--interactive-accent);
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in oklch, var(--interactive-accent) 50%, transparent);
+}
+.nexus-markdown-body .nx-wikilink:hover {
+  border-bottom-style: solid;
+}
+
+/* ─── BL-053 Phase 3 — Obsidian-style callouts ───────────────────
+   `> [!info] Title\n> body` blocks render as raised panels with a
+   coloured dot on the head. Tone tokens (`--ok` / `--warn` /
+   `--risk` / `--interactive-accent`) come from the shipped ember
+   themes; unknown kinds fall back to the neutral muted variant.       */
+.nexus-markdown-body .nx-callout {
+  margin: 1.4em 0;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--divider-color);
+  display: grid;
+  gap: 6px;
+}
+.nexus-markdown-body .nx-callout__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--text-normal);
+}
+.nexus-markdown-body .nx-callout__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.nexus-markdown-body .nx-callout__body { color: var(--text-normal); }
+.nexus-markdown-body .nx-callout__body > :first-child { margin-top: 0; }
+.nexus-markdown-body .nx-callout__body > :last-child  { margin-bottom: 0; }
+.nexus-markdown-body .nx-callout--info     .nx-callout__dot { background: var(--interactive-accent); }
+.nexus-markdown-body .nx-callout--note     .nx-callout__dot { background: var(--text-muted); }
+.nexus-markdown-body .nx-callout--tip      .nx-callout__dot { background: var(--ok); }
+.nexus-markdown-body .nx-callout--success  .nx-callout__dot { background: var(--ok); }
+.nexus-markdown-body .nx-callout--ok       .nx-callout__dot { background: var(--ok); }
+.nexus-markdown-body .nx-callout--warn     .nx-callout__dot { background: var(--warn); }
+.nexus-markdown-body .nx-callout--warning  .nx-callout__dot { background: var(--warn); }
+.nexus-markdown-body .nx-callout--todo     .nx-callout__dot { background: var(--warn); }
+.nexus-markdown-body .nx-callout--risk     .nx-callout__dot { background: var(--risk); }
+.nexus-markdown-body .nx-callout--danger   .nx-callout__dot { background: var(--risk); }
+.nexus-markdown-body .nx-callout--error    .nx-callout__dot { background: var(--risk); }
+.nexus-markdown-body .nx-callout--update   .nx-callout__dot { background: var(--interactive-accent); }
+
+/* ─── BL-053 Phase 4a — status pills ─────────────────────────────
+   Rendered by the markdown pipeline for table cells whose body
+   is exactly a known status keyword, and inside inline `<code>`
+   spans for the same labels. Tone tokens match the callout dots
+   so a Decision banner and a Complete pill share the same green.       */
+.nexus-markdown-body .nx-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in oklch, var(--text-muted) 14%, transparent);
+  color: var(--text-muted);
+  border: 1px solid color-mix(in oklch, var(--text-muted) 26%, transparent);
+}
+.nexus-markdown-body .nx-status-pill__chip--ok {
+  background: color-mix(in oklch, var(--ok) 16%, transparent);
+  color: var(--ok);
+  border-color: color-mix(in oklch, var(--ok) 32%, transparent);
+}
+.nexus-markdown-body .nx-status-pill__chip--warn {
+  background: color-mix(in oklch, var(--warn) 16%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in oklch, var(--warn) 32%, transparent);
+}
+.nexus-markdown-body .nx-status-pill__chip--risk {
+  background: color-mix(in oklch, var(--risk) 16%, transparent);
+  color: var(--risk);
+  border-color: color-mix(in oklch, var(--risk) 32%, transparent);
+}
+.nexus-markdown-body .nx-status-pill__chip--info {
+  background: var(--interactive-accent-soft);
+  color: var(--interactive-accent);
+  border-color: color-mix(in oklch, var(--interactive-accent) 28%, transparent);
+}
+.nexus-markdown-body .nx-status-pill__chip--muted {
+  /* Same as the base styling above; explicit class to keep the
+     CSS hook stable for plugin contributors. */
+}
 .nexus-markdown-body h3 { font-size: 18px; }
 .nexus-markdown-body h4,
 .nexus-markdown-body h5,
