@@ -399,19 +399,29 @@ The in-app toast subscriber landed; the next refinement is hooking the bus event
 
 _BL-133 follow-up (CLI agent auto-notify) closed 2026-05-14. New `--notify-after-secs <N>` flag on `nexus agent run` (default 30s; 0 disables). After the session returns, the CLI checks `Instant::elapsed()` against the threshold and dispatches `com.nexus.notifications::send` with a one-line summary (`<outcome> · <round-count> rounds · <duration> · <goal-prefix>`). Pure CLI-side timing — no kernel-event subscriber needed because the CLI is already the synchronous caller of `session_run`. New `compose_completion_message` helper handles UTF-8-safe goal truncation at ~60 chars + minute/second duration formatting. 5 new unit tests pin every projection rule (short run mm:ss vs ss, long-goal ellipsis, UTF-8 boundary safety, missing-field fallback). `cargo test -p nexus-cli` 60/60; clippy clean._
 
+_BL-133 follow-up (workflow `notify` step) closed 2026-05-14. New `"notify"` arm on `nexus-workflow::KernelActionDispatcher::run` routes through `com.nexus.notifications::send` with `channel` (required) + `message` (required) + optional `title`. New `NotifyStepArgs::from_step` parser validates the structural shape locally and accepts unknown channel names — server-side `serde(deny_unknown_fields)` on `SendArgs.channel` does the channel-name check at dispatch, surfacing a clear "invalid args" error through the step's `on_error` policy. Adopting a typed channel enum locally would require a circular dep `nexus-workflow → nexus-notifications`. 6 new tests pin every parse rule (minimal step / with title / missing channel / missing message / empty channel / unknown-channel passes through). `cargo test -p nexus-workflow` 188/188; clippy clean. Example forge usage in a workflow TOML:_
+
+```toml
+[[steps]]
+type = "notify"
+channel = "discord"
+message = "${RunBackup.summary}"
+title = "Nightly backup"
+```
+
 ---
 
-### Follow-up: workflow `notify` step + background agent auto-notify (from BL-133)
+### Follow-up: background agent auto-notify (from BL-133)
 
-**Source**: BL-133 deferral. Filed 2026-05-14. Updated 2026-05-14 after CLI auto-notify landed.
-**Effort**: Medium. Touches `nexus-workflow` step grammar + a new subscriber in `nexus-bootstrap`.
+**Source**: BL-133 deferral. Filed 2026-05-14. Updated 2026-05-14 after CLI auto-notify + workflow notify-step landed.
+**Effort**: Medium. Needs a new bus event from `nexus-agent` + a subscriber in `nexus-bootstrap`.
 
-CLI agent auto-notify landed; what's still missing is the **background** auto-notify:
+CLI agent auto-notify (`nexus agent run --notify-after-secs`) covers human-driven sessions. Workflow `notify` step lets a workflow author surface specific moments. What's still missing is the **automatic background path**: a workflow- or schedule-triggered agent session that exceeds the threshold should notify without the author having to add an explicit `notify` step. Needs:
 
-- Workflow `.workflow.toml::[[steps]] notify: [discord]` key — set to fire `com.nexus.notifications::send` on step / run completion. The `nexus-workflow` step grammar needs the new key + a per-step IPC call. Today a scheduled workflow that completes at 02:00 produces no signal.
-- Background agent runs (workflow-triggered, schedule-driven) — subscribe to a `com.nexus.agent.session_completed` topic in `nexus-bootstrap` and dispatch `notifications::send` when the run took > threshold. The CLI-side path covers human-driven `nexus agent run`; this covers everything else.
+1. A new `com.nexus.agent.session_completed { session_id, duration_ms, outcome, ... }` event published from `handle_session_run` after the run finishes.
+2. A `nexus-bootstrap` subscriber that watches the event and dispatches `notifications::send` when `duration_ms > threshold`. Threshold lives in `[agent] auto_notify_threshold_s` (default 30s).
 
-Both can land independently of each other.
+The subscriber can be conditional — only fires when at least one notification channel is configured, so a forge with `[notifications]` absent doesn't pay for the subscription.
 
 ---
 

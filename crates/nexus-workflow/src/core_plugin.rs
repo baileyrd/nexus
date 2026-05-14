@@ -1767,6 +1767,56 @@ fn json_to_toml(v: &serde_json::Value) -> Option<toml::Value> {
 ///
 /// `slug` is required so every action has a saved-command profile to
 /// reference (shell / cwd / env). `action` defaults to `start`. The
+/// BL-133 follow-up — typed view of the `[[steps]] type = "notify"`
+/// fields. Parsed once in [`ActionDispatcher::run`] before dispatch
+/// so the per-channel rejection message points at the failing step
+/// rather than the downstream serde error from the notifications
+/// plugin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NotifyStepArgs {
+    channel: String,
+    message: String,
+    title: Option<String>,
+}
+
+impl NotifyStepArgs {
+    /// Parse the step's `extra` table into the validated view. The
+    /// channel name itself isn't matched against
+    /// `Channel`'s variants here — the notifications plugin's
+    /// `serde(deny_unknown_fields)` does that and returns a clear
+    /// "invalid args" error if the workflow author typos the
+    /// channel. Keeping the parse local-only avoids a circular dep
+    /// on `nexus-notifications` from `nexus-workflow`.
+    fn from_step(step: &Step) -> Result<Self, String> {
+        let channel = step
+            .extra
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "notify step missing `channel`".to_string())?
+            .trim()
+            .to_string();
+        if channel.is_empty() {
+            return Err("notify step: `channel` cannot be empty".into());
+        }
+        let message = step
+            .extra
+            .get("message")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "notify step missing `message`".to_string())?
+            .to_string();
+        let title = step
+            .extra
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Ok(Self {
+            channel,
+            message,
+            title,
+        })
+    }
+}
+
 /// `command` field is only meaningful for `run_adhoc`; for the other
 /// actions it's ignored. `working_dir` overrides the saved profile
 /// when present.
@@ -2061,6 +2111,38 @@ impl ActionDispatcher for KernelActionDispatcher {
             "terminal" => {
                 let parsed = TerminalStepArgs::from_step(step)?;
                 self.dispatch_terminal(&parsed).await
+            }
+            // BL-133 follow-up — `notify` step: route through
+            // `com.nexus.notifications::send`. Lets a workflow
+            // surface step / run completion through any configured
+            // channel (Desktop / Discord / Telegram) without the
+            // author having to spell out an `ipc` step. Fields:
+            //   - `channel` (required): "desktop" | "discord" |
+            //     "telegram"
+            //   - `message` (required): string
+            //   - `title` (optional): string
+            // Unknown channel → the notifications plugin's
+            // server-side serde rejects with `invalid args`, which
+            // surfaces here as a workflow step error — the step's
+            // `on_error` policy then decides the workflow's fate.
+            "notify" => {
+                let parsed = NotifyStepArgs::from_step(step)?;
+                let mut ipc_args = serde_json::json!({
+                    "channel": parsed.channel,
+                    "message": parsed.message,
+                });
+                if let Some(t) = parsed.title {
+                    ipc_args["title"] = serde_json::Value::String(t);
+                }
+                self.ctx
+                    .ipc_call(
+                        "com.nexus.notifications",
+                        "send",
+                        ipc_args,
+                        DEFAULT_STEP_TIMEOUT,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())
             }
             other => {
                 // Unknown action types still get a stable success so
@@ -2542,6 +2624,108 @@ slug = "   "
             let parsed = TerminalAction::parse(action.as_str()).unwrap();
             assert_eq!(parsed, action);
         }
+    }
+}
+
+// ── BL-133 follow-up — workflow `notify` step parser tests ───────
+//
+// Same testing scope as the terminal-step parser above: pin the
+// structural parser exhaustively here, rely on the
+// `nexus-notifications::core_plugin::tests` IPC tests for the
+// downstream serde-validation behaviour. Adding the dispatcher path
+// to the integration tests would need a live `com.nexus.notifications`
+// in the test runtime, which the `validate_async`-style fallback
+// doesn't exercise.
+#[cfg(test)]
+mod notify_step_parse_tests {
+    use super::*;
+    use crate::Step;
+
+    fn step_from_toml(src: &str) -> Step {
+        let wf = parse_workflow_text(src).expect("parse");
+        wf.steps.into_iter().next().expect("one step")
+    }
+
+    fn build_notify_step(extra: &str) -> Step {
+        let src = format!(
+            r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "notify"
+{extra}
+"#
+        );
+        step_from_toml(&src)
+    }
+
+    #[test]
+    fn parses_minimal_notify_step() {
+        let step = build_notify_step(r#"channel = "desktop"
+message = "hello""#);
+        let parsed = NotifyStepArgs::from_step(&step).unwrap();
+        assert_eq!(parsed.channel, "desktop");
+        assert_eq!(parsed.message, "hello");
+        assert!(parsed.title.is_none());
+    }
+
+    #[test]
+    fn parses_notify_step_with_title() {
+        let step = build_notify_step(
+            r#"channel = "discord"
+message = "deploy complete"
+title = "Workflow nightly""#,
+        );
+        let parsed = NotifyStepArgs::from_step(&step).unwrap();
+        assert_eq!(parsed.channel, "discord");
+        assert_eq!(parsed.message, "deploy complete");
+        assert_eq!(parsed.title.as_deref(), Some("Workflow nightly"));
+    }
+
+    #[test]
+    fn rejects_missing_channel() {
+        let step = build_notify_step(r#"message = "x""#);
+        let err = NotifyStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("missing `channel`"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_missing_message() {
+        let step = build_notify_step(r#"channel = "desktop""#);
+        let err = NotifyStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("missing `message`"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_empty_channel() {
+        let step = build_notify_step(
+            r#"channel = "   "
+message = "x""#,
+        );
+        let err = NotifyStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("`channel` cannot be empty"), "got: {err}");
+    }
+
+    /// The parser deliberately does NOT validate `channel` against
+    /// `nexus_notifications::Channel`'s variants. Doing so would
+    /// require a circular dep (`nexus-workflow` → `nexus-notifications`).
+    /// Server-side `serde(deny_unknown_fields)` on `SendArgs.channel`
+    /// rejects unknown values at dispatch time with a clear "invalid
+    /// args" error. This test pins that contract — parsing accepts
+    /// unknown channel names so the dispatcher's error path is the
+    /// one that fires.
+    #[test]
+    fn accepts_unknown_channel_at_parse_time() {
+        let step = build_notify_step(
+            r#"channel = "carrier-pigeon"
+message = "x""#,
+        );
+        let parsed = NotifyStepArgs::from_step(&step).unwrap();
+        assert_eq!(parsed.channel, "carrier-pigeon");
     }
 }
 
