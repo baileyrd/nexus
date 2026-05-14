@@ -399,7 +399,8 @@ async fn handle_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "plan")?;
-    let skills_prompt = system_prompt_with_skills(&ctx, &a.goal).await;
+    let skills_prompt =
+        system_prompt_with_skills(&ctx, &a.goal, a.archetype.as_deref()).await;
     // `system_prompt_with_skills` returns DEFAULT_SYSTEM_PROMPT as
     // its baseline when no skills match; strip that prefix so the
     // archetype's prompt becomes the new baseline without doubling
@@ -1281,6 +1282,34 @@ async fn record_session_memory(
     );
 }
 
+/// DG-33 follow-up — read the agent's memory log via the kernel
+/// context and render the prompt-time recall preamble. Returns
+/// `None` when the log is missing, every line is malformed, or the
+/// pure formatter selects nothing recall-worthy.
+///
+/// Caps are tuned for context-budget conservativeness: every
+/// `Decision` (load-bearing per PRD-15 §5) up to 8 entries +
+/// the most recent 6 non-decision entries. Together that's at
+/// most ~14 short lines added to the system prompt — comfortably
+/// inside any provider's budget.
+async fn compose_memory_preamble(
+    ctx: &KernelPluginContext,
+    agent_id: &str,
+) -> Option<String> {
+    const DECISION_CAP: usize = 8;
+    const RECENT_CAP: usize = 6;
+    if crate::memory::normalize_agent_id(agent_id).is_err() {
+        return None;
+    }
+    let path = crate::memory::history_path(agent_id);
+    let bytes = ctx.read_file(&path).await.ok()?;
+    let entries = parse_memory_lines(&bytes);
+    if entries.is_empty() {
+        return None;
+    }
+    crate::memory::format_memory_preamble(&entries, DECISION_CAP, RECENT_CAP)
+}
+
 /// DG-36 follow-up — run a session with an optional
 /// [`crate::ManifestPolicyGate`] wrapping the base policy. Centralises
 /// the "wrap if Some, pass through if None" branching so
@@ -1356,11 +1385,25 @@ async fn handle_session_run(
         None => None,
     };
 
-    let system = match (&parsed.system, resolved.as_ref()) {
+    let mut system = match (&parsed.system, resolved.as_ref()) {
         (Some(s), _) => s.clone(),
         (None, Some(r)) => r.system_prompt.clone(),
         (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
     };
+
+    // DG-33 follow-up — splice the prompt-time memory preamble into
+    // the session's system prompt. Skipped when the caller passed an
+    // explicit `system` override (their string wins verbatim), when
+    // there's no archetype (no memory log key), or when the agent
+    // has no recall-worthy entries yet.
+    if parsed.system.is_none() {
+        if let Some(slug) = parsed.archetype.as_deref() {
+            if let Some(preamble) = compose_memory_preamble(&ctx, slug).await {
+                system.push_str("\n\n");
+                system.push_str(&preamble);
+            }
+        }
+    }
 
     // DG-36 follow-up — pull the manifest's `[tools]` policy out of
     // the resolved archetype. `None` for built-ins and the default
@@ -1830,9 +1873,26 @@ fn session_path(id: &str) -> Option<std::path::PathBuf> {
 async fn system_prompt_with_skills(
     ctx: &KernelPluginContext,
     goal: &str,
+    agent_id: Option<&str>,
 ) -> String {
     let mut prompt = String::from(DEFAULT_SYSTEM_PROMPT);
     append_mcp_hint(ctx, &mut prompt).await;
+
+    // DG-33 follow-up — prompt-time memory recall. The auto-record
+    // path (commit b6c0d09d) appends every completed session's tool
+    // calls / errors / compactions to `<forge>/.forge/agents/<slug>/
+    // history.jsonl`; here we read the agent's slice of that log,
+    // render the most recall-worthy entries through
+    // `crate::memory::format_memory_preamble`, and splice the
+    // preamble between the baseline + skills sections. Missing log
+    // or kernel-context errors are silent: the planner still works
+    // without the memory hint.
+    if let Some(slug) = agent_id.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(memory_preamble) = compose_memory_preamble(ctx, slug).await {
+            prompt.push_str("\n\n");
+            prompt.push_str(&memory_preamble);
+        }
+    }
 
     let response = ctx
         .ipc_call(

@@ -333,6 +333,133 @@ pub fn events_from_session(
     out
 }
 
+/// DG-33 follow-up — render an agent's recent memory entries as a
+/// short markdown preamble suitable for splicing into a session's
+/// system prompt. Returns `None` when nothing recall-worthy exists.
+///
+/// **Selection rule** (newest-first):
+/// - Every [`MemoryEntry::Decision`] entry up to `decision_cap` —
+///   PRD-15 §5 marks decisions as load-bearing context that survives
+///   `prune`; they're the highest-signal recall items.
+/// - The most recent `recent_cap` non-decision entries
+///   ([`MemoryEntry::Error`], [`MemoryEntry::CompactedTurns`],
+///   [`MemoryEntry::ToolCall`], etc.) for "what's been happening
+///   lately" context.
+///
+/// Duplicate entries are not removed — the underlying log is
+/// append-only; if the same decision is recorded twice it shows
+/// twice. Caps the two pools independently so a session full of
+/// recent ToolCalls doesn't squeeze out the decision history.
+///
+/// **Output shape** is a single string suitable for appending to a
+/// system prompt with a blank-line separator. Empty input or
+/// caps-of-zero return `None` so callers can skip the splice
+/// without checking the string.
+#[must_use]
+pub fn format_memory_preamble(
+    entries: &[MemoryEntry],
+    decision_cap: usize,
+    recent_cap: usize,
+) -> Option<String> {
+    use std::fmt::Write as _;
+    if entries.is_empty() || (decision_cap == 0 && recent_cap == 0) {
+        return None;
+    }
+    // Pre-sort newest-first so the take() below picks the most recent
+    // entries from each pool.
+    let mut sorted: Vec<&MemoryEntry> = entries.iter().collect();
+    sorted.sort_by(|a, b| b.timestamp_ms().cmp(&a.timestamp_ms()));
+
+    let mut decisions: Vec<&MemoryEntry> = Vec::new();
+    let mut recent: Vec<&MemoryEntry> = Vec::new();
+    for e in &sorted {
+        if e.is_decision() {
+            if decisions.len() < decision_cap {
+                decisions.push(*e);
+            }
+        } else if recent.len() < recent_cap {
+            recent.push(*e);
+        }
+        if decisions.len() >= decision_cap && recent.len() >= recent_cap {
+            break;
+        }
+    }
+    if decisions.is_empty() && recent.is_empty() {
+        return None;
+    }
+
+    let mut out = String::new();
+    out.push_str(
+        "## Recent context from prior sessions\n\nUse the entries below as \
+         signal from earlier work — files on disk remain the source of truth. \
+         Decisions are load-bearing; recent entries surface what happened most \
+         recently and may be stale.\n",
+    );
+    if !decisions.is_empty() {
+        out.push_str("\n### Decisions\n");
+        for e in &decisions {
+            if let MemoryEntry::Decision {
+                summary, rationale, ..
+            } = e
+            {
+                if rationale.trim().is_empty() {
+                    let _ = writeln!(out, "- {summary}");
+                } else {
+                    let _ = writeln!(out, "- {summary} — {rationale}");
+                }
+            }
+        }
+    }
+    if !recent.is_empty() {
+        out.push_str("\n### Recent activity\n");
+        for e in &recent {
+            match e {
+                MemoryEntry::Error { message, step_id, .. } => {
+                    if let Some(sid) = step_id {
+                        let _ = writeln!(out, "- ERROR [{sid}]: {message}");
+                    } else {
+                        let _ = writeln!(out, "- ERROR: {message}");
+                    }
+                }
+                MemoryEntry::CompactedTurns {
+                    rounds_compressed,
+                    summary,
+                    ..
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "- COMPACTED {rounds_compressed} rounds: {summary}",
+                    );
+                }
+                MemoryEntry::ToolCall {
+                    tool, success, ..
+                } => {
+                    let marker = if *success { "ok" } else { "FAILED" };
+                    let _ = writeln!(out, "- {marker} tool `{tool}`");
+                }
+                MemoryEntry::StepExecution { step_id, success, summary, .. } => {
+                    let marker = if *success { "ok" } else { "FAILED" };
+                    let _ = writeln!(out, "- {marker} step `{step_id}`: {summary}");
+                }
+                MemoryEntry::Artifact { path, description, .. } => {
+                    let _ = writeln!(out, "- ARTIFACT `{path}`: {description}");
+                }
+                MemoryEntry::AgentPlan { plan_id, step_count, .. } => {
+                    let _ = writeln!(out, "- PLAN `{plan_id}` ({step_count} steps)");
+                }
+                MemoryEntry::UserGoal { text, .. } => {
+                    let _ = writeln!(out, "- GOAL: {text}");
+                }
+                MemoryEntry::UserFeedback { text, .. } => {
+                    let _ = writeln!(out, "- FEEDBACK: {text}");
+                }
+                MemoryEntry::Decision { .. } => {} // pulled into decisions list
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Serialise a batch of [`MemoryEntry`] values as newline-terminated
 /// JSON. Used by the session-loop auto-record path that appends
 /// many entries in one IPC round-trip via the kernel context's
@@ -1010,6 +1137,133 @@ mod tests {
             }
             other => panic!("expected session-level Error, got {other:?}"),
         }
+    }
+
+    // ── DG-33 follow-up — format_memory_preamble ──────────────────────────────
+
+    #[test]
+    fn preamble_returns_none_for_empty_entries() {
+        assert!(format_memory_preamble(&[], 10, 10).is_none());
+    }
+
+    #[test]
+    fn preamble_returns_none_when_both_caps_are_zero() {
+        let entries = vec![MemoryEntry::Decision {
+            summary: "use sentence case".to_string(),
+            rationale: "house style".to_string(),
+            timestamp_ms: 1,
+        }];
+        assert!(format_memory_preamble(&entries, 0, 0).is_none());
+    }
+
+    #[test]
+    fn preamble_lists_decisions_under_their_own_heading() {
+        let entries = vec![
+            MemoryEntry::Decision {
+                summary: "use sentence case".to_string(),
+                rationale: "house style".to_string(),
+                timestamp_ms: 1_000,
+            },
+            MemoryEntry::Decision {
+                summary: "prefer 4-space indent".to_string(),
+                rationale: String::new(),
+                timestamp_ms: 2_000,
+            },
+        ];
+        let out = format_memory_preamble(&entries, 10, 10).unwrap();
+        assert!(out.contains("## Recent context"));
+        assert!(out.contains("### Decisions"));
+        assert!(out.contains("use sentence case — house style"));
+        // Empty rationale: no trailing em-dash.
+        assert!(out.contains("- prefer 4-space indent"));
+        assert!(!out.contains("- prefer 4-space indent —"));
+    }
+
+    #[test]
+    fn preamble_renders_recent_activity_kinds_in_short_form() {
+        let entries = vec![
+            MemoryEntry::Error {
+                message: "ENOSPC".to_string(),
+                step_id: Some("s-1".to_string()),
+                timestamp_ms: 1,
+            },
+            MemoryEntry::CompactedTurns {
+                rounds_compressed: 5,
+                summary: "early rounds".to_string(),
+                timestamp_ms: 2,
+            },
+            MemoryEntry::ToolCall {
+                tool: "read_file".to_string(),
+                success: true,
+                duration_ms: 0,
+                timestamp_ms: 3,
+            },
+            MemoryEntry::ToolCall {
+                tool: "write_file".to_string(),
+                success: false,
+                duration_ms: 0,
+                timestamp_ms: 4,
+            },
+        ];
+        let out = format_memory_preamble(&entries, 10, 10).unwrap();
+        assert!(out.contains("### Recent activity"));
+        assert!(out.contains("ERROR [s-1]: ENOSPC"));
+        assert!(out.contains("COMPACTED 5 rounds: early rounds"));
+        assert!(out.contains("ok tool `read_file`"));
+        assert!(out.contains("FAILED tool `write_file`"));
+    }
+
+    #[test]
+    fn preamble_caps_decisions_and_recent_independently() {
+        let mut entries = Vec::new();
+        for i in 0..30 {
+            entries.push(MemoryEntry::Decision {
+                summary: format!("d-{i}"),
+                rationale: String::new(),
+                timestamp_ms: 1_000 + i,
+            });
+        }
+        for i in 0..30 {
+            entries.push(MemoryEntry::ToolCall {
+                tool: format!("t-{i}"),
+                success: true,
+                duration_ms: 0,
+                timestamp_ms: 2_000 + i,
+            });
+        }
+        let out = format_memory_preamble(&entries, 3, 2).unwrap();
+        // Only the most-recent 3 decisions (d-29 / d-28 / d-27).
+        let decisions_line_count = out
+            .lines()
+            .filter(|l| l.starts_with("- d-"))
+            .count();
+        assert_eq!(decisions_line_count, 3);
+        // Only the most-recent 2 tool calls.
+        let tool_lines = out.lines().filter(|l| l.contains("tool `t-")).count();
+        assert_eq!(tool_lines, 2);
+        assert!(out.contains("d-29"));
+        assert!(out.contains("t-29"));
+    }
+
+    #[test]
+    fn preamble_sorts_newest_first_across_kinds() {
+        let entries = vec![
+            MemoryEntry::ToolCall {
+                tool: "old".to_string(),
+                success: true,
+                duration_ms: 0,
+                timestamp_ms: 1,
+            },
+            MemoryEntry::ToolCall {
+                tool: "new".to_string(),
+                success: true,
+                duration_ms: 0,
+                timestamp_ms: 100,
+            },
+        ];
+        let out = format_memory_preamble(&entries, 0, 1).unwrap();
+        assert!(out.contains("ok tool `new`"));
+        assert!(!out.contains("ok tool `old`"));
     }
 
     #[test]

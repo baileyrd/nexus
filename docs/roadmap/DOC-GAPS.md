@@ -1157,6 +1157,48 @@ without the planner having to ask.
   Errored outcome, and the JSONL serializer round-trip. All 127
   nexus-agent lib tests green.
 
+**Follow-up shipped 2026-05-14 — prompt-time recall.**
+
+The other half of the memory-layer loop. Auto-record fills the
+log per-session; this follow-up makes the planner read it on the
+*next* invocation so prior decisions show up without the user
+having to remind it.
+
+- New pure helper `crate::memory::format_memory_preamble(entries,
+  decision_cap, recent_cap)` renders a short markdown preamble.
+  Selection: every `Decision` entry (PRD-15 §5 retained
+  indefinitely; load-bearing signal) up to `decision_cap`,
+  newest-first; plus the most recent `recent_cap` non-decision
+  entries (`Error` / `CompactedTurns` / `ToolCall` / etc.). Decision
+  and recent pools are capped independently so a session full of
+  recent ToolCalls doesn't squeeze out the decision history.
+  Empty input or zero caps return `None` so the splice site can
+  skip without an explicit emptiness check.
+- New async `compose_memory_preamble(ctx, agent_id)` in
+  `core_plugin.rs`: reads `<forge>/.forge/agents/<slug>/history.jsonl`
+  via the kernel context, calls the pure formatter with
+  `DECISION_CAP = 8` / `RECENT_CAP = 6` (≈14 short lines max into
+  the system prompt — comfortably inside any provider's budget).
+- `system_prompt_with_skills` extended with an optional
+  `agent_id: Option<&str>`; when non-empty + non-builtin, it
+  splices the preamble between the baseline + skills sections.
+- `handle_plan` passes `a.archetype.as_deref()`; `handle_session_run`
+  appends the preamble onto its `system` string after archetype
+  resolution. Skipped when the caller passed an explicit `system`
+  override (their string wins verbatim).
+- 6 new unit tests: returns-None matrix (empty entries, zero
+  caps), Decisions heading + em-dash rendering for non-empty
+  rationale, Recent activity per-kind formatting (Error /
+  CompactedTurns / ok+FAILED ToolCall), independent decision /
+  recent caps, newest-first sort across kinds. All 133 nexus-agent
+  lib tests green.
+
+The auto-record + prompt-time recall pair closes the DG-33
+memory-layer loop end-to-end: every session writes its tool
+calls / errors / compactions to history.jsonl on completion, and
+every next session reads the most recall-worthy slice back into
+its system prompt at start.
+
 **Remaining deferred:**
 
 - Dated `MemorySnapshot` rollups. The PRD-15 §5 `MemorySnapshot`
