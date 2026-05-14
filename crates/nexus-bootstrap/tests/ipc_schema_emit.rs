@@ -63,6 +63,7 @@ use nexus_lsp::ipc::{
     LspServerEntry,
 };
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
+use nexus_agent::transcript_search::{SearchArgs as TranscriptSearchArgs, TranscriptHit};
 use nexus_agent::{Plan, Step, ToolCall};
 use nexus_comments::core_plugin::{
     AddReplyArgs, CreateThreadArgs, DeleteCommentArgs, DeleteThreadArgs, EditCommentArgs,
@@ -290,6 +291,9 @@ fn emit_all_schemas_impl() {
     write_schema::<Plan>("com_nexus_agent", "plan");
     write_schema::<Step>("com_nexus_agent", "step");
     write_schema::<ToolCall>("com_nexus_agent", "tool_call");
+    // BL-121 — transcript-search wire types.
+    write_schema::<TranscriptSearchArgs>("com_nexus_agent__search_transcripts", "args");
+    write_schema::<TranscriptHit>("com_nexus_agent__search_transcripts", "hit");
 
     // ── com.nexus.comments (P1-3 #113) ───────────────────────────────────
     write_schema::<FilePathArg>("com_nexus_comments__list", "args");

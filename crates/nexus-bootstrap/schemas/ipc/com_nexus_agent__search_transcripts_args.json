@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SearchArgs",
+  "description": "Arguments for [`TranscriptStore::search`] / the wire-level\n`com.nexus.agent::search_transcripts` handler.",
+  "type": "object",
+  "properties": {
+    "agent_id": {
+      "description": "Restrict to one agent id.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "description": "Maximum hits to return. Clamped to `[1, 200]` server-side.\nDefaults to 50.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "query": {
+      "description": "FTS5 MATCH query. Plain words AND-combine; quote phrases;\ntrailing `*` enables prefix matching.",
+      "type": "string"
+    },
+    "since_ts_ms": {
+      "description": "Unix epoch ms floor — only entries at or after this time.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "query"
+  ]
+}

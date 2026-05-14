@@ -81,6 +81,9 @@ pub use session::{
     DEFAULT_MAX_TOOL_CALLS_PER_ITERATION, LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
 };
 
+/// BL-121 — FTS5-backed search over agent `history.jsonl` logs.
+pub mod transcript_search;
+
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that
 /// need branching or loops return a flat list today and re-plan if

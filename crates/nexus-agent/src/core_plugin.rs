@@ -172,6 +172,13 @@ pub const HANDLER_MEMORY_EXPORT: u32 = 23;
 /// the session-shaped reply is the new currency.
 pub const HANDLER_DELEGATE: u32 = 24;
 
+/// BL-121 — `search_transcripts`. Args:
+/// [`crate::transcript_search::SearchArgs`] (`{ query, agent_id?,
+/// since_ts_ms?, limit? }`). Reply: `{ hits: Vec<TranscriptHit> }`.
+/// Backed by the FTS5 virtual table populated from
+/// `.forge/agents/*/history.jsonl`.
+pub const HANDLER_SEARCH_TRANSCRIPTS: u32 = 25;
+
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -206,12 +213,23 @@ const MAX_APPROVAL_TIMEOUT_SECS: u64 = 3600;
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
     pending_approvals: Arc<PendingApprovals>,
+    /// BL-121 — absolute forge root used to open the FTS index at
+    /// `<forge>/.forge/agent/transcripts.sqlite`. `None` for the
+    /// legacy default constructor (which keeps every existing
+    /// caller compiling); bootstrap calls [`Self::new_with_forge`]
+    /// so the index actually lands.
+    forge_root: Option<std::path::PathBuf>,
 }
 
 impl AgentCorePlugin {
     /// Construct an unwired plugin. Bootstrap must call
     /// [`CorePlugin::wire_context`] before the first dispatch; any
     /// handler that fires before then returns a clear error.
+    ///
+    /// BL-121 prefers [`Self::new_with_forge`] so the FTS index has
+    /// a path to open against; this constructor stays for backwards
+    /// compatibility with the existing test surface that doesn't
+    /// know about transcript search.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -219,9 +237,23 @@ impl AgentCorePlugin {
             pending_approvals: Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            forge_root: None,
         }
     }
 
+    /// Like [`Self::new`] but captures the forge root so BL-121's
+    /// transcript-search store opens against the right `.sqlite`
+    /// file at `on_init`.
+    #[must_use]
+    pub fn new_with_forge(forge_root: std::path::PathBuf) -> Self {
+        Self {
+            context: None,
+            pending_approvals: Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            forge_root: Some(forge_root),
+        }
+    }
 }
 
 impl Default for AgentCorePlugin {
@@ -231,6 +263,28 @@ impl Default for AgentCorePlugin {
 }
 
 impl CorePlugin for AgentCorePlugin {
+    fn on_init(&mut self) -> Result<(), PluginError> {
+        // BL-121 — open the FTS5 transcript index and rebuild from
+        // disk if empty. Failures here are non-fatal: a forge with
+        // a corrupted .sqlite or a read-only filesystem still boots
+        // (the rest of the agent surface works without
+        // `search_transcripts`).
+        if let Some(forge_root) = &self.forge_root {
+            match crate::transcript_search::initialize(forge_root) {
+                Ok(_) => tracing::debug!(
+                    plugin_id = PLUGIN_ID,
+                    "BL-121 transcript search index ready",
+                ),
+                Err(err) => tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    %err,
+                    "BL-121: transcript search index unavailable; search_transcripts will return an empty result"
+                ),
+            }
+        }
+        Ok(())
+    }
+
     fn dispatch(
         &mut self,
         handler_id: u32,
@@ -293,6 +347,7 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_MEMORY_PRUNE => handle_memory_prune(ctx, &args).await,
                 HANDLER_MEMORY_EXPORT => handle_memory_export(ctx, &args).await,
                 HANDLER_DELEGATE => handle_delegate(ctx, pending_approvals, &args).await,
+                HANDLER_SEARCH_TRANSCRIPTS => handle_search_transcripts(&args),
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -1676,6 +1731,34 @@ impl ToolDispatcher for KernelToolBridge {
             .await
             .map_err(|e| e.to_string())
     }
+}
+
+// ── BL-121 — search_transcripts ─────────────────────────────────────────────
+
+/// Synchronous handler — the FTS5 index is in-process so no kernel
+/// IPC is needed. Returns an empty hit set with a clear error
+/// message when the global store hasn't been initialised yet
+/// (forge without `transcript_search::initialize` having run, or a
+/// rebuild failure at boot).
+fn handle_search_transcripts(
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::transcript_search::SearchArgs =
+        parse(args, "search_transcripts")?;
+    let Some(store) = crate::transcript_search::global() else {
+        return Ok(serde_json::json!({
+            "hits": [],
+            "available": false,
+            "reason": "transcript-search index not initialised; boot the agent plugin against a forge",
+        }));
+    };
+    let hits = store
+        .search(&parsed)
+        .map_err(|e| exec_err(format!("search_transcripts: {e}")))?;
+    Ok(serde_json::json!({
+        "hits": hits,
+        "available": true,
+    }))
 }
 
 // ── Error / serde plumbing ──────────────────────────────────────────────────

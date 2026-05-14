@@ -1357,7 +1357,13 @@ fn register_core_plugins(
             core_manifest_with_ipc(
                 "com.nexus.agent",
                 "Agent",
-                LifecycleFlags::NONE,
+                // BL-121 — on_init opens the transcript-search FTS
+                // index. on_start / on_stop stay as no-ops.
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: false,
+                    on_stop: false,
+                },
                 &with_v1_aliases(&[
                     ("plan", nexus_agent::HANDLER_PLAN),
                     ("history_list", nexus_agent::HANDLER_HISTORY_LIST),
@@ -1382,10 +1388,16 @@ fn register_core_plugins(
                     ("memory_export", nexus_agent::HANDLER_MEMORY_EXPORT),
                     // DG-37 (PRD-15 §10) — agent-to-agent delegation.
                     ("delegate", nexus_agent::HANDLER_DELEGATE),
+                    // BL-121 — FTS5-backed transcript search over
+                    // `.forge/agents/*/history.jsonl`.
+                    (
+                        "search_transcripts",
+                        nexus_agent::core_plugin::HANDLER_SEARCH_TRANSCRIPTS,
+                    ),
                 ]),
             ),
             forge_root,
-            Box::new(AgentCorePlugin::new()),
+            Box::new(AgentCorePlugin::new_with_forge(forge_root.to_path_buf())),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.agent")?;
 

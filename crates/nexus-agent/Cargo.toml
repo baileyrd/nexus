@@ -19,6 +19,11 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+# BL-121 — FTS5-backed transcript search over `.forge/agents/*/history.jsonl`.
+# Lives in `transcript_search.rs`; default no-feature build pulls in the
+# rusqlite bundled SQLite, same shape every other in-tree SQLite consumer
+# uses.
+rusqlite = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
 schemars = { workspace = true, optional = true }
 
@@ -29,3 +34,4 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tokio = { workspace = true }
+tempfile = { workspace = true }

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TranscriptHit",
+  "description": "One match row returned by [`TranscriptStore::search`].",
+  "type": "object",
+  "properties": {
+    "agent_id": {
+      "description": "Agent id the entry came from. Matches\n`<forge>/.forge/agents/<agent_id>/`.",
+      "type": "string"
+    },
+    "content": {
+      "description": "Full searched text — useful when the snippet truncates the\nmatch's surrounding context too aggressively for the caller.",
+      "type": "string"
+    },
+    "entry_idx": {
+      "description": "0-based index of the entry inside the agent's `history.jsonl`.\nStable across rebuilds because the JSONL is append-only.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "role": {
+      "description": "Synthesised role label (`\"user\"` / `\"assistant\"` / `\"tool\"`\n/ `\"error\"` / `\"artifact\"`).",
+      "type": "string"
+    },
+    "score": {
+      "description": "BM25 relevance score; lower is more relevant (SQLite FTS5\nconvention). Negate for descending sort.",
+      "type": "number",
+      "format": "float"
+    },
+    "snippet": {
+      "description": "FTS5-generated snippet with `**…**` markers around hit\ntokens; safe to render verbatim in a chat-style UI.",
+      "type": "string"
+    },
+    "ts_ms": {
+      "description": "Unix epoch milliseconds the entry carried.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "agent_id",
+    "entry_idx",
+    "role",
+    "snippet",
+    "content",
+    "ts_ms",
+    "score"
+  ]
+}

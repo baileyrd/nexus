@@ -245,6 +245,11 @@ pub fn append_entry_to_path(path: &Path, entry: &MemoryEntry) -> Result<(), Memo
         source,
     })?;
     json.push(b'\n');
+    // BL-121 — capture the soon-to-be entry index by counting the
+    // file's existing newline-terminated lines before we append.
+    // Falls back to 0 if the file doesn't exist yet, which is the
+    // correct index for the first entry.
+    let entry_idx_before = count_lines_in_file(path);
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -257,7 +262,52 @@ pub fn append_entry_to_path(path: &Path, entry: &MemoryEntry) -> Result<(), Memo
         path: path.to_path_buf(),
         source,
     })?;
+
+    // BL-121 — best-effort live index. The transcript store is set
+    // by `nexus_agent::transcript_search::initialize`; tests that
+    // don't initialise it (and CLI flows that touch JSONL directly
+    // without booting the agent plugin) skip the indexing silently.
+    if let Some(store) = crate::transcript_search::global() {
+        if let Some(agent_id) = derive_agent_id_from_history_path(path) {
+            if let Err(err) = store.append_entry(
+                &agent_id,
+                i64::try_from(entry_idx_before).unwrap_or(i64::MAX),
+                entry,
+            ) {
+                tracing::warn!(
+                    %err,
+                    path = %path.display(),
+                    "BL-121: live transcript index append failed; index will rebuild from disk next boot"
+                );
+            }
+        }
+    }
     Ok(())
+}
+
+/// Count newline-terminated lines in a file. Returns 0 if the file
+/// doesn't exist. BL-121 uses this to compute the entry_idx of the
+/// next append for the live FTS index.
+fn count_lines_in_file(path: &Path) -> usize {
+    use std::io::BufRead;
+    let Ok(file) = std::fs::File::open(path) else {
+        return 0;
+    };
+    std::io::BufReader::new(file).lines().count()
+}
+
+/// Pull `<agent_id>` out of a `.../.forge/agents/<agent_id>/history.jsonl`
+/// path. Returns `None` for paths that don't match the canonical
+/// shape so an off-tree caller (e.g. a future BL stashing a custom
+/// log under a different prefix) doesn't accidentally pollute the
+/// index with a meaningless segment.
+fn derive_agent_id_from_history_path(path: &Path) -> Option<String> {
+    if path.file_name()?.to_string_lossy() != HISTORY_FILE {
+        return None;
+    }
+    let dir = path.parent()?;
+    let agent_id = dir.file_name()?.to_string_lossy().into_owned();
+    normalize_agent_id(&agent_id).ok().map(str::to_string)
 }
 
 /// Read every entry from a `history.jsonl` file, in insertion order.
