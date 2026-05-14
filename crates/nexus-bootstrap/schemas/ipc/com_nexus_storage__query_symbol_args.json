@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageQuerySymbolArgs",
+  "description": "Args for `com.nexus.storage::query_symbol` (handler 63). Mirrors\n[`crate::code_index::SymbolFilter`]. `name` and `path` AND-combine\nwhen both present; an empty payload returns every indexed symbol\nup to the default limit.",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Maximum rows to return. Defaults to 200 when absent.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "name": {
+      "description": "Exact identifier match. Case-sensitive.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "description": "Exact forge-relative path match. Scopes results to one file.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

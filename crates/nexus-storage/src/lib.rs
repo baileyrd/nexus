@@ -33,6 +33,10 @@ pub mod lfs;
 /// BL-083: forge-to-forge import / migration planning + apply.
 pub mod import;
 pub mod vectorstore;
+/// BL-114: tree-sitter code-symbol index. Populated from the storage
+/// engine's `write_file` / `rebuild_index` paths and the
+/// `com.nexus.git.commit` subscription in [`core_plugin`].
+pub mod code_index;
 
 pub mod ipc;
 
@@ -210,6 +214,9 @@ impl StorageEngine {
                 rusqlite::params![path],
             )?;
             canvas::delete_canvas(&conn, existing.id.cast_signed())?;
+            // BL-114: drop any prior code symbols for this path so a
+            // code→non-code rename doesn't leave stale rows.
+            let _ = code_index::delete_file_symbols(&conn, path);
             delete_file(&conn, existing.id)?;
         }
 
@@ -268,6 +275,22 @@ impl StorageEngine {
 
             if !jsx_components.is_empty() {
                 insert_jsx_components(&conn, file_id, &jsx_components)?;
+            }
+
+            // BL-114: refresh the tree-sitter code-symbol index for
+            // code-language files. detect_language returns None for
+            // markdown / non-code files, so the call is a no-op there.
+            // Errors are logged and swallowed — a broken parser must
+            // not block a normal save.
+            if let Some(lang) = code_index::detect_language(path) {
+                let symbols = code_index::extract_symbols(lang, text);
+                if let Err(e) = code_index::upsert_file_symbols(&conn, path, lang, &symbols) {
+                    tracing::warn!(
+                        path,
+                        error = %e,
+                        "BL-114: code_symbols upsert failed; index entry skipped",
+                    );
+                }
             }
 
             // Update knowledge graph.
@@ -923,6 +946,10 @@ impl StorageEngine {
             )?;
             delete_file(&conn, record.id)?;
         }
+        // BL-114: code symbols are path-keyed; drop them outside the
+        // FTS/files cascade so a delete of a non-markdown file still
+        // cleans up its symbols.
+        let _ = code_index::delete_file_symbols(&conn, path);
 
         // Remove from graph.
         {
@@ -1191,6 +1218,21 @@ impl StorageEngine {
         query_files(&conn, filter)
     }
 
+    /// BL-114: query the code-symbol index. See
+    /// [`code_index::SymbolFilter`].
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Database`] on any SQLite failure.
+    pub fn query_symbols(
+        &self,
+        filter: &code_index::SymbolFilter,
+    ) -> Result<Vec<code_index::SymbolRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        code_index::query_symbols(&conn, filter)
+    }
+
     /// Return all blocks belonging to the file identified by `file_id`.
     ///
     /// # Errors
@@ -1299,8 +1341,11 @@ impl StorageEngine {
         let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
 
         // Clear all tables (FTS first, then files which cascades the rest).
+        // BL-114: code_symbols is path-keyed, not foreign-keyed to files,
+        // so it needs its own DELETE before the rebuild walk.
         conn.execute_batch(
             "DELETE FROM fts_blocks;
+             DELETE FROM code_symbols;
              DELETE FROM files;",
         )?;
 
@@ -2108,6 +2153,128 @@ mod tests {
 
         let tags = engine.query_tags("rust").expect("query_tags");
         assert_eq!(tags.len(), 1, "expected 1 tag result for 'rust', got {}", tags.len());
+    }
+
+    // ── BL-114: code-symbol index — write_file path ───────────────────────────
+
+    #[test]
+    fn write_file_indexes_code_symbols() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        engine
+            .write_file("notes/lib.rs", b"pub fn hello() {}\npub struct Counter;\n")
+            .expect("write");
+        let rows = engine
+            .query_symbols(&code_index::SymbolFilter {
+                path: Some("notes/lib.rs".into()),
+                ..Default::default()
+            })
+            .expect("query");
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"hello"));
+        assert!(names.contains(&"Counter"));
+    }
+
+    #[test]
+    fn write_file_skips_non_code_files() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        engine
+            .write_file("notes/note.md", b"# Title\n\nBody paragraph.")
+            .expect("write");
+        let rows = engine
+            .query_symbols(&code_index::SymbolFilter::default())
+            .expect("query");
+        assert!(rows.is_empty(), "markdown should not produce code symbols");
+    }
+
+    #[test]
+    fn write_file_replaces_prior_symbols() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        engine
+            .write_file("notes/a.rs", b"pub fn old() {}\n")
+            .expect("write v1");
+        engine
+            .write_file("notes/a.rs", b"pub fn fresh() {}\n")
+            .expect("write v2");
+        let rows = engine
+            .query_symbols(&code_index::SymbolFilter::default())
+            .expect("query");
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert!(!names.contains(&"old"), "stale row from v1 must be gone");
+        assert!(names.contains(&"fresh"));
+    }
+
+    #[test]
+    fn delete_file_drops_code_symbols() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        engine
+            .write_file("notes/gone.rs", b"pub fn x() {}\n")
+            .expect("write");
+        engine.delete_file("notes/gone.rs").expect("delete");
+        let rows = engine
+            .query_symbols(&code_index::SymbolFilter::default())
+            .expect("query");
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn rebuild_index_indexes_code_symbols_from_disk() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        std::fs::write(
+            dir.path().join("notes/script.py"),
+            "def greet(name):\n    return name\n",
+        )
+        .expect("write py");
+        std::fs::write(
+            dir.path().join("notes/main.go"),
+            "package main\nfunc Greet() string { return \"hi\" }\n",
+        )
+        .expect("write go");
+        engine.rebuild_index().expect("rebuild");
+        let py_rows = engine
+            .query_symbols(&code_index::SymbolFilter {
+                name: Some("greet".into()),
+                ..Default::default()
+            })
+            .expect("query");
+        assert_eq!(py_rows.len(), 1);
+        assert_eq!(py_rows[0].language, "python");
+        let go_rows = engine
+            .query_symbols(&code_index::SymbolFilter {
+                name: Some("Greet".into()),
+                ..Default::default()
+            })
+            .expect("query");
+        assert_eq!(go_rows.len(), 1);
+        assert_eq!(go_rows[0].language, "go");
+    }
+
+    #[test]
+    fn reconcile_rename_repaths_code_symbols() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        engine
+            .write_file("notes/old.rs", b"pub fn rename_me() {}\n")
+            .expect("write");
+        // Rename on disk + reconcile.
+        std::fs::rename(
+            dir.path().join("notes/old.rs"),
+            dir.path().join("notes/new.rs"),
+        )
+        .expect("rename");
+        engine.reconcile_index().expect("reconcile");
+        let rows = engine
+            .query_symbols(&code_index::SymbolFilter {
+                name: Some("rename_me".into()),
+                ..Default::default()
+            })
+            .expect("query");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "notes/new.rs");
     }
 
     // ── 7. rebuild_index_reindexes_all ────────────────────────────────────────

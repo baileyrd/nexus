@@ -15,11 +15,21 @@ use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use nexus_kernel::EventBus;
+use nexus_kernel::{EventBus, EventFilter};
 use nexus_plugins::{CorePlugin, PluginError};
 
 use crate::{FileFilter, StorageConfig, StorageEngine, TaskFilter};
 use crate::watcher::{StorageEvent, Watcher};
+
+/// Topic the git plugin emits on every HEAD change; the storage
+/// plugin subscribes here so that an external pull / rebase / checkout
+/// triggers an incremental reconcile and the code-symbol index stays
+/// fresh without the user needing to manually rebuild. See
+/// `crates/nexus-git/src/core_plugin.rs` for the producer side.
+const GIT_COMMIT_TOPIC: &str = "com.nexus.git.commit";
+
+/// Tick interval for the BL-114 git-commit subscriber thread.
+const GIT_COMMIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.storage";
@@ -298,6 +308,13 @@ pub const HANDLER_SETTINGS_READ: u32 = 61;
 /// Returns `{}`.
 pub const HANDLER_SETTINGS_WRITE: u32 = 62;
 
+/// BL-114 — `query_symbol`. Args: [`crate::code_index::SymbolFilter`]
+/// (`{ name?: string, path?: string, limit?: u32 }`). Returns
+/// `{ symbols: Vec<SymbolRecord> }`. Read-only — never touches the
+/// write connection. Powers BL-115's `nexus_context` / `nexus_impact`
+/// MCP tools and the BL-116 doc generator.
+pub const HANDLER_QUERY_SYMBOL: u32 = 63;
+
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
 ///
@@ -326,6 +343,11 @@ pub struct StorageCorePlugin {
     engine: Option<Arc<StorageEngine>>,
     stop_tx: Option<mpsc::SyncSender<()>>,
     bridge_thread: Option<std::thread::JoinHandle<()>>,
+    /// BL-114: thread that watches `com.nexus.git.commit` and runs
+    /// an incremental reconcile when an external commit lands. The
+    /// thread signals stop through `commit_stop_tx`.
+    commit_stop_tx: Option<mpsc::SyncSender<()>>,
+    commit_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl StorageCorePlugin {
@@ -343,6 +365,8 @@ impl StorageCorePlugin {
             engine: None,
             stop_tx: None,
             bridge_thread: None,
+            commit_stop_tx: None,
+            commit_thread: None,
         }
     }
 
@@ -409,6 +433,29 @@ impl CorePlugin for StorageCorePlugin {
             })?;
 
         self.bridge_thread = Some(handle);
+
+        // BL-114: subscribe to git.commit. Subscribe on the *parent*
+        // thread before spawning so an event emitted between spawn
+        // and subscribe isn't lost — same pattern as the BL-007
+        // pull-landing subscriber in `nexus-bootstrap::crdt_publisher`.
+        let commit_sub = self
+            .event_bus
+            .subscribe(EventFilter::CustomExact(GIT_COMMIT_TOPIC.to_string()));
+        let engine_for_commit = self
+            .engine
+            .as_ref()
+            .map(Arc::clone);
+        let (commit_stop_tx, commit_stop_rx) = mpsc::sync_channel::<()>(1);
+        self.commit_stop_tx = Some(commit_stop_tx);
+        let commit_handle = std::thread::Builder::new()
+            .name("nexus-storage-git-commit".to_string())
+            .spawn(move || git_commit_loop(engine_for_commit, commit_sub, commit_stop_rx))
+            .map_err(|e| PluginError::LifecycleError {
+                plugin_id: PLUGIN_ID.to_string(),
+                hook: "on_start".to_string(),
+                reason: format!("failed to spawn git-commit thread: {e}"),
+            })?;
+        self.commit_thread = Some(commit_handle);
         Ok(())
     }
 
@@ -418,6 +465,12 @@ impl CorePlugin for StorageCorePlugin {
             let _ = tx.try_send(());
         }
         if let Some(handle) = self.bridge_thread.take() {
+            let _ = handle.join();
+        }
+        if let Some(tx) = self.commit_stop_tx.take() {
+            let _ = tx.try_send(());
+        }
+        if let Some(handle) = self.commit_thread.take() {
             let _ = handle.join();
         }
     }
@@ -535,6 +588,13 @@ impl CorePlugin for StorageCorePlugin {
                     .search(query, limit)
                     .map_err(|e| exec_err(format!("search: {e}")))?;
                 to_value(&results, "search")
+            }
+            HANDLER_QUERY_SYMBOL => {
+                let filter: crate::code_index::SymbolFilter = parse_args(args, "query_symbol")?;
+                let symbols = engine
+                    .query_symbols(&filter)
+                    .map_err(|e| exec_err(format!("query_symbol: {e}")))?;
+                Ok(serde_json::json!({ "symbols": symbols }))
             }
             HANDLER_WRITE_FILE => {
                 let path = path_arg(args, "write_file")?;
@@ -1432,6 +1492,54 @@ fn dispatch_settings_write(
 /// The bridge only handles event translation and publication.  Index updates
 /// (`write_file`, `delete_file`, etc.) remain the caller's responsibility.
 #[allow(clippy::needless_pass_by_value)]
+/// BL-114: drain `com.nexus.git.commit` events and run an incremental
+/// reconcile so the FTS / knowledge graph / code-symbol indices catch
+/// up after an external commit (pull, rebase, checkout). Many commits
+/// inside a single tick collapse to one reconcile — the index is
+/// idempotent under repeated passes. Falls out when `stop_rx` fires.
+fn git_commit_loop(
+    engine: Option<Arc<StorageEngine>>,
+    mut sub: nexus_kernel::EventSubscription,
+    stop_rx: mpsc::Receiver<()>,
+) {
+    loop {
+        match stop_rx.try_recv() {
+            Ok(()) | Err(mpsc::TryRecvError::Disconnected) => break,
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+
+        // Coalesce every pending commit into one reconcile per tick.
+        let mut had_event = false;
+        loop {
+            match sub.try_recv() {
+                Ok(Some(_)) => had_event = true,
+                Ok(None) => break,
+                Err(err) => {
+                    tracing::debug!(%err, "BL-114 git-commit subscriber recv error");
+                    break;
+                }
+            }
+        }
+
+        if had_event {
+            if let Some(engine) = engine.as_ref() {
+                match engine.reconcile_index() {
+                    Ok(delta) => tracing::debug!(
+                        ?delta,
+                        "BL-114: reconcile after git.commit",
+                    ),
+                    Err(err) => tracing::warn!(
+                        %err,
+                        "BL-114: reconcile after git.commit failed",
+                    ),
+                }
+            }
+        } else {
+            std::thread::sleep(GIT_COMMIT_POLL_INTERVAL);
+        }
+    }
+}
+
 fn bridge_loop(
     watcher: Watcher,
     bus: Arc<EventBus>,

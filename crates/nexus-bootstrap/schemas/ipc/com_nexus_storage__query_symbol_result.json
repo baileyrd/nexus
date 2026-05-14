@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageQuerySymbolResult",
+  "description": "Return type for `com.nexus.storage::query_symbol`.",
+  "type": "object",
+  "properties": {
+    "symbols": {
+      "description": "Matching rows ordered by `(path, line_start)` ascending.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StorageSymbolRow"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "symbols"
+  ],
+  "$defs": {
+    "StorageSymbolRow": {
+      "description": "One symbol row in [`StorageQuerySymbolResult`]. Mirror of\n[`crate::code_index::SymbolRecord`] — kept in sync manually.",
+      "type": "object",
+      "properties": {
+        "doc_comment": {
+          "description": "Leading doc comment, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Row id in the `code_symbols` table.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "kind": {
+          "description": "Symbol kind (`\"function\"` / `\"struct\"` / `\"class\"` / `\"impl\"` / …).",
+          "type": "string"
+        },
+        "language": {
+          "description": "Language label (`\"rust\"` / `\"typescript\"` / `\"python\"` / `\"go\"` / …).",
+          "type": "string"
+        },
+        "line_end": {
+          "description": "1-based ending line.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "line_start": {
+          "description": "1-based starting line.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "description": "Identifier as it appears in source.",
+          "type": "string"
+        },
+        "parent_id": {
+          "description": "Row id of the enclosing symbol, or `null` for top-level.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "path": {
+          "description": "Forge-relative path of the source file.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "language",
+        "kind",
+        "name",
+        "line_start",
+        "line_end"
+      ]
+    }
+  }
+}

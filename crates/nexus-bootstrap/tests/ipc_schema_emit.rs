@@ -31,9 +31,10 @@ use nexus_ai::{Citation, RagResponse};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
     ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
-    StorageNoteAppendArgs, StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult,
+    StorageNoteAppendArgs, StorageNoteAppendResult, StorageQuerySymbolArgs,
+    StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
     StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
-    StorageWriteFileArgs, StorageWriteFileResult,
+    StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
 };
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
 // brought into the schema generator outside the original storage / ai
@@ -177,6 +178,11 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.storage::read_frontmatter (BL-053 Phase 4) ─────────────
     write_schema::<StorageReadFrontmatterArgs>("com_nexus_storage__read_frontmatter", "args");
     write_schema::<ReadFrontmatterResult>("com_nexus_storage__read_frontmatter", "result");
+
+    // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
+    write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");
+    write_schema::<StorageSymbolRow>("com_nexus_storage__query_symbol", "row");
+    write_schema::<StorageQuerySymbolResult>("com_nexus_storage__query_symbol", "result");
 
     // ── com.nexus.ai::stream_ask ─────────────────────────────────────────
     write_schema::<AiStreamAskArgs>("com_nexus_ai__stream_ask", "args");

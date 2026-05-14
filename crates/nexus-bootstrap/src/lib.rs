@@ -654,6 +654,10 @@ fn register_core_plugins(
                         "settings_write",
                         nexus_storage::core_plugin::HANDLER_SETTINGS_WRITE,
                     ),
+                    (
+                        "query_symbol",
+                        nexus_storage::core_plugin::HANDLER_QUERY_SYMBOL,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),
