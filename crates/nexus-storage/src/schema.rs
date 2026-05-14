@@ -11,7 +11,7 @@ use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
-pub const CURRENT_VERSION: u32 = 7;
+pub const CURRENT_VERSION: u32 = 8;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -122,6 +122,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_007(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (7, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 8 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_008(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (8, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -353,6 +363,34 @@ fn apply_migration_007(conn: &Connection) -> Result<(), StorageError> {
             FOREIGN KEY(base_id) REFERENCES bases(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_bsv_base ON bases_schema_versions(base_id);",
+    )?;
+    Ok(())
+}
+
+fn apply_migration_008(conn: &Connection) -> Result<(), StorageError> {
+    // BL-114 — code-symbol index. One row per declared symbol; parent_id
+    // chains a Method back to its enclosing Class / Impl so callers can
+    // resolve `Type::method` without re-parsing. `path` is forge-relative;
+    // the row is keyed by id so a path-rename only needs to flip `path`
+    // rather than rewrite parent pointers. ON DELETE CASCADE on parent_id
+    // keeps an enclosing-symbol removal from leaving orphan children.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS code_symbols (
+            id           INTEGER PRIMARY KEY,
+            path         TEXT NOT NULL,
+            language     TEXT NOT NULL,
+            kind         TEXT NOT NULL,
+            name         TEXT NOT NULL,
+            line_start   INTEGER NOT NULL,
+            line_end     INTEGER NOT NULL,
+            parent_id    INTEGER REFERENCES code_symbols(id) ON DELETE CASCADE,
+            doc_comment  TEXT,
+            indexed_at   INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_code_symbols_name      ON code_symbols(name);
+        CREATE INDEX IF NOT EXISTS idx_code_symbols_path      ON code_symbols(path);
+        CREATE INDEX IF NOT EXISTS idx_code_symbols_path_name ON code_symbols(path, name);
+        CREATE INDEX IF NOT EXISTS idx_code_symbols_parent    ON code_symbols(parent_id);",
     )?;
     Ok(())
 }

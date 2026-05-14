@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioStatusResult",
+  "description": "Reply from `com.nexus.audio::status` (handler id `3`). Read-only\nreflection of the active backend pair — surfaces the bare names so\na future settings UI can render \"STT: provider · TTS: platform\"\nwithout knowing the backend taxonomy.",
+  "type": "object",
+  "properties": {
+    "stt_backend": {
+      "description": "Backend handling `transcribe`.",
+      "type": "string"
+    },
+    "tts_backend": {
+      "description": "Backend handling `synthesize`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "stt_backend",
+    "tts_backend"
+  ]
+}

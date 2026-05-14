@@ -37,4 +37,16 @@ response?: unknown | null,
  * reason fed back to the model). Empty when the call ran
  * successfully.
  */
-error?: string, };
+error?: string, 
+/**
+ * DG-33 follow-up — wall-clock duration the dispatcher took to
+ * run this tool call, measured by [`dispatch_one`] across the
+ * async `dispatcher.dispatch(...)` await. `0` for denied calls
+ * (which never invoke the dispatcher) and for sessions
+ * deserialised from a pre-DG-33-duration transcript on disk
+ * (the `#[serde(default)]` rides over the missing field).
+ * Surfaces in `MemoryEntry::ToolCall.duration_ms` through
+ * `crate::memory::events_from_session` so the prompt-time
+ * recall preamble can show "tool X took 12ms last time".
+ */
+duration_ms?: bigint, };

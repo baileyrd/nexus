@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioTranscribeArgs",
+  "description": "Args for `com.nexus.audio::transcribe` (handler id `1`).",
+  "type": "object",
+  "properties": {
+    "audio_b64": {
+      "description": "Base64-encoded raw audio. The backend decodes this once at\nthe IPC boundary.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Container format label (`\"wav\"` / `\"webm\"` / `\"opus\"` /\n`\"mp3\"`). Empty / absent defaults to `\"webm\"` to match the\nshell's default capture from `MediaRecorder`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "language": {
+      "description": "Optional BCP-47 language hint (e.g. `\"en\"`). When `None` the\nbackend auto-detects.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "audio_b64"
+  ]
+}

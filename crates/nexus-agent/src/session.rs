@@ -26,11 +26,132 @@ use ts_rs::TS;
 
 use crate::{ChatDriver, ProposedToolCall, ToolCall, ToolDispatcher};
 
-/// Hard cap on round count, mirroring the AI plugin's
-/// `MAX_TOOL_ROUNDS`. A session that hits the cap exits with
-/// [`SessionOutcome::MaxRounds`] — the caller may resume with a
-/// follow-up `run_session` if the goal isn't done.
-pub const MAX_AGENT_ROUNDS: u32 = 8;
+/// Legacy hard cap on round count (the BL-119-pre default). Kept
+/// `pub` so external tests that pin against the ADR 0024 Phase 2a
+/// shipping value still compile. New callers should read
+/// [`SessionConfig::max_iterations`] instead — which defaults to
+/// [`DEFAULT_MAX_ITERATIONS`].
+pub const MAX_AGENT_ROUNDS: u32 = LEGACY_MAX_AGENT_ROUNDS;
+
+/// The original Phase 2a shipping cap (8 rounds). Exposed so the
+/// existing regression test can pin the legacy behaviour through
+/// an explicit `SessionConfig` override (per BL-119 DoD).
+pub const LEGACY_MAX_AGENT_ROUNDS: u32 = 8;
+
+/// BL-119 — new default for [`SessionConfig::max_iterations`].
+/// Raised from the Phase 2a value of 8 to 32 per the Hermes Feature 1
+/// recommendation ("8 iterations is the floor for non-trivial
+/// multi-step tasks"). Callers can lower it explicitly through
+/// `SessionConfig`; raising it further is a config-level decision
+/// rather than a kernel-side default change.
+pub const DEFAULT_MAX_ITERATIONS: u32 = 32;
+
+/// BL-119 — default cap on tool calls per iteration. The agent
+/// dispatcher already accepts whatever the model emits; this cap
+/// guards against a runaway round that emits 100 tool_use blocks
+/// at once. Excess calls are dropped (with a tracing warning) at
+/// the start of [`execute_round`] so the dispatcher's downstream
+/// work and the per-call result fan-out stay bounded.
+pub const DEFAULT_MAX_TOOL_CALLS_PER_ITERATION: u32 = 16;
+
+/// BL-119 — provider-routing + budget knobs for a single agent
+/// session.
+///
+/// Constructed via [`SessionConfig::default`] (recommended) or
+/// [`SessionConfig::legacy_phase2a`] when a caller needs to pin the
+/// pre-BL-119 cap. The struct is the wire shape too — `session_run`
+/// accepts it directly as `session_config`.
+///
+/// All fields default to "use the documented default"; an
+/// explicitly-zero `max_iterations` is treated as a configuration
+/// error and clamped to `1` so a misconfigured caller can't deadlock
+/// the dispatch loop.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct SessionConfig {
+    /// Hard cap on the number of model-driven rounds. Defaults to
+    /// [`DEFAULT_MAX_ITERATIONS`] (32). A session that hits the cap
+    /// exits with [`SessionOutcome::MaxRounds`].
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+
+    /// Cap on tool calls per round. The dispatcher drops excess
+    /// calls (with a tracing warning) so a runaway round can't fan
+    /// out into hundreds of nested operations. Defaults to
+    /// [`DEFAULT_MAX_TOOL_CALLS_PER_ITERATION`] (16).
+    #[serde(default = "default_max_tool_calls_per_iteration")]
+    pub max_tool_calls_per_iteration: u32,
+
+    /// Context-budget guardrail consumed by BL-120's compression
+    /// pass. `0` means "unbounded" — the v1 dispatch loop honours
+    /// this field by passing it through but does not compress
+    /// turns; BL-120 wires the compressor to read this value.
+    #[serde(default)]
+    pub max_context_tokens: u32,
+
+    /// Provider-routing hint. v1 accepts the field for forward-
+    /// compat with BL-119's "provider-routing hints" DoD bullet but
+    /// the dispatch loop does not yet consult it — the AI plugin's
+    /// configured provider is still authoritative. A future BL
+    /// (Hermes Features 2–3) will let an agent pick a different
+    /// provider per session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_hint: Option<String>,
+}
+
+fn default_max_iterations() -> u32 {
+    DEFAULT_MAX_ITERATIONS
+}
+
+fn default_max_tool_calls_per_iteration() -> u32 {
+    DEFAULT_MAX_TOOL_CALLS_PER_ITERATION
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: DEFAULT_MAX_ITERATIONS,
+            max_tool_calls_per_iteration: DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
+            max_context_tokens: 0,
+            provider_hint: None,
+        }
+    }
+}
+
+impl SessionConfig {
+    /// Pre-BL-119 default — `max_iterations = 8`. Existing tests
+    /// pin this to keep behaviour identical to the Phase 2a
+    /// shipping value while the new default rolls out elsewhere.
+    #[must_use]
+    pub fn legacy_phase2a() -> Self {
+        Self {
+            max_iterations: LEGACY_MAX_AGENT_ROUNDS,
+            ..Self::default()
+        }
+    }
+
+    /// Clamp obviously-bogus values into a runnable shape. `0`
+    /// iterations would deadlock the loop; same for `0` tool calls
+    /// per iteration. Returns a fresh config; the original is left
+    /// untouched.
+    #[must_use]
+    pub fn sanitized(&self) -> Self {
+        Self {
+            max_iterations: self.max_iterations.max(1),
+            max_tool_calls_per_iteration: self.max_tool_calls_per_iteration.max(1),
+            max_context_tokens: self.max_context_tokens,
+            provider_hint: self.provider_hint.clone(),
+        }
+    }
+}
 
 /// Why a session ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,6 +306,25 @@ pub struct ToolCallRecord {
     /// successfully.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub error: String,
+    /// DG-33 follow-up — wall-clock duration the dispatcher took to
+    /// run this tool call, measured by [`dispatch_one`] across the
+    /// async `dispatcher.dispatch(...)` await. `0` for denied calls
+    /// (which never invoke the dispatcher) and for sessions
+    /// deserialised from a pre-DG-33-duration transcript on disk
+    /// (the `#[serde(default)]` rides over the missing field).
+    /// Surfaces in `MemoryEntry::ToolCall.duration_ms` through
+    /// `crate::memory::events_from_session` so the prompt-time
+    /// recall preamble can show "tool X took 12ms last time".
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub duration_ms: u64,
+}
+
+/// `serde(skip_serializing_if)` helper used by `ToolCallRecord`'s
+/// `duration_ms` field — keeps the on-disk JSON small for entries
+/// that didn't run (denied) or weren't measured (pre-DG-33).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 /// One round in a recorded session.
@@ -236,6 +376,13 @@ pub struct AgentSession {
     pub rounds: Vec<RoundRecord>,
     /// Why the session ended.
     pub outcome: SessionOutcome,
+    /// BL-120 — compaction events the loop fired during this
+    /// session. Each event records the range of rounds rolled up
+    /// plus the summary text the configured [`crate::compression::Compressor`]
+    /// produced. Empty for sessions where compression never
+    /// triggered (the default unless `SessionConfig::max_context_tokens > 0`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compactions: Vec<crate::compression::CompactionEvent>,
 }
 
 /// Run a session against `driver` (the LLM) and `dispatcher` (the
@@ -288,6 +435,89 @@ where
     P: SessionPolicy + ?Sized,
     T: ToolDispatcher + ?Sized,
 {
+    run_session_with_config(
+        driver,
+        dispatcher,
+        policy,
+        goal,
+        system,
+        archetype,
+        id,
+        SessionConfig::default(),
+    )
+    .await
+}
+
+/// BL-119 — full entry point taking an explicit [`SessionConfig`].
+/// Existing [`run_session`] / [`run_session_with_id`] wrappers
+/// delegate here with `SessionConfig::default()`, so a caller that
+/// wants the legacy 8-round cap (or any other override) drops in
+/// at this surface. The struct is `Clone` + cheap to construct;
+/// the loop sanitises the values internally so a misconfigured
+/// `max_iterations = 0` clamps to 1 rather than deadlocking.
+pub async fn run_session_with_config<D, P, T>(
+    driver: &D,
+    dispatcher: &T,
+    policy: &P,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: SessionConfig,
+) -> AgentSession
+where
+    D: ChatDriver + ?Sized,
+    P: SessionPolicy + ?Sized,
+    T: ToolDispatcher + ?Sized,
+{
+    // BL-120 — when context-budget is set, an LLM compressor folds
+    // older rounds into a rolling summary. Otherwise compression
+    // stays disabled (max_context_tokens = 0 in
+    // `SessionConfig::default()`); existing tests that pre-date
+    // BL-120 observe the same prompt shape.
+    if config.max_context_tokens > 0 {
+        let compressor = crate::compression::LlmCompressor::new(driver);
+        return run_session_with_compressor(
+            driver, dispatcher, policy, goal, system, archetype, id, config, &compressor,
+        )
+        .await;
+    }
+    run_session_with_compressor::<D, P, T, crate::compression::NoopCompressor>(
+        driver,
+        dispatcher,
+        policy,
+        goal,
+        system,
+        archetype,
+        id,
+        config,
+        &crate::compression::NoopCompressor,
+    )
+    .await
+}
+
+/// BL-120 — full entry point that also accepts an explicit
+/// [`crate::compression::Compressor`]. The compressor only fires
+/// when [`SessionConfig::max_context_tokens`] > 0; otherwise the
+/// loop runs identically to BL-119.
+pub async fn run_session_with_compressor<D, P, T, C>(
+    driver: &D,
+    dispatcher: &T,
+    policy: &P,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: SessionConfig,
+    compressor: &C,
+) -> AgentSession
+where
+    D: ChatDriver + ?Sized,
+    P: SessionPolicy + ?Sized,
+    T: ToolDispatcher + ?Sized,
+    C: crate::compression::Compressor + ?Sized,
+{
+    let config = config.sanitized();
     let started_at = chrono::Utc::now().to_rfc3339();
     let mut session = AgentSession {
         id: id.clone(),
@@ -297,6 +527,7 @@ where
         ended_at: String::new(),
         rounds: Vec::new(),
         outcome: SessionOutcome::Complete,
+        compactions: Vec::new(),
     };
 
     if goal.trim().is_empty() {
@@ -313,9 +544,20 @@ where
     // driver surface supports multi-turn directly.
     let mut current_prompt = goal.to_string();
 
-    for round_idx in 1..=MAX_AGENT_ROUNDS {
+    // BL-120 — compression state. `live_rounds_start` is the index
+    // into `session.rounds` of the first round NOT yet folded into
+    // `live_summary`. Both stay at their initial values until the
+    // first compaction fires.
+    let mut live_rounds_start: usize = 0;
+    let mut live_summary = String::new();
+    // Working-set size: the most recent N rounds always stay
+    // verbatim so the model can reason about the in-flight work
+    // even after older rounds have been rolled up.
+    const WORKING_SET_ROUNDS: usize = 4;
+
+    for round_idx in 1..=config.max_iterations {
         // Ask the model for this round's tool calls.
-        let proposal = match driver.propose(system, &current_prompt).await {
+        let mut proposal = match driver.propose(system, &current_prompt).await {
             Ok(p) => p,
             Err(e) => {
                 session.rounds.push(RoundRecord {
@@ -327,6 +569,21 @@ where
                 break;
             }
         };
+
+        // BL-119 — guard against runaway rounds. Truncate excess
+        // tool calls so the dispatcher's downstream work stays
+        // bounded; drops are logged so the user sees a clear
+        // signal in operator logs.
+        let cap = config.max_tool_calls_per_iteration as usize;
+        if proposal.tool_calls.len() > cap {
+            tracing::warn!(
+                round = round_idx,
+                proposed = proposal.tool_calls.len(),
+                cap,
+                "BL-119: dropping excess tool calls; raise max_tool_calls_per_iteration to keep them"
+            );
+            proposal.tool_calls.truncate(cap);
+        }
 
         // Terminal text-only round — the model is done.
         if proposal.tool_calls.is_empty() {
@@ -390,9 +647,71 @@ where
         // Stay deliberately minimal — the goal is to give the model
         // enough context to pick a sensible next step without
         // bloating the prompt.
-        current_prompt = compose_followup_prompt(goal, &session.rounds, all_errored);
+        current_prompt = compose_followup_prompt_compressed(
+            goal,
+            &session.rounds,
+            live_rounds_start,
+            &live_summary,
+            all_errored,
+        );
 
-        if round_idx == MAX_AGENT_ROUNDS {
+        // BL-120 — trigger compression while the prompt exceeds the
+        // configured token budget AND there are at least
+        // `WORKING_SET_ROUNDS` rounds left untouched. Multiple
+        // compactions per round are allowed; each one rolls another
+        // chunk of history forward but stops short of the working
+        // set so the most recent rounds stay verbatim.
+        if config.max_context_tokens > 0 {
+            let budget_chars =
+                (config.max_context_tokens as usize).saturating_mul(4);
+            while current_prompt.len() > budget_chars
+                && session.rounds.len().saturating_sub(live_rounds_start)
+                    > WORKING_SET_ROUNDS
+            {
+                let new_start = session.rounds.len() - WORKING_SET_ROUNDS;
+                let to_compress = &session.rounds[live_rounds_start..new_start];
+                let summary = match compressor.compress(to_compress, goal).await {
+                    Ok(s) if !s.is_empty() => s,
+                    Ok(_) => format!(
+                        "[{} earlier rounds elided — compressor returned no text]",
+                        to_compress.len()
+                    ),
+                    Err(err) => {
+                        tracing::warn!(%err, "BL-120: compressor errored; using elision placeholder");
+                        format!(
+                            "[{} earlier rounds elided — compressor error]",
+                            to_compress.len()
+                        )
+                    }
+                };
+                let first_round = to_compress.first().map(|r| r.round).unwrap_or(0);
+                let last_round = to_compress.last().map(|r| r.round).unwrap_or(0);
+                let timestamp_ms =
+                    u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0);
+                session
+                    .compactions
+                    .push(crate::compression::CompactionEvent {
+                        first_round,
+                        last_round,
+                        summary: summary.clone(),
+                        timestamp_ms,
+                    });
+                if !live_summary.is_empty() {
+                    live_summary.push_str("\n\n");
+                }
+                live_summary.push_str(&summary);
+                live_rounds_start = new_start;
+                current_prompt = compose_followup_prompt_compressed(
+                    goal,
+                    &session.rounds,
+                    live_rounds_start,
+                    &live_summary,
+                    all_errored,
+                );
+            }
+        }
+
+        if round_idx == config.max_iterations {
             session.outcome = SessionOutcome::MaxRounds;
         }
     }
@@ -430,6 +749,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     reason: reason.clone(),
                     response: None,
                     error: format!("session aborted: {reason}"),
+                    duration_ms: 0,
                 })
                 .collect(),
             Some(RoundStopReason::Aborted(reason)),
@@ -445,6 +765,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     reason: reason.clone(),
                     response: None,
                     error: format!("approval timeout: {reason}"),
+                    duration_ms: 0,
                 })
                 .collect(),
             Some(RoundStopReason::Timeout(reason)),
@@ -494,9 +815,20 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             } else {
                 reason
             },
+            duration_ms: 0,
         };
     }
-    match dispatcher.dispatch(&proposed.tool_call).await {
+    // DG-33 follow-up — measure wall-clock dispatch latency so
+    // `events_from_session` can populate `MemoryEntry::ToolCall.duration_ms`
+    // with a real value rather than a placeholder zero. The clock
+    // start happens *after* the approval gate so denials don't
+    // pollute the metric; the saturating cast caps at u64::MAX in
+    // the pathological case where a dispatch hangs longer than ~584
+    // million years.
+    let started = std::time::Instant::now();
+    let outcome = dispatcher.dispatch(&proposed.tool_call).await;
+    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match outcome {
         Ok(value) => ToolCallRecord {
             id: proposed.id,
             name: proposed.name,
@@ -505,6 +837,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             reason,
             response: Some(value),
             error: String::new(),
+            duration_ms,
         },
         Err(e) => ToolCallRecord {
             id: proposed.id,
@@ -514,6 +847,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             reason,
             response: None,
             error: e,
+            duration_ms,
         },
     }
 }
@@ -521,21 +855,39 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
 /// Compose the prompt for the next round. Phase 2a uses a flat
 /// re-statement with a compact summary of prior rounds; a future
 /// upgrade can switch to provider-native multi-turn chat.
+#[cfg(test)]
 fn compose_followup_prompt(goal: &str, rounds: &[RoundRecord], all_errored: bool) -> String {
+    compose_followup_prompt_compressed(goal, rounds, 0, "", all_errored)
+}
+
+/// BL-120 — variant of [`compose_followup_prompt`] that honours a
+/// rolling-summary preamble + a working-set window. `live_start`
+/// is the index into `rounds` of the first round still considered
+/// "live"; rounds before it have already been folded into
+/// `live_summary` by the configured compressor.
+fn compose_followup_prompt_compressed(
+    goal: &str,
+    rounds: &[RoundRecord],
+    live_start: usize,
+    live_summary: &str,
+    all_errored: bool,
+) -> String {
     let mut out = String::new();
     out.push_str("Original goal: ");
     out.push_str(goal);
+    if !live_summary.is_empty() {
+        out.push_str("\n\nEarlier work (compacted):\n");
+        out.push_str(live_summary);
+    }
     out.push_str("\n\nResults so far:\n");
-    for r in rounds {
+    let live = rounds.get(live_start..).unwrap_or(&[]);
+    for r in live {
         if r.tool_calls.is_empty() {
             continue;
         }
         for tc in &r.tool_calls {
             if tc.approved && tc.error.is_empty() {
-                out.push_str(&format!(
-                    "- round {}: {} ok\n",
-                    r.round, tc.name
-                ));
+                out.push_str(&format!("- round {}: {} ok\n", r.round, tc.name));
             } else if !tc.error.is_empty() {
                 out.push_str(&format!(
                     "- round {}: {} failed: {}\n",
@@ -757,17 +1109,22 @@ mod tests {
         }
         let driver = ScriptedDriver::new(replies);
         let dispatcher = CountingDispatcher::new();
-        let session = run_session(
+        // BL-119 — the new default is 32 iterations; pin the legacy
+        // Phase 2a cap (8) through an explicit `SessionConfig` so
+        // this regression test still asserts the same behaviour.
+        let session = run_session_with_config(
             &driver,
             &dispatcher,
             &AutoApproveAll,
             "loop forever",
             "system",
             None,
+            "legacy-cap".to_string(),
+            SessionConfig::legacy_phase2a(),
         )
         .await;
         assert_eq!(session.outcome, SessionOutcome::MaxRounds);
-        assert_eq!(session.rounds.len() as u32, MAX_AGENT_ROUNDS);
+        assert_eq!(session.rounds.len() as u32, LEGACY_MAX_AGENT_ROUNDS);
     }
 
     /// Phase 2b smoke test: a policy that returns
@@ -823,5 +1180,286 @@ mod tests {
         .await;
         assert_eq!(session.outcome, SessionOutcome::Errored);
         assert!(session.rounds[0].text.contains("driver error"));
+    }
+
+    // ── BL-120 compression tests ──────────────────────────────────────
+
+    /// DoD scenario: a 50-turn synthetic session with a tight
+    /// `max_context_tokens` budget should compress at least once,
+    /// keep the working set untouched, and preserve every decision
+    /// in either the live rounds or the captured summaries.
+    #[tokio::test]
+    async fn fifty_turn_session_compresses_without_losing_decisions() {
+        use crate::compression::KeepDecisionsCompressor;
+
+        // Driver yields 50 tool-call rounds (each names a unique
+        // decision) followed by a terminal text-only round.
+        let mut replies = Vec::new();
+        for i in 1..=50 {
+            replies.push(Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool(
+                    &format!("u{i}"),
+                    &format!("decision_{i}.md"),
+                )],
+            });
+        }
+        replies.push(Proposal {
+            text: "all decisions recorded".into(),
+            tool_calls: Vec::new(),
+        });
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let config = SessionConfig {
+            max_iterations: 100,
+            // ~200 chars of budget — far below the natural growth
+            // of the 50-round prompt, guaranteed to trigger
+            // multiple compactions.
+            max_context_tokens: 50,
+            ..SessionConfig::default()
+        };
+        let compressor = KeepDecisionsCompressor;
+        let session = run_session_with_compressor(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "make 50 decisions",
+            "system",
+            None,
+            "fifty-turn".to_string(),
+            config,
+            &compressor,
+        )
+        .await;
+
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        // Every round is still in the persisted transcript (the
+        // working-set + compaction separation only affects the
+        // live prompt, not the recorded session).
+        assert_eq!(session.rounds.len(), 51);
+        // Compression fired at least once.
+        assert!(
+            !session.compactions.is_empty(),
+            "expected at least one compaction event",
+        );
+        // Every decision is reachable either via the surviving
+        // rounds or one of the captured summaries.
+        let summary_blob = session
+            .compactions
+            .iter()
+            .map(|e| e.summary.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for i in 1..=50_u32 {
+            let in_live = session
+                .rounds
+                .iter()
+                .any(|r| r.round == i && !r.tool_calls.is_empty());
+            let in_summary = summary_blob.contains(&format!("round {i}: read"));
+            assert!(
+                in_live && in_summary || in_live || in_summary,
+                "decision for round {i} lost across compaction"
+            );
+        }
+        // Every compaction event must record a non-empty range.
+        for ev in &session.compactions {
+            assert!(ev.first_round <= ev.last_round, "{ev:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn compression_disabled_when_max_context_tokens_zero() {
+        // BL-120 — `max_context_tokens = 0` means "unbounded".
+        // The loop never invokes the compressor, and the session
+        // ends with an empty `compactions` list — matching every
+        // pre-BL-120 caller's observable behaviour.
+        let replies = vec![
+            Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool("u1", "x.md")],
+            },
+            Proposal {
+                text: "done".into(),
+                tool_calls: Vec::new(),
+            },
+        ];
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "small task",
+            "system",
+            None,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert!(session.compactions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn compression_skips_when_working_set_not_full() {
+        // BL-120 — even with a tiny budget, compaction never
+        // touches the most recent WORKING_SET_ROUNDS rounds.
+        // A session with fewer rounds than the working set
+        // therefore never compresses.
+        let replies = vec![
+            Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool("a", "x.md")],
+            },
+            Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool("b", "y.md")],
+            },
+            Proposal {
+                text: "done".into(),
+                tool_calls: Vec::new(),
+            },
+        ];
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let cfg = SessionConfig {
+            max_iterations: 10,
+            max_context_tokens: 4,
+            ..SessionConfig::default()
+        };
+        let session = run_session_with_compressor(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "two-round task",
+            "system",
+            None,
+            "ws-test".to_string(),
+            cfg,
+            &crate::compression::NoopCompressor,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert!(session.compactions.is_empty());
+    }
+
+    // ── BL-119 SessionConfig tests ─────────────────────────────────
+
+    #[test]
+    fn session_config_defaults_match_hermes_recommendation() {
+        let cfg = SessionConfig::default();
+        assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        assert_eq!(cfg.max_iterations, 32);
+        assert_eq!(
+            cfg.max_tool_calls_per_iteration,
+            DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
+        );
+        assert_eq!(cfg.max_context_tokens, 0);
+        assert!(cfg.provider_hint.is_none());
+    }
+
+    #[test]
+    fn legacy_phase2a_preserves_old_cap() {
+        let cfg = SessionConfig::legacy_phase2a();
+        assert_eq!(cfg.max_iterations, LEGACY_MAX_AGENT_ROUNDS);
+        assert_eq!(cfg.max_iterations, 8);
+    }
+
+    #[test]
+    fn session_config_sanitized_clamps_zero_to_one() {
+        let cfg = SessionConfig {
+            max_iterations: 0,
+            max_tool_calls_per_iteration: 0,
+            max_context_tokens: 0,
+            provider_hint: None,
+        };
+        let s = cfg.sanitized();
+        assert_eq!(s.max_iterations, 1);
+        assert_eq!(s.max_tool_calls_per_iteration, 1);
+    }
+
+    #[test]
+    fn session_config_serde_round_trips_with_partial_input() {
+        // BL-119 callers should be able to pass `{}` and get the
+        // BL-119 defaults; the IPC arg path uses #[serde(default)].
+        let cfg: SessionConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        // Explicit override echoes through.
+        let cfg: SessionConfig = serde_json::from_value(
+            serde_json::json!({ "max_iterations": 12, "provider_hint": "anthropic" }),
+        )
+        .unwrap();
+        assert_eq!(cfg.max_iterations, 12);
+        assert_eq!(cfg.provider_hint.as_deref(), Some("anthropic"));
+    }
+
+    #[tokio::test]
+    async fn default_max_iterations_supports_more_than_legacy_cap() {
+        // Driver yields tool calls for 16 rounds (exceeds legacy
+        // cap of 8) then a terminal text-only round. With the
+        // default config the session should complete normally.
+        let mut replies = Vec::new();
+        for i in 0..16 {
+            replies.push(Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool(&format!("r{i}"), "x.md")],
+            });
+        }
+        replies.push(Proposal {
+            text: "all done".into(),
+            tool_calls: Vec::new(),
+        });
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go far",
+            "system",
+            None,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert!(session.rounds.len() > LEGACY_MAX_AGENT_ROUNDS as usize);
+    }
+
+    #[tokio::test]
+    async fn excess_tool_calls_per_iteration_are_truncated() {
+        // Single round with 5 tool calls; cap at 2.
+        let many = vec![
+            read_tool("a", "1.md"),
+            read_tool("b", "2.md"),
+            read_tool("c", "3.md"),
+            read_tool("d", "4.md"),
+            read_tool("e", "5.md"),
+        ];
+        let driver = ScriptedDriver::new(vec![
+            Proposal {
+                text: "round 1".into(),
+                tool_calls: many,
+            },
+            Proposal {
+                text: "done".into(),
+                tool_calls: Vec::new(),
+            },
+        ]);
+        let dispatcher = CountingDispatcher::new();
+        let cfg = SessionConfig {
+            max_tool_calls_per_iteration: 2,
+            ..SessionConfig::default()
+        };
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "cap-tools",
+            "system",
+            None,
+            "cap-test".to_string(),
+            cfg,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        // Only 2 calls dispatched in round 1.
+        assert_eq!(session.rounds[0].tool_calls.len(), 2);
     }
 }

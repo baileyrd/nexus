@@ -16,6 +16,13 @@ export interface OutlineHeading {
    *  h1..h6 in the rendered markdown body) without needing ids to
    *  match between our slugs and marked's auto-generated ones. */
   index: number
+  /** BL-053 mockup row N — approximate word count for the section
+   *  this heading owns (from this heading's line through to the
+   *  next heading's line, exclusive of the heading text itself).
+   *  Populated by [`parseHeadings`] / [`treeToHeadings`]; omitted
+   *  when the parser couldn't compute one (defensive default).
+   *  The outline row's faint badge reads this. */
+  wordCount?: number
 }
 
 interface OutlineState {

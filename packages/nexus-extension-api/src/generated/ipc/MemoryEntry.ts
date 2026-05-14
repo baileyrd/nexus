@@ -102,4 +102,19 @@ description: string,
 /**
  * Unix epoch milliseconds.
  */
+timestamp_ms: bigint, } | { "kind": "compacted_turns", 
+/**
+ * How many session rounds the summary replaces. Always
+ * `>= 1`; a zero-round compaction is meaningless and
+ * callers must not record one.
+ */
+rounds_compressed: number, 
+/**
+ * The summary text the compressor produced. Treated as
+ * opaque prose by the memory layer.
+ */
+summary: string, 
+/**
+ * Unix epoch milliseconds.
+ */
 timestamp_ms: bigint, };

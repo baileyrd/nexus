@@ -244,6 +244,12 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ### BL-113: Protocol-host contribution model for LSP / DAP / MCP / ACP
 
+> **Phase 0a shipped 2026-05-14.** ADR 0027 accepted (open questions pinned to decisions). New `[[registrations.protocol_hosts.{lsp,dap,mcp,acp}]]` manifest section: public types (`ProtocolHostsContribution`, `LspProtocolHostReg`, `DapProtocolHostReg`, `McpProtocolHostReg`, `AcpProtocolHostReg`) live in `nexus-plugins::manifest`; new `nexus-plugins::contributions` module exposes `ContributedAdapter<T>` + `collect_contributions(&[&PluginManifest])`. 10 unit tests across parsing + aggregation.
+>
+> **Phases 2a + 3a shipped 2026-05-14.** Host-side merge primitives on `main` ready for activation. `LspHostConfig::merge_contributed(Vec<(LspServerSpec, plugin_id)>)` and `McpHostConfig::merge_contributed(Vec<(name, McpServerSpec, plugin_id)>)` accept contributed adapter specs and merge with **TOML-wins** precedence. Both return a typed skip report (`LspMergeSkip` / `McpMergeSkip`) carrying `(name, plugin_id, reason)` so the bootstrap-side caller can log conflicts. MCP factors per-spec validation out of `validate` into a shared `validate_spec` rule so contributions go through the same transport-aware checks as TOML entries. New `nexus-bootstrap::protocol_host_specs` is the only place in tree that maps `ContributedAdapter<*ProtocolHostReg>` → host spec; preserves contribution order; MCP transport string (`http` / `ws|websocket` / unknown → `stdio`) parsed defensively. 8 + 4 unit tests across the merge + converter layers.
+>
+> **Phases 1, 2b, 3b, 4 still open.** Phase 1 (DAP on the new shape; lands on the parked `bl-081-dap-debugger` branch). Phase 2b / 3b (bootstrap-side activation: register_adapter / unregister_adapter IPC pair + post-plugin-scan merge call) waits for Phase 1's lifecycle-callback design. Phase 4 (greenfield ACP host when Hermes Feature 7 is picked up).
+
 **Source**: BL-081 review (2026-05-13) — full design in [ADR 0027](../adr/0027-protocol-host-contribution-model.md).
 **Effort**: Large. Phase 0 (ADR + spike) ~1–2 days; Phase 1 (DAP on the new shape) ~1 wk; Phases 2–3 (LSP, MCP) ~1 wk each; Phase 4 (ACP) lands greenfield when the Hermes Feature-7 / ACP integration BL is picked up.
 **Crates**: `nexus-lsp`, `nexus-dap` (on the parked branch), `nexus-mcp`, future `nexus-acp`, `nexus-plugins` (contribution loader), shell-side plugin manifest schema.
@@ -267,6 +273,8 @@ Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML c
 
 ### BL-114: Code-symbol index foundation (GitNexus port)
 
+> **Shipped 2026-05-13** in commit `2ce5e645`. New `crates/nexus-storage/src/code_index.rs` ships a tree-sitter walker covering Rust / TypeScript / Python / Go (matching the BL-075 default set), a SQLite-backed `code_symbols` table with indexes by name / path / containing-file, and the `com.nexus.storage::query_symbol` IPC handler. File-save + commit hooks keep the index live; rebuild path matches the FTS index pattern (files-on-disk are authoritative). Powers BL-115's MCP tools + BL-116's doc generator.
+
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
 **Effort**: Medium. Self-contained foundation for BL-115 + BL-116.
 **Crates**: `nexus-storage` (new `code_index` module), `nexus-git` (diff→symbol hook).
@@ -284,6 +292,8 @@ Cross-repo code-intel index. The MVP: a SQLite-backed table of (path, kind, name
 
 ### BL-115: MCP tools for code intel (GitNexus port)
 
+> **Shipped 2026-05-13** in commit `11c2836f`. Three new MCP tools (`nexus_context`, `nexus_impact`, `nexus_detect_changes`) registered in `crates/nexus-mcp/src/server.rs`, backed by BL-114's symbol index. `nexus_impact` accepts a depth parameter; risk levels follow the GitNexus rubric (LOW / MEDIUM / HIGH / CRITICAL) via a `risk_for_kind` helper. `nexus_detect_changes` consumes `com.nexus.git::file_statuses`. `BL115_DEGRADED_REASON` const surfaces a clear message when the symbol index isn't initialised.
+
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
 **Effort**: Medium. Depends on BL-114.
 **Crates**: `nexus-mcp` (new tool registrations).
@@ -300,6 +310,8 @@ Three new MCP tools backed by the BL-114 index: `nexus_context(symbol)` returns 
 
 ### BL-116: `ai.generate_docs` symbol-aware doc generator (GitNexus port)
 
+> **Shipped 2026-05-13** in commit `9c1b7fb9`. New `crates/nexus-ai/src/generate_docs.rs` + `HANDLER_GENERATE_DOCS` (id 22) on `com.nexus.ai`. Args take `symbol_id` (or `path` + `name`); the handler gathers the symbol body plus 1-hop call-graph context from BL-114's index, renders a structured prompt, dispatches through the existing `nexus-ai` tool-loop. Optional write-back routes through `com.nexus.editor::apply_transaction` so undo is preserved. Tested against a synthetic symbol set with a mocked provider.
+
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
 **Effort**: Small. Depends on BL-114 (consumes the symbol index).
 **Crates**: `nexus-ai` (new `generate_docs` IPC handler).
@@ -315,6 +327,8 @@ Symbol-aware doc generator. Given a `symbol_id` (or `path` + `name` pair), gathe
 ---
 
 ### BL-117: `nexus-audio` STT + TTS crate (Anything-LLM port)
+
+> **Shipped 2026-05-13** across commits `4d39016d` (crate scaffold) and `5c81d173` (three remaining gaps). New `crates/nexus-audio` with `SttProvider` / `TtsProvider` traits + three backends: `local-audio` feature-gated `LocalWhisper` backend (whisper-rs against `tiny.en` / `base.en` / `small.en` models) + `LocalTts`; `ProviderRouted` delegates to whichever `nexus-ai` provider is configured (OpenAI Whisper / TTS today; Anthropic falls back to local); `PlatformSpeech` shell-side stub filled by BL-118. New caps `audio.record` + `audio.synthesize` registered in `nexus-plugin-api` + `nexus-security`. New `com.nexus.ai::resolve_credentials` handler (id 21) routes provider auth so the audio crate doesn't need its own API-key path — uses the configured AI provider, falls back to env. Backend selection via `<forge>/.forge/config.toml::[audio]`.
 
 **Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13. Scope refined 2026-05-13 to require a local-first path.
 **Effort**: Medium. Self-contained.
@@ -353,6 +367,8 @@ Powers two near-term use cases: voice-driven memory capture (extends BL-043's qu
 
 ### BL-118: Web Speech API shell integration (Anything-LLM port)
 
+> **Shipped 2026-05-13** in commit `3bedd31f`. New `shell/src/plugins/nexus/audio/` plugin wraps `webkitSpeechRecognition` (continuous-mode STT) and `SpeechSynthesisUtterance` (voice + rate selection); `speechApi.ts` + `runtime.ts` registered through `catalog.ts`. Plugin falls back gracefully when browser speech support is missing. BL-113 contribution path is the natural future home; today the plugin self-registers via the same plugin mechanism the audio crate's `PlatformSpeech` stub expects.
+
 **Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13.
 **Effort**: Small. Companion to BL-117.
 **Crates**: shell-side `nexus.audio` plugin.
@@ -369,6 +385,8 @@ Native browser STT/TTS via the Web Speech API exposed through the Tauri webview.
 
 ### BL-119: `SessionConfig` + iteration budget (Hermes Feature 1)
 
+> **Shipped 2026-05-13** in commit `d1ad15e4`. New `SessionConfig` struct in `crates/nexus-agent/src/session.rs` carrying `max_iterations` (default 32, raised from 8 per Hermes Feature 1), `max_tool_calls_per_iteration`, `max_context_tokens`, and provider-routing hints. New `run_session_with_config` entry point alongside the legacy `run_session`. `com.nexus.agent::run` accepts an optional `session_config` arg. `SessionConfig::legacy_phase2a()` pins the old 8-iteration default for the `max_rounds_cap_is_honoured` test that pre-dated the lift. Companion `run_session_with_compressor` slot reserved for BL-120 to plug in.
+
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
 **Effort**: Small. Merge-first per the Hermes plan; unblocks Features 4–6 cleanly.
 **Crates**: `nexus-agent` (new `SessionConfig`).
@@ -384,6 +402,8 @@ Raise the agent's iteration budget cap and introduce a typed `SessionConfig` car
 ---
 
 ### BL-120: Context compression in the agent session loop (Hermes Feature 4)
+
+> **Shipped 2026-05-13** in commit `a3adfd08`. New `crates/nexus-agent/src/compression.rs` ships the `Compressor` trait + three implementations: `LlmCompressor` (default; summarises the oldest turns through the configured AI provider into a single `<system>`-tagged digest), `KeepDecisionsCompressor` (deterministic decisions-only fallback), `NoopCompressor` (testing). Working-set windowing keeps the most recent rounds verbatim — pinned at `WORKING_SET_ROUNDS = 4` (configurable working-set deferred to a future BL). Triggers when `estimate_tokens(transcript) > SessionConfig.max_context_tokens`. New `MemoryEntry::CompactedTurns` variant (extending DG-33) records what got compressed; `AgentSession.compactions` array carries the audit trail. Tested on a 50-turn synthetic session — decisions preserved through compression.
 
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
 **Effort**: Large. Depends on BL-119.
@@ -402,6 +422,8 @@ When the session-loop's running context approaches the provider's token budget, 
 
 ### BL-121: Session-transcript FTS5 search (Hermes Feature 5)
 
+> **Shipped 2026-05-13** in commit `d620b2b0`. New `crates/nexus-agent/src/transcript_search.rs` ships `TranscriptStore` backed by `Arc<Mutex<Connection>>` (`rusqlite::Connection` is `Send` but not `Sync`, so the Mutex makes the store `Sync` for the kernel) plus an FTS5 virtual table colocated with the agent SQLite store. New `com.nexus.agent::search_transcripts(query, [agent_id], [since_ts])` IPC handler returns ranked snippets `(agent_id, session_id, turn_idx, role, snippet)`. Rebuild path walks `<forge>/.forge/agents/<id>/history.jsonl` files when the FTS table is missing. `MemoryEntry::CompactedTurns` records (added by BL-120) are indexed with the rest. Shell-side search-bar UI deferred as a follow-up.
+
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
 **Effort**: Medium. Independent of BL-119 / BL-120 but composes nicely.
 **Crates**: `nexus-agent` (new `transcript_search` module).
@@ -416,7 +438,109 @@ FTS5 virtual table over the agent's persisted session transcripts (which DG-33 a
 
 ---
 
-### BL-122: Personal entity knowledge graph (Thoth port)
+### BL-122: Typing-latency measurement scaffold (Phase 0 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Small. Prerequisite for BL-123..BL-126.
+**Crates**: `nexus-editor` (instrument span); `experiments/perf` (new scenarios).
+
+Extend the BL-112 perf harness with three direct microbenchmark scenarios (`editor.apply_transaction.{small,medium,large}`, `editor.livePreview.decorate.{small,medium,large}`, `editor.markdownRender.large`) plus a `tracing::info_span!("apply_transaction", ...)` around `handle_apply_transaction` in `crates/nexus-editor/src/core_plugin.rs:1150-1211`. The microbench drives the kernel directly through an integration test (no Tauri); the span gives us per-op wall-time, op count, and bytes in/out for future regressions. Commits a fresh baseline at `experiments/perf/baselines/<date>.json` after the scenarios run clean.
+
+**Definition of done:**
+- `experiments/perf/run.ts` emits the three new scenario sections in stable-sorted JSON
+- New `crates/nexus-editor/tests/perf_apply_transaction.rs` integration harness backs the kernel-side scenarios
+- `apply_transaction` tracing span gated behind subscriber filter (no-op outside the harness)
+- Baseline JSON committed; numbers show the N-linear shape today so the BL-123 win is visible as a flat curve
+
+---
+
+### BL-123: Slim `apply_transaction` response for text-only ops (Phase 1 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Medium. Single biggest typing-latency fix; depends on BL-122 for the regression gate.
+**Crates**: `nexus-editor`, shell `nexus.editor` plugin, IPC bindings.
+
+Today every successful `apply_transaction` returns a full `EditorSnapshot` — `crates/nexus-editor/src/core_plugin.rs:1203` clones the entire `BlockTree` (`snapshot_of` at `:1538`) and serializes it via `snapshot_to_value` (`:1573-1576`). For text-only ops (insert/delete on a single block) the webview already discards the snapshot via the `skipReconcile` shortcut at `shell/src/plugins/nexus/editor/cm/transactionBridge.ts:362-367`, but the kernel still does the O(N blocks) work. Returning just `{ revision }` for text-only ops makes the kernel-side cost O(1) and removes the largest IPC payload on the typing hot path.
+
+**Definition of done:**
+- New `ApplyTransactionResponse` enum: `Slim { revision }` vs `Full(EditorSnapshot)`
+- `handle_apply_transaction` inspects op kinds: all-`insert_text`/`delete_text` → `Slim`; structural ops → `Full`
+- `EditorKernelClient.applyTransaction` types the response as a discriminated union; bridge handles both shapes
+- Slim path drops the existing `setSnapshot?.(...)` call on the bridge side; downstream consumers (drag-bridge, comments, block-link nav) either refresh on demand via `get_tree` or get a periodic refresh — pick one as part of the PR after auditing consumers
+- IPC drift check passes (`scripts/check_ipc_drift.sh`)
+- `editor.apply_transaction.large` p95 server-side time flat in N for text-only ops (target < 1 ms regardless of doc size)
+- New Rust test asserts response shape per op kind; new shell test asserts bridge coherency on both shapes
+- Open question: whether `update_annotations` joins the slim path (default in plan: exclude, since the optimistic mirror doesn't track annotation changes)
+
+---
+
+### BL-124: `useFrameSnapshot` adoption in `EditorView` (Phase 2 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Small. Independent of BL-123; both can land in parallel.
+**Crates**: shell `nexus.editor` plugin.
+
+The current `useEditorStore((s) => s.tabs)` at `shell/src/plugins/nexus/editor/EditorView.tsx:172` subscribes to the entire `tabs` array, so every keystroke re-renders `EditorView` + `TabBody` + `ViewHeader` + `BreadcrumbSegments` + `ModeToggle`. The BL-110 `useFrameSnapshot` hook coalesces multi-store notifications into one rAF flush and lets selectors actually shed irrelevant slices. The hook is in place and reference-used by `FileStats.tsx`; this BL wires it into the editor.
+
+**Definition of done:**
+- `EditorView` switches to `useFrameSnapshot` with narrowed entries (active tab content/mode/loading/error, active relpath, dirty flag)
+- `TabBody`, `ViewHeader`, `BreadcrumbSegments`, `ModeToggle` follow the same pattern, each reading only what it needs
+- Render-count test: typing 10 characters into the active tab produces ≤ 10 `EditorView` re-renders and zero re-renders for non-active-tab components
+- Snapshot tests confirm `editorStore.setContent` preserves identity for non-target tabs (the `.map(...)` already does this; pin it)
+- `typing.small` shows a measurable improvement on the post-paint React phase
+
+---
+
+### BL-125: Viewport-scoped live-preview decorations (Phase 3 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Medium. Independent of BL-123/BL-124.
+**Crates**: shell `nexus.editor` plugin (CM6 extensions).
+
+`buildLivePreviewDecorations` at `shell/src/plugins/nexus/editor/cm/livePreviewDecorations.ts:141-153` walks the full Lezer syntax tree on every `docChanged` *and* every selection change (the `StateField.update` at `cm/livePreview.ts:30-43` checks both). This runs pre-paint, so on a 10k-line doc with a 50k-node tree it directly delays the glyph. Scope the walk to the visible viewport + the changed range; for selection-only updates, rebuild only lines that crossed the active-set boundary.
+
+**Definition of done:**
+- Decoration source restructured so the walk reads `view.visibleRanges` plus `tr.changes.iterChangedRanges` for `docChanged` and the active-line delta for selection-only updates
+- Block decorations (table widget, HR) remain `StateField`-sourced per CM6's rule against block decorations from `ViewPlugin`s; resolve the split (effect-passed viewport vs separate StateField for blocks) in the PR
+- `EditorView.atomicRanges.of(...)` wiring preserved so cursor motion still respects atomic ranges
+- `editor.livePreview.decorate.large` p95 ≤ p95 of `.small` (cost becomes viewport-bounded)
+- Visual snapshot tests pass: emphasis / strong / inline code / headings across viewport edges; selection-driven reveal/hide transitions on the line the cursor enters
+
+---
+
+### BL-126: Drop redundant size-cap serialize + tighten session-mutex span (Phase 4 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Small. Independent of BL-123/BL-124/BL-125; mostly cleanup.
+**Crates**: `nexus-editor`.
+
+Two small cleanups in `handle_apply_transaction` (`crates/nexus-editor/src/core_plugin.rs:1146-1211`). First, the 16 MiB payload-size check at `:1169` re-serializes the already-deserialized `tx_value` via `serde_json::to_vec(&tx_value)` purely to measure bytes — replace with a structural bound (sum of inserted text/block-content lengths on the typed `Transaction`). Second, the sessions mutex at `:1183` is held across mutation + tree clone + JSON serialize; with BL-123's slim path the serialize is rare, but tightening the lock to "mutation + revision bump" anyway lets concurrent edits to different files actually run concurrently.
+
+**Definition of done:**
+- `serde_json::to_vec(&tx_value)` removed; structural bound check trips on the same 16 MiB pathological-payload test
+- Snapshot serialization moves outside the mutex scope (collect `(snapshot, rev, ops)` under the lock, serialize after)
+- New multi-relpath concurrency test exercises two sessions being mutated simultaneously; tracing spans show overlap
+
+---
+
+### BL-127: Runtime typing-latency perf scenarios (Phase 5 of TYPING-LATENCY-PLAN)
+
+**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
+**Effort**: Medium. Gated on the WDIO-Tauri runner that BL-112 also defers.
+**Crates**: `experiments/perf` + a small instrumentation hook in shell `nexus.editor`.
+
+The microbenchmarks from BL-122 gate the kernel and decoration paths but miss IPC, Tauri serialization, webview paint, and React re-render. This BL fills in the runtime side from BL-112's deferred slot — `typing.small/medium/large` scenarios that boot the shell against a synthetic forge, open a markdown tab, programmatically dispatch keydown events, and measure keystroke → next-frame-paint via `performance.mark`/`performance.measure`. Wires into CI as non-blocking first, then promotes to a regression gate once variance settles.
+
+**Definition of done:**
+- WDIO-Tauri runner stood up (track separately; reference here)
+- `typing.{small,medium,large}` scenarios produce stable numbers (< 10% variance across 3 runs)
+- Targets: p95 keystroke → paint < 16 ms (small/medium), < 33 ms (large)
+- Instrumentation hook in `EditorView.tsx` gated by `NEXUS_PERF_TYPING=1` so production paths aren't paying for it
+- Regression in any of BL-123/BL-124/BL-125/BL-126 surfaces as a CI delta
+
+---
+
+### BL-128: Personal entity knowledge graph (Thoth port)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
 **Effort**: Large. Independent of other Thoth ports.
@@ -430,7 +554,7 @@ Nexus's petgraph today is a document-link graph: nodes are files, edges are wiki
 
 **Relation types (40+ controlled vocabulary):** family/social (`knows`, `friend_of`, `married_to`), location (`lives_in`, `works_at`, `born_in`), work (`works_on`, `manages`, `employed_by`), knowledge (`proficient_in`, `certified_in`, `studies`), media (`reading`, `watching`, `authored`), plus temporal, ownership, membership, and causality variants. A `normalize_relation_type` lookup maps LLM-generated variants to canonical forms.
 
-**IPC handlers** (new, in `nexus-storage`):`entity_search(query, [type])` — semantic recall via FAISS; `entity_get(id)` — fetch by ID or subject; `entity_relations(id, [direction])` — graph traversal; `entity_upsert(frontmatter)` — write-through to disk; `entity_find_duplicates(threshold)` — similarity scan for Dream Cycle (BL-123).
+**IPC handlers** (new, in `nexus-storage`): `entity_search(query, [type])` — semantic recall via FAISS; `entity_get(id)` — fetch by ID or subject; `entity_relations(id, [direction])` — graph traversal; `entity_upsert(frontmatter)` — write-through to disk; `entity_find_duplicates(threshold)` — similarity scan for Dream Cycle (BL-129).
 
 **Definition of done:**
 - `nexus-storage` parses `entity_type` + `relations` frontmatter; extends petgraph edges with `type: String` and `confidence: f32`
@@ -443,13 +567,13 @@ Nexus's petgraph today is a document-link graph: nodes are files, edges are wiki
 
 ---
 
-### BL-123: Dream Cycle — knowledge refinement engine (Thoth port)
+### BL-129: Dream Cycle — knowledge refinement engine (Thoth port)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
-**Effort**: Medium. Depends on BL-122 (entity graph).
+**Effort**: Medium. Depends on BL-128 (entity graph).
 **Crates**: `nexus-workflow` (new built-in workflow type), `nexus-storage` (dedup API), `nexus-ai` (enrichment handler).
 
-A scheduled background pass that keeps the entity knowledge graph (BL-122) clean and enriched without manual curation. Modelled on Thoth's "Dream Cycle" daemon. Four phases run in sequence during a user-configured maintenance window (default: daily at 02:00 local, or on-demand via `nexus graph dream-cycle run`):
+A scheduled background pass that keeps the entity knowledge graph (BL-128) clean and enriched without manual curation. Modelled on Thoth's "Dream Cycle" daemon. Four phases run in sequence during a user-configured maintenance window (default: daily at 02:00 local, or on-demand via `nexus graph dream-cycle run`):
 
 1. **Duplicate detection** — calls `entity_find_duplicates(threshold: 0.92)` to surface semantically near-identical entity pairs; auto-merges pairs above a higher threshold (0.97), queues the rest for user review via a shell notification.
 2. **Description enrichment** — for entities whose `description` field is short (< 80 chars) or was not updated in the last 30 days, asks the AI to expand it using existing relations and linked document context.
@@ -467,7 +591,7 @@ A scheduled background pass that keeps the entity knowledge graph (BL-122) clean
 
 ---
 
-### BL-124: Prompt injection detection (Thoth port)
+### BL-130: Prompt injection detection (Thoth port)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
 **Effort**: Small. Self-contained; adds one pre-prompt sanitisation pass.
@@ -475,7 +599,7 @@ A scheduled background pass that keeps the entity knowledge graph (BL-122) clean
 
 Nexus's `PrivacyPolicy` redactor (BL-017, shipped) handles outbound PII. The missing piece is inbound content sanitisation: RAG chunks, tool call results, channel-sourced messages, and MCP tool outputs can all carry adversarially crafted content targeting the agent's LLM context. Thoth's `_check_prompt_injection()` proves a lightweight pattern scan catches the most common attack vectors before the prompt is assembled.
 
-**Scanning targets** (applied to every string that flows into prompt assembly — RAG chunks, tool results, MCP outputs, entity descriptions prepended by BL-122):
+**Scanning targets** (applied to every string that flows into prompt assembly — RAG chunks, tool results, MCP outputs, entity descriptions prepended by BL-128):
 
 - **Role-override patterns**: case-insensitive match for `"ignore previous instructions"`, `"you are now"`, `"disregard your"`, `"act as"` combined with `"without restrictions"`, `"your new instructions"`, and similar.
 - **Invisible Unicode**: scan for U+200B (zero-width space), U+200C/D (joiners), U+FEFF (BOM), U+2060 (word joiner), and other zero-width / directional override code points.
@@ -498,7 +622,7 @@ Mode is configurable per source type in `<forge>/.forge/config.toml::[ai.injecti
 
 ---
 
-### BL-125: Pre-invocation message sanitisation in the agent loop (Thoth port)
+### BL-131: Pre-invocation message sanitisation in the agent loop (Thoth port)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
 **Effort**: Small. Complements BL-120's summarisation approach; independent.
@@ -522,7 +646,7 @@ This is distinct from BL-120's LLM-based turn summarisation: it targets mechanic
 
 ---
 
-### BL-126: Runtime approval gates in the agent loop (Thoth port)
+### BL-132: Runtime approval gates in the agent loop (Thoth port)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
 **Effort**: Medium. Touches kernel event system, agent executor, and all three frontends.
@@ -551,7 +675,7 @@ Nexus's capability system enforces access at IPC dispatch time — a plugin eith
 
 ---
 
-### BL-127: Multi-channel notification output (Thoth port)
+### BL-133: Multi-channel notification output (Thoth port)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
 **Effort**: Medium. New crate; does not touch existing service plugins.
@@ -726,9 +850,13 @@ The theme system already has live reload; the only new backend work is a `previe
 > **Phase 2b closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `workspace.moveLeafToDock(leaf, side)` mutator (leaf is unmounted from its source Tabs, pushed onto the destination dock's first Tabs, parent pointer rewritten, view instance preserved). View Builder snapshot rows gain a per-leaf `↔` "Move to" affordance with four target buttons (left / right / bottom / main) and per-dock collapse-toggle + −/+ size step controls in the section heading. The existing `setSidedockSize` / `setSidedockCollapsed` mutators carry the size/collapse work; the new code is the move surface plus the UI plumbing.
 >
 > **Phase 2c closed 2026-05-09** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Visual layout canvas (`LayoutCanvas` component, 360×220 px box-model preview at the top of the View Builder panel) renders the live workspace as a scaled-down 2D layout — left | main | right with bottom spanning beneath, dock proportions scaled against `TYPICAL_WORKSPACE_WIDTH = 1200` / `TYPICAL_WORKSPACE_HEIGHT = 800` and clamped to `MAX_DOCK_FRACTION = 35%` of canvas. Two pointer-driven interactions: drag a leaf chip onto a different region's box to move it (fires `workspace.moveLeafToDock(leaf, side)` on release; same mutator the Phase 2b inline-buttons call), and drag a divider line continuously to resize a dock (fires `workspace.setSidedockSize(side, realPx)` on every move; the workspace store's 150-real-px floor still clamps). All geometry math lives in `canvasGeometry.ts` (pure module: `computeLayout`, `regionAt`, `dividerAt`, `dragDividerToRealPx`, `extractCanvasState`); the React component is render + pointer-event wiring only. 21 new tests cover the geometry helpers (scale fns + their inverses, layout composition, hit-tests against interior/exterior/divider zones, divider-drag math, and the snapshot extractor's region-walking + active-flag + missing-dock cases). Drop-target highlight (`var(--interactive-accent)` outline + hover background) appears while a leaf is being dragged over a non-source region. Click-button surface from Phase 2a/2b kept untouched — the canvas is additive.
+>
+> **Phase 0 introspection API shipped 2026-05-14.** Audit during the Phase 0 follow-up found the pre-existing `nexus.viewBuilder` had walked `workspace.layoutSnapshot()` directly but left the chrome-slot inventory and view-type catalog unexposed. New `shell/src/host/layoutSnapshot.ts` ships `getLayoutSnapshot(pluginRegistry?) → { slots, viewTypes, extensions, layout, takenAtMs }` plus `globalSnapshot()` paired with `bindPluginRegistry()` (wired in `shell/src/main.tsx`). New `SlotRegistry.snapshot()` projects `SlotEntrySnapshot { id, pluginId, priority }` per chrome contribution (drops the React component refs); `viewRegistry.registeredTypes()` / `registeredExtensions()` expose the creator + extension inventory. `countLeavesInLayout(json)` walks splits / tabs / floating for a "N leaves" status line. 7 unit tests. Ownership resolution flows through `PluginRegistry.ownerOfViewType` — shell built-ins (`empty`) report `pluginId: null`.
+>
+> **Finish polish shipped 2026-05-14.** `ChromeSlotsSection` in `ViewBuilderView` consumes `globalSnapshot()` and surfaces every chrome contribution (titleBar, activityBar, statusBarLeft/Right, overlay, paneMode) with the registering plugin id + priority; subscribes to `useSlotStore` so the inventory refreshes when a plugin registers mid-session. "Add panel" gained the PRD's "searchable palette" — case-insensitive substring filter with `N of M` header counter. Genuine remainder: per-panel authoring options on the export form (min-width / min-height / float-vs-dock) — deferred because the live snapshot already captures whatever sizes the user has dragged the canvas to. Community-plugin distribution still gated on WI-44.
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
-**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b ~1 day _(shipped)_ · Phase 2c ~1 day _(shipped)_
+**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b ~1 day _(shipped)_ · Phase 2c ~1 day _(shipped)_ · Phase 0 introspection API + finish polish ~0.5 day _(shipped 2026-05-14)_
 **Crates**: `ExtensionHost` (JS introspection API), new `shell/src/plugins/nexus/viewBuilder/`
 **Related**: ADR 0011 (plugin-first shell), BL-053 (forge visual target), BL-054 (Nexus OS Mode)
 
@@ -769,6 +897,8 @@ No new backend services. Every phase is UI additions or thin IPC handlers over f
 ### BL-053: Forge visual target — close the gap to the design mockup
 
 > **All four phases closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 1: pill-shaped editor tabs, ember segmented inspector control, status-bar forge name + ember dot. Phase 2: ember wikilinks, path-style inline code, YAML frontmatter metadata bar. Phase 3: Obsidian-style callouts (`> [!type] Title`) with seven types + per-type accent dot. Phase 4: status pills (`info`/`warn`/`risk`/`ok`) in the frontmatter metadata bar + status dots in the file-tree row, sourced from `status:` frontmatter via a new `com.nexus.storage::read_frontmatter` IPC. Q2 was decided in favor of frontmatter as the canonical source.
+>
+> **Tail items shipped 2026-05-14** in commit `165e0b1f`. Three remaining mockup elements that the prior PRD listed as deferred follow-ups: table chrome (border-separate + dashed row separators + alternating tints + uppercased header band + hover lift), outline numbered prefix (`.nx-outline__prefix` chip at depth 0 with `01 / 02` tabular numerics on `--interactive-accent-soft`), and word-count badge (new `countWordsIn` + per-section accumulation in both `parseHeadings` and `treeToHeadings`; `OutlineHeading.wordCount` rendered through `compactCount` for sub-4-char chip widths; punctuation-only tokens skipped). Font bundling stays out of scope (separate offline-first workstream).
 
 **Source**: Forge Color System mockup + ember-on-slate exploration (2026-05-06) — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)
 **Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2 ~2 days _(shipped)_ · Phase 3 ~3–5 days _(shipped)_ · Phase 4 ~3–5 days _(shipped)_
@@ -803,10 +933,10 @@ _BL-007 closed 2026-05-09 — fully subsumed by [BL-074](#bl-074-collaborative-e
 Features spec'd in a PRD or ADR but missing from code, found by the 2026-05-12 doc-traceability audit. Full descriptions in [../roadmap/DOC-GAPS.md](../roadmap/DOC-GAPS.md) under DG-32 through DG-46. Doc-only bugs (DG-01..DG-31) live in DOC-GAPS but are not cross-listed here since they're not BL-shaped work.
 
 - [x] **DG-32: PRD-15 §4 ToolRegistry** — closed 2026-05-12. Typed `AgentToolRegistry` + `Capability` enum + `AgentToolSpec` shipped in `crates/nexus-agent/src/tool_registry.rs`; seeded with the eight in-tree tools at bootstrap. New `com.nexus.agent::list_tools` (handler id 18) + `nexus tool list [--capability ID]…` CLI close the discoverability DoD. See [../roadmap/DOC-GAPS.md#dg-32](../roadmap/DOC-GAPS.md).
-- [x] **DG-33: PRD-15 §5 Memory** — closed 2026-05-12. Filesystem-backed agent memory shipped at `crates/nexus-agent/src/memory.rs` with the eight `MemoryEntry` variants from the PRD, append-only `.forge/agents/<id>/history.jsonl`, decision-preserving prune, and four IPC handlers (`memory_record`, `memory_query`, `memory_prune`, `memory_export`). Auto-recording from the session loop + dated snapshots are documented follow-ups. See [../roadmap/DOC-GAPS.md#dg-33](../roadmap/DOC-GAPS.md).
+- [x] **DG-33: PRD-15 §5 Memory** — closed 2026-05-12. Filesystem-backed agent memory shipped at `crates/nexus-agent/src/memory.rs` with the eight `MemoryEntry` variants from the PRD, append-only `.forge/agents/<id>/history.jsonl`, decision-preserving prune, and four IPC handlers (`memory_record`, `memory_query`, `memory_prune`, `memory_export`). **Auto-recording follow-up shipped 2026-05-14**: `events_from_session(&session, now_ms)` + `serialize_entries_jsonl` pure helpers + `record_session_memory(ctx, &session)` fire from `handle_session_run` so every completed session appends its tool calls / errors / compactions to the agent's `history.jsonl`. **Prompt-time recall follow-up shipped 2026-05-14**: `format_memory_preamble(entries, decision_cap, recent_cap)` pure renderer + async `compose_memory_preamble(ctx, agent_id)` + `system_prompt_with_skills(ctx, goal, agent_id)` splice the most recall-worthy entries into the planner's system prompt at session start. Decisions are pinned (PRD-15 §5); recent non-decisions are capped independently so the budget stays bounded. Dated snapshots remain a deferred follow-up. See [../roadmap/DOC-GAPS.md#dg-33](../roadmap/DOC-GAPS.md).
 - [x] **DG-34: PRD-15 §7 interactive approval round-trip** — closed 2026-05-12. Risk classification (`round_requires_approval`) layered on top of the existing ADR 0024 Phase 2b bus-bridge: `BusBridgePolicy` now auto-approves rounds where every proposed tool is registered with `requires_approval=false`, prompts otherwise. `round_proposed` payload carries `requires_approval` + `registered` per tool call so the shell can render per-call risk badges. New `strict_approval` arg restores the prompt-every-round behaviour. See [../roadmap/DOC-GAPS.md#dg-34](../roadmap/DOC-GAPS.md).
 - [x] **DG-35: PRD-15 §8 six built-in agent classes** — closed 2026-05-12. `auditor` (read-heavy reviewer), `librarian` (knowledge organisation), and `coach` (guidance-over-execution) archetypes added in `crates/nexus-agent/src/archetypes.rs` with stable ids `com.nexus.agent.{auditor,librarian,coach}`. `list_archetypes` IPC now returns all six. See [../roadmap/DOC-GAPS.md#dg-35](../roadmap/DOC-GAPS.md).
-- [x] **DG-36: PRD-15 §9 `.agent.toml`** — closed 2026-05-12. Parser + loader + scanner shipped in `crates/nexus-agent/src/custom_agent.rs`; new `com.nexus.agent::list_custom` IPC handler (id 19) + `nexus agent list-custom` CLI surface the manifests. Routing the manifest into the plan / session loop is the next follow-up. See [../roadmap/DOC-GAPS.md#dg-36](../roadmap/DOC-GAPS.md).
+- [x] **DG-36: PRD-15 §9 `.agent.toml`** — closed 2026-05-12. Parser + loader + scanner shipped in `crates/nexus-agent/src/custom_agent.rs`; new `com.nexus.agent::list_custom` IPC handler (id 19) + `nexus agent list-custom` CLI surface the manifests. **Routing follow-up shipped 2026-05-14**: `nexus agent plan/run --archetype <slug>` now accepts custom-manifest slugs — new `resolve_archetype_for_run(ctx, name)` reads `<forge>/.forge/agents/<slug>/agent.toml` and layers `[system_prompt]` over the manifest's `[agent].archetype` baseline; custom agents run with a `com.nexus.agent.custom.<slug>` id. **Tool allow/deny enforcement shipped 2026-05-14**: new `ManifestToolPolicy` + `ManifestPolicyGate<P>` decorator over `SessionPolicy` — manifest denials surface via `RoundDecision::Partial` so the session loop's existing failure path (denied call → `is_error: true` tool-result turn → model recovers) handles them. DG-36 is fully closed. See [../roadmap/DOC-GAPS.md#dg-36](../roadmap/DOC-GAPS.md).
 - [x] **DG-37: PRD-15 §10 agent-to-agent comms** — closed 2026-05-12. New `com.nexus.agent::delegate` (handler id 24) runs a sub-session via the existing session machinery; new `delegate_to_agent` registered in the agent tool registry so a planner LLM sees A2A as a first-class tool call. Parallel / pipeline remain caller composition patterns (no resurrected orchestrator). See [../roadmap/DOC-GAPS.md#dg-37](../roadmap/DOC-GAPS.md).
 - [x] **DG-38: PRD-17 cross-platform reframe-or-build** — closed 2026-05-12 with **Option A** (reframe as desktop-only). PRD-17 retitled "Desktop Strategy"; per-section "Deferred (DG-38)" callouts at §3/§5/§6/§15/§16 and a partial-deferral note at §4; `00-index.md` + `IMPLEMENTATION_STATUS.md` reflect the new scope. Web/mobile content preserved as design rationale; future multi-platform work would split into per-platform BL entries. See [../roadmap/DOC-GAPS.md#dg-38](../roadmap/DOC-GAPS.md).
 - [x] **DG-39: PRD-14 §10 dynamic MCP tool registration** — closed 2026-05-12. New `crates/nexus-mcp/src/dynamic_tools.rs` registry plus `register_tool` / `unregister_tool` / `list_dynamic_tools` IPC handlers on `com.nexus.mcp.host`; `NexusMcpServer::list_tools` + `call_tool` merge static + dynamic surfaces. `notifications/tools/list_changed` broadcast + dedicated capability deferred as documented follow-ups. See [../roadmap/DOC-GAPS.md#dg-39](../roadmap/DOC-GAPS.md).
@@ -898,12 +1028,12 @@ Four external-project assessments under [`../research/`](../research/) each carr
     - Feature 6 — multi-agent delegation → **already shipped as DG-37**
     - Feature 7 — ACP protocol adapter crate → **covered by [BL-113](#bl-113-protocol-host-contribution-model-for-lsp--dap--mcp--acp) Phase 4**
 - **Thoth capability assessment** — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Thoth is a local-first Python AI assistant (NiceGUI + LangGraph + Ollama + FAISS + NetworkX) with broad tool coverage and a personal entity knowledge graph. Six high-priority ports promoted (2026-05-14); eight medium-priority items held here. Voice (STT/TTS) already covered by BL-117 / BL-118 from the Anything-LLM assessment; context compression overlap noted with BL-120 but BL-125 targets the cheaper pre-invocation sanitisation pass rather than LLM-based summarisation.
-    - Typed personal entity graph (people/places/events/concepts, 40+ relation types, FAISS recall) → **[BL-122](#bl-122-personal-entity-knowledge-graph-thoth-port)**
-    - Dream Cycle refinement engine (nightly dedup, decay, enrich, infer) → **[BL-123](#bl-123-dream-cycle--knowledge-refinement-engine-thoth-port)**
-    - Prompt injection detection (role-override patterns, invisible Unicode, HTML directives) → **[BL-124](#bl-124-prompt-injection-detection-thoth-port)**
-    - Pre-invocation message sanitisation (dedup tool results, strip base64 URIs, 85% trim) → **[BL-125](#bl-125-pre-invocation-message-sanitisation-in-the-agent-loop-thoth-port)**
-    - Runtime approval gates in the agent loop (pause-and-ask before destructive steps) → **[BL-126](#bl-126-runtime-approval-gates-in-the-agent-loop-thoth-port)**
-    - Multi-channel notification output (OS, Telegram, Discord, SMTP) → **[BL-127](#bl-127-multi-channel-notification-output-thoth-port)**
+    - Typed personal entity graph (people/places/events/concepts, 40+ relation types, FAISS recall) → **[BL-128](#bl-128-personal-entity-knowledge-graph-thoth-port)**
+    - Dream Cycle refinement engine (nightly dedup, decay, enrich, infer) → **[BL-129](#bl-129-dream-cycle--knowledge-refinement-engine-thoth-port)**
+    - Prompt injection detection (role-override patterns, invisible Unicode, HTML directives) → **[BL-130](#bl-130-prompt-injection-detection-thoth-port)**
+    - Pre-invocation message sanitisation (dedup tool results, strip base64 URIs, 85% trim) → **[BL-131](#bl-131-pre-invocation-message-sanitisation-in-the-agent-loop-thoth-port)**
+    - Runtime approval gates in the agent loop (pause-and-ask before destructive steps) → **[BL-132](#bl-132-runtime-approval-gates-in-the-agent-loop-thoth-port)**
+    - Multi-channel notification output (OS, Telegram, Discord, SMTP) → **[BL-133](#bl-133-multi-channel-notification-output-thoth-port)**
   Medium-priority items held here until capacity opens: vision (`nexus-vision` plugin — screen/file image analysis via local Ollama vision model); built-in web search (Tavily + DuckDuckGo handlers in `nexus-ai`); browser automation (Playwright via `nexus-browser` plugin); chart generation (10 Plotly-equivalent chart types in `nexus-formats` or `nexus-ai`); health/habit tracker (`nexus-tracker` plugin or Bases extension); Docker sandbox for terminal sessions (shadow workspace + patch-apply in `nexus-terminal`); custom tool builder UX (wizard shell plugin wrapping `nexus plugin scaffold`). Skip items (Gmail, Calendar, image/video gen, X/Twitter, Arxiv/Wolfram/Weather — all reachable via MCP): these are community plugin territory.
 
 ---

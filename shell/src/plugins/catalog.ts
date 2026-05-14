@@ -331,6 +331,12 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/recall').then(m => m.recallPlugin),
   },
   {
+    id: 'nexus.audio', name: 'Audio (Web Speech)',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'BL-118 — Speak and transcribe via the browser\'s Web Speech API, with fallback to the kernel-side audio backend.',
+    load: () => import('./nexus/audio').then(m => m.audioPlugin),
+  },
+  {
     id: 'nexus.enrich', name: 'Enrich',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'AI enrichment pipeline — auto-tag, summarise, and extract entities from notes.',

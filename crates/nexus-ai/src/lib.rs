@@ -17,6 +17,10 @@ mod chunker;
 mod config;
 pub mod core_plugin;
 mod embedding;
+/// BL-116 — `com.nexus.ai::generate_docs` implementation. Lives in
+/// its own module so the prompt-building + doc-comment-wrapping
+/// logic stays unit-testable without firing a real provider.
+mod generate_docs;
 pub mod enrichment;
 mod http_client;
 mod error;

@@ -1126,15 +1126,82 @@ Filesystem-backed agent-scoped memory shipped:
   (reverse-DNS / empty / too-long / unsafe chars), and missing
   file handling. All 68 nexus-agent lib tests green.
 
-**Deferred** as documented follow-ups:
+**Follow-up shipped 2026-05-14 — auto-recording from the session loop.**
 
-- Auto-recording from the session loop. The session loop in
-  `session.rs` writes per-session transcripts under
-  `.forge/agent/sessions/` already; threading those events through
-  `memory_record` so a Coder agent's prior decisions show up on
-  its next invocation is the integration step. Foundation is in
-  place (the handler exists; the session loop knows the agent id);
-  one focused PR away.
+The session loop now auto-records into `history.jsonl` so a next
+invocation can recall prior tool calls / errors / compactions
+without the planner having to ask.
+
+- New pure helper `crate::memory::events_from_session(&session,
+  now_ms)` derives the `Vec<MemoryEntry>` to record. Emitted
+  classes: `CompactedTurns` (one per BL-120 `CompactionEvent`,
+  `rounds_compressed = last_round - first_round + 1`), `ToolCall`
+  (one per `ToolCallRecord`, `success = approved && error.is_empty()`,
+  `duration_ms` carries the dispatcher-measured wall-clock latency
+  from `session::dispatch_one`'s `Instant::now()` instrumentation
+  shipped 2026-05-14), `Error` (one per failed call carrying `tool: error`
+  plus the per-call `step_id`, plus one session-level entry when
+  `outcome == Errored`). `Decision` / `Artifact` deliberately stay
+  out — those need explicit model / user intent.
+- New pure helper `crate::memory::serialize_entries_jsonl(entries,
+  tag_path)` produces newline-terminated JSON for the batched
+  read-once-write-once IPC append.
+- New async `record_session_memory(ctx, &session)` in `core_plugin.rs`
+  fires right after the session loop returns inside
+  `handle_session_run`. Skipped when the session has no archetype,
+  no recordable events, or an invalid agent slug. Failures here
+  are logged and *don't* block the session result — the caller
+  cares about the result, the memory layer is an audit trail.
+- 7 new unit tests cover the matrix: empty session, success-only
+  rounds, failed-call paired-Error emission, denied-call as
+  unsuccessful, compaction-before-tool-call ordering, session-level
+  Errored outcome, and the JSONL serializer round-trip. All 127
+  nexus-agent lib tests green.
+
+**Follow-up shipped 2026-05-14 — prompt-time recall.**
+
+The other half of the memory-layer loop. Auto-record fills the
+log per-session; this follow-up makes the planner read it on the
+*next* invocation so prior decisions show up without the user
+having to remind it.
+
+- New pure helper `crate::memory::format_memory_preamble(entries,
+  decision_cap, recent_cap)` renders a short markdown preamble.
+  Selection: every `Decision` entry (PRD-15 §5 retained
+  indefinitely; load-bearing signal) up to `decision_cap`,
+  newest-first; plus the most recent `recent_cap` non-decision
+  entries (`Error` / `CompactedTurns` / `ToolCall` / etc.). Decision
+  and recent pools are capped independently so a session full of
+  recent ToolCalls doesn't squeeze out the decision history.
+  Empty input or zero caps return `None` so the splice site can
+  skip without an explicit emptiness check.
+- New async `compose_memory_preamble(ctx, agent_id)` in
+  `core_plugin.rs`: reads `<forge>/.forge/agents/<slug>/history.jsonl`
+  via the kernel context, calls the pure formatter with
+  `DECISION_CAP = 8` / `RECENT_CAP = 6` (≈14 short lines max into
+  the system prompt — comfortably inside any provider's budget).
+- `system_prompt_with_skills` extended with an optional
+  `agent_id: Option<&str>`; when non-empty + non-builtin, it
+  splices the preamble between the baseline + skills sections.
+- `handle_plan` passes `a.archetype.as_deref()`; `handle_session_run`
+  appends the preamble onto its `system` string after archetype
+  resolution. Skipped when the caller passed an explicit `system`
+  override (their string wins verbatim).
+- 6 new unit tests: returns-None matrix (empty entries, zero
+  caps), Decisions heading + em-dash rendering for non-empty
+  rationale, Recent activity per-kind formatting (Error /
+  CompactedTurns / ok+FAILED ToolCall), independent decision /
+  recent caps, newest-first sort across kinds. All 133 nexus-agent
+  lib tests green.
+
+The auto-record + prompt-time recall pair closes the DG-33
+memory-layer loop end-to-end: every session writes its tool
+calls / errors / compactions to history.jsonl on completion, and
+every next session reads the most recall-worthy slice back into
+its system prompt at start.
+
+**Remaining deferred:**
+
 - Dated `MemorySnapshot` rollups. The PRD-15 §5 `MemorySnapshot`
   type wasn't materialised — the JSONL log is the canonical
   source. A rollup writer that compresses old history into a
@@ -1321,19 +1388,82 @@ Parser + loader + IPC + CLI shipped:
   manifest isolated to errors), and prompt resolution (inline /
   file). All 55 nexus-agent lib tests green.
 
-**Deferred** as documented follow-ups:
+**Follow-up shipped 2026-05-14 — custom-archetype routing.**
 
-- Routing a custom agent through `nexus agent plan/run --archetype <slug>`
-  isn't wired yet. `build_archetype` in `archetypes.rs` resolves
-  built-in names only; a `--archetype` arg that matches a custom
-  manifest's slug should layer that manifest's `system_prompt`
-  over its `archetype` baseline. Foundation is in place — every
-  manifest exposes the system prompt + base archetype — but the
-  resolver itself is one follow-up away (read scan result during
-  `handle_plan` / `handle_session_run`).
-- Tool allow/deny enforcement against `AgentToolRegistry` likewise
-  pending until the planning loop reads the manifest at request
-  time.
+`nexus agent plan --archetype <slug>` and `nexus agent run --archetype <slug>`
+now accept custom-manifest slugs alongside the six built-ins:
+
+- New `is_builtin_archetype(name)` + `build_archetype_with_prompt(id,
+  prompt, driver, extra)` in `crates/nexus-agent/src/archetypes.rs`.
+  The built-in helper lets the routing path decide between the
+  `&'static`-prompt fast path and the owned-prompt path that custom
+  manifests require.
+- New async `resolve_archetype_for_run(ctx, name)` in
+  `core_plugin.rs` returns `(agent_id, system_prompt,
+  ArchetypeSource)`. Built-in slugs hit the legacy path; unknown
+  slugs trigger `load_custom_archetype_prompt(ctx, slug)` which
+  reads `<forge>/.forge/agents/<slug>/agent.toml` through
+  `ctx.read_file` (capability-correct, matches the `handle_list_custom`
+  pattern), parses, resolves `[system_prompt].text` inline or
+  `[system_prompt].path` via a second `ctx.read_file`, and layers
+  the custom body over the manifest's `[agent].archetype` baseline
+  (default if absent).
+- Slug sanitisation hoisted into a pure `is_safe_archetype_slug`
+  helper (rejects path separators, parent-directory escapes,
+  hidden-directory aliases, empty strings) so the rule can be
+  unit-tested without a kernel context.
+- Custom agents get a `com.nexus.agent.custom.<slug>` namespaced id
+  so logs / transcripts make the routing visible. `tracing::debug!`
+  fires from `handle_plan` on every custom-routed plan.
+- `handle_plan` and `handle_session_run` both updated. Unknown
+  slugs that match neither a built-in nor a manifest fall through to
+  default with a logged warning — same posture as the pre-DG-36
+  fallback in `resolve_prompt`.
+- 7 new unit tests: `is_builtin_archetype` (recognise + reject),
+  `build_archetype_with_prompt` (owned id, extra layering, empty
+  extra), `is_safe_archetype_slug` (typical + path-shaped slugs).
+  All 111 nexus-agent lib tests green.
+
+**Follow-up shipped 2026-05-14 — manifest tool allow/deny enforcement.**
+
+The last DG-36 follow-up. A custom agent's `[tools]` `allowed` /
+`denied` lists now gate per-call tool dispatch through the existing
+`SessionPolicy` surface — denials surface as
+`RoundDecision::Partial` entries that the session loop already feeds
+back to the model as `is_error: true` tool-result turns, so the
+model can recover.
+
+- New `ManifestToolPolicy` in `custom_agent.rs`: `from_manifest`
+  builds the `HashSet<String>` allow/deny pair + the contributing
+  slug; `check(name)` returns `Ok(())` or a clear rejection string
+  ("`tool 'X' denied by 'slug' [tools].denied`" / "not in
+  [tools].allowed list"); `is_noop()` short-circuits the wrap when
+  both lists are empty.
+- New `ManifestPolicyGate<P>` decorator: implements `SessionPolicy`
+  generically over the wrapped inner policy (`AutoApproveAll` /
+  `BusBridgePolicy` / etc.). Merge rules: if every call is
+  manifest-denied, return `Partial(all-denied)` without consulting
+  the inner; otherwise consult inner and merge — manifest denials
+  override inner approvals on the same `tool_use_id`,
+  `Abort`/`Timeout` propagate unchanged.
+- `resolve_archetype_for_run` extended to return a new
+  `ResolvedArchetype` struct carrying the parsed
+  `CustomAgentManifest` alongside the prompt so the caller doesn't
+  re-read the file.
+- `handle_session_run` builds the `ManifestToolPolicy` once from
+  the resolved manifest, skips the wrap if `is_noop()`, otherwise
+  constructs `ManifestPolicyGate::new(base_policy, mp)`. New
+  `run_session_optionally_gated` helper centralises the "wrap or
+  pass through" branching so the auto-approve and interactive
+  approval paths each have one call site rather than two.
+- 9 new unit tests: 4 over `ManifestToolPolicy` (noop, deny
+  precedence, allow narrowing, empty-allow no-filter) + 5 over
+  `ManifestPolicyGate` (passthrough on no denials, full-Partial on
+  total denial, layering on inner ApproveAll, manifest overrides
+  inner Partial, Abort propagation). All 120 nexus-agent lib tests
+  green.
+
+DG-36 is now closed end-to-end. No remaining follow-ups.
 
 ---
 

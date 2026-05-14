@@ -38,6 +38,18 @@ petgraph = { workspace = true }
 chrono = { workspace = true }
 # BL-083: forge-to-forge import hashes.
 sha2 = { workspace = true }
+# BL-114: tree-sitter code-symbol index. One runtime crate + one
+# grammar per language in the BL-075 default code-extension set
+# (Rust / TS+TSX / JS+JSX / Python / Go). Symbols are persisted to
+# the same SQLite that backs the FTS index and rebuildable from
+# files on disk, so the dep cost is gated behind a real load-bearing
+# feature rather than purely cosmetic.
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-go = { workspace = true }
+tree-sitter-javascript = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 schemars = { workspace = true, optional = true }
 

@@ -19,9 +19,10 @@ use std::path::PathBuf;
 use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
-    AiActivityListArgs, AiActivityListResult, AiProposeArgs, AiProposeReply, AiProposedToolCall,
-    AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
-    AiStreamChatArgs, AiStreamChatMode, AiToolPolicy, AiUnmappedToolCall,
+    AiActivityListArgs, AiActivityListResult, AiGenerateDocsArgs, AiGenerateDocsReply,
+    AiProposeArgs, AiProposeReply, AiProposedToolCall, AiStreamAskArgs, AiStreamAskMessage,
+    AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
+    AiToolPolicy, AiUnmappedToolCall,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
@@ -31,9 +32,10 @@ use nexus_ai::{Citation, RagResponse};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
     ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
-    StorageNoteAppendArgs, StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult,
+    StorageNoteAppendArgs, StorageNoteAppendResult, StorageQuerySymbolArgs,
+    StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
     StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
-    StorageWriteFileArgs, StorageWriteFileResult,
+    StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
 };
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
 // brought into the schema generator outside the original storage / ai
@@ -61,6 +63,7 @@ use nexus_lsp::ipc::{
     LspServerEntry,
 };
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
+use nexus_agent::transcript_search::{SearchArgs as TranscriptSearchArgs, TranscriptHit};
 use nexus_agent::{Plan, Step, ToolCall};
 use nexus_comments::core_plugin::{
     AddReplyArgs, CreateThreadArgs, DeleteCommentArgs, DeleteThreadArgs, EditCommentArgs,
@@ -110,6 +113,11 @@ use nexus_templates::core_plugin::{
 };
 // nexus-formats: Notion zip-import / format-export args.
 use nexus_formats::core_plugin::{ExportNotionArgs, ImportNotionArgs};
+// nexus-audio (BL-117): STT + TTS IPC types.
+use nexus_audio::ipc::{
+    AudioStatusResult, AudioSynthesizeArgs, AudioSynthesizeResult, AudioTranscribeArgs,
+    AudioTranscribeResult,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -178,6 +186,11 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageReadFrontmatterArgs>("com_nexus_storage__read_frontmatter", "args");
     write_schema::<ReadFrontmatterResult>("com_nexus_storage__read_frontmatter", "result");
 
+    // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
+    write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");
+    write_schema::<StorageSymbolRow>("com_nexus_storage__query_symbol", "row");
+    write_schema::<StorageQuerySymbolResult>("com_nexus_storage__query_symbol", "result");
+
     // ── com.nexus.ai::stream_ask ─────────────────────────────────────────
     write_schema::<AiStreamAskArgs>("com_nexus_ai__stream_ask", "args");
     write_schema::<AiStreamAskMessage>("com_nexus_ai__stream_ask", "message");
@@ -207,6 +220,10 @@ fn emit_all_schemas_impl() {
     // honest as `Citation` evolves.
     write_schema::<Citation>("com_nexus_ai__ask", "citation");
     write_schema::<RagResponse>("com_nexus_ai__ask", "result");
+
+    // ── com.nexus.ai::generate_docs (BL-116) ─────────────────────────────
+    write_schema::<AiGenerateDocsArgs>("com_nexus_ai__generate_docs", "args");
+    write_schema::<AiGenerateDocsReply>("com_nexus_ai__generate_docs", "reply");
 
     // ── com.nexus.ai::activity_list (BL-037) ─────────────────────────────
     // Per-forge AI activity timeline. The shell pane consumes
@@ -274,6 +291,9 @@ fn emit_all_schemas_impl() {
     write_schema::<Plan>("com_nexus_agent", "plan");
     write_schema::<Step>("com_nexus_agent", "step");
     write_schema::<ToolCall>("com_nexus_agent", "tool_call");
+    // BL-121 — transcript-search wire types.
+    write_schema::<TranscriptSearchArgs>("com_nexus_agent__search_transcripts", "args");
+    write_schema::<TranscriptHit>("com_nexus_agent__search_transcripts", "hit");
 
     // ── com.nexus.comments (P1-3 #113) ───────────────────────────────────
     write_schema::<FilePathArg>("com_nexus_comments__list", "args");
@@ -364,6 +384,13 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.formats ────────────────────────────────────────────────
     write_schema::<ImportNotionArgs>("com_nexus_formats__import_notion", "args");
     write_schema::<ExportNotionArgs>("com_nexus_formats__export_notion", "args");
+
+    // ── com.nexus.audio (BL-117) ─────────────────────────────────────────
+    write_schema::<AudioTranscribeArgs>("com_nexus_audio__transcribe", "args");
+    write_schema::<AudioTranscribeResult>("com_nexus_audio__transcribe", "result");
+    write_schema::<AudioSynthesizeArgs>("com_nexus_audio__synthesize", "args");
+    write_schema::<AudioSynthesizeResult>("com_nexus_audio__synthesize", "result");
+    write_schema::<AudioStatusResult>("com_nexus_audio__status", "result");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

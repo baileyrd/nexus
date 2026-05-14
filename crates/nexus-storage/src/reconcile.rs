@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use nexus_formats::sha256_hex;
 
 use crate::StorageError;
+use crate::code_index;
 use crate::index::{FileFilter, FileRecord, delete_file, insert_file, query_files, soft_delete_file};
 use crate::parser::parse_markdown;
 use crate::watcher::should_ignore;
@@ -115,6 +116,7 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             delete_file(conn, record.id)?;
             let file_type = infer_file_type(rel_path);
             insert_file(conn, rel_path, &file_type, *size_bytes, &parsed)?;
+            refresh_code_symbols(conn, rel_path, &content);
             if record.is_deleted {
                 delta.created += 1;
             } else {
@@ -148,6 +150,12 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
                     "UPDATE fts_blocks SET file_path = ?1 WHERE file_path = ?2",
                     rusqlite::params![rel_path, &old_record.path],
                 )?;
+                // BL-114: re-key any code symbols under the new path so
+                // queries by path still resolve after a rename.
+                conn.execute(
+                    "UPDATE code_symbols SET path = ?1 WHERE path = ?2",
+                    rusqlite::params![rel_path, &old_record.path],
+                )?;
                 renamed_source_ids.insert(old_record.id);
                 delta.renamed += 1;
             } else {
@@ -159,6 +167,7 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
                 let parsed = parse_markdown(&content)?;
                 let file_type = infer_file_type(rel_path);
                 insert_file(conn, rel_path, &file_type, *size_bytes, &parsed)?;
+                refresh_code_symbols(conn, rel_path, &content);
                 delta.created += 1;
             }
         }
@@ -173,6 +182,10 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
         }
         if !disk_paths.contains(&record.path) && !renamed_source_ids.contains(&record.id) {
             soft_delete_file(conn, record.id)?;
+            // BL-114: code symbols are path-keyed (not files.id) so
+            // soft-deleting the files row would orphan them — drop
+            // them outright.
+            let _ = code_index::delete_file_symbols(conn, &record.path);
             delta.deleted += 1;
         }
     }
@@ -181,6 +194,27 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// BL-114: extract code symbols for `rel_path` and upsert them.
+/// No-op when the path's extension isn't in the code-language set.
+/// Failures are logged and swallowed — a single parser hiccup must
+/// not abort a multi-file reconcile.
+fn refresh_code_symbols(conn: &Connection, rel_path: &str, content: &str) {
+    let Some(lang) = code_index::detect_language(rel_path) else {
+        // Drop any stale symbols left over from a previous code→non-code
+        // rewrite where the extension changed.
+        let _ = code_index::delete_file_symbols(conn, rel_path);
+        return;
+    };
+    let symbols = code_index::extract_symbols(lang, content);
+    if let Err(e) = code_index::upsert_file_symbols(conn, rel_path, lang, &symbols) {
+        tracing::warn!(
+            path = rel_path,
+            error = %e,
+            "BL-114: reconcile code-symbol upsert failed",
+        );
+    }
+}
 
 /// Scan all user-facing directories under `forge_root`.
 ///

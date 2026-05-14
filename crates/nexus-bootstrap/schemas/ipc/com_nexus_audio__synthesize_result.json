@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioSynthesizeResult",
+  "description": "Reply from `com.nexus.audio::synthesize`.",
+  "type": "object",
+  "properties": {
+    "audio_b64": {
+      "description": "Base64-encoded synthesized audio. The shell decodes once for\n`<audio>`-element playback.",
+      "type": "string"
+    },
+    "backend": {
+      "description": "Backend identifier that handled this call.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Container format of the returned bytes (one of `\"wav\"` /\n`\"mp3\"` / `\"opus\"`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "audio_b64",
+    "format",
+    "backend"
+  ]
+}

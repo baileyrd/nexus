@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiGenerateDocsArgs",
+  "description": "Args for `com.nexus.ai::generate_docs` (handler id `22`).\n\nEither `symbol_id` (preferred when available — addresses a row in\nthe BL-114 `code_symbols` table directly) or the `path` + `name`\npair. When both are supplied `symbol_id` wins. Returning an\nunresolved-symbol error rather than guessing keeps the contract\npredictable for agent-driven callers.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Identifier as it appears in source. Case-sensitive.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "description": "Forge-relative path to the source file. Used with `name` when\n`symbol_id` is absent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "style": {
+      "description": "Doc-comment style hint (`\"rustdoc\"` / `\"jsdoc\"` / `\"godoc\"` /\n`\"docstring\"`). When `None` the handler picks a default per\nthe symbol's language (rustdoc for Rust, JSDoc for TS/JS,\ngodoc for Go, Python docstrings for Python).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "symbol_id": {
+      "description": "Row id in the `code_symbols` table. Preferred when known.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false
+}

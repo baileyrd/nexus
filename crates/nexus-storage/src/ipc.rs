@@ -376,6 +376,76 @@ fn stringify_yaml_value(v: &serde_yml::Value) -> String {
     }
 }
 
+// ── BL-114 — query_symbol ────────────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::query_symbol` (handler 63). Mirrors
+/// [`crate::code_index::SymbolFilter`]. `name` and `path` AND-combine
+/// when both present; an empty payload returns every indexed symbol
+/// up to the default limit.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageQuerySymbolArgs {
+    /// Exact identifier match. Case-sensitive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Exact forge-relative path match. Scopes results to one file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Maximum rows to return. Defaults to 200 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One symbol row in [`StorageQuerySymbolResult`]. Mirror of
+/// [`crate::code_index::SymbolRecord`] — kept in sync manually.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageSymbolRow {
+    /// Row id in the `code_symbols` table.
+    pub id: i64,
+    /// Forge-relative path of the source file.
+    pub path: String,
+    /// Language label (`"rust"` / `"typescript"` / `"python"` / `"go"` / …).
+    pub language: String,
+    /// Symbol kind (`"function"` / `"struct"` / `"class"` / `"impl"` / …).
+    pub kind: String,
+    /// Identifier as it appears in source.
+    pub name: String,
+    /// 1-based starting line.
+    pub line_start: u32,
+    /// 1-based ending line.
+    pub line_end: u32,
+    /// Row id of the enclosing symbol, or `null` for top-level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<i64>,
+    /// Leading doc comment, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_comment: Option<String>,
+}
+
+/// Return type for `com.nexus.storage::query_symbol`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageQuerySymbolResult {
+    /// Matching rows ordered by `(path, line_start)` ascending.
+    pub symbols: Vec<StorageSymbolRow>,
+}
+
 #[cfg(test)]
 mod read_frontmatter_tests {
     use super::*;

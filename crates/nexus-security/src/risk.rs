@@ -88,6 +88,15 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // tool-loop's downstream cap checks (write_file via storage)
         // or the agent's per-step approval policy.
         Capability::AiToolsWrite | Capability::AiToolsMcp => RiskLevel::Medium,
+
+        // BL-117 audio capabilities. Microphone capture is privacy-
+        // sensitive — a hostile plugin could exfiltrate ambient room
+        // audio, so AudioRecord lives in the High band alongside
+        // network egress. Speaker output is annoying but not
+        // destructive; AudioSynthesize is Low by analogy with
+        // ui.notify (user-visible side effect, no exfiltration).
+        Capability::AudioRecord => RiskLevel::High,
+        Capability::AudioSynthesize => RiskLevel::Low,
     }
 }
 

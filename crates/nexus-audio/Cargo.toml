@@ -1,0 +1,56 @@
+[package]
+name = "nexus-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus audio subsystem: STT + TTS provider traits with local / provider-routed / platform backends (BL-117)"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+toml = { workspace = true }
+base64 = { workspace = true }
+# Provider-routed backend talks to OpenAI's `/v1/audio/{transcriptions,speech}`
+# directly so it doesn't have to round-trip through `nexus-ai`'s
+# session-bound chat stack. The reqwest feature surface matches
+# `nexus-ai`'s so the dep graph collapses to one rustls.
+reqwest = { workspace = true, features = ["multipart", "blocking"] }
+tokio = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+# BL-117 local backends. `local-audio` feature pulls in whisper-rs
+# (whisper.cpp bindings, ~3-5 min build cost) + hound for WAV
+# decode. `tempfile` lets the TTS shell-out write to a temp WAV
+# the kernel reads back as bytes without leaving a stray file in
+# the forge.
+whisper-rs = { version = "0.16", optional = true }
+hound = { version = "3.5", optional = true }
+tempfile = { workspace = true, optional = true }
+
+[features]
+# Emit TypeScript + JSON Schema bindings. Off by default; enable via
+# `cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export`.
+ts-export = ["dep:ts-rs", "dep:schemars"]
+
+# BL-117: opt-in local audio backends. Pulls in whisper.cpp via
+# whisper-rs (~3-5 min build cost + a 75 MB+ model that the audio
+# plugin downloads on first run) plus the hound WAV decoder and
+# tempfile for the TTS shell-out. The default workspace build
+# stays fast; operators flip this on once they're ready to pay
+# the cost. Local TTS additionally requires `espeak-ng` on PATH
+# (Linux); macOS uses the built-in `say` binary; Windows uses
+# PowerShell SAPI.
+local-audio = ["dep:whisper-rs", "dep:hound", "dep:tempfile"]
+# Legacy alias from the BL-117 v1 commit. Kept so existing build
+# scripts pointing at `local-whisper` still work; new callers
+# should switch to `local-audio`.
+local-whisper = ["local-audio"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }

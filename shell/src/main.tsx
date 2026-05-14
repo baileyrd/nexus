@@ -10,6 +10,7 @@ import { PluginRegistry } from './host/PluginRegistry'
 import { ExtensionHost } from './host/ExtensionHost'
 import { contextKeyService } from './host/ContextKeyService'
 import { setRegistry } from './host/shellRegistry'
+import { bindPluginRegistry } from './host/layoutSnapshot'
 import { setHost } from './host/shellHost'
 import { installBodyClasses } from './host/bodyClasses'
 import { eventBus } from './host/EventBus'
@@ -94,6 +95,10 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   // Expose via singletons — no circular import
   setRegistry(reg)
   setHost(host)
+
+  // BL-067 Phase 0 — capture the registry for layoutSnapshot's plugin-side
+  // `globalSnapshot()` accessor (view-type ownership resolution).
+  bindPluginRegistry(reg)
 
   // OI-16 — graceful shutdown hook for script plugins. `beforeunload`
   // fires on Cmd+Q (when Tauri delegates to the WebView), Ctrl+R, HMR

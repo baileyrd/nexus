@@ -172,6 +172,13 @@ pub const HANDLER_MEMORY_EXPORT: u32 = 23;
 /// the session-shaped reply is the new currency.
 pub const HANDLER_DELEGATE: u32 = 24;
 
+/// BL-121 — `search_transcripts`. Args:
+/// [`crate::transcript_search::SearchArgs`] (`{ query, agent_id?,
+/// since_ts_ms?, limit? }`). Reply: `{ hits: Vec<TranscriptHit> }`.
+/// Backed by the FTS5 virtual table populated from
+/// `.forge/agents/*/history.jsonl`.
+pub const HANDLER_SEARCH_TRANSCRIPTS: u32 = 25;
+
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -206,12 +213,23 @@ const MAX_APPROVAL_TIMEOUT_SECS: u64 = 3600;
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
     pending_approvals: Arc<PendingApprovals>,
+    /// BL-121 — absolute forge root used to open the FTS index at
+    /// `<forge>/.forge/agent/transcripts.sqlite`. `None` for the
+    /// legacy default constructor (which keeps every existing
+    /// caller compiling); bootstrap calls [`Self::new_with_forge`]
+    /// so the index actually lands.
+    forge_root: Option<std::path::PathBuf>,
 }
 
 impl AgentCorePlugin {
     /// Construct an unwired plugin. Bootstrap must call
     /// [`CorePlugin::wire_context`] before the first dispatch; any
     /// handler that fires before then returns a clear error.
+    ///
+    /// BL-121 prefers [`Self::new_with_forge`] so the FTS index has
+    /// a path to open against; this constructor stays for backwards
+    /// compatibility with the existing test surface that doesn't
+    /// know about transcript search.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -219,9 +237,23 @@ impl AgentCorePlugin {
             pending_approvals: Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            forge_root: None,
         }
     }
 
+    /// Like [`Self::new`] but captures the forge root so BL-121's
+    /// transcript-search store opens against the right `.sqlite`
+    /// file at `on_init`.
+    #[must_use]
+    pub fn new_with_forge(forge_root: std::path::PathBuf) -> Self {
+        Self {
+            context: None,
+            pending_approvals: Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            forge_root: Some(forge_root),
+        }
+    }
 }
 
 impl Default for AgentCorePlugin {
@@ -231,6 +263,28 @@ impl Default for AgentCorePlugin {
 }
 
 impl CorePlugin for AgentCorePlugin {
+    fn on_init(&mut self) -> Result<(), PluginError> {
+        // BL-121 — open the FTS5 transcript index and rebuild from
+        // disk if empty. Failures here are non-fatal: a forge with
+        // a corrupted .sqlite or a read-only filesystem still boots
+        // (the rest of the agent surface works without
+        // `search_transcripts`).
+        if let Some(forge_root) = &self.forge_root {
+            match crate::transcript_search::initialize(forge_root) {
+                Ok(_) => tracing::debug!(
+                    plugin_id = PLUGIN_ID,
+                    "BL-121 transcript search index ready",
+                ),
+                Err(err) => tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    %err,
+                    "BL-121: transcript search index unavailable; search_transcripts will return an empty result"
+                ),
+            }
+        }
+        Ok(())
+    }
+
     fn dispatch(
         &mut self,
         handler_id: u32,
@@ -293,6 +347,7 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_MEMORY_PRUNE => handle_memory_prune(ctx, &args).await,
                 HANDLER_MEMORY_EXPORT => handle_memory_export(ctx, &args).await,
                 HANDLER_DELEGATE => handle_delegate(ctx, pending_approvals, &args).await,
+                HANDLER_SEARCH_TRANSCRIPTS => handle_search_transcripts(&args),
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -344,7 +399,8 @@ async fn handle_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "plan")?;
-    let skills_prompt = system_prompt_with_skills(&ctx, &a.goal).await;
+    let skills_prompt =
+        system_prompt_with_skills(&ctx, &a.goal, a.archetype.as_deref()).await;
     // `system_prompt_with_skills` returns DEFAULT_SYSTEM_PROMPT as
     // its baseline when no skills match; strip that prefix so the
     // archetype's prompt becomes the new baseline without doubling
@@ -353,12 +409,40 @@ async fn handle_plan(
         .strip_prefix(DEFAULT_SYSTEM_PROMPT)
         .map(str::trim_start)
         .filter(|s| !s.is_empty());
+    let ResolvedArchetype {
+        agent_id,
+        system_prompt: agent_prompt,
+        source,
+        manifest: _,
+    } = resolve_archetype_for_run(&ctx, a.archetype.as_deref()).await;
     let driver = AiChatBridge {
         ctx,
         timeout: DEFAULT_CHAT_TIMEOUT,
     };
-    let agent = build_archetype(a.archetype.as_deref(), driver, extra);
-    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
+    let plan = match source {
+        ArchetypeSource::Builtin | ArchetypeSource::Default => {
+            // Preserve the existing fast-path for built-ins —
+            // `build_archetype` already knows the `&'static`-string
+            // map; routing through it keeps callers that don't pass a
+            // forge-relative slug on the unchanged code path.
+            build_archetype(a.archetype.as_deref(), driver, extra)
+                .plan(&a.goal)
+                .await
+                .map_err(|e| agent_err(&e))?
+        }
+        ArchetypeSource::CustomManifest { slug } => {
+            tracing::debug!(
+                plugin_id = PLUGIN_ID,
+                custom_slug = %slug,
+                agent_id = %agent_id,
+                "DG-36: routing through custom archetype manifest",
+            );
+            crate::archetypes::build_archetype_with_prompt(agent_id, agent_prompt, driver, extra)
+                .plan(&a.goal)
+                .await
+                .map_err(|e| agent_err(&e))?
+        }
+    };
     to_value(&plan, "plan")
 }
 
@@ -369,6 +453,203 @@ async fn handle_plan(
 //    STEP_DONE / RUN_DONE bus topics retired alongside —
 //    `com.nexus.agent.round_proposed` (Phase 2b) is the
 //    replacement for live UI updates.
+
+// ── DG-36 follow-up: custom-archetype routing ──────────────────────────────
+
+/// Where the system prompt used by `handle_plan` / `handle_session_run`
+/// came from. Lets the call site pick between the built-in fast path
+/// (`&'static` prompt strings) and the owned-string path that custom
+/// manifests require.
+#[derive(Debug, Clone)]
+enum ArchetypeSource {
+    /// Caller passed nothing — DEFAULT_SYSTEM_PROMPT.
+    Default,
+    /// Caller passed one of the six built-in slugs (writer / coder /
+    /// researcher / auditor / librarian / coach).
+    Builtin,
+    /// Caller passed a slug that matched a manifest under
+    /// `<forge>/.forge/agents/<slug>/agent.toml`. The custom manifest's
+    /// `[system_prompt]` body is layered over its `[agent].archetype`
+    /// baseline (default if absent). Agent id is namespaced as
+    /// `com.nexus.agent.custom.<slug>`.
+    CustomManifest { slug: String },
+}
+
+/// Resolution result for an `--archetype <slug>` argument. The
+/// optional `manifest` is non-`None` only when the slug matched a
+/// custom manifest under `<forge>/.forge/agents/<slug>/agent.toml`;
+/// `handle_session_run` consults it for the DG-36 follow-up tool
+/// allow/deny enforcement.
+struct ResolvedArchetype {
+    agent_id: String,
+    system_prompt: String,
+    source: ArchetypeSource,
+    /// Full parsed manifest for custom slugs. Built-in / default
+    /// resolutions return `None`.
+    manifest: Option<crate::CustomAgentManifest>,
+}
+
+/// DG-36 — resolve an `--archetype` argument into a concrete
+/// [`ResolvedArchetype`]. Try built-ins first (fast path, same as
+/// the pre-DG-36 behaviour); on miss, look up
+/// `<forge>/.forge/agents/<slug>/agent.toml` via the kernel context.
+/// A custom manifest's `system_prompt` body layers over its
+/// `[agent].archetype` baseline (default if unset). The parsed
+/// manifest is returned alongside the prompt so the caller can
+/// derive `[tools]` allow/deny policy without re-reading the file.
+///
+/// Unknown slugs that don't match a built-in and don't have a manifest
+/// fall through to `ArchetypeSource::Default` — same posture as the
+/// pre-DG-36 fallback in `resolve_prompt`. The kernel-context I/O
+/// failures are logged as warnings; they don't crash the handler.
+async fn resolve_archetype_for_run(
+    ctx: &KernelPluginContext,
+    name: Option<&str>,
+) -> ResolvedArchetype {
+    let trimmed = name.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(slug) = trimmed {
+        if crate::archetypes::is_builtin_archetype(slug) {
+            let (id, prompt) = crate::archetypes::resolve_prompt(Some(slug));
+            return ResolvedArchetype {
+                agent_id: id.to_string(),
+                system_prompt: prompt.to_string(),
+                source: ArchetypeSource::Builtin,
+                manifest: None,
+            };
+        }
+        // Slug doesn't match a built-in — try the custom-manifest path.
+        match load_custom_archetype_prompt(ctx, slug).await {
+            Ok(Some((id, prompt, manifest))) => {
+                return ResolvedArchetype {
+                    agent_id: id,
+                    system_prompt: prompt,
+                    source: ArchetypeSource::CustomManifest {
+                        slug: slug.to_string(),
+                    },
+                    manifest: Some(manifest),
+                };
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    archetype = slug,
+                    "no custom manifest found for slug; falling back to default",
+                );
+            }
+            Err(reason) => {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    archetype = slug,
+                    %reason,
+                    "custom manifest lookup failed; falling back to default",
+                );
+            }
+        }
+    }
+    // No name, or fall-through: built-in default.
+    let (id, prompt) = crate::archetypes::resolve_prompt(name);
+    ResolvedArchetype {
+        agent_id: id.to_string(),
+        system_prompt: prompt.to_string(),
+        source: ArchetypeSource::Default,
+        manifest: None,
+    }
+}
+
+/// `true` when `slug` is safe to splice into a `<forge>/.forge/agents/<slug>/…`
+/// path. Pure helper extracted from [`load_custom_archetype_prompt`]
+/// so the slug-validation rules are unit-testable without a kernel
+/// context. Rejects path separators, parent-directory escapes, and
+/// hidden-directory aliases. Empty slugs are rejected too — the only
+/// caller guarantees a non-empty slug, but defending here keeps the
+/// helper self-contained.
+fn is_safe_archetype_slug(slug: &str) -> bool {
+    if slug.is_empty() {
+        return false;
+    }
+    if slug.contains('/') || slug.contains('\\') {
+        return false;
+    }
+    if slug.contains("..") {
+        return false;
+    }
+    if slug.starts_with('.') {
+        return false;
+    }
+    true
+}
+
+/// Read `<forge>/.forge/agents/<slug>/agent.toml` through the kernel
+/// context (capability-correct path) and assemble the layered prompt.
+/// Returns `Ok(None)` when the manifest file is missing or unreadable
+/// — the slug just isn't a custom agent, which `resolve_archetype_for_run`
+/// surfaces as a warning. `Err` is reserved for parse / shape failures
+/// surfaced to the trace log so an operator can debug a broken manifest.
+async fn load_custom_archetype_prompt(
+    ctx: &KernelPluginContext,
+    slug: &str,
+) -> Result<Option<(String, String, crate::CustomAgentManifest)>, String> {
+    // Reject path-shaped slugs up front; the manifest scanner trusts
+    // directory names, so a `../etc/passwd` slug must not escape.
+    if !is_safe_archetype_slug(slug) {
+        return Err(format!("rejecting suspicious slug `{slug}`"));
+    }
+    let manifest_path = std::path::Path::new(crate::custom_agent::AGENTS_DIR)
+        .join(slug)
+        .join(crate::custom_agent::MANIFEST_FILE_NAME);
+    let bytes = match ctx.read_file(&manifest_path).await {
+        Ok(b) => b,
+        // Missing file is the common case (slug isn't a custom agent).
+        Err(_) => return Ok(None),
+    };
+    let body = std::str::from_utf8(&bytes)
+        .map_err(|e| format!("manifest not UTF-8 at {}: {e}", manifest_path.display()))?
+        .to_string();
+    let manifest = crate::custom_agent::parse_str(&body, slug, &manifest_path)
+        .map_err(|e| format!("parse failed for {}: {e}", manifest_path.display()))?;
+
+    // Resolve the prompt body. For `[system_prompt].text` we have it
+    // inline; for `[system_prompt].path` we fetch the referenced file
+    // through the kernel context, treating the path as relative to the
+    // manifest directory (matches `custom_agent::resolve_system_prompt`
+    // on the sync side).
+    let custom_prompt = if let Some(text) = manifest.system_prompt.text.as_deref() {
+        text.to_string()
+    } else if let Some(rel) = manifest.system_prompt.path.as_deref() {
+        let full_path = std::path::Path::new(crate::custom_agent::AGENTS_DIR)
+            .join(slug)
+            .join(rel);
+        let bytes = ctx
+            .read_file(&full_path)
+            .await
+            .map_err(|e| format!("read {} failed: {e}", full_path.display()))?;
+        std::str::from_utf8(&bytes)
+            .map_err(|e| format!("system prompt file not UTF-8 at {}: {e}", full_path.display()))?
+            .to_string()
+    } else {
+        // Parse-time check should have rejected this; treat as missing
+        // rather than an error so the fallback path stays predictable.
+        return Ok(None);
+    };
+
+    // Layer over the named baseline archetype, or DEFAULT_SYSTEM_PROMPT
+    // when none is given. Custom prompt is appended with a blank-line
+    // separator — same shape as build_archetype's `extra_prompt`
+    // layering, so a custom agent reads as "<baseline>\n\n<custom>".
+    let base_name = manifest
+        .agent
+        .archetype
+        .as_deref()
+        .filter(|s| crate::archetypes::is_builtin_archetype(s));
+    let (_, base_prompt) = crate::archetypes::resolve_prompt(base_name);
+    let layered = if custom_prompt.trim().is_empty() {
+        base_prompt.to_string()
+    } else {
+        format!("{base_prompt}\n\n{custom_prompt}")
+    };
+    let id = format!("com.nexus.agent.custom.{slug}");
+    Ok(Some((id, layered, manifest)))
+}
 
 // ── History persistence ─────────────────────────────────────────────────────
 
@@ -909,11 +1190,174 @@ struct SessionRunArgs {
     /// `round_proposed`. Matches PRD-15 §7's risk table.
     #[serde(default)]
     strict_approval: bool,
+    /// BL-119 — optional [`crate::SessionConfig`] override. When
+    /// omitted, defaults from `SessionConfig::default()` apply
+    /// (max_iterations = 32 per Hermes Feature 1). Partial JSON is
+    /// accepted; missing fields fall back to per-field defaults via
+    /// `#[serde(default = "…")]` on the struct.
+    #[serde(default)]
+    session_config: Option<crate::session::SessionConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SessionIdArgs {
     id: String,
+}
+
+/// DG-33 follow-up — auto-record the completed session into the
+/// agent's `history.jsonl`. Derived events come from
+/// [`crate::memory::events_from_session`]; the batch is appended
+/// in a single read-once / write-once IPC round-trip via the same
+/// `ctx.read_file` + `ctx.write_file` primitive that
+/// [`handle_memory_record`] uses for one entry.
+///
+/// Non-fatal: a memory-layer failure here is *logged* but does not
+/// block the session result. The session loop has already
+/// completed; the caller cares about the result, not the audit
+/// trail. A future enhancement can mirror this onto the kernel
+/// bus so a watchdog can re-attempt on failure.
+///
+/// Skipped entirely when:
+/// - the agent has no archetype (the default agent doesn't get a
+///   per-agent log; nothing to record),
+/// - the session produced no recordable events (no tool calls, no
+///   compactions, no error outcome),
+/// - the archetype slug fails `normalize_agent_id` validation
+///   (defensive — would only fire if the resolver let an invalid
+///   slug through, which it doesn't today).
+async fn record_session_memory(
+    ctx: &KernelPluginContext,
+    session: &crate::session::AgentSession,
+) {
+    let Some(archetype) = session.archetype.as_deref() else {
+        return;
+    };
+    let agent_id = archetype.trim();
+    if agent_id.is_empty() {
+        return;
+    }
+    if let Err(e) = crate::memory::normalize_agent_id(agent_id) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            archetype = agent_id,
+            error = %e,
+            "DG-33 auto-record: rejecting invalid agent id; skipping",
+        );
+        return;
+    }
+    let now = now_unix_ms();
+    let events = crate::memory::events_from_session(session, now);
+    if events.is_empty() {
+        return;
+    }
+    let path = crate::memory::history_path(agent_id);
+    let appended = match crate::memory::serialize_entries_jsonl(&events, &path) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(
+                plugin_id = PLUGIN_ID,
+                error = %e,
+                "DG-33 auto-record: serialize failed; skipping",
+            );
+            return;
+        }
+    };
+    let existing = ctx.read_file(&path).await.unwrap_or_default();
+    let mut combined = existing;
+    combined.extend_from_slice(&appended);
+    if let Err(e) = ctx.write_file(&path, &combined).await {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            path = %path.display(),
+            error = %e,
+            "DG-33 auto-record: write failed; not blocking session result",
+        );
+        return;
+    }
+    tracing::debug!(
+        plugin_id = PLUGIN_ID,
+        agent_id,
+        entry_count = events.len(),
+        "DG-33 auto-record: appended session events to history.jsonl",
+    );
+}
+
+/// DG-33 follow-up — read the agent's memory log via the kernel
+/// context and render the prompt-time recall preamble. Returns
+/// `None` when the log is missing, every line is malformed, or the
+/// pure formatter selects nothing recall-worthy.
+///
+/// Caps are tuned for context-budget conservativeness: every
+/// `Decision` (load-bearing per PRD-15 §5) up to 8 entries +
+/// the most recent 6 non-decision entries. Together that's at
+/// most ~14 short lines added to the system prompt — comfortably
+/// inside any provider's budget.
+async fn compose_memory_preamble(
+    ctx: &KernelPluginContext,
+    agent_id: &str,
+) -> Option<String> {
+    const DECISION_CAP: usize = 8;
+    const RECENT_CAP: usize = 6;
+    if crate::memory::normalize_agent_id(agent_id).is_err() {
+        return None;
+    }
+    let path = crate::memory::history_path(agent_id);
+    let bytes = ctx.read_file(&path).await.ok()?;
+    let entries = parse_memory_lines(&bytes);
+    if entries.is_empty() {
+        return None;
+    }
+    crate::memory::format_memory_preamble(&entries, DECISION_CAP, RECENT_CAP)
+}
+
+/// DG-36 follow-up — run a session with an optional
+/// [`crate::ManifestPolicyGate`] wrapping the base policy. Centralises
+/// the "wrap if Some, pass through if None" branching so
+/// [`handle_session_run`] only has one call site per approval mode
+/// (auto vs interactive) rather than four.
+///
+/// Generic over the base `P` so a `BusBridgePolicy` (owns a session
+/// id used for cleanup) and an `AutoApproveAll` (unit) both flow
+/// through the same helper.
+#[allow(clippy::too_many_arguments)]
+async fn run_session_optionally_gated<D, P, T>(
+    driver: &D,
+    dispatcher: &T,
+    base_policy: P,
+    manifest_policy: Option<crate::ManifestToolPolicy>,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: crate::SessionConfig,
+) -> crate::session::AgentSession
+where
+    D: crate::ChatDriver + ?Sized,
+    P: crate::SessionPolicy,
+    T: crate::ToolDispatcher + ?Sized,
+{
+    match manifest_policy {
+        Some(mp) => {
+            let wrapped = crate::ManifestPolicyGate::new(base_policy, mp);
+            crate::session::run_session_with_config(
+                driver, dispatcher, &wrapped, goal, system, archetype, id, config,
+            )
+            .await
+        }
+        None => {
+            crate::session::run_session_with_config(
+                driver,
+                dispatcher,
+                &base_policy,
+                goal,
+                system,
+                archetype,
+                id,
+                config,
+            )
+            .await
+        }
+    }
 }
 
 async fn handle_session_run(
@@ -932,26 +1376,73 @@ async fn handle_session_run(
         timeout: DEFAULT_TOOL_TIMEOUT,
     };
 
-    let system = match (&parsed.system, &parsed.archetype) {
+    // DG-36 — resolve the archetype once so both the system-prompt
+    // composition AND the tool-policy gate see the same manifest.
+    // `None` for the `archetype` arg short-circuits cleanly to the
+    // default; that branch never enters the custom-manifest path.
+    let resolved = match &parsed.archetype {
+        Some(name) => Some(resolve_archetype_for_run(&ctx, Some(name)).await),
+        None => None,
+    };
+
+    let mut system = match (&parsed.system, resolved.as_ref()) {
         (Some(s), _) => s.clone(),
-        (None, Some(name)) => {
-            // Reuse the archetype's prompt directly. Skill-aware
-            // assembly is for the legacy `plan` flow; sessions
-            // can compose later in a follow-up.
-            let (_, prompt) = crate::archetypes::resolve_prompt(Some(name));
-            prompt.to_string()
-        }
+        (None, Some(r)) => r.system_prompt.clone(),
         (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
     };
 
+    // DG-33 follow-up — splice the prompt-time memory preamble into
+    // the session's system prompt. Skipped when the caller passed an
+    // explicit `system` override (their string wins verbatim), when
+    // there's no archetype (no memory log key), or when the agent
+    // has no recall-worthy entries yet.
+    if parsed.system.is_none() {
+        if let Some(slug) = parsed.archetype.as_deref() {
+            if let Some(preamble) = compose_memory_preamble(&ctx, slug).await {
+                system.push_str("\n\n");
+                system.push_str(&preamble);
+            }
+        }
+    }
+
+    // DG-36 follow-up — pull the manifest's `[tools]` policy out of
+    // the resolved archetype. `None` for built-ins and the default
+    // baseline. A non-`None` policy with empty allow + deny lists
+    // is treated as a no-op (no wrapper installed).
+    let manifest_policy = resolved
+        .as_ref()
+        .and_then(|r| r.manifest.as_ref())
+        .map(crate::ManifestToolPolicy::from_manifest)
+        .filter(|p| !p.is_noop());
+    if manifest_policy.is_some() {
+        tracing::debug!(
+            plugin_id = PLUGIN_ID,
+            archetype = parsed.archetype.as_deref().unwrap_or(""),
+            "DG-36 follow-up: applying manifest tool allow/deny policy",
+        );
+    }
+
+    // BL-119 — fold the optional caller-supplied config into the
+    // default. Partial overrides (e.g. `{ "max_iterations": 64 }`)
+    // already populate the defaults via the struct's #[serde(default)]
+    // helpers; here we just default the whole thing when absent.
+    let session_config = parsed
+        .session_config
+        .clone()
+        .unwrap_or_default();
+
     let session = if parsed.auto_approve {
-        crate::session::run_session(
+        let id = uuid::Uuid::new_v4().to_string();
+        run_session_optionally_gated(
             &driver,
             &dispatcher,
-            &crate::session::AutoApproveAll,
+            crate::session::AutoApproveAll,
+            manifest_policy.clone(),
             &parsed.goal,
             &system,
             parsed.archetype.clone(),
+            id,
+            session_config,
         )
         .await
     } else {
@@ -973,14 +1464,16 @@ async fn handle_session_run(
         // from the policy's session_id. Fix is to plumb the policy's
         // id into run_session as a starter — done below.
         let policy_session_id = policy.session_id.clone();
-        let session = crate::session::run_session_with_id(
+        let session = run_session_optionally_gated(
             &driver,
             &dispatcher,
-            &policy,
+            policy,
+            manifest_policy.clone(),
             &parsed.goal,
             &system,
             parsed.archetype.clone(),
             policy_session_id,
+            session_config,
         )
         .await;
         // Defensive cleanup: if the loop exited with a pending
@@ -988,6 +1481,14 @@ async fn handle_session_run(
         drop_pending(&pending_approvals, &session.id);
         session
     };
+
+    // DG-33 follow-up — auto-record the session into the agent's
+    // memory log so the next invocation can recall prior tool
+    // calls, errors, and compactions without the planner having to
+    // ask. Derived from the completed `AgentSession`; non-fatal
+    // failures are logged so a memory-layer hiccup never blocks the
+    // session result.
+    record_session_memory(&ctx, &session).await;
 
     // Persist before returning so a crash mid-call still leaves a
     // record on disk.
@@ -1372,9 +1873,26 @@ fn session_path(id: &str) -> Option<std::path::PathBuf> {
 async fn system_prompt_with_skills(
     ctx: &KernelPluginContext,
     goal: &str,
+    agent_id: Option<&str>,
 ) -> String {
     let mut prompt = String::from(DEFAULT_SYSTEM_PROMPT);
     append_mcp_hint(ctx, &mut prompt).await;
+
+    // DG-33 follow-up — prompt-time memory recall. The auto-record
+    // path (commit b6c0d09d) appends every completed session's tool
+    // calls / errors / compactions to `<forge>/.forge/agents/<slug>/
+    // history.jsonl`; here we read the agent's slice of that log,
+    // render the most recall-worthy entries through
+    // `crate::memory::format_memory_preamble`, and splice the
+    // preamble between the baseline + skills sections. Missing log
+    // or kernel-context errors are silent: the planner still works
+    // without the memory hint.
+    if let Some(slug) = agent_id.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(memory_preamble) = compose_memory_preamble(ctx, slug).await {
+            prompt.push_str("\n\n");
+            prompt.push_str(&memory_preamble);
+        }
+    }
 
     let response = ctx
         .ipc_call(
@@ -1658,6 +2176,34 @@ impl ToolDispatcher for KernelToolBridge {
     }
 }
 
+// ── BL-121 — search_transcripts ─────────────────────────────────────────────
+
+/// Synchronous handler — the FTS5 index is in-process so no kernel
+/// IPC is needed. Returns an empty hit set with a clear error
+/// message when the global store hasn't been initialised yet
+/// (forge without `transcript_search::initialize` having run, or a
+/// rebuild failure at boot).
+fn handle_search_transcripts(
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::transcript_search::SearchArgs =
+        parse(args, "search_transcripts")?;
+    let Some(store) = crate::transcript_search::global() else {
+        return Ok(serde_json::json!({
+            "hits": [],
+            "available": false,
+            "reason": "transcript-search index not initialised; boot the agent plugin against a forge",
+        }));
+    };
+    let hits = store
+        .search(&parsed)
+        .map_err(|e| exec_err(format!("search_transcripts: {e}")))?;
+    Ok(serde_json::json!({
+        "hits": hits,
+        "available": true,
+    }))
+}
+
 // ── Error / serde plumbing ──────────────────────────────────────────────────
 
 fn exec_err(reason: String) -> PluginError {
@@ -1751,6 +2297,32 @@ mod tests {
         });
         let parsed: DelegateArgs = serde_json::from_value(args).expect("decode");
         assert!(parsed.auto_approve);
+    }
+
+    // ── DG-36 follow-up — slug validation ──────────────────────────────────
+
+    #[test]
+    fn is_safe_archetype_slug_accepts_typical_slugs() {
+        for s in ["rust-reviewer", "auditor_v2", "code_review_2", "abc"] {
+            assert!(is_safe_archetype_slug(s), "{s} should be safe");
+        }
+    }
+
+    #[test]
+    fn is_safe_archetype_slug_rejects_path_shaped_slugs() {
+        for s in [
+            "",
+            "../etc/passwd",
+            "..",
+            "foo/bar",
+            "foo\\bar",
+            ".hidden",
+            ".",
+            "..pwn",
+            "ok/..",
+        ] {
+            assert!(!is_safe_archetype_slug(s), "{s} should be rejected");
+        }
     }
 
     /// DG-37 — the agent tool registry lists `delegate_to_agent`

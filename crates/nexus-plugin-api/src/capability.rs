@@ -65,6 +65,15 @@ pub enum Capability {
     /// so a caller can opt into local writes without granting MCP
     /// reach. Per ADR 0022 Phase 2.
     AiToolsMcp,
+    /// Record audio via the host microphone (BL-117). HIGH risk: a
+    /// hostile plugin could exfiltrate ambient room audio.
+    /// Required to invoke `com.nexus.audio::transcribe`.
+    AudioRecord,
+    /// Play audio through the host speakers (BL-117). Low risk —
+    /// the user notices a stray TTS clip more readily than they
+    /// notice a stray microphone capture. Required to invoke
+    /// `com.nexus.audio::synthesize`.
+    AudioSynthesize,
 }
 
 /// Error parsing a capability string.
@@ -102,6 +111,8 @@ impl Capability {
         Capability::AiActivityWrite,
         Capability::AiToolsWrite,
         Capability::AiToolsMcp,
+        Capability::AudioRecord,
+        Capability::AudioSynthesize,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -117,6 +128,7 @@ impl Capability {
                 | Capability::ProcessSpawn
                 | Capability::IpcCall
                 | Capability::AiConfigWrite
+                | Capability::AudioRecord
         )
     }
 
@@ -146,6 +158,8 @@ impl Capability {
             Capability::AiActivityWrite  => "ai.activity.write",
             Capability::AiToolsWrite     => "ai.tools.write",
             Capability::AiToolsMcp       => "ai.tools.mcp",
+            Capability::AudioRecord      => "audio.record",
+            Capability::AudioSynthesize  => "audio.synthesize",
         }
     }
 
@@ -179,6 +193,8 @@ impl Capability {
             "ai.activity.write"  => Ok(Capability::AiActivityWrite),
             "ai.tools.write"     => Ok(Capability::AiToolsWrite),
             "ai.tools.mcp"       => Ok(Capability::AiToolsMcp),
+            "audio.record"       => Ok(Capability::AudioRecord),
+            "audio.synthesize"   => Ok(Capability::AudioSynthesize),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -281,8 +297,9 @@ mod tests {
 
     #[test]
     fn all_slice_covers_all_discriminants() {
-        // 14 base + 6 ai.* (ADR 0022 Phase 1) + 2 ai.tools.* (Phase 2).
-        assert_eq!(Capability::ALL.len(), 22);
+        // 14 base + 6 ai.* (ADR 0022 Phase 1) + 2 ai.tools.* (Phase 2)
+        // + 2 audio.* (BL-117).
+        assert_eq!(Capability::ALL.len(), 24);
     }
 
     #[test]

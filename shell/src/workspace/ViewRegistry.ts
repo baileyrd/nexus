@@ -95,6 +95,30 @@ export const viewRegistry = {
   getCreator: (type: string) => useViewStore.getState().getCreator(type),
 
   getTypeForExt: (ext: string) => useViewStore.getState().getTypeForExt(ext),
+
+  /**
+   * BL-067 Phase 0 — list every registered view type. The View
+   * Builder's "Add panel" palette consumes this to populate its
+   * picker. The actual creators aren't surfaced (they're not
+   * serialisable + the builder UI doesn't invoke them directly).
+   */
+  registeredTypes(): string[] {
+    return [...useViewStore.getState().creators.keys()].sort()
+  },
+
+  /**
+   * BL-067 Phase 0 — list every `extension → viewType` binding so
+   * the builder can surface "files of type .md open as the editor
+   * view" affordances.
+   */
+  registeredExtensions(): Array<{ extension: string; viewType: string }> {
+    const out: Array<{ extension: string; viewType: string }> = []
+    for (const [ext, type] of useViewStore.getState().extensions) {
+      out.push({ extension: ext, viewType: type })
+    }
+    out.sort((a, b) => a.extension.localeCompare(b.extension))
+    return out
+  },
 }
 
 // Built-in `empty` view — legal persisted state per leaf-migration-plan §Phase 1.

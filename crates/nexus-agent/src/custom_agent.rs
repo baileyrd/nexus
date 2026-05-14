@@ -155,6 +155,183 @@ pub struct ToolsSection {
     pub denied: Vec<String>,
 }
 
+/// DG-36 follow-up — runtime check derived from a manifest's
+/// `[tools]` section. Built once per session and consulted before
+/// each tool dispatch (see `ToolPolicyDispatcher` in
+/// `crate::core_plugin`).
+///
+/// **Decision rules** (in order):
+/// 1. If the tool name is in `denied` → reject.
+/// 2. If `allowed` is non-empty and the tool name is NOT in `allowed` → reject.
+/// 3. Otherwise accept.
+///
+/// Empty `allowed` means "no allow-list filter" (every tool is fair
+/// game subject only to the deny list). This matches the spec
+/// comment on [`ToolsSection::allowed`].
+#[derive(Debug, Clone, Default)]
+pub struct ManifestToolPolicy {
+    allowed: std::collections::HashSet<String>,
+    denied: std::collections::HashSet<String>,
+    /// Slug of the contributing manifest — used to build a clear
+    /// rejection message ("denied by `<slug>`'s [tools] manifest")
+    /// without forcing the caller to thread the slug separately.
+    slug: String,
+}
+
+impl ManifestToolPolicy {
+    /// Build a policy from a parsed [`CustomAgentManifest`]. Cheap —
+    /// just clones the two lists into `HashSet`s and copies the slug.
+    #[must_use]
+    pub fn from_manifest(manifest: &CustomAgentManifest) -> Self {
+        Self {
+            allowed: manifest.tools.allowed.iter().cloned().collect(),
+            denied: manifest.tools.denied.iter().cloned().collect(),
+            slug: manifest.slug.clone(),
+        }
+    }
+
+    /// `Ok(())` when `tool_name` is permitted; `Err(reason)` otherwise.
+    /// The error string is the message the session loop surfaces in
+    /// the rejected `ToolCallRecord` so the model sees *why* its call
+    /// failed and can adjust.
+    ///
+    /// # Errors
+    /// Returns a human-readable rejection string keyed by the
+    /// contributing slug so a transcript review can trace the policy
+    /// origin back to the manifest.
+    pub fn check(&self, tool_name: &str) -> Result<(), String> {
+        if self.denied.contains(tool_name) {
+            return Err(format!(
+                "tool '{tool_name}' denied by '{slug}' [tools].denied",
+                slug = self.slug,
+            ));
+        }
+        if !self.allowed.is_empty() && !self.allowed.contains(tool_name) {
+            return Err(format!(
+                "tool '{tool_name}' not in '{slug}' [tools].allowed list",
+                slug = self.slug,
+            ));
+        }
+        Ok(())
+    }
+
+    /// `true` when both lists are empty — the policy is a no-op and
+    /// the caller can skip wrapping the dispatcher altogether. Tiny
+    /// optimisation; mainly here so the wrap site has a clear "skip
+    /// the indirection" branch.
+    #[must_use]
+    pub fn is_noop(&self) -> bool {
+        self.allowed.is_empty() && self.denied.is_empty()
+    }
+}
+
+/// DG-36 follow-up — `SessionPolicy` decorator that filters proposed
+/// tool calls against a custom agent's manifest `[tools]` policy
+/// *before* delegating to the inner policy (the existing
+/// `AutoApproveAll` / `BusBridgePolicy` / etc.).
+///
+/// **Why decorate the policy rather than the dispatcher.** The
+/// session loop already supports per-call denials through
+/// `RoundDecision::Partial(Vec<RoundDecisionEntry>)`; a denied call
+/// feeds back as an `is_error: true` tool-result turn so the model
+/// can recover. Routing manifest denials through the same surface
+/// keeps the failure semantics consistent and avoids growing a
+/// parallel "denied at dispatch time" path.
+///
+/// **Merge rules** (when the manifest policy contributes denials):
+/// - If the manifest denies every call, return
+///   `RoundDecision::Partial(all-denied)`; we don't ask the inner
+///   policy.
+/// - Otherwise consult the inner policy on the full round:
+///   - `ApproveAll` → emit `Partial` where every approved call rides
+///     through and every manifest-denied call carries the manifest's
+///     reason.
+///   - `Partial(inner_entries)` → manifest denials override
+///     inner approvals on the same `tool_use_id`; otherwise the
+///     inner entry stands.
+///   - `Abort` / `Timeout` → propagated unchanged (the round failed
+///     for a reason orthogonal to manifest filtering).
+///
+/// **Manifest policy of [`ManifestToolPolicy::is_noop`] is a
+/// pass-through** — the decorator delegates straight to the inner
+/// policy. Construct only when at least one of `allowed` / `denied`
+/// is non-empty.
+pub struct ManifestPolicyGate<P> {
+    inner: P,
+    policy: ManifestToolPolicy,
+}
+
+impl<P> ManifestPolicyGate<P> {
+    /// Wrap `inner` with `policy`. The wrapper is itself a
+    /// [`crate::SessionPolicy`].
+    pub fn new(inner: P, policy: ManifestToolPolicy) -> Self {
+        Self { inner, policy }
+    }
+}
+
+#[async_trait::async_trait]
+impl<P> crate::SessionPolicy for ManifestPolicyGate<P>
+where
+    P: crate::SessionPolicy,
+{
+    async fn allow_round(
+        &self,
+        round: &crate::ProposedRound,
+    ) -> crate::RoundDecision {
+        // Manifest denials, indexed by tool_use_id.
+        let manifest_denials: Vec<crate::RoundDecisionEntry> = round
+            .tool_calls
+            .iter()
+            .filter_map(|p| match self.policy.check(&p.name) {
+                Ok(()) => None,
+                Err(reason) => Some(crate::RoundDecisionEntry {
+                    tool_use_id: p.id.clone(),
+                    approve: false,
+                    reason,
+                }),
+            })
+            .collect();
+        if manifest_denials.is_empty() {
+            return self.inner.allow_round(round).await;
+        }
+        if manifest_denials.len() == round.tool_calls.len() {
+            // Every call rejected by the manifest. Skip the inner
+            // policy — there's nothing left for it to approve.
+            return crate::RoundDecision::Partial(manifest_denials);
+        }
+        // Mixed: consult the inner policy, then merge.
+        let denial_ids: std::collections::HashSet<String> = manifest_denials
+            .iter()
+            .map(|e| e.tool_use_id.clone())
+            .collect();
+        match self.inner.allow_round(round).await {
+            crate::RoundDecision::ApproveAll => {
+                let mut entries = manifest_denials;
+                for p in &round.tool_calls {
+                    if !denial_ids.contains(&p.id) {
+                        entries.push(crate::RoundDecisionEntry {
+                            tool_use_id: p.id.clone(),
+                            approve: true,
+                            reason: String::new(),
+                        });
+                    }
+                }
+                crate::RoundDecision::Partial(entries)
+            }
+            crate::RoundDecision::Partial(inner_entries) => {
+                let mut entries = manifest_denials;
+                for entry in inner_entries {
+                    if !denial_ids.contains(&entry.tool_use_id) {
+                        entries.push(entry);
+                    }
+                }
+                crate::RoundDecision::Partial(entries)
+            }
+            other => other,
+        }
+    }
+}
+
 /// `[memory]` — storage policy. Consumed by DG-33's memory layer;
 /// the parser captures the values without acting on them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -692,5 +869,233 @@ path = "prompt.md"
         let prompt = resolve_system_prompt(&m, &tmp).unwrap();
         assert_eq!(prompt, "loaded from file");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── DG-36 follow-up — ManifestToolPolicy + ManifestPolicyGate ──────────────
+
+    fn manifest_with_tools(allowed: &[&str], denied: &[&str]) -> CustomAgentManifest {
+        let body = format!(
+            r#"
+[agent]
+name = "Foo"
+
+[tools]
+allowed = [{allowed}]
+denied = [{denied}]
+
+[system_prompt]
+text = "p"
+"#,
+            allowed = allowed
+                .iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", "),
+            denied = denied
+                .iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        parse_str(&body, "foo", Path::new("/anywhere/agent.toml")).unwrap()
+    }
+
+    #[test]
+    fn policy_empty_lists_is_noop() {
+        let m = manifest_with_tools(&[], &[]);
+        let p = ManifestToolPolicy::from_manifest(&m);
+        assert!(p.is_noop());
+        assert!(p.check("read_file").is_ok());
+    }
+
+    #[test]
+    fn policy_denied_takes_precedence_over_allowed() {
+        let m = manifest_with_tools(&["read_file", "write_file"], &["write_file"]);
+        let p = ManifestToolPolicy::from_manifest(&m);
+        assert!(!p.is_noop());
+        assert!(p.check("read_file").is_ok());
+        let err = p.check("write_file").unwrap_err();
+        assert!(err.contains("denied"));
+        assert!(err.contains("foo"));
+        assert!(err.contains("write_file"));
+    }
+
+    #[test]
+    fn policy_allow_list_narrows_when_non_empty() {
+        let m = manifest_with_tools(&["read_file"], &[]);
+        let p = ManifestToolPolicy::from_manifest(&m);
+        assert!(p.check("read_file").is_ok());
+        let err = p.check("write_file").unwrap_err();
+        assert!(err.contains("not in"));
+        assert!(err.contains("[tools].allowed"));
+    }
+
+    #[test]
+    fn policy_empty_allow_means_no_filter() {
+        let m = manifest_with_tools(&[], &["write_file"]);
+        let p = ManifestToolPolicy::from_manifest(&m);
+        // Read passes (no allow filter); write denied.
+        assert!(p.check("read_file").is_ok());
+        assert!(p.check("write_file").is_err());
+    }
+
+    // ── ManifestPolicyGate decision matrix ─────────────────────────────────────
+
+    use crate::session::{ProposedRound, RoundDecision, RoundDecisionEntry};
+    use crate::SessionPolicy;
+    use crate::ToolCall;
+    use async_trait::async_trait;
+
+    fn proposed(id: &str, name: &str) -> crate::llm::ProposedToolCall {
+        crate::llm::ProposedToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            tool_call: ToolCall {
+                target_plugin_id: "com.nexus.storage".to_string(),
+                command_id: name.to_string(),
+                args: serde_json::json!({}),
+            },
+        }
+    }
+
+    fn round_of(calls: Vec<(&str, &str)>) -> ProposedRound {
+        ProposedRound {
+            round: 1,
+            text: String::new(),
+            tool_calls: calls.into_iter().map(|(id, n)| proposed(id, n)).collect(),
+        }
+    }
+
+    struct ApproveAllInner;
+    #[async_trait]
+    impl SessionPolicy for ApproveAllInner {
+        async fn allow_round(&self, _round: &ProposedRound) -> RoundDecision {
+            RoundDecision::ApproveAll
+        }
+    }
+
+    struct AbortInner;
+    #[async_trait]
+    impl SessionPolicy for AbortInner {
+        async fn allow_round(&self, _round: &ProposedRound) -> RoundDecision {
+            RoundDecision::Abort("inner abort".into())
+        }
+    }
+
+    struct PartialDenyInner {
+        deny_id: String,
+    }
+    #[async_trait]
+    impl SessionPolicy for PartialDenyInner {
+        async fn allow_round(&self, round: &ProposedRound) -> RoundDecision {
+            RoundDecision::Partial(
+                round
+                    .tool_calls
+                    .iter()
+                    .map(|p| RoundDecisionEntry {
+                        tool_use_id: p.id.clone(),
+                        approve: p.id != self.deny_id,
+                        reason: if p.id == self.deny_id {
+                            "inner reason".to_string()
+                        } else {
+                            String::new()
+                        },
+                    })
+                    .collect(),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn gate_passes_through_when_no_manifest_denials() {
+        let m = manifest_with_tools(&[], &["forbidden"]);
+        let policy = ManifestToolPolicy::from_manifest(&m);
+        let gate = ManifestPolicyGate::new(ApproveAllInner, policy);
+        let r = round_of(vec![("a", "read_file"), ("b", "write_file")]);
+        match gate.allow_round(&r).await {
+            RoundDecision::ApproveAll => {}
+            other => panic!("expected ApproveAll passthrough, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn gate_returns_full_partial_when_every_call_denied() {
+        let m = manifest_with_tools(&[], &["read_file", "write_file"]);
+        let policy = ManifestToolPolicy::from_manifest(&m);
+        let gate = ManifestPolicyGate::new(ApproveAllInner, policy);
+        let r = round_of(vec![("a", "read_file"), ("b", "write_file")]);
+        match gate.allow_round(&r).await {
+            RoundDecision::Partial(entries) => {
+                assert_eq!(entries.len(), 2);
+                assert!(entries.iter().all(|e| !e.approve));
+                assert!(entries.iter().all(|e| e.reason.contains("denied")));
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn gate_layers_manifest_denials_on_top_of_inner_approve_all() {
+        let m = manifest_with_tools(&[], &["write_file"]);
+        let policy = ManifestToolPolicy::from_manifest(&m);
+        let gate = ManifestPolicyGate::new(ApproveAllInner, policy);
+        let r = round_of(vec![
+            ("a", "read_file"),
+            ("b", "write_file"),
+            ("c", "list_backlinks"),
+        ]);
+        match gate.allow_round(&r).await {
+            RoundDecision::Partial(entries) => {
+                let by_id: std::collections::HashMap<_, _> =
+                    entries.iter().map(|e| (e.tool_use_id.clone(), e)).collect();
+                assert!(!by_id["b"].approve, "write_file should be denied");
+                assert!(by_id["a"].approve, "read_file should pass");
+                assert!(by_id["c"].approve, "list_backlinks should pass");
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn gate_manifest_overrides_inner_partial_approval() {
+        // Inner approves everything but call "b"; manifest denies
+        // call "a". Expected: a denied by manifest reason; b denied
+        // by inner reason; c approved.
+        let m = manifest_with_tools(&[], &["read_file"]);
+        let policy = ManifestToolPolicy::from_manifest(&m);
+        let inner = PartialDenyInner {
+            deny_id: "b".into(),
+        };
+        let gate = ManifestPolicyGate::new(inner, policy);
+        let r = round_of(vec![
+            ("a", "read_file"),
+            ("b", "write_file"),
+            ("c", "list_backlinks"),
+        ]);
+        match gate.allow_round(&r).await {
+            RoundDecision::Partial(entries) => {
+                let by_id: std::collections::HashMap<_, _> =
+                    entries.iter().map(|e| (e.tool_use_id.clone(), e)).collect();
+                assert!(!by_id["a"].approve);
+                assert!(by_id["a"].reason.contains("denied"));
+                assert!(!by_id["b"].approve);
+                assert_eq!(by_id["b"].reason, "inner reason");
+                assert!(by_id["c"].approve);
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn gate_propagates_inner_abort_when_no_manifest_denial() {
+        // No manifest denials → delegate fully to inner, which aborts.
+        let m = manifest_with_tools(&[], &["nothing-matches"]);
+        let policy = ManifestToolPolicy::from_manifest(&m);
+        let gate = ManifestPolicyGate::new(AbortInner, policy);
+        let r = round_of(vec![("a", "read_file")]);
+        match gate.allow_round(&r).await {
+            RoundDecision::Abort(reason) => assert_eq!(reason, "inner abort"),
+            other => panic!("expected Abort, got {other:?}"),
+        }
     }
 }

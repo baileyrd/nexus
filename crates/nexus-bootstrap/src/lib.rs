@@ -42,6 +42,12 @@ pub mod crdt_publisher;
 pub mod database;
 pub mod storage;
 pub mod terminal;
+/// BL-113 / ADR 0027 — manifest-side `ContributedAdapter` → host-side
+/// `{Lsp,Mcp}ServerSpec` converters. Phase 2a/3a primitive; the
+/// bootstrap-side wiring that calls these converters and feeds the
+/// result through `merge_contributed` lands in Phase 2b/3b once the
+/// plugin-lifecycle callback shape is settled by Phase 1.
+pub mod protocol_host_specs;
 
 /// Render a markdown note to a standalone HTML string.
 ///
@@ -240,6 +246,10 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         ("semantic_search", Capability::AiChat),
         ("enrich_file", Capability::AiChat),
         ("propose_tool_calls", Capability::AiChat),
+        // BL-116 — generate_docs dispatches a single-turn chat
+        // completion, gated under the same ai.chat capability the
+        // rest of the chat surface uses.
+        ("generate_docs", Capability::AiChat),
         ("index_file", Capability::AiIndex),
         ("index_trigger", Capability::AiIndex),
         ("session_load", Capability::AiSessionRead),
@@ -294,6 +304,22 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         "com.nexus.agent",
         "round_decide",
         vec![Capability::AiChat],
+    );
+
+    // BL-117 — audio subsystem caps. Microphone capture (transcribe)
+    // is privacy-sensitive; speaker output (synthesize) is annoying
+    // but not destructive. `status` is read-only and ungated so a
+    // settings panel can probe the active backend pair without a cap
+    // negotiation.
+    shared.add_cap_requirement(
+        "com.nexus.audio",
+        "transcribe",
+        vec![Capability::AudioRecord],
+    );
+    shared.add_cap_requirement(
+        "com.nexus.audio",
+        "synthesize",
+        vec![Capability::AudioSynthesize],
     );
 
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
@@ -390,6 +416,25 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         .wire_context("com.nexus.workflow", Arc::new(workflow_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire workflow plugin context: {e}"))?;
 
+    // BL-117 — audio subsystem's provider-routed backend issues
+    // `ipc_call("com.nexus.ai", "resolve_credentials", …)` at
+    // dispatch time, and reqwest-talks to the AI provider's audio
+    // endpoint. Capabilities are scoped to those two surfaces; the
+    // backend has no other direct kernel reach.
+    let audio_ctx = KernelPluginContext::new(
+        "com.nexus.audio",
+        env!("CARGO_PKG_VERSION"),
+        audio_capabilities(),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.audio")?;
+    shared
+        .wire_context("com.nexus.audio", Arc::new(audio_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire audio plugin context: {e}"))?;
+
     let context = KernelPluginContext::new(
         invoker_id,
         env!("CARGO_PKG_VERSION"),
@@ -476,6 +521,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
+    use nexus_audio::AudioCorePlugin;
     use nexus_comments::core_plugin::CommentsCorePlugin;
     use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
     use nexus_formats::FormatsCorePlugin;
@@ -653,6 +699,10 @@ fn register_core_plugins(
                     (
                         "settings_write",
                         nexus_storage::core_plugin::HANDLER_SETTINGS_WRITE,
+                    ),
+                    (
+                        "query_symbol",
+                        nexus_storage::core_plugin::HANDLER_QUERY_SYMBOL,
                     ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
@@ -1043,6 +1093,23 @@ fn register_core_plugins(
                         "propose_tool_calls",
                         nexus_ai::core_plugin::HANDLER_PROPOSE_TOOL_CALLS,
                     ),
+                    // BL-117 — sibling subsystems (nexus-audio) ask
+                    // here for the active chat provider's credentials
+                    // so the user doesn't need to configure a second
+                    // API key for audio.
+                    (
+                        "resolve_credentials",
+                        nexus_ai::core_plugin::HANDLER_RESOLVE_CREDENTIALS,
+                    ),
+                    // BL-116 — symbol-aware doc generator. Resolves a
+                    // symbol from the BL-114 index, reads its source
+                    // range, packs in parent + sibling 1-hop context
+                    // (call-edges land in a follow-up BL), prompts
+                    // the configured AI provider for a docblock.
+                    (
+                        "generate_docs",
+                        nexus_ai::core_plugin::HANDLER_GENERATE_DOCS,
+                    ),
                 ]),
             ),
             forge_root,
@@ -1217,6 +1284,33 @@ fn register_core_plugins(
         )
         .or_lifecycle_skip(event_bus, "com.nexus.linkpreview")?;
 
+    // Audio — BL-117 STT + TTS subsystem. on_init loads the
+    // `<forge>/.forge/config.toml::[audio]` block and builds the
+    // configured backend pair (local / provider / platform). The
+    // shipped build stubs `local` + `platform` so a forge without
+    // an OPENAI_API_KEY surfaces a clear "backend not enabled"
+    // error from the first dispatch rather than a panic.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.audio",
+                "Audio",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: false,
+                    on_stop: false,
+                },
+                &with_v1_aliases(&[
+                    ("transcribe", nexus_audio::core_plugin::HANDLER_TRANSCRIBE),
+                    ("synthesize", nexus_audio::core_plugin::HANDLER_SYNTHESIZE),
+                    ("status", nexus_audio::core_plugin::HANDLER_STATUS),
+                ]),
+            ),
+            forge_root,
+            Box::new(AudioCorePlugin::new(forge_root.to_path_buf())),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.audio")?;
+
     // Comments — BL-050. Side-margin comment threads anchored to
     // stable block ids (ADR 0017). Storage in
     // `<forge>/.forge/comments/<relpath>.json`. Stateless: every
@@ -1269,7 +1363,13 @@ fn register_core_plugins(
             core_manifest_with_ipc(
                 "com.nexus.agent",
                 "Agent",
-                LifecycleFlags::NONE,
+                // BL-121 — on_init opens the transcript-search FTS
+                // index. on_start / on_stop stay as no-ops.
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: false,
+                    on_stop: false,
+                },
                 &with_v1_aliases(&[
                     ("plan", nexus_agent::HANDLER_PLAN),
                     ("history_list", nexus_agent::HANDLER_HISTORY_LIST),
@@ -1294,10 +1394,16 @@ fn register_core_plugins(
                     ("memory_export", nexus_agent::HANDLER_MEMORY_EXPORT),
                     // DG-37 (PRD-15 §10) — agent-to-agent delegation.
                     ("delegate", nexus_agent::HANDLER_DELEGATE),
+                    // BL-121 — FTS5-backed transcript search over
+                    // `.forge/agents/*/history.jsonl`.
+                    (
+                        "search_transcripts",
+                        nexus_agent::core_plugin::HANDLER_SEARCH_TRANSCRIPTS,
+                    ),
                 ]),
             ),
             forge_root,
-            Box::new(AgentCorePlugin::new()),
+            Box::new(AgentCorePlugin::new_with_forge(forge_root.to_path_buf())),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.agent")?;
 
@@ -1853,6 +1959,32 @@ pub fn agent_capabilities() -> CapabilitySet {
 /// The cron-driven digest scheduler runs on top of the same context,
 /// so this scope applies there too. Same caveat about the transitive
 /// IpcCall-laundering surface as for `agent_capabilities`.
+/// Capabilities granted to the `com.nexus.audio` plugin context
+/// (BL-117). The provider-routed backend uses two kernel surfaces:
+///
+/// - `IpcCall` to reach `com.nexus.ai::resolve_credentials` for the
+///   active chat provider's key.
+/// - `NetHttp` for outbound HTTPS to the AI provider's audio
+///   endpoint.
+///
+/// The audio plugin does NOT request `AudioRecord` / `AudioSynthesize`
+/// — those are *caller-facing* gates declared on the handler manifest
+/// (`add_cap_requirement` above), enforced when something *outside*
+/// the audio plugin calls `com.nexus.audio::transcribe` /
+/// `synthesize`. The audio plugin's own context never needs to call
+/// those handlers on itself.
+#[must_use]
+pub fn audio_capabilities() -> CapabilitySet {
+    [Capability::IpcCall, Capability::NetHttp]
+        .into_iter()
+        .collect()
+}
+
+/// Capabilities granted to the `com.nexus.workflow` `KernelPluginContext`
+/// at runtime wiring time (issue #73). Scoped to `IpcCall` + `AiChat`
+/// only — every step type (ipc_call / ai_prompt / digest reads / …)
+/// routes through `ctx.ipc_call(...)`, gated by the target plugin's
+/// own capability checks.
 #[must_use]
 pub fn workflow_capabilities() -> CapabilitySet {
     // ADR 0022: workflow `ai_prompt` steps reach `stream_chat` via

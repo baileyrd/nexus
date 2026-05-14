@@ -66,8 +66,9 @@ pub use core_plugin::{
 pub use custom_agent::{
     load_from_path as load_custom_agent, parse_str as parse_custom_agent_str,
     resolve_system_prompt as resolve_custom_system_prompt, scan_forge as scan_custom_agents,
-    AgentSection, CustomAgentError, CustomAgentManifest, ExecutionSection, MemorySection,
-    SystemPromptSection, ToolsSection, AGENTS_DIR, MANIFEST_FILE_NAME,
+    AgentSection, CustomAgentError, CustomAgentManifest, ExecutionSection, ManifestPolicyGate,
+    ManifestToolPolicy, MemorySection, SystemPromptSection, ToolsSection, AGENTS_DIR,
+    MANIFEST_FILE_NAME,
 };
 pub use tool_registry::{
     default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,
@@ -75,10 +76,19 @@ pub use tool_registry::{
 };
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use session::{
-    run_session, run_session_with_id, AgentSession, AutoApproveAll, ProposedRound,
-    RoundDecision, RoundDecisionEntry, RoundRecord, SessionOutcome, SessionPolicy,
-    ToolCallRecord, MAX_AGENT_ROUNDS,
+    run_session, run_session_with_config, run_session_with_id, AgentSession, AutoApproveAll,
+    ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionConfig,
+    SessionOutcome, SessionPolicy, ToolCallRecord, DEFAULT_MAX_ITERATIONS,
+    DEFAULT_MAX_TOOL_CALLS_PER_ITERATION, LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
 };
+
+/// BL-121 — FTS5-backed search over agent `history.jsonl` logs.
+pub mod transcript_search;
+
+/// BL-120 — context compression for the session loop. Defines the
+/// [`compression::Compressor`] trait plus the default LLM-backed,
+/// deterministic, and no-op implementations.
+pub mod compression;
 
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that

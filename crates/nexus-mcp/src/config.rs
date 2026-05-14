@@ -228,30 +228,113 @@ impl McpHostConfig {
 
     fn validate(&self, source: &str) -> Result<(), McpConfigError> {
         for (name, spec) in &self.servers {
-            match spec.transport {
-                McpTransport::Stdio => {
-                    if spec.command.trim().is_empty() {
-                        return Err(McpConfigError::Invalid {
-                            path: source.to_string(),
-                            reason: format!("server '{name}' has empty command"),
-                        });
-                    }
+            Self::validate_spec(name, spec).map_err(|reason| McpConfigError::Invalid {
+                path: source.to_string(),
+                reason,
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Per-server semantic check: stdio entries need a non-empty `command`;
+    /// remote (`http` / `websocket`) entries need a non-empty `url`. Returns
+    /// a human-readable reason on failure so both [`validate`] and
+    /// [`merge_contributed`] can build error messages without duplicating
+    /// the rule set.
+    fn validate_spec(name: &str, spec: &McpServerSpec) -> Result<(), String> {
+        match spec.transport {
+            McpTransport::Stdio => {
+                if spec.command.trim().is_empty() {
+                    return Err(format!("server '{name}' has empty command"));
                 }
-                McpTransport::Http | McpTransport::Websocket => {
-                    let url = spec.url.as_deref().unwrap_or("").trim();
-                    if url.is_empty() {
-                        return Err(McpConfigError::Invalid {
-                            path: source.to_string(),
-                            reason: format!(
-                                "server '{name}' uses a remote transport but has no `url`"
-                            ),
-                        });
-                    }
+            }
+            McpTransport::Http | McpTransport::Websocket => {
+                let url = spec.url.as_deref().unwrap_or("").trim();
+                if url.is_empty() {
+                    return Err(format!(
+                        "server '{name}' uses a remote transport but has no `url`"
+                    ));
                 }
             }
         }
         Ok(())
     }
+
+    /// BL-113 / ADR 0027 — merge plugin-contributed MCP servers into the
+    /// in-memory map. Each input triple is `(name, spec, plugin_id)`
+    /// where `plugin_id` is the contributing plugin's reverse-DNS id.
+    ///
+    /// **TOML wins** on name collision — matches the LSP host's
+    /// `merge_contributed` precedence and ADR 0027 §Migration's
+    /// legacy-fallback stance. The returned [`Vec<McpMergeSkip>`]
+    /// preserves input order; empty means every contribution was
+    /// accepted.
+    ///
+    /// Contributed servers must pass the same per-entry validation as
+    /// TOML-loaded ones (non-empty `command` for stdio, non-empty `url`
+    /// for remote). Invalid contributions are reported as
+    /// [`McpMergeSkipReason::Invalid`] with the validation message.
+    pub fn merge_contributed(
+        &mut self,
+        contributions: Vec<(String, McpServerSpec, String)>,
+    ) -> Vec<McpMergeSkip> {
+        let mut skipped = Vec::new();
+        for (name, spec, plugin_id) in contributions {
+            if name.trim().is_empty() {
+                skipped.push(McpMergeSkip {
+                    name,
+                    plugin_id,
+                    reason: McpMergeSkipReason::InvalidName,
+                });
+                continue;
+            }
+            if let Err(reason) = Self::validate_spec(&name, &spec) {
+                skipped.push(McpMergeSkip {
+                    name,
+                    plugin_id,
+                    reason: McpMergeSkipReason::Invalid(reason),
+                });
+                continue;
+            }
+            if self.servers.contains_key(&name) {
+                skipped.push(McpMergeSkip {
+                    name,
+                    plugin_id,
+                    reason: McpMergeSkipReason::TomlOverride,
+                });
+                continue;
+            }
+            self.servers.insert(name, spec);
+        }
+        skipped
+    }
+}
+
+/// One contributed MCP server that did not make it into the merged
+/// config. Same shape as `LspHostConfig`'s `MergeSkip` but the reason
+/// variant includes a free-form `Invalid(String)` because MCP's
+/// validation rules vary by transport.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpMergeSkip {
+    /// The proposed server name (may be empty when
+    /// [`McpMergeSkipReason::InvalidName`]).
+    pub name: String,
+    /// Reverse-DNS id of the contributing plugin.
+    pub plugin_id: String,
+    /// Reason the contribution was not accepted.
+    pub reason: McpMergeSkipReason,
+}
+
+/// Skip reasons for [`McpHostConfig::merge_contributed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpMergeSkipReason {
+    /// A TOML-loaded entry already owns this name.
+    TomlOverride,
+    /// `name` was empty / whitespace-only.
+    InvalidName,
+    /// Per-spec validation failed (empty stdio command, missing remote URL).
+    /// Inner string is the human-readable reason.
+    Invalid(String),
 }
 
 #[cfg(test)]
@@ -406,5 +489,107 @@ mod tests {
             cfg.servers.get("legacy").unwrap().transport,
             McpTransport::Websocket
         );
+    }
+
+    // ── BL-113 / ADR 0027 — merge_contributed ──────────────────────────────────
+
+    fn stdio_spec(command: &str) -> McpServerSpec {
+        McpServerSpec {
+            transport: McpTransport::Stdio,
+            command: command.to_string(),
+            ..McpServerSpec::default()
+        }
+    }
+
+    fn http_spec(url: &str) -> McpServerSpec {
+        McpServerSpec {
+            transport: McpTransport::Http,
+            url: Some(url.to_string()),
+            ..McpServerSpec::default()
+        }
+    }
+
+    #[test]
+    fn merge_contributed_inserts_new_entries() {
+        let mut cfg = McpHostConfig::default();
+        let skipped = cfg.merge_contributed(vec![
+            ("fs".into(), stdio_spec("filesystem-mcp"), "community.fs".into()),
+            (
+                "remote".into(),
+                http_spec("https://example.com/mcp"),
+                "community.remote".into(),
+            ),
+        ]);
+        assert!(skipped.is_empty());
+        assert_eq!(cfg.servers.len(), 2);
+        assert!(cfg.servers.contains_key("fs"));
+        assert!(cfg.servers.contains_key("remote"));
+    }
+
+    #[test]
+    fn merge_contributed_toml_wins_on_collision() {
+        let mut cfg = McpHostConfig::from_str(
+            r#"
+            [servers.fs]
+            command = "fs-from-toml"
+        "#,
+            "inline",
+        )
+        .unwrap();
+        let skipped = cfg.merge_contributed(vec![(
+            "fs".into(),
+            stdio_spec("fs-from-plugin"),
+            "community.fs".into(),
+        )]);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].name, "fs");
+        assert_eq!(skipped[0].plugin_id, "community.fs");
+        assert_eq!(skipped[0].reason, McpMergeSkipReason::TomlOverride);
+        assert_eq!(cfg.servers["fs"].command, "fs-from-toml");
+    }
+
+    #[test]
+    fn merge_contributed_rejects_invalid_specs() {
+        let mut cfg = McpHostConfig::default();
+        let skipped = cfg.merge_contributed(vec![
+            ("".into(), stdio_spec("x"), "p1".into()),
+            ("empty-cmd".into(), stdio_spec(""), "p2".into()),
+            (
+                "remote-no-url".into(),
+                McpServerSpec {
+                    transport: McpTransport::Http,
+                    url: None,
+                    ..McpServerSpec::default()
+                },
+                "p3".into(),
+            ),
+        ]);
+        assert_eq!(skipped.len(), 3);
+        assert_eq!(skipped[0].reason, McpMergeSkipReason::InvalidName);
+        assert!(matches!(skipped[1].reason, McpMergeSkipReason::Invalid(ref r) if r.contains("empty command")));
+        assert!(matches!(skipped[2].reason, McpMergeSkipReason::Invalid(ref r) if r.contains("no `url`")));
+        assert!(cfg.servers.is_empty());
+    }
+
+    #[test]
+    fn merge_contributed_preserves_input_order() {
+        let mut cfg = McpHostConfig::from_str(
+            r#"
+            [servers.taken]
+            command = "from-toml"
+        "#,
+            "inline",
+        )
+        .unwrap();
+        let skipped = cfg.merge_contributed(vec![
+            ("taken".into(), stdio_spec("p1"), "plug1".into()),
+            ("new1".into(), stdio_spec("ok"), "plug2".into()),
+            ("".into(), stdio_spec("oops"), "plug3".into()),
+        ]);
+        assert_eq!(skipped.len(), 2);
+        assert_eq!(skipped[0].plugin_id, "plug1");
+        assert_eq!(skipped[1].plugin_id, "plug3");
+        assert_eq!(cfg.servers.len(), 2);
+        assert!(cfg.servers.contains_key("new1"));
     }
 }

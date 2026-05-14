@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiGenerateDocsReply",
+  "description": "Reply for `com.nexus.ai::generate_docs`.",
+  "type": "object",
+  "properties": {
+    "degraded": {
+      "description": "`true` when the BL-114 index can't supply a full 1-hop call\ngraph; the prompt used parent + sibling symbols as a proxy.\nMirrors BL-115's `degraded` flag — agents can downweight\nconfidence.",
+      "type": "boolean"
+    },
+    "degraded_reason": {
+      "description": "Human-readable note about what's missing.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "docblock": {
+      "description": "Generated docblock — already wrapped in the chosen comment\nsyntax (rustdoc `///` lines, JSDoc block comments, godoc `//`,\nPython `\"\"\"…\"\"\"`). Caller can splice this directly above the\nsymbol's source range.",
+      "type": "string"
+    },
+    "insert_line": {
+      "description": "1-based starting line where the docblock should be inserted\n(the symbol's `line_start`). Caller writes the docblock\nimmediately before this line.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "kind": {
+      "description": "Resolved kind (`\"function\"` / `\"struct\"` / …).",
+      "type": "string"
+    },
+    "language": {
+      "description": "Resolved language label (matches `StorageSymbolRow.language`).",
+      "type": "string"
+    },
+    "name": {
+      "description": "Resolved symbol name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Resolved forge-relative path.",
+      "type": "string"
+    },
+    "symbol_id": {
+      "description": "Resolved symbol's row id, echoed so the caller can apply the\ndocblock without re-resolving.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "docblock",
+    "symbol_id",
+    "language",
+    "kind",
+    "name",
+    "path",
+    "insert_line",
+    "degraded"
+  ]
+}

@@ -31,12 +31,23 @@ pub use loader::{
     SharedPluginLoader,
 };
 pub use manifest::{
-    ActivationConfig, CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig,
-    ManifestCapabilities, PanelSide, PluginDependency, PluginManifest, PluginRuntime,
-    Registrations, SettingsConfig, UiCommandReg, UiPanelReg, UiRibbonItemReg, UiSettingsTabReg,
-    UiStatusItemReg, WasmConfig,
+    AcpProtocolHostReg, ActivationConfig, CliSubcommandReg, DapProtocolHostReg,
+    EventSubscriberReg, IpcCommandReg, LifecycleConfig, LspProtocolHostReg,
+    ManifestCapabilities, McpProtocolHostReg, PanelSide, PluginDependency, PluginManifest,
+    PluginRuntime, ProtocolHostsContribution, Registrations, SettingsConfig, UiCommandReg,
+    UiPanelReg, UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
+
+/// BL-113 / ADR 0027 — aggregate protocol-host adapter contributions
+/// across loaded plugin manifests. Routed through a dedicated module so
+/// host crates (`nexus-lsp`, `nexus-dap`, `nexus-mcp`, future
+/// `nexus-acp`) consume one stable surface independent of the
+/// manifest's parser internals.
+pub mod contributions;
+pub use contributions::{
+    ContributedAdapter, ContributedAdapterSet, collect_contributions,
+};
 pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 
 /// Host function registration + result codes. Re-exported (doc-hidden)

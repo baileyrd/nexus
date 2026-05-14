@@ -178,6 +178,159 @@ pub struct Registrations {
     pub menu_items: Vec<MenuItemReg>,
     /// URI / protocol-handler registrations.
     pub uri_handlers: Vec<UriHandlerReg>,
+    /// Protocol-host adapter contributions (ADR 0027 / BL-113). Plugins
+    /// register adapters for the four core protocol hosts (LSP, DAP,
+    /// MCP, ACP) through this section instead of flat-TOML
+    /// `<forge>/.forge/{lsp,dap,mcp}.toml` configs. Phase 0a parses and
+    /// surfaces the contributions; host-side merging with the legacy
+    /// TOML is wired in Phase 1+ (per-protocol). See
+    /// `docs/adr/0027-protocol-host-contribution-model.md`.
+    pub protocol_hosts: ProtocolHostsContribution,
+}
+
+/// All four protocol-host adapter contribution families (ADR 0027).
+/// Plugins populate any subset via `[[registrations.protocol_hosts.lsp]]`,
+/// `[[registrations.protocol_hosts.dap]]`, `[[registrations.protocol_hosts.mcp]]`,
+/// `[[registrations.protocol_hosts.acp]]` blocks in `manifest.toml`.
+#[derive(Debug, Clone, Default)]
+pub struct ProtocolHostsContribution {
+    /// LSP adapter contributions (rust-analyzer, typescript-language-server, ...).
+    pub lsp: Vec<LspProtocolHostReg>,
+    /// DAP adapter contributions (codelldb, debugpy, js-debug, ...).
+    pub dap: Vec<DapProtocolHostReg>,
+    /// MCP server contributions (filesystem-mcp, git-mcp, ...).
+    pub mcp: Vec<McpProtocolHostReg>,
+    /// ACP agent contributions (future — gated on Hermes Feature 7).
+    pub acp: Vec<AcpProtocolHostReg>,
+}
+
+impl ProtocolHostsContribution {
+    /// `true` when no adapter has been contributed for any of the four
+    /// protocol-host families. Useful for skipping the host-side merge
+    /// path when a plugin has zero contributions.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.lsp.is_empty() && self.dap.is_empty() && self.mcp.is_empty() && self.acp.is_empty()
+    }
+
+    /// Total contributed-adapter count across all four families.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.lsp.len() + self.dap.len() + self.mcp.len() + self.acp.len()
+    }
+}
+
+/// A single LSP adapter contribution. Mirrors `LspServerSpec` in
+/// `nexus-lsp::config` but reaches the host via the contribution loader
+/// rather than `<forge>/.forge/lsp.toml`. The legacy flat-TOML form
+/// keeps working through the Phase 5 deprecation window in ADR 0027.
+#[derive(Debug, Clone)]
+pub struct LspProtocolHostReg {
+    /// Stable adapter identifier. Used by the host's `register_adapter`
+    /// IPC verb as the dedup key and by future `nexus lsp restart <id>`
+    /// CLI affordances.
+    pub id: String,
+    /// Optional human-readable display name. Falls back to `id` when
+    /// the host needs a label and this is `None`.
+    pub display_name: Option<String>,
+    /// Executable to spawn (e.g. `rust-analyzer`).
+    pub command: String,
+    /// Argv tail passed to `command` at spawn time.
+    pub args: Vec<String>,
+    /// File extensions this server should handle, lowercased without
+    /// the leading dot.
+    pub file_types: Vec<String>,
+    /// Project-root marker files (e.g. `Cargo.toml`, `package.json`).
+    pub root_markers: Vec<String>,
+    /// `true` to register the adapter in disabled state so the user can
+    /// enable it through the shell.
+    pub disabled: bool,
+    /// Environment variables to inject into the spawned process.
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Optional shell-side hover-renderer export id — when the
+    /// contributing plugin also ships a `PluginAPI.hoverProviders`
+    /// export of this id, the editor wires it as the hover provider for
+    /// this server's languages.
+    pub hover_renderer: Option<String>,
+}
+
+/// A single DAP adapter contribution. Mirrors the parked
+/// `nexus-dap::config::DapAdapterSpec` shape. Carries the launch-config
+/// JSON-Schema reference + per-language variable renderer hooks that
+/// motivated the contribution-model shift (ADR 0027 §1.1).
+#[derive(Debug, Clone)]
+pub struct DapProtocolHostReg {
+    /// Stable adapter identifier.
+    pub id: String,
+    /// Human-readable display name shown in the debug-config picker.
+    pub display_name: Option<String>,
+    /// Executable to spawn (e.g. `codelldb`).
+    pub command: String,
+    /// Argv tail passed at spawn time.
+    pub args: Vec<String>,
+    /// File extensions this adapter targets (e.g. `["rs"]`).
+    pub file_types: Vec<String>,
+    /// Project-root marker files.
+    pub root_markers: Vec<String>,
+    /// Relative path to a JSON-Schema describing the launch-config form
+    /// the shell renders for this adapter. The path is resolved against
+    /// the plugin directory.
+    pub launch_config_schema: Option<String>,
+    /// Shell-side variable-renderer export ids the debugger panel
+    /// consults when formatting watch / locals values for this adapter.
+    pub variable_renderers: Vec<String>,
+    /// `true` to register disabled.
+    pub disabled: bool,
+    /// Environment variables to inject.
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+/// A single MCP server contribution. Mirrors the existing
+/// `nexus-mcp::McpServerSpec` shape.
+#[derive(Debug, Clone)]
+pub struct McpProtocolHostReg {
+    /// Stable server identifier.
+    pub id: String,
+    /// Display name.
+    pub display_name: Option<String>,
+    /// Transport — `"stdio"` (default), `"sse"`, or `"http"`.
+    pub transport: String,
+    /// Executable to spawn (stdio transport only).
+    pub command: Option<String>,
+    /// Argv tail (stdio transport only).
+    pub args: Vec<String>,
+    /// URL endpoint (http / sse transports only).
+    pub url: Option<String>,
+    /// Environment variables to inject.
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Connect on plugin activation rather than first-use.
+    pub auto_connect: bool,
+    /// `true` to register disabled.
+    pub disabled: bool,
+}
+
+/// A single ACP agent contribution (ADR 0027 Phase 4 / Hermes Feature
+/// 7). Reserved — no `nexus-acp` crate ships yet, so contributions land
+/// in the manifest but are surfaced through `collect_protocol_hosts()`
+/// only; no host consumes them.
+#[derive(Debug, Clone)]
+pub struct AcpProtocolHostReg {
+    /// Stable agent identifier.
+    pub id: String,
+    /// Display name shown in the agent picker.
+    pub display_name: Option<String>,
+    /// Executable to spawn.
+    pub command: String,
+    /// Argv tail.
+    pub args: Vec<String>,
+    /// Declarative capability tags (`delegate`, `tools`, `memory`,
+    /// ...). Exact set is settled when `nexus-acp` is built; today
+    /// these are surfaced verbatim.
+    pub capabilities: Vec<String>,
+    /// Environment variables to inject.
+    pub env: std::collections::BTreeMap<String, String>,
+    /// `true` to register disabled.
+    pub disabled: bool,
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
@@ -573,6 +726,107 @@ struct TomlRegistrations {
     menu_items: Vec<TomlMenuItemReg>,
     #[serde(default, rename = "uri_handler")]
     uri_handlers: Vec<TomlUriHandlerReg>,
+    /// ADR 0027 / BL-113 — nested `[registrations.protocol_hosts]`
+    /// table holding adapter contributions across the four protocol
+    /// host families. Optional; absent for plugins that don't
+    /// contribute adapters.
+    #[serde(default)]
+    protocol_hosts: TomlProtocolHosts,
+}
+
+#[derive(Deserialize, Default)]
+struct TomlProtocolHosts {
+    #[serde(default)]
+    lsp: Vec<TomlLspProtocolHostReg>,
+    #[serde(default)]
+    dap: Vec<TomlDapProtocolHostReg>,
+    #[serde(default)]
+    mcp: Vec<TomlMcpProtocolHostReg>,
+    #[serde(default)]
+    acp: Vec<TomlAcpProtocolHostReg>,
+}
+
+#[derive(Deserialize)]
+struct TomlLspProtocolHostReg {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    file_types: Vec<String>,
+    #[serde(default)]
+    root_markers: Vec<String>,
+    #[serde(default)]
+    disabled: bool,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    hover_renderer: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TomlDapProtocolHostReg {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    file_types: Vec<String>,
+    #[serde(default)]
+    root_markers: Vec<String>,
+    #[serde(default)]
+    launch_config_schema: Option<String>,
+    #[serde(default)]
+    variable_renderers: Vec<String>,
+    #[serde(default)]
+    disabled: bool,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct TomlMcpProtocolHostReg {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default = "default_mcp_transport")]
+    transport: String,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    auto_connect: bool,
+    #[serde(default)]
+    disabled: bool,
+}
+
+fn default_mcp_transport() -> String {
+    "stdio".to_string()
+}
+
+#[derive(Deserialize)]
+struct TomlAcpProtocolHostReg {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    disabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -888,6 +1142,75 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     handler_id: r.handler_id,
                 })
                 .collect(),
+            protocol_hosts: ProtocolHostsContribution {
+                lsp: raw
+                    .registrations
+                    .protocol_hosts
+                    .lsp
+                    .into_iter()
+                    .map(|r| LspProtocolHostReg {
+                        id: r.id,
+                        display_name: r.display_name,
+                        command: r.command,
+                        args: r.args,
+                        file_types: r.file_types,
+                        root_markers: r.root_markers,
+                        disabled: r.disabled,
+                        env: r.env,
+                        hover_renderer: r.hover_renderer,
+                    })
+                    .collect(),
+                dap: raw
+                    .registrations
+                    .protocol_hosts
+                    .dap
+                    .into_iter()
+                    .map(|r| DapProtocolHostReg {
+                        id: r.id,
+                        display_name: r.display_name,
+                        command: r.command,
+                        args: r.args,
+                        file_types: r.file_types,
+                        root_markers: r.root_markers,
+                        launch_config_schema: r.launch_config_schema,
+                        variable_renderers: r.variable_renderers,
+                        disabled: r.disabled,
+                        env: r.env,
+                    })
+                    .collect(),
+                mcp: raw
+                    .registrations
+                    .protocol_hosts
+                    .mcp
+                    .into_iter()
+                    .map(|r| McpProtocolHostReg {
+                        id: r.id,
+                        display_name: r.display_name,
+                        transport: r.transport,
+                        command: r.command,
+                        args: r.args,
+                        url: r.url,
+                        env: r.env,
+                        auto_connect: r.auto_connect,
+                        disabled: r.disabled,
+                    })
+                    .collect(),
+                acp: raw
+                    .registrations
+                    .protocol_hosts
+                    .acp
+                    .into_iter()
+                    .map(|r| AcpProtocolHostReg {
+                        id: r.id,
+                        display_name: r.display_name,
+                        command: r.command,
+                        args: r.args,
+                        capabilities: r.capabilities,
+                        env: r.env,
+                        disabled: r.disabled,
+                    })
+                    .collect(),
+            },
         },
         lifecycle: LifecycleConfig {
             on_load: raw.lifecycle.on_load,
@@ -2049,5 +2372,178 @@ module = "test.wasm"
         let dir = make_test_plugin_dir_with_schema("test.wasm");
         let m = parse_manifest(FULL, "manifest.toml").unwrap();
         validate(&m, dir.path()).unwrap();
+    }
+
+    // ── BL-113 / ADR 0027 — protocol-host adapter contributions ────────────────
+
+    #[test]
+    fn parse_protocol_hosts_lsp_contribution() {
+        let toml = r#"
+[plugin]
+id = "community.rust-lang"
+name = "Rust Language Pack"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.lsp]]
+id = "rust-analyzer"
+display_name = "rust-analyzer"
+command = "rust-analyzer"
+file_types = ["rs"]
+root_markers = ["Cargo.toml"]
+env = { RUST_LOG = "info" }
+hover_renderer = "rust_hover"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let ph = &m.registrations.protocol_hosts;
+        assert_eq!(ph.lsp.len(), 1);
+        assert!(ph.dap.is_empty() && ph.mcp.is_empty() && ph.acp.is_empty());
+        let lsp = &ph.lsp[0];
+        assert_eq!(lsp.id, "rust-analyzer");
+        assert_eq!(lsp.display_name.as_deref(), Some("rust-analyzer"));
+        assert_eq!(lsp.command, "rust-analyzer");
+        assert_eq!(lsp.file_types, ["rs"]);
+        assert_eq!(lsp.root_markers, ["Cargo.toml"]);
+        assert_eq!(lsp.env.get("RUST_LOG").map(String::as_str), Some("info"));
+        assert_eq!(lsp.hover_renderer.as_deref(), Some("rust_hover"));
+        assert!(!lsp.disabled);
+    }
+
+    #[test]
+    fn parse_protocol_hosts_dap_contribution() {
+        let toml = r#"
+[plugin]
+id = "community.rust-debug"
+name = "Rust Debugger"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.dap]]
+id = "rust"
+display_name = "Rust (codelldb)"
+command = "codelldb"
+args = ["--port", "0"]
+file_types = ["rs"]
+launch_config_schema = "./launch.schema.json"
+variable_renderers = ["rust_vec", "rust_option"]
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let dap = &m.registrations.protocol_hosts.dap;
+        assert_eq!(dap.len(), 1);
+        assert_eq!(dap[0].id, "rust");
+        assert_eq!(dap[0].args, ["--port", "0"]);
+        assert_eq!(
+            dap[0].launch_config_schema.as_deref(),
+            Some("./launch.schema.json"),
+        );
+        assert_eq!(dap[0].variable_renderers, ["rust_vec", "rust_option"]);
+    }
+
+    #[test]
+    fn parse_protocol_hosts_mcp_default_transport() {
+        let toml = r#"
+[plugin]
+id = "community.mcp-pack"
+name = "MCP Pack"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.mcp]]
+id = "fs-mcp"
+command = "filesystem-mcp"
+auto_connect = true
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let mcp = &m.registrations.protocol_hosts.mcp;
+        assert_eq!(mcp.len(), 1);
+        assert_eq!(mcp[0].transport, "stdio");
+        assert!(mcp[0].auto_connect);
+        assert_eq!(mcp[0].command.as_deref(), Some("filesystem-mcp"));
+        assert!(mcp[0].url.is_none());
+    }
+
+    #[test]
+    fn parse_protocol_hosts_acp_contribution() {
+        let toml = r#"
+[plugin]
+id = "community.hermes-agents"
+name = "Hermes Agents"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.acp]]
+id = "rust-reviewer"
+display_name = "Rust Code Reviewer"
+command = "hermes-agent"
+args = ["--profile", "rust-reviewer"]
+capabilities = ["delegate", "tools", "memory"]
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let acp = &m.registrations.protocol_hosts.acp;
+        assert_eq!(acp.len(), 1);
+        assert_eq!(acp[0].id, "rust-reviewer");
+        assert_eq!(acp[0].capabilities, ["delegate", "tools", "memory"]);
+    }
+
+    #[test]
+    fn parse_protocol_hosts_all_four_families() {
+        let toml = r#"
+[plugin]
+id = "community.everything"
+name = "Everything"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.lsp]]
+id = "lsp.a"
+command = "x"
+
+[[registrations.protocol_hosts.dap]]
+id = "dap.a"
+command = "x"
+
+[[registrations.protocol_hosts.mcp]]
+id = "mcp.a"
+command = "x"
+
+[[registrations.protocol_hosts.acp]]
+id = "acp.a"
+command = "x"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let ph = &m.registrations.protocol_hosts;
+        assert!(!ph.is_empty());
+        assert_eq!(ph.len(), 4);
+        assert_eq!(ph.lsp[0].id, "lsp.a");
+        assert_eq!(ph.dap[0].id, "dap.a");
+        assert_eq!(ph.mcp[0].id, "mcp.a");
+        assert_eq!(ph.acp[0].id, "acp.a");
+    }
+
+    #[test]
+    fn manifest_without_protocol_hosts_yields_empty_contribution() {
+        let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
+        assert!(m.registrations.protocol_hosts.is_empty());
+        assert_eq!(m.registrations.protocol_hosts.len(), 0);
     }
 }

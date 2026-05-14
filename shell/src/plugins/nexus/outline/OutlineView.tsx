@@ -412,6 +412,14 @@ function Row({
         ) : null}
       </span>
 
+      {/* BL-053 mockup row N — `01` / `02` ember-numbered prefix on
+          top-level (depth=0) headings. Sub-headings drop the prefix
+          to keep the visual band anchored at section starts. The
+          number is the 1-based count among headings at depth 0; we
+          recompute it during render rather than threading it through
+          OutlineHeading because the depth filter can hide rows. */}
+      {depth === 0 ? <span className="nx-outline__prefix">{formatPrefix(row.flatIndex)}</span> : null}
+
       <span
         style={{
           flex: '1 1 auto',
@@ -421,6 +429,32 @@ function Row({
       >
         {heading.text}
       </span>
+
+      {/* BL-053 mockup row N tail — faint word-count badge. Renders
+          only when the parser populated `wordCount` (always today;
+          guarded for forward-compat with future parsers that may
+          omit it). Hidden for sections that wrap to zero words. */}
+      {typeof heading.wordCount === 'number' && heading.wordCount > 0 ? (
+        <span className="nx-outline__count">{compactCount(heading.wordCount)}</span>
+      ) : null}
     </div>
   )
+}
+
+/** Zero-padded prefix used for the leading "01 / 02" stripe on
+ *  top-level outline rows. Matches the mockup's visual rhythm. */
+function formatPrefix(index: number): string {
+  // `index` here is the 0-based position in the flat heading list.
+  // Convert to 1-based for display and zero-pad to two digits.
+  const n = index + 1
+  return n < 100 ? n.toString().padStart(2, '0') : n.toString()
+}
+
+/** Compact word-count: 950 → "950", 1240 → "1.2k", 12_400 → "12k".
+ *  Stays under 4 chars so the badge doesn't push the heading text. */
+function compactCount(n: number): string {
+  if (n < 1000) return n.toString()
+  const k = n / 1000
+  if (k < 10) return `${k.toFixed(1)}k`
+  return `${Math.round(k)}k`
 }

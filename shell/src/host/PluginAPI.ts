@@ -167,6 +167,10 @@ export function buildPluginAPI(
       },
       getCreator: (type) => viewRegistry.getCreator(type),
       getTypeForExt: (ext) => viewRegistry.getTypeForExt(ext),
+      // BL-067 Phase 0 — read-only inventory accessors for the View
+      // Builder's "Add panel" palette and `host/layoutSnapshot.ts`.
+      registeredTypes: () => viewRegistry.registeredTypes(),
+      registeredExtensions: () => viewRegistry.registeredExtensions(),
     },
 
     // ─── Context keys ───────────────────────────────────────────────────────

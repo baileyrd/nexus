@@ -442,6 +442,86 @@ pub struct AiActivityListResult {
     pub entries: Vec<nexus_types::activity::ActivityEntry>,
 }
 
+// ── BL-116 — generate_docs ─────────────────────────────────────────────────
+
+/// Args for `com.nexus.ai::generate_docs` (handler id `22`).
+///
+/// Either `symbol_id` (preferred when available — addresses a row in
+/// the BL-114 `code_symbols` table directly) or the `path` + `name`
+/// pair. When both are supplied `symbol_id` wins. Returning an
+/// unresolved-symbol error rather than guessing keeps the contract
+/// predictable for agent-driven callers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiGenerateDocsArgs {
+    /// Row id in the `code_symbols` table. Preferred when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_id: Option<i64>,
+    /// Forge-relative path to the source file. Used with `name` when
+    /// `symbol_id` is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Identifier as it appears in source. Case-sensitive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Doc-comment style hint (`"rustdoc"` / `"jsdoc"` / `"godoc"` /
+    /// `"docstring"`). When `None` the handler picks a default per
+    /// the symbol's language (rustdoc for Rust, JSDoc for TS/JS,
+    /// godoc for Go, Python docstrings for Python).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+}
+
+/// Reply for `com.nexus.ai::generate_docs`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiGenerateDocsReply {
+    /// Generated docblock — already wrapped in the chosen comment
+    /// syntax (rustdoc `///` lines, JSDoc block comments, godoc `//`,
+    /// Python `"""…"""`). Caller can splice this directly above the
+    /// symbol's source range.
+    pub docblock: String,
+    /// Resolved symbol's row id, echoed so the caller can apply the
+    /// docblock without re-resolving.
+    pub symbol_id: i64,
+    /// Resolved language label (matches `StorageSymbolRow.language`).
+    pub language: String,
+    /// Resolved kind (`"function"` / `"struct"` / …).
+    pub kind: String,
+    /// Resolved symbol name.
+    pub name: String,
+    /// Resolved forge-relative path.
+    pub path: String,
+    /// 1-based starting line where the docblock should be inserted
+    /// (the symbol's `line_start`). Caller writes the docblock
+    /// immediately before this line.
+    pub insert_line: u32,
+    /// `true` when the BL-114 index can't supply a full 1-hop call
+    /// graph; the prompt used parent + sibling symbols as a proxy.
+    /// Mirrors BL-115's `degraded` flag — agents can downweight
+    /// confidence.
+    pub degraded: bool,
+    /// Human-readable note about what's missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
 #[cfg(test)]
 mod stream_chat_serde_tests {
     use super::*;

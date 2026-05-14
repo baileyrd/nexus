@@ -23,8 +23,20 @@
 
 .cm-content .cm-md-image { color: var(--text-muted); }
 
-.cm-content .cm-md-h1 { font-size: 1.85em; font-weight: 700; line-height: 1.25; }
-.cm-content .cm-md-h2 { font-size: 1.5em;  font-weight: 700; line-height: 1.3;  }
+/* BL-053 Phase 1 — Fraunces (or platform serif fallback) for the
+   editor's H1 / H2 to match the mockup's display typography.
+   Body text + lower-level headings stay in the configured sans
+   font so the contrast band stays at the page header. */
+.cm-content .cm-md-h1 {
+  font-family: var(--font-serif);
+  font-size: 1.85em; font-weight: 600; line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.cm-content .cm-md-h2 {
+  font-family: var(--font-serif);
+  font-size: 1.5em; font-weight: 600; line-height: 1.3;
+  letter-spacing: -0.015em;
+}
 .cm-content .cm-md-h3 { font-size: 1.25em; font-weight: 700; line-height: 1.35; }
 .cm-content .cm-md-h4 { font-size: 1.1em;  font-weight: 700; }
 .cm-content .cm-md-h5 { font-size: 1em;    font-weight: 700; }

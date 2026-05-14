@@ -32,6 +32,8 @@ test('CAPABILITY_INFO covers every Capability variant', () => {
     // ADR 0022 (per-handler ai.* + tools-policy enforcement)
     'AiChat', 'AiIndex', 'AiSessionRead', 'AiSessionWrite',
     'AiConfigWrite', 'AiActivityWrite', 'AiToolsWrite', 'AiToolsMcp',
+    // BL-117 audio subsystem
+    'AudioRecord', 'AudioSynthesize',
   ]
   for (const variant of expected) {
     assert.ok(
