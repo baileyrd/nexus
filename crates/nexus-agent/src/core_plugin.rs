@@ -909,6 +909,13 @@ struct SessionRunArgs {
     /// `round_proposed`. Matches PRD-15 §7's risk table.
     #[serde(default)]
     strict_approval: bool,
+    /// BL-119 — optional [`crate::SessionConfig`] override. When
+    /// omitted, defaults from `SessionConfig::default()` apply
+    /// (max_iterations = 32 per Hermes Feature 1). Partial JSON is
+    /// accepted; missing fields fall back to per-field defaults via
+    /// `#[serde(default = "…")]` on the struct.
+    #[serde(default)]
+    session_config: Option<crate::session::SessionConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -944,14 +951,26 @@ async fn handle_session_run(
         (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
     };
 
+    // BL-119 — fold the optional caller-supplied config into the
+    // default. Partial overrides (e.g. `{ "max_iterations": 64 }`)
+    // already populate the defaults via the struct's #[serde(default)]
+    // helpers; here we just default the whole thing when absent.
+    let session_config = parsed
+        .session_config
+        .clone()
+        .unwrap_or_default();
+
     let session = if parsed.auto_approve {
-        crate::session::run_session(
+        let id = uuid::Uuid::new_v4().to_string();
+        crate::session::run_session_with_config(
             &driver,
             &dispatcher,
             &crate::session::AutoApproveAll,
             &parsed.goal,
             &system,
             parsed.archetype.clone(),
+            id,
+            session_config,
         )
         .await
     } else {
@@ -973,7 +992,7 @@ async fn handle_session_run(
         // from the policy's session_id. Fix is to plumb the policy's
         // id into run_session as a starter — done below.
         let policy_session_id = policy.session_id.clone();
-        let session = crate::session::run_session_with_id(
+        let session = crate::session::run_session_with_config(
             &driver,
             &dispatcher,
             &policy,
@@ -981,6 +1000,7 @@ async fn handle_session_run(
             &system,
             parsed.archetype.clone(),
             policy_session_id,
+            session_config,
         )
         .await;
         // Defensive cleanup: if the loop exited with a pending

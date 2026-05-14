@@ -75,9 +75,10 @@ pub use tool_registry::{
 };
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use session::{
-    run_session, run_session_with_id, AgentSession, AutoApproveAll, ProposedRound,
-    RoundDecision, RoundDecisionEntry, RoundRecord, SessionOutcome, SessionPolicy,
-    ToolCallRecord, MAX_AGENT_ROUNDS,
+    run_session, run_session_with_config, run_session_with_id, AgentSession, AutoApproveAll,
+    ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionConfig,
+    SessionOutcome, SessionPolicy, ToolCallRecord, DEFAULT_MAX_ITERATIONS,
+    DEFAULT_MAX_TOOL_CALLS_PER_ITERATION, LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
 };
 
 /// A unit of work produced by an [`Agent`] and consumed by a

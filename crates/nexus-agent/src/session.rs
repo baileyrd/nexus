@@ -26,11 +26,132 @@ use ts_rs::TS;
 
 use crate::{ChatDriver, ProposedToolCall, ToolCall, ToolDispatcher};
 
-/// Hard cap on round count, mirroring the AI plugin's
-/// `MAX_TOOL_ROUNDS`. A session that hits the cap exits with
-/// [`SessionOutcome::MaxRounds`] — the caller may resume with a
-/// follow-up `run_session` if the goal isn't done.
-pub const MAX_AGENT_ROUNDS: u32 = 8;
+/// Legacy hard cap on round count (the BL-119-pre default). Kept
+/// `pub` so external tests that pin against the ADR 0024 Phase 2a
+/// shipping value still compile. New callers should read
+/// [`SessionConfig::max_iterations`] instead — which defaults to
+/// [`DEFAULT_MAX_ITERATIONS`].
+pub const MAX_AGENT_ROUNDS: u32 = LEGACY_MAX_AGENT_ROUNDS;
+
+/// The original Phase 2a shipping cap (8 rounds). Exposed so the
+/// existing regression test can pin the legacy behaviour through
+/// an explicit `SessionConfig` override (per BL-119 DoD).
+pub const LEGACY_MAX_AGENT_ROUNDS: u32 = 8;
+
+/// BL-119 — new default for [`SessionConfig::max_iterations`].
+/// Raised from the Phase 2a value of 8 to 32 per the Hermes Feature 1
+/// recommendation ("8 iterations is the floor for non-trivial
+/// multi-step tasks"). Callers can lower it explicitly through
+/// `SessionConfig`; raising it further is a config-level decision
+/// rather than a kernel-side default change.
+pub const DEFAULT_MAX_ITERATIONS: u32 = 32;
+
+/// BL-119 — default cap on tool calls per iteration. The agent
+/// dispatcher already accepts whatever the model emits; this cap
+/// guards against a runaway round that emits 100 tool_use blocks
+/// at once. Excess calls are dropped (with a tracing warning) at
+/// the start of [`execute_round`] so the dispatcher's downstream
+/// work and the per-call result fan-out stay bounded.
+pub const DEFAULT_MAX_TOOL_CALLS_PER_ITERATION: u32 = 16;
+
+/// BL-119 — provider-routing + budget knobs for a single agent
+/// session.
+///
+/// Constructed via [`SessionConfig::default`] (recommended) or
+/// [`SessionConfig::legacy_phase2a`] when a caller needs to pin the
+/// pre-BL-119 cap. The struct is the wire shape too — `session_run`
+/// accepts it directly as `session_config`.
+///
+/// All fields default to "use the documented default"; an
+/// explicitly-zero `max_iterations` is treated as a configuration
+/// error and clamped to `1` so a misconfigured caller can't deadlock
+/// the dispatch loop.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct SessionConfig {
+    /// Hard cap on the number of model-driven rounds. Defaults to
+    /// [`DEFAULT_MAX_ITERATIONS`] (32). A session that hits the cap
+    /// exits with [`SessionOutcome::MaxRounds`].
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+
+    /// Cap on tool calls per round. The dispatcher drops excess
+    /// calls (with a tracing warning) so a runaway round can't fan
+    /// out into hundreds of nested operations. Defaults to
+    /// [`DEFAULT_MAX_TOOL_CALLS_PER_ITERATION`] (16).
+    #[serde(default = "default_max_tool_calls_per_iteration")]
+    pub max_tool_calls_per_iteration: u32,
+
+    /// Context-budget guardrail consumed by BL-120's compression
+    /// pass. `0` means "unbounded" — the v1 dispatch loop honours
+    /// this field by passing it through but does not compress
+    /// turns; BL-120 wires the compressor to read this value.
+    #[serde(default)]
+    pub max_context_tokens: u32,
+
+    /// Provider-routing hint. v1 accepts the field for forward-
+    /// compat with BL-119's "provider-routing hints" DoD bullet but
+    /// the dispatch loop does not yet consult it — the AI plugin's
+    /// configured provider is still authoritative. A future BL
+    /// (Hermes Features 2–3) will let an agent pick a different
+    /// provider per session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_hint: Option<String>,
+}
+
+fn default_max_iterations() -> u32 {
+    DEFAULT_MAX_ITERATIONS
+}
+
+fn default_max_tool_calls_per_iteration() -> u32 {
+    DEFAULT_MAX_TOOL_CALLS_PER_ITERATION
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: DEFAULT_MAX_ITERATIONS,
+            max_tool_calls_per_iteration: DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
+            max_context_tokens: 0,
+            provider_hint: None,
+        }
+    }
+}
+
+impl SessionConfig {
+    /// Pre-BL-119 default — `max_iterations = 8`. Existing tests
+    /// pin this to keep behaviour identical to the Phase 2a
+    /// shipping value while the new default rolls out elsewhere.
+    #[must_use]
+    pub fn legacy_phase2a() -> Self {
+        Self {
+            max_iterations: LEGACY_MAX_AGENT_ROUNDS,
+            ..Self::default()
+        }
+    }
+
+    /// Clamp obviously-bogus values into a runnable shape. `0`
+    /// iterations would deadlock the loop; same for `0` tool calls
+    /// per iteration. Returns a fresh config; the original is left
+    /// untouched.
+    #[must_use]
+    pub fn sanitized(&self) -> Self {
+        Self {
+            max_iterations: self.max_iterations.max(1),
+            max_tool_calls_per_iteration: self.max_tool_calls_per_iteration.max(1),
+            max_context_tokens: self.max_context_tokens,
+            provider_hint: self.provider_hint.clone(),
+        }
+    }
+}
 
 /// Why a session ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,6 +409,42 @@ where
     P: SessionPolicy + ?Sized,
     T: ToolDispatcher + ?Sized,
 {
+    run_session_with_config(
+        driver,
+        dispatcher,
+        policy,
+        goal,
+        system,
+        archetype,
+        id,
+        SessionConfig::default(),
+    )
+    .await
+}
+
+/// BL-119 — full entry point taking an explicit [`SessionConfig`].
+/// Existing [`run_session`] / [`run_session_with_id`] wrappers
+/// delegate here with `SessionConfig::default()`, so a caller that
+/// wants the legacy 8-round cap (or any other override) drops in
+/// at this surface. The struct is `Clone` + cheap to construct;
+/// the loop sanitises the values internally so a misconfigured
+/// `max_iterations = 0` clamps to 1 rather than deadlocking.
+pub async fn run_session_with_config<D, P, T>(
+    driver: &D,
+    dispatcher: &T,
+    policy: &P,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: SessionConfig,
+) -> AgentSession
+where
+    D: ChatDriver + ?Sized,
+    P: SessionPolicy + ?Sized,
+    T: ToolDispatcher + ?Sized,
+{
+    let config = config.sanitized();
     let started_at = chrono::Utc::now().to_rfc3339();
     let mut session = AgentSession {
         id: id.clone(),
@@ -313,9 +470,9 @@ where
     // driver surface supports multi-turn directly.
     let mut current_prompt = goal.to_string();
 
-    for round_idx in 1..=MAX_AGENT_ROUNDS {
+    for round_idx in 1..=config.max_iterations {
         // Ask the model for this round's tool calls.
-        let proposal = match driver.propose(system, &current_prompt).await {
+        let mut proposal = match driver.propose(system, &current_prompt).await {
             Ok(p) => p,
             Err(e) => {
                 session.rounds.push(RoundRecord {
@@ -327,6 +484,21 @@ where
                 break;
             }
         };
+
+        // BL-119 — guard against runaway rounds. Truncate excess
+        // tool calls so the dispatcher's downstream work stays
+        // bounded; drops are logged so the user sees a clear
+        // signal in operator logs.
+        let cap = config.max_tool_calls_per_iteration as usize;
+        if proposal.tool_calls.len() > cap {
+            tracing::warn!(
+                round = round_idx,
+                proposed = proposal.tool_calls.len(),
+                cap,
+                "BL-119: dropping excess tool calls; raise max_tool_calls_per_iteration to keep them"
+            );
+            proposal.tool_calls.truncate(cap);
+        }
 
         // Terminal text-only round — the model is done.
         if proposal.tool_calls.is_empty() {
@@ -392,7 +564,7 @@ where
         // bloating the prompt.
         current_prompt = compose_followup_prompt(goal, &session.rounds, all_errored);
 
-        if round_idx == MAX_AGENT_ROUNDS {
+        if round_idx == config.max_iterations {
             session.outcome = SessionOutcome::MaxRounds;
         }
     }
@@ -757,17 +929,22 @@ mod tests {
         }
         let driver = ScriptedDriver::new(replies);
         let dispatcher = CountingDispatcher::new();
-        let session = run_session(
+        // BL-119 — the new default is 32 iterations; pin the legacy
+        // Phase 2a cap (8) through an explicit `SessionConfig` so
+        // this regression test still asserts the same behaviour.
+        let session = run_session_with_config(
             &driver,
             &dispatcher,
             &AutoApproveAll,
             "loop forever",
             "system",
             None,
+            "legacy-cap".to_string(),
+            SessionConfig::legacy_phase2a(),
         )
         .await;
         assert_eq!(session.outcome, SessionOutcome::MaxRounds);
-        assert_eq!(session.rounds.len() as u32, MAX_AGENT_ROUNDS);
+        assert_eq!(session.rounds.len() as u32, LEGACY_MAX_AGENT_ROUNDS);
     }
 
     /// Phase 2b smoke test: a policy that returns
@@ -823,5 +1000,127 @@ mod tests {
         .await;
         assert_eq!(session.outcome, SessionOutcome::Errored);
         assert!(session.rounds[0].text.contains("driver error"));
+    }
+
+    // ── BL-119 SessionConfig tests ─────────────────────────────────
+
+    #[test]
+    fn session_config_defaults_match_hermes_recommendation() {
+        let cfg = SessionConfig::default();
+        assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        assert_eq!(cfg.max_iterations, 32);
+        assert_eq!(
+            cfg.max_tool_calls_per_iteration,
+            DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
+        );
+        assert_eq!(cfg.max_context_tokens, 0);
+        assert!(cfg.provider_hint.is_none());
+    }
+
+    #[test]
+    fn legacy_phase2a_preserves_old_cap() {
+        let cfg = SessionConfig::legacy_phase2a();
+        assert_eq!(cfg.max_iterations, LEGACY_MAX_AGENT_ROUNDS);
+        assert_eq!(cfg.max_iterations, 8);
+    }
+
+    #[test]
+    fn session_config_sanitized_clamps_zero_to_one() {
+        let cfg = SessionConfig {
+            max_iterations: 0,
+            max_tool_calls_per_iteration: 0,
+            max_context_tokens: 0,
+            provider_hint: None,
+        };
+        let s = cfg.sanitized();
+        assert_eq!(s.max_iterations, 1);
+        assert_eq!(s.max_tool_calls_per_iteration, 1);
+    }
+
+    #[test]
+    fn session_config_serde_round_trips_with_partial_input() {
+        // BL-119 callers should be able to pass `{}` and get the
+        // BL-119 defaults; the IPC arg path uses #[serde(default)].
+        let cfg: SessionConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        // Explicit override echoes through.
+        let cfg: SessionConfig = serde_json::from_value(
+            serde_json::json!({ "max_iterations": 12, "provider_hint": "anthropic" }),
+        )
+        .unwrap();
+        assert_eq!(cfg.max_iterations, 12);
+        assert_eq!(cfg.provider_hint.as_deref(), Some("anthropic"));
+    }
+
+    #[tokio::test]
+    async fn default_max_iterations_supports_more_than_legacy_cap() {
+        // Driver yields tool calls for 16 rounds (exceeds legacy
+        // cap of 8) then a terminal text-only round. With the
+        // default config the session should complete normally.
+        let mut replies = Vec::new();
+        for i in 0..16 {
+            replies.push(Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool(&format!("r{i}"), "x.md")],
+            });
+        }
+        replies.push(Proposal {
+            text: "all done".into(),
+            tool_calls: Vec::new(),
+        });
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go far",
+            "system",
+            None,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert!(session.rounds.len() > LEGACY_MAX_AGENT_ROUNDS as usize);
+    }
+
+    #[tokio::test]
+    async fn excess_tool_calls_per_iteration_are_truncated() {
+        // Single round with 5 tool calls; cap at 2.
+        let many = vec![
+            read_tool("a", "1.md"),
+            read_tool("b", "2.md"),
+            read_tool("c", "3.md"),
+            read_tool("d", "4.md"),
+            read_tool("e", "5.md"),
+        ];
+        let driver = ScriptedDriver::new(vec![
+            Proposal {
+                text: "round 1".into(),
+                tool_calls: many,
+            },
+            Proposal {
+                text: "done".into(),
+                tool_calls: Vec::new(),
+            },
+        ]);
+        let dispatcher = CountingDispatcher::new();
+        let cfg = SessionConfig {
+            max_tool_calls_per_iteration: 2,
+            ..SessionConfig::default()
+        };
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "cap-tools",
+            "system",
+            None,
+            "cap-test".to_string(),
+            cfg,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        // Only 2 calls dispatched in round 1.
+        assert_eq!(session.rounds[0].tool_calls.len(), 2);
     }
 }
