@@ -271,6 +271,8 @@ Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML c
 
 ### BL-114: Code-symbol index foundation (GitNexus port)
 
+> **Shipped 2026-05-13** in commit `2ce5e645`. New `crates/nexus-storage/src/code_index.rs` ships a tree-sitter walker covering Rust / TypeScript / Python / Go (matching the BL-075 default set), a SQLite-backed `code_symbols` table with indexes by name / path / containing-file, and the `com.nexus.storage::query_symbol` IPC handler. File-save + commit hooks keep the index live; rebuild path matches the FTS index pattern (files-on-disk are authoritative). Powers BL-115's MCP tools + BL-116's doc generator.
+
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
 **Effort**: Medium. Self-contained foundation for BL-115 + BL-116.
 **Crates**: `nexus-storage` (new `code_index` module), `nexus-git` (diff→symbol hook).
@@ -288,6 +290,8 @@ Cross-repo code-intel index. The MVP: a SQLite-backed table of (path, kind, name
 
 ### BL-115: MCP tools for code intel (GitNexus port)
 
+> **Shipped 2026-05-13** in commit `11c2836f`. Three new MCP tools (`nexus_context`, `nexus_impact`, `nexus_detect_changes`) registered in `crates/nexus-mcp/src/server.rs`, backed by BL-114's symbol index. `nexus_impact` accepts a depth parameter; risk levels follow the GitNexus rubric (LOW / MEDIUM / HIGH / CRITICAL) via a `risk_for_kind` helper. `nexus_detect_changes` consumes `com.nexus.git::file_statuses`. `BL115_DEGRADED_REASON` const surfaces a clear message when the symbol index isn't initialised.
+
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
 **Effort**: Medium. Depends on BL-114.
 **Crates**: `nexus-mcp` (new tool registrations).
@@ -304,6 +308,8 @@ Three new MCP tools backed by the BL-114 index: `nexus_context(symbol)` returns 
 
 ### BL-116: `ai.generate_docs` symbol-aware doc generator (GitNexus port)
 
+> **Shipped 2026-05-13** in commit `9c1b7fb9`. New `crates/nexus-ai/src/generate_docs.rs` + `HANDLER_GENERATE_DOCS` (id 22) on `com.nexus.ai`. Args take `symbol_id` (or `path` + `name`); the handler gathers the symbol body plus 1-hop call-graph context from BL-114's index, renders a structured prompt, dispatches through the existing `nexus-ai` tool-loop. Optional write-back routes through `com.nexus.editor::apply_transaction` so undo is preserved. Tested against a synthetic symbol set with a mocked provider.
+
 **Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
 **Effort**: Small. Depends on BL-114 (consumes the symbol index).
 **Crates**: `nexus-ai` (new `generate_docs` IPC handler).
@@ -319,6 +325,8 @@ Symbol-aware doc generator. Given a `symbol_id` (or `path` + `name` pair), gathe
 ---
 
 ### BL-117: `nexus-audio` STT + TTS crate (Anything-LLM port)
+
+> **Shipped 2026-05-13** across commits `4d39016d` (crate scaffold) and `5c81d173` (three remaining gaps). New `crates/nexus-audio` with `SttProvider` / `TtsProvider` traits + three backends: `local-audio` feature-gated `LocalWhisper` backend (whisper-rs against `tiny.en` / `base.en` / `small.en` models) + `LocalTts`; `ProviderRouted` delegates to whichever `nexus-ai` provider is configured (OpenAI Whisper / TTS today; Anthropic falls back to local); `PlatformSpeech` shell-side stub filled by BL-118. New caps `audio.record` + `audio.synthesize` registered in `nexus-plugin-api` + `nexus-security`. New `com.nexus.ai::resolve_credentials` handler (id 21) routes provider auth so the audio crate doesn't need its own API-key path — uses the configured AI provider, falls back to env. Backend selection via `<forge>/.forge/config.toml::[audio]`.
 
 **Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13. Scope refined 2026-05-13 to require a local-first path.
 **Effort**: Medium. Self-contained.
@@ -357,6 +365,8 @@ Powers two near-term use cases: voice-driven memory capture (extends BL-043's qu
 
 ### BL-118: Web Speech API shell integration (Anything-LLM port)
 
+> **Shipped 2026-05-13** in commit `3bedd31f`. New `shell/src/plugins/nexus/audio/` plugin wraps `webkitSpeechRecognition` (continuous-mode STT) and `SpeechSynthesisUtterance` (voice + rate selection); `speechApi.ts` + `runtime.ts` registered through `catalog.ts`. Plugin falls back gracefully when browser speech support is missing. BL-113 contribution path is the natural future home; today the plugin self-registers via the same plugin mechanism the audio crate's `PlatformSpeech` stub expects.
+
 **Source**: Anything-LLM portability — see [../research/anything-llm-assessment.md](../research/anything-llm-assessment.md). Filed 2026-05-13.
 **Effort**: Small. Companion to BL-117.
 **Crates**: shell-side `nexus.audio` plugin.
@@ -372,6 +382,8 @@ Native browser STT/TTS via the Web Speech API exposed through the Tauri webview.
 ---
 
 ### BL-119: `SessionConfig` + iteration budget (Hermes Feature 1)
+
+> **Shipped 2026-05-13** in commit `d1ad15e4`. New `SessionConfig` struct in `crates/nexus-agent/src/session.rs` carrying `max_iterations` (default 32, raised from 8 per Hermes Feature 1), `max_tool_calls_per_iteration`, `max_context_tokens`, and provider-routing hints. New `run_session_with_config` entry point alongside the legacy `run_session`. `com.nexus.agent::run` accepts an optional `session_config` arg. `SessionConfig::legacy_phase2a()` pins the old 8-iteration default for the `max_rounds_cap_is_honoured` test that pre-dated the lift. Companion `run_session_with_compressor` slot reserved for BL-120 to plug in.
 
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
 **Effort**: Small. Merge-first per the Hermes plan; unblocks Features 4–6 cleanly.
@@ -389,6 +401,8 @@ Raise the agent's iteration budget cap and introduce a typed `SessionConfig` car
 
 ### BL-120: Context compression in the agent session loop (Hermes Feature 4)
 
+> **Shipped 2026-05-13** in commit `a3adfd08`. New `crates/nexus-agent/src/compression.rs` ships the `Compressor` trait + three implementations: `LlmCompressor` (default; summarises the oldest turns through the configured AI provider into a single `<system>`-tagged digest), `KeepDecisionsCompressor` (deterministic decisions-only fallback), `NoopCompressor` (testing). Working-set windowing keeps the most recent rounds verbatim — pinned at `WORKING_SET_ROUNDS = 4` (configurable working-set deferred to a future BL). Triggers when `estimate_tokens(transcript) > SessionConfig.max_context_tokens`. New `MemoryEntry::CompactedTurns` variant (extending DG-33) records what got compressed; `AgentSession.compactions` array carries the audit trail. Tested on a 50-turn synthetic session — decisions preserved through compression.
+
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
 **Effort**: Large. Depends on BL-119.
 **Crates**: `nexus-agent` (new `compression` module).
@@ -405,6 +419,8 @@ When the session-loop's running context approaches the provider's token budget, 
 ---
 
 ### BL-121: Session-transcript FTS5 search (Hermes Feature 5)
+
+> **Shipped 2026-05-13** in commit `d620b2b0`. New `crates/nexus-agent/src/transcript_search.rs` ships `TranscriptStore` backed by `Arc<Mutex<Connection>>` (`rusqlite::Connection` is `Send` but not `Sync`, so the Mutex makes the store `Sync` for the kernel) plus an FTS5 virtual table colocated with the agent SQLite store. New `com.nexus.agent::search_transcripts(query, [agent_id], [since_ts])` IPC handler returns ranked snippets `(agent_id, session_id, turn_idx, role, snippet)`. Rebuild path walks `<forge>/.forge/agents/<id>/history.jsonl` files when the FTS table is missing. `MemoryEntry::CompactedTurns` records (added by BL-120) are indexed with the rest. Shell-side search-bar UI deferred as a follow-up.
 
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.
 **Effort**: Medium. Independent of BL-119 / BL-120 but composes nicely.
@@ -605,6 +621,8 @@ No new backend services. Every phase is UI additions or thin IPC handlers over f
 ### BL-053: Forge visual target — close the gap to the design mockup
 
 > **All four phases closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 1: pill-shaped editor tabs, ember segmented inspector control, status-bar forge name + ember dot. Phase 2: ember wikilinks, path-style inline code, YAML frontmatter metadata bar. Phase 3: Obsidian-style callouts (`> [!type] Title`) with seven types + per-type accent dot. Phase 4: status pills (`info`/`warn`/`risk`/`ok`) in the frontmatter metadata bar + status dots in the file-tree row, sourced from `status:` frontmatter via a new `com.nexus.storage::read_frontmatter` IPC. Q2 was decided in favor of frontmatter as the canonical source.
+>
+> **Tail items shipped 2026-05-14** in commit `165e0b1f`. Three remaining mockup elements that the prior PRD listed as deferred follow-ups: table chrome (border-separate + dashed row separators + alternating tints + uppercased header band + hover lift), outline numbered prefix (`.nx-outline__prefix` chip at depth 0 with `01 / 02` tabular numerics on `--interactive-accent-soft`), and word-count badge (new `countWordsIn` + per-section accumulation in both `parseHeadings` and `treeToHeadings`; `OutlineHeading.wordCount` rendered through `compactCount` for sub-4-char chip widths; punctuation-only tokens skipped). Font bundling stays out of scope (separate offline-first workstream).
 
 **Source**: Forge Color System mockup + ember-on-slate exploration (2026-05-06) — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)
 **Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2 ~2 days _(shipped)_ · Phase 3 ~3–5 days _(shipped)_ · Phase 4 ~3–5 days _(shipped)_
