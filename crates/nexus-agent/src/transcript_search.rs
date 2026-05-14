@@ -388,6 +388,20 @@ pub(crate) fn render_entry(entry: &MemoryEntry) -> (&'static str, String) {
             }
             ("artifact", out)
         }
+        MemoryEntry::CompactedTurns {
+            rounds_compressed,
+            summary,
+            ..
+        } => {
+            // BL-120 — compaction events are pure narrative; index
+            // the summary text under the `assistant` role so a later
+            // recall surface ("what did the agent decide?") still
+            // matches against compressed history.
+            (
+                "assistant",
+                format!("[compacted {rounds_compressed} rounds] {summary}"),
+            )
+        }
     }
 }
 

@@ -136,6 +136,24 @@ pub enum MemoryEntry {
         /// Unix epoch milliseconds.
         timestamp_ms: u64,
     },
+    /// BL-120 — compaction event. The session loop summarised
+    /// `rounds_compressed` consecutive earlier rounds into a single
+    /// `summary` block to keep the live transcript inside the
+    /// provider's token budget. Persisting the event in the memory
+    /// log gives the next-invocation planner enough breadcrumb to
+    /// avoid duplicating prior work even when the per-session
+    /// transcript itself has been trimmed.
+    CompactedTurns {
+        /// How many session rounds the summary replaces. Always
+        /// `>= 1`; a zero-round compaction is meaningless and
+        /// callers must not record one.
+        rounds_compressed: u32,
+        /// The summary text the compressor produced. Treated as
+        /// opaque prose by the memory layer.
+        summary: String,
+        /// Unix epoch milliseconds.
+        timestamp_ms: u64,
+    },
 }
 
 impl MemoryEntry {
@@ -150,7 +168,8 @@ impl MemoryEntry {
             | Self::UserFeedback { timestamp_ms, .. }
             | Self::Error { timestamp_ms, .. }
             | Self::Decision { timestamp_ms, .. }
-            | Self::Artifact { timestamp_ms, .. } => *timestamp_ms,
+            | Self::Artifact { timestamp_ms, .. }
+            | Self::CompactedTurns { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -391,6 +410,7 @@ pub fn query_entries(
                 path, description, ..
             } => format!("{path} {description}").to_ascii_lowercase(),
             MemoryEntry::AgentPlan { plan_id, .. } => plan_id.to_ascii_lowercase(),
+            MemoryEntry::CompactedTurns { summary, .. } => summary.to_ascii_lowercase(),
         };
         if needle.is_empty() || haystack.contains(&needle) {
             out.push(entry.clone());
@@ -466,6 +486,17 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
                 path, description, ..
             } => {
                 writeln!(out, "- [{ts}] artifact `{path}` — {description}").unwrap();
+            }
+            MemoryEntry::CompactedTurns {
+                rounds_compressed,
+                summary,
+                ..
+            } => {
+                writeln!(
+                    out,
+                    "- [{ts}] **compacted {rounds_compressed} rounds:** {summary}"
+                )
+                .unwrap();
             }
         }
     }

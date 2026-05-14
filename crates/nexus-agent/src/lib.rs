@@ -84,6 +84,11 @@ pub use session::{
 /// BL-121 — FTS5-backed search over agent `history.jsonl` logs.
 pub mod transcript_search;
 
+/// BL-120 — context compression for the session loop. Defines the
+/// [`compression::Compressor`] trait plus the default LLM-backed,
+/// deterministic, and no-op implementations.
+pub mod compression;
+
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that
 /// need branching or loops return a flat list today and re-plan if
