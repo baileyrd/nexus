@@ -1,7 +1,7 @@
 # ADR 0027: Protocol-Host Contribution Model for LSP / DAP / MCP / ACP
 
-**Date:** 2026-05-13
-**Status:** Proposed — open for review. Tracks as **BL-113** in the backlog.
+**Date:** 2026-05-13 (proposed), 2026-05-14 (Phase 0a accepted)
+**Status:** Accepted — Phase 0a shipped. Tracks as **BL-113** in the backlog.
 **Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/BACKLOG_COMPLETED.md) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host, parked on `bl-081-dap-debugger` pending this ADR), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet implemented; named here so the future crate lands on the contribution model from day one).
 
 ## Context
@@ -117,12 +117,57 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
 - **Manifest churn.** Renaming `dap.toml`'s `adapter_type` to a `contributes.protocolHosts.dap.id` field is a one-way migration. Need overlap window + clear deprecation messaging.
 - **Per-adapter version skew.** Today an operator pinning `codelldb 1.8` edits one TOML; under the new shape they swap a plugin version. That's strictly better with the marketplace but slightly worse without (need a plugin-pin mechanism).
 
-## Open questions
+## Open questions (resolved before Phase 0a)
 
-1. **Hot-reload of contribution-defined adapters.** Today `dap.toml` is read at `on_init`; a contribution change after boot needs a re-scan. Existing plugin lifecycle (`activate` / `deactivate`) already covers this — verify it round-trips a `register_adapter` / `unregister_adapter` IPC pair.
-2. **Where do `variable_renderers` and `hover_renderer` get executed?** The shell-side export path is the natural answer; the question is whether the host crate sees them at all or whether the shell consumes them out-of-band against the same plugin id. Leaning toward "shell-only" so the Rust host crate stays protocol-only.
-3. **Capability surface.** A community plugin registering itself as `com.nexus.dap`'s adapter is implicitly granting itself a slice of the debugger's capability footprint. Need to decide whether `dap.register_adapter` is a new capability or whether contribution wiring bypasses the consent path (precedent: command contributions don't require a capability today).
-4. **Schema validation timing.** Validate launch-config submission against the JSON Schema in the shell, in the host crate, or both? Shell-side gives a richer error; host-side is the authoritative gate. Likely both, with the shell-side validation surfacing pre-submit hints.
+1. **Hot-reload of contribution-defined adapters.** Resolved: plugin
+   activate/deactivate is the lifecycle; the Phase 1 host-side wiring
+   calls `register_adapter` from the plugin's activation closure and
+   `unregister_adapter` from its deactivation closure. No additional
+   wake-up loop in the host. The Phase 0a aggregator
+   (`nexus-plugins::collect_contributions`) is pure, so the host calls
+   it fresh on each lifecycle event.
+2. **Where do `variable_renderers` and `hover_renderer` get executed?**
+   Resolved: **shell-only**. The host crates stay protocol-only — they
+   never resolve those identifiers. The shell looks them up in the
+   contributing plugin's exports table when rendering. The Phase 0a
+   types carry the identifier strings verbatim; no Rust-side
+   resolution.
+3. **Capability surface.** Resolved: **contribution wiring follows the
+   command-contribution precedent — no new capability required at
+   registration time.** A contributed adapter is treated as a
+   declarative manifest entry, no different from a `[[ipc_command]]`
+   contribution. The capabilities that *gate adapter usage at runtime*
+   (e.g. spawning the executable, opening the TCP socket) ride on the
+   plugin's existing capability grants (`process.spawn`, `net.connect`)
+   per the standard capability path.
+4. **Schema validation timing.** Resolved: **both sides validate,
+   host-side is authoritative.** The shell renders the launch-config
+   form against the JSON Schema referenced in
+   `launch_config_schema` (richer error messages, pre-submit hints).
+   The host crate re-validates on the `register_adapter` payload as the
+   authoritative gate. Phase 0a does not yet ship validation — the
+   Phase 1 DAP rollout is the first time the host sees one.
+
+## Phase 0a — shipped 2026-05-14
+
+The minimal foundational landing on `main`:
+
+- New `ProtocolHostsContribution` + `LspProtocolHostReg` /
+  `DapProtocolHostReg` / `McpProtocolHostReg` / `AcpProtocolHostReg`
+  public types in `nexus-plugins::manifest`.
+- New `[[registrations.protocol_hosts.{lsp,dap,mcp,acp}]]` TOML
+  sections in `manifest.toml`, parsed and round-tripped through 7
+  unit tests across the four families plus the empty-contribution case.
+- New `nexus-plugins::contributions` module shipping
+  `ContributedAdapter<T>`, `ContributedAdapterSet`, and the
+  `collect_contributions(&[&PluginManifest])` aggregator that tags each
+  contribution with the originating plugin id and returns the four
+  family vectors. 4 unit tests cover the tagger + the all-empty
+  fast-path.
+
+The host crates do not yet consume the aggregator — that's Phase 1
+(DAP first, on the parked `bl-081-dap-debugger` branch), Phase 2 (LSP),
+Phase 3 (MCP), Phase 4 (ACP — greenfield from day one).
 
 ## References
 

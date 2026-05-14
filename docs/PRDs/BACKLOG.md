@@ -244,6 +244,10 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ### BL-113: Protocol-host contribution model for LSP / DAP / MCP / ACP
 
+> **Phase 0a shipped 2026-05-14.** ADR 0027 accepted (open questions pinned to decisions). New `[[registrations.protocol_hosts.{lsp,dap,mcp,acp}]]` manifest section: public types (`ProtocolHostsContribution`, `LspProtocolHostReg`, `DapProtocolHostReg`, `McpProtocolHostReg`, `AcpProtocolHostReg`) live in `nexus-plugins::manifest`; new `nexus-plugins::contributions` module exposes `ContributedAdapter<T>` + `collect_contributions(&[&PluginManifest])`. 10 unit tests across parsing + aggregation. Host crates don't consume the aggregator yet — that's Phases 1+ per protocol.
+>
+> **Phases 1–4 still open.** Phase 1 (DAP on the new shape; unblocks the parked BL-081 branch). Phase 2 (LSP migration). Phase 3 (MCP migration). Phase 4 (greenfield ACP host when Hermes Feature 7 is picked up).
+
 **Source**: BL-081 review (2026-05-13) — full design in [ADR 0027](../adr/0027-protocol-host-contribution-model.md).
 **Effort**: Large. Phase 0 (ADR + spike) ~1–2 days; Phase 1 (DAP on the new shape) ~1 wk; Phases 2–3 (LSP, MCP) ~1 wk each; Phase 4 (ACP) lands greenfield when the Hermes Feature-7 / ACP integration BL is picked up.
 **Crates**: `nexus-lsp`, `nexus-dap` (on the parked branch), `nexus-mcp`, future `nexus-acp`, `nexus-plugins` (contribution loader), shell-side plugin manifest schema.
