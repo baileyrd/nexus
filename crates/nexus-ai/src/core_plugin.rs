@@ -232,6 +232,23 @@ pub const HANDLER_ACTIVITY_CLEAR: u32 = 19;
 /// [`AiProposeReply`].
 pub const HANDLER_PROPOSE_TOOL_CALLS: u32 = 20;
 
+/// BL-117 — return the live AI chat provider's resolved credentials
+/// (provider name, base URL, api_key) so sibling subsystems like
+/// `nexus-audio` can talk to the same provider endpoint without
+/// asking the user to configure a second key. Reads from the
+/// `ai_config` `RwLock` so a runtime `set_config` push by the shell
+/// is honoured. Reply shape:
+/// ```json
+/// { "provider": "openai", "api_key": "...", "base_url": "https://..." | null,
+///   "model":   "..." | null }
+/// ```
+/// or `null` when no AI provider is configured.
+///
+/// The API key in the reply is sensitive — gate calls under the
+/// existing `ipc.call` capability the caller already needs to reach
+/// here, and audit each call via the activity log.
+pub const HANDLER_RESOLVE_CREDENTIALS: u32 = 21;
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can
@@ -340,6 +357,10 @@ impl CorePlugin for AiCorePlugin {
             let embed = self.embed_config.read().ok().and_then(|g| g.clone());
             return Ok(config_snapshot(ai.as_ref(), embed.as_ref()));
         }
+        if handler_id == HANDLER_RESOLVE_CREDENTIALS {
+            let ai = self.ai_config.read().ok().and_then(|g| g.clone());
+            return Ok(resolve_credentials_payload(ai.as_ref()));
+        }
         if handler_id == HANDLER_INDEX_STATUS {
             let snap = indexing_daemon::snapshot(&self.index_status);
             return serde_json::to_value(&snap)
@@ -366,6 +387,15 @@ impl CorePlugin for AiCorePlugin {
             let ai = self.ai_config.read().ok().and_then(|g| g.clone());
             let embed = self.embed_config.read().ok().and_then(|g| g.clone());
             let response = config_snapshot(ai.as_ref(), embed.as_ref());
+            return Some(Box::pin(async move { Ok(response) }));
+        }
+
+        // BL-117 — sync resolve_credentials. Mirrors the
+        // HANDLER_CONFIG fall-through so a caller using either
+        // dispatch path observes identical behaviour.
+        if handler_id == HANDLER_RESOLVE_CREDENTIALS {
+            let ai = self.ai_config.read().ok().and_then(|g| g.clone());
+            let response = resolve_credentials_payload(ai.as_ref());
             return Some(Box::pin(async move { Ok(response) }));
         }
 
@@ -938,6 +968,25 @@ fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> s
     serde_json::json!({
         "ai": ai_cfg.map(view),
         "embedding": embed_cfg.map(view),
+    })
+}
+
+/// BL-117 — assemble the resolve_credentials reply. Returns
+/// `Value::Null` when no AI chat provider is configured so the
+/// caller can branch cleanly without parsing an error string. The
+/// api_key is included verbatim because the caller (`nexus-audio`)
+/// needs to talk to the same provider endpoint; this is a
+/// sensitive payload — the manifest gates dispatch under
+/// `ipc.call`, the activity log records each call.
+fn resolve_credentials_payload(ai_cfg: Option<&AiConfig>) -> serde_json::Value {
+    let Some(cfg) = ai_cfg else {
+        return serde_json::Value::Null;
+    };
+    serde_json::json!({
+        "provider": cfg.provider,
+        "api_key": cfg.api_key.clone().unwrap_or_default(),
+        "base_url": cfg.base_url,
+        "model": cfg.model,
     })
 }
 

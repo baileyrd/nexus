@@ -18,7 +18,11 @@
 //! does, so a forge configured for chat works for audio out of the
 //! box.
 
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
 use base64::Engine;
+use nexus_kernel::{KernelPluginContext, PluginContext};
 use reqwest::multipart;
 use tokio::runtime::Handle;
 
@@ -29,20 +33,101 @@ use crate::backend::{
 use crate::config::AudioConfig;
 use crate::AudioError;
 
+/// Shared kernel-context slot. [`crate::AudioCorePlugin`] owns the
+/// `RwLock`; the provider backend captures a clone at construction
+/// time and reads it on every call so a `wire_context` that arrives
+/// after `on_init` is still observed without rebuilding the backend.
+pub type SharedCtx = Arc<RwLock<Option<Arc<KernelPluginContext>>>>;
+
 const BACKEND_NAME: &str = "provider";
 const DEFAULT_BASE_URL: &str = "https://api.openai.com";
+const CREDS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Credentials resolved at call time. Prefers `com.nexus.ai`'s live
+/// chat-provider config when reachable through the shared kernel
+/// context (so a runtime `set_config` push from the shell is
+/// observed); falls back to `OPENAI_API_KEY` env / `[audio]
+/// provider_*` TOML otherwise.
+struct ResolvedCreds {
+    api_key: String,
+    base_url: String,
+}
+
+/// Look up the API key + base URL for the provider call.
+///
+/// Order of preference (BL-117 — "use the configured AI or fall
+/// back to env"):
+///   1. `com.nexus.ai::resolve_credentials` when the kernel
+///      context is wired AND its reply has a non-empty api_key.
+///   2. The `AudioConfig` snapshot (which already merged env
+///      `OPENAI_API_KEY` + config.toml at load time).
+///
+/// Returns [`AudioError::Misconfigured`] when neither source has a
+/// key, so the dispatch surfaces a clear error rather than POSTing
+/// an empty Bearer token.
+async fn resolve_creds(cfg: &AudioConfig, ctx: &SharedCtx) -> Result<ResolvedCreds, AudioError> {
+    // Snapshot the context handle so we don't hold the read lock
+    // across the await.
+    let ctx_opt = ctx.read().ok().and_then(|g| g.clone());
+    if let Some(kctx) = ctx_opt {
+        let call = kctx
+            .ipc_call(
+                "com.nexus.ai",
+                "resolve_credentials",
+                serde_json::json!({}),
+                CREDS_LOOKUP_TIMEOUT,
+            )
+            .await;
+        if let Ok(value) = call {
+            if let (Some(api_key), base_url) = (
+                value.get("api_key").and_then(serde_json::Value::as_str),
+                value.get("base_url").and_then(serde_json::Value::as_str),
+            ) {
+                if !api_key.is_empty() {
+                    let base = base_url
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+                    return Ok(ResolvedCreds {
+                        api_key: api_key.to_string(),
+                        base_url: base,
+                    });
+                }
+            }
+        }
+    }
+    if let Some(key) = cfg.provider_api_key.clone().filter(|s| !s.is_empty()) {
+        let base = cfg
+            .provider_base_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        return Ok(ResolvedCreds {
+            api_key: key,
+            base_url: base,
+        });
+    }
+    Err(AudioError::Misconfigured {
+        backend: BACKEND_NAME.to_string(),
+        reason: "no API key found via `com.nexus.ai::resolve_credentials` or `OPENAI_API_KEY`; \
+                 configure an AI provider in Settings → AI or export OPENAI_API_KEY"
+            .to_string(),
+    })
+}
 
 /// STT backend that POSTs to `/v1/audio/transcriptions` using the
 /// configured API key.
 pub struct ProviderRoutedStt {
     cfg: AudioConfig,
+    ctx: SharedCtx,
 }
 
 impl ProviderRoutedStt {
-    /// Construct from a resolved [`AudioConfig`].
+    /// Construct from a resolved [`AudioConfig`] and the shared
+    /// kernel-context slot. The context is read at call time; a
+    /// `None` slot falls back to config / env credentials.
     #[must_use]
-    pub fn new(cfg: AudioConfig) -> Self {
-        Self { cfg }
+    pub fn new(cfg: AudioConfig, ctx: SharedCtx) -> Self {
+        Self { cfg, ctx }
     }
 }
 
@@ -55,26 +140,15 @@ impl SttProvider for ProviderRoutedStt {
         &mut self,
         input: TranscriptionInput,
     ) -> Result<TranscriptionOutput, AudioError> {
-        let api_key = self
-            .cfg
-            .provider_api_key
-            .clone()
-            .ok_or_else(|| AudioError::Misconfigured {
-                backend: BACKEND_NAME.to_string(),
-                reason: "set OPENAI_API_KEY or the `[audio] provider_api_key` config entry"
-                    .to_string(),
-            })?;
-        let base_url = self
-            .cfg
-            .provider_base_url
-            .clone()
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        let cfg = self.cfg.clone();
+        let ctx = Arc::clone(&self.ctx);
         let model = self.cfg.provider_stt_model.clone();
         let format = input.format;
         let language = input.language.clone();
         let bytes = input.bytes;
 
         run_async(async move {
+            let ResolvedCreds { api_key, base_url } = resolve_creds(&cfg, &ctx).await?;
             let client = build_http_client();
             let url = format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'));
             let filename = format!("audio.{}", format.extension());
@@ -128,13 +202,15 @@ impl SttProvider for ProviderRoutedStt {
 /// binary response.
 pub struct ProviderRoutedTts {
     cfg: AudioConfig,
+    ctx: SharedCtx,
 }
 
 impl ProviderRoutedTts {
-    /// Construct from a resolved [`AudioConfig`].
+    /// Construct from a resolved [`AudioConfig`] and the shared
+    /// kernel-context slot.
     #[must_use]
-    pub fn new(cfg: AudioConfig) -> Self {
-        Self { cfg }
+    pub fn new(cfg: AudioConfig, ctx: SharedCtx) -> Self {
+        Self { cfg, ctx }
     }
 }
 
@@ -149,20 +225,8 @@ impl TtsProvider for ProviderRoutedTts {
         voice: Option<&str>,
         format: AudioFormat,
     ) -> Result<SynthesisOutput, AudioError> {
-        let api_key = self
-            .cfg
-            .provider_api_key
-            .clone()
-            .ok_or_else(|| AudioError::Misconfigured {
-                backend: BACKEND_NAME.to_string(),
-                reason: "set OPENAI_API_KEY or the `[audio] provider_api_key` config entry"
-                    .to_string(),
-            })?;
-        let base_url = self
-            .cfg
-            .provider_base_url
-            .clone()
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        let cfg = self.cfg.clone();
+        let ctx = Arc::clone(&self.ctx);
         let model = self.cfg.provider_tts_model.clone();
         let voice = voice
             .map_or_else(|| self.cfg.provider_tts_voice.clone(), str::to_string);
@@ -181,6 +245,7 @@ impl TtsProvider for ProviderRoutedTts {
         };
 
         run_async(async move {
+            let ResolvedCreds { api_key, base_url } = resolve_creds(&cfg, &ctx).await?;
             let client = build_http_client();
             let url = format!("{}/v1/audio/speech", base_url.trim_end_matches('/'));
             let body = serde_json::json!({

@@ -3,11 +3,12 @@
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{AudioBackends, SttProvider, TtsProvider};
-use crate::provider_backend::{ProviderRoutedStt, ProviderRoutedTts};
+use crate::provider_backend::{ProviderRoutedStt, ProviderRoutedTts, SharedCtx};
 use crate::stub_backend::{
     local_stt_stub, local_tts_stub, platform_stt_stub, platform_tts_stub,
 };
@@ -187,30 +188,47 @@ impl AudioConfig {
 
     /// Build the backend pair selected by this config.
     ///
-    /// Backend construction itself is infallible — disabled / missing
-    /// dependencies surface as [`AudioError::BackendNotEnabled`] or
-    /// [`AudioError::Misconfigured`] from the first dispatch instead
-    /// of at boot. This keeps a forge with a missing API key bootable
-    /// (so the user can still edit text + see "audio backend not
-    /// configured" from the UI) rather than crashing the kernel.
+    /// `shared_ctx` is the kernel-context slot owned by
+    /// [`crate::AudioCorePlugin`]; the provider-routed backend
+    /// reads it at call time to issue an `ipc_call` for the active
+    /// AI provider's credentials. Pass `None` (or a never-populated
+    /// handle) and the provider backend falls back to env / TOML
+    /// only.
+    ///
+    /// Backend construction itself is infallible — disabled /
+    /// missing dependencies surface as
+    /// [`AudioError::BackendNotEnabled`](crate::AudioError::BackendNotEnabled)
+    /// or [`AudioError::Misconfigured`](crate::AudioError::Misconfigured)
+    /// from the first dispatch instead of at boot, so a forge with
+    /// a missing API key is still bootable (the user can still edit
+    /// text + see "audio backend not configured" from the UI).
     #[must_use]
-    pub fn build_backends(&self) -> AudioBackends {
-        AudioBackends::new(self.build_stt(), self.build_tts())
+    pub fn build_backends(&self, shared_ctx: SharedCtx) -> AudioBackends {
+        AudioBackends::new(
+            self.build_stt(Arc::clone(&shared_ctx)),
+            self.build_tts(shared_ctx),
+        )
     }
 
-    fn build_stt(&self) -> Box<dyn SttProvider> {
+    fn build_stt(&self, ctx: SharedCtx) -> Box<dyn SttProvider> {
         match self.stt_backend {
+            #[cfg(feature = "local-audio")]
+            AudioBackendName::Local => crate::local_backend::local_stt(self.clone()),
+            #[cfg(not(feature = "local-audio"))]
             AudioBackendName::Local => local_stt_stub(),
             AudioBackendName::Platform => platform_stt_stub(),
-            AudioBackendName::Provider => Box::new(ProviderRoutedStt::new(self.clone())),
+            AudioBackendName::Provider => Box::new(ProviderRoutedStt::new(self.clone(), ctx)),
         }
     }
 
-    fn build_tts(&self) -> Box<dyn TtsProvider> {
+    fn build_tts(&self, ctx: SharedCtx) -> Box<dyn TtsProvider> {
         match self.tts_backend {
+            #[cfg(feature = "local-audio")]
+            AudioBackendName::Local => crate::local_backend::local_tts(self.clone()),
+            #[cfg(not(feature = "local-audio"))]
             AudioBackendName::Local => local_tts_stub(),
             AudioBackendName::Platform => platform_tts_stub(),
-            AudioBackendName::Provider => Box::new(ProviderRoutedTts::new(self.clone())),
+            AudioBackendName::Provider => Box::new(ProviderRoutedTts::new(self.clone(), ctx)),
         }
     }
 }

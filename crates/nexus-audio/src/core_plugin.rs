@@ -7,8 +7,9 @@
 //! here when the caller has the matching capability.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 
+use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, PluginError};
 
 use crate::backend::AudioBackends;
@@ -17,7 +18,7 @@ use crate::ipc::{
     AudioStatusResult, AudioSynthesizeArgs, AudioSynthesizeResult, AudioTranscribeArgs,
     AudioTranscribeResult,
 };
-use crate::provider_backend::{decode_b64, encode_b64};
+use crate::provider_backend::{decode_b64, encode_b64, SharedCtx};
 use crate::{AudioError, AudioFormat};
 
 /// Reverse-DNS identifier.
@@ -34,10 +35,17 @@ pub const HANDLER_STATUS: u32 = 3;
 
 /// Core plugin. Owns the configured backend pair behind a mutex so
 /// IPC dispatches can serialise into the backend without forcing
-/// every backend to be `Sync`.
+/// every backend to be `Sync`. Holds a shared `Arc<RwLock<_>>`
+/// kernel-context slot that the provider-routed backend reads at
+/// call time to ask `com.nexus.ai::resolve_credentials` for the
+/// active chat provider's api_key (BL-117 — "use the configured AI
+/// or fall back to env").
 pub struct AudioCorePlugin {
     forge_root: PathBuf,
     backends: Mutex<Option<AudioBackends>>,
+    /// Shared so the provider backend constructed in `on_init` can
+    /// observe the context that lands later through `wire_context`.
+    context: SharedCtx,
 }
 
 impl AudioCorePlugin {
@@ -48,6 +56,7 @@ impl AudioCorePlugin {
         Self {
             forge_root,
             backends: Mutex::new(None),
+            context: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -59,6 +68,7 @@ impl AudioCorePlugin {
         Self {
             forge_root,
             backends: Mutex::new(Some(backends)),
+            context: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -74,9 +84,15 @@ impl CorePlugin for AudioCorePlugin {
             hook: "on_init".to_string(),
             reason: format!("load config: {e}"),
         })?;
-        let pair = cfg.build_backends();
+        let pair = cfg.build_backends(Arc::clone(&self.context));
         *self.backends.lock().expect("audio backends mutex") = Some(pair);
         Ok(())
+    }
+
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        if let Ok(mut g) = self.context.write() {
+            *g = Some(ctx);
+        }
     }
 
     fn dispatch(

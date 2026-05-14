@@ -296,6 +296,22 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         vec![Capability::AiChat],
     );
 
+    // BL-117 — audio subsystem caps. Microphone capture (transcribe)
+    // is privacy-sensitive; speaker output (synthesize) is annoying
+    // but not destructive. `status` is read-only and ungated so a
+    // settings panel can probe the active backend pair without a cap
+    // negotiation.
+    shared.add_cap_requirement(
+        "com.nexus.audio",
+        "transcribe",
+        vec![Capability::AudioRecord],
+    );
+    shared.add_cap_requirement(
+        "com.nexus.audio",
+        "synthesize",
+        vec![Capability::AudioSynthesize],
+    );
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
@@ -389,6 +405,25 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     shared
         .wire_context("com.nexus.workflow", Arc::new(workflow_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire workflow plugin context: {e}"))?;
+
+    // BL-117 — audio subsystem's provider-routed backend issues
+    // `ipc_call("com.nexus.ai", "resolve_credentials", …)` at
+    // dispatch time, and reqwest-talks to the AI provider's audio
+    // endpoint. Capabilities are scoped to those two surfaces; the
+    // backend has no other direct kernel reach.
+    let audio_ctx = KernelPluginContext::new(
+        "com.nexus.audio",
+        env!("CARGO_PKG_VERSION"),
+        audio_capabilities(),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.audio")?;
+    shared
+        .wire_context("com.nexus.audio", Arc::new(audio_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire audio plugin context: {e}"))?;
 
     let context = KernelPluginContext::new(
         invoker_id,
@@ -1047,6 +1082,14 @@ fn register_core_plugins(
                     (
                         "propose_tool_calls",
                         nexus_ai::core_plugin::HANDLER_PROPOSE_TOOL_CALLS,
+                    ),
+                    // BL-117 — sibling subsystems (nexus-audio) ask
+                    // here for the active chat provider's credentials
+                    // so the user doesn't need to configure a second
+                    // API key for audio.
+                    (
+                        "resolve_credentials",
+                        nexus_ai::core_plugin::HANDLER_RESOLVE_CREDENTIALS,
                     ),
                 ]),
             ),
@@ -1885,6 +1928,32 @@ pub fn agent_capabilities() -> CapabilitySet {
 /// The cron-driven digest scheduler runs on top of the same context,
 /// so this scope applies there too. Same caveat about the transitive
 /// IpcCall-laundering surface as for `agent_capabilities`.
+/// Capabilities granted to the `com.nexus.audio` plugin context
+/// (BL-117). The provider-routed backend uses two kernel surfaces:
+///
+/// - `IpcCall` to reach `com.nexus.ai::resolve_credentials` for the
+///   active chat provider's key.
+/// - `NetHttp` for outbound HTTPS to the AI provider's audio
+///   endpoint.
+///
+/// The audio plugin does NOT request `AudioRecord` / `AudioSynthesize`
+/// — those are *caller-facing* gates declared on the handler manifest
+/// (`add_cap_requirement` above), enforced when something *outside*
+/// the audio plugin calls `com.nexus.audio::transcribe` /
+/// `synthesize`. The audio plugin's own context never needs to call
+/// those handlers on itself.
+#[must_use]
+pub fn audio_capabilities() -> CapabilitySet {
+    [Capability::IpcCall, Capability::NetHttp]
+        .into_iter()
+        .collect()
+}
+
+/// Capabilities granted to the `com.nexus.workflow` `KernelPluginContext`
+/// at runtime wiring time (issue #73). Scoped to `IpcCall` + `AiChat`
+/// only — every step type (ipc_call / ai_prompt / digest reads / …)
+/// routes through `ctx.ipc_call(...)`, gated by the target plugin's
+/// own capability checks.
 #[must_use]
 pub fn workflow_capabilities() -> CapabilitySet {
     // ADR 0022: workflow `ai_prompt` steps reach `stream_chat` via
