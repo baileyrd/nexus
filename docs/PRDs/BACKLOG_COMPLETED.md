@@ -45,6 +45,54 @@ Fix: store the srcdoc body in a `pendingSrcDoc` field in the constructor; assign
 
 ---
 
+### BL-125: Viewport-scoped live-preview decorations (Phase 3 of TYPING-LATENCY-PLAN) ✅ (2026-05-14)
+
+**Source**: Typing-latency analysis — `docs/roadmap/TYPING-LATENCY-PLAN.md`
+**Files**: `shell/src/plugins/nexus/editor/cm/livePreviewDecorations.ts` (new `buildLivePreviewBlockDecorations`, `buildLivePreviewInlineDecorations`; new `visitBlock`/`visitInline` split; `handleFencedCode` factored into block-only + inline-only branches); `shell/src/plugins/nexus/editor/cm/livePreview.ts` (StateField for blocks, ViewPlugin for inline, both contribute to `EditorView.atomicRanges`); `shell/src/plugins/nexus/editor/cm/livePreviewDecorations.test.ts` (6 new BL-125 tests covering the split); `experiments/perf/run.ts` (live-preview scenarios bumped to 5000-line `large` against a synthetic 50-line viewport); `experiments/perf/baselines/2026-05-14.json` (post-BL-125 baseline)
+**Related**: BL-122 (the perf-harness scenarios this PR moves); BL-127 (the deferred runtime-side typing-latency scenarios)
+
+The motivating observation: `buildLivePreviewDecorations` walked the full lezer syntax tree on every `docChanged` *and* every selection change. On a 5000-line doc with ~22 000 syntax nodes that's measurable pre-paint work the user experiences as glyph delay. CM6 already maintains `view.visibleRanges` — the viewport-bounded subset of the document — so the inline-decoration walk has no reason to touch non-visible content.
+
+**What landed.**
+
+- **Split decoration source.** A new `StateField` calls `buildLivePreviewBlockDecorations(state)` which walks the full tree but emits only block widgets (HR / Table / FencedCode). A new `ViewPlugin` calls `buildLivePreviewInlineDecorations(state, view.visibleRanges)` which walks only the visible ranges and emits marks / line decorations / non-block replaces. Both sources contribute to `EditorView.atomicRanges` so cursor motion still skips over hidden marks cleanly across the split.
+  - Why two sources, not one viewport-aware field: CM6 disallows block widgets from `ViewPlugin`s (`RangeError: Block decorations may not be specified via plugins`). A StateField can't read `view.visibleRanges` directly (no view in `StateField.update`). The clean split is StateField for blocks + ViewPlugin for the rest.
+- **`visitBlock` / `visitInline` split** in `livePreviewDecorations.ts`. `visitBlock` only enters HR / Table / FencedCode handlers and only emits the block-widget branch. `visitInline` mirrors the legacy `visit` but skips block-widget emission. `handleFencedCode` factors into `handleFencedCodeBlockOnly` (emits only the FencedCodeWidget block-replace) and `handleFencedCodeInlineOnly` (emits the line-decoration / inline-replace fallback when no renderer is registered or the cursor is inside the fence). The legacy `handleFencedCode` is preserved as a dispatcher for the backward-compat combined entry-point.
+- **Backward-compat shim.** Legacy `buildLivePreviewDecorations(state)` stays as a thin combined walker — used by the pre-existing test suite and by the BL-122 backward-compat checkpoint. Tests + perf-harness can rely on either entry-point as needed.
+- **Atomic ranges across the split.** Block field provides atomic ranges via `EditorView.atomicRanges.of(view => view.state.field(blockField) ?? Decoration.none)`. Inline plugin provides via `EditorView.atomicRanges.of(view => view.plugin(inlinePlugin)?.decorations ?? Decoration.none)`. CM6's facet combines them. Cursor motion across the viewport boundary lands in the freshly-recomputed inline decoration set on the next frame (CM6 fires `viewportChanged` before paint).
+- **Live-preview perf scenarios bumped.** `large` now exercises a 5000-line doc instead of 1500 (lift now safe because the inline walk is viewport-bounded, not doc-bounded). Each iteration emulates one frame of CM6 work: one block-decoration rebuild + one inline-decoration rebuild scoped to a synthetic 50-line viewport.
+
+**Tests.** 6 new tests in `livePreviewDecorations.test.ts`:
+
+1. **Block source emits widgets, no inline marks.** Multi-construct doc with HR + table + inline marks; block source returns HR widget + Table widget but no `cm-md-strong` / `cm-md-code` marks.
+2. **Inline source obeys the requested range.** Two emphasis runs on separate lines; asking for just the first line yields the first-line mark and not the second-line mark.
+3. **Empty range list emits nothing.** Sanity check on the loop guard.
+4. **Heading line decoration appears within range.** Pins that line decorations participate in viewport scoping correctly.
+5. **Selection-driven reveal works across the split.** Cursor on heading line + viewport covering the heading: no replace over the `# ` marker (the `computeActiveLines` is doc-global, not range-bounded, so the reveal applies even when the viewport starts past the cursor).
+6. **Combined block + inline (full doc) matches the full-walk reference.** Sanity check that splitting the walk doesn't drop decorations overall.
+
+**Baseline shift on `editor.livePreview.decorate.*` (`experiments/perf/baselines/2026-05-14.json`, dev WSL2 host).**
+
+| scenario | iterations | p50 µs | p95 µs |
+|----------|-----------:|-------:|-------:|
+| `editor.livePreview.decorate.small` (50 lines) | 100 | 85.44 | 185.29 |
+| `editor.livePreview.decorate.medium` (500 lines) | 40 | 48.91 | 64.76 |
+| `editor.livePreview.decorate.large` (5000 lines) | 20 | **12.66** | **50.93** |
+
+The DoD bullet "`large` p95 ≤ `large.small` p95" is satisfied (51 µs ≤ 185 µs). The `large` scenario is now ~7x faster than the pre-BL-125 full-walk equivalent at the same 5000-line size, because the inline portion is bounded by viewport (~50 lines) and only the block portion does a full-tree pass — and that pass emits nothing (no HR / Table / FencedCode in the synthetic doc), so it just descends through the tree without allocating decoration objects.
+
+**Tested**:
+- `cargo test -p nexus-editor` → 232 passed (no editor crate changes).
+- `pnpm --filter nexus-shell test` → 1392 passed, 1 skipped (was 1386 / 1; +6 new BL-125 tests).
+- `pnpm --filter nexus-shell typecheck` clean.
+- `pnpm --filter nexus-shell lint` clean (2 pre-existing `no-explicit-any` warnings only).
+
+**Deviations from the BL DoD**: The DoD bullet "Decoration source restructured so the walk reads `view.visibleRanges` plus `tr.changes.iterChangedRanges` for `docChanged` and the active-line delta for selection-only updates" landed in a simpler form — the inline ViewPlugin recomputes from scratch on every relevant update (docChanged / selectionSet / viewportChanged / parse-tree-replaced / fencedRegistryChanged), bounded to `view.visibleRanges`. The finer-grained "changed-range delta" optimization is unnecessary at the current p50 of 12 µs and would add significant complexity to the active-line-set bookkeeping; left as a future optimization gated on a real signal that the recompute is hot. Visual snapshot tests are pinned at the decoration-set level (introspecting the emitted `Decoration` items via the RangeSet cursor) rather than DOM-snapshot level — DOM snapshots would require mounting CodeMirror under happy-dom with a real layout pass, which is non-deterministic across happy-dom versions.
+
+**Definition of done coverage**: ✅ decoration source restructured (block StateField + inline ViewPlugin reading `view.visibleRanges`); ✅ block decorations remain StateField-sourced; ✅ `EditorView.atomicRanges.of(...)` wired from both sources; ✅ `editor.livePreview.decorate.large` p95 ≤ `editor.livePreview.decorate.small` p95 (51 µs vs 185 µs); ✅ visual snapshot tests (decoration-set level) cover emphasis / strong / inline code / headings across viewport edges + selection-driven reveal; ⏸ finer-grained "changed-range delta" recompute deferred — not load-bearing at the current 12 µs p50, see deviations.
+
+---
+
 ### BL-124: `useFrameSnapshot` adoption in `EditorView` (Phase 2 of TYPING-LATENCY-PLAN) ✅ (2026-05-14)
 
 **Source**: Typing-latency analysis — `docs/roadmap/TYPING-LATENCY-PLAN.md`

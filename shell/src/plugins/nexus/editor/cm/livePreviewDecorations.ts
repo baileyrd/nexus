@@ -137,6 +137,14 @@ interface SyntaxNodeRef {
  * Atomicity: the caller pairs the resulting set with
  * `EditorView.atomicRanges` so cursor motion skips over hidden marks
  * cleanly — a left-arrow doesn't park inside an invisible `**`.
+ *
+ * BL-125: see also [`buildLivePreviewBlockDecorations`] and
+ * [`buildLivePreviewInlineDecorations`] for the viewport-scoped
+ * split — production code wires those through a `StateField` (blocks)
+ * + `ViewPlugin` (inline) pair so the inline walk cost is bounded by
+ * viewport size, not document size. This combined entry-point stays
+ * for backward compat (the existing unit tests + the BL-122 perf
+ * harness drive it directly).
  */
 export function buildLivePreviewDecorations(state: EditorState): DecorationSet {
   const activeLines = computeActiveLines(state)
@@ -149,6 +157,75 @@ export function buildLivePreviewDecorations(state: EditorState): DecorationSet {
       visit(node, doc, state, activeLines, items)
     },
   })
+
+  return decorationsFromItems(items)
+}
+
+/**
+ * BL-125 — emit only block-level decorations (HR widget, table widget,
+ * fenced-code widget) by walking the full syntax tree.
+ *
+ * CM6's atomic-range + block-decoration semantics require block
+ * widgets to come from a `StateField` (not a `ViewPlugin`), so this
+ * builder is the one wired into the field side of the split. The
+ * full-tree walk is OK because block constructs are rare (a typical
+ * doc has < 50 tables / HRs / fenced blocks) and each handler
+ * descends only into the matched node's children.
+ *
+ * Inline decorations are emitted by [`buildLivePreviewInlineDecorations`].
+ */
+export function buildLivePreviewBlockDecorations(state: EditorState): DecorationSet {
+  const activeLines = computeActiveLines(state)
+  const items: DecorationItem[] = []
+  const tree = syntaxTree(state)
+  const doc = state.doc
+
+  tree.iterate({
+    enter(node) {
+      visitBlock(node, doc, state, activeLines, items)
+    },
+  })
+
+  return decorationsFromItems(items)
+}
+
+/**
+ * BL-125 — emit inline marks, line decorations, and non-block replace
+ * ranges by walking only the supplied `ranges` (typically
+ * `view.visibleRanges`).
+ *
+ * Marks / replaces / line decorations outside the visible viewport
+ * have no effect on the rendered output, and the user can't see them.
+ * So the walker is bounded by viewport size, not document size — the
+ * core BL-125 win.
+ *
+ * Atomic-ranges integration: the inline `Decoration.replace` ranges
+ * emitted here are wired into `EditorView.atomicRanges` alongside the
+ * block field's. Atomic ranges only matter for cursor motion inside
+ * visible content; navigation that jumps past the viewport (e.g.
+ * Ctrl+End) lands the cursor inside the freshly-recomputed viewport's
+ * decoration set, since CM6 fires a `viewportChanged` update before
+ * the next paint.
+ */
+export function buildLivePreviewInlineDecorations(
+  state: EditorState,
+  ranges: readonly { from: number; to: number }[],
+): DecorationSet {
+  const activeLines = computeActiveLines(state)
+  const items: DecorationItem[] = []
+  const tree = syntaxTree(state)
+  const doc = state.doc
+
+  for (const r of ranges) {
+    if (r.to <= r.from) continue
+    tree.iterate({
+      enter(node) {
+        visitInline(node, doc, state, activeLines, items)
+      },
+      from: r.from,
+      to: r.to,
+    })
+  }
 
   return decorationsFromItems(items)
 }
@@ -273,6 +350,112 @@ function visit(
   }
   if (name === 'Table') {
     handleTable(node.node, doc, active, state, items)
+    return
+  }
+}
+
+/**
+ * BL-125 — block-only visitor for the StateField source. Emits
+ * `Decoration.replace({ block: true, widget })` for HR / Table /
+ * FencedCode (when the block-render path fires) and nothing else.
+ * Skipped block constructs (HR on active line, Table on active line,
+ * FencedCode without a registered renderer or on the active line)
+ * yield zero output here — the inline visitor handles their fallback
+ * line decorations.
+ */
+function visitBlock(
+  node: SyntaxNodeRef,
+  doc: EditorState['doc'],
+  state: EditorState,
+  active: Set<number>,
+  items: DecorationItem[],
+): void {
+  const name = node.name
+  if (name === 'HorizontalRule') {
+    const reveal = nodeIntersectsActiveLines(state, node.from, node.to, active)
+    handleHorizontalRule(node.node, reveal, doc, items)
+    return
+  }
+  if (name === 'Table') {
+    handleTable(node.node, doc, active, state, items)
+    return
+  }
+  if (name === 'FencedCode') {
+    handleFencedCodeBlockOnly(node.node, doc, active, state, items)
+    return
+  }
+}
+
+/**
+ * BL-125 — inline visitor for the ViewPlugin source. Mirrors
+ * [`visit`] but skips constructs whose only output is a block widget
+ * (HR, Table). For FencedCode it emits only the line-decoration /
+ * inline-replace fallback path; the block widget itself is owned by
+ * the StateField via [`visitBlock`].
+ */
+function visitInline(
+  node: SyntaxNodeRef,
+  doc: EditorState['doc'],
+  state: EditorState,
+  active: Set<number>,
+  items: DecorationItem[],
+): void {
+  const name = node.name
+  const reveal = nodeIntersectsActiveLines(state, node.from, node.to, active)
+
+  if (name === 'Emphasis') {
+    handleEmphasis(node.node, reveal, items, 'cm-md-em')
+    return
+  }
+  if (name === 'StrongEmphasis') {
+    handleEmphasis(node.node, reveal, items, 'cm-md-strong')
+    return
+  }
+  if (name === 'InlineCode') {
+    handleInlineCode(node.node, reveal, items)
+    return
+  }
+  if (name === 'Link') {
+    handleLink(node.node, reveal, items)
+    return
+  }
+  if (name === 'Image') {
+    handleImage(node.node, items)
+    return
+  }
+  if (/^ATXHeading[1-6]$/.test(name)) {
+    handleAtxHeading(node.node, reveal, doc, items)
+    return
+  }
+  if (name === 'SetextHeading1' || name === 'SetextHeading2') {
+    handleSetextHeading(node.node, reveal, doc, items)
+    return
+  }
+  if (name === 'Blockquote') {
+    handleBlockquote(node.node, doc, items)
+    return
+  }
+  if (name === 'BulletList' || name === 'OrderedList') {
+    return
+  }
+  if (name === 'ListMark') {
+    pushMark(items, node.from, node.to, 'cm-md-list-marker')
+    return
+  }
+  if (name === 'TaskMarker') {
+    pushMark(items, node.from, node.to, 'cm-md-task')
+    return
+  }
+  if (name === 'FencedCode') {
+    handleFencedCodeInlineOnly(node.node, doc, active, state, items)
+    return
+  }
+  if (name === 'CodeBlock') {
+    handleCodeBlock(node.node, doc, items)
+    return
+  }
+  if (name === 'HTMLBlock' || name === 'HTMLTag') {
+    pushMark(items, node.from, node.to, 'cm-md-html')
     return
   }
 }
@@ -517,32 +700,78 @@ function handleFencedCode(
   state: EditorState,
   items: DecorationItem[],
 ): void {
+  // Backward-compat path for the combined `buildLivePreviewDecorations`
+  // entry-point. The split visitors below run only their relevant
+  // branch.
+  if (fencedCodeIsBlockRendering(node, doc, active, state)) {
+    handleFencedCodeBlockOnly(node, doc, active, state, items)
+    return
+  }
+  handleFencedCodeInlineOnly(node, doc, active, state, items)
+}
+
+function fencedCodeIsBlockRendering(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  active: Set<number>,
+  state: EditorState,
+): boolean {
   const startLine = doc.lineAt(node.from)
   const endLine = doc.lineAt(node.to)
   const language = readFencedCodeLanguage(node, state)
-
-  if (
-    language &&
+  return (
+    !!language &&
     fencedCodeRegistry.has(language) &&
     !nodeIntersectsActiveLines(state, startLine.from, endLine.to, active)
+  )
+}
+
+function handleFencedCodeBlockOnly(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  active: Set<number>,
+  state: EditorState,
+  items: DecorationItem[],
+): void {
+  const startLine = doc.lineAt(node.from)
+  const endLine = doc.lineAt(node.to)
+  const language = readFencedCodeLanguage(node, state)
+  if (
+    !language ||
+    !fencedCodeRegistry.has(language) ||
+    nodeIntersectsActiveLines(state, startLine.from, endLine.to, active)
   ) {
-    const innerSource = readFencedCodeBody(node, state, startLine, endLine)
-    items.push({
-      from: startLine.from,
-      to: endLine.to,
-      deco: Decoration.replace({
-        widget: new FencedCodeWidget(
-          innerSource,
-          language,
-          fencedCodeRegistry.generation(),
-        ),
-        block: true,
-        inclusive: false,
-      }),
-    })
     return
   }
+  const innerSource = readFencedCodeBody(node, state, startLine, endLine)
+  items.push({
+    from: startLine.from,
+    to: endLine.to,
+    deco: Decoration.replace({
+      widget: new FencedCodeWidget(
+        innerSource,
+        language,
+        fencedCodeRegistry.generation(),
+      ),
+      block: true,
+      inclusive: false,
+    }),
+  })
+}
 
+function handleFencedCodeInlineOnly(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  active: Set<number>,
+  state: EditorState,
+  items: DecorationItem[],
+): void {
+  // When the block-render path fires this fence is owned by the block
+  // StateField; the inline plugin emits nothing.
+  if (fencedCodeIsBlockRendering(node, doc, active, state)) return
+
+  const startLine = doc.lineAt(node.from)
+  const endLine = doc.lineAt(node.to)
   for (let l = startLine.number; l <= endLine.number; l++) {
     pushLine(items, doc.line(l).from, 'cm-md-codeblock')
   }

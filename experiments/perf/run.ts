@@ -406,14 +406,36 @@ interface DocSize {
 const LIVE_PREVIEW_SIZES: DocSize[] = [
   { name: 'small', lineCount: 50, iterations: 100 },
   { name: 'medium', lineCount: 500, iterations: 40 },
-  // `large` is intentionally well below the 5000-line ceiling used for
-  // the kernel scenarios — lezer's syntax tree + the decoration walk
-  // produce a lot of intermediate allocations that GC under happy-dom
-  // doesn't reliably reclaim between iterations. 1500 lines is enough
-  // to make the BL-125 viewport-scoped win measurable without OOMing
-  // the harness.
-  { name: 'large', lineCount: 1500, iterations: 10 },
+  // BL-125: with viewport-scoped inline decorations the per-frame
+  // walk is bounded by viewport size, not doc size, so a much larger
+  // doc is safe under the same iteration budget. 5000 lines exercises
+  // the win — the inline walker should stay flat with `small` while
+  // the block walker absorbs the full-tree pass once.
+  { name: 'large', lineCount: 5000, iterations: 20 },
 ]
+
+/**
+ * Synthetic viewport range — emulates CM6's `view.visibleRanges`. A
+ * realistic viewport on a typing host is ~50 lines tall regardless of
+ * doc length, so we keep the range fixed at 50 lines and slide it
+ * into the middle of the doc to exercise a non-trivial offset.
+ */
+function syntheticViewport(doc: string, viewportLines = 50): { from: number; to: number } {
+  const lines = doc.split('\n')
+  if (lines.length <= viewportLines) {
+    return { from: 0, to: doc.length }
+  }
+  const startLine = Math.max(0, Math.floor((lines.length - viewportLines) / 2))
+  let from = 0
+  for (let i = 0; i < startLine; i++) {
+    from += lines[i]!.length + 1 // +1 for the joining '\n'
+  }
+  let to = from
+  for (let i = 0; i < viewportLines; i++) {
+    to += lines[startLine + i]!.length + 1
+  }
+  return { from, to: Math.min(to, doc.length) }
+}
 
 function buildMarkdownDoc(lineCount: number): string {
   // Mix of constructs the live-preview walker handles so the result
@@ -437,14 +459,17 @@ function buildMarkdownDoc(lineCount: number): string {
 }
 
 /**
- * BL-122 — `editor.livePreview.decorate.{small,medium,large}` scenarios.
+ * BL-122 / BL-125 — `editor.livePreview.decorate.{small,medium,large}` scenarios.
  *
- * Drives the decoration builder against three doc sizes. Each
- * iteration is a fresh `EditorState` (so the lezer parse tree is
- * built once per measured sample) plus one `buildLivePreviewDecorations`
- * call. The current implementation walks the full syntax tree on every
- * change; BL-125 makes the walk viewport-scoped so `large` collapses
- * toward `small` once it lands.
+ * Each iteration emulates one frame of CM6 work: one `block`
+ * decoration rebuild (full-tree walk, StateField source) + one
+ * `inline` decoration rebuild scoped to a synthetic 50-line viewport
+ * (ViewPlugin source). Pre-BL-125 the inline walk traversed the full
+ * syntax tree on every doc/selection change; BL-125 makes it
+ * viewport-bounded, so the `large` scenario should stay roughly flat
+ * with `small` for the inline portion while the block portion
+ * absorbs the full-tree pass (which is cheap because block
+ * constructs are rare).
  */
 async function microbenchLivePreviewDecorate(): Promise<Record<string, MicrobenchResult>> {
   await ensureDom()
@@ -457,7 +482,10 @@ async function microbenchLivePreviewDecorate(): Promise<Record<string, Microbenc
   const { ensureSyntaxTree } = await importFromShell<typeof import('@codemirror/language')>(
     '@codemirror/language',
   )
-  const { buildLivePreviewDecorations } = await import(
+  const {
+    buildLivePreviewBlockDecorations,
+    buildLivePreviewInlineDecorations,
+  } = await import(
     '../../shell/src/plugins/nexus/editor/cm/livePreviewDecorations.ts'
   )
   const results: Record<string, MicrobenchResult> = {}
@@ -470,8 +498,10 @@ async function microbenchLivePreviewDecorate(): Promise<Record<string, Microbenc
     // every doc size produces ~the same number — useless as a baseline
     // for BL-125's viewport-scoping win.
     ensureSyntaxTree(state, doc.length, 30_000)
+    const viewport = syntheticViewport(doc)
     results[`editor.livePreview.decorate.${sz.name}`] = timeBlock(() => {
-      buildLivePreviewDecorations(state)
+      buildLivePreviewBlockDecorations(state)
+      buildLivePreviewInlineDecorations(state, [viewport])
     }, sz.iterations)
   }
   return results

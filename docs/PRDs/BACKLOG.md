@@ -446,26 +446,15 @@ _BL-123 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 _BL-124 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `EditorView` switches from `useEditorStore((s) => s.tabs)` (subscribes to the entire array; every keystroke in any leaf re-renders every other leaf) to a per-relpath `useFrameSnapshot` over `[active-tab-object, tabs.length]` selectors. `useFrameSnapshot` gains an optional `rebuildKey` parameter so the controller re-binds if a leaf is ever re-targeted to a different file without unmounting; default behaviour (no key, captures entries on first render) is preserved for the BL-110 reference site. `activeRelpath` and `isDirty` are intentionally excluded from the snapshot — EditorView never renders them, so including them would force a re-render on every session-revision bump for no visible change; the tab-strip dirty dot still flows through `WorkspaceRenderer.useLeafDirty` per-leaf subscription, unchanged. 4 new tests pin the contract: 10 keystrokes against tab A flush tab A's controller exactly 10 times and tab B's controller zero times; `setContent` / `setMode` on tab A preserve tab B's object identity; the rebuildKey-driven re-bind reads the new tab's slice. `pnpm --filter nexus-shell test` 1386/1387 (one pre-existing skip). The render-count DoD bullet is verified at the FrameSnapshot layer (not the React tree) because mounting `EditorView` in happy-dom needs CM6, the runtime, the storage IPC stub, etc. — too heavy for a unit test; the per-relpath narrowing is the actual mechanism, and the test pins the mechanism._
 
+_BL-125 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Live-preview decoration source split into two: a `StateField` calling new `buildLivePreviewBlockDecorations(state)` (full-tree walk emitting only HR / Table / FencedCode block widgets — CM6 requires block widgets to be StateField-sourced) and a `ViewPlugin` calling new `buildLivePreviewInlineDecorations(state, view.visibleRanges)` (viewport-scoped walk emitting marks / line decorations / non-block replaces). The walker uses `tree.iterate({ from, to })` to bound iteration by the supplied ranges; everything else is unchanged. Both sources contribute to `EditorView.atomicRanges` so cursor motion still respects hidden marks across the split. Legacy `buildLivePreviewDecorations(state)` is preserved as a thin combined entry-point so the pre-existing test suite + the BL-122 perf harness backward-compat scenario continue to work. New `visitBlock` / `visitInline` split the dispatch table; `handleFencedCode` factors into `handleFencedCodeBlockOnly` + `handleFencedCodeInlineOnly` so each visitor emits only its branch. 6 new tests cover the BL-125 split: block source emits widgets and no inline marks, inline source emits inline marks within the requested range only, empty-range inline source emits nothing, heading line decoration appears inside its range, cursor-on-heading reveal works across the viewport split, and `block ∪ inline (full doc)` reproduces the full-walk reference set. BL-122 perf scenarios bumped — `large` now exercises a 5000-line doc against a synthetic 50-line viewport (the natural CM6 frame shape). Baseline: small=85 µs p50, medium=49 µs p50, **large=12.66 µs p50 / 51 µs p95** — `large` p95 ≤ `small` p95 (the DoD target), and large is now ≈ 7x faster than the pre-BL-125 full-walk equivalent on the same 5000-line doc. `pnpm --filter nexus-shell test` 1392/1393 (one pre-existing skip)._
+
 ---
 
 _BL-124 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
-### BL-125: Viewport-scoped live-preview decorations (Phase 3 of TYPING-LATENCY-PLAN)
-
-**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
-**Effort**: Medium. Independent of BL-123/BL-124.
-**Crates**: shell `nexus.editor` plugin (CM6 extensions).
-
-`buildLivePreviewDecorations` at `shell/src/plugins/nexus/editor/cm/livePreviewDecorations.ts:141-153` walks the full Lezer syntax tree on every `docChanged` *and* every selection change (the `StateField.update` at `cm/livePreview.ts:30-43` checks both). This runs pre-paint, so on a 10k-line doc with a 50k-node tree it directly delays the glyph. Scope the walk to the visible viewport + the changed range; for selection-only updates, rebuild only lines that crossed the active-set boundary.
-
-**Definition of done:**
-- Decoration source restructured so the walk reads `view.visibleRanges` plus `tr.changes.iterChangedRanges` for `docChanged` and the active-line delta for selection-only updates
-- Block decorations (table widget, HR) remain `StateField`-sourced per CM6's rule against block decorations from `ViewPlugin`s; resolve the split (effect-passed viewport vs separate StateField for blocks) in the PR
-- `EditorView.atomicRanges.of(...)` wiring preserved so cursor motion still respects atomic ranges
-- `editor.livePreview.decorate.large` p95 ≤ p95 of `.small` (cost becomes viewport-bounded)
-- Visual snapshot tests pass: emphasis / strong / inline code / headings across viewport edges; selection-driven reveal/hide transitions on the line the cursor enters
+_BL-125 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

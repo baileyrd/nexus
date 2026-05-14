@@ -503,3 +503,238 @@ test('FencedCodeWidget.eq: source / language / generation triple gates equality'
   assert.equal(a.eq(d), false, 'different language ⇒ not eq')
   assert.equal(a.eq(e), false, 'different generation ⇒ not eq')
 })
+
+// ── BL-125: viewport-scoped split between block + inline sources ────────────
+
+import {
+  buildLivePreviewBlockDecorations,
+  buildLivePreviewInlineDecorations,
+} from './livePreviewDecorations.ts'
+import { ensureSyntaxTree } from '@codemirror/language'
+
+interface Range {
+  from: number
+  to: number
+}
+
+function makeState(doc: string, selection?: EditorSelection) {
+  const state = EditorState.create({
+    doc,
+    selection: selection ?? EditorSelection.cursor(0),
+    extensions: [
+      EditorState.allowMultipleSelections.of(true),
+      markdown({ extensions: [Table] }),
+    ],
+  })
+  // Force a complete lezer parse so viewport-bounded iteration sees
+  // the full tree (the parser is incremental + time-bounded; without
+  // this large docs are silently truncated).
+  ensureSyntaxTree(state, doc.length, 30_000)
+  return state
+}
+
+function decosFromSet(set: DecorationSet): Item[] {
+  const items: Item[] = []
+  const cur = set.iter()
+  while (cur.value) {
+    const spec = cur.value.spec as { class?: string; widget?: unknown; block?: boolean }
+    const startSide = (cur.value as unknown as { startSide?: number }).startSide
+    const isLine = startSide !== undefined && startSide < 0 && spec.class !== undefined
+    const isReplace =
+      cur.value.spec &&
+      'inclusive' in (cur.value.spec as Record<string, unknown>) === false &&
+      spec.class === undefined
+    if (isLine) {
+      items.push({ from: cur.from, to: cur.to, line: spec.class })
+    } else if (isReplace && cur.from !== cur.to) {
+      const widgetName = spec.widget
+        ? (spec.widget as { constructor: { name: string } }).constructor.name
+        : undefined
+      items.push({
+        from: cur.from,
+        to: cur.to,
+        replace: true,
+        widget: widgetName,
+        block: spec.block === true,
+      })
+    } else if (spec.class !== undefined) {
+      items.push({ from: cur.from, to: cur.to, cls: spec.class })
+    } else {
+      const widgetName = spec.widget
+        ? (spec.widget as { constructor: { name: string } }).constructor.name
+        : undefined
+      items.push({
+        from: cur.from,
+        to: cur.to,
+        replace: true,
+        widget: widgetName,
+        block: spec.block === true,
+      })
+    }
+    cur.next()
+  }
+  return items
+}
+
+test('BL-125 block source: emits HR / Table / FencedCode widgets, skips inline marks', () => {
+  // Multi-construct doc — HR, table, paragraph with bold + inline code.
+  // The block source should pick up HR + Table; the inline source
+  // should pick up the bold mark + inline code mark.
+  const doc = [
+    '**bold** and `code`',
+    '',
+    '---',
+    '',
+    '| h | h2 |',
+    '| - | -- |',
+    '| 1 | 2  |',
+  ].join('\n')
+  // Cursor on line 1 (offset 0). HR and table need to be inactive
+  // (i.e. cursor not on their lines) for the block-render path to
+  // fire — putting the cursor at doc end would land it on the last
+  // table row and suppress the widget.
+  const state = makeState(doc, EditorSelection.cursor(0))
+  const blockSet = buildLivePreviewBlockDecorations(state)
+  const items = decosFromSet(blockSet)
+
+  // HR widget over the `---` line (offsets 21..24).
+  assert.ok(
+    items.some(
+      (i) =>
+        i.replace &&
+        i.widget === 'HrWidget' &&
+        i.block === true &&
+        i.from === 21 &&
+        i.to === 24,
+    ),
+    'HR widget present in block source',
+  )
+
+  // Table widget covering the table lines.
+  assert.ok(
+    items.some(
+      (i) => i.replace && i.widget === 'TableWidget' && i.block === true,
+    ),
+    'Table widget present in block source',
+  )
+
+  // No inline marks (those belong to the inline source).
+  assert.equal(
+    items.some((i) => i.cls === 'cm-md-strong'),
+    false,
+    'block source emits no inline strong mark',
+  )
+  assert.equal(
+    items.some((i) => i.cls === 'cm-md-code'),
+    false,
+    'block source emits no inline code mark',
+  )
+})
+
+test('BL-125 inline source: emits inline marks within the requested range only', () => {
+  // Two emphasis runs on separate lines. Asking the inline builder
+  // for just the first line should yield decorations only for that
+  // line — the second line is "outside the viewport" for this call.
+  const doc = ['**first**', '*second*'].join('\n')
+  // doc layout:
+  //   "**first**" → offsets 0..9
+  //   "\n"        → offset 9
+  //   "*second*"  → offsets 10..18
+  const state = makeState(doc, EditorSelection.cursor(doc.length))
+  const ranges: Range[] = [{ from: 0, to: 9 }]
+  const items = decosFromSet(buildLivePreviewInlineDecorations(state, ranges))
+
+  // First-line strong mark present.
+  assert.ok(
+    items.some((i) => i.cls === 'cm-md-strong'),
+    'first-line strong mark emitted',
+  )
+  // Second-line emphasis mark absent — outside the requested range.
+  assert.equal(
+    items.some((i) => i.cls === 'cm-md-em'),
+    false,
+    'second-line emphasis mark NOT emitted — viewport excluded it',
+  )
+})
+
+test('BL-125 inline source: empty range list emits nothing', () => {
+  const doc = '**bold**\n*italic*'
+  const state = makeState(doc, EditorSelection.cursor(doc.length))
+  const items = decosFromSet(buildLivePreviewInlineDecorations(state, []))
+  assert.equal(items.length, 0, 'empty ranges produces empty decoration set')
+})
+
+test('BL-125 inline source: heading line decoration appears within range', () => {
+  const doc = ['# Hello', '', 'paragraph'].join('\n')
+  const state = makeState(doc, EditorSelection.cursor(doc.length))
+  // Heading line is offsets 0..7.
+  const items = decosFromSet(
+    buildLivePreviewInlineDecorations(state, [{ from: 0, to: 7 }]),
+  )
+  assert.ok(
+    items.some((i) => i.line === 'cm-md-h1' && i.from === 0),
+    'h1 line decoration emitted for visible heading',
+  )
+})
+
+test('BL-125 inline source: selection-driven reveal depends on full doc state', () => {
+  // The cursor on the heading line reveals the leading `# ` even when
+  // the inline walk is range-bounded — the active-line computation
+  // uses the global selection, not the supplied range. Pin that
+  // behaviour so a viewport that starts past the cursor line doesn't
+  // accidentally hide a "reveal" the user expects.
+  const doc = '# Heading'
+  const state = makeState(doc, EditorSelection.cursor(0))
+  const items = decosFromSet(
+    buildLivePreviewInlineDecorations(state, [{ from: 0, to: doc.length }]),
+  )
+  // No replace over the `# ` marker — cursor is on the heading.
+  assert.equal(
+    items.some((i) => i.replace && i.from === 0 && i.to <= 2),
+    false,
+    'cursor-on-heading: no replace over the # marker',
+  )
+  // Line decoration still applies.
+  assert.ok(
+    items.some((i) => i.line === 'cm-md-h1' && i.from === 0),
+    'h1 line decoration still applied',
+  )
+})
+
+test('BL-125: combined block + inline matches the full-walk reference', () => {
+  // Sanity check that splitting the walk doesn't drop decorations
+  // overall — for any doc, block-decos ∪ full-range-inline-decos
+  // covers the same construct set as the legacy combined walker.
+  const doc = [
+    '# Heading',
+    '',
+    '**bold** then `code`',
+    '',
+    '---',
+    '',
+    'plain',
+  ].join('\n')
+  const state = makeState(doc, EditorSelection.cursor(doc.length))
+
+  const fullItems = decosFromSet(buildLivePreviewDecorations(state))
+  const blockItems = decosFromSet(buildLivePreviewBlockDecorations(state))
+  const inlineItems = decosFromSet(
+    buildLivePreviewInlineDecorations(state, [{ from: 0, to: doc.length }]),
+  )
+
+  // Sort both sides by (from, to, cls/line/widget) for comparison.
+  const norm = (xs: Item[]) =>
+    xs
+      .slice()
+      .sort(
+        (a, b) =>
+          a.from - b.from ||
+          a.to - b.to ||
+          (a.cls ?? a.line ?? a.widget ?? '').localeCompare(
+            b.cls ?? b.line ?? b.widget ?? '',
+          ),
+      )
+  const combined = norm([...blockItems, ...inlineItems])
+  const reference = norm(fullItems)
+  assert.deepEqual(combined, reference, 'split sources reproduce the full walk')
+})
