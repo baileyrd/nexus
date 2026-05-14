@@ -29,6 +29,8 @@ import type {
   SerializedSplit,
   SerializedTabs,
 } from '../../../workspace/types'
+import { useSlotStore } from '../../../registry/SlotRegistry'
+import { globalSnapshot } from '../../../host/layoutSnapshot'
 import { LayoutCanvas } from './LayoutCanvas'
 import { useLayoutsStore, normaliseName } from './layoutsStore'
 
@@ -84,6 +86,7 @@ export function ViewBuilderView({
         onExport={onExport}
         onRefresh={onRefresh}
       />
+      <ChromeSlotsSection />
       <ViewTypesSection />
     </div>
   )
@@ -615,12 +618,78 @@ function SavedLayoutsSection({
   )
 }
 
+// ── Chrome slots inventory (BL-067 finish) ──────────────────────────────────
+
+/** Read-only catalog of chrome-slot contributions surfaced through
+ *  the BL-067 Phase 0 introspection API. Subscribes to the slot store
+ *  so the panel refreshes when a plugin registers/unregisters a chrome
+ *  entry mid-session. */
+function ChromeSlotsSection(): ReactElement {
+  // Subscribe to the live store so the inventory refreshes when a
+  // plugin registers a new entry; `globalSnapshot()` reads from the
+  // same store but the projection itself is computed per render so we
+  // need the subscription to re-fire the render.
+  useSlotStore((s) => s.slots)
+  const snap = globalSnapshot()
+  const slotEntries = Object.entries(snap.slots) as Array<[string, typeof snap.slots[keyof typeof snap.slots]]>
+  const total = slotEntries.reduce((sum, [, entries]) => sum + entries.length, 0)
+  return (
+    <section>
+      <h3 style={sectionHeading}>Chrome slots ({total} contribution{total === 1 ? '' : 's'})</h3>
+      <div style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginBottom: 4 }}>
+        Fixed regions like the title bar, activity bar, and status bar. Movable
+        panels live under <em>Add panel</em>.
+      </div>
+      <ul
+        style={{
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
+          fontFamily: 'var(--font-monospace)',
+          fontSize: '0.85em',
+        }}
+      >
+        {slotEntries.map(([slotId, entries]) => (
+          <li
+            key={slotId}
+            style={{
+              padding: '3px 0',
+              borderBottom: '1px solid var(--background-modifier-border)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ flex: 1, fontWeight: 600 }}>{slotId}</span>
+              <span style={{ color: 'var(--text-muted)' }}>{entries.length}</span>
+            </div>
+            {entries.length > 0 && (
+              <ul style={{ listStyle: 'none', margin: 0, padding: '2px 0 0 12px' }}>
+                {entries.map((e) => (
+                  <li key={e.id} style={{ color: 'var(--text-muted)' }}>
+                    <span style={{ color: 'var(--text-normal)' }}>{e.id}</span>
+                    {'  '}
+                    <span>by {e.pluginId}</span>
+                    {'  '}
+                    <span>(priority {e.priority})</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 // ── View types catalog ──────────────────────────────────────────────────────
 
 function ViewTypesSection(): ReactElement {
   const creators = useViewStore((s) => s.creators)
   // Stable sort so the list isn't insertion-ordered on every render.
-  const types = [...creators.keys()].sort()
+  const allTypes = [...creators.keys()].sort()
+  const [filter, setFilter] = useState('')
+  const needle = filter.trim().toLowerCase()
+  const types = needle ? allTypes.filter((t) => t.toLowerCase().includes(needle)) : allTypes
   const [expanded, setExpanded] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -644,11 +713,31 @@ function ViewTypesSection(): ReactElement {
 
   return (
     <section>
-      <h3 style={sectionHeading}>Add panel ({types.length} view types)</h3>
+      <h3 style={sectionHeading}>
+        Add panel ({types.length}
+        {needle && types.length !== allTypes.length ? ` of ${allTypes.length}` : ''} view types)
+      </h3>
       <div style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginBottom: 4 }}>
         Click a view to add it. Singleton view types reveal the existing
         instance instead of creating a duplicate.
       </div>
+      <input
+        type="search"
+        placeholder="Filter view types…"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        aria-label="Filter view types"
+        style={{
+          width: '100%',
+          padding: '4px 6px',
+          marginBottom: 6,
+          background: 'var(--background-primary)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 3,
+          color: 'inherit',
+          font: 'inherit',
+        }}
+      />
       {feedback != null && (
         <div
           style={{

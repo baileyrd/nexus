@@ -203,9 +203,44 @@ view-type catalog unexposed. Phase 0 closes those two gaps.
   snapshot call (point-in-time projection, no caching).
 - ✅ Typecheck + node:test green.
 
-### Deferred (Phase 1+)
+### What was already shipped (Phases 1–2d)
 
-Phases 1+ — drag-drop palette UI, export-as-plugin codegen template,
-`.forge/layouts/<name>.layout.toml` round-trip — remain on the backlog. The
-existing `nexus.viewBuilder` plugin renders the live canvas today but does
-not yet consume the new slot/viewType inventories or write a layout file.
+Audit during Phase 0 surfaced that the feature is further along than the
+original PRD copy implied. The following are in tree under
+`shell/src/plugins/nexus/viewBuilder/`:
+
+- **Phase 1** — `index.ts` + `ViewBuilderView.tsx`: activity-bar entry, panel
+  surface, save/apply/delete saved layouts under
+  `<forge>/.forge/layouts/*.layout.json`.
+- **Phase 2a** — close-leaf + inline action row per leaf in the snapshot tree.
+- **Phase 2b** — move-leaf-to-dock dropdown + dock collapse/resize controls.
+- **Phase 2c** — `LayoutCanvas.tsx` + `canvasGeometry.ts`: visual drag-drop
+  canvas, splits resize by dragging dividers, panels move by dropping onto a
+  target region.
+- **Phase 2d** — `exporter.ts`: emit `manifest.toml` + `index.ts` +
+  `<slug>.layout.json` + `README.md` under `<forge>/.forge/exports/<slug>/`;
+  `slugify` + `camelize` + write helpers fully covered by `exporter.test.ts`.
+
+### Phase 0 finish polish (shipped 2026-05-14)
+
+After Phase 0 landed the panel was rewired to consume the new introspection
+API:
+
+- **Chrome slots inventory** — `ChromeSlotsSection` lists every chrome
+  contribution (titleBar, activityBar, statusBarLeft, statusBarRight,
+  overlay, paneMode) with the registering plugin id and priority. Reads
+  through `globalSnapshot()`, subscribes to `useSlotStore` so the list
+  refreshes when a plugin registers a slot entry mid-session.
+- **Searchable view-type palette** — the "Add panel" section gained a filter
+  input matching the PRD's "searchable palette" wording. Substring match,
+  case-insensitive; header counter reflects the filtered subset.
+
+### Deferred (genuine remainder)
+
+- Per-panel authoring options on the saved-layout export (default min-width /
+  min-height / float-vs-dock). Not blocking because the live snapshot already
+  captures whatever sizes the user has dragged the canvas to; the deferred
+  affordance is *editing those defaults inside the builder* before export.
+- The export form is a first-party-style shell-plugin source — community-plugin
+  distribution waits on WI-44 (marketplace). The exporter's README already
+  documents both install paths.
