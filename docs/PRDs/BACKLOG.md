@@ -24,6 +24,8 @@ _BL-111 closed 2026-05-13 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 _BL-112 closed 2026-05-13 (first cut) — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `experiments/perf/run.ts` harness ships build-output measurement (eager-vs-lazy chunk inventory, entry static-import set, HTML preload list — exactly the surface that would have caught the BL-111 vendor-mermaid regression at PR review) plus two microbenchmarks against the BL-109/110 hot helpers (`flattenTree` on a synthetic 10k-file forge with every folder expanded, `frameSnapshot` four-store flush). Stable JSON schema (`schemaVersion: 1`) sorted for textual diffability; baseline committed at `experiments/perf/baselines/2026-05-13.json`. Tauri/WDIO runtime scenarios from the original DoD (cold-start trace, 50 MB file open, 10k-row scroll, 500-heading outline, 5-char type latency) are scaffolded for as additional `scenarios` entries in the same JSON shape but **deferred** until a WDIO-Tauri runner exists — the BL itself flagged that piece as already-deferred ("needs a stable runner")._
 
+_BL-122 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Three new scenario families wired into the BL-112 harness: `editor.apply_transaction.{small,medium,large}` (Rust integration test at `crates/nexus-editor/tests/perf_apply_transaction.rs`, drives `EditorCorePlugin::dispatch(HANDLER_APPLY_TRANSACTION, ...)` against 10 / 100 / 5000-block docs and prints `PERF_RESULT::<json>` lines that `run.ts` parses), `editor.livePreview.decorate.{small,medium,large}` (drives `buildLivePreviewDecorations` against a fully-parsed lezer tree via `ensureSyntaxTree`; happy-dom + CodeMirror reached through a `createRequire` rooted in `shell/package.json`), and `editor.markdownRender.large` (marked + DOMPurify under happy-dom). New `tracing::info_span!("apply_transaction", op_count, bytes_in, bytes_out)` around `handle_apply_transaction` records per-call fields; no subscriber → no-op. Baseline at `experiments/perf/baselines/2026-05-14.json` shows the N-linear shape on `apply_transaction.*` (39 → 330 → 24190 µs p50) — exactly the curve BL-123's slim text-only response will flatten. `live-preview.decorate.*` floors around ~100 µs at 50 / 500 / 1500 lines because per-node walk cost is dominated by fixed overhead (`computeActiveLines`, `Decoration.set` sort) at these sizes; BL-125's viewport-scoping win is still measurable because the production path walks every node on every keystroke + selection change. Runtime (WDIO-Tauri) scenarios from the original DoD remain BL-127's domain — same deferral note as BL-112._
+
 ---
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
@@ -438,19 +440,7 @@ FTS5 virtual table over the agent's persisted session transcripts (which DG-33 a
 
 ---
 
-### BL-122: Typing-latency measurement scaffold (Phase 0 of TYPING-LATENCY-PLAN)
-
-**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
-**Effort**: Small. Prerequisite for BL-123..BL-126.
-**Crates**: `nexus-editor` (instrument span); `experiments/perf` (new scenarios).
-
-Extend the BL-112 perf harness with three direct microbenchmark scenarios (`editor.apply_transaction.{small,medium,large}`, `editor.livePreview.decorate.{small,medium,large}`, `editor.markdownRender.large`) plus a `tracing::info_span!("apply_transaction", ...)` around `handle_apply_transaction` in `crates/nexus-editor/src/core_plugin.rs:1150-1211`. The microbench drives the kernel directly through an integration test (no Tauri); the span gives us per-op wall-time, op count, and bytes in/out for future regressions. Commits a fresh baseline at `experiments/perf/baselines/<date>.json` after the scenarios run clean.
-
-**Definition of done:**
-- `experiments/perf/run.ts` emits the three new scenario sections in stable-sorted JSON
-- New `crates/nexus-editor/tests/perf_apply_transaction.rs` integration harness backs the kernel-side scenarios
-- `apply_transaction` tracing span gated behind subscriber filter (no-op outside the harness)
-- Baseline JSON committed; numbers show the N-linear shape today so the BL-123 win is visible as a flat curve
+_BL-122 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

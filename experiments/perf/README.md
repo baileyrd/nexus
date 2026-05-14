@@ -20,24 +20,51 @@ Two classes of metric:
   the comparable number; p95/p99 captures tail latency. Wall-clock
   varies ±20% on a contended host — treat as a smoke gate, not a
   precise budget.
+- **Editor typing-latency scenarios (BL-122).** Three families backing
+  the [TYPING-LATENCY-PLAN](../../docs/roadmap/TYPING-LATENCY-PLAN.md):
+  - `editor.apply_transaction.{small,medium,large}` — drives
+    `EditorCorePlugin::dispatch(HANDLER_APPLY_TRANSACTION, ...)` against
+    10 / 100 / 5000-block docs via the Rust integration test
+    `crates/nexus-editor/tests/perf_apply_transaction.rs`. The current
+    baseline shows the N-linear shape of the snapshot-serialize path —
+    BL-123 lands the slim text-only response that flattens the curve.
+  - `editor.livePreview.decorate.{small,medium,large}` — calls
+    `buildLivePreviewDecorations` over a fully-parsed lezer tree at
+    50 / 500 / 1500 lines. Forces a complete parse via
+    `ensureSyntaxTree` so doc length actually drives node count
+    (without it lezer's incremental parser caps the tree). BL-125
+    moves the walker to visible-viewport scope; the win shows up as
+    `large` collapsing toward `small`.
+  - `editor.markdownRender.large` — `renderMarkdown` (marked +
+    DOMPurify) on a 1500-line synthetic doc. Tracks the long-doc
+    preview render path that fires on hydration / tab-switch.
 
 The wall-clock build duration is recorded for context but is the
 noisiest metric in the file; don't gate on it.
 
 ## How to run
 
-From the repo root:
+From `shell/` so Node resolves `tsx` and the shell-hoisted CM6 /
+happy-dom packages:
 
 ```sh
-node --import tsx experiments/perf/run.ts            # print to stdout
-node --import tsx experiments/perf/run.ts --write    # also write baselines/<YYYY-MM-DD>.json
+cd shell
+node --import tsx --max-old-space-size=8192 ../experiments/perf/run.ts          # print to stdout
+node --import tsx --max-old-space-size=8192 ../experiments/perf/run.ts --write  # also write baselines/<YYYY-MM-DD>.json
 ```
 
-The harness depends on the shell workspace's `tsx`. No separate
-install needed; the script imports `flattenTree` and `FrameSnapshot`
-straight out of `shell/src/`.
+The harness depends on the shell workspace's `tsx`, plus
+`@happy-dom/global-registrator` and CodeMirror packages reached via a
+`createRequire` rooted at `shell/package.json`. No separate install
+needed.
 
-Run takes ~30–60 s end-to-end (most of it is the Vite build).
+The raised heap (`--max-old-space-size=8192`) accommodates the
+lezer-markdown syntax tree + marked/DOMPurify allocations for the
+`large` editor scenarios; Node's default 4 GB cap OOMs around the
+1500-line markdown render.
+
+Run takes ~2–3 min end-to-end (Vite build + a release-mode
+`cargo test` for the kernel-side editor scenarios).
 
 ## Host-machine assumption
 

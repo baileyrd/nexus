@@ -19,8 +19,10 @@
  */
 
 import { execSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { gzipSync } from 'node:zlib'
 import { performance } from 'node:perf_hooks'
+import { pathToFileURL } from 'node:url'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -32,6 +34,27 @@ import {
   snap,
   type Subscribable,
 } from '../../shell/src/stores/frameSnapshot.ts'
+
+// BL-122 typing-latency scaffold: live-preview decoration + markdown
+// render scenarios need a DOM (DOMPurify, widget classes that reference
+// document) plus CodeMirror, all hoisted under `shell/node_modules/`
+// rather than the repo root. Resolve those bare specifiers through a
+// `createRequire` rooted in shell so the harness keeps running from
+// the repo-root invocation documented in `experiments/perf/README.md`.
+let domReady = false
+const SHELL_REQUIRE = createRequire(path.join(/* SHELL_DIR set below */ __dirname, '..', '..', 'shell', 'package.json'))
+async function importFromShell<T>(spec: string): Promise<T> {
+  const resolved = SHELL_REQUIRE.resolve(spec)
+  return (await import(pathToFileURL(resolved).href)) as T
+}
+async function ensureDom(): Promise<void> {
+  if (domReady) return
+  const { GlobalRegistrator } = await importFromShell<{
+    GlobalRegistrator: { register(): void }
+  }>('@happy-dom/global-registrator')
+  GlobalRegistrator.register()
+  domReady = true
+}
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const SHELL_DIR = path.join(REPO_ROOT, 'shell')
@@ -322,7 +345,161 @@ function microbenchFrameSnapshot(): MicrobenchResult {
   }, 5000)
 }
 
-function main(): void {
+/**
+ * BL-122 — `editor.apply_transaction.{small,medium,large}` scenarios.
+ *
+ * The Rust integration test at
+ * `crates/nexus-editor/tests/perf_apply_transaction.rs` does the
+ * actual timing (release-mode, no Tauri/IPC). It prints one stable
+ * `PERF_RESULT::<json>` line per scenario when `NEXUS_PERF=1` is set.
+ * We invoke it via `cargo test --release` here and parse those lines
+ * back into the per-scenario `MicrobenchResult` shape.
+ */
+function microbenchKernelApplyTransaction(): Record<string, MicrobenchResult> {
+  console.error('[perf] running editor.apply_transaction.* (cargo test, release)...')
+  const out = execSync(
+    'cargo test -p nexus-editor --release --test perf_apply_transaction -- --nocapture',
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, NEXUS_PERF: '1' },
+      stdio: ['ignore', 'pipe', 'inherit'],
+      encoding: 'utf8',
+    },
+  )
+  const results: Record<string, MicrobenchResult> = {}
+  for (const line of out.split('\n')) {
+    const marker = 'PERF_RESULT::'
+    const idx = line.indexOf(marker)
+    if (idx < 0) continue
+    const parsed = JSON.parse(line.slice(idx + marker.length)) as {
+      name: string
+      iterations: number
+      meanus: number
+      p50us: number
+      p95us: number
+      p99us: number
+      totalMs: number
+    }
+    results[parsed.name] = {
+      iterations: parsed.iterations,
+      p50us: parsed.p50us,
+      p95us: parsed.p95us,
+      p99us: parsed.p99us,
+      meanus: parsed.meanus,
+      totalMs: parsed.totalMs,
+    }
+  }
+  if (Object.keys(results).length !== 3) {
+    throw new Error(
+      `expected 3 editor.apply_transaction.* results, got ${Object.keys(results).length}`,
+    )
+  }
+  return results
+}
+
+interface DocSize {
+  name: string
+  lineCount: number
+  iterations: number
+}
+
+const LIVE_PREVIEW_SIZES: DocSize[] = [
+  { name: 'small', lineCount: 50, iterations: 100 },
+  { name: 'medium', lineCount: 500, iterations: 40 },
+  // `large` is intentionally well below the 5000-line ceiling used for
+  // the kernel scenarios — lezer's syntax tree + the decoration walk
+  // produce a lot of intermediate allocations that GC under happy-dom
+  // doesn't reliably reclaim between iterations. 1500 lines is enough
+  // to make the BL-125 viewport-scoped win measurable without OOMing
+  // the harness.
+  { name: 'large', lineCount: 1500, iterations: 10 },
+]
+
+function buildMarkdownDoc(lineCount: number): string {
+  // Mix of constructs the live-preview walker handles so the result
+  // reflects realistic decoration work: headings, emphasis, code,
+  // links, lists, blockquotes. Lines repeat in a stable cycle so two
+  // runs produce deterministic input.
+  const patterns = [
+    'Paragraph with **strong** and *italic* and `inline-code` and [link](http://example.com).',
+    '## Heading L2 with `code` mix',
+    '- bullet list item with *emphasis*',
+    '> blockquote line with **bold**',
+    '',
+    'Plain paragraph number {i} sits between heavier constructs.',
+  ]
+  const lines: string[] = []
+  for (let i = 0; i < lineCount; i++) {
+    const p = patterns[i % patterns.length]!
+    lines.push(p.replace('{i}', String(i)))
+  }
+  return lines.join('\n')
+}
+
+/**
+ * BL-122 — `editor.livePreview.decorate.{small,medium,large}` scenarios.
+ *
+ * Drives the decoration builder against three doc sizes. Each
+ * iteration is a fresh `EditorState` (so the lezer parse tree is
+ * built once per measured sample) plus one `buildLivePreviewDecorations`
+ * call. The current implementation walks the full syntax tree on every
+ * change; BL-125 makes the walk viewport-scoped so `large` collapses
+ * toward `small` once it lands.
+ */
+async function microbenchLivePreviewDecorate(): Promise<Record<string, MicrobenchResult>> {
+  await ensureDom()
+  const { EditorState } = await importFromShell<typeof import('@codemirror/state')>(
+    '@codemirror/state',
+  )
+  const { markdown } = await importFromShell<typeof import('@codemirror/lang-markdown')>(
+    '@codemirror/lang-markdown',
+  )
+  const { ensureSyntaxTree } = await importFromShell<typeof import('@codemirror/language')>(
+    '@codemirror/language',
+  )
+  const { buildLivePreviewDecorations } = await import(
+    '../../shell/src/plugins/nexus/editor/cm/livePreviewDecorations.ts'
+  )
+  const results: Record<string, MicrobenchResult> = {}
+  for (const sz of LIVE_PREVIEW_SIZES) {
+    const doc = buildMarkdownDoc(sz.lineCount)
+    const state = EditorState.create({ doc, extensions: [markdown()] })
+    // Force a complete parse before timing the decoration walk. lezer
+    // parses incrementally; without this the first `syntaxTree(state)`
+    // call only walks whatever the time-budgeted parse finished, and
+    // every doc size produces ~the same number — useless as a baseline
+    // for BL-125's viewport-scoping win.
+    ensureSyntaxTree(state, doc.length, 30_000)
+    results[`editor.livePreview.decorate.${sz.name}`] = timeBlock(() => {
+      buildLivePreviewDecorations(state)
+    }, sz.iterations)
+  }
+  return results
+}
+
+/**
+ * BL-122 — `editor.markdownRender.large` scenario.
+ *
+ * Runs the shell-side `renderMarkdown` (marked + DOMPurify) on a 5k-
+ * line doc. Single size by design — the kernel-side scenarios cover
+ * the small/medium spectrum; this one measures the long-doc preview-
+ * render path that fires on tab-switch / hydration.
+ */
+async function microbenchMarkdownRenderLarge(): Promise<MicrobenchResult> {
+  await ensureDom()
+  const { renderMarkdown } = await import(
+    '../../shell/src/plugins/nexus/editor/markdownRender.ts'
+  )
+  // 1500 lines mirrors the live-preview `large` ceiling — DOMPurify
+  // and marked together hold enough intermediate state that a 5k-
+  // line doc OOMs the harness on a 4 GB Node heap.
+  const doc = buildMarkdownDoc(1500)
+  return timeBlock(() => {
+    renderMarkdown(doc)
+  }, 10)
+}
+
+async function main(): Promise<void> {
   const writeMode = process.argv.includes('--write')
 
   const buildSec = runBuild()
@@ -331,16 +508,30 @@ function main(): void {
   console.error('[perf] running microbenchmarks...')
   const flatten = microbenchFlattenTree()
   const frame = microbenchFrameSnapshot()
+  const apply = microbenchKernelApplyTransaction()
+  console.error('[perf] running editor.livePreview.decorate.* (happy-dom + CM6)...')
+  const livePreview = await microbenchLivePreviewDecorate()
+  console.error('[perf] running editor.markdownRender.large (marked + DOMPurify)...')
+  const markdownLarge = await microbenchMarkdownRenderLarge()
+
+  // Stable-sorted insertion so the JSON diff stays minimal across
+  // runs. The scenarios are grouped: structural helpers first
+  // (BL-109/110), then editor hot path (BL-122..127), each group's
+  // entries sorted alphabetically.
+  const microbenchmarks: Record<string, MicrobenchResult> = {
+    'flattenTree.10k': flatten,
+    'frameSnapshot.4stores.flush': frame,
+    ...sortRecord(apply),
+    ...sortRecord(livePreview),
+    'editor.markdownRender.large': markdownLarge,
+  }
 
   const report: PerfReport = {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     host: host(),
     build: buildReport,
-    microbenchmarks: {
-      'flattenTree.10k': flatten,
-      'frameSnapshot.4stores.flush': frame,
-    },
+    microbenchmarks,
   }
 
   const json = JSON.stringify(report, null, 2)
@@ -355,4 +546,10 @@ function main(): void {
   }
 }
 
-main()
+function sortRecord<T>(rec: Record<string, T>): Record<string, T> {
+  const out: Record<string, T> = {}
+  for (const k of Object.keys(rec).sort()) out[k] = rec[k]!
+  return out
+}
+
+void main()

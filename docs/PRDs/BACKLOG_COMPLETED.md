@@ -45,6 +45,41 @@ Fix: store the srcdoc body in a `pendingSrcDoc` field in the constructor; assign
 
 ---
 
+### BL-122: Typing-latency measurement scaffold (Phase 0 of TYPING-LATENCY-PLAN) ✅ (2026-05-14)
+
+**Source**: Typing-latency analysis — `docs/roadmap/TYPING-LATENCY-PLAN.md`
+**Files**: `crates/nexus-editor/src/core_plugin.rs` (tracing span added inside `handle_apply_transaction`); `crates/nexus-editor/tests/perf_apply_transaction.rs` (new integration harness); `experiments/perf/run.ts` (three new scenario families + `createRequire`-rooted shell-package resolution); `experiments/perf/README.md` (updated for new scenarios + invocation); `experiments/perf/baselines/2026-05-14.json` (new baseline)
+**Related**: BL-112 (the perf harness this extends), BL-123/BL-124/BL-125/BL-126 (the four typing-latency fixes this scaffold gates), BL-127 (the deferred WDIO-Tauri runtime scenarios)
+
+The motivating observation: BL-123..126 each propose a typing-latency fix, but without a committed baseline + microbenchmark there's nothing for those PRs to regress against. This is the scaffold.
+
+**What landed.**
+
+- **`editor.apply_transaction.{small,medium,large}` scenarios.** Driven by a new Rust integration test at `crates/nexus-editor/tests/perf_apply_transaction.rs`. The test boots `EditorCorePlugin::new(...)`, opens a synthetic doc with 10 / 100 / 5000 paragraph blocks, applies single-op `InsertText` transactions in a warmup-then-measure loop (3-20 warmups per size, then 500 / 300 / 50 timed iterations), and emits one `PERF_RESULT::<json>` line per scenario. Gated behind `NEXUS_PERF=1` so `cargo test -p nexus-editor` returns immediately by default. `run.ts` spawns `cargo test --release -p nexus-editor --test perf_apply_transaction -- --nocapture` with `NEXUS_PERF=1` and parses the marker lines back into the standard `MicrobenchResult` shape. The committed baseline shows the N-linear shape (p50 39 µs → 330 µs → 24190 µs) — exactly the curve BL-123's slim text-only response will flatten.
+- **`editor.livePreview.decorate.{small,medium,large}` scenarios.** Run inside `run.ts` against fully-parsed lezer trees. Each scenario constructs an `EditorState` with the `markdown()` language extension over 50 / 500 / 1500 lines, then calls `ensureSyntaxTree(state, doc.length, 30_000)` before timing — without that pre-warm, lezer's incremental parser caps the tree at whatever its time budget produces (~100 nodes regardless of doc length, which makes the scenario meaningless as a BL-125 baseline). Walks `buildLivePreviewDecorations(state)` in the measured loop. Floors around ~100 µs at all three sizes because per-node walk cost is small enough that fixed overhead (`computeActiveLines`, `Decoration.set` sort) dominates at these doc lengths; BL-125's viewport-scoping win remains measurable since the production path walks every node on every keystroke + selection change, and on truly huge docs the ratio matters.
+- **`editor.markdownRender.large` scenario.** Calls `renderMarkdown` (marked + DOMPurify) on a 1500-line synthetic doc, 10 iterations. Tracks the long-doc preview-render path that fires on hydration / tab-switch. 1500 lines mirrors the live-preview large ceiling — DOMPurify + marked together hold enough intermediate state that 5000 lines OOMs Node's 4 GB default heap, so the harness now documents `--max-old-space-size=8192` for the editor-scenario runs.
+- **`tracing::info_span!("apply_transaction", op_count, bytes_in, bytes_out)` instrumentation.** Recorded fields capture exactly what BL-123 needs to verify (`op_count` for the text-only-vs-structural split, `bytes_in`/`bytes_out` for the slim-vs-full response payload sizes). No subscriber → no-op pointer bump on the hot path, per standard tracing semantics. The `bytes_out` field is recorded after the snapshot serialize so it reflects the post-mutation payload size, not a pre-mutation guess.
+- **`createRequire`-rooted shell-package resolution.** `run.ts` lives under `experiments/perf/` but pulls `@happy-dom/global-registrator` + CodeMirror packages out of `shell/node_modules/`. A `createRequire` rooted at `shell/package.json` resolves bare specifiers from the shell tree, then `pathToFileURL` lets ESM `import()` consume the resolved absolute path. Shell-internal modules (`shell/src/...`) come in via direct relative `.ts` imports as before — they already resolve their own bare specifiers through Node's walk-up from `shell/src/`.
+- **Invocation update.** `cd shell && node --import tsx --max-old-space-size=8192 ../experiments/perf/run.ts` is the documented run line. The raised heap accommodates the live-preview lezer parse tree + the markdown render allocations.
+
+**Baseline numbers (`experiments/perf/baselines/2026-05-14.json`, dev WSL2 host).**
+
+| scenario | iterations | p50 µs | p95 µs | p99 µs |
+|----------|-----------:|-------:|-------:|-------:|
+| `editor.apply_transaction.small` (10 blocks) | 500 | 39 | 52 | 78 |
+| `editor.apply_transaction.medium` (100 blocks) | 300 | 331 | 485 | 844 |
+| `editor.apply_transaction.large` (5000 blocks) | 50 | 24190 | 28234 | 34772 |
+| `editor.livePreview.decorate.small` (50 lines) | 100 | 103 | 206 | 1727 |
+| `editor.livePreview.decorate.medium` (500 lines) | 40 | 111 | 178 | 1704 |
+| `editor.livePreview.decorate.large` (1500 lines) | 10 | 96 | 143 | 143 |
+| `editor.markdownRender.large` (1500 lines) | 10 | 86715 | 98473 | 98473 |
+
+**Tested**: `cargo test -p nexus-editor` → 231 passed; `cargo test -p nexus-editor --test perf_apply_transaction` → 1 passed (returns immediately without `NEXUS_PERF=1`); `cargo clippy -p nexus-editor --all-targets` → clean for the new files (one pre-existing `items_after_statements` warning at line 1168 from the const inside `handle_apply_transaction` survives — out of scope); `cargo check --workspace` clean; perf harness runs end-to-end and writes the new baseline.
+
+**Definition of done coverage**: ✅ `experiments/perf/run.ts` emits the three new scenario sections in stable-sorted JSON; ✅ `crates/nexus-editor/tests/perf_apply_transaction.rs` integration harness backs the kernel-side scenarios; ✅ `apply_transaction` tracing span gated behind subscriber filter (no-op outside the harness); ✅ baseline JSON committed; numbers show the N-linear shape on `apply_transaction.*` so the BL-123 win is visible as a flat curve.
+
+---
+
 ### BL-112: Frontend perf benchmark harness — first cut ✅ (2026-05-13)
 
 **Source**: Nexus frontend performance assessment (2026-05-11) — `experiments/nexus-frontend-assessment.html` §6

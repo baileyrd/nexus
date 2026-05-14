@@ -1,0 +1,624 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-14T19:41:22.640Z",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "nodeVersion": "v22.22.2",
+    "cpuModel": "Intel(R) Core(TM) Ultra 9 285H",
+    "cpuCount": 16,
+    "totalMemMB": 15706
+  },
+  "build": {
+    "durationSec": 25.96,
+    "entryChunk": {
+      "name": "index-C8IfsjmN.js",
+      "sizeKB": 215.3,
+      "sizeKBGz": 60.8,
+      "staticImports": [
+        "vendor-react-C4KjzCe2.js",
+        "vite-preload-helper-DfZQVC28.js"
+      ]
+    },
+    "htmlPreloads": [
+      "vite-preload-helper-DfZQVC28.js",
+      "vendor-react-C4KjzCe2.js"
+    ],
+    "eagerKB": 355.5,
+    "eagerKBGz": 106,
+    "lazyKB": 5870.4,
+    "lazyKBGz": 1724.2,
+    "chunks": [
+      {
+        "name": "vendor-mermaid-ClpGRxWk.js",
+        "sizeKB": 2659.4,
+        "sizeKBGz": 720.4,
+        "eager": false
+      },
+      {
+        "name": "vendor-codemirror-DElDkw2t.js",
+        "sizeKB": 703.8,
+        "sizeKBGz": 248.6,
+        "eager": false
+      },
+      {
+        "name": "exportFormats-ChsxWTA6.js",
+        "sizeKB": 395.2,
+        "sizeKBGz": 131.3,
+        "eager": false
+      },
+      {
+        "name": "vendor-xterm-bcxN8mh8.js",
+        "sizeKB": 381.4,
+        "sizeKBGz": 95.1,
+        "eager": false
+      },
+      {
+        "name": "index-D87JLgyn.js",
+        "sizeKB": 277,
+        "sizeKBGz": 84.1,
+        "eager": false
+      },
+      {
+        "name": "katex-DHMw6HUq.js",
+        "sizeKB": 253,
+        "sizeKBGz": 75.2,
+        "eager": false
+      },
+      {
+        "name": "index-C8IfsjmN.js",
+        "sizeKB": 215.3,
+        "sizeKBGz": 60.8,
+        "eager": true
+      },
+      {
+        "name": "html2canvas.esm-BfxBtG_O.js",
+        "sizeKB": 197.5,
+        "sizeKBGz": 46.9,
+        "eager": false
+      },
+      {
+        "name": "index.es-CVN1HtD9.js",
+        "sizeKB": 147.5,
+        "sizeKBGz": 50.5,
+        "eager": false
+      },
+      {
+        "name": "vendor-react-C4KjzCe2.js",
+        "sizeKB": 139.1,
+        "sizeKBGz": 44.5,
+        "eager": true
+      },
+      {
+        "name": "index-C1CjX86r.js",
+        "sizeKB": 90.1,
+        "sizeKBGz": 23.9,
+        "eager": false
+      },
+      {
+        "name": "index-WBaDXjpQ.js",
+        "sizeKB": 69.4,
+        "sizeKBGz": 21.2,
+        "eager": false
+      },
+      {
+        "name": "index-g47_Sqle.js",
+        "sizeKB": 65.3,
+        "sizeKBGz": 16,
+        "eager": false
+      },
+      {
+        "name": "index-CxN2rrRj.js",
+        "sizeKB": 47.2,
+        "sizeKBGz": 14.5,
+        "eager": false
+      },
+      {
+        "name": "index-JnmGPKTU.js",
+        "sizeKB": 46.5,
+        "sizeKBGz": 11.9,
+        "eager": false
+      },
+      {
+        "name": "markdownRender-ldCKI8dW.js",
+        "sizeKB": 46.2,
+        "sizeKBGz": 14.3,
+        "eager": false
+      },
+      {
+        "name": "index-BQLXaNK1.js",
+        "sizeKB": 36,
+        "sizeKBGz": 9.1,
+        "eager": false
+      },
+      {
+        "name": "index-D0iVOfjn.js",
+        "sizeKB": 35.5,
+        "sizeKBGz": 11.4,
+        "eager": false
+      },
+      {
+        "name": "index-CZGN5uNr.js",
+        "sizeKB": 29,
+        "sizeKBGz": 7.5,
+        "eager": false
+      },
+      {
+        "name": "index-BVu0yajt.js",
+        "sizeKB": 25.2,
+        "sizeKBGz": 8.2,
+        "eager": false
+      },
+      {
+        "name": "index-CE-W0mNn.js",
+        "sizeKB": 24.9,
+        "sizeKBGz": 8.4,
+        "eager": false
+      },
+      {
+        "name": "index-BOnpVJyw.js",
+        "sizeKB": 24.8,
+        "sizeKBGz": 7.6,
+        "eager": false
+      },
+      {
+        "name": "index-CvAJVzF5.js",
+        "sizeKB": 20.1,
+        "sizeKBGz": 5.5,
+        "eager": false
+      },
+      {
+        "name": "index-C6YWOhQt.js",
+        "sizeKB": 16.1,
+        "sizeKBGz": 5.1,
+        "eager": false
+      },
+      {
+        "name": "index-CY8A5XMk.js",
+        "sizeKB": 16,
+        "sizeKBGz": 4.9,
+        "eager": false
+      },
+      {
+        "name": "index-CioQ68EE.js",
+        "sizeKB": 15.6,
+        "sizeKBGz": 5.1,
+        "eager": false
+      },
+      {
+        "name": "globalIndex-D0qEpgHh.js",
+        "sizeKB": 14.9,
+        "sizeKBGz": 5.8,
+        "eager": false
+      },
+      {
+        "name": "index-Db-G-V_k.js",
+        "sizeKB": 14.4,
+        "sizeKBGz": 5.1,
+        "eager": false
+      },
+      {
+        "name": "index-Ddz7UQUb.js",
+        "sizeKB": 12.3,
+        "sizeKBGz": 4.1,
+        "eager": false
+      },
+      {
+        "name": "index-BEijA5VZ.js",
+        "sizeKB": 11.6,
+        "sizeKBGz": 3.7,
+        "eager": false
+      },
+      {
+        "name": "index-DGFlazLt.js",
+        "sizeKB": 10.9,
+        "sizeKBGz": 4,
+        "eager": false
+      },
+      {
+        "name": "index-CQ9L0k8L.js",
+        "sizeKB": 10.2,
+        "sizeKBGz": 3.3,
+        "eager": false
+      },
+      {
+        "name": "index-DM1uzQvG.js",
+        "sizeKB": 9.7,
+        "sizeKBGz": 4,
+        "eager": false
+      },
+      {
+        "name": "index-BRU6f5n5.js",
+        "sizeKB": 9,
+        "sizeKBGz": 3.1,
+        "eager": false
+      },
+      {
+        "name": "index-Dw8zzwFS.js",
+        "sizeKB": 8.8,
+        "sizeKBGz": 3.1,
+        "eager": false
+      },
+      {
+        "name": "index-iTKf_L5-.js",
+        "sizeKB": 8.8,
+        "sizeKBGz": 3.2,
+        "eager": false
+      },
+      {
+        "name": "index-4CnjVnVC.js",
+        "sizeKB": 8.4,
+        "sizeKBGz": 3.2,
+        "eager": false
+      },
+      {
+        "name": "index-plj6ech_.js",
+        "sizeKB": 8.3,
+        "sizeKBGz": 3.5,
+        "eager": false
+      },
+      {
+        "name": "index-BguDreqN.js",
+        "sizeKB": 7.9,
+        "sizeKBGz": 2.7,
+        "eager": false
+      },
+      {
+        "name": "index-Brtt24fB.js",
+        "sizeKB": 7.9,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-Xae1bomP.js",
+        "sizeKB": 7.4,
+        "sizeKBGz": 3,
+        "eager": false
+      },
+      {
+        "name": "index-eWRPXKIu.js",
+        "sizeKB": 6.9,
+        "sizeKBGz": 2.7,
+        "eager": false
+      },
+      {
+        "name": "index-BLYMV06W.js",
+        "sizeKB": 6.7,
+        "sizeKBGz": 2.5,
+        "eager": false
+      },
+      {
+        "name": "index-DyWwa8oV.js",
+        "sizeKB": 6.7,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-CGH8rYB4.js",
+        "sizeKB": 6.1,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-CS-QTBtW.js",
+        "sizeKB": 6,
+        "sizeKBGz": 2.6,
+        "eager": false
+      },
+      {
+        "name": "index-r6YAVAGw.js",
+        "sizeKB": 5.4,
+        "sizeKBGz": 2.3,
+        "eager": false
+      },
+      {
+        "name": "index-BwYJhXLg.js",
+        "sizeKB": 5.1,
+        "sizeKBGz": 2.2,
+        "eager": false
+      },
+      {
+        "name": "index-DT5uwR9M.js",
+        "sizeKB": 4,
+        "sizeKBGz": 1.6,
+        "eager": false
+      },
+      {
+        "name": "index-3thKl1jO.js",
+        "sizeKB": 3.9,
+        "sizeKBGz": 1.5,
+        "eager": false
+      },
+      {
+        "name": "index-Dlp93vrI.js",
+        "sizeKB": 3.9,
+        "sizeKBGz": 1.6,
+        "eager": false
+      },
+      {
+        "name": "index-CoVsCt8R.js",
+        "sizeKB": 3.8,
+        "sizeKBGz": 1.5,
+        "eager": false
+      },
+      {
+        "name": "index-BdGPFVi-.js",
+        "sizeKB": 3.3,
+        "sizeKBGz": 1.5,
+        "eager": false
+      },
+      {
+        "name": "index-BUnlugSL.js",
+        "sizeKB": 2.5,
+        "sizeKBGz": 1.1,
+        "eager": false
+      },
+      {
+        "name": "index-DqpLTKG5.js",
+        "sizeKB": 2.5,
+        "sizeKBGz": 1.2,
+        "eager": false
+      },
+      {
+        "name": "index-D7wNN3xf.js",
+        "sizeKB": 2.4,
+        "sizeKBGz": 1.1,
+        "eager": false
+      },
+      {
+        "name": "index-C0Dso-TW.js",
+        "sizeKB": 2.3,
+        "sizeKBGz": 0.9,
+        "eager": false
+      },
+      {
+        "name": "commentsApi-BejuGiVX.js",
+        "sizeKB": 2.2,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-D01HY4Ut.js",
+        "sizeKB": 1.9,
+        "sizeKBGz": 0.8,
+        "eager": false
+      },
+      {
+        "name": "index-CyuGCgM-.js",
+        "sizeKB": 1.6,
+        "sizeKBGz": 0.9,
+        "eager": false
+      },
+      {
+        "name": "wardley-RL74JXVD-DZL-gl0x.js",
+        "sizeKB": 1.5,
+        "sizeKBGz": 0.5,
+        "eager": false
+      },
+      {
+        "name": "index-DzKhgLu6.js",
+        "sizeKB": 1.4,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-C4a2PJa1.js",
+        "sizeKB": 1.3,
+        "sizeKBGz": 0.6,
+        "eager": false
+      },
+      {
+        "name": "index-CIQsypd-.js",
+        "sizeKB": 1.3,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-BfdDwRhs.js",
+        "sizeKB": 1.2,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-DKkQHay6.js",
+        "sizeKB": 1.2,
+        "sizeKBGz": 0.6,
+        "eager": false
+      },
+      {
+        "name": "index-hFSFnaEB.js",
+        "sizeKB": 1.2,
+        "sizeKBGz": 0.6,
+        "eager": false
+      },
+      {
+        "name": "index-4ft7LrZB.js",
+        "sizeKB": 1.1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-CGwyAE8b.js",
+        "sizeKB": 1.1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "vite-preload-helper-DfZQVC28.js",
+        "sizeKB": 1.1,
+        "sizeKBGz": 0.6,
+        "eager": true
+      },
+      {
+        "name": "index-B-AwAV83.js",
+        "sizeKB": 1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "index-Dsyb7f96.js",
+        "sizeKB": 1,
+        "sizeKBGz": 0.7,
+        "eager": false
+      },
+      {
+        "name": "blockRefDrag-kole4JeV.js",
+        "sizeKB": 0.9,
+        "sizeKBGz": 0.5,
+        "eager": false
+      },
+      {
+        "name": "outlineStore-Cbrtnph3.js",
+        "sizeKB": 0.8,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "index-B4WI1JLt.js",
+        "sizeKB": 0.7,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "index-BkAL5bCS.js",
+        "sizeKB": 0.7,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "applyCapabilityChange-D4whVXwr.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "confirmStore-DtuNdGXE.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "filesStore-v21YoAPC.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.3,
+        "eager": false
+      },
+      {
+        "name": "pickStore-DsXzhVm1.js",
+        "sizeKB": 0.6,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "promptStore-D0Kl4eWO.js",
+        "sizeKB": 0.5,
+        "sizeKBGz": 0.4,
+        "eager": false
+      },
+      {
+        "name": "index-BUHL18_C.js",
+        "sizeKB": 0.2,
+        "sizeKBGz": 0.2,
+        "eager": false
+      },
+      {
+        "name": "constants-Chebcsbk.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      },
+      {
+        "name": "gitStatusStore-Cg8JgUEO.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      },
+      {
+        "name": "marginApi-CG5RUV85.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      },
+      {
+        "name": "runtime-CF-Rhxkh.js",
+        "sizeKB": 0.1,
+        "sizeKBGz": 0.1,
+        "eager": false
+      }
+    ]
+  },
+  "microbenchmarks": {
+    "flattenTree.10k": {
+      "iterations": 200,
+      "p50us": 643.69,
+      "p95us": 1414.95,
+      "p99us": 2969.14,
+      "meanus": 756.42,
+      "totalMs": 151.53
+    },
+    "frameSnapshot.4stores.flush": {
+      "iterations": 5000,
+      "p50us": 0.38,
+      "p95us": 2.01,
+      "p99us": 2.63,
+      "meanus": 1.16,
+      "totalMs": 6.24
+    },
+    "editor.apply_transaction.large": {
+      "iterations": 50,
+      "p50us": 24190.46,
+      "p95us": 28234.73,
+      "p99us": 34772.04,
+      "meanus": 24448.55,
+      "totalMs": 1222.49
+    },
+    "editor.apply_transaction.medium": {
+      "iterations": 300,
+      "p50us": 330.77,
+      "p95us": 485.19,
+      "p99us": 843.58,
+      "meanus": 352.03,
+      "totalMs": 105.63
+    },
+    "editor.apply_transaction.small": {
+      "iterations": 500,
+      "p50us": 39.37,
+      "p95us": 51.66,
+      "p99us": 77.61,
+      "meanus": 41.71,
+      "totalMs": 20.88
+    },
+    "editor.livePreview.decorate.large": {
+      "iterations": 10,
+      "p50us": 96.28,
+      "p95us": 142.7,
+      "p99us": 142.7,
+      "meanus": 100.96,
+      "totalMs": 1.01
+    },
+    "editor.livePreview.decorate.medium": {
+      "iterations": 40,
+      "p50us": 110.97,
+      "p95us": 177.68,
+      "p99us": 1704.25,
+      "meanus": 154.41,
+      "totalMs": 6.18
+    },
+    "editor.livePreview.decorate.small": {
+      "iterations": 100,
+      "p50us": 102.54,
+      "p95us": 205.97,
+      "p99us": 1291.7,
+      "meanus": 127.13,
+      "totalMs": 12.73
+    },
+    "editor.markdownRender.large": {
+      "iterations": 10,
+      "p50us": 86715.37,
+      "p95us": 98472.94,
+      "p99us": 98472.94,
+      "meanus": 85848.84,
+      "totalMs": 858.55
+    }
+  }
+}

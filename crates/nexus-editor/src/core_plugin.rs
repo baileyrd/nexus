@@ -1178,6 +1178,16 @@ fn handle_apply_transaction(
     let tx: crate::Transaction = serde_json::from_value(tx_value)
         .map_err(|e| exec_err(format!("apply_transaction: invalid transaction: {e}")))?;
     let tx_id = tx.id;
+    let op_count = tx.operations.len();
+
+    // BL-122: instrumentation span for the typing-latency perf
+    // harness. Records per-call op count + transaction bytes-in, and
+    // (after serialize) bytes-out. A subscriber installed at
+    // `info` level captures wall-time via `span.enter()`/exit; with
+    // no subscriber the span is a no-op pointer bump.
+    let span =
+        tracing::info_span!("apply_transaction", op_count, bytes_in = tx_json_size, bytes_out = tracing::field::Empty);
+    let _enter = span.enter();
 
     let (value, revision, applied_ops) = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
@@ -1203,6 +1213,13 @@ fn handle_apply_transaction(
         let val = snapshot_to_value(&snapshot_of(s), "apply_transaction")?;
         (val, rev, ops)
     };
+    // Record the serialized snapshot size on the active span (no-op
+    // when no subscriber is recording the field).
+    if let Some(s) = value.as_str() {
+        span.record("bytes_out", s.len());
+    } else if let Ok(buf) = serde_json::to_vec(&value) {
+        span.record("bytes_out", buf.len());
+    }
     if let Some(obs) = observer {
         obs.on_apply_transaction(&relpath, &applied_ops);
     }
