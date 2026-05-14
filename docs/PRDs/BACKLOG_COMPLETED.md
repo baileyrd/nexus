@@ -253,6 +253,56 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-054: Nexus OS Mode — Agentic OS methodology layer ✅ (2026-05-14 umbrella close — shipped 2026-05-07)
+
+**Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)
+**Shipped**: 2026-05-07 across 5 phases. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-skills` (new `invoke` handler); shell `nexus.skills`, new `nexus.osArchitecture`, new `nexus.observability` (usage / automation / vault-feed).
+**Related**: BL-037 (activity timeline), BL-052 (universal activity timeline), PRD-13 (skills), PRD-15 (agent), PRD-16 (workflow).
+
+Nexus was already 85% of the substrate for the "Agentic OS" pattern (Domains → Tasks → Skills → Automations with a markdown memory layer and observability dashboard). The forge is the vault, `com.nexus.skills` is the skill system, `com.nexus.agent` is the sub-agent layer, `com.nexus.workflow` is the automation engine, the shell plugin system is the dashboard. What was missing was the *methodological layer* — conventions, scaffolding, and UI affordances that surface these capabilities as a coherent operating system. Five independent phases, each shippable standalone, all closed 2026-05-07.
+
+**What landed (per phase):**
+
+- **Phase 1 — Forge OS template** (0.5d). `nexus forge init --template os` scaffolds `raw/wiki/output/projects/ops/` layout with a template `CLAUDE.md` memory map.
+- **Phase 2 — Architecture panel** (1.5d). New `nexus.osArchitecture` shell plugin renders `architecture.md` (Domains → Tasks hierarchy with four-attribute tags) and cross-references it against actual `.skill.md` and `.workflow.toml` files to surface drift.
+- **Phase 3 — Skills invocation** (1d). New `com.nexus.skills::invoke` IPC handler + "Run" button in `SkillsPanel`. Dispatches through `com.nexus.agent::run` with the skill body as system prompt. Foundation-class skills get a "Schedule" button that pre-fills a `.workflow.toml`.
+- **Phase 4 — Observability panels** (2d). Three shell plugins — usage panel (token/cost from activity log), automation status panel (foundation workflow last-run/next-run), vault feed panel (file-change events on `raw/wiki/output/`).
+- **Phase 5 — OS Setup skill** (0.5d). Built-in skill seeded into OS-template forges that runs the architecture elicitation interview and produces `architecture.md`.
+
+No new backend services. Every phase is UI additions or thin IPC handlers over fully-operational existing infrastructure. The end-to-end vertical works today.
+
+**Definition of done coverage**: ✅ all five phases shipped on the dates the BL was scoped against (2026-05-07).
+
+---
+
+### BL-053: Forge visual target — close the gap to the design mockup ✅ (2026-05-14 umbrella close — shipped 2026-05-07 + tail 2026-05-14)
+
+**Source**: Forge Color System mockup + ember-on-slate exploration (2026-05-06) — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)
+**Shipped**: 2026-05-07 (four phases) + 2026-05-14 (tail items) in commit `165e0b1f`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `shell/src/shell/`, `shell/src/plugins/nexus/editor/`, `shell/src/plugins/nexus/outline/`, `shell/src/plugins/core/editorArea/`, new markdown-extension surface in `nexus-editor` for callouts.
+**Related**: bundled themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the tokens; this BL styled against them.
+
+The bundled ember themes shipped the right token values, but the shell rendered a much plainer surface than the Forge mockup — mostly because rich rendering (callouts, status pills, frontmatter metadata bars, path-style inline code, ember wikilinks) is renderer/plugin work, not theme work. The companion plan split the gap into four phases ordered by ROI, identified what was reachable through theme+CSS alone vs. what needed renderer extensions, and listed four product decisions that gated code (callout syntax, status data source, font bundling, scope commitment). Q2 was decided in favor of frontmatter as the canonical source for status data.
+
+**What landed (per phase):**
+
+- **Phase 1** (1d, shipped 2026-05-07). Pill-shaped editor tabs, ember segmented inspector control, status-bar forge name + ember dot. Delivered ~70% of the visible win on its own.
+- **Phase 2** (2d, shipped 2026-05-07). Ember wikilinks (`.nx-wikilink` styling), path-style inline code (`.nx-codepath` heuristic in `markdownRender.ts`), YAML frontmatter metadata bar (parsed via new `parseFrontmatter` helper, rendered as a chip row spliced after the first H1).
+- **Phase 3** (3–5d, shipped 2026-05-07). Obsidian-style callouts (`> [!type] Title`) with seven types (`info` / `note` / `tip` / `warn` / `risk` / `success` / `update`) + per-type accent dot. Custom marked extension; cleanly composed with the inline wikilink extension.
+- **Phase 4** (3–5d, shipped 2026-05-07). Status pills (`info` / `warn` / `risk` / `ok`) in the frontmatter metadata bar + status dots in the file-tree row, sourced from `status:` frontmatter via a new `com.nexus.storage::read_frontmatter` IPC handler. Pills also render inside table cells (`tablecell` renderer override) and standalone inline code blocks.
+
+**Tail items shipped 2026-05-14** in commit `165e0b1f`. Three remaining mockup elements that the prior PRD listed as deferred follow-ups:
+- **Table chrome** — `border-separate` + dashed row separators + alternating tints + uppercased header band + hover lift, scoped via `.nexus-markdown-body table` selectors.
+- **Outline numbered prefix** — `.nx-outline__prefix` chip at depth 0 with `01 / 02` tabular numerics on `--interactive-accent-soft`.
+- **Word-count badge** — new `countWordsIn` + per-section accumulation in both `parseHeadings` and `treeToHeadings`; `OutlineHeading.wordCount` rendered through `compactCount` for sub-4-char chip widths; punctuation-only tokens skipped.
+
+**Out of scope:** font bundling stays a separate offline-first workstream (touches the install pipeline + license review, not a renderer concern).
+
+**Definition of done coverage**: ✅ all four phases shipped on the dates the BL was scoped against; ✅ Q2 (status data source) decided in favor of frontmatter; ⏸ Q3 (font bundling) deferred to the separate offline-first workstream by design.
+
+---
+
 ### BL-121: Session-transcript FTS5 search (Hermes Feature 5) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
 
 **Source**: Hermes Agent port — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md). Filed 2026-05-13.

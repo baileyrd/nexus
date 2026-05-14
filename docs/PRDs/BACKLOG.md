@@ -562,43 +562,9 @@ _BL-067 closed 2026-05-14 (umbrella close — Phase 1 / 2a / 2b / 2c / 2d / Phas
 
 ---
 
-### BL-054: Nexus OS Mode — Agentic OS methodology layer
+_BL-054 closed 2026-05-14 (umbrella close — all 5 phases shipped 2026-05-07; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md))._
 
-> **Fully closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 1: CLI + launcher OS-template scaffold. Phase 2: `nexus.osArchitecture` panel renders architecture.md with drift detection. Phase 3: `com.nexus.skills::invoke` + Run button. Phase 4: `nexus.osObservability` panel with usage / automation / vault-feed tabs. Phase 5: built-in `os-setup` elicitation skill. The end-to-end vertical works today.
-
-**Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)
-**Effort**: ~1 week total across 5 independent phases (0.5 _(shipped)_ + 1.5 _(shipped)_ + 1 _(shipped)_ + 2 _(shipped)_ + 0.5 _(shipped)_ days)
-**Crates**: `nexus-skills` (new `invoke` handler), `shell/src/plugins/nexus/skills/`, new `shell/src/plugins/nexus/osArchitecture/`, new `shell/src/plugins/nexus/observability/`
-**Related**: BL-037 (activity timeline), BL-052 (universal activity timeline), PRD-13 (skills), PRD-15 (agent), PRD-16 (workflow)
-
-Nexus is already 85% of the substrate for the "Agentic OS" pattern (Domains → Tasks → Skills → Automations with a markdown memory layer and observability dashboard). The forge is the vault. `com.nexus.skills` is the skill system. `com.nexus.agent` is the sub-agent layer. `com.nexus.workflow` is the automation engine. The shell plugin system is the dashboard. What's missing is the *methodological layer* — conventions, scaffolding, and UI affordances that surface these capabilities as a coherent operating system.
-
-Five independent phases, each shippable standalone:
-
-- **Phase 1 — Forge OS template** (0.5d): `nexus forge init --template os` scaffolds `raw/wiki/output/projects/ops/` layout with a template `CLAUDE.md` memory map.
-- **Phase 2 — Architecture panel** (1.5d): New `nexus.osArchitecture` shell plugin renders `architecture.md` (Domains → Tasks hierarchy with four-attribute tags) and cross-references it against actual `.skill.md` and `.workflow.toml` files to surface drift.
-- **Phase 3 — Skills invocation** (1d): New `com.nexus.skills::invoke` IPC handler + "Run" button in `SkillsPanel`. Dispatches through `com.nexus.agent::run` with the skill body as system prompt. Foundation-class skills get a "Schedule" button that pre-fills a `.workflow.toml`.
-- **Phase 4 — Observability panels** (2d): Three shell plugins — usage panel (token/cost from activity log), automation status panel (foundation workflow last-run/next-run), vault feed panel (file-change events on `raw/wiki/output/`).
-- **Phase 5 — OS Setup skill** (0.5d): Built-in skill seeded into OS-template forges that runs the architecture elicitation interview and produces `architecture.md`.
-
-No new backend services. Every phase is UI additions or thin IPC handlers over fully-operational existing infrastructure.
-
-### BL-053: Forge visual target — close the gap to the design mockup
-
-> **All four phases closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 1: pill-shaped editor tabs, ember segmented inspector control, status-bar forge name + ember dot. Phase 2: ember wikilinks, path-style inline code, YAML frontmatter metadata bar. Phase 3: Obsidian-style callouts (`> [!type] Title`) with seven types + per-type accent dot. Phase 4: status pills (`info`/`warn`/`risk`/`ok`) in the frontmatter metadata bar + status dots in the file-tree row, sourced from `status:` frontmatter via a new `com.nexus.storage::read_frontmatter` IPC. Q2 was decided in favor of frontmatter as the canonical source.
->
-> **Tail items shipped 2026-05-14** in commit `165e0b1f`. Three remaining mockup elements that the prior PRD listed as deferred follow-ups: table chrome (border-separate + dashed row separators + alternating tints + uppercased header band + hover lift), outline numbered prefix (`.nx-outline__prefix` chip at depth 0 with `01 / 02` tabular numerics on `--interactive-accent-soft`), and word-count badge (new `countWordsIn` + per-section accumulation in both `parseHeadings` and `treeToHeadings`; `OutlineHeading.wordCount` rendered through `compactCount` for sub-4-char chip widths; punctuation-only tokens skipped). Font bundling stays out of scope (separate offline-first workstream).
-
-**Source**: Forge Color System mockup + ember-on-slate exploration (2026-05-06) — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)
-**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2 ~2 days _(shipped)_ · Phase 3 ~3–5 days _(shipped)_ · Phase 4 ~3–5 days _(shipped)_
-**Crates**: `shell/src/shell/`, `shell/src/plugins/nexus/editor/`, `shell/src/plugins/nexus/outline/`, `shell/src/plugins/core/editorArea/`, possibly a new markdown-extension surface in `nexus-editor`
-**Related**: bundled themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the tokens; this BL styles against them
-
-The bundled ember themes ship the right token values, but the shell renders a much plainer surface than the Forge mockup — mostly because rich rendering (callouts, status pills, frontmatter metadata bars, path-style inline code, ember wikilinks) is renderer/plugin work, not theme work. The companion plan splits the gap into four phases ordered by ROI, identifies what's reachable through theme+CSS alone vs. what needs renderer extensions, and lists the four product decisions that gate code (callout syntax, status data source, font bundling, scope commitment).
-
-**Phase 1 alone delivers ~70% of the visible win.** Subsequent phases are independent and can be greenlit individually.
-
-**Definition of done (per phase):** acceptance criteria filled in when a phase is scoped in — see §6 of the companion doc. The plan itself does not commit to any phase.
+_BL-053 closed 2026-05-14 (umbrella close — 4 phases shipped 2026-05-07, tail items shipped 2026-05-14 in commit `165e0b1f`; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md))._
 
 _BL-052 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `ActivityEntry` / `ActivitySurface` / `ActivityOutcome` / `ActivityToolCall` lifted from `nexus-ai` to `nexus-types::activity` (kept the type names; `nexus-ai` re-exports for back-compat, so existing call sites still compile). New `ActivityOrigin` enum (`Ai` / `User` / `Plugin(id)` / `Workflow(id)` / `Agent(id)` / `Terminal(id)` / `Git` / `Storage` / `Capability`) with a `to_wire` / `from_wire` round-trip; `ActivityEntry` carries it as a `String` field with `serde(default = "ai")` so legacy on-disk JSONL parses cleanly. New universal topic constant `ACTIVITY_APPENDED_TOPIC = "com.nexus.activity.appended"`; the AI recorder now publishes to BOTH this and the legacy `com.nexus.ai.activity_appended` so existing AI-only subscribers keep working. Emitters wired in this sweep: storage (file_created / file_modified / file_deleted / file_renamed via `publish_file_activity`), git (HEAD-changed commit detection via `publish_git_activity` + the auto-committer's existing emit reshaped to a proper `ActivityEntry`), workflow (run start + end via `publish_workflow_activity`), terminal (BL-057 — see its closure note). Shell-side: the `activityTimeline` plugin subscribes to BOTH topics with id-keyed dedup so the AI's twin-emit doesn't render twice; gains an origin filter chip with nine kinds (AI / User / Storage / Git / Terminal / Workflow / Agent / Plugin / Capability); surface union widens to include `file` / `process` / `git` / `workflow` / `capability` plus the existing AI surfaces. Pre-existing schema tests catch the new types via the existing `every_object_schema_denies_additional_properties` invariant — `ActivityEntry` keeps `deny_unknown_fields` (extras rejected; `serde(default)` handles missing-on-read separately).
 
