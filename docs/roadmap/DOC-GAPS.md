@@ -1357,12 +1357,46 @@ now accept custom-manifest slugs alongside the six built-ins:
   extra), `is_safe_archetype_slug` (typical + path-shaped slugs).
   All 111 nexus-agent lib tests green.
 
-**Remaining deferred:**
+**Follow-up shipped 2026-05-14 — manifest tool allow/deny enforcement.**
 
-- Tool allow/deny enforcement against `AgentToolRegistry` — pending
-  until the planning loop reads the manifest's `[tools]` section
-  at request time. The custom-archetype path now resolves the
-  manifest end-to-end, so this is one targeted addition away.
+The last DG-36 follow-up. A custom agent's `[tools]` `allowed` /
+`denied` lists now gate per-call tool dispatch through the existing
+`SessionPolicy` surface — denials surface as
+`RoundDecision::Partial` entries that the session loop already feeds
+back to the model as `is_error: true` tool-result turns, so the
+model can recover.
+
+- New `ManifestToolPolicy` in `custom_agent.rs`: `from_manifest`
+  builds the `HashSet<String>` allow/deny pair + the contributing
+  slug; `check(name)` returns `Ok(())` or a clear rejection string
+  ("`tool 'X' denied by 'slug' [tools].denied`" / "not in
+  [tools].allowed list"); `is_noop()` short-circuits the wrap when
+  both lists are empty.
+- New `ManifestPolicyGate<P>` decorator: implements `SessionPolicy`
+  generically over the wrapped inner policy (`AutoApproveAll` /
+  `BusBridgePolicy` / etc.). Merge rules: if every call is
+  manifest-denied, return `Partial(all-denied)` without consulting
+  the inner; otherwise consult inner and merge — manifest denials
+  override inner approvals on the same `tool_use_id`,
+  `Abort`/`Timeout` propagate unchanged.
+- `resolve_archetype_for_run` extended to return a new
+  `ResolvedArchetype` struct carrying the parsed
+  `CustomAgentManifest` alongside the prompt so the caller doesn't
+  re-read the file.
+- `handle_session_run` builds the `ManifestToolPolicy` once from
+  the resolved manifest, skips the wrap if `is_noop()`, otherwise
+  constructs `ManifestPolicyGate::new(base_policy, mp)`. New
+  `run_session_optionally_gated` helper centralises the "wrap or
+  pass through" branching so the auto-approve and interactive
+  approval paths each have one call site rather than two.
+- 9 new unit tests: 4 over `ManifestToolPolicy` (noop, deny
+  precedence, allow narrowing, empty-allow no-filter) + 5 over
+  `ManifestPolicyGate` (passthrough on no denials, full-Partial on
+  total denial, layering on inner ApproveAll, manifest overrides
+  inner Partial, Abort propagation). All 120 nexus-agent lib tests
+  green.
+
+DG-36 is now closed end-to-end. No remaining follow-ups.
 
 ---
 

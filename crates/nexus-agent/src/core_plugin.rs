@@ -408,8 +408,12 @@ async fn handle_plan(
         .strip_prefix(DEFAULT_SYSTEM_PROMPT)
         .map(str::trim_start)
         .filter(|s| !s.is_empty());
-    let (agent_id, agent_prompt, source) =
-        resolve_archetype_for_run(&ctx, a.archetype.as_deref()).await;
+    let ResolvedArchetype {
+        agent_id,
+        system_prompt: agent_prompt,
+        source,
+        manifest: _,
+    } = resolve_archetype_for_run(&ctx, a.archetype.as_deref()).await;
     let driver = AiChatBridge {
         ctx,
         timeout: DEFAULT_CHAT_TIMEOUT,
@@ -470,12 +474,28 @@ enum ArchetypeSource {
     CustomManifest { slug: String },
 }
 
+/// Resolution result for an `--archetype <slug>` argument. The
+/// optional `manifest` is non-`None` only when the slug matched a
+/// custom manifest under `<forge>/.forge/agents/<slug>/agent.toml`;
+/// `handle_session_run` consults it for the DG-36 follow-up tool
+/// allow/deny enforcement.
+struct ResolvedArchetype {
+    agent_id: String,
+    system_prompt: String,
+    source: ArchetypeSource,
+    /// Full parsed manifest for custom slugs. Built-in / default
+    /// resolutions return `None`.
+    manifest: Option<crate::CustomAgentManifest>,
+}
+
 /// DG-36 — resolve an `--archetype` argument into a concrete
-/// `(agent_id, system_prompt, source)` triple. Try built-ins first
-/// (fast path, same as the pre-DG-36 behaviour); on miss, look up
+/// [`ResolvedArchetype`]. Try built-ins first (fast path, same as
+/// the pre-DG-36 behaviour); on miss, look up
 /// `<forge>/.forge/agents/<slug>/agent.toml` via the kernel context.
 /// A custom manifest's `system_prompt` body layers over its
-/// `[agent].archetype` baseline (default if unset).
+/// `[agent].archetype` baseline (default if unset). The parsed
+/// manifest is returned alongside the prompt so the caller can
+/// derive `[tools]` allow/deny policy without re-reading the file.
 ///
 /// Unknown slugs that don't match a built-in and don't have a manifest
 /// fall through to `ArchetypeSource::Default` — same posture as the
@@ -484,23 +504,29 @@ enum ArchetypeSource {
 async fn resolve_archetype_for_run(
     ctx: &KernelPluginContext,
     name: Option<&str>,
-) -> (String, String, ArchetypeSource) {
+) -> ResolvedArchetype {
     let trimmed = name.map(str::trim).filter(|s| !s.is_empty());
     if let Some(slug) = trimmed {
         if crate::archetypes::is_builtin_archetype(slug) {
             let (id, prompt) = crate::archetypes::resolve_prompt(Some(slug));
-            return (id.to_string(), prompt.to_string(), ArchetypeSource::Builtin);
+            return ResolvedArchetype {
+                agent_id: id.to_string(),
+                system_prompt: prompt.to_string(),
+                source: ArchetypeSource::Builtin,
+                manifest: None,
+            };
         }
         // Slug doesn't match a built-in — try the custom-manifest path.
         match load_custom_archetype_prompt(ctx, slug).await {
-            Ok(Some((id, prompt))) => {
-                return (
-                    id,
-                    prompt,
-                    ArchetypeSource::CustomManifest {
+            Ok(Some((id, prompt, manifest))) => {
+                return ResolvedArchetype {
+                    agent_id: id,
+                    system_prompt: prompt,
+                    source: ArchetypeSource::CustomManifest {
                         slug: slug.to_string(),
                     },
-                );
+                    manifest: Some(manifest),
+                };
             }
             Ok(None) => {
                 tracing::warn!(
@@ -521,7 +547,12 @@ async fn resolve_archetype_for_run(
     }
     // No name, or fall-through: built-in default.
     let (id, prompt) = crate::archetypes::resolve_prompt(name);
-    (id.to_string(), prompt.to_string(), ArchetypeSource::Default)
+    ResolvedArchetype {
+        agent_id: id.to_string(),
+        system_prompt: prompt.to_string(),
+        source: ArchetypeSource::Default,
+        manifest: None,
+    }
 }
 
 /// `true` when `slug` is safe to splice into a `<forge>/.forge/agents/<slug>/…`
@@ -556,7 +587,7 @@ fn is_safe_archetype_slug(slug: &str) -> bool {
 async fn load_custom_archetype_prompt(
     ctx: &KernelPluginContext,
     slug: &str,
-) -> Result<Option<(String, String)>, String> {
+) -> Result<Option<(String, String, crate::CustomAgentManifest)>, String> {
     // Reject path-shaped slugs up front; the manifest scanner trusts
     // directory names, so a `../etc/passwd` slug must not escape.
     if !is_safe_archetype_slug(slug) {
@@ -616,7 +647,7 @@ async fn load_custom_archetype_prompt(
         format!("{base_prompt}\n\n{custom_prompt}")
     };
     let id = format!("com.nexus.agent.custom.{slug}");
-    Ok(Some((id, layered)))
+    Ok(Some((id, layered, manifest)))
 }
 
 // ── History persistence ─────────────────────────────────────────────────────
@@ -1172,6 +1203,56 @@ struct SessionIdArgs {
     id: String,
 }
 
+/// DG-36 follow-up — run a session with an optional
+/// [`crate::ManifestPolicyGate`] wrapping the base policy. Centralises
+/// the "wrap if Some, pass through if None" branching so
+/// [`handle_session_run`] only has one call site per approval mode
+/// (auto vs interactive) rather than four.
+///
+/// Generic over the base `P` so a `BusBridgePolicy` (owns a session
+/// id used for cleanup) and an `AutoApproveAll` (unit) both flow
+/// through the same helper.
+#[allow(clippy::too_many_arguments)]
+async fn run_session_optionally_gated<D, P, T>(
+    driver: &D,
+    dispatcher: &T,
+    base_policy: P,
+    manifest_policy: Option<crate::ManifestToolPolicy>,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: crate::SessionConfig,
+) -> crate::session::AgentSession
+where
+    D: crate::ChatDriver + ?Sized,
+    P: crate::SessionPolicy,
+    T: crate::ToolDispatcher + ?Sized,
+{
+    match manifest_policy {
+        Some(mp) => {
+            let wrapped = crate::ManifestPolicyGate::new(base_policy, mp);
+            crate::session::run_session_with_config(
+                driver, dispatcher, &wrapped, goal, system, archetype, id, config,
+            )
+            .await
+        }
+        None => {
+            crate::session::run_session_with_config(
+                driver,
+                dispatcher,
+                &base_policy,
+                goal,
+                system,
+                archetype,
+                id,
+                config,
+            )
+            .await
+        }
+    }
+}
+
 async fn handle_session_run(
     ctx: Arc<KernelPluginContext>,
     pending_approvals: Arc<PendingApprovals>,
@@ -1188,17 +1269,37 @@ async fn handle_session_run(
         timeout: DEFAULT_TOOL_TIMEOUT,
     };
 
-    let system = match (&parsed.system, &parsed.archetype) {
+    // DG-36 — resolve the archetype once so both the system-prompt
+    // composition AND the tool-policy gate see the same manifest.
+    // `None` for the `archetype` arg short-circuits cleanly to the
+    // default; that branch never enters the custom-manifest path.
+    let resolved = match &parsed.archetype {
+        Some(name) => Some(resolve_archetype_for_run(&ctx, Some(name)).await),
+        None => None,
+    };
+
+    let system = match (&parsed.system, resolved.as_ref()) {
         (Some(s), _) => s.clone(),
-        (None, Some(name)) => {
-            // DG-36 — try the custom-manifest path first; fall back to
-            // built-ins. Skill-aware assembly is for the legacy `plan`
-            // flow; sessions compose the prompt directly.
-            let (_, prompt, _) = resolve_archetype_for_run(&ctx, Some(name)).await;
-            prompt
-        }
+        (None, Some(r)) => r.system_prompt.clone(),
         (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
     };
+
+    // DG-36 follow-up — pull the manifest's `[tools]` policy out of
+    // the resolved archetype. `None` for built-ins and the default
+    // baseline. A non-`None` policy with empty allow + deny lists
+    // is treated as a no-op (no wrapper installed).
+    let manifest_policy = resolved
+        .as_ref()
+        .and_then(|r| r.manifest.as_ref())
+        .map(crate::ManifestToolPolicy::from_manifest)
+        .filter(|p| !p.is_noop());
+    if manifest_policy.is_some() {
+        tracing::debug!(
+            plugin_id = PLUGIN_ID,
+            archetype = parsed.archetype.as_deref().unwrap_or(""),
+            "DG-36 follow-up: applying manifest tool allow/deny policy",
+        );
+    }
 
     // BL-119 — fold the optional caller-supplied config into the
     // default. Partial overrides (e.g. `{ "max_iterations": 64 }`)
@@ -1211,10 +1312,11 @@ async fn handle_session_run(
 
     let session = if parsed.auto_approve {
         let id = uuid::Uuid::new_v4().to_string();
-        crate::session::run_session_with_config(
+        run_session_optionally_gated(
             &driver,
             &dispatcher,
-            &crate::session::AutoApproveAll,
+            crate::session::AutoApproveAll,
+            manifest_policy.clone(),
             &parsed.goal,
             &system,
             parsed.archetype.clone(),
@@ -1241,10 +1343,11 @@ async fn handle_session_run(
         // from the policy's session_id. Fix is to plumb the policy's
         // id into run_session as a starter — done below.
         let policy_session_id = policy.session_id.clone();
-        let session = crate::session::run_session_with_config(
+        let session = run_session_optionally_gated(
             &driver,
             &dispatcher,
-            &policy,
+            policy,
+            manifest_policy.clone(),
             &parsed.goal,
             &system,
             parsed.archetype.clone(),

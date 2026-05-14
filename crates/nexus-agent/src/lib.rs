@@ -66,8 +66,9 @@ pub use core_plugin::{
 pub use custom_agent::{
     load_from_path as load_custom_agent, parse_str as parse_custom_agent_str,
     resolve_system_prompt as resolve_custom_system_prompt, scan_forge as scan_custom_agents,
-    AgentSection, CustomAgentError, CustomAgentManifest, ExecutionSection, MemorySection,
-    SystemPromptSection, ToolsSection, AGENTS_DIR, MANIFEST_FILE_NAME,
+    AgentSection, CustomAgentError, CustomAgentManifest, ExecutionSection, ManifestPolicyGate,
+    ManifestToolPolicy, MemorySection, SystemPromptSection, ToolsSection, AGENTS_DIR,
+    MANIFEST_FILE_NAME,
 };
 pub use tool_registry::{
     default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,
