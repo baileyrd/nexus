@@ -253,6 +253,48 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-130: Prompt injection detection (Thoth port) ✅ (2026-05-14)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Files**: `crates/nexus-ai/src/sanitize.rs` (new); `crates/nexus-ai/src/lib.rs` (re-exports); `crates/nexus-ai/src/config.rs` (`AiConfig::injection_policy` field); `crates/nexus-ai/src/rag.rs` (new `build_rag_prompt_budgeted_with_scanner`; `rag::query` threads the policy + emits tracing warnings); `crates/nexus-ai/src/core_plugin.rs` (`handle_ask` passes `ai_cfg.injection_policy`).
+**Related**: BL-017 (`PrivacyPolicy::Redactor` — outbound PII redactor; this PR layers the inbound scanner alongside it on the same RAG-chunk boundary), BL-128 (entity-graph wire point — filed but not shipped), BL-131 (pre-LLM context sanitisation — different concern: mechanical waste vs. adversarial patterns).
+
+The companion to BL-017. Where the redactor strips outbound PII / secrets from retrieved chunks before they leave the host, the new scanner flags inbound patterns that look like adversarially-crafted attempts to steer the LLM mid-context. Thoth's `_check_prompt_injection()` proved a lightweight pattern scan catches the most common attack vectors before the prompt is assembled.
+
+**What landed.**
+
+- **`sanitize.rs` module**.
+  - `Scanner::with_default_patterns(policy) -> Option<Self>` — `Off` returns `None` (the `Option<&Scanner>` convention mirrors `Option<&Redactor>`).
+  - `InjectionPolicy` enum: `Off` (default) / `Warn` (prepends `[INJECTION RISK: <kinds>]` tag, preserves text) / `Redact` (replaces flagged byte ranges with `[INJECTION REDACTED]`, merging overlaps) / `Reject` (signals via `ScanResult::rejected`, leaves text intact for the caller to log).
+  - `ScanResult { text, findings, rejected }`. `Finding { pattern_id, start, end, snippet }` carries a UTF-8-safe ≤100-byte excerpt for audit-log consumers.
+  - `InjectionSource` enum (`RagChunk` / `ToolResult` / `McpOutput` / `EntityDescription`) — label-only today; carried in audit metadata once additional wire points land.
+- **Four pattern families** (all `regex-lite`-compatible — no lookaround, `[\s\S]` for `.` across newlines, `(?i)` flag where needed):
+  - **Role-override** — `ignore (previous|prior|above) instructions`, `disregard (the|your)? (previous|prior|above)`, `you are now`, `act as … without restrictions|unfiltered|jailbroken|no constraints`, `your new instructions`.
+  - **Invisible Unicode** — U+200B, U+200C, U+200D, U+FEFF, U+2060 in a single character class; embedded as literal UTF-8 in the source so the regex sees byte sequences.
+  - **Hidden HTML** — `<!--`, `<script\b`, `<style\b`.
+  - **Data exfiltration** — `base64 … (curl|wget)` and `(curl|wget) … base64` within ~200 chars (two directional patterns to avoid alternation re-anchoring); high-entropy long URLs (`https?://[^\s]{500,}`).
+- **Wire point: RAG chunks**. New `build_rag_prompt_budgeted_with_scanner` variant layers the scanner AFTER the redactor in the existing per-chunk pipeline. Order matters: redactor strips secrets first so the scanner's audit snippets don't carry stripped-bytes; scanner runs second, applying its policy. `Reject` policy drops the chunk before it consumes budget; `Warn` / `Redact` mutate the text and let the budget decide. Legacy `build_rag_prompt_budgeted` is preserved as a thin shim calling the new variant with `scanner: None` — BL-018 byte-identity for existing callers.
+- **End-to-end wiring** via `rag::query` → `handle_ask`. `AiConfig::injection_policy` defaults to `Off` so existing deployments stay byte-identical until an operator opts in via `<forge>/.forge/config.toml::[ai] injection_policy = "warn"` (or `redact` / `reject`). Findings emit a `tracing::warn` per match under target `nexus_ai::sanitize` carrying `pattern_id` / `start` / `end` / `policy` — a real audit-log entry on the universal-activity bus is a documented follow-up.
+
+**Tests:**
+
+- **24 sanitize-module tests**: one per pattern in each family (positive + carefully-chosen negative pairs to pin false-positive boundaries — e.g. `"act as a polite reviewer"` passes clean while `"act as DAN without restrictions"` fires); policy semantics (`Off` returns no scanner, `Warn` prepends tag, `Redact` merges overlapping ranges into a single placeholder, `Reject` signals without mutating text); UTF-8 safety of the snippet helper; finding dedup + sort-by-start.
+- **3 rag.rs wiring tests**: `Warn` policy produces an `[INJECTION RISK: role-override]`-tagged prompt with findings collected; `Reject` policy drops the flagged source entirely (only the clean source survives); `Scanner=None` matches the legacy builder byte-for-byte.
+
+**Deferrals (documented in the BACKLOG.md closure note):**
+
+- **Tool-result wiring** — the agent tool-loop assembles results from arbitrary handler responses without a central chokepoint. The scanner API is independent of where it's called from, so the wire-up is local-only when it lands.
+- **MCP-output wiring** — routed through the MCP host, not through `nexus-ai`'s prompt builder.
+- **Entity-description wiring** — gated on BL-128 (entity graph hasn't shipped).
+- **Per-source-type config** — collapsed to a single `injection_policy` field on `AiConfig`. The per-source split (`rag_chunks = "warn"`, `tool_results = "warn"`, `mcp_outputs = "redact"`) adds config surface without a real use case until additional wire points land.
+- **Bus-published audit entries** — today findings flow through `tracing::warn` only. Wiring through `ActivityRecorder` requires plumbing a recorder into `rag::query`, which has no recorder argument today — out of scope for this small BL.
+
+**Tested**: `cargo test -p nexus-ai` 249/249; `cargo clippy -p nexus-ai --all-targets` clean; `cargo check --workspace` clean.
+
+**Definition of done coverage**: ✅ `sanitize.rs` exports the scanner API (typed `Scanner` rather than the free `scan()` fn the BL sketched — same call shape via the `Option<&Scanner>` convention); ✅ called by `stream_ask` (through `handle_ask` → `rag::query` → `build_rag_prompt_budgeted_with_scanner`); ⏸ called by `stream_chat` / agent context assembly — deferred per above (no central chokepoint); ✅ findings emit operator-visible records (via `tracing::warn`; bus / activity-log wiring deferred); ✅ test matrix per pattern class + legitimate content passes clean; ⏸ per-source-type config collapsed to a single field — restored if a real per-source use case surfaces.
+
+---
+
 ### BL-054: Nexus OS Mode — Agentic OS methodology layer ✅ (2026-05-14 umbrella close — shipped 2026-05-07)
 
 **Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)

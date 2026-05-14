@@ -333,34 +333,7 @@ A scheduled background pass that keeps the entity knowledge graph (BL-128) clean
 
 ---
 
-### BL-130: Prompt injection detection (Thoth port)
-
-**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
-**Effort**: Small. Self-contained; adds one pre-prompt sanitisation pass.
-**Crates**: `nexus-ai` (new `sanitize` module).
-
-Nexus's `PrivacyPolicy` redactor (BL-017, shipped) handles outbound PII. The missing piece is inbound content sanitisation: RAG chunks, tool call results, channel-sourced messages, and MCP tool outputs can all carry adversarially crafted content targeting the agent's LLM context. Thoth's `_check_prompt_injection()` proves a lightweight pattern scan catches the most common attack vectors before the prompt is assembled.
-
-**Scanning targets** (applied to every string that flows into prompt assembly — RAG chunks, tool results, MCP outputs, entity descriptions prepended by BL-128):
-
-- **Role-override patterns**: case-insensitive match for `"ignore previous instructions"`, `"you are now"`, `"disregard your"`, `"act as"` combined with `"without restrictions"`, `"your new instructions"`, and similar.
-- **Invisible Unicode**: scan for U+200B (zero-width space), U+200C/D (joiners), U+FEFF (BOM), U+2060 (word joiner), and other zero-width / directional override code points.
-- **Hidden HTML directives**: detect `<!--`, `<script`, `<style` as markers of embedded HTML injection attempts.
-- **Data exfiltration patterns**: `base64` + `curl`/`wget` in close proximity; unusually long URL query strings (> 500 chars with high entropy).
-
-**Response options per detection:**
-- `Warn` (default): log to audit store, prepend `[INJECTION RISK]` tag to the flagged chunk, continue.
-- `Redact` (opt-in): replace the flagged chunk with a placeholder.
-- `Reject`: surface an error to the caller, do not invoke the LLM.
-
-Mode is configurable per source type in `<forge>/.forge/config.toml::[ai.injection_policy]`.
-
-**Definition of done:**
-- `nexus-ai/src/sanitize.rs` exports `fn scan(text: &str, policy: InjectionPolicy) -> ScanResult`
-- Called by `stream_ask` (RAG chunks), `stream_chat` (tool results), and `nexus-agent` context assembly (entity prepend, MCP tool outputs)
-- Audit log entry for every flagged chunk (source, detection type, policy applied)
-- Test matrix: each pattern class fires on a crafted fixture; legitimate content passes clean
-- Config: `[ai.injection_policy] rag_chunks = "warn"`, `tool_results = "warn"`, `mcp_outputs = "redact"`
+_BL-130 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `crates/nexus-ai/src/sanitize.rs` ships `Scanner::with_default_patterns(InjectionPolicy)` with four pattern families (role-override / invisible-unicode / hidden-HTML / data-exfiltration) and four policies (`Off` / `Warn` / `Redact` / `Reject`). `ScanResult` carries the rewritten text + per-match `Finding`s + a `rejected` flag. New `build_rag_prompt_budgeted_with_scanner` variant in `rag.rs` layers the scanner after the BL-017 redactor (so audit snippets don't carry already-stripped secrets); the legacy `build_rag_prompt_budgeted` keeps byte-for-byte BL-018 semantics for callers passing `scanner: None`. `rag::query` (called by `handle_ask`) threads `AiConfig::injection_policy` end-to-end and emits a `tracing::warn` per finding under `nexus_ai::sanitize` for operator visibility. Tool-result + MCP-output + entity-prepend wire points are documented follow-ups — the agent tool-loop and MCP host assemble strings from arbitrary handler responses with no central chokepoint today, and the entity graph (BL-128) hasn't shipped. Per-source-type config (`[ai.injection_policy] rag_chunks = "warn"`, etc.) collapsed to a single `injection_policy: InjectionPolicy` field on `AiConfig` — the per-source split adds config surface without a real use case until other wire points land. 27 new tests (24 in the sanitize module covering every pattern class + each policy + UTF-8 snippet safety; 3 in rag.rs pinning the Warn/Reject paths and `Scanner=None` byte-identity). `cargo test -p nexus-ai` 249/249; `cargo clippy -p nexus-ai --all-targets` clean._
 
 ---
 

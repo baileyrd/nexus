@@ -3,6 +3,7 @@
 use std::env;
 
 use crate::privacy::PrivacyPolicy;
+use crate::sanitize::InjectionPolicy;
 
 /// Configuration for an AI provider.
 #[derive(Debug, Clone)]
@@ -31,6 +32,14 @@ pub struct AiConfig {
     /// [`PrivacyPolicy::Redact`] (or `Strict`) and threading a
     /// [`crate::Redactor`] into the prompt builder.
     pub privacy: PrivacyPolicy,
+    /// BL-130 inbound-injection scanner policy for retrieved RAG
+    /// chunks. Default is [`InjectionPolicy::Off`] — opt in by
+    /// setting this to `Warn` / `Redact` / `Reject` to have the
+    /// scanner run alongside the outbound redactor in
+    /// [`crate::rag::build_rag_prompt_budgeted`]. Tool-result and
+    /// MCP-output wire points are independent of this field (the
+    /// scanner API takes a policy argument per call).
+    pub injection_policy: InjectionPolicy,
     /// Local embedding model identifier consumed by the
     /// [`crate::LocalEmbedding`] backend (BL-019, ADR 0018). Only read
     /// when [`Self::provider`] is `"local"`. Defaults to
@@ -62,6 +71,7 @@ impl Default for AiConfig {
             context_window: 8192,
             reserved_response_tokens: 1024,
             privacy: PrivacyPolicy::Off,
+            injection_policy: InjectionPolicy::Off,
             local_embedding_model: None,
             tls_pinning_enabled: false,
         }

@@ -599,9 +599,16 @@ async fn handle_ask(
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
-    let response = rag::query(ctx, ai.as_ref(), embedder.as_ref(), question, limit)
-        .await
-        .map_err(|e| exec_err(format!("rag query failed: {e}")))?;
+    let response = rag::query(
+        ctx,
+        ai.as_ref(),
+        embedder.as_ref(),
+        question,
+        limit,
+        ai_cfg.injection_policy,
+    )
+    .await
+    .map_err(|e| exec_err(format!("rag query failed: {e}")))?;
     serde_json::to_value(&response).map_err(|e| exec_err(format!("ask: serialize: {e}")))
 }
 
