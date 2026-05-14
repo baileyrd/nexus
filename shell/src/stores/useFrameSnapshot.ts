@@ -24,6 +24,14 @@ import {
  * rule). Pair with `useMemo`/module-level constants if a selector
  * needs to depend on props.
  *
+ * BL-124: pass an optional `rebuildKey` when selectors close over a
+ * prop that can change for the same component instance (the
+ * `relpath` in `EditorView` is the motivating case — each leaf can
+ * be re-bound to a different file without unmounting). Changing the
+ * key tears down the current FrameSnapshot and stamps a fresh one
+ * over the new entries. Omit the key for prop-free entries — the
+ * default (`undefined`) is stable.
+ *
  * The returned tuple keeps the same array reference within a single
  * rAF window even if a store mutates partway through. Identity flips
  * only when at least one selector value changes between flushes,
@@ -32,13 +40,16 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function useFrameSnapshot<T extends readonly SnapshotEntry<any, any>[]>(
   entries: T,
+  rebuildKey?: unknown,
 ): SnapshotResult<T> {
-  // One controller per mount. The `entries` argument is captured on
-  // first render — see the docblock for the stability constraint.
+  // One controller per `rebuildKey`. With the default `undefined` key,
+  // the entries are captured on first render and never rebuilt —
+  // preserves BL-110 behaviour. With a non-default key, a key change
+  // remounts the controller against the latest entries.
   const snap = useMemo(
     () => new FrameSnapshot(entries),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [rebuildKey],
   )
 
   return useSyncExternalStore(

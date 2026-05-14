@@ -444,22 +444,11 @@ _BL-122 closed 2026-05-14 — see the closure note at the top of this file and [
 
 _BL-123 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `ApplyTransactionResponse` tagged union (`{ kind: 'slim', revision }` vs `{ kind: 'full', ...EditorSnapshot }`); `handle_apply_transaction` returns Slim for any all-`insert_text`/`delete_text` transaction and Full for anything structural (including `update_annotations` — the bridge's optimistic mirror doesn't track annotations, so the snapshot is the only authoritative source for the post-apply annotation list). Bridge updated to skip `setSnapshot?.(...)` on slim, strip the discriminator on full; downstream consumers (drag-bridge, comments) keep correct block IDs + structure across text-only ops since neither changes under InsertText/DeleteText. BL-122's `editor.apply_transaction.*` baseline collapses from 39 / 330 / 24190 µs p50 (small/medium/large) to **4 / 4.45 / 4 µs** — flat curve, ≈ 6000x speedup on the 5000-block case, well under the DoD's < 1 ms target. New Rust response-shape test (`apply_transaction_response_shape_per_op_kind`) exercises every op kind plus the wire-shape JSON. New shell coherency tests cover the slim path (setSnapshot NOT called, revision propagates) and the full path (setSnapshot called with the post-apply tree, discriminator stripped). `scripts/check_ipc_drift.sh` clean — `EditorSnapshot` isn't a ts-rs-generated binding (defined manually in `shell/src/plugins/nexus/editor/types.ts`), so the new discriminator type ships as a hand-written `ApplyTransactionResponse` in `kernelClient.ts`._
 
+_BL-124 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `EditorView` switches from `useEditorStore((s) => s.tabs)` (subscribes to the entire array; every keystroke in any leaf re-renders every other leaf) to a per-relpath `useFrameSnapshot` over `[active-tab-object, tabs.length]` selectors. `useFrameSnapshot` gains an optional `rebuildKey` parameter so the controller re-binds if a leaf is ever re-targeted to a different file without unmounting; default behaviour (no key, captures entries on first render) is preserved for the BL-110 reference site. `activeRelpath` and `isDirty` are intentionally excluded from the snapshot — EditorView never renders them, so including them would force a re-render on every session-revision bump for no visible change; the tab-strip dirty dot still flows through `WorkspaceRenderer.useLeafDirty` per-leaf subscription, unchanged. 4 new tests pin the contract: 10 keystrokes against tab A flush tab A's controller exactly 10 times and tab B's controller zero times; `setContent` / `setMode` on tab A preserve tab B's object identity; the rebuildKey-driven re-bind reads the new tab's slice. `pnpm --filter nexus-shell test` 1386/1387 (one pre-existing skip). The render-count DoD bullet is verified at the FrameSnapshot layer (not the React tree) because mounting `EditorView` in happy-dom needs CM6, the runtime, the storage IPC stub, etc. — too heavy for a unit test; the per-relpath narrowing is the actual mechanism, and the test pins the mechanism._
+
 ---
 
-### BL-124: `useFrameSnapshot` adoption in `EditorView` (Phase 2 of TYPING-LATENCY-PLAN)
-
-**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
-**Effort**: Small. Independent of BL-123; both can land in parallel.
-**Crates**: shell `nexus.editor` plugin.
-
-The current `useEditorStore((s) => s.tabs)` at `shell/src/plugins/nexus/editor/EditorView.tsx:172` subscribes to the entire `tabs` array, so every keystroke re-renders `EditorView` + `TabBody` + `ViewHeader` + `BreadcrumbSegments` + `ModeToggle`. The BL-110 `useFrameSnapshot` hook coalesces multi-store notifications into one rAF flush and lets selectors actually shed irrelevant slices. The hook is in place and reference-used by `FileStats.tsx`; this BL wires it into the editor.
-
-**Definition of done:**
-- `EditorView` switches to `useFrameSnapshot` with narrowed entries (active tab content/mode/loading/error, active relpath, dirty flag)
-- `TabBody`, `ViewHeader`, `BreadcrumbSegments`, `ModeToggle` follow the same pattern, each reading only what it needs
-- Render-count test: typing 10 characters into the active tab produces ≤ 10 `EditorView` re-renders and zero re-renders for non-active-tab components
-- Snapshot tests confirm `editorStore.setContent` preserves identity for non-target tabs (the `.map(...)` already does this; pin it)
-- `typing.small` shows a measurable improvement on the post-paint React phase
+_BL-124 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

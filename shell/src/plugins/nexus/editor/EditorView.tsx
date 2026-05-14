@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorView as CMEditorView } from '@codemirror/view'
 import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStore'
+import { snap, useFrameSnapshot } from '../../../stores/useFrameSnapshot'
 import { renderMarkdown, hydrateFencedCode } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
@@ -171,18 +172,48 @@ function withHtmlViewerOverrides(content: string): string {
  * load on one tab doesn't bleed into any neighbour.
  */
 export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
-  const tabs = useEditorStore((s) => s.tabs)
-  const setMode = useEditorStore((s) => s.setMode)
-  const tabPos = useTabPosition(leafId)
-
-  // Each leaf binds to exactly one file via its workspace state.relpath;
-  // the leaf's own TabButton in `WorkspaceRenderer.TabStrip` is the
-  // tab-switching UI now, so the editor plugin no longer draws its own
-  // tab row on top of it.
-  const activeTab = useMemo<EditorTab | null>(
-    () => (relpath ? tabs.find((t) => t.relpath === relpath) ?? null : null),
-    [tabs, relpath],
+  // BL-124: narrow per-relpath selectors so each leaf only re-renders
+  // when *its* tab's content/mode/loading/error changes. Pre-BL-124
+  // every leaf subscribed to the whole `tabs` array, so a keystroke
+  // in any one editor re-rendered every other open editor too. The
+  // BL-110 `useFrameSnapshot` hook also coalesces the multi-step
+  // store transitions on the typing path (the bridge sets
+  // `sessionRevision` immediately after `setContent` returns,
+  // producing two Zustand notifications inside one frame) into a
+  // single render. `rebuildKey: relpath` lets us re-bind the
+  // controller if a leaf is ever re-targeted to a different file
+  // without unmounting.
+  const entries = useMemo(
+    () => [
+      // Per-relpath slice of the tabs array. Returning the tab
+      // object directly means EditorView re-renders only when this
+      // specific tab's content / mode / loading / error / name /
+      // savedContent flips identity (each `setContent` /
+      // `setTabContent` / `setMode` produces a fresh tab object).
+      // Other leaves' tabs change identity independently in the
+      // tabs array, but `find` here returns the same object so this
+      // selector's value is `===` stable across unrelated mutations.
+      snap(useEditorStore, (s) =>
+        relpath ? s.tabs.find((t) => t.relpath === relpath) ?? null : null,
+      ),
+      // Total tab count — drives the empty-state CTA branch.
+      snap(useEditorStore, (s) => s.tabs.length),
+    ] as const,
+    [relpath],
   )
+  const [activeTab, totalTabs] = useFrameSnapshot(entries, relpath)
+  // The dirty flag (`isDirty(tab, ...)`) is rendered by
+  // WorkspaceRenderer's TabButton via its own per-leaf
+  // subscription; EditorView itself doesn't render dirty state, so
+  // it's intentionally excluded from the snapshot — including it
+  // would force a re-render on every session-revision bump (i.e.
+  // every keystroke) for no visible change. Same for `activeRelpath`
+  // — only read inside event handlers via `getState()`.
+  // `setMode` is action-only — its identity never changes, so a
+  // direct read is fine and keeps the BL-110 frame-coalescing scoped
+  // to the value selectors above.
+  const setMode = useEditorStore.getState().setMode
+  const tabPos = useTabPosition(leafId)
 
   // Refs into the rendered body so an outline click can actually scroll
   // the right element. Preview uses the markdown body div; source uses
@@ -412,7 +443,7 @@ export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
       <div style={rootStyle}>
         <ViewHeader activeTab={null} />
         <div style={centredStyle}>
-          <EmptyStateActions hasAnyTab={tabs.length > 0} />
+          <EmptyStateActions hasAnyTab={totalTabs > 0} />
         </div>
       </div>
     )
