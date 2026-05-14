@@ -468,15 +468,23 @@ enum AgentCommand {
         #[arg(long)]
         archetype: Option<String>,
     },
-    /// Run a session against a goal end-to-end (auto-approve every
-    /// tool call). Drives `com.nexus.agent::session_run`. Per
-    /// ADR 0025 Phase 1 this replaces the legacy `run` IPC handler.
+    /// Run a session against a goal end-to-end. Without
+    /// `--interactive`, auto-approves every tool call (legacy
+    /// behaviour). With `--interactive`, drives the BL-132 approval
+    /// flow — subscribes to `com.nexus.agent.round_proposed` events
+    /// and prompts y/n on stderr for any round whose tool calls
+    /// flag `requires_approval = true`.
     Run {
         /// Natural-language goal
         goal: String,
         /// Archetype — writer / coder / researcher / general (default)
         #[arg(long)]
         archetype: Option<String>,
+        /// BL-132 — prompt for approval on rounds whose tool calls
+        /// are flagged `requires_approval = true`. Without this
+        /// flag, every round auto-approves (pre-BL-132 default).
+        #[arg(long)]
+        interactive: bool,
     },
     /// List custom agents defined in `<forge>/.forge/agents/*/agent.toml`
     /// (PRD-15 §9 — DG-36).
@@ -1732,8 +1740,12 @@ fn main() {
             AgentCommand::Plan { goal, archetype } => {
                 commands::agent::plan(&mut app, &goal, archetype.as_deref())
             }
-            AgentCommand::Run { goal, archetype } => {
-                commands::agent::run(&mut app, &goal, archetype.as_deref())
+            AgentCommand::Run {
+                goal,
+                archetype,
+                interactive,
+            } => {
+                commands::agent::run(&mut app, &goal, archetype.as_deref(), interactive)
             }
             AgentCommand::ListCustom => commands::agent::list_custom(&mut app),
         },

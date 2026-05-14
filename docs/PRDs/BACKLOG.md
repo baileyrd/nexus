@@ -341,32 +341,41 @@ _BL-131 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-132: Runtime approval gates in the agent loop (Thoth port)
+_BL-132 closed 2026-05-14 (partial close; see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)). The kernel-event + agent-executor + shell-UI half landed earlier as **DG-34** (2026-05-12) — `round_proposed` / `round_decide` bus pair on top of ADR 0024 Phase 2b's `BusBridgePolicy`, with per-call `requires_approval` + `registered` badges in the payload, an `approval_timeout_secs` field on `SessionRunArgs`, and shell-side risk badges. This PR closes the CLI half of BL-132: new `--interactive` flag on `nexus agent run` that flips `auto_approve = false` (engaging the bus bridge) and runs a `tokio::select!` over the `session_run` IPC + a `com.nexus.agent.*` bus subscription; rounds whose tool calls are all `requires_approval = false` auto-approve through the bridge without prompting, rounds with any destructive tool surface an `[approval required]` block on stderr that lists each call with a `DESTRUCTIVE` / `UNREGISTERED` / `safe` badge, then prompts `Approve? [y/N]` and replies via `round_decide`. 6 new unit tests pin the helpers (`parse_yes`, `classify_round`, `first_line`). **Deferred:** the BL DoD's "approval_required flag on IPC handlers (terminal::execute_command, storage::delete_file, git::push --force, storage::replace_in_files > N files)" lives at the agent-tool level today (via `AgentToolSpec.requires_approval` — see `nexus-agent::tool_registry::seed_default_tools`). Adding the listed handlers to the agent tool surface AND lifting the flag to the kernel-handler level (so non-agent IPC callers also see the prompt) are separate architectural changes — filed below as follow-ups. TUI modal also deferred — `nexus-tui` has no agent run surface today; when it lands it inherits the bus event shape DG-34 already ships._
 
-**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
-**Effort**: Medium. Touches kernel event system, agent executor, and all three frontends.
-**Crates**: `nexus-kernel` (new event type), `nexus-agent` (executor gate), shell plugin `nexus.agentApproval`, TUI modal, CLI `--interactive` flag.
+---
 
-Nexus's capability system enforces access at IPC dispatch time — a plugin either holds `exec.spawn` or it doesn't. There is no runtime checkpoint: when an agent step is about to execute a destructive action (shell command, file deletion, git force-push), it proceeds without surfacing the pending action to the user. Thoth's `LangGraph interrupt()` pattern shows that pausing the agent mid-plan and routing an approval request to the active frontend is both implementable and significantly improves trust in agentic workflows.
+### Follow-up: agent-tool registry coverage for destructive operations (from BL-132)
 
-**Mechanism:**
+**Source**: BL-132 deferral. Filed 2026-05-14.
+**Effort**: Small. Add to `nexus-agent::tool_registry::seed_default_tools`.
 
-1. A new `approval_required: bool` flag on IPC handlers (set in the handler registration, not in capabilities). Handlers that mutate the filesystem destructively, execute arbitrary shell commands, or perform git operations with `--force` semantics set this flag.
-2. Before dispatching a flagged handler, the agent plan executor emits `com.nexus.agent.approval_required { plan_id, step_idx, handler_id, args_summary }` on the kernel bus, then `await`s a `com.nexus.agent.approval_response { plan_id, step_idx, approved: bool }` event with a configurable timeout (default 120 s; configurable in `[agent] approval_timeout_s`).
-3. Frontends subscribe to `approval_required` and surface an approve/cancel UI:
-   - **Shell**: inline card in the active chat panel with action summary and ✓ / ✗ buttons
-   - **TUI**: modal overlay over the current pane
-   - **CLI**: `--interactive` flag; non-interactive runs auto-reject destructive steps with a clear error
-4. If the timeout elapses without a response, the step is cancelled and the plan marked `AwaitingApproval` (resumable).
+Today's seeded agent tools include `write_file` (`requires_approval=true`), `terminal_run_saved` (true), `terminal_send_signal` (true), `delegate_to_agent` (true) — plus several read-only tools. The BL-132 DoD listed four destructive operations the agent surface doesn't expose yet:
 
-**Definition of done:**
-- `approval_required` flag on at minimum: `nexus-terminal::execute_command`, `nexus-storage::delete_file`, `nexus-git::push` (force flag path), `nexus-storage::replace_in_files` (> N files)
-- Kernel event pair (`approval_required` / `approval_response`) with typed payload
-- Agent executor awaits the response event with timeout; plan state tracks `AwaitingApproval`
-- Shell plugin: card-style approval UI, dismissable, auto-expires at timeout
-- TUI: modal overlay (reuse existing dialog pattern)
-- CLI: `--interactive` flag honours approvals; without it, destructive steps log a clear skip message
-- Test: mock executor with injected `approval_response` events; timeout path cancels correctly
+- `delete_file` — `com.nexus.storage::delete_file` exists; needs a registry entry with `requires_approval=true`.
+- `git_push_force` — `com.nexus.git::push` exists; needs a registry entry that detects / opts into the `--force` path.
+- `replace_in_files` — `com.nexus.storage::replace_in_files` exists; needs registry entry that flags writes spanning > N files.
+- `execute_command` — covered by `terminal_run_saved` today; an ad-hoc command path would need a separate registry entry.
+
+When agents need any of these capabilities, the BL-132 interactive prompt + bus bridge will surface them automatically once they're seeded with `requires_approval=true`.
+
+---
+
+### Follow-up: kernel-handler-level requires_approval flag (from BL-132)
+
+**Source**: BL-132 deferral. Filed 2026-05-14.
+**Effort**: Medium. Touches every plugin-handler registration.
+
+DG-34 / BL-132 ship the flag at the agent-tool level (`AgentToolSpec.requires_approval`). The BL DoD originally proposed putting the flag on IPC handlers themselves so non-agent callers (CLI, MCP, shell) also see the prompt. That requires either threading the flag through `register_handler` everywhere or adding a registry side table — both touch every service plugin. Defer until a real non-agent caller surfaces a need.
+
+---
+
+### Follow-up: TUI modal for agent approval (from BL-132)
+
+**Source**: BL-132 deferral. Filed 2026-05-14.
+**Effort**: Small (after TUI agent surface lands).
+
+`nexus-tui` has no `agent run` surface today, so the TUI half of BL-132's frontend triad is gated on the underlying agent UI landing first. When that surface ships, a `tui::dialog`-style modal subscribing to `com.nexus.agent.round_proposed` inherits the bus-event shape DG-34 already established.
 
 ---
 

@@ -253,6 +253,52 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-132: Runtime approval gates in the agent loop (Thoth port) ✅ (2026-05-14 — partial close, CLI half)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
+**Files**: `crates/nexus-cli/src/commands/agent.rs` (new interactive flow); `crates/nexus-cli/src/main.rs` (new `--interactive` flag on `AgentCommand::Run`).
+**Related**: DG-34 (the kernel-event + agent-executor + shell-UI half — shipped 2026-05-12; this PR is the CLI complement), ADR 0024 Phase 2b (the underlying `BusBridgePolicy`), BL-130 / BL-131 (sibling Thoth ports).
+
+DG-34 shipped the kernel-event + agent-executor + shell-side render half of BL-132 — `round_proposed` / `round_decide` bus pair, `BusBridgePolicy` auto-approving rounds whose tool calls are all `requires_approval = false`, per-call `registered` + `requires_approval` badges in the payload, and `approval_timeout_secs` on `SessionRunArgs`. This PR closes the CLI half.
+
+**What landed.**
+
+- **New `--interactive` flag** on `nexus agent run`. Without it, runs behave exactly as before (auto-approve every round — the pre-BL-132 default). With it, the CLI flips `auto_approve = false` on the `session_run` IPC and engages the BusBridgePolicy server-side.
+- **`tokio::select!`-based driver** in `commands/agent.rs::run_interactive`. Subscribes to `com.nexus.agent.*`, drives `session_run` IPC concurrently via a pinned future, and on each `com.nexus.agent.round_proposed` event runs the BL-132 prompt flow. Both arms share `runtime.context` — `select!` avoids the `tokio::spawn` + clone-able-context problem the streaming code would otherwise need.
+- **Prompt UX**.
+  - Rounds whose tool calls are all `requires_approval = false` skip the prompt entirely (the bus bridge auto-approves them on its own).
+  - Rounds with any destructive call surface an `──[ approval required ]──` block on stderr listing each call with a `DESTRUCTIVE` / `UNREGISTERED` / `safe` badge and the target plugin/command id.
+  - `Approve? [y/N]` defaults to no — empty input / `n` / anything-non-yes rejects; `y` / `yes` (case-insensitive, leading whitespace OK) approves.
+  - Reply dispatched as `round_decide` IPC carrying `{ session_id, round, approved }`.
+- **Conservative defaults for unknown fields**. `classify_round` treats a missing `requires_approval` field as `true` (matching the server-side `round_requires_approval` conservative default for unregistered tools). The "unregistered" badge surfaces the registration status to the user so they can tell the difference between "registered destructive" and "totally unknown".
+
+**Tests** (6 new):
+- `parse_yes_accepts_y_and_yes_case_insensitive` / `parse_yes_rejects_anything_else` — pins the y/n parser.
+- `classify_round_no_tool_calls_returns_auto_approve` — empty call lists short-circuit (bus bridge will too).
+- `classify_round_all_safe_tools_returns_auto_approve` — every call flagged false → skip prompt.
+- `classify_round_any_destructive_tool_skips_auto_approve` — one destructive call surfaces the prompt.
+- `classify_round_unregistered_tool_defaults_to_destructive` — missing field → treat as destructive.
+- `first_line_returns_first_segment_only` — single-line preview helper used in the prompt header.
+
+**Tested**: `cargo test -p nexus-cli` 53/53 + 10/10 + 3/3; `cargo clippy -p nexus-cli --all-targets` clean; `cargo build -p nexus-cli` clean.
+
+**Deferred (filed as follow-ups in `BACKLOG.md` immediately below the BL-132 marker)**:
+
+- **Agent-tool registry coverage for `delete_file` / `git push --force` / `replace_in_files` / ad-hoc `execute_command`** — none are seeded in `nexus-agent::tool_registry::seed_default_tools` today. Once seeded with `requires_approval = true`, the BL-132 interactive prompt + bus bridge handle them automatically.
+- **Kernel-handler-level `requires_approval` flag** — the BL DoD originally proposed putting the flag on IPC handlers themselves so non-agent callers also see the prompt. Today the flag is at the agent-tool level (`AgentToolSpec.requires_approval`). Lifting it to the kernel-handler level touches every plugin-handler registration; deferred until a real non-agent caller surfaces a need.
+- **TUI modal** — `nexus-tui` has no `agent run` surface today, so the TUI half is gated on that underlying UI landing first. When it does, a `tui::dialog`-style modal can subscribe to the same bus events DG-34 ships.
+
+**Definition of done coverage**:
+- ✅ Kernel event pair (`round_proposed` / `round_decide`) with typed payload — DG-34.
+- ✅ Agent executor awaits the response event with timeout (`approval_timeout_secs` on `SessionRunArgs`) — DG-34.
+- ✅ Shell plugin: card-style approval UI, dismissable, auto-expires at timeout — DG-34.
+- ✅ CLI `--interactive` flag — this PR.
+- ⏸ `approval_required` flag on the four listed handlers — filed as agent-tool-registry follow-up.
+- ⏸ TUI modal — filed as TUI follow-up.
+- ✅ Mock-executor tests for the approval path — this PR (CLI parsing + classification helpers); the executor-level path is exercised in `nexus-agent`'s existing BusBridgePolicy tests.
+
+---
+
 ### BL-131: Pre-invocation message sanitisation in the agent loop (Thoth port) ✅ (2026-05-14)
 
 **Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.

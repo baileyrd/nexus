@@ -9,15 +9,20 @@
 //! `run-plan` was removed — there's no session-model equivalent
 //! for replaying a static plan.
 
+use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
+use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
 use serde_json::Value;
 
 use crate::app::App;
 
 const AGENT_PLUGIN: &str = "com.nexus.agent";
+
+/// BL-132 — bus topic prefix the interactive run subscribes to so it
+/// only sees agent-emitted events.
+const APPROVAL_TOPIC_PREFIX: &str = "com.nexus.agent.";
 
 /// Planning is usually a single chat round-trip (~30 s tops against
 /// remote providers). Run can string many tool calls together so the
@@ -31,16 +36,216 @@ pub fn plan(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `nexus agent run <goal> [--archetype ..]` — drive a session
-/// end-to-end with auto-approve, then render the transcript.
-pub fn run(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
+/// `nexus agent run <goal> [--archetype ..] [--interactive]` —
+/// drive a session end-to-end. Without `--interactive`, every
+/// round auto-approves (pre-BL-132 default). With `--interactive`,
+/// drives the BL-132 approval flow: subscribe to
+/// `com.nexus.agent.round_proposed` events, prompt the user (y/n on
+/// stderr) for any round whose tool calls carry
+/// `requires_approval = true`, and reply via the `round_decide` IPC.
+pub fn run(
+    app: &mut App,
+    goal: &str,
+    archetype: Option<&str>,
+    interactive: bool,
+) -> Result<()> {
     let mut args = goal_args(goal, archetype);
     if let Some(map) = args.as_object_mut() {
-        map.insert("auto_approve".into(), Value::Bool(true));
+        // BL-132: `auto_approve = false` engages BusBridgePolicy
+        // server-side; the CLI is then responsible for handling
+        // round_proposed events and replying via round_decide.
+        map.insert("auto_approve".into(), Value::Bool(!interactive));
     }
-    let response = call(app, "session_run", args)?;
-    print_session(&response);
+    if interactive {
+        let response = run_interactive(app, args)?;
+        print_session(&response);
+    } else {
+        let response = call(app, "session_run", args)?;
+        print_session(&response);
+    }
     Ok(())
+}
+
+/// BL-132 interactive driver. Subscribes to the agent's bus topic
+/// prefix, drives the `session_run` IPC concurrently via a
+/// `tokio::select!` over the call's future + the bus subscription,
+/// and for every `round_proposed` event with `requires_approval =
+/// true` prompts the user on stderr (yes / no) and dispatches
+/// `round_decide`. Rounds whose tool calls are all flagged
+/// `requires_approval = false` auto-approve through the
+/// `BusBridgePolicy` short-circuit and never produce a prompt.
+fn run_interactive(app: &mut App, args: Value) -> Result<Value> {
+    let (runtime, rt) = app.runtime()?;
+    rt.block_on(async {
+        let mut sub = runtime
+            .context
+            .subscribe(EventFilter::CustomPrefix(APPROVAL_TOPIC_PREFIX.to_owned()));
+        // `session_run` is a long-lived IPC call; the CLI's bus
+        // subscriber must drain events concurrently and dispatch
+        // `round_decide` replies while the call is in flight.
+        // `tokio::select!` over both arms keeps both alive on the
+        // same task — `runtime.context` is borrowed once for the
+        // outer call and re-borrowed inside the event handler for
+        // each `round_decide`.
+        let mut session_call = Box::pin(runtime.context.ipc_call(
+            AGENT_PLUGIN,
+            "session_run",
+            args,
+            IPC_TIMEOUT,
+        ));
+        loop {
+            tokio::select! {
+                biased;
+                evt = sub.recv() => {
+                    let Ok(event) = evt else { continue };
+                    let NexusEvent::Custom { type_id, payload, .. } = &event.event else {
+                        continue;
+                    };
+                    if type_id != "com.nexus.agent.round_proposed" {
+                        continue;
+                    }
+                    let decision = match prompt_for_round(payload) {
+                        PromptOutcome::Approve => true,
+                        PromptOutcome::Reject => false,
+                        PromptOutcome::AutoApprove => continue,
+                    };
+                    let Some(session_id) =
+                        payload.get("session_id").and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    let Some(round) = payload.get("round").and_then(Value::as_u64) else {
+                        continue;
+                    };
+                    let reply = serde_json::json!({
+                        "session_id": session_id,
+                        "round": round,
+                        "approved": decision,
+                    });
+                    if let Err(e) = runtime
+                        .context
+                        .ipc_call(AGENT_PLUGIN, "round_decide", reply, IPC_TIMEOUT)
+                        .await
+                    {
+                        eprintln!("[agent] round_decide failed: {e}");
+                    }
+                }
+                result = &mut session_call => {
+                    return result.with_context(|| "agent ipc call 'session_run' failed");
+                }
+            }
+        }
+    })
+}
+
+/// Outcome of presenting a `round_proposed` payload to the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptOutcome {
+    Approve,
+    Reject,
+    /// All tool calls in the round are flagged
+    /// `requires_approval = false` — the bus bridge will short-circuit
+    /// on its own; the CLI doesn't need to prompt or reply.
+    AutoApprove,
+}
+
+/// Render the `round_proposed` payload on stderr and read a y/n
+/// answer from stdin. Returns [`PromptOutcome::AutoApprove`] when the
+/// payload's tool calls are all flagged
+/// `requires_approval = false` so the caller can skip the round
+/// entirely.
+fn prompt_for_round(payload: &Value) -> PromptOutcome {
+    let outcome = classify_round(payload);
+    if outcome == PromptOutcome::AutoApprove {
+        return outcome;
+    }
+    eprintln!();
+    eprintln!("──[ approval required ]──────────────────────");
+    if let Some(round) = payload.get("round").and_then(Value::as_u64) {
+        eprintln!("round: {round}");
+    }
+    if let Some(text) = payload.get("text").and_then(Value::as_str) {
+        if !text.is_empty() {
+            eprintln!("model: {}", first_line(text));
+        }
+    }
+    if let Some(calls) = payload.get("tool_calls").and_then(Value::as_array) {
+        for (i, c) in calls.iter().enumerate() {
+            let name = c.get("name").and_then(Value::as_str).unwrap_or("?");
+            let requires = c
+                .get("requires_approval")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let registered = c
+                .get("registered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let badge = match (requires, registered) {
+                (true, true) => "DESTRUCTIVE",
+                (true, false) => "UNREGISTERED",
+                (false, _) => "safe",
+            };
+            eprintln!("  {idx}. [{badge}] {name}", idx = i + 1);
+            if let Some(target) = c.get("target_plugin_id").and_then(Value::as_str) {
+                let cmd = c.get("command_id").and_then(Value::as_str).unwrap_or("?");
+                eprintln!("       → {target}::{cmd}");
+            }
+        }
+    }
+    eprint!("Approve? [y/N] ");
+    let _ = io::stderr().flush();
+    let stdin = io::stdin();
+    let mut line = String::new();
+    if stdin.lock().read_line(&mut line).is_err() {
+        eprintln!("[reject — stdin read error]");
+        return PromptOutcome::Reject;
+    }
+    if parse_yes(&line) {
+        PromptOutcome::Approve
+    } else {
+        PromptOutcome::Reject
+    }
+}
+
+/// Classify a `round_proposed` payload by checking whether any
+/// `tool_calls[*].requires_approval` is `true`. Returns
+/// [`PromptOutcome::AutoApprove`] when every call is flagged false —
+/// the bus bridge auto-approves these on its own so the CLI doesn't
+/// need to surface a prompt. Default `true` for unknown / missing
+/// fields, matching the server-side conservative default.
+fn classify_round(payload: &Value) -> PromptOutcome {
+    let Some(calls) = payload.get("tool_calls").and_then(Value::as_array) else {
+        // No tool calls — treat as auto-approve; the bus bridge will
+        // short-circuit too.
+        return PromptOutcome::AutoApprove;
+    };
+    let any_destructive = calls.iter().any(|c| {
+        c.get("requires_approval")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    });
+    if any_destructive {
+        PromptOutcome::Reject // placeholder — the actual decision
+                              // comes from the user prompt in
+                              // `prompt_for_round`. Returning
+                              // anything other than `AutoApprove`
+                              // here is fine; the caller only checks
+                              // for `== AutoApprove`.
+    } else {
+        PromptOutcome::AutoApprove
+    }
+}
+
+fn first_line(s: &str) -> &str {
+    s.lines().next().unwrap_or(s)
+}
+
+/// Parse a user reply line as yes/no. Accepts `y`, `yes`, `Y`,
+/// `YES`, leading whitespace OK. Anything else — including empty
+/// (just enter) — counts as no.
+fn parse_yes(line: &str) -> bool {
+    let trimmed = line.trim().to_ascii_lowercase();
+    matches!(trimmed.as_str(), "y" | "yes")
 }
 
 /// `nexus agent list-custom` — list `.agent.toml` manifests under
@@ -227,4 +432,89 @@ fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
             .ipc_call(AGENT_PLUGIN, command, args, IPC_TIMEOUT),
     )
     .with_context(|| format!("agent ipc call '{command}' failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── BL-132 — interactive prompt helpers ──────────────────────
+
+    #[test]
+    fn parse_yes_accepts_y_and_yes_case_insensitive() {
+        assert!(parse_yes("y\n"));
+        assert!(parse_yes("Y\n"));
+        assert!(parse_yes("yes\n"));
+        assert!(parse_yes("  YES  \n"));
+        assert!(parse_yes("yes"));
+    }
+
+    #[test]
+    fn parse_yes_rejects_anything_else() {
+        assert!(!parse_yes("\n"));
+        assert!(!parse_yes(""));
+        assert!(!parse_yes("n\n"));
+        assert!(!parse_yes("no\n"));
+        assert!(!parse_yes("maybe\n"));
+        assert!(!parse_yes("approve\n"));
+    }
+
+    #[test]
+    fn classify_round_no_tool_calls_returns_auto_approve() {
+        let payload = serde_json::json!({ "session_id": "s", "round": 1 });
+        assert_eq!(classify_round(&payload), PromptOutcome::AutoApprove);
+    }
+
+    #[test]
+    fn classify_round_all_safe_tools_returns_auto_approve() {
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [
+                { "name": "read_file", "requires_approval": false, "registered": true },
+                { "name": "search_forge", "requires_approval": false, "registered": true },
+            ],
+        });
+        assert_eq!(classify_round(&payload), PromptOutcome::AutoApprove);
+    }
+
+    #[test]
+    fn classify_round_any_destructive_tool_skips_auto_approve() {
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [
+                { "name": "read_file", "requires_approval": false, "registered": true },
+                { "name": "write_file", "requires_approval": true, "registered": true },
+            ],
+        });
+        // The exact non-AutoApprove value is irrelevant — the caller
+        // only checks `== AutoApprove` before proceeding to prompt.
+        // Asserting != AutoApprove pins the contract without tying
+        // the test to the placeholder value.
+        assert_ne!(classify_round(&payload), PromptOutcome::AutoApprove);
+    }
+
+    #[test]
+    fn classify_round_unregistered_tool_defaults_to_destructive() {
+        // The agent's server-side default for unknown tools is
+        // `requires_approval = true`. The CLI mirrors that
+        // conservative stance: if the field is missing, treat as
+        // destructive.
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [
+                { "name": "unregistered_thing" },
+            ],
+        });
+        assert_ne!(classify_round(&payload), PromptOutcome::AutoApprove);
+    }
+
+    #[test]
+    fn first_line_returns_first_segment_only() {
+        assert_eq!(first_line("hello\nworld"), "hello");
+        assert_eq!(first_line("single"), "single");
+        assert_eq!(first_line(""), "");
+    }
 }
