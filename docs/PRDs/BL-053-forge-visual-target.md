@@ -1,7 +1,7 @@
 # BL-053 — Forge visual target: from current shell to the mockup
 
 > **Source:** Forge Color System mockup + ember-on-slate design exploration (2026-05-06).
-> **Status:** **Phases 1, 2, 3, and 4a shipped.** Phase 4b (file-tree dots from frontmatter) remains deferred — wiring frontmatter into every visible tree node is its own multi-file IPC dance.
+> **Status:** **All four phases shipped (1, 2, 3, 4a, 4b).** Closure verified 2026-05-14.
 > **Related:** the bundled themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the token values this plan styles against.
 
 ## Decisions locked in (§5 open questions)
@@ -44,12 +44,11 @@ Supported kinds: `info`, `note`, `tip`, `success` / `ok`, `warn` / `warning` / `
 | K. Status pills in table cells (Complete / Substantial / Partial / Scaffolded / Not started / Deferred) | ✅ `tablecell` renderer override — known status labels render as `<span class="nx-status-pill nx-status-pill__chip--{tone}">`; unknown cells fall through unchanged |
 | K-inline. Status keywords in inline `code` | ✅ Same `STATUS_KIND` table is consulted by the `codespan` renderer |
 | K-frontmatter. Frontmatter `status:` value as a pill in the metadata bar | ✅ `renderFrontmatterBar` swaps the chip for a pill when the value matches a known status |
-| D. File-tree status dots driven by frontmatter `status:` | 🕗 **Deferred** — needs a per-file frontmatter cache backed by `com.nexus.storage::read_frontmatter` (handler 59); the kernel surface exists but feeding it through the file-tree plugin's rendering loop is its own follow-up |
+| D. File-tree status dots driven by frontmatter `status:` | ✅ Shipped via the `nexus.status` plugin: `statusStore.ts` (zustand cache, FIFO-bounded at 256 entries, in-flight-promise coalescing, files:saved/modified/deleted/renamed invalidation), `useFileStatus.ts` (read-through hook gated to markdown extensions), `StatusPill.tsx` (`StatusDot` component used by `RowStatusDot` inside `FilesTree`). Reads route through `com.nexus.storage::read_frontmatter` (handler 59). |
 
 **Deferred follow-ups:**
 
 - **Font bundling** — `font_imports` pulls Fraunces from Google Fonts; first-boot-offline launches see Georgia. Bundling woff2 is a separate workstream.
-- **File-tree dots (Phase 4b)** — needs the file-tree plugin to call `read_frontmatter` per visible node and tint the row's leading dot. Out of scope for this BL because the volume of IPC calls + the eviction policy need their own design.
 - **Markdown table chrome (J)** — the mockup shows rounded surfaces + dashed row separators on tables. Marked emits plain `<table>`; styling is a CSS-only follow-up that can land any time.
 - **Outline plugin numbered prefix (N) + word-count badge** — the outline plugin already exists; this is feature work on top, and the outline plugin is currently in a different visual band.
 
