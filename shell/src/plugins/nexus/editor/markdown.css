@@ -319,23 +319,54 @@
   margin: 1.5em 0;
 }
 
-/* Tables */
+/* ─── BL-053 mockup element J — table chrome ─────────────────────
+   The mockup shows tables on a raised rounded surface with dashed
+   row separators; cells lose their per-cell borders so the row
+   rules are the only horizontal lines. The outer surface gets a
+   single 1px border that follows the same radius as the cell
+   container so the corners stay crisp.                              */
 .nexus-markdown-body table {
-  border-collapse: collapse;
-  margin: 1em 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 1.4em 0;
   font-size: 0.92em;
+  background: var(--background-secondary-alt);
+  border: 1px solid var(--divider-color);
+  border-radius: 10px;
+  overflow: hidden;
+  width: 100%;
 }
 
 .nexus-markdown-body th,
 .nexus-markdown-body td {
-  border: 1px solid var(--divider-color);
-  padding: 6px 10px;
+  padding: 8px 12px;
   text-align: left;
+  border: none;
+  border-bottom: 1px dashed var(--divider-color);
+  vertical-align: top;
+}
+
+.nexus-markdown-body tr:last-child td {
+  border-bottom: none;
 }
 
 .nexus-markdown-body th {
   background: var(--background-secondary);
+  border-bottom: 1px solid var(--divider-color);
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Subtle alternating-row tint so dashed separators read clearly
+   even on a flat background. Hover lifts the row a hair more. */
+.nexus-markdown-body tbody tr:nth-child(even) td {
+  background: color-mix(in oklch, var(--background-secondary-alt) 60%, transparent);
+}
+.nexus-markdown-body tbody tr:hover td {
+  background: var(--background-modifier-hover);
 }
 
 /* Images */

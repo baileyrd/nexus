@@ -1489,6 +1489,33 @@ textarea:disabled {
   color: var(--interactive-accent-ink); font-weight: 700;
 }
 
+/* ─── BL-053 mockup row N — outline numbered prefix + word-count badge ───
+   Top-level outline rows show a tiny ember "01" / "02" stripe (the
+   prefix); every row that owns content shows a faint right-aligned
+   word-count badge. Both are span-level and slot into `OutlineView`'s
+   existing Row flex layout without affecting indent / connector lines.   */
+.nx-outline__prefix {
+  font-family: var(--font-monospace);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--interactive-accent);
+  background: var(--interactive-accent-soft);
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  margin-right: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.nx-outline__count {
+  font-family: var(--font-monospace);
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-left: 8px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ─── Forge editor tab bar (BL-053 Phase 1: ember pills) ────────────────── */
 .forge-tabbar {
   display: flex; align-items: center;

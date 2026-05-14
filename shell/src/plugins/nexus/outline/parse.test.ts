@@ -125,3 +125,42 @@ test('treeToHeadings clamps bad level values to 1', () => {
   assert.equal(hs[0].level, 1)
   assert.equal(hs[1].level, 1)
 })
+
+// ── BL-053 mockup row N — wordCount on each heading ────────────────────────
+
+test('parseHeadings counts words between consecutive headings', () => {
+  const src = [
+    '# One',
+    'three short words here.', // 4 words
+    '',
+    '## Two',
+    'just two.',               // 2 words
+    '## Three',
+    '',                         // 0 words
+  ].join('\n')
+  const hs = parseHeadings(src)
+  assert.equal(hs.length, 3)
+  assert.equal(hs[0].wordCount, 4)
+  assert.equal(hs[1].wordCount, 2)
+  assert.equal(hs[2].wordCount, 0)
+})
+
+test('parseHeadings: punctuation-only tokens do not inflate the count', () => {
+  const src = '# Title\n— — — and three words here.\n'
+  const hs = parseHeadings(src)
+  assert.equal(hs[0].wordCount, 4) // "and", "three", "words", "here"
+})
+
+test('treeToHeadings sums word counts of intervening non-heading blocks', () => {
+  const tree = buildTree([
+    makeBlock('h1', { ty: { kind: 'heading', level: 1 }, content: 'Alpha' }),
+    makeBlock('p1', { content: 'one two three' }),    // 3
+    makeBlock('p2', { content: 'four five' }),         // 2
+    makeBlock('h2', { ty: { kind: 'heading', level: 2 }, content: 'Beta' }),
+    makeBlock('p3', { content: 'six' }),               // 1
+  ])
+  const hs = treeToHeadings(tree)
+  assert.equal(hs.length, 2)
+  assert.equal(hs[0].wordCount, 5)
+  assert.equal(hs[1].wordCount, 1)
+})

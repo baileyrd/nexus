@@ -46,11 +46,17 @@ Supported kinds: `info`, `note`, `tip`, `success` / `ok`, `warn` / `warning` / `
 | K-frontmatter. Frontmatter `status:` value as a pill in the metadata bar | ✅ `renderFrontmatterBar` swaps the chip for a pill when the value matches a known status |
 | D. File-tree status dots driven by frontmatter `status:` | ✅ Shipped via the `nexus.status` plugin: `statusStore.ts` (zustand cache, FIFO-bounded at 256 entries, in-flight-promise coalescing, files:saved/modified/deleted/renamed invalidation), `useFileStatus.ts` (read-through hook gated to markdown extensions), `StatusPill.tsx` (`StatusDot` component used by `RowStatusDot` inside `FilesTree`). Reads route through `com.nexus.storage::read_frontmatter` (handler 59). |
 
-**Deferred follow-ups:**
+**Tail items also shipped (2026-05-14):**
 
-- **Font bundling** — `font_imports` pulls Fraunces from Google Fonts; first-boot-offline launches see Georgia. Bundling woff2 is a separate workstream.
-- **Markdown table chrome (J)** — the mockup shows rounded surfaces + dashed row separators on tables. Marked emits plain `<table>`; styling is a CSS-only follow-up that can land any time.
-- **Outline plugin numbered prefix (N) + word-count badge** — the outline plugin already exists; this is feature work on top, and the outline plugin is currently in a different visual band.
+| Mockup element | Status |
+|----|----|
+| J. Markdown table chrome (rounded surface, dashed row separators, header band) | ✅ `markdown.css` `.nexus-markdown-body table` rebuild: border-separate + rounded outer container, dashed row separators via `border-bottom: 1px dashed`, header band with uppercased / tracked label styling, alternating row tint via `color-mix(--background-secondary-alt)`. |
+| N. Outline numbered prefix (`01` / `02` ember stripe on top-level rows) | ✅ `OutlineView.tsx::formatPrefix` + `.nx-outline__prefix` CSS in `shell.css`. Only top-level headings (depth=0) carry the prefix so the visual band anchors at section starts. |
+| N tail. Word-count badge per outline row | ✅ `parse.ts::countWordsIn` + per-section sum in both `parseHeadings` and `treeToHeadings`; `OutlineHeading.wordCount` field; `.nx-outline__count` CSS with `compactCount` (950 → "950", 1240 → "1.2k", 12400 → "12k"). Zero-word sections hide the badge so an empty heading doesn't clutter the row. |
+
+**Still deferred:**
+
+- **Font bundling** — `font_imports` pulls Fraunces from Google Fonts; first-boot-offline launches see Georgia. Bundling woff2 is a separate offline-first workstream (binary commit + cargo features needed).
 
 ## Tests
 
