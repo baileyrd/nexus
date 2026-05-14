@@ -67,6 +67,31 @@ export const useSlotStore = create<SlotStore>((set) => ({
     })),
 }))
 
+/**
+ * BL-067 Phase 0 — JSON-safe snapshot of a [`SlotEntry`].
+ *
+ * The React component reference is intentionally dropped because
+ * React `ComponentType`s are not serialisable and the View Builder
+ * surface only needs identity (`id` + `pluginId`) + ordering
+ * (`priority`) to render its inventory + composition palette.
+ */
+export interface SlotEntrySnapshot {
+  /** Stable entry id assigned by the caller at register time. */
+  id: string
+  /** Reverse-DNS id of the registering plugin. */
+  pluginId: string
+  /** Sort key inside the slot (lower = earlier). */
+  priority: number
+}
+
+/**
+ * BL-067 Phase 0 — JSON-safe snapshot of every slot's contributions.
+ * Keyed by `SlotId`; every slot is present even when empty so the
+ * View Builder can iterate the chrome positions without checking
+ * for `undefined` first.
+ */
+export type SlotInventory = Record<SlotId, SlotEntrySnapshot[]>
+
 // Non-reactive read — for use outside React (e.g., in the extension host)
 export const slotRegistry = {
   register: (slotId: SlotId, entry: SlotEntry) =>
@@ -74,4 +99,22 @@ export const slotRegistry = {
 
   unregister: (entryId: string) =>
     useSlotStore.getState().unregister(entryId),
+
+  /**
+   * BL-067 Phase 0 — pure snapshot of every slot's entries minus
+   * the React component reference. Safe to surface to plugins; the
+   * View Builder feeds this into its composition canvas.
+   */
+  snapshot(): SlotInventory {
+    const raw = useSlotStore.getState().slots
+    const out = {} as SlotInventory
+    for (const slot of Object.keys(raw) as SlotId[]) {
+      out[slot] = (raw[slot] ?? []).map((entry) => ({
+        id: entry.id,
+        pluginId: entry.pluginId,
+        priority: entry.priority,
+      }))
+    }
+    return out
+  },
 }

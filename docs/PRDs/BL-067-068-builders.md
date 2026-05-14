@@ -160,3 +160,52 @@ Relative effort:
 Both are UI-heavy, non-blocking, and independently shippable. Theme Builder
 first is the natural order — it's lower risk and the visual feedback it
 provides would itself be useful while building the View Builder.
+
+---
+
+## BL-067 Phase 0 — Layout Introspection API (shipped 2026-05-14)
+
+The 1-day prerequisite called out in §Sequencing has shipped. The View Builder
+plugin already in tree (`shell/src/plugins/nexus/viewBuilder/`) previously
+walked `workspace.layoutSnapshot()` directly to render its canvas; that
+covered the live workspace tree but left the chrome-slot inventory and the
+view-type catalog unexposed. Phase 0 closes those two gaps.
+
+### What shipped
+
+- **`shell/src/host/layoutSnapshot.ts`** — `getLayoutSnapshot(pluginRegistry?)`
+  returns a JSON-safe `LayoutSnapshot { slots, viewTypes, extensions, layout,
+  takenAtMs }`. `globalSnapshot()` is a convenience accessor that uses the
+  registry singleton bound at boot via `bindPluginRegistry(reg)` (wired in
+  `shell/src/main.tsx`).
+- **`SlotRegistry.snapshot()`** — emits one `SlotEntrySnapshot { id,
+  pluginId, priority }` per registered chrome contribution. The React
+  `component` reference is intentionally dropped (not serialisable, builder
+  doesn't invoke creators directly).
+- **`viewRegistry.registeredTypes()` / `registeredExtensions()`** — read-only
+  inventory of every view-type creator and every `ext → viewType` binding,
+  surfaced through `PluginAPI` so plugin code reaches them the same way it
+  reaches `register()` / `update()`.
+- **`countLeavesInLayout(json)`** — utility that walks the workspace tree
+  (splits, tabs, floating windows) so the builder's status line can render
+  "N leaves" without re-implementing the walk.
+- Tests at `shell/tests/layoutSnapshot.test.ts` (re-exporting
+  `src/host/layoutSnapshot.test.ts`).
+
+### Acceptance criteria (met)
+
+- ✅ Snapshot is JSON-stringify-able end-to-end (no React refs, no Maps).
+- ✅ Every registered slot key is present in the snapshot even when empty.
+- ✅ View-type ownership resolves through `PluginRegistry.ownerOfViewType`
+  when a registry is bound; shell built-ins (`empty`) report `pluginId:
+  null`.
+- ✅ Newly-registered view-types and slot entries surface on the next
+  snapshot call (point-in-time projection, no caching).
+- ✅ Typecheck + node:test green.
+
+### Deferred (Phase 1+)
+
+Phases 1+ — drag-drop palette UI, export-as-plugin codegen template,
+`.forge/layouts/<name>.layout.toml` round-trip — remain on the backlog. The
+existing `nexus.viewBuilder` plugin renders the live canvas today but does
+not yet consume the new slot/viewType inventories or write a layout file.
