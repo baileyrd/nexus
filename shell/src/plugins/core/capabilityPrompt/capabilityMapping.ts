@@ -45,6 +45,9 @@ export const CAPABILITY_TO_KERNEL_STRING: Record<Capability, string> = {
   AiActivityWrite:  'ai.activity.write',
   AiToolsWrite:     'ai.tools.write',
   AiToolsMcp:       'ai.tools.mcp',
+  // BL-117 — audio subsystem caps.
+  AudioRecord:      'audio.record',
+  AudioSynthesize:  'audio.synthesize',
 }
 
 /** Dotted → PascalCase; inverse of the above. */

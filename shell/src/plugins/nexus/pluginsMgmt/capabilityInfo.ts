@@ -82,6 +82,10 @@ export const CAPABILITY_INFO: Record<Capability, CapabilityMeta> = {
   AiToolsWrite:    { risk: 'medium', description: 'Let the model see write-capable tools (e.g. write_file)' },
   AiToolsMcp:      { risk: 'medium', description: 'Let the model see MCP-bridged external tools' },
   AiConfigWrite:   { risk: 'high',   description: 'Hot-swap AI provider credentials at runtime' },
+
+  // ── audio.* — BL-117 ────────────────────────────────────────────
+  AudioSynthesize: { risk: 'low',    description: 'Play synthesized speech through your speakers' },
+  AudioRecord:     { risk: 'high',   description: 'Capture audio from your microphone' },
 }
 
 /** All capability variants known to the shell, in stable display order. */
