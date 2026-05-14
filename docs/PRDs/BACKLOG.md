@@ -448,6 +448,8 @@ _BL-124 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 _BL-125 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Live-preview decoration source split into two: a `StateField` calling new `buildLivePreviewBlockDecorations(state)` (full-tree walk emitting only HR / Table / FencedCode block widgets — CM6 requires block widgets to be StateField-sourced) and a `ViewPlugin` calling new `buildLivePreviewInlineDecorations(state, view.visibleRanges)` (viewport-scoped walk emitting marks / line decorations / non-block replaces). The walker uses `tree.iterate({ from, to })` to bound iteration by the supplied ranges; everything else is unchanged. Both sources contribute to `EditorView.atomicRanges` so cursor motion still respects hidden marks across the split. Legacy `buildLivePreviewDecorations(state)` is preserved as a thin combined entry-point so the pre-existing test suite + the BL-122 perf harness backward-compat scenario continue to work. New `visitBlock` / `visitInline` split the dispatch table; `handleFencedCode` factors into `handleFencedCodeBlockOnly` + `handleFencedCodeInlineOnly` so each visitor emits only its branch. 6 new tests cover the BL-125 split: block source emits widgets and no inline marks, inline source emits inline marks within the requested range only, empty-range inline source emits nothing, heading line decoration appears inside its range, cursor-on-heading reveal works across the viewport split, and `block ∪ inline (full doc)` reproduces the full-walk reference set. BL-122 perf scenarios bumped — `large` now exercises a 5000-line doc against a synthetic 50-line viewport (the natural CM6 frame shape). Baseline: small=85 µs p50, medium=49 µs p50, **large=12.66 µs p50 / 51 µs p95** — `large` p95 ≤ `small` p95 (the DoD target), and large is now ≈ 7x faster than the pre-BL-125 full-walk equivalent on the same 5000-line doc. `pnpm --filter nexus-shell test` 1392/1393 (one pre-existing skip)._
 
+_BL-126 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). The `serde_json::to_vec(&tx_value).len()` payload-size pre-check in `handle_apply_transaction` (a throwaway full-tx serialize purely to count bytes) is replaced by a new `transaction_payload_size(tx)` helper that sums the user-controlled string fields op-by-op (`text` / `deleted_text` / block content / content-update old/new strings) plus a 64-byte fixed cost per annotation. The same 16 MiB safety ceiling is enforced; the deserialize-then-check ordering is preserved (typed `Transaction` → structural sum → cap). Tracing span field `bytes_in` renamed to `payload_bytes` to reflect the new semantics. New `apply_transaction_rejects_payload_above_structural_cap` test pins three properties: a small payload reports the expected byte count, the apply path goes through for small txs, and a 17 MiB `InsertText` is rejected before any mutation with a message that names both the actual payload size and the cap. The BL DoD's second bullet (concurrency overlap test that exercises two relpaths in parallel) is intentionally deferred — the `Mutex<HashMap<String, Session>>` map-level lock guarantees serial mutation of different relpaths today, and breaking that out into per-session `Arc<Mutex<Session>>` would touch ~22 handler signatures, larger than the BL's "Small. Mostly cleanup" tag warrants. Snapshot-clone-outside-the-lock is also out of scope for the same reason; the snapshot SERIALIZE was already moved outside the lock by BL-123. `cargo test -p nexus-editor` 233/233; `cargo clippy -p nexus-editor --all-targets` clean for new code; perf baseline unchanged in shape (typing path 7–11 µs p50 across small/medium/large — flat curve preserved)._
+
 ---
 
 _BL-124 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
@@ -458,18 +460,17 @@ _BL-125 closed 2026-05-14 — see the closure note at the top of this file and [
 
 ---
 
-### BL-126: Drop redundant size-cap serialize + tighten session-mutex span (Phase 4 of TYPING-LATENCY-PLAN)
+_BL-126 closed 2026-05-14 — see the closure note at the top of this file and [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-**Source**: Typing-latency analysis — see [../roadmap/TYPING-LATENCY-PLAN.md](../roadmap/TYPING-LATENCY-PLAN.md). Filed 2026-05-14.
-**Effort**: Small. Independent of BL-123/BL-124/BL-125; mostly cleanup.
+---
+
+### Follow-up: per-session locks for concurrent multi-relpath mutation
+
+**Source**: BL-126 deferral. Filed 2026-05-14.
+**Effort**: Medium. ~22 handler signature changes.
 **Crates**: `nexus-editor`.
 
-Two small cleanups in `handle_apply_transaction` (`crates/nexus-editor/src/core_plugin.rs:1146-1211`). First, the 16 MiB payload-size check at `:1169` re-serializes the already-deserialized `tx_value` via `serde_json::to_vec(&tx_value)` purely to measure bytes — replace with a structural bound (sum of inserted text/block-content lengths on the typed `Transaction`). Second, the sessions mutex at `:1183` is held across mutation + tree clone + JSON serialize; with BL-123's slim path the serialize is rare, but tightening the lock to "mutation + revision bump" anyway lets concurrent edits to different files actually run concurrently.
-
-**Definition of done:**
-- `serde_json::to_vec(&tx_value)` removed; structural bound check trips on the same 16 MiB pathological-payload test
-- Snapshot serialization moves outside the mutex scope (collect `(snapshot, rev, ops)` under the lock, serialize after)
-- New multi-relpath concurrency test exercises two sessions being mutated simultaneously; tracing spans show overlap
+BL-126's DoD asked for a "multi-relpath concurrency test [that] exercises two sessions being mutated simultaneously" — currently the `Mutex<HashMap<String, Session>>` map-level lock serialises mutations even when they target different files. To make concurrent edits actually overlap, switch the map to `Mutex<HashMap<String, Arc<Mutex<Session>>>>` so handlers acquire the outer lock briefly to clone the per-session Arc, drop the outer lock, then acquire the inner session lock. Snapshot-clone-outside-the-lock becomes feasible after that change (the inner lock guards a single session, so the tree clone can move outside the outer lock's scope, with the session-Arc clone replacing it). Tracing spans should then show two `apply_transaction` enters overlapping when the two sessions are independent.
 
 ---
 

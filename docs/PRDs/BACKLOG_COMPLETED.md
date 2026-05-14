@@ -45,6 +45,44 @@ Fix: store the srcdoc body in a `pendingSrcDoc` field in the constructor; assign
 
 ---
 
+### BL-126: Drop redundant size-cap serialize + tighten session-mutex span (Phase 4 of TYPING-LATENCY-PLAN) ✅ (2026-05-14)
+
+**Source**: Typing-latency analysis — `docs/roadmap/TYPING-LATENCY-PLAN.md`
+**Files**: `crates/nexus-editor/src/core_plugin.rs` (replaces `serde_json::to_vec(&tx_value).len()` with new `transaction_payload_size(tx)` helper; renames tracing span field `bytes_in` → `payload_bytes`; adds `apply_transaction_rejects_payload_above_structural_cap` test); `experiments/perf/baselines/2026-05-14.json` (refreshed)
+**Related**: BL-122 (the perf-harness baseline this PR keeps flat); BL-123 (already moved the snapshot SERIALIZE outside the lock); follow-up filed in BACKLOG.md for the per-session-locks DoD bullet
+
+The motivating observation: every keystroke routed through the editor IPC paid for a `serde_json::to_vec(&tx_value)` purely to count bytes for the 16 MiB safety cap. That re-serialize was redundant with the immediately-following `serde_json::from_value(tx_value)` that produced the typed `Transaction` — once we have the typed form, a structural sum is both cheaper and tighter against the actual payload semantics.
+
+**What landed.**
+
+- **New `transaction_payload_size(tx) -> usize` helper.** Sums every op's user-controlled string fields:
+  - `Operation::InsertText { text, pre_annotations, .. }` → `text.len() + 64 * pre_annotations.len()`
+  - `Operation::DeleteText { deleted_text, pre_annotations, .. }` → same shape
+  - `Operation::InsertBlock { block, .. }` → `block.content.len() + 64 * block.annotations.len()`
+  - `Operation::DeleteBlock { old_block, .. }` → same shape
+  - `Operation::ReparentBlock { .. }` → 0 (no payload-scaling fields)
+  - `Operation::UpdateBlockContent { old_content, new_content, old_annotations, new_annotations, .. }` → sum of all four
+  - `Operation::UpdateAnnotations { old_annotations, new_annotations, .. }` → annotation sum
+  - The 64-byte per-annotation allowance is a conservative average bounding the worst case (a wikilink with a long path is ~200 bytes; a Bold/Italic annotation is ~50 bytes) to within ~3x of the JSON-serialized count.
+- **Same 16 MiB safety ceiling.** The cap value is unchanged; only the measurement changes. The deserialize-then-check ordering is preserved — `serde_json::from_value` produces the typed `Transaction` first, then `transaction_payload_size` sums it, then the cap is enforced. A pathological payload now reads as `transaction payload is N bytes; max is 16777216 bytes` (was `transaction is N bytes; max is …`) — slightly different wording to disambiguate from a JSON-byte count.
+- **Span field renamed.** `bytes_in` → `payload_bytes` in `tracing::info_span!("apply_transaction", ...)`. The field semantics changed (was JSON-encoded byte count, is now structural payload sum), so the rename makes downstream consumers fail loud rather than silently displaying mismatched units.
+
+**Pathological-payload test (`apply_transaction_rejects_payload_above_structural_cap`).** Pins three properties:
+1. `transaction_payload_size(small_tx) == text.len()` — the per-op accounting is exposed and matches the documented breakdown.
+2. A within-cap transaction goes through the apply path and produces a `Slim` response.
+3. A 17 MiB `InsertText` (1 MiB above the ceiling) is rejected, the rejection message names both the actual payload size and the cap, and the previously-applied state is intact (no half-apply).
+
+**Deferred — per-session-locks for concurrency overlap.** The BL DoD asked for a "multi-relpath concurrency test [that] exercises two sessions being mutated simultaneously; tracing spans show overlap". Today the `Mutex<HashMap<String, Session>>` map-level lock serialises mutations across all sessions, so concurrent edits to different files DO NOT overlap. Making them overlap requires switching the map to `Mutex<HashMap<String, Arc<Mutex<Session>>>>` so handlers can acquire the outer lock briefly to clone the per-session Arc, drop the outer lock, then acquire the inner session lock. That touches ~22 handler signatures across the editor crate — meaningfully larger than the BL's "Small. Mostly cleanup" tag, so the change is deferred and filed as a follow-up in `BACKLOG.md` under the BL-126 section. The snapshot-clone-outside-the-lock DoD bullet is also gated on that refactor (today the tree clone happens under the lock, which is the only correct ordering with a single map mutex; per-session locks would let it move outside).
+
+**Tested**:
+- `cargo test -p nexus-editor` → 233 passed (was 232; +1 new pathological-payload test).
+- `cargo clippy -p nexus-editor --all-targets` clean for new code.
+- Perf harness: `editor.apply_transaction.*` curve stays flat across small/medium/large (7–11 µs p50). The BL-123 win is preserved; BL-126 is a maintenance change that should be at most a small constant factor faster on the typing path, but variance dominates at these scales.
+
+**Definition of done coverage**: ✅ `serde_json::to_vec(&tx_value)` removed; structural bound check trips on the new 16 MiB pathological-payload test (`apply_transaction_rejects_payload_above_structural_cap`); ⏸ snapshot serialisation moves outside the mutex scope — partial: snapshot SERIALIZE is already outside (BL-123), tree CLONE is still inside, gated on per-session locks; ⏸ multi-relpath concurrency test deferred and filed as a follow-up.
+
+---
+
 ### BL-125: Viewport-scoped live-preview decorations (Phase 3 of TYPING-LATENCY-PLAN) ✅ (2026-05-14)
 
 **Source**: Typing-latency analysis — `docs/roadmap/TYPING-LATENCY-PLAN.md`

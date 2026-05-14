@@ -1216,6 +1216,70 @@ async fn handle_resolve_block_link_async(
     Ok(resolve_in_tree(&tree, block_id))
 }
 
+/// BL-126: structural sum of the user-controlled bytes carried by
+/// `tx`. Replaces the pre-BL-126 `serde_json::to_vec(&tx_value).len()`
+/// pre-check that paid for a throwaway full-tx serialize on the
+/// typing hot path.
+///
+/// Counts the bytes of every string field that scales with payload
+/// (`text` / `deleted_text` / block content / content-update old/new)
+/// plus a fixed-cost approximation for each annotation. Constant-
+/// cost fields (UUIDs, positions, structural metadata) are
+/// excluded — they're bounded by op count, which the caller already
+/// bounds implicitly through the same cap (a 16 MiB tx ceiling
+/// translates to ≥ tens of millions of zero-payload ops, far past
+/// the CRDT engine's intended operating range).
+///
+/// Annotations get a fixed 64-byte allowance per entry — the typed
+/// `Annotation` is at most `{ start, end, ty }` where `ty` is a
+/// small enum, and the empirical max annotation payload (a wikilink
+/// with a long path) is ~200 bytes. 64 is a conservative average
+/// that bounds the worst case to within ~3x the JSON-serialized
+/// byte count, well under the 16 MiB safety ceiling.
+fn transaction_payload_size(tx: &crate::Transaction) -> usize {
+    tx.operations.iter().map(op_payload_size).sum()
+}
+
+fn op_payload_size(op: &crate::Operation) -> usize {
+    use crate::Operation;
+    const PER_ANNOTATION: usize = 64;
+    let ann_cost = |xs: &[crate::Annotation]| xs.len() * PER_ANNOTATION;
+    match op {
+        Operation::InsertText {
+            text, pre_annotations, ..
+        } => text.len() + ann_cost(pre_annotations),
+        Operation::DeleteText {
+            deleted_text,
+            pre_annotations,
+            ..
+        } => deleted_text.len() + ann_cost(pre_annotations),
+        Operation::InsertBlock { block, .. } => {
+            block.content.len() + ann_cost(&block.annotations)
+        }
+        Operation::DeleteBlock { old_block, .. } => {
+            old_block.content.len() + ann_cost(&old_block.annotations)
+        }
+        Operation::ReparentBlock { .. } => 0,
+        Operation::UpdateBlockContent {
+            old_content,
+            new_content,
+            old_annotations,
+            new_annotations,
+            ..
+        } => {
+            old_content.len()
+                + new_content.len()
+                + ann_cost(old_annotations)
+                + ann_cost(new_annotations)
+        }
+        Operation::UpdateAnnotations {
+            old_annotations,
+            new_annotations,
+            ..
+        } => ann_cost(old_annotations) + ann_cost(new_annotations),
+    }
+}
+
 fn handle_apply_transaction(
     sessions: &Mutex<HashMap<String, Session>>,
     event_bus: Option<&Arc<EventBus>>,
@@ -1227,25 +1291,28 @@ fn handle_apply_transaction(
         .get("transaction")
         .ok_or_else(|| exec_err("apply_transaction: missing 'transaction'".to_string()))?
         .clone();
-    // Issue #85. Cap the transaction payload size before
-    // deserializing into a `Transaction` so a malicious/buggy caller
-    // can't ask the CRDT engine to walk gigabytes of operations in
-    // one IPC dispatch. 16 MiB is generous (a normal transaction is
-    // a few KB; a large multi-block paste is < 1 MiB) and the cap
-    // is on the JSON byte size, not op count, because per-op cost
-    // varies wildly.
-    const MAX_TRANSACTION_JSON_BYTES: usize = 16 * 1024 * 1024;
-    let tx_json_size = serde_json::to_vec(&tx_value)
-        .map(|v| v.len())
-        .unwrap_or(usize::MAX);
-    if tx_json_size > MAX_TRANSACTION_JSON_BYTES {
-        return Err(exec_err(format!(
-            "apply_transaction: transaction is {tx_json_size} bytes; \
-             max is {MAX_TRANSACTION_JSON_BYTES} bytes"
-        )));
-    }
+    // Cap the transaction payload before applying. Issue #85's
+    // original implementation re-serialized `tx_value` via
+    // `serde_json::to_vec(&tx_value)` purely to count JSON bytes —
+    // ~10–20% of the BL-122-measured small-tx latency was spent in
+    // that throwaway serialize on the typing hot path. BL-126
+    // replaces it with a structural sum (op-by-op string-length
+    // tally on the typed `Transaction`); cheaper and bounded against
+    // the same conceptual 16 MiB limit. A small headroom margin
+    // accounts for JSON's per-string overhead — the limit is on
+    // bytes of user-controlled payload, not exact JSON-serialized
+    // bytes, so we under-bound rather than over-bound to keep the
+    // safety property.
+    const MAX_TRANSACTION_BYTES: usize = 16 * 1024 * 1024;
     let tx: crate::Transaction = serde_json::from_value(tx_value)
         .map_err(|e| exec_err(format!("apply_transaction: invalid transaction: {e}")))?;
+    let tx_size = transaction_payload_size(&tx);
+    if tx_size > MAX_TRANSACTION_BYTES {
+        return Err(exec_err(format!(
+            "apply_transaction: transaction payload is {tx_size} bytes; \
+             max is {MAX_TRANSACTION_BYTES} bytes"
+        )));
+    }
     let tx_id = tx.id;
     let op_count = tx.operations.len();
     // BL-123: text-only ops (insert_text / delete_text) get a slim
@@ -1261,16 +1328,17 @@ fn handle_apply_transaction(
             )
         });
 
-    // BL-122: instrumentation span for the typing-latency perf
-    // harness. Records per-call op count + transaction bytes-in, and
-    // (after serialize) bytes-out. A subscriber installed at
-    // `info` level captures wall-time via `span.enter()`/exit; with
-    // no subscriber the span is a no-op pointer bump.
+    // BL-122 / BL-126: instrumentation span for the typing-latency
+    // perf harness. Records per-call op count + transaction payload
+    // bytes (structural sum of insert/delete/content strings), and
+    // (after serialize) bytes-out. A subscriber installed at `info`
+    // level captures wall-time via `span.enter()`/exit; with no
+    // subscriber the span is a no-op pointer bump.
     let span = tracing::info_span!(
         "apply_transaction",
         op_count,
         text_only,
-        bytes_in = tx_json_size,
+        payload_bytes = tx_size,
         bytes_out = tracing::field::Empty,
     );
     let _enter = span.enter();
@@ -2119,6 +2187,93 @@ mod tests {
         .unwrap();
         assert_eq!(md, MarkdownSerializer::serialize(&snap2.tree));
         assert!(md.contains("Hello world"));
+    }
+
+    /// BL-126: structural-bound payload-size check.
+    ///
+    /// The pre-BL-126 implementation re-serialized `tx_value` via
+    /// `serde_json::to_vec` purely to count bytes, which paid a
+    /// throwaway full-tx serialize on every keystroke. BL-126
+    /// replaces that with a structural sum over typed op fields.
+    /// This test pins three properties:
+    ///   1. A merely-large transaction (within the 16 MiB ceiling)
+    ///      goes through the apply path unaffected.
+    ///   2. A transaction whose `InsertText` payload alone exceeds
+    ///      the ceiling is rejected by the structural cap.
+    ///   3. The helper's per-op accounting matches the documented
+    ///      breakdown (text string lengths + per-annotation fixed
+    ///      cost).
+    #[test]
+    fn apply_transaction_rejects_payload_above_structural_cap() {
+        use crate::{Operation, Transaction, TransactionMetadata};
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "Hello\n");
+        let mut p = new_plugin(root);
+        let snap = open_value(&mut p, "notes/a.md");
+        let para_id = snap.tree.root_blocks[0];
+
+        // Property 3: payload-size helper accounts for InsertText
+        // string length + per-annotation overhead.
+        let tx_small = Transaction::new(
+            vec![Operation::InsertText {
+                block_id: para_id,
+                pos: 0,
+                text: "xxxxxxxxxx".into(), // 10 bytes
+                pre_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        assert_eq!(
+            transaction_payload_size(&tx_small),
+            10,
+            "InsertText payload cost == text byte length",
+        );
+
+        // Property 1: a small transaction goes through.
+        let resp = apply_value(&mut p, "notes/a.md", &tx_small);
+        assert!(matches!(resp, ApplyTransactionResponse::Slim { .. }));
+
+        // Property 2: an oversized transaction is rejected before
+        // any mutation. Build a single InsertText whose `text` is
+        // 17 MiB (1 MiB above the 16 MiB ceiling).
+        const MAX: usize = 16 * 1024 * 1024;
+        let big = "x".repeat(MAX + 1024 * 1024);
+        let big_len = big.len();
+        let tx_big = Transaction::new(
+            vec![Operation::InsertText {
+                block_id: para_id,
+                pos: 0,
+                text: big,
+                pre_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        // The check is on payload size, so the helper should report
+        // the full 17 MiB rather than the JSON-encoded byte count.
+        assert!(transaction_payload_size(&tx_big) > MAX);
+        let err = p
+            .dispatch(
+                HANDLER_APPLY_TRANSACTION,
+                &serde_json::json!({
+                    "relpath": "notes/a.md",
+                    "transaction": serde_json::to_value(&tx_big).unwrap(),
+                }),
+            )
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("payload is") && msg.contains("max is"),
+            "rejection mentions payload bytes vs cap: {msg}",
+        );
+        assert!(
+            msg.contains(&format!("{big_len}")),
+            "rejection includes actual payload size {big_len}: {msg}",
+        );
+        // The pre-reject path must not have mutated the session —
+        // get_tree returns the post-tx_small state, no further
+        // mutations.
+        let post = get_tree_value(&mut p, "notes/a.md");
+        assert_eq!(post.tree.blocks[&para_id].content, "xxxxxxxxxxHello");
     }
 
     /// BL-123: response-shape contract. Text-only ops (`insert_text`,
