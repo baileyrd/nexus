@@ -2,9 +2,21 @@
 
 **Source**: AI Integration Assessment (2026-05-06) + analysis of Chase AI's "Agentic OS" framework  
 **Reference**: `docs/audits/AI-INTEGRATION-ASSESSMENT-2026-05-06.md`, `docs/research/agentic-os-implementation-plan.md`  
-**Effort**: ~1 week of focused work across 5 phases  
-**Crates**: `nexus-skills` (new `invoke` handler), `shell/src/plugins/nexus/skills/`, new `shell/src/plugins/nexus/osArchitecture/`, new `shell/src/plugins/nexus/observability/`  
+**Status**: **All five phases shipped.** Verified 2026-05-14.
+**Crates**: `nexus-skills` (`invoke` handler id 8), `shell/src/plugins/nexus/{workspace,launcher,osArchitecture,observability,skills}/`, `nexus-bootstrap` (`forge_template` module + templates).
 **Related**: BL-037 (activity timeline), BL-052 (universal activity timeline), PRD-13 (skills), PRD-15 (agent), PRD-16 (workflow)
+
+## Shipped status (2026-05-14)
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 1. Forge OS template | ✅ Shipped | `crates/nexus-bootstrap/src/forge_template.rs` ships the `ForgeTemplate::Os` scaffolder + 5 unit tests. `crates/nexus-cli/src/commands/forge.rs::init` accepts `--template os`. `shell/src-tauri/src/bridge.rs::init_forge` accepts `template: Option<String>`. `nexus.workspace.openWithTemplate` command + the launcher's "Create OS workspace" action at `LauncherView.tsx:452` cover the DoD's "shell new-forge flow offers OS layout as an option alongside blank" bullet. Templates live at `crates/nexus-bootstrap/templates/os/{CLAUDE.md,architecture.md}`. |
+| 2. Architecture panel | ✅ Shipped | `shell/src/plugins/nexus/osArchitecture/` with `architectureParser.ts`, `driftDetect.ts`, `osArchitectureStore.ts`, `OsArchitectureView.tsx`, `OsArchitecturePaneView.tsx`. Registered in `shell/src/plugins/catalog.ts:477`. |
+| 3. Skills invocation | ✅ Shipped | `crates/nexus-skills/src/core_plugin.rs::HANDLER_INVOKE = 8` + `dispatch_async` arm; 7 unit tests in `core_plugin.rs::tests` cover the path. SkillsPanel surfaces the Run affordance per `BL-067-068-builders.md`. |
+| 4. Observability panels | ✅ Shipped | `shell/src/plugins/nexus/observability/` with usage aggregation (`usageAggregate.ts`), three-tab pane view, and store. Registered in `shell/src/plugins/catalog.ts:487`. |
+| 5. OS Setup skill | ✅ Shipped | `crates/nexus-skills/builtins/os-setup.skill.md` seeded; runs the architecture elicitation interview and writes `architecture.md`. |
+
+Each phase keeps its DoD bullets in §"Phased implementation" below — preserved for traceability.
 
 ---
 
