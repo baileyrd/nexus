@@ -253,6 +253,65 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-116: `ai.generate_docs` symbol-aware doc generator (GitNexus port) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `9c1b7fb9`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-ai` (new `generate_docs` IPC handler).
+**Related**: BL-114 (symbol index — required dependency), BL-115 (MCP tools — sibling consumer of the same index).
+
+Symbol-aware doc generator. Given a `symbol_id` (or `path` + `name` pair), gather the symbol's source range + its direct callers / callees from the BL-114 index, render a structured prompt, dispatch to the configured AI provider via the existing `nexus-ai` tool-loop, and return a markdown docblock. Optionally writes the docblock back as an annotation on the symbol's source range (gated by capability + confirmation).
+
+**What landed:**
+- New `crates/nexus-ai/src/generate_docs.rs` + `HANDLER_GENERATE_DOCS` (id 22) on `com.nexus.ai`.
+- Args take `symbol_id` (or `path` + `name`); the handler gathers the symbol body plus 1-hop call-graph context from BL-114's index, renders a structured prompt, dispatches through the existing `nexus-ai` tool-loop.
+- Optional write-back routes through `com.nexus.editor::apply_transaction` so undo is preserved.
+- Tested against a synthetic symbol set with a mocked provider (no live AI call needed in CI).
+
+**Definition of done coverage**: ✅ `com.nexus.ai::generate_docs` IPC handler with typed args; ✅ prompt template includes symbol body + 1-hop call graph context; ✅ optional write-back goes through `com.nexus.editor::apply_transaction`; ✅ tested against a synthetic symbol set.
+
+---
+
+### BL-115: MCP tools for code intel (GitNexus port) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `11c2836f`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-mcp` (new tool registrations).
+**Related**: BL-114 (symbol index — required dependency), BL-116 (doc generator — sibling consumer of the same index).
+
+Three new MCP tools backed by the BL-114 index. The shape is taken directly from the GitNexus MCP server that `CLAUDE.md` already requires for the impact-analysis workflow — porting it in-tree means agents working in Nexus don't need a parallel external service.
+
+**What landed:**
+- `nexus_context(symbol)` — returns callers / callees / containing-process.
+- `nexus_impact(symbol, depth)` — walks the call graph and reports blast radius with risk classification. Risk levels follow the GitNexus rubric (LOW / MEDIUM / HIGH / CRITICAL) via a `risk_for_kind` helper.
+- `nexus_detect_changes()` — diffs the current dirty set against the indexed state and lists affected symbols; consumes `com.nexus.git::file_statuses` for the dirty set.
+- All three registered in `crates/nexus-mcp/src/server.rs`.
+- `BL115_DEGRADED_REASON` const surfaces a clear message when the symbol index isn't initialised (e.g. the forge hasn't been indexed yet).
+
+**Definition of done coverage**: ✅ three tools registered in `nexus-mcp.host`'s dynamic-tool registry (DG-39 surface); ✅ `nexus_impact` depth parameter with documented LOW / MEDIUM / HIGH / CRITICAL thresholds; ✅ `nexus_detect_changes` consumes `com.nexus.git::file_statuses`; ✅ live MCP smoke against the in-process server confirmed agent-side discoverability.
+
+---
+
+### BL-114: Code-symbol index foundation (GitNexus port) ✅ (2026-05-14 umbrella close — shipped 2026-05-13)
+
+**Source**: GitNexus capability porting — see [../research/gitnexus-capability-assessment.md](../research/gitnexus-capability-assessment.md). Filed 2026-05-13.
+**Shipped**: 2026-05-13 in commit `2ce5e645`. Umbrella closure 2026-05-14 (backlog accounting).
+**Crates**: `nexus-storage` (new `code_index` module), `nexus-git` (diff→symbol hook), `nexus-editor` (file-save hook).
+**Related**: BL-115 (MCP tools — consumer), BL-116 (doc generator — consumer), BL-075 (the language list `nexus.editor.codeFileExtensions` gates the walker).
+
+Cross-repo code-intel index. The MVP: a SQLite-backed table of `(path, kind, name, line_start, line_end, parent_id, doc_comment)` populated by a tree-sitter walker over the forge's source files, gated by `nexus.editor.codeFileExtensions` from BL-075. Indexed on file save and on `com.nexus.git.commit`. Powers blast-radius queries, BM25 over code symbols, and the doc-generator in BL-116. No new top-level subsystem — lands inside `nexus-storage`'s existing schema next to the Tantivy FTS index.
+
+**What landed:**
+- New `crates/nexus-storage/src/code_index.rs` with a tree-sitter walker covering Rust / TypeScript / Python / Go (matching the BL-075 default set).
+- SQLite-backed `code_symbols` table with indexes by name / path / containing-file.
+- `com.nexus.storage::query_symbol(name, [path])` IPC handler returns the matching set.
+- File-save hook in `nexus-editor` and commit hook in `nexus-git` keep the index live.
+- Rebuild path matches the FTS index pattern — files-on-disk are authoritative; the index is regenerable.
+
+**Definition of done coverage**: ✅ tree-sitter walker covering Rust / TS / Python / Go; ✅ SQLite table + indexed lookups by name / path / containing-file; ✅ file-save hook in `nexus-editor` and commit hook in `nexus-git`; ✅ rebuild path identical to FTS; ✅ `com.nexus.storage::query_symbol(name, [path])` IPC handler.
+
+---
+
 ### BL-074: Collaborative editing — CRDT layer ✅ (2026-05-14 umbrella close)
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #5; ADR 0026 documents the phase plan
