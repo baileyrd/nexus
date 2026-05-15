@@ -97,6 +97,15 @@ pub enum Capability {
     /// 0028). Granted to the shell observability panel; community
     /// plugins do not get this by default.
     AiRuntimeObserve,
+    /// Read the notifications inbox via `inbox_list` / `inbox_stats`
+    /// on `com.nexus.notifications` (BL-136, ADR 0029). Granted to
+    /// the CLI / TUI / shell invokers; community plugins do not get
+    /// it by default.
+    NotificationsInboxRead,
+    /// Mutate inbox user-state via `inbox_mark_read` / `inbox_dismiss`
+    /// on `com.nexus.notifications` (BL-136, ADR 0029). Granted to
+    /// the shell only — there is no CLI/TUI surface for these today.
+    NotificationsInboxWrite,
 }
 
 /// Error parsing a capability string.
@@ -139,6 +148,8 @@ impl Capability {
         Capability::AiRuntimeSubmit,
         Capability::AiRuntimeControl,
         Capability::AiRuntimeObserve,
+        Capability::NotificationsInboxRead,
+        Capability::NotificationsInboxWrite,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -189,6 +200,8 @@ impl Capability {
             Capability::AiRuntimeSubmit  => "ai.runtime.submit",
             Capability::AiRuntimeControl => "ai.runtime.control",
             Capability::AiRuntimeObserve => "ai.runtime.observe",
+            Capability::NotificationsInboxRead  => "notifications.inbox.read",
+            Capability::NotificationsInboxWrite => "notifications.inbox.write",
         }
     }
 
@@ -227,6 +240,8 @@ impl Capability {
             "ai.runtime.submit"  => Ok(Capability::AiRuntimeSubmit),
             "ai.runtime.control" => Ok(Capability::AiRuntimeControl),
             "ai.runtime.observe" => Ok(Capability::AiRuntimeObserve),
+            "notifications.inbox.read"  => Ok(Capability::NotificationsInboxRead),
+            "notifications.inbox.write" => Ok(Capability::NotificationsInboxWrite),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -330,8 +345,9 @@ mod tests {
     #[test]
     fn all_slice_covers_all_discriminants() {
         // 14 base + 6 ai.* (ADR 0022 Phase 1) + 2 ai.tools.* (Phase 2)
-        // + 2 audio.* (BL-117).
-        assert_eq!(Capability::ALL.len(), 24);
+        // + 2 audio.* (BL-117) + 3 ai.runtime.* (BL-134) + 2
+        // notifications.inbox.* (BL-136).
+        assert_eq!(Capability::ALL.len(), 29);
     }
 
     #[test]

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InboxIdsArgs",
+  "description": "Args for `com.nexus.notifications::inbox_mark_read` /\n`inbox_dismiss` (handler ids `3` / `4`).",
+  "type": "object",
+  "properties": {
+    "ids": {
+      "description": "Row ids to mutate. Empty is a no-op.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ids"
+  ]
+}

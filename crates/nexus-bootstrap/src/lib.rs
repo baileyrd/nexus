@@ -363,6 +363,23 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         );
     }
 
+    // BL-136 / ADR 0029 — notifications inbox cap matrix. List/stats
+    // read; mark_read/dismiss mutate the user-state columns.
+    for cmd in ["inbox_list", "inbox_stats"] {
+        shared.add_cap_requirement(
+            "com.nexus.notifications",
+            cmd,
+            vec![Capability::NotificationsInboxRead],
+        );
+    }
+    for cmd in ["inbox_mark_read", "inbox_dismiss"] {
+        shared.add_cap_requirement(
+            "com.nexus.notifications",
+            cmd,
+            vec![Capability::NotificationsInboxWrite],
+        );
+    }
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
@@ -1401,10 +1418,12 @@ fn register_core_plugins(
     // predates BL-135 keeps working without editing.
     let (notifications_config, notifications_config_path) =
         load_notifications_config(forge_root);
-    let notifications_plugin = nexus_notifications::core_plugin::NotificationsCorePlugin::from_config(
+    let inbox_db_path = forge_root.join(nexus_notifications::INBOX_DB_RELPATH);
+    let notifications_plugin = nexus_notifications::core_plugin::NotificationsCorePlugin::from_config_with_inbox(
         Some(Arc::clone(event_bus)),
         notifications_config,
         notifications_config_path,
+        Some(inbox_db_path),
     )
     .unwrap_or_else(|err| {
         tracing::warn!(
@@ -1424,11 +1443,30 @@ fn register_core_plugins(
             core_manifest_with_ipc(
                 "com.nexus.notifications",
                 "Notifications",
-                LifecycleFlags::NONE,
-                &with_v1_aliases(&[(
-                    "send",
-                    nexus_notifications::core_plugin::HANDLER_SEND,
-                )]),
+                LifecycleFlags {
+                    on_init: false,
+                    on_start: true,
+                    on_stop: false,
+                },
+                &with_v1_aliases(&[
+                    ("send", nexus_notifications::core_plugin::HANDLER_SEND),
+                    (
+                        "inbox_list",
+                        nexus_notifications::core_plugin::HANDLER_INBOX_LIST,
+                    ),
+                    (
+                        "inbox_mark_read",
+                        nexus_notifications::core_plugin::HANDLER_INBOX_MARK_READ,
+                    ),
+                    (
+                        "inbox_dismiss",
+                        nexus_notifications::core_plugin::HANDLER_INBOX_DISMISS,
+                    ),
+                    (
+                        "inbox_stats",
+                        nexus_notifications::core_plugin::HANDLER_INBOX_STATS,
+                    ),
+                ]),
             ),
             forge_root,
             Box::new(notifications_plugin),

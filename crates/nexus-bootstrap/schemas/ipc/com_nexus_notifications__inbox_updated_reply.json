@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InboxUpdatedReply",
+  "description": "Reply for `inbox_mark_read` / `inbox_dismiss`.",
+  "type": "object",
+  "properties": {
+    "updated": {
+      "description": "Number of rows whose state actually changed (already-read /\nalready-dismissed rows are not double-stamped).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "updated"
+  ]
+}

@@ -44,10 +44,13 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 use crate::config::{NotificationsConfig, Severity};
+use crate::inbox::{
+    Inbox, InboxStats, NewEntry, StatusFilter, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_ROWS,
+};
 use crate::router::{current_min_of_day, Resolution, Router};
 use crate::{
     Channel, DesktopTransport, DiscordWebhook, Notification, SmtpConfig, SmtpTransport,
-    TelegramBot, Transport,
+    TelegramBot, Transport, INBOX_APPENDED_TOPIC,
 };
 
 /// Reverse-DNS identifier.
@@ -55,6 +58,14 @@ pub const PLUGIN_ID: &str = "com.nexus.notifications";
 
 /// `send` handler id.
 pub const HANDLER_SEND: u32 = 1;
+/// `inbox_list` handler id (BL-136).
+pub const HANDLER_INBOX_LIST: u32 = 2;
+/// `inbox_mark_read` handler id (BL-136).
+pub const HANDLER_INBOX_MARK_READ: u32 = 3;
+/// `inbox_dismiss` handler id (BL-136).
+pub const HANDLER_INBOX_DISMISS: u32 = 4;
+/// `inbox_stats` handler id (BL-136).
+pub const HANDLER_INBOX_STATS: u32 = 5;
 
 /// Bus topic prefix the BL-134 runtime publishes typed [`crate`]-
 /// independent AI lifecycle events on. Mirrored here to avoid pulling
@@ -148,6 +159,66 @@ pub struct SendReply {
     pub routing: String,
 }
 
+/// Args for `com.nexus.notifications::inbox_list` (handler id `2`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct InboxListArgs {
+    /// Only return rows with `ts >= since` (Unix seconds).
+    #[serde(default)]
+    pub since: Option<i64>,
+    /// `"all"` (default), `"unread"`, or `"dismissed"`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Restrict to a single source tag.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Page size — default 100, capped at 1000.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Args for `com.nexus.notifications::inbox_mark_read` /
+/// `inbox_dismiss` (handler ids `3` / `4`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct InboxIdsArgs {
+    /// Row ids to mutate. Empty is a no-op.
+    pub ids: Vec<String>,
+}
+
+/// Reply for `inbox_mark_read` / `inbox_dismiss`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct InboxUpdatedReply {
+    /// Number of rows whose state actually changed (already-read /
+    /// already-dismissed rows are not double-stamped).
+    pub updated: u32,
+}
+
 /// One row of the [`SendReply::failures`] list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
@@ -184,6 +255,11 @@ pub struct NotificationsCorePlugin {
     /// subscriber listens on, even when the Desktop channel isn't in
     /// the route (so the toast UI sees every routed notification).
     bus: Option<Arc<EventBus>>,
+    /// BL-136 inbox store. `None` for unit tests that construct the
+    /// plugin via [`Self::with_transports`]; production callers
+    /// route through [`Self::from_config`] which opens a SQLite-
+    /// backed store under `<forge>/.forge/notifications/inbox.db`.
+    inbox: Option<Arc<Inbox>>,
 }
 
 impl NotificationsCorePlugin {
@@ -201,6 +277,22 @@ impl NotificationsCorePlugin {
         bus: Option<Arc<EventBus>>,
         config: NotificationsConfig,
         config_path: Option<PathBuf>,
+    ) -> Result<Self, crate::config::ConfigError> {
+        Self::from_config_with_inbox(bus, config, config_path, None)
+    }
+
+    /// `from_config` plus an explicit inbox path. Passing `None`
+    /// disables the inbox (legacy / test paths). The bootstrap call
+    /// site uses [`crate::INBOX_DB_RELPATH`] under the forge root.
+    ///
+    /// # Errors
+    /// Same as [`Self::from_config`]; inbox open failures are logged
+    /// + skipped (the dispatcher still runs without inbox writes).
+    pub fn from_config_with_inbox(
+        bus: Option<Arc<EventBus>>,
+        config: NotificationsConfig,
+        config_path: Option<PathBuf>,
+        inbox_path: Option<PathBuf>,
     ) -> Result<Self, crate::config::ConfigError> {
         let router = Router::from_config(&config)?;
         let mut transports: HashMap<Channel, Box<dyn Transport>> = HashMap::new();
@@ -220,6 +312,19 @@ impl NotificationsCorePlugin {
             Channel::Email,
             Box::new(SmtpTransport::new(config.channels.email.to_smtp_config())),
         );
+        let max_rows = config.inbox.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
+        let max_age = config.inbox.max_age_days.unwrap_or(DEFAULT_MAX_AGE_DAYS);
+        let inbox = inbox_path.and_then(|p| match Inbox::open(&p, max_rows, max_age) {
+            Ok(i) => Some(Arc::new(i)),
+            Err(err) => {
+                tracing::warn!(
+                    path = %p.display(),
+                    %err,
+                    "inbox.db: open failed; notifications history disabled"
+                );
+                None
+            }
+        });
         Ok(Self {
             transports,
             router,
@@ -227,6 +332,7 @@ impl NotificationsCorePlugin {
             config_path,
             ctx: None,
             bus,
+            inbox,
         })
     }
 
@@ -269,6 +375,7 @@ impl NotificationsCorePlugin {
             config_path: None,
             ctx: None,
             bus: None,
+            inbox: None,
         }
     }
 
@@ -288,7 +395,40 @@ impl NotificationsCorePlugin {
             config_path: None,
             ctx: None,
             bus: None,
+            inbox: None,
         }
+    }
+
+    /// Construct a plugin with an in-memory inbox attached. Used by
+    /// the integration tests that exercise the IPC surface end-to-end.
+    #[must_use]
+    pub fn with_transports_and_inmemory_inbox(
+        transports: HashMap<Channel, Box<dyn Transport>>,
+        config: NotificationsConfig,
+    ) -> Self {
+        let router = Router::from_config(&config).unwrap_or_default();
+        let max_rows = config.inbox.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
+        let max_age = config.inbox.max_age_days.unwrap_or(DEFAULT_MAX_AGE_DAYS);
+        let inbox = Inbox::in_memory(max_rows, max_age)
+            .ok()
+            .map(Arc::new);
+        Self {
+            transports,
+            router,
+            config: Arc::new(RwLock::new(config)),
+            config_path: None,
+            ctx: None,
+            bus: None,
+            inbox,
+        }
+    }
+
+    /// Borrow the inbox if attached. `None` for legacy / test
+    /// constructors. Public so unit tests can pin write semantics
+    /// without going through the IPC layer.
+    #[must_use]
+    pub fn inbox(&self) -> Option<&Arc<Inbox>> {
+        self.inbox.as_ref()
     }
 
     /// Borrow the router. Public for shell IPC handlers that want to
@@ -343,10 +483,70 @@ impl NotificationsCorePlugin {
         severity: Severity,
         notif: &Notification,
     ) -> (Vec<Channel>, Vec<ChannelFailure>) {
+        self.dispatch_routed_with_payload(source, severity, notif, None)
+    }
+
+    /// `dispatch_routed` plus a caller-supplied `payload_json`
+    /// attached to the inbox row. Producers that want to cross-link
+    /// back to their own event (`task_id`, run id, etc.) populate
+    /// this; the default `dispatch_routed` passes `None`.
+    pub fn dispatch_routed_with_payload(
+        &self,
+        source: &str,
+        severity: Severity,
+        notif: &Notification,
+        payload_json: Option<&str>,
+    ) -> (Vec<Channel>, Vec<ChannelFailure>) {
         let resolution = self.router.resolve(source, severity, current_min_of_day());
         match resolution {
-            Resolution::Routed(channels) => self.fan_out(notif, &channels),
+            Resolution::Routed(channels) => {
+                let (delivered, failures) = self.fan_out(notif, &channels);
+                self.write_inbox_row(source, severity, notif, &channels, payload_json);
+                (delivered, failures)
+            }
             Resolution::UnknownSource | Resolution::Filtered => (Vec::new(), Vec::new()),
+        }
+    }
+
+    /// Write one inbox row (when the inbox is wired) and republish a
+    /// `com.nexus.notifications.inbox.appended` event. Best-effort —
+    /// inbox failures log a warning but never block the dispatch.
+    fn write_inbox_row(
+        &self,
+        source: &str,
+        severity: Severity,
+        notif: &Notification,
+        channels: &[Channel],
+        payload_json: Option<&str>,
+    ) {
+        let Some(inbox) = self.inbox.as_ref() else {
+            return;
+        };
+        let id = match inbox.insert(&NewEntry {
+            source,
+            severity,
+            title: notif.title.as_deref(),
+            body: &notif.message,
+            channels,
+            payload_json,
+        }) {
+            Ok(id) => id,
+            Err(err) => {
+                tracing::warn!(%err, "inbox: insert failed");
+                return;
+            }
+        };
+        if let Some(bus) = self.bus.as_ref() {
+            let _ = bus.publish_plugin(
+                PLUGIN_ID,
+                INBOX_APPENDED_TOPIC,
+                serde_json::json!({
+                    "id": id,
+                    "source": source,
+                    "severity": severity.as_str(),
+                    "ts": chrono::Utc::now().timestamp(),
+                }),
+            );
         }
     }
 
@@ -385,6 +585,10 @@ impl CorePlugin for NotificationsCorePlugin {
     ) -> Result<serde_json::Value, PluginError> {
         match handler_id {
             HANDLER_SEND => self.dispatch_send(args),
+            HANDLER_INBOX_LIST => self.dispatch_inbox_list(args),
+            HANDLER_INBOX_MARK_READ => self.dispatch_inbox_mark_read(args),
+            HANDLER_INBOX_DISMISS => self.dispatch_inbox_dismiss(args),
+            HANDLER_INBOX_STATS => self.dispatch_inbox_stats(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -394,6 +598,16 @@ impl CorePlugin for NotificationsCorePlugin {
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
+        // BL-136: one-time age-cap sweep at boot. Row-cap enforcement
+        // is amortised across inserts.
+        if let Some(inbox) = self.inbox.as_ref() {
+            match inbox.enforce_age_cap() {
+                Ok(n) if n > 0 => tracing::info!(deleted = n, "inbox: aged-out rows pruned"),
+                Ok(_) => {}
+                Err(err) => tracing::warn!(%err, "inbox: age-cap sweep failed"),
+            }
+        }
+
         // Spawn the AI runtime subscriber. Best-effort: if there is
         // no tokio runtime in scope (CLI single-shot path), skip;
         // BL-134's AiEvent stream only matters when the shell or a
@@ -495,6 +709,7 @@ impl NotificationsCorePlugin {
             message: parsed.message.clone(),
             title: parsed.title.clone(),
         };
+        let severity = parsed.severity.unwrap_or_default();
         // Override path — caller picked a channel explicitly.
         if let Some(channel) = parsed.channel {
             let transport = self.transports.get(&channel).ok_or_else(|| {
@@ -506,6 +721,12 @@ impl NotificationsCorePlugin {
             transport
                 .send(&notif)
                 .map_err(|e| exec_err(format!("send: {e}")))?;
+            // BL-136: explicit-channel sends record under a synthetic
+            // `"override"` source so the inbox holds a row even when
+            // the caller bypassed the router. Producers that want a
+            // real source tag should use the router path.
+            let source = parsed.source.as_deref().unwrap_or("override");
+            self.write_inbox_row(source, severity, &notif, &[channel], None);
             let reply = SendReply {
                 delivered: true,
                 channel: Some(channel),
@@ -518,7 +739,6 @@ impl NotificationsCorePlugin {
         }
         // Router path — source tag.
         let source = parsed.source.expect("checked above");
-        let severity = parsed.severity.unwrap_or_default();
         let resolution = self.router.resolve(&source, severity, current_min_of_day());
         let reply = match resolution {
             Resolution::UnknownSource => SendReply {
@@ -537,6 +757,7 @@ impl NotificationsCorePlugin {
             },
             Resolution::Routed(channels) => {
                 let (delivered_to, failures) = self.fan_out(&notif, &channels);
+                self.write_inbox_row(&source, severity, &notif, &channels, None);
                 SendReply {
                     delivered: !delivered_to.is_empty(),
                     channel: delivered_to.first().copied(),
@@ -547,6 +768,83 @@ impl NotificationsCorePlugin {
             }
         };
         serde_json::to_value(&reply).map_err(|e| exec_err(format!("send: serialize: {e}")))
+    }
+
+    // ── BL-136 inbox handlers ───────────────────────────────────────
+
+    fn dispatch_inbox_list(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let parsed: InboxListArgs = serde_json::from_value(args.clone())
+            .map_err(|e| exec_err(format!("inbox_list: invalid args: {e}")))?;
+        let inbox = self
+            .inbox
+            .as_ref()
+            .ok_or_else(|| exec_err("inbox_list: inbox not wired"))?;
+        let status = match parsed.status.as_deref() {
+            None | Some("all") => StatusFilter::All,
+            Some("unread") => StatusFilter::Unread,
+            Some("dismissed") => StatusFilter::Dismissed,
+            Some(other) => {
+                return Err(exec_err(format!(
+                    "inbox_list: unknown status '{other}'; expected all|unread|dismissed"
+                )))
+            }
+        };
+        let limit = parsed.limit.unwrap_or(100).min(1000);
+        let rows = inbox
+            .list(parsed.since, status, parsed.source.as_deref(), limit)
+            .map_err(|e| exec_err(format!("inbox_list: {e}")))?;
+        serde_json::to_value(rows).map_err(|e| exec_err(format!("inbox_list: serialize: {e}")))
+    }
+
+    fn dispatch_inbox_mark_read(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let parsed: InboxIdsArgs = serde_json::from_value(args.clone())
+            .map_err(|e| exec_err(format!("inbox_mark_read: invalid args: {e}")))?;
+        let inbox = self
+            .inbox
+            .as_ref()
+            .ok_or_else(|| exec_err("inbox_mark_read: inbox not wired"))?;
+        let updated = inbox
+            .mark_read(&parsed.ids)
+            .map_err(|e| exec_err(format!("inbox_mark_read: {e}")))?;
+        serde_json::to_value(InboxUpdatedReply { updated })
+            .map_err(|e| exec_err(format!("inbox_mark_read: serialize: {e}")))
+    }
+
+    fn dispatch_inbox_dismiss(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let parsed: InboxIdsArgs = serde_json::from_value(args.clone())
+            .map_err(|e| exec_err(format!("inbox_dismiss: invalid args: {e}")))?;
+        let inbox = self
+            .inbox
+            .as_ref()
+            .ok_or_else(|| exec_err("inbox_dismiss: inbox not wired"))?;
+        let updated = inbox
+            .dismiss(&parsed.ids)
+            .map_err(|e| exec_err(format!("inbox_dismiss: {e}")))?;
+        serde_json::to_value(InboxUpdatedReply { updated })
+            .map_err(|e| exec_err(format!("inbox_dismiss: serialize: {e}")))
+    }
+
+    fn dispatch_inbox_stats(
+        &self,
+        _args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let inbox = self
+            .inbox
+            .as_ref()
+            .ok_or_else(|| exec_err("inbox_stats: inbox not wired"))?;
+        let stats: InboxStats = inbox
+            .stats()
+            .map_err(|e| exec_err(format!("inbox_stats: {e}")))?;
+        serde_json::to_value(stats).map_err(|e| exec_err(format!("inbox_stats: serialize: {e}")))
     }
 }
 

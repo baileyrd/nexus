@@ -20,6 +20,8 @@ notify = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 reqwest = { workspace = true, features = ["blocking", "json"] }
 lettre = { workspace = true }
+rusqlite = { workspace = true }
+uuid = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 

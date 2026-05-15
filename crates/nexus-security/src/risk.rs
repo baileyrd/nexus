@@ -108,6 +108,13 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // state — Low by analogy with ai.session.read.
         Capability::AiRuntimeSubmit | Capability::AiRuntimeControl => RiskLevel::Medium,
         Capability::AiRuntimeObserve => RiskLevel::Low,
+
+        // BL-136 / ADR 0029 notification inbox caps. Both gate a
+        // derived store under `.forge/`; no network egress, no
+        // process spawn. read is read-only; write only mutates the
+        // user-state columns (`read_at` / `dismissed_at`). Both Low
+        // by analogy with kv.read / kv.write.
+        Capability::NotificationsInboxRead | Capability::NotificationsInboxWrite => RiskLevel::Low,
     }
 }
 

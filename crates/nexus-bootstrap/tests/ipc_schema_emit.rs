@@ -51,7 +51,16 @@ use nexus_storage::ipc::{
 use nexus_linkpreview::core_plugin::FetchArgs as LinkPreviewFetchArgs;
 use nexus_linkpreview::LinkPreview;
 // BL-133 — multi-channel notification dispatcher.
-use nexus_notifications::core_plugin::{SendArgs as NotificationsSendArgs, SendReply as NotificationsSendReply};
+// BL-136 — inbox IPC surface (`inbox_list` / `inbox_mark_read` /
+// `inbox_dismiss` / `inbox_stats`).
+use nexus_notifications::core_plugin::{
+    InboxIdsArgs as NotificationsInboxIdsArgs, InboxListArgs as NotificationsInboxListArgs,
+    InboxUpdatedReply as NotificationsInboxUpdatedReply, SendArgs as NotificationsSendArgs,
+    SendReply as NotificationsSendReply,
+};
+use nexus_notifications::inbox::{
+    InboxEntry as NotificationsInboxEntry, InboxStats as NotificationsInboxStats,
+};
 use nexus_notifications::Channel as NotificationsChannel;
 // BL-134 / ADR 0028 Phase 1 — `com.nexus.ai.runtime` task scheduler.
 use nexus_ai_runtime::events::AiEvent as AiRuntimeEvent;
@@ -321,6 +330,16 @@ fn emit_all_schemas_impl() {
     write_schema::<NotificationsSendArgs>("com_nexus_notifications__send", "args");
     write_schema::<NotificationsSendReply>("com_nexus_notifications__send", "reply");
     write_schema::<NotificationsChannel>("com_nexus_notifications", "channel");
+
+    // ── com.nexus.notifications inbox surface (BL-136) ────────────
+    write_schema::<NotificationsInboxListArgs>("com_nexus_notifications__inbox_list", "args");
+    write_schema::<NotificationsInboxIdsArgs>("com_nexus_notifications__inbox_ids", "args");
+    write_schema::<NotificationsInboxUpdatedReply>(
+        "com_nexus_notifications__inbox_updated",
+        "reply",
+    );
+    write_schema::<NotificationsInboxEntry>("com_nexus_notifications__inbox", "entry");
+    write_schema::<NotificationsInboxStats>("com_nexus_notifications__inbox", "stats");
 
     // ── com.nexus.ai.runtime (BL-134 Phase 1, ADR 0028) ─────────────────
     // Task scheduler + typed AiEvent envelope. Phase 1 wires submit /
