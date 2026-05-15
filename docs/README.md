@@ -18,6 +18,8 @@ or the Tauri bridge.
 | [`architecture/leaf-architecture.md`](architecture/leaf-architecture.md) | Shell pane/leaf chrome-vs-content separation |
 | [`architecture/editor-transaction-architecture.md`](architecture/editor-transaction-architecture.md) | Edit-flow model from shell → kernel → storage |
 | [`architecture/ipc-schemas.md`](architecture/ipc-schemas.md) | IPC drift-check policy; generated dirs are the listing |
+| [`architecture/runtime-ownership.md`](architecture/runtime-ownership.md) | Catalogue of every tokio runtime / spawn site; rule of thumb for new spawns |
+| [`generated/capabilities.md`](generated/capabilities.md) | Auto-generated capability inventory (live mirror of `Capability::ALL`) |
 | [`architecture/legacy-shell-retirement.md`](architecture/legacy-shell-retirement.md) | Why `app/` and `crates/nexus-app` are gone (v0.4.0) |
 | [`adr/README.md`](adr/README.md) | ADR conventions; jump from there to the numbered ADRs |
 | [`PRDs/IMPLEMENTATION_STATUS.md`](PRDs/IMPLEMENTATION_STATUS.md) | What's shipped, in-progress, blocked — the live state doc |

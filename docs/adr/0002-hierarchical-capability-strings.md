@@ -99,3 +99,18 @@ references it via `policy = "<name>"`.
 [`SharedPluginLoader`] are the canonical Rust-side registration API
 the matrix loader uses; they should not be called directly from any
 new bootstrap code. New entries go in the TOML file.
+
+## Addendum 2026-05-15 — BL-137 capability inventory auto-generation
+
+The hand-maintained table above (2026-04-16 snapshot) and ADR 0022's
+"Inventory" table have been the canonical-by-convention listings, but
+they drift the moment a `Capability` variant is added. BL-137 closes the
+loop: [`docs/generated/capabilities.md`](../generated/capabilities.md)
+is emitted from `nexus_kernel::Capability::ALL` +
+`nexus_security::risk::risk_level` at test time, and
+`scripts/check_ipc_drift.sh` `git diff`s the file so an unrun generator
+fails CI the same way an unregenerated TS binding does.
+
+The original ADR table is preserved per the immutable-body convention;
+treat the generated file as the live mirror going forward. The table
+emitter lives in `crates/nexus-security/tests/capability_inventory_emit.rs`.
