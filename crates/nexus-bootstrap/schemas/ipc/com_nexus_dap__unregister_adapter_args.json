@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapUnregisterAdapterArgs",
+  "description": "Args for `unregister_adapter` (handler `21`).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Adapter `name` to remove.",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Reverse-DNS id of the plugin claiming to own the entry. Must\nmatch the plugin recorded at register time, otherwise the host\nrefuses with `status = \"not_owned_by_plugin\"`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "plugin_id"
+  ]
+}

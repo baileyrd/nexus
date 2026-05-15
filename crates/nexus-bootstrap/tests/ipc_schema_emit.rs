@@ -77,9 +77,10 @@ use nexus_lsp::ipc::{
 // `serde_json::json!` like nexus-lsp.
 use nexus_dap::ipc::{
     DapAdapterArgs, DapAdapterEntry, DapAttachArgs, DapEvaluateArgs, DapFunctionBreakpoint,
-    DapLaunchArgs, DapOk, DapScopesArgs, DapSetBreakpointsArgs, DapSetExceptionBreakpointsArgs,
-    DapSetFunctionBreakpointsArgs, DapSourceBreakpoint, DapStackTraceArgs, DapThreadArgs,
-    DapVariablesArgs,
+    DapLaunchArgs, DapOk, DapRegisterAdapterArgs, DapRegisterAdapterReply, DapScopesArgs,
+    DapSetBreakpointsArgs, DapSetExceptionBreakpointsArgs, DapSetFunctionBreakpointsArgs,
+    DapSourceBreakpoint, DapStackTraceArgs, DapThreadArgs, DapUnregisterAdapterArgs,
+    DapUnregisterAdapterReply, DapVariablesArgs,
 };
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
 use nexus_agent::transcript_search::{SearchArgs as TranscriptSearchArgs, TranscriptHit};
@@ -385,6 +386,11 @@ fn emit_all_schemas_impl() {
     write_schema::<DapVariablesArgs>("com_nexus_dap__variables", "args");
     write_schema::<DapEvaluateArgs>("com_nexus_dap__evaluate", "args");
     write_schema::<DapOk>("com_nexus_dap", "ok");
+    // BL-113 Phase 1b — plugin contribution registration verbs.
+    write_schema::<DapRegisterAdapterArgs>("com_nexus_dap__register_adapter", "args");
+    write_schema::<DapRegisterAdapterReply>("com_nexus_dap__register_adapter", "reply");
+    write_schema::<DapUnregisterAdapterArgs>("com_nexus_dap__unregister_adapter", "args");
+    write_schema::<DapUnregisterAdapterReply>("com_nexus_dap__unregister_adapter", "reply");
 
     // ── com.nexus.agent (P1-3 #113) ──────────────────────────────────────
     write_schema::<GoalArgs>("com_nexus_agent__plan", "args");

@@ -27,6 +27,8 @@
 //! | 17 | `scopes` | scopes for a frame |
 //! | 18 | `variables` | resolve a `variablesReference` |
 //! | 19 | `evaluate` | REPL / watch evaluation |
+//! | 20 | `register_adapter` | BL-113 plugin-contributed adapter add |
+//! | 21 | `unregister_adapter` | BL-113 plugin-contributed adapter remove |
 //!
 //! # Bus events
 //!
@@ -37,13 +39,14 @@
 //! event names pass through unchanged.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::{json, Value};
 
 use crate::client::{DapClient, DapClientError, SourceBreakpointSpec};
+use crate::config::{DapAdapterSpec, MergeSkipReason, UnregisterError};
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{DapConfigError, DapHostConfig};
 
@@ -69,6 +72,8 @@ pub const HANDLER_STACK_TRACE: u32 = 16;
 pub const HANDLER_SCOPES: u32 = 17;
 pub const HANDLER_VARIABLES: u32 = 18;
 pub const HANDLER_EVALUATE: u32 = 19;
+pub const HANDLER_REGISTER_ADAPTER: u32 = 20;
+pub const HANDLER_UNREGISTER_ADAPTER: u32 = 21;
 
 /// Async IPC verbs require `dispatch_async`. Listed once so the sync
 /// `dispatch` arm can route them with a clear error.
@@ -94,10 +99,18 @@ const ASYNC_HANDLERS: &[u32] = &[
 ];
 
 /// Core plugin that manages connections to DAP adapters.
+///
+/// The active adapter set lives behind a [`RwLock`] so the
+/// BL-113 `register_adapter` / `unregister_adapter` IPC verbs can
+/// mutate it at runtime after a plugin activates / deactivates.
+/// Async dispatch handlers snapshot the config at dispatch time
+/// (see [`snapshot_config`]) so an in-flight command keeps the
+/// adapter view it started with even if the master config mutates
+/// underneath.
 pub struct DapCorePlugin {
     forge_root: PathBuf,
     event_bus: Option<Arc<EventBus>>,
-    config: Option<Arc<DapHostConfig>>,
+    config: Arc<RwLock<DapHostConfig>>,
     pool: Arc<ConnectionPool>,
 }
 
@@ -109,23 +122,155 @@ impl DapCorePlugin {
         Self {
             forge_root,
             event_bus,
-            config: None,
+            config: Arc::new(RwLock::new(DapHostConfig::default())),
             pool,
         }
     }
 }
 
+/// Snapshot the host config behind an `Arc<RwLock>` into a fresh
+/// `Arc<DapHostConfig>` so async dispatch keeps its existing
+/// pass-by-Arc helper signatures unchanged.
+fn snapshot_config(cell: &Arc<RwLock<DapHostConfig>>) -> Arc<DapHostConfig> {
+    Arc::new(
+        cell.read()
+            .expect("DapHostConfig RwLock poisoned")
+            .clone(),
+    )
+}
+
+/// BL-113 Phase 1b — sync IPC handler for `register_adapter`.
+///
+/// Parses `args` into a [`DapAdapterSpec`] + `plugin_id`, takes the
+/// host config's write lock, delegates the merge to
+/// [`DapHostConfig::register_contributed`], and returns a
+/// `{ok, status}` envelope. Validation errors are surfaced as a
+/// "skip" status (not a `PluginError`) so the caller can decide
+/// whether to log + continue or escalate.
+fn handle_register_adapter(
+    config: &Arc<RwLock<DapHostConfig>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let spec = parse_register_adapter_spec(args)?;
+    let plugin_id = parse_string_field(args, "plugin_id")?;
+    let mut cfg = config
+        .write()
+        .expect("DapHostConfig RwLock poisoned");
+    let status = match cfg.register_contributed(spec, plugin_id) {
+        Ok(()) => ("ok", true),
+        Err(MergeSkipReason::TomlOverride) => ("toml_override", false),
+        Err(MergeSkipReason::InvalidName) => ("invalid_name", false),
+        Err(MergeSkipReason::InvalidCommand) => ("invalid_command", false),
+    };
+    Ok(json!({ "ok": status.1, "status": status.0 }))
+}
+
+/// BL-113 Phase 1b — sync IPC handler for `unregister_adapter`.
+///
+/// Parses `name` + `plugin_id` out of `args` and delegates to
+/// [`DapHostConfig::unregister_contributed`]. Authorisation is
+/// enforced inside the config method (the `plugin_id` must match the
+/// contributing plugin recorded at register time). On
+/// `NotOwnedByPlugin` the reply carries `actual_owner` so the caller
+/// can log who actually contributed the entry.
+fn handle_unregister_adapter(
+    config: &Arc<RwLock<DapHostConfig>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let name = parse_string_field(args, "name")?;
+    let plugin_id = parse_string_field(args, "plugin_id")?;
+    let mut cfg = config
+        .write()
+        .expect("DapHostConfig RwLock poisoned");
+    match cfg.unregister_contributed(&name, &plugin_id) {
+        Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
+        Err(UnregisterError::NotFound) => {
+            Ok(json!({ "ok": false, "status": "not_found" }))
+        }
+        Err(UnregisterError::TomlEntry) => {
+            Ok(json!({ "ok": false, "status": "toml_entry" }))
+        }
+        Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
+            "ok": false,
+            "status": "not_owned_by_plugin",
+            "actual_owner": actual_owner,
+        })),
+    }
+}
+
+fn parse_string_field(args: &Value, key: &str) -> Result<String, PluginError> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("missing or empty required field `{key}`"),
+        })
+}
+
+fn parse_register_adapter_spec(args: &Value) -> Result<DapAdapterSpec, PluginError> {
+    let name = parse_string_field(args, "name")?;
+    let command = parse_string_field(args, "command")?;
+    let parse_args_list = args
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let file_types = args
+        .get("file_types")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let adapter_type = args
+        .get("adapter_type")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let disabled = args
+        .get("disabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let env = args
+        .get("env")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(DapAdapterSpec {
+        name,
+        command,
+        args: parse_args_list,
+        adapter_type,
+        file_types,
+        disabled,
+        env,
+    })
+}
+
 impl CorePlugin for DapCorePlugin {
     fn on_init(&mut self) -> Result<(), PluginError> {
         let toml_path = self.forge_root.join(".forge").join("dap.toml");
-        match DapHostConfig::read_from(&toml_path) {
+        let loaded = match DapHostConfig::read_from(&toml_path) {
             Ok(cfg) => {
                 tracing::info!(
                     plugin_id = PLUGIN_ID,
                     adapters = cfg.adapters.len(),
                     "loaded dap.toml"
                 );
-                self.config = Some(Arc::new(cfg));
+                cfg
             }
             Err(DapConfigError::Io { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
@@ -134,7 +279,7 @@ impl CorePlugin for DapCorePlugin {
                     plugin_id = PLUGIN_ID,
                     "no dap.toml found — DAP host has no adapters configured"
                 );
-                self.config = Some(Arc::new(DapHostConfig::default()));
+                DapHostConfig::default()
             }
             Err(e) => {
                 tracing::warn!(
@@ -142,14 +287,23 @@ impl CorePlugin for DapCorePlugin {
                     error = %e,
                     "failed to parse dap.toml — DAP host disabled"
                 );
-                self.config = Some(Arc::new(DapHostConfig::default()));
+                DapHostConfig::default()
             }
-        }
+        };
+        *self
+            .config
+            .write()
+            .expect("DapHostConfig RwLock poisoned") = loaded;
         Ok(())
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let adapter_count = self.config.as_ref().map_or(0, |c| c.adapters.len());
+        let adapter_count = self
+            .config
+            .read()
+            .expect("DapHostConfig RwLock poisoned")
+            .adapters
+            .len();
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
                 PLUGIN_ID,
@@ -200,7 +354,7 @@ impl CorePlugin for DapCorePlugin {
     fn dispatch(
         &mut self,
         handler_id: u32,
-        _args: &Value,
+        args: &Value,
     ) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_ADAPTERS => {
@@ -210,28 +364,29 @@ impl CorePlugin for DapCorePlugin {
                 // async handler (we route both ids through
                 // `dispatch_async` below; this sync arm is the
                 // fallback for the rare invoker that bypasses async).
-                let arr = self
+                let cfg = self
                     .config
-                    .as_ref()
-                    .map(|cfg| {
-                        cfg.adapters
-                            .values()
-                            .map(|spec| {
-                                json!({
-                                    "name": spec.name,
-                                    "command": spec.command,
-                                    "args": spec.args,
-                                    "adapter_type": spec.adapter_type,
-                                    "file_types": spec.file_types,
-                                    "disabled": spec.disabled,
-                                    "connected": false,
-                                })
-                            })
-                            .collect::<Vec<_>>()
+                    .read()
+                    .expect("DapHostConfig RwLock poisoned");
+                let arr: Vec<Value> = cfg
+                    .adapters
+                    .values()
+                    .map(|spec| {
+                        json!({
+                            "name": spec.name,
+                            "command": spec.command,
+                            "args": spec.args,
+                            "adapter_type": spec.adapter_type,
+                            "file_types": spec.file_types,
+                            "disabled": spec.disabled,
+                            "connected": false,
+                        })
                     })
-                    .unwrap_or_default();
+                    .collect();
                 Ok(Value::Array(arr))
             }
+            HANDLER_REGISTER_ADAPTER => handle_register_adapter(&self.config, args),
+            HANDLER_UNREGISTER_ADAPTER => handle_unregister_adapter(&self.config, args),
             id if ASYNC_HANDLERS.contains(&id) => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("handler_id {id} requires dispatch_async"),
@@ -250,7 +405,12 @@ impl CorePlugin for DapCorePlugin {
         args: &Value,
     ) -> Option<CorePluginFuture> {
         let pool = Arc::clone(&self.pool);
-        let config = self.config.clone();
+        // BL-113 Phase 1b — async dispatchers consume an immutable
+        // snapshot of the host config taken at dispatch time. A
+        // concurrent `register_adapter` / `unregister_adapter` mutates
+        // the master config but won't affect this in-flight command's
+        // adapter view (the snapshot is per-future, not shared).
+        let config = Some(snapshot_config(&self.config));
         let bus = self.event_bus.clone();
 
         match handler_id {
@@ -727,16 +887,18 @@ mod tests {
             HANDLER_SCOPES,
             HANDLER_VARIABLES,
             HANDLER_EVALUATE,
+            HANDLER_REGISTER_ADAPTER,
+            HANDLER_UNREGISTER_ADAPTER,
         ];
         // Unique
         let mut sorted = ids.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), ids.len(), "duplicate handler id");
-        // Contiguous 1..=19
+        // Contiguous 1..=21
         assert_eq!(*sorted.first().unwrap(), 1);
-        assert_eq!(*sorted.last().unwrap(), 19);
-        assert_eq!(sorted.len(), 19);
+        assert_eq!(*sorted.last().unwrap(), 21);
+        assert_eq!(sorted.len(), 21);
     }
 
     #[test]
@@ -745,7 +907,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
         let mut plugin = make_plugin(dir.path());
         assert!(plugin.on_init().is_ok());
-        assert!(plugin.config.as_ref().unwrap().adapters.is_empty());
+        assert!(plugin.config.read().unwrap().adapters.is_empty());
     }
 
     #[test]
@@ -765,7 +927,7 @@ file_types = ["rs"]
         .unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        let cfg = plugin.config.as_ref().unwrap();
+        let cfg = plugin.config.read().unwrap();
         assert!(cfg.adapters.contains_key("rust"));
     }
 
@@ -777,7 +939,7 @@ file_types = ["rs"]
         std::fs::write(forge_dir.join("dap.toml"), "not valid toml = = =").unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        assert!(plugin.config.as_ref().unwrap().adapters.is_empty());
+        assert!(plugin.config.read().unwrap().adapters.is_empty());
     }
 
     #[test]
@@ -919,13 +1081,204 @@ disabled = true
 
     #[test]
     fn async_async_handlers_set_covers_every_non_list_id() {
-        // Sanity check: every handler except LIST_ADAPTERS must be in
-        // the async set. Helps the sync dispatch arm route correctly.
+        // Sanity check: every handler except LIST_ADAPTERS,
+        // REGISTER_ADAPTER, and UNREGISTER_ADAPTER must be in the
+        // async set. Helps the sync dispatch arm route correctly.
         for id in 2u32..=19u32 {
             assert!(
                 ASYNC_HANDLERS.contains(&id),
                 "handler {id} missing from ASYNC_HANDLERS"
             );
         }
+        // The BL-113 verbs are sync — they mutate the config map under
+        // a write lock; no async pool interaction needed.
+        assert!(!ASYNC_HANDLERS.contains(&HANDLER_REGISTER_ADAPTER));
+        assert!(!ASYNC_HANDLERS.contains(&HANDLER_UNREGISTER_ADAPTER));
+    }
+
+    // ── BL-113 Phase 1b — register_adapter / unregister_adapter IPC ────────────
+
+    fn register_args(name: &str, command: &str, plugin_id: &str) -> Value {
+        json!({
+            "name": name,
+            "command": command,
+            "args": [],
+            "file_types": ["rs"],
+            "disabled": false,
+            "env": {},
+            "plugin_id": plugin_id,
+        })
+    }
+
+    #[test]
+    fn register_adapter_ipc_inserts_and_reports_ok() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_ADAPTER,
+                &register_args("rust", "codelldb", "community.rust"),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(true));
+        assert_eq!(reply["status"], json!("ok"));
+        let cfg = plugin.config.read().unwrap();
+        assert!(cfg.adapters.contains_key("rust"));
+        assert_eq!(cfg.contributed_by["rust"], "community.rust");
+    }
+
+    #[test]
+    fn register_adapter_ipc_rejects_collision_with_toml() {
+        let dir = tempdir().unwrap();
+        let forge_dir = dir.path().join(".forge");
+        std::fs::create_dir_all(&forge_dir).unwrap();
+        std::fs::write(
+            forge_dir.join("dap.toml"),
+            r#"
+[[adapters]]
+name = "rust"
+command = "codelldb-from-toml"
+"#,
+        )
+        .unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_ADAPTER,
+                &register_args("rust", "codelldb-from-plugin", "community.rust"),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(false));
+        assert_eq!(reply["status"], json!("toml_override"));
+        // TOML entry untouched.
+        let cfg = plugin.config.read().unwrap();
+        assert_eq!(cfg.adapters["rust"].command, "codelldb-from-toml");
+        assert!(!cfg.contributed_by.contains_key("rust"));
+    }
+
+    #[test]
+    fn register_adapter_ipc_rejects_missing_fields() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        // Missing `command`.
+        let err = plugin
+            .dispatch(
+                HANDLER_REGISTER_ADAPTER,
+                &json!({
+                    "name": "rust",
+                    "plugin_id": "community.rust",
+                }),
+            )
+            .unwrap_err();
+        let PluginError::ExecutionFailed { reason, .. } = err else {
+            panic!("expected ExecutionFailed");
+        };
+        assert!(reason.contains("command"), "reason was: {reason}");
+    }
+
+    #[test]
+    fn unregister_adapter_ipc_round_trip_with_owner_match() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_ADAPTER,
+                &register_args("rust", "codelldb", "community.rust"),
+            )
+            .unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_ADAPTER,
+                &json!({ "name": "rust", "plugin_id": "community.rust" }),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(true));
+        assert_eq!(reply["status"], json!("ok"));
+        assert!(plugin.config.read().unwrap().adapters.is_empty());
+    }
+
+    #[test]
+    fn unregister_adapter_ipc_surfaces_each_skip_reason() {
+        let dir = tempdir().unwrap();
+        let forge_dir = dir.path().join(".forge");
+        std::fs::create_dir_all(&forge_dir).unwrap();
+        std::fs::write(
+            forge_dir.join("dap.toml"),
+            r#"
+[[adapters]]
+name = "toml-pinned"
+command = "x"
+"#,
+        )
+        .unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_ADAPTER,
+                &register_args("contrib", "x", "plugin.owner"),
+            )
+            .unwrap();
+
+        // not_found
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_ADAPTER,
+                &json!({ "name": "ghost", "plugin_id": "anyone" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("not_found"));
+
+        // toml_entry
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_ADAPTER,
+                &json!({ "name": "toml-pinned", "plugin_id": "anyone" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("toml_entry"));
+
+        // not_owned_by_plugin (includes actual_owner)
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_ADAPTER,
+                &json!({ "name": "contrib", "plugin_id": "plugin.intruder" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("not_owned_by_plugin"));
+        assert_eq!(reply["actual_owner"], json!("plugin.owner"));
+
+        // Original entries untouched after failed unregister attempts.
+        let cfg = plugin.config.read().unwrap();
+        assert!(cfg.adapters.contains_key("toml-pinned"));
+        assert!(cfg.adapters.contains_key("contrib"));
+    }
+
+    #[test]
+    fn async_dispatch_snapshot_sees_register_at_dispatch_time() {
+        // A snapshot taken from the RwLock reflects the state at the
+        // moment of the read; a later register doesn't retroactively
+        // appear in the snapshot.
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let snap_before = snapshot_config(&plugin.config);
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_ADAPTER,
+                &register_args("rust", "codelldb", "community.rust"),
+            )
+            .unwrap();
+        let snap_after = snapshot_config(&plugin.config);
+        assert!(snap_before.adapters.is_empty());
+        assert!(snap_after.adapters.contains_key("rust"));
     }
 }

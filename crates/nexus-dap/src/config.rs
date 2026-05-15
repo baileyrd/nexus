@@ -89,11 +89,27 @@ pub struct DapAdapterSpec {
     pub env: HashMap<String, String>,
 }
 
-/// Parsed `dap.toml`.
+/// Parsed `dap.toml` plus runtime-merged plugin contributions.
+///
+/// TOML-loaded entries and plugin-contributed entries share the
+/// [`adapters`] map; the [`contributed_by`] map distinguishes them
+/// for unregister authorisation. See BL-113 / ADR 0027.
+///
+/// [`adapters`]: Self::adapters
+/// [`contributed_by`]: Self::contributed_by
 #[derive(Debug, Clone, Default)]
 pub struct DapHostConfig {
     /// Adapters keyed by [`DapAdapterSpec::name`] for O(1) lookup.
     pub adapters: HashMap<String, DapAdapterSpec>,
+    /// BL-113 Phase 1b — maps adapter `name` to the contributing plugin's
+    /// reverse-DNS id for adapters that came through
+    /// [`merge_contributed`] / [`register_contributed`]. TOML-loaded
+    /// entries do not appear here, so the host can refuse a plugin's
+    /// `unregister_adapter` against a TOML-pinned name.
+    ///
+    /// [`merge_contributed`]: Self::merge_contributed
+    /// [`register_contributed`]: Self::register_contributed
+    pub contributed_by: HashMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -140,7 +156,10 @@ impl DapHostConfig {
             }
             adapters.insert(spec.name.clone(), spec);
         }
-        Ok(Self { adapters })
+        Ok(Self {
+            adapters,
+            contributed_by: HashMap::new(),
+        })
     }
 
     /// Find the first enabled adapter that handles the extension of
@@ -177,33 +196,87 @@ impl DapHostConfig {
     ) -> Vec<MergeSkip> {
         let mut skipped = Vec::new();
         for (spec, plugin_id) in contributions {
-            if spec.name.trim().is_empty() {
+            if let Err(reason) = self.register_contributed(spec.clone(), plugin_id.clone()) {
                 skipped.push(MergeSkip {
                     name: spec.name,
                     plugin_id,
-                    reason: MergeSkipReason::InvalidName,
+                    reason,
                 });
-                continue;
             }
-            if spec.command.trim().is_empty() {
-                skipped.push(MergeSkip {
-                    name: spec.name,
-                    plugin_id,
-                    reason: MergeSkipReason::InvalidCommand,
-                });
-                continue;
-            }
-            if self.adapters.contains_key(&spec.name) {
-                skipped.push(MergeSkip {
-                    name: spec.name,
-                    plugin_id,
-                    reason: MergeSkipReason::TomlOverride,
-                });
-                continue;
-            }
-            self.adapters.insert(spec.name.clone(), spec);
         }
         skipped
+    }
+
+    /// BL-113 Phase 1b — single-spec variant of [`merge_contributed`],
+    /// the inner per-contribution rule the batch merge calls into and
+    /// the entry point the `com.nexus.dap::register_adapter` IPC verb
+    /// dispatches to at runtime.
+    ///
+    /// Validates `spec.name` / `spec.command` (same rules as
+    /// [`merge_contributed`]), refuses a name that any existing entry
+    /// already owns (TOML or plugin-contributed alike — plugins must
+    /// `unregister_adapter` before re-registering), inserts on success,
+    /// and records the contributing plugin in
+    /// [`contributed_by`](Self::contributed_by).
+    ///
+    /// # Errors
+    /// Returns a [`MergeSkipReason`] when the spec fails validation or
+    /// collides with an existing entry. On `Err`, the config is
+    /// unchanged.
+    pub fn register_contributed(
+        &mut self,
+        spec: DapAdapterSpec,
+        plugin_id: String,
+    ) -> Result<(), MergeSkipReason> {
+        if spec.name.trim().is_empty() {
+            return Err(MergeSkipReason::InvalidName);
+        }
+        if spec.command.trim().is_empty() {
+            return Err(MergeSkipReason::InvalidCommand);
+        }
+        if self.adapters.contains_key(&spec.name) {
+            return Err(MergeSkipReason::TomlOverride);
+        }
+        let name = spec.name.clone();
+        self.adapters.insert(name.clone(), spec);
+        self.contributed_by.insert(name, plugin_id);
+        Ok(())
+    }
+
+    /// BL-113 Phase 1b — remove a previously contributed adapter. The
+    /// `com.nexus.dap::unregister_adapter` IPC verb's host entry point.
+    ///
+    /// `plugin_id` must match the contributing plugin recorded in
+    /// [`contributed_by`](Self::contributed_by); this gates plugins
+    /// from unregistering adapters they don't own (including any
+    /// TOML-pinned entry, which has no `contributed_by` row).
+    ///
+    /// # Errors
+    /// Returns [`UnregisterError::NotFound`] when no adapter exists for
+    /// `name`, [`UnregisterError::TomlEntry`] when the entry is
+    /// TOML-loaded (not in `contributed_by`), and
+    /// [`UnregisterError::NotOwnedByPlugin`] when the row exists but
+    /// was contributed by a different plugin.
+    pub fn unregister_contributed(
+        &mut self,
+        name: &str,
+        plugin_id: &str,
+    ) -> Result<DapAdapterSpec, UnregisterError> {
+        match self.contributed_by.get(name) {
+            None if self.adapters.contains_key(name) => Err(UnregisterError::TomlEntry),
+            None => Err(UnregisterError::NotFound),
+            Some(owner) if owner != plugin_id => Err(UnregisterError::NotOwnedByPlugin {
+                actual_owner: owner.clone(),
+            }),
+            Some(_) => {
+                self.contributed_by.remove(name);
+                // Invariant: register_contributed inserts both maps
+                // atomically under the &mut. The NotFound fallback
+                // here is defensive — only reachable if a caller
+                // mutates the public `adapters` field directly.
+                self.adapters.remove(name).ok_or(UnregisterError::NotFound)
+            }
+        }
     }
 }
 
@@ -231,6 +304,24 @@ pub enum MergeSkipReason {
     InvalidName,
     /// `command` was empty / whitespace-only.
     InvalidCommand,
+}
+
+/// Why [`DapHostConfig::unregister_contributed`] refused. Distinguishes
+/// "this name was never registered" from "this name belongs to TOML /
+/// another plugin" so the IPC layer can surface a precise reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnregisterError {
+    /// No adapter exists under that name.
+    NotFound,
+    /// The adapter exists but came from `dap.toml`, not a plugin
+    /// contribution — plugins can't unregister TOML-pinned entries.
+    TomlEntry,
+    /// The adapter exists and was plugin-contributed, but the calling
+    /// plugin isn't the one that contributed it.
+    NotOwnedByPlugin {
+        /// Reverse-DNS id of the plugin that actually owns the entry.
+        actual_owner: String,
+    },
 }
 
 #[cfg(test)]
@@ -441,5 +532,106 @@ file_types = ["rs"]
         assert_eq!(cfg.adapters.len(), 2);
         assert!(cfg.adapters.contains_key("b"));
         assert_eq!(cfg.adapters["a"].command, "from-toml");
+    }
+
+    #[test]
+    fn merge_contributed_populates_contributed_by_for_accepted_entries() {
+        let mut cfg = DapHostConfig::default();
+        cfg.adapters.insert("toml-pinned".into(), spec("toml-pinned", "x"));
+        let skipped = cfg.merge_contributed(vec![
+            (spec("contrib-a", "x"), "plugin.a".into()),
+            (spec("contrib-b", "x"), "plugin.b".into()),
+            (spec("toml-pinned", "y"), "plugin.c".into()), // rejected
+        ]);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(cfg.contributed_by.len(), 2);
+        assert_eq!(cfg.contributed_by["contrib-a"], "plugin.a");
+        assert_eq!(cfg.contributed_by["contrib-b"], "plugin.b");
+        assert!(!cfg.contributed_by.contains_key("toml-pinned"));
+    }
+
+    // ── BL-113 Phase 1b — register_contributed / unregister_contributed ────────
+
+    #[test]
+    fn register_contributed_happy_path_inserts_and_records_provenance() {
+        let mut cfg = DapHostConfig::default();
+        assert!(cfg
+            .register_contributed(spec("rust", "codelldb"), "community.rust".into())
+            .is_ok());
+        assert_eq!(cfg.adapters["rust"].command, "codelldb");
+        assert_eq!(cfg.contributed_by["rust"], "community.rust");
+    }
+
+    #[test]
+    fn register_contributed_rejects_invalid_and_collisions() {
+        let mut cfg = DapHostConfig::default();
+        cfg.adapters.insert("taken".into(), spec("taken", "x"));
+        assert_eq!(
+            cfg.register_contributed(spec("", "ok"), "p".into())
+                .unwrap_err(),
+            MergeSkipReason::InvalidName,
+        );
+        assert_eq!(
+            cfg.register_contributed(spec("ok", "  "), "p".into())
+                .unwrap_err(),
+            MergeSkipReason::InvalidCommand,
+        );
+        assert_eq!(
+            cfg.register_contributed(spec("taken", "y"), "p".into())
+                .unwrap_err(),
+            MergeSkipReason::TomlOverride,
+        );
+        // Plugin-contributed entries also collide.
+        cfg.register_contributed(spec("contrib", "x"), "p1".into())
+            .unwrap();
+        assert_eq!(
+            cfg.register_contributed(spec("contrib", "x"), "p2".into())
+                .unwrap_err(),
+            MergeSkipReason::TomlOverride,
+        );
+        // Failed registrations leave config untouched aside from what
+        // successfully landed.
+        assert_eq!(cfg.adapters.len(), 2); // "taken" + "contrib"
+        assert_eq!(cfg.contributed_by.len(), 1);
+        assert_eq!(cfg.contributed_by["contrib"], "p1");
+    }
+
+    #[test]
+    fn unregister_contributed_removes_when_owner_matches() {
+        let mut cfg = DapHostConfig::default();
+        cfg.register_contributed(spec("rust", "codelldb"), "community.rust".into())
+            .unwrap();
+        let removed = cfg
+            .unregister_contributed("rust", "community.rust")
+            .unwrap();
+        assert_eq!(removed.command, "codelldb");
+        assert!(!cfg.adapters.contains_key("rust"));
+        assert!(!cfg.contributed_by.contains_key("rust"));
+    }
+
+    #[test]
+    fn unregister_contributed_distinguishes_not_found_toml_and_wrong_owner() {
+        let mut cfg = DapHostConfig::default();
+        cfg.adapters.insert("toml".into(), spec("toml", "x"));
+        cfg.register_contributed(spec("contrib", "x"), "plugin.owner".into())
+            .unwrap();
+        assert_eq!(
+            cfg.unregister_contributed("ghost", "anyone").unwrap_err(),
+            UnregisterError::NotFound,
+        );
+        assert_eq!(
+            cfg.unregister_contributed("toml", "anyone").unwrap_err(),
+            UnregisterError::TomlEntry,
+        );
+        match cfg.unregister_contributed("contrib", "plugin.intruder") {
+            Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => {
+                assert_eq!(actual_owner, "plugin.owner");
+            }
+            other => panic!("expected NotOwnedByPlugin, got {other:?}"),
+        }
+        // Original entries untouched.
+        assert!(cfg.adapters.contains_key("toml"));
+        assert!(cfg.adapters.contains_key("contrib"));
+        assert_eq!(cfg.contributed_by["contrib"], "plugin.owner");
     }
 }

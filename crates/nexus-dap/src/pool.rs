@@ -315,7 +315,10 @@ mod tests {
                 env: HashMap::new(),
             },
         );
-        let cfg = DapHostConfig { adapters };
+        let cfg = DapHostConfig {
+            adapters,
+            contributed_by: HashMap::new(),
+        };
         let pool = ConnectionPool::new(PoolConfig::default());
         let Err(err) = pool.get_or_connect("x", &cfg).await else {
             panic!("expected error for disabled adapter");

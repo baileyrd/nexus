@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapRegisterAdapterArgs",
+  "description": "Args for `register_adapter` (handler `20`). Mirrors a\n[`crate::config::DapAdapterSpec`] plus the contributing plugin's\nreverse-DNS id. The host crate stays protocol-only per ADR 0027 —\nshell-side fields (`display_name`, `launch_config_schema`,\n`variable_renderers`, `root_markers`) are intentionally absent.",
+  "type": "object",
+  "properties": {
+    "adapter_type": {
+      "description": "Cosmetic adapter-type hint (`\"lldb\"`, `\"node\"`, `\"python\"`, …).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "args": {
+      "description": "CLI args appended at spawn time.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Executable to spawn.",
+      "type": "string"
+    },
+    "disabled": {
+      "description": "`true` to keep the entry registered but skip spawning.",
+      "type": "boolean",
+      "default": false
+    },
+    "env": {
+      "description": "Environment merged on top of the host process's environment\nat spawn time.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "file_types": {
+      "description": "File extensions the adapter handles.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "description": "Stable adapter identifier (`DapAdapterSpec::name`).",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Reverse-DNS id of the contributing plugin; used for diagnostics\nand as the authorisation key for `unregister_adapter`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "command",
+    "plugin_id"
+  ]
+}
