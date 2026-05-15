@@ -136,6 +136,16 @@ fn snapshot_config(cell: &Arc<RwLock<LspHostConfig>>) -> Arc<LspHostConfig> {
 /// `{ok, status}` envelope. Validation errors are surfaced as a
 /// "skip" status (not a `PluginError`) so the caller can decide
 /// whether to log + continue or escalate.
+///
+/// Trust model (ADR 0027 §Open Question #3): no capability gate at
+/// the verb level. Plugins author manifest contributions; the
+/// bootstrap-side wiring helper
+/// (`nexus-bootstrap::lsp_contribution_wiring::wire_lsp_contributions`)
+/// is the only intended caller. Runtime usage capabilities
+/// (`process.spawn` for spawning the language server) ride on the
+/// contributing plugin's existing grants and are checked at the
+/// `start` boundary, not here. Hard enforcement at the verb level
+/// is filed as a hardening follow-up.
 fn handle_register_server(
     config: &Arc<RwLock<LspHostConfig>>,
     args: &Value,

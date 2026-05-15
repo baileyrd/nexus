@@ -140,6 +140,27 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
    (e.g. spawning the executable, opening the TCP socket) ride on the
    plugin's existing capability grants (`process.spawn`, `net.connect`)
    per the standard capability path.
+
+   **Verified through Phase 1b/2b/3b (2026-05-15).** The
+   `com.nexus.dap::register_adapter` / `com.nexus.lsp::register_server`
+   / `com.nexus.mcp.host::register_server` handlers shipped without a
+   capability gate at the verb level, matching this resolution.
+   Trust model: **plugins author manifest contributions; the bootstrap
+   wiring helper (`nexus-bootstrap::{dap,lsp,mcp}_contribution_wiring::
+   wire_*`) is the only caller of these verbs in tree.** A plugin with
+   `ipc.call` could today reach the verb directly — there's no kernel-
+   level caller-identity threading to refuse the call — but that path
+   bypasses the manifest pipeline (no `contributed_by` provenance, no
+   per-plugin lifecycle attribution, no marketplace install record),
+   and the resulting adapter still couldn't *spawn* anything its
+   contributing plugin didn't already hold `process.spawn` /
+   `net.connect` for, because spawn capabilities are checked at the
+   `launch` / `attach` boundary not at registration. Hard enforcement
+   ("refuse `register_adapter` unless the invoker is core") would
+   require the kernel IPC dispatch to expose caller identity to
+   handlers, which is a separate concern filed as a future hardening
+   item — flagged here so the option stays on the table without
+   blocking BL-113 closure.
 4. **Schema validation timing.** Resolved: **both sides validate,
    host-side is authoritative.** The shell renders the launch-config
    form against the JSON Schema referenced in

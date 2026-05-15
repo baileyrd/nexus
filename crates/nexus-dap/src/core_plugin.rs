@@ -147,6 +147,20 @@ fn snapshot_config(cell: &Arc<RwLock<DapHostConfig>>) -> Arc<DapHostConfig> {
 /// `{ok, status}` envelope. Validation errors are surfaced as a
 /// "skip" status (not a `PluginError`) so the caller can decide
 /// whether to log + continue or escalate.
+///
+/// **Trust model (ADR 0027 §Open Question #3, confirmed Phase 1b):**
+/// no capability gate at the verb level. Plugins author manifest
+/// contributions; the bootstrap-side wiring helper
+/// (`nexus-bootstrap::dap_contribution_wiring::wire_dap_contributions`)
+/// is the only intended caller in tree. A plugin with `ipc.call`
+/// could reach this verb directly today, but doing so bypasses the
+/// manifest pipeline (no `contributed_by` provenance via the proper
+/// lifecycle path, no marketplace install record); the resulting
+/// adapter still can't *spawn* anything its contributing plugin
+/// doesn't hold `process.spawn` for, because spawn capability is
+/// checked at the `launch` / `attach` boundary, not here. Hard
+/// enforcement at the verb level needs kernel-side caller-identity
+/// threading; filed as a hardening follow-up.
 fn handle_register_adapter(
     config: &Arc<RwLock<DapHostConfig>>,
     args: &Value,

@@ -187,6 +187,20 @@ fn required_string(
         })
 }
 
+/// BL-113 Phase 3b — sync IPC handler for `register_server` on
+/// `com.nexus.mcp.host`. Same shape as the DAP / LSP register
+/// handlers, adapted for MCP's `BTreeMap<name, McpServerSpec>` keying
+/// and per-transport validator.
+///
+/// Trust model (ADR 0027 §Open Question #3): no capability gate at
+/// the verb level. Plugins author manifest contributions; the
+/// bootstrap-side wiring helper
+/// (`nexus-bootstrap::mcp_contribution_wiring::wire_mcp_contributions`)
+/// is the only intended caller. Runtime capabilities for MCP server
+/// operation (`process.spawn` for stdio transport, `net.connect` for
+/// http/websocket) ride on the contributing plugin's existing grants
+/// and are checked at the `connect` boundary, not here. Hard
+/// enforcement at the verb level is filed as a hardening follow-up.
 fn handle_register_server(
     config: &Arc<RwLock<McpHostConfig>>,
     args: &serde_json::Value,

@@ -235,7 +235,19 @@ Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML c
 - `nexus-lsp` migrates next; `lsp.toml` keeps working
 - `nexus-mcp.host` migrates last; `mcp.toml` keeps working
 - Future `nexus-acp` crate (Hermes Feature 7) consumes the contribution loader as its only adapter source — no `acp.toml` to migrate from
-- Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path)
+- Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path) — **Resolved**: no new capability at the verb level; the contribution path is the manifest-declared shape and the bootstrap wiring helper is the only intended caller. Runtime usage capabilities (`process.spawn`, `net.connect`) ride on the contributing plugin's existing grants and are checked at the `launch` / `connect` boundary. See ADR 0027 §Open Question #3 ("Verified through Phase 1b/2b/3b" close-out, 2026-05-15). Hard enforcement at the verb level would need kernel-side caller-identity threading; filed as the hardening follow-up below.
+
+---
+
+### Follow-up: kernel-side caller-identity threading for register_adapter verb hardening (from BL-113)
+
+**Source**: BL-113 capability-surface resolution (ADR 0027 §Open Question #3). Filed 2026-05-15.
+**Effort**: Medium. Touches the kernel IPC dispatcher + every handler signature.
+**Crates**: `nexus-kernel`, every service crate that registers a handler.
+
+ADR 0027 resolves the capability question by treating contribution wiring as a declarative manifest pipeline (no verb-level gate). The trust model is **"plugins author manifests; bootstrap calls IPC."** Today there's no kernel-side enforcement preventing a plugin with `ipc.call` from invoking `com.nexus.dap::register_adapter` (or LSP / MCP equivalents) directly — bypassing the contribution pipeline. That can't escalate spawn privileges (those are checked at `launch` / `attach` / `connect`), but it does corrupt `contributed_by` provenance and skip marketplace install records.
+
+Hardening: thread the calling plugin's id through `IpcDispatch::call(...)` into the handler. Handlers that want it (`register_adapter`, `register_server`) can then refuse the call when the caller isn't the trusted bootstrap context. Touches every handler signature in tree — defer until the corruption becomes a real problem or until another concern (audit logs, per-caller rate limits) wants the same plumbing.
 
 ---
 
