@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeSubmitReply",
+  "description": "Reply from `submit`. The caller subscribes to\n`com.nexus.ai.runtime.*` (filtered by `task_id`) for live updates,\nor polls `events`/`get`.",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "description": "Server-allocated task id.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "task_id"
+  ]
+}

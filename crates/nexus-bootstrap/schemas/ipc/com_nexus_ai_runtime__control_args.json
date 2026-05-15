@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeControlArgs",
+  "description": "`cancel` / `pause` / `resume` arg envelope. Phase 1 ships only the\nshapes; Phase 5 wires the actual control plane.",
+  "type": "object",
+  "properties": {
+    "reason": {
+      "description": "Optional human-readable reason — captured in the corresponding\n`Cancelled` / `Paused` event for audit traceability.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "task_id": {
+      "description": "Target task id.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "task_id"
+  ]
+}

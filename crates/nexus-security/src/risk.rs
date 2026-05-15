@@ -97,6 +97,17 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // ui.notify (user-visible side effect, no exfiltration).
         Capability::AudioRecord => RiskLevel::High,
         Capability::AudioSynthesize => RiskLevel::Low,
+
+        // BL-134 / ADR 0028 ai-runtime caps. submit consumes worker
+        // pool capacity and can fan out into capability-gated AI
+        // calls (the runtime impersonates the caller's caps so it
+        // can't escalate, but a budget exhaustion attack is in
+        // scope) — Medium by analogy with ai.chat. control gates
+        // cancel/pause/resume on someone else's run; same blast
+        // radius — Medium. observe is read-only over typed run
+        // state — Low by analogy with ai.session.read.
+        Capability::AiRuntimeSubmit | Capability::AiRuntimeControl => RiskLevel::Medium,
+        Capability::AiRuntimeObserve => RiskLevel::Low,
     }
 }
 

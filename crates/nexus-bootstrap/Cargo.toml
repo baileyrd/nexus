@@ -14,6 +14,7 @@ description = "Nexus runtime bootstrap: assembles kernel, plugin loader, and cor
 ts-export = [
     "nexus-storage/ts-export",
     "nexus-ai/ts-export",
+    "nexus-ai-runtime/ts-export",
     "nexus-linkpreview/ts-export",
     "nexus-notifications/ts-export",
     "nexus-git/ts-export",
@@ -43,6 +44,7 @@ nexus-security = { path = "../nexus-security" }
 nexus-storage = { path = "../nexus-storage" }
 nexus-database = { path = "../nexus-database" }
 nexus-ai = { path = "../nexus-ai" }
+nexus-ai-runtime = { path = "../nexus-ai-runtime" }
 nexus-editor = { path = "../nexus-editor" }
 nexus-crdt = { path = "../nexus-crdt" }
 nexus-terminal = { path = "../nexus-terminal" }

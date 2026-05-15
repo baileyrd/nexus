@@ -327,6 +327,42 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         vec![Capability::AudioSynthesize],
     );
 
+    // BL-134 Phase 1 — `com.nexus.ai.runtime` cap matrix per ADR
+    // 0028 §"Capability gates". `submit` consumes worker capacity;
+    // `cancel`/`pause`/`resume` mutate someone else's run;
+    // `get`/`list`/`events`/`pool_stats` are read-only over typed
+    // run state. Reserved Phase-5 handlers carry the `Control` cap
+    // even though the handlers themselves return a "Phase 5 not
+    // wired" error today — pinning the gate now means flipping the
+    // implementation later doesn't open a privilege gap.
+    shared.add_cap_requirement(
+        "com.nexus.ai.runtime",
+        "submit",
+        vec![Capability::AiRuntimeSubmit],
+    );
+    shared.add_cap_requirement(
+        "com.nexus.ai.runtime",
+        "cancel",
+        vec![Capability::AiRuntimeControl],
+    );
+    shared.add_cap_requirement(
+        "com.nexus.ai.runtime",
+        "pause",
+        vec![Capability::AiRuntimeControl],
+    );
+    shared.add_cap_requirement(
+        "com.nexus.ai.runtime",
+        "resume",
+        vec![Capability::AiRuntimeControl],
+    );
+    for cmd in ["get", "list", "events", "pool_stats"] {
+        shared.add_cap_requirement(
+            "com.nexus.ai.runtime",
+            cmd,
+            vec![Capability::AiRuntimeObserve],
+        );
+    }
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
@@ -440,6 +476,26 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         .wire_context("com.nexus.audio", Arc::new(audio_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire audio plugin context: {e}"))?;
 
+    // BL-134 Phase 1 — ai-runtime needs its own context so the
+    // worker pool can `ctx.ipc_call("com.nexus.agent","session_run",
+    // ..)` and `ctx.publish(...)` typed `AiEvent`s onto the bus.
+    // Caps mirror `agent_capabilities()` (which is the underlying
+    // call shape) plus the ai-runtime caps so the runtime can
+    // recursively submit child tasks under Phase-2 delegate.
+    let ai_runtime_ctx = KernelPluginContext::new(
+        nexus_ai_runtime::PLUGIN_ID,
+        env!("CARGO_PKG_VERSION"),
+        ai_runtime_capabilities(),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.ai.runtime")?;
+    shared
+        .wire_context(nexus_ai_runtime::PLUGIN_ID, Arc::new(ai_runtime_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire ai-runtime plugin context: {e}"))?;
+
     let context = KernelPluginContext::new(
         invoker_id,
         env!("CARGO_PKG_VERSION"),
@@ -526,6 +582,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
+    use nexus_ai_runtime::core_plugin::AiRuntimeCorePlugin;
     use nexus_audio::AudioCorePlugin;
     use nexus_comments::core_plugin::CommentsCorePlugin;
     use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
@@ -1369,6 +1426,35 @@ fn register_core_plugins(
         )
         .or_lifecycle_skip(event_bus, "com.nexus.notifications")?;
 
+    // BL-134 / ADR 0028 Phase 1 — `com.nexus.ai.runtime` task
+    // scheduler + worker pool. Registered after notifications so
+    // any republished `AiEvent::Failed` can route through the
+    // notifications subsystem once Phase 6 wires the router.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.ai.runtime",
+                "AiRuntime",
+                LifecycleFlags::NONE,
+                &with_v1_aliases(&[
+                    ("submit", nexus_ai_runtime::core_plugin::HANDLER_SUBMIT),
+                    ("cancel", nexus_ai_runtime::core_plugin::HANDLER_CANCEL),
+                    ("pause", nexus_ai_runtime::core_plugin::HANDLER_PAUSE),
+                    ("resume", nexus_ai_runtime::core_plugin::HANDLER_RESUME),
+                    ("get", nexus_ai_runtime::core_plugin::HANDLER_GET),
+                    ("list", nexus_ai_runtime::core_plugin::HANDLER_LIST),
+                    ("events", nexus_ai_runtime::core_plugin::HANDLER_EVENTS),
+                    (
+                        "pool_stats",
+                        nexus_ai_runtime::core_plugin::HANDLER_POOL_STATS,
+                    ),
+                ]),
+            ),
+            forge_root,
+            Box::new(AiRuntimeCorePlugin::new()),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.ai.runtime")?;
+
     // Audio — BL-117 STT + TTS subsystem. on_init loads the
     // `<forge>/.forge/config.toml::[audio]` block and builds the
     // configured backend pair (local / provider / platform). The
@@ -2063,6 +2149,30 @@ pub fn audio_capabilities() -> CapabilitySet {
     [Capability::IpcCall, Capability::NetHttp]
         .into_iter()
         .collect()
+}
+
+/// Capabilities granted to the `com.nexus.ai.runtime` plugin context
+/// (BL-134 Phase 1). The runtime worker pool dispatches into the
+/// agent (`session_run`) and republishes typed events on the kernel
+/// bus.
+///
+/// - `IpcCall` to reach `com.nexus.agent::session_run` (and Phase 2+
+///   `com.nexus.ai::stream_chat` for `AgentTaskKind::AiStream`).
+/// - `AiChat` because `session_run` is gated on it (per ADR 0022 /
+///   ADR 0024). The runtime impersonates the caller's caps when it
+///   issues these IPC calls; per-call capability snapshotting lands
+///   in Phase 2 alongside `delegate`.
+/// - `EventsPublish` so `record_and_publish` can emit
+///   `com.nexus.ai.runtime.*` topics.
+#[must_use]
+pub fn ai_runtime_capabilities() -> CapabilitySet {
+    [
+        Capability::IpcCall,
+        Capability::AiChat,
+        Capability::EventsPublish,
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// Capabilities granted to the `com.nexus.workflow` `KernelPluginContext`

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunStatus",
+  "description": "Coarse-grained run lifecycle. Mapped from per-event transitions in\n[`scheduler::Store::record_event`]. Failed/aborted runs carry the\nerror message in their last [`events::AiEvent::Failed`].",
+  "oneOf": [
+    {
+      "description": "Submitted, not yet picked up by a worker.",
+      "type": "string",
+      "const": "queued"
+    },
+    {
+      "description": "Worker has begun executing.",
+      "type": "string",
+      "const": "running"
+    },
+    {
+      "description": "Reserved for Phase 5 — worker is suspended pending `resume`.",
+      "type": "string",
+      "const": "paused"
+    },
+    {
+      "description": "Reserved for Phase 5 — caller asked to cancel before completion.",
+      "type": "string",
+      "const": "cancelled"
+    },
+    {
+      "description": "Worker finished and the underlying call returned `Ok`.",
+      "type": "string",
+      "const": "completed"
+    },
+    {
+      "description": "Worker finished and the underlying call returned `Err`. The\n`error` string lives in the run's terminal `Failed` event.",
+      "type": "string",
+      "const": "failed"
+    }
+  ]
+}

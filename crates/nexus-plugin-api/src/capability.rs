@@ -74,6 +74,29 @@ pub enum Capability {
     /// notice a stray microphone capture. Required to invoke
     /// `com.nexus.audio::synthesize`.
     AudioSynthesize,
+    /// Submit an [`AgentTask`](https://example.invalid) to the
+    /// `com.nexus.ai.runtime` scheduler (BL-134 Phase 1, ADR 0028).
+    /// Granted to the invoker frontends (`com.nexus.cli`,
+    /// `com.nexus.tui`, `com.nexus.shell`), to `com.nexus.workflow`
+    /// for its `notify` / `ai_prompt` / `ai_decision` async-step
+    /// migration, and to `com.nexus.agent` for `delegate`-shaped
+    /// composition. Medium risk — submission consumes worker pool
+    /// capacity and can chain into capability-gated AI calls, but
+    /// the runtime impersonates the caller's caps so it cannot
+    /// escalate.
+    AiRuntimeSubmit,
+    /// Cancel / pause / resume an in-flight `AgentTask` (BL-134
+    /// Phase 5, ADR 0028). Separate from
+    /// [`Self::AiRuntimeSubmit`] so a UI panel that displays runs
+    /// without controlling them can be wired with the smaller grant.
+    /// Phase-1 callers do not need this capability — the handlers
+    /// it gates return a "Phase 5" error.
+    AiRuntimeControl,
+    /// Read AgentRun state via `get` / `list` / `events` /
+    /// `pool_stats` on `com.nexus.ai.runtime` (BL-134 Phase 1, ADR
+    /// 0028). Granted to the shell observability panel; community
+    /// plugins do not get this by default.
+    AiRuntimeObserve,
 }
 
 /// Error parsing a capability string.
@@ -113,6 +136,9 @@ impl Capability {
         Capability::AiToolsMcp,
         Capability::AudioRecord,
         Capability::AudioSynthesize,
+        Capability::AiRuntimeSubmit,
+        Capability::AiRuntimeControl,
+        Capability::AiRuntimeObserve,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -160,6 +186,9 @@ impl Capability {
             Capability::AiToolsMcp       => "ai.tools.mcp",
             Capability::AudioRecord      => "audio.record",
             Capability::AudioSynthesize  => "audio.synthesize",
+            Capability::AiRuntimeSubmit  => "ai.runtime.submit",
+            Capability::AiRuntimeControl => "ai.runtime.control",
+            Capability::AiRuntimeObserve => "ai.runtime.observe",
         }
     }
 
@@ -195,6 +224,9 @@ impl Capability {
             "ai.tools.mcp"       => Ok(Capability::AiToolsMcp),
             "audio.record"       => Ok(Capability::AudioRecord),
             "audio.synthesize"   => Ok(Capability::AudioSynthesize),
+            "ai.runtime.submit"  => Ok(Capability::AiRuntimeSubmit),
+            "ai.runtime.control" => Ok(Capability::AiRuntimeControl),
+            "ai.runtime.observe" => Ok(Capability::AiRuntimeObserve),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }

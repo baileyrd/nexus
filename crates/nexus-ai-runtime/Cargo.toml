@@ -1,0 +1,30 @@
+[package]
+name = "nexus-ai-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus unified AI/agent event loop (BL-134, ADR 0028): task scheduler, typed AiEvent channel, dedicated worker pool."
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugin-api = { path = "../nexus-plugin-api" }
+nexus-plugins = { path = "../nexus-plugins" }
+nexus-types = { path = "../nexus-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl", "serde-json-impl"] }
+schemars = { workspace = true, optional = true, features = ["chrono04", "uuid1"] }
+
+[features]
+# Emit TypeScript + JSON Schema bindings for the IPC handler types.
+# Off by default — enabled by `nexus-bootstrap`'s schema-emit binary.
+ts-export = ["dep:ts-rs", "dep:schemars"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -77,6 +77,9 @@ cargo test -p nexus-audio --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (BL-133: notifications) …"
 cargo test -p nexus-notifications --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (BL-134: ai-runtime) …"
+cargo test -p nexus-ai-runtime --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 

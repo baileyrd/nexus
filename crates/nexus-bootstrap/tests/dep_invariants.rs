@@ -38,6 +38,13 @@ const FORBIDDEN: &[(&str, &str)] = &[
     // impl is in `nexus-kv` and must be injected via `Kernel::new`.
     ("nexus-kernel", "rusqlite"),
     ("nexus-kernel", "nexus-kv"),
+    // BL-134 / ADR 0028 invariant 2 — `nexus-ai-runtime` is the new
+    // shared scheduler/observation surface; CLI/TUI/MCP must reach it
+    // through `ipc_call("com.nexus.ai.runtime", ...)` rather than
+    // linking the crate directly. Bootstrap is the sole linker.
+    ("nexus-cli", "nexus-ai-runtime"),
+    ("nexus-tui", "nexus-ai-runtime"),
+    ("nexus-mcp", "nexus-ai-runtime"),
 ];
 
 #[test]

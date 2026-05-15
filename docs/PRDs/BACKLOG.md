@@ -314,6 +314,24 @@ A scheduled background pass that keeps the entity knowledge graph (BL-128) clean
 
 **Close-out landed 2026-05-15** — the remaining three phases plus the scheduler. `com.nexus.storage::entity_merge` merges `drop` into `keep` (union aliases, longer description, max-confidence per `(target, kind)` relation, drop's id appended as an alias so dangling references still resolve, atomic rewrite + drop-file removal). The CLI's `dedup` phase now auto-merges pairs at or above `--merge-threshold` (deterministic across pair order: a single entity can't be merged into two different survivors in one cycle) and surfaces the rest above `--review-threshold` for the user. Two new AI handlers — `com.nexus.ai::enrich_entity` (RAG-augmented LLM expansion when description < `min_description_chars`, write-back via `entity_upsert`) and `com.nexus.ai::infer_entity_relations` (LLM proposes new typed relations against `entity_recall` candidates, JSON-fenced reply parsed defensively, written as `confidence: 0.5` drafts; emits `com.nexus.dream_cycle.proposals` kernel event when any proposals land for shell notification consumption). The TUI bootstrap spawns a `DreamCycleScheduler` thread that polls the config every 60 s when disabled and uses `nexus_workflow::CronSchedule` (the same parser user workflows use) to compute the next fire time when enabled. CLI run path stays available for on-demand invocation; `--phase` now accepts `dedup|decay|enrich|infer`.
 
+> **Verification 2026-05-15** — 6 of 7 DoD bullets shipped; the inference-proposals bullet's backend half landed (`com.nexus.dream_cycle.proposals` kernel event published, drafts written at `confidence: 0.5`) but no shell consumer exists yet. Filed as the follow-up below.
+
+---
+
+### Follow-up: shell subscriber for Dream Cycle relation proposals (from BL-129)
+
+**Source**: BL-129 verification 2026-05-15.
+**Effort**: Small. Shell-side plugin only; backend already publishes the event.
+**Crates**: new `shell/src/plugins/nexus/dreamCycle/`; no Rust changes.
+
+`com.nexus.ai::infer_entity_relations` already writes draft relations at `confidence: 0.5` and publishes `com.nexus.dream_cycle.proposals` on the kernel bus when any proposals land. The BL-129 DoD's "shell notification surfaces 'N new relation proposals from Dream Cycle' with an approve/skip action" needs a shell plugin that subscribes to that event and:
+
+1. Counts the proposals in the payload, surfaces a toast through `api.notifications.show` (or routes through the BL-133 `nexus.notifications` plugin) with the `N new relation proposals` text.
+2. Provides an inbox / panel listing the draft relations (entity pair, proposed kind, confidence) with per-row approve / skip actions.
+3. Approve bumps `confidence` to a configurable confirmed value (default `1.0`) via `entity_upsert`; skip removes the draft via the same handler with the relation omitted from the payload.
+
+Mirror the BL-133 shell-subscriber shape (`shell/src/plugins/nexus/notifications/index.ts`) — small plugin, default-on, registered in `shell/src/plugins/catalog.ts`.
+
 ---
 
 _BL-130 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `crates/nexus-ai/src/sanitize.rs` ships `Scanner::with_default_patterns(InjectionPolicy)` with four pattern families (role-override / invisible-unicode / hidden-HTML / data-exfiltration) and four policies (`Off` / `Warn` / `Redact` / `Reject`). `ScanResult` carries the rewritten text + per-match `Finding`s + a `rejected` flag. New `build_rag_prompt_budgeted_with_scanner` variant in `rag.rs` layers the scanner after the BL-017 redactor (so audit snippets don't carry already-stripped secrets); the legacy `build_rag_prompt_budgeted` keeps byte-for-byte BL-018 semantics for callers passing `scanner: None`. `rag::query` (called by `handle_ask`) threads `AiConfig::injection_policy` end-to-end and emits a `tracing::warn` per finding under `nexus_ai::sanitize` for operator visibility. Tool-result + MCP-output + entity-prepend wire points are documented follow-ups — the agent tool-loop and MCP host assemble strings from arbitrary handler responses with no central chokepoint today, and the entity graph (BL-128) hasn't shipped. Per-source-type config (`[ai.injection_policy] rag_chunks = "warn"`, etc.) collapsed to a single `injection_policy: InjectionPolicy` field on `AiConfig` — the per-source split adds config surface without a real use case until other wire points land. 27 new tests (24 in the sanitize module covering every pattern class + each policy + UTF-8 snippet safety; 3 in rag.rs pinning the Warn/Reject paths and `Scanner=None` byte-identity). `cargo test -p nexus-ai` 249/249; `cargo clippy -p nexus-ai --all-targets` clean._
@@ -560,6 +578,10 @@ BL-074 shipped the CRDT primitives and the in-process ops bus (`com.nexus.editor
 - `nexus collab serve` and `nexus collab join` CLI verbs documented in `nexus help collab`
 - 10 integration tests: relay message routing, presence broadcast, cursor annotation render, disconnect-reconnect op replay, auth token rejection
 ### BL-134: `nexus-ai-runtime` — unified AI/agent event loop
+
+> **Phase 1 landed 2026-05-15** on branch `bl-134-ai-runtime`. New `crates/nexus-ai-runtime/` core plugin (`com.nexus.ai.runtime`) registered after notifications in bootstrap. IPC surface: `submit` / `get` / `list` / `events` / `pool_stats` (5 of 8 handlers). `cancel` / `pause` / `resume` reserved for Phase 5 — they appear in the manifest + cap matrix but return a typed "Phase 5 not wired" error. `AgentTaskKind::Session` is the only kind wired; `AiStream` / `WorkflowAiStep` reject with a "reserved for Phase N" message at submit time. Three new capabilities (`ai.runtime.submit` / `.control` / `.observe`) added to `nexus-plugin-api::Capability` and to the per-handler cap matrix in bootstrap. Worker pool: dedicated multi-thread tokio runtime, `worker_threads = max(2, num_cpus / 2)`, started on `wire_context`. Typed `AiEvent` channel emits `Submitted` / `Started` / `Finished` / `Failed` directly from the worker; correlation back from `com.nexus.ai.stream_*` / `com.nexus.agent.round_*` is **deferred to Phase 2** (requires a session-id mapping). 24 in-crate unit tests + 5 bootstrap IPC tests + new dep-invariants row + ts-rs/schemars bindings + ipc-drift script entry.
+>
+> **Phases 2–6 still open:** Phase 2 (delegate shim + AiEvent correlation), Phase 3 (workflow `async = true`), Phase 4 (indexing-daemon migration), Phase 5 (cancel/pause/resume + `Critical` priority), Phase 6 (notification router refactor — see [BL-135](#bl-135-notification-router-refactor) which can land in parallel).
 
 **Source**: Architectural review 2026-05-14 — full design in [ADR 0028](../adr/0028-ai-agent-event-loop.md). Filed 2026-05-14.
 **Effort**: Large. 5-phase migration (~4–6 weeks); Phase 6 (notification router) lands in parallel with Phase 1.

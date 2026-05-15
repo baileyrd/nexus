@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeEventsArgs",
+  "description": "`events` arg envelope.",
+  "type": "object",
+  "properties": {
+    "since_seq": {
+      "description": "Sequence number to start after — when omitted, the full\nbounded buffer is returned.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "default": null,
+      "minimum": 0
+    },
+    "task_id": {
+      "description": "Task whose replay buffer to drain.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "task_id"
+  ]
+}

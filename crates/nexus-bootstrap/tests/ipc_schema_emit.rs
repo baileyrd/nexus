@@ -53,6 +53,13 @@ use nexus_linkpreview::LinkPreview;
 // BL-133 — multi-channel notification dispatcher.
 use nexus_notifications::core_plugin::{SendArgs as NotificationsSendArgs, SendReply as NotificationsSendReply};
 use nexus_notifications::Channel as NotificationsChannel;
+// BL-134 / ADR 0028 Phase 1 — `com.nexus.ai.runtime` task scheduler.
+use nexus_ai_runtime::events::AiEvent as AiRuntimeEvent;
+use nexus_ai_runtime::{
+    AgentRun, AgentRunSummary, AgentTaskKind, AiRuntimeControlArgs, AiRuntimeEventsArgs,
+    AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs, AiRuntimeSubmitReply, PoolStats,
+    RunStatus, TaskPriority,
+};
 // nexus-git uses a wire-mirror module — handlers emit ad-hoc
 // `serde_json::json!` and the impl types in `nexus_git::types`
 // don't even derive `Serialize`.
@@ -314,6 +321,25 @@ fn emit_all_schemas_impl() {
     write_schema::<NotificationsSendArgs>("com_nexus_notifications__send", "args");
     write_schema::<NotificationsSendReply>("com_nexus_notifications__send", "reply");
     write_schema::<NotificationsChannel>("com_nexus_notifications", "channel");
+
+    // ── com.nexus.ai.runtime (BL-134 Phase 1, ADR 0028) ─────────────────
+    // Task scheduler + typed AiEvent envelope. Phase 1 wires submit /
+    // get / list / events / pool_stats; the cancel/pause/resume IDs are
+    // reserved for Phase 5 but their args type already ships so the
+    // wire shape is locked.
+    write_schema::<AiRuntimeSubmitArgs>("com_nexus_ai_runtime__submit", "args");
+    write_schema::<AiRuntimeSubmitReply>("com_nexus_ai_runtime__submit", "reply");
+    write_schema::<AiRuntimeGetArgs>("com_nexus_ai_runtime__get", "args");
+    write_schema::<AiRuntimeListArgs>("com_nexus_ai_runtime__list", "args");
+    write_schema::<AiRuntimeEventsArgs>("com_nexus_ai_runtime__events", "args");
+    write_schema::<AiRuntimeControlArgs>("com_nexus_ai_runtime__control", "args");
+    write_schema::<AgentTaskKind>("com_nexus_ai_runtime", "task_kind");
+    write_schema::<AgentRun>("com_nexus_ai_runtime__get", "result");
+    write_schema::<AgentRunSummary>("com_nexus_ai_runtime__list", "summary");
+    write_schema::<AiRuntimeEvent>("com_nexus_ai_runtime", "event");
+    write_schema::<PoolStats>("com_nexus_ai_runtime__pool_stats", "result");
+    write_schema::<RunStatus>("com_nexus_ai_runtime", "run_status");
+    write_schema::<TaskPriority>("com_nexus_ai_runtime", "task_priority");
 
     // ── com.nexus.git (P1-3 #113) ────────────────────────────────────────
     // Wire-mirror types — impl emits ad-hoc `serde_json::json!`.

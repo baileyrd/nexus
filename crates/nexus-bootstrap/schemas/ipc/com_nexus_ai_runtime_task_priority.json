@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskPriority",
+  "description": "Priority bucket for an [`AgentTask`]. The Phase-1 scheduler treats\nevery priority equally (FIFO across the single queue); BL-134\nPhase 5 splits the pool into per-priority `JoinSet`s so `Critical`\ncan preempt a `Background` burst.",
+  "oneOf": [
+    {
+      "description": "Indexing-daemon-style work the user is not waiting on.",
+      "type": "string",
+      "const": "background"
+    },
+    {
+      "description": "Default. Interactive agent runs the user is watching.",
+      "type": "string",
+      "const": "interactive"
+    },
+    {
+      "description": "Reserved for Phase 5 — preempts other priorities.",
+      "type": "string",
+      "const": "critical"
+    }
+  ]
+}
