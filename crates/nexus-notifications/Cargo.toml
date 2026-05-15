@@ -8,15 +8,24 @@ description = "Nexus multi-channel notification dispatcher (BL-133): desktop OS 
 
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugin-api = { path = "../nexus-plugin-api" }
 nexus-plugins = { path = "../nexus-plugins" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+notify = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 reqwest = { workspace = true, features = ["blocking", "json"] }
 lettre = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
 
 [features]
 # Emit TypeScript + JSON Schema bindings for the IPC handler types.

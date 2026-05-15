@@ -82,10 +82,14 @@ pub fn run(
     Ok(())
 }
 
-/// BL-133 follow-up — dispatch `com.nexus.notifications::send` on
-/// the Desktop channel with a one-line completion summary. Best-
-/// effort: an empty response or missing fields render a sensible
-/// fallback rather than crashing.
+/// BL-133 follow-up — dispatch `com.nexus.notifications::send` with
+/// a one-line completion summary. BL-135 reshape: emit a source-
+/// tagged Notification (`source = "agent"`) instead of hardcoding
+/// `channel = "desktop"`. The notifications plugin's router consults
+/// `notifications.toml` to pick the channel list; users who add a
+/// `[sources.agent]` block get Discord/Telegram/email delivery
+/// without editing this file. Best-effort: an empty response or
+/// missing fields render a sensible fallback rather than crashing.
 fn dispatch_completion_notification(
     app: &mut App,
     goal: &str,
@@ -94,7 +98,8 @@ fn dispatch_completion_notification(
 ) -> Result<()> {
     let summary = compose_completion_message(goal, elapsed, response);
     let args = serde_json::json!({
-        "channel": "desktop",
+        "source": "agent",
+        "severity": "info",
         "title": "Agent session",
         "message": summary,
     });

@@ -566,14 +566,26 @@ struct NotifyArgs {
 #[derive(Subcommand)]
 enum NotifyCommand {
     /// Send a notification through `com.nexus.notifications::send`.
-    /// `desktop` routes through the kernel bus → shell toast; other
-    /// channels (Discord today; Telegram / SMTP filed as
-    /// follow-ups) need their transport configured in
-    /// `.forge/config.toml::[notifications.<channel>]`.
+    ///
+    /// BL-135 — either `--channel` (override path; bypass the
+    /// router) or `--source` (router path; consults
+    /// `<forge>/.forge/notifications.toml`) must be supplied. When
+    /// neither is supplied the CLI defaults `--source cli` so a
+    /// bare `nexus notify send "msg"` invocation routes through the
+    /// `[sources.cli]` block.
     Send {
-        /// Channel: `desktop` | `discord` | `telegram`.
+        /// Explicit target channel — `desktop` | `discord` | `telegram` | `email`.
+        /// Bypasses the BL-135 router. Cannot be used together with `--source`.
+        #[arg(long, conflicts_with = "source")]
+        channel: Option<String>,
+        /// BL-135 source tag — feeds the router to pick channels
+        /// from `notifications.toml`.
         #[arg(long)]
-        channel: String,
+        source: Option<String>,
+        /// Optional severity (`debug` / `info` / `warn` / `error`).
+        /// Defaults to `info` server-side.
+        #[arg(long)]
+        severity: Option<String>,
         /// Message body.
         message: String,
         /// Optional title — transports that need a header fall back
@@ -2054,8 +2066,15 @@ fn main() {
         }
 
         Commands::Notify(args) => match args.command {
-            NotifyCommand::Send { channel, message, title } => {
-                commands::notify::send(&mut app, &channel, &message, title.as_deref())
+            NotifyCommand::Send { channel, source, severity, message, title } => {
+                commands::notify::send(
+                    &mut app,
+                    channel.as_deref(),
+                    source.as_deref(),
+                    severity.as_deref(),
+                    &message,
+                    title.as_deref(),
+                )
             }
         },
 

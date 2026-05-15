@@ -1,22 +1,50 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SendReply",
-  "description": "Reply for `com.nexus.notifications::send`. Lightweight — the\ncaller can branch on the `delivered` flag without parsing per-\ntransport status fields.",
+  "description": "Reply for `com.nexus.notifications::send`.\n\n`channel` echoes the *primary* channel that was used — for the\nrouter path this is the first channel in `channels`. Legacy\nconsumers parsing the v1 shape (`{ delivered, channel }`) keep\nworking.",
   "type": "object",
   "properties": {
     "channel": {
-      "description": "Echoes the channel that was used so consumers don't have to\nthread the request shape back through.",
-      "$ref": "#/$defs/Channel"
+      "description": "Primary channel — for compatibility with the v1 shape. For\nrouter-path sends this is the first channel in `channels`.\n`None` if no channels were routed.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Channel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "channels": {
+      "description": "Every channel the notification was dispatched to. Length 1 on\nthe override path; 0..N on the router path.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Channel"
+      }
     },
     "delivered": {
-      "description": "`true` when the transport accepted the notification.",
+      "description": "`true` when at least one transport accepted the notification.",
       "type": "boolean"
+    },
+    "failures": {
+      "description": "Per-channel failure messages. Empty when every dispatch\nsucceeded. Only populated on the router path — override-path\nfailures still surface as a top-level IPC error.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ChannelFailure"
+      }
+    },
+    "routing": {
+      "description": "Resolved routing decision for observability — `\"override\"`,\n`\"routed\"`, `\"unknown_source\"`, `\"filtered\"`, or `\"none\"`.",
+      "type": "string",
+      "default": ""
     }
   },
   "additionalProperties": false,
   "required": [
-    "delivered",
-    "channel"
+    "delivered"
   ],
   "$defs": {
     "Channel": {
@@ -42,6 +70,25 @@
           "type": "string",
           "const": "email"
         }
+      ]
+    },
+    "ChannelFailure": {
+      "description": "One row of the [`SendReply::failures`] list.",
+      "type": "object",
+      "properties": {
+        "channel": {
+          "description": "Channel that failed.",
+          "$ref": "#/$defs/Channel"
+        },
+        "error": {
+          "description": "Transport-side error message.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "channel",
+        "error"
       ]
     }
   }

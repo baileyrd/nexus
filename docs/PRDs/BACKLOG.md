@@ -581,12 +581,12 @@ BL-074 shipped the CRDT primitives and the in-process ops bus (`com.nexus.editor
 
 > **Phase 1 landed 2026-05-15** on branch `bl-134-ai-runtime`. New `crates/nexus-ai-runtime/` core plugin (`com.nexus.ai.runtime`) registered after notifications in bootstrap. IPC surface: `submit` / `get` / `list` / `events` / `pool_stats` (5 of 8 handlers). `cancel` / `pause` / `resume` reserved for Phase 5 — they appear in the manifest + cap matrix but return a typed "Phase 5 not wired" error. `AgentTaskKind::Session` is the only kind wired; `AiStream` / `WorkflowAiStep` reject with a "reserved for Phase N" message at submit time. Three new capabilities (`ai.runtime.submit` / `.control` / `.observe`) added to `nexus-plugin-api::Capability` and to the per-handler cap matrix in bootstrap. Worker pool: dedicated multi-thread tokio runtime, `worker_threads = max(2, num_cpus / 2)`, started on `wire_context`. Typed `AiEvent` channel emits `Submitted` / `Started` / `Finished` / `Failed` directly from the worker; correlation back from `com.nexus.ai.stream_*` / `com.nexus.agent.round_*` is **deferred to Phase 2** (requires a session-id mapping). 24 in-crate unit tests + 5 bootstrap IPC tests + new dep-invariants row + ts-rs/schemars bindings + ipc-drift script entry.
 >
-> **Phases 2–6 still open:** Phase 2 (delegate shim + AiEvent correlation), Phase 3 (workflow `async = true`), Phase 4 (indexing-daemon migration), Phase 5 (cancel/pause/resume + `Critical` priority), Phase 6 (notification router refactor — see [BL-135](#bl-135-notification-router-refactor) which can land in parallel).
+> **Phases 2–5 still open:** Phase 2 (delegate shim + AiEvent correlation), Phase 3 (workflow `async = true`), Phase 4 (indexing-daemon migration), Phase 5 (cancel/pause/resume + `Critical` priority). **Phase 6 (notification router refactor) closed 2026-05-15 via [BL-135](BACKLOG_COMPLETED.md#bl-135-notification-router-refactor--2026-05-15).**
 
 **Source**: Architectural review 2026-05-14 — full design in [ADR 0028](../adr/0028-ai-agent-event-loop.md). Filed 2026-05-14.
 **Effort**: Large. 5-phase migration (~4–6 weeks); Phase 6 (notification router) lands in parallel with Phase 1.
 **Crates**: new `nexus-ai-runtime`; touches `nexus-bootstrap` (registration + cap matrix), `nexus-agent` (`delegate` shim), `nexus-workflow` (optional `async = true` steps), `nexus-ai` (`indexing_daemon` migrates to the shared pool), `nexus-notifications` (becomes a consumer of `AiEvent`).
-**Related**: ADR 0028 (this work), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md) (cap matrix this extends), [ADR 0024](../adr/0024-agent-session-tool-loop.md) (session loop the runtime drives), [BL-135](#bl-135-notification-router-refactor) (Phase 6), [BL-138](#bl-138-default-deny-capability-registration) (pre-req: cap matrix needs default-deny before the runtime's 3 new caps land).
+**Related**: ADR 0028 (this work), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md) (cap matrix this extends), [ADR 0024](../adr/0024-agent-session-tool-loop.md) (session loop the runtime drives), [BL-135](BACKLOG_COMPLETED.md#bl-135-notification-router-refactor--2026-05-15) (Phase 6 — closed), [BL-138](#bl-138-default-deny-capability-registration) (pre-req: cap matrix needs default-deny before the runtime's 3 new caps land).
 
 Three independent gaps in the current AI/agent stack — no first-class agent task scheduler, no typed cross-subsystem AI event channel, and no dedicated worker pool — point at the same missing primitive. ADR 0028 promotes the three existing *prototypes* (`BusBridgePolicy::pending_approvals`, the `com.nexus.ai.stream_*` topics, `nexus-ai::indexing_daemon`'s dedicated tokio runtime) into one named subsystem: a new `nexus-ai-runtime` core plugin (`com.nexus.ai.runtime`) that owns the scheduler, the typed `AiEvent` republisher, and a multi-thread tokio worker pool. Preserves all four invariants (file-as-truth, microkernel isolation, IPC over direct calls, capabilities); existing `stream_*` and `round_proposed` topics stay; republisher is additive.
 
@@ -601,34 +601,15 @@ Three independent gaps in the current AI/agent stack — no first-class agent ta
 - ts-rs / schemars bindings for `AgentTask`, `AgentRun`, `AiEvent`; `scripts/check_ipc_drift.sh` clean.
 
 **Open follow-ups carved off into their own BLs** (separate scope, not gating):
-- Notification router refactor — [BL-135](#bl-135-notification-router-refactor) (Phase 6 of the migration; can land in parallel with Phase 1).
+- Notification router refactor — [BL-135](BACKLOG_COMPLETED.md#bl-135-notification-router-refactor--2026-05-15) (Phase 6 of the migration; **closed 2026-05-15**).
 - Notification Center (persistent inbox + read/unread) — [BL-136](#bl-136-notification-center--persistent-inbox--shell-panel) (sibling ADR; builds on BL-135).
 - Task DAG visualiser, persistence across restart, per-caller quotas — listed in ADR 0028 §Open follow-ups; not BLs yet.
 
 ---
 
-### BL-135: Notification router refactor
+### BL-135: Notification router refactor → closed 2026-05-15
 
-**Source**: ADR 0028 §"Integration with `nexus-notifications`" + Phase 6. Filed 2026-05-14.
-**Effort**: Medium. Pure refactor of `nexus-notifications`; no new transports.
-**Crates**: `nexus-notifications`, `nexus-bootstrap` (config loading).
-**Related**: [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop), [BL-136](#bl-136-notification-center--persistent-inbox--shell-panel), [ADR 0028](../adr/0028-ai-agent-event-loop.md).
-
-Today every producer hardcodes which channel/transport it targets (the workflow `notify` step picks a channel inline; agent CLI auto-notify picks one; the shell toast subscriber listens to one topic; future `AiEvent` consumers would each pick channels too). This scales poorly once the runtime adds a fourth high-volume source. Pull producer→transport routing out of producers and into a single forge-local config that the notifications plugin reads on `on_start` and reloads via the existing file watcher.
-
-**Definition of done:**
-- New `<forge>/.forge/notifications.toml` schema parsed in `nexus-notifications`:
-  - `[sources.<name>] on = [...]`, `route = [channel, ...]`, `min_severity`, `quiet_hours`
-  - `[channels.<name>]` block for per-channel config (Discord URL, Telegram chat-id, SMTP server) — existing `[notifications.<channel>]` blocks in `config.toml` migrate to here.
-- Built-in router inside `nexus-notifications` subscribes to event sources by topic prefix and dispatches `Notification` records to configured transports.
-- Built-in `AiEvent` subscriber (listens on `com.nexus.ai.runtime.*`) translates typed events into `Notification` records — works even before BL-134 Phase 1 fully lands; if the runtime topic is silent the source is dormant.
-- Existing producers (workflow `notify` step, CLI `--notify-after-secs`, shell toast subscriber) drop their hardcoded channel selection and emit a `Notification` carrying a `source` tag; legacy callers that pass an explicit channel keep working (router treats explicit-channel as an override).
-- Live-reload on config change verified by a unit test.
-- `scripts/check_ipc_drift.sh` clean if the IPC envelope shifts.
-
-**Non-goals (call out, don't do here):**
-- No new transports. Slack / Matrix / ntfy / web-push are deferred until someone asks.
-- No persistent inbox — that's BL-136.
+**See [`BACKLOG_COMPLETED.md`](BACKLOG_COMPLETED.md) for the close note.** Forge-local `<forge>/.forge/notifications.toml` schema + `Router` + `AiEvent` subscriber + producer migration + live-reload all shipped. Legacy `[notifications.*]` blocks remain as a fallback for forges that haven't authored `notifications.toml`.
 
 ---
 

@@ -1392,18 +1392,33 @@ fn register_core_plugins(
         )
         .or_lifecycle_skip(event_bus, "com.nexus.linkpreview")?;
 
-    // BL-133 — multi-channel notification dispatcher. Wires the
-    // bus-event-based Desktop transport (shell renders the toast),
-    // the Discord webhook transport, and the Telegram bot
-    // transport. All three URLs / tokens / chat ids are sourced
-    // from the forge config — empty when not configured, in which
-    // case `send(channel: <c>, ...)` returns `NotConfigured` at
-    // dispatch time rather than crashing at boot. SMTP, shell-side
-    // settings UI, workflow-step, and agent-auto-notify wiring are
-    // filed as follow-ups.
-    let discord_webhook_url = load_discord_webhook_url(forge_root);
-    let (telegram_bot_token, telegram_chat_id) = load_telegram_config(forge_root);
-    let smtp_config = load_smtp_config(forge_root);
+    // BL-133 / BL-135 — multi-channel notification dispatcher with a
+    // forge-local routing config. Source-tagged sends consult
+    // `<forge>/.forge/notifications.toml` to pick channels; explicit-
+    // channel sends bypass the router. When `notifications.toml` is
+    // absent the bootstrap falls back to the legacy
+    // `config.toml::[notifications.*]` blocks so a forge that
+    // predates BL-135 keeps working without editing.
+    let (notifications_config, notifications_config_path) =
+        load_notifications_config(forge_root);
+    let notifications_plugin = nexus_notifications::core_plugin::NotificationsCorePlugin::from_config(
+        Some(Arc::clone(event_bus)),
+        notifications_config,
+        notifications_config_path,
+    )
+    .unwrap_or_else(|err| {
+        tracing::warn!(
+            %err,
+            "notifications.toml: resolve_sources failed; falling back to empty router"
+        );
+        NotificationsCorePlugin::with_defaults(
+            Some(Arc::clone(event_bus)),
+            String::new(),
+            String::new(),
+            String::new(),
+            nexus_notifications::SmtpConfig::default(),
+        )
+    });
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -1416,13 +1431,7 @@ fn register_core_plugins(
                 )]),
             ),
             forge_root,
-            Box::new(NotificationsCorePlugin::with_defaults(
-                Some(Arc::clone(event_bus)),
-                discord_webhook_url,
-                telegram_bot_token,
-                telegram_chat_id,
-                smtp_config,
-            )),
+            Box::new(notifications_plugin),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.notifications")?;
 
@@ -2196,6 +2205,63 @@ pub fn workflow_capabilities() -> CapabilitySet {
 /// fall back to an empty string, which surfaces at
 /// `send(channel: discord, ...)` time as
 /// `SendError::NotConfigured` rather than crashing at boot.
+/// BL-135 — load the unified `notifications.toml` router config.
+///
+/// Returns `(config, Some(path))` when the file exists (path drives
+/// the live-reload watcher inside the notifications plugin).
+/// Returns `(synthetic_config, None)` when the file is absent — the
+/// synthetic config carries the legacy `config.toml::[notifications.*]`
+/// channel credentials so a pre-BL-135 forge keeps delivering on the
+/// override path (CLI `nexus notify send --channel discord …`,
+/// workflow `notify` steps with explicit `channel = "…"`). Source-
+/// tagged sends in that state route nowhere — authors opting in to
+/// BL-135 routing add a `notifications.toml`.
+fn load_notifications_config(
+    forge_root: &std::path::Path,
+) -> (
+    nexus_notifications::NotificationsConfig,
+    Option<std::path::PathBuf>,
+) {
+    let path = forge_root.join(nexus_notifications::NOTIFICATIONS_CONFIG_RELPATH);
+    if path.exists() {
+        match nexus_notifications::NotificationsConfig::load_from(&path) {
+            Ok(cfg) => return (cfg, Some(path)),
+            Err(err) => tracing::warn!(
+                path = %path.display(),
+                %err,
+                "notifications.toml: parse failed; falling back to legacy [notifications.*] blocks"
+            ),
+        }
+    }
+    let mut cfg = nexus_notifications::NotificationsConfig::default();
+    cfg.channels.discord.webhook_url = load_discord_webhook_url(forge_root);
+    let (bot_token, chat_id) = load_telegram_config(forge_root);
+    cfg.channels.telegram.bot_token = bot_token;
+    cfg.channels.telegram.chat_id = chat_id;
+    let smtp = load_smtp_config(forge_root);
+    cfg.channels.email.host = smtp.host;
+    cfg.channels.email.port = smtp.port;
+    cfg.channels.email.username = smtp.username;
+    cfg.channels.email.password = smtp.password;
+    cfg.channels.email.from = smtp.from;
+    cfg.channels.email.to = smtp.to;
+    cfg.channels.email.subject_template = smtp.subject_template;
+    // Synthesize default source routes so source-tagged producers
+    // keep delivering on Desktop when the forge hasn't authored a
+    // `notifications.toml`. Users opt into per-source routing
+    // (Discord/Telegram/email) by creating the file.
+    for source in ["workflow", "agent", "cli", "ai_runtime"] {
+        cfg.sources.insert(
+            source.to_string(),
+            nexus_notifications::SourceConfig {
+                route: vec!["desktop".to_string()],
+                ..Default::default()
+            },
+        );
+    }
+    (cfg, None)
+}
+
 fn load_discord_webhook_url(forge_root: &std::path::Path) -> String {
     #[derive(serde::Deserialize, Default)]
     struct Wrapper {

@@ -1772,9 +1772,16 @@ fn json_to_toml(v: &serde_json::Value) -> Option<toml::Value> {
 /// so the per-channel rejection message points at the failing step
 /// rather than the downstream serde error from the notifications
 /// plugin.
+///
+/// BL-135 reshape: `channel` becomes optional (override path) and
+/// `source` is the canonical knob. A step that supplies neither
+/// defaults to `source = "workflow"` so the notifications plugin's
+/// router picks the channels from `notifications.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NotifyStepArgs {
-    channel: String,
+    channel: Option<String>,
+    source: Option<String>,
+    severity: Option<String>,
     message: String,
     title: Option<String>,
 }
@@ -1792,12 +1799,19 @@ impl NotifyStepArgs {
             .extra
             .get("channel")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "notify step missing `channel`".to_string())?
-            .trim()
-            .to_string();
-        if channel.is_empty() {
-            return Err("notify step: `channel` cannot be empty".into());
-        }
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let source = step
+            .extra
+            .get("source")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let severity = step
+            .extra
+            .get("severity")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let message = step
             .extra
             .get("message")
@@ -1811,6 +1825,8 @@ impl NotifyStepArgs {
             .map(|s| s.to_string());
         Ok(Self {
             channel,
+            source,
+            severity,
             message,
             title,
         })
@@ -2128,11 +2144,28 @@ impl ActionDispatcher for KernelActionDispatcher {
             "notify" => {
                 let parsed = NotifyStepArgs::from_step(step)?;
                 let mut ipc_args = serde_json::json!({
-                    "channel": parsed.channel,
                     "message": parsed.message,
                 });
+                let obj = ipc_args.as_object_mut().expect("json object");
+                if let Some(channel) = parsed.channel {
+                    obj.insert("channel".into(), serde_json::Value::String(channel));
+                } else {
+                    // Default to source-tag routing through the BL-135
+                    // router. Authors override with `source = "..."`;
+                    // bare `notify` steps land under the canonical
+                    // `workflow` source.
+                    obj.insert(
+                        "source".into(),
+                        serde_json::Value::String(
+                            parsed.source.unwrap_or_else(|| "workflow".to_string()),
+                        ),
+                    );
+                }
+                if let Some(s) = parsed.severity {
+                    obj.insert("severity".into(), serde_json::Value::String(s));
+                }
                 if let Some(t) = parsed.title {
-                    ipc_args["title"] = serde_json::Value::String(t);
+                    obj.insert("title".into(), serde_json::Value::String(t));
                 }
                 self.ctx
                     .ipc_call(
@@ -2664,11 +2697,12 @@ type = "notify"
     }
 
     #[test]
-    fn parses_minimal_notify_step() {
+    fn parses_minimal_notify_step_with_explicit_channel() {
         let step = build_notify_step(r#"channel = "desktop"
 message = "hello""#);
         let parsed = NotifyStepArgs::from_step(&step).unwrap();
-        assert_eq!(parsed.channel, "desktop");
+        assert_eq!(parsed.channel.as_deref(), Some("desktop"));
+        assert!(parsed.source.is_none());
         assert_eq!(parsed.message, "hello");
         assert!(parsed.title.is_none());
     }
@@ -2681,16 +2715,35 @@ message = "deploy complete"
 title = "Workflow nightly""#,
         );
         let parsed = NotifyStepArgs::from_step(&step).unwrap();
-        assert_eq!(parsed.channel, "discord");
+        assert_eq!(parsed.channel.as_deref(), Some("discord"));
         assert_eq!(parsed.message, "deploy complete");
         assert_eq!(parsed.title.as_deref(), Some("Workflow nightly"));
     }
 
     #[test]
-    fn rejects_missing_channel() {
+    fn parses_notify_step_with_source_only() {
+        let step = build_notify_step(
+            r#"source = "ai_runtime"
+severity = "warn"
+message = "task failed""#,
+        );
+        let parsed = NotifyStepArgs::from_step(&step).unwrap();
+        assert!(parsed.channel.is_none());
+        assert_eq!(parsed.source.as_deref(), Some("ai_runtime"));
+        assert_eq!(parsed.severity.as_deref(), Some("warn"));
+        assert_eq!(parsed.message, "task failed");
+    }
+
+    #[test]
+    fn accepts_step_with_neither_channel_nor_source() {
+        // BL-135 — the dispatcher fills in `source = "workflow"`
+        // when neither field is supplied. The parser accepts this
+        // shape; downstream code handles the defaulting.
         let step = build_notify_step(r#"message = "x""#);
-        let err = NotifyStepArgs::from_step(&step).unwrap_err();
-        assert!(err.contains("missing `channel`"), "got: {err}");
+        let parsed = NotifyStepArgs::from_step(&step).unwrap();
+        assert!(parsed.channel.is_none());
+        assert!(parsed.source.is_none());
+        assert_eq!(parsed.message, "x");
     }
 
     #[test]
@@ -2701,13 +2754,18 @@ title = "Workflow nightly""#,
     }
 
     #[test]
-    fn rejects_empty_channel() {
+    fn empty_channel_string_is_dropped_to_none() {
+        // Producers that emit `channel = ""` (deserialisers that
+        // surface absent fields as empty strings, the legacy
+        // workflow author who clears the field) are treated as if
+        // the field were absent — the dispatcher then routes by
+        // source / default tag.
         let step = build_notify_step(
             r#"channel = "   "
 message = "x""#,
         );
-        let err = NotifyStepArgs::from_step(&step).unwrap_err();
-        assert!(err.contains("`channel` cannot be empty"), "got: {err}");
+        let parsed = NotifyStepArgs::from_step(&step).unwrap();
+        assert!(parsed.channel.is_none());
     }
 
     /// The parser deliberately does NOT validate `channel` against
@@ -2725,7 +2783,7 @@ message = "x""#,
 message = "x""#,
         );
         let parsed = NotifyStepArgs::from_step(&step).unwrap();
-        assert_eq!(parsed.channel, "carrier-pigeon");
+        assert_eq!(parsed.channel.as_deref(), Some("carrier-pigeon"));
     }
 }
 

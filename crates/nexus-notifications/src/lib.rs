@@ -66,7 +66,20 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
+pub mod config;
 pub mod core_plugin;
+pub mod router;
+
+pub use config::{
+    ChannelsConfig, ConfigError, DiscordChannel, EmailChannel, NotificationsConfig, QuietHours,
+    ResolvedSource, Severity, SourceConfig, TelegramChannel,
+};
+pub use router::{Resolution, Router};
+
+/// Default location of the BL-135 router config, relative to the
+/// forge root. Bootstrap and the file-watcher live-reload path both
+/// reference this so the path stays single-sourced.
+pub const NOTIFICATIONS_CONFIG_RELPATH: &str = ".forge/notifications.toml";
 
 /// Bus topic published when a notification has been delivered (or
 /// attempted) on a frontend-rendered channel. Shell subscribers can
