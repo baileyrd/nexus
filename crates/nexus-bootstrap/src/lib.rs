@@ -725,6 +725,10 @@ fn register_core_plugins(
                         "entity_find_duplicates",
                         nexus_storage::core_plugin::HANDLER_ENTITY_FIND_DUPLICATES,
                     ),
+                    (
+                        "entity_decay_relations",
+                        nexus_storage::core_plugin::HANDLER_ENTITY_DECAY_RELATIONS,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),

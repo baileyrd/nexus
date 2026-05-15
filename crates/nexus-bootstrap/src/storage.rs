@@ -738,3 +738,44 @@ pub fn entity_find_duplicates(
     let resp: Resp = call(runtime, rt, "entity_find_duplicates", args)?;
     Ok(resp.pairs)
 }
+
+/// BL-129 — multiplicative confidence decay across every entity
+/// relation. `factor` and `floor` fall back server-side to `0.95`
+/// and `0.10` when `None`. When `dry_run` is true, counts are
+/// computed but no file is written.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EntityDecayRelationsOutcome {
+    /// Entity files parsed during the sweep.
+    pub entities_scanned: u32,
+    /// Entity files that had at least one relation modified.
+    pub entities_updated: u32,
+    /// Relations whose confidence was strictly reduced this pass.
+    pub relations_decayed: u32,
+    /// Relations that landed exactly on `floor` this pass. Pre-existing
+    /// at-floor relations are excluded.
+    pub relations_at_floor: u32,
+    /// Reflects the request: when `true`, no files were written.
+    pub dry_run: bool,
+}
+
+/// BL-129 — multiplicative confidence decay across every entity
+/// relation in the forge's `entities/` directory.
+pub fn entity_decay_relations(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    factor: Option<f32>,
+    floor: Option<f32>,
+    dry_run: bool,
+) -> Result<EntityDecayRelationsOutcome> {
+    let mut args = serde_json::json!({});
+    if let Some(f) = factor {
+        args["factor"] = serde_json::Value::from(f);
+    }
+    if let Some(f) = floor {
+        args["floor"] = serde_json::Value::from(f);
+    }
+    if dry_run {
+        args["dry_run"] = serde_json::Value::Bool(true);
+    }
+    call(runtime, rt, "entity_decay_relations", args)
+}

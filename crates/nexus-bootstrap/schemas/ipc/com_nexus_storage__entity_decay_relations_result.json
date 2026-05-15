@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityDecayRelationsResult",
+  "description": "Return type for `com.nexus.storage::entity_decay_relations`.",
+  "type": "object",
+  "properties": {
+    "dry_run": {
+      "description": "Reflects the request: when `true`, no files were written.",
+      "type": "boolean"
+    },
+    "entities_scanned": {
+      "description": "Total entity files scanned (parsed successfully).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "entities_updated": {
+      "description": "Entity files that had at least one relation modified and\n(unless `dry_run`) rewritten on disk.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "relations_at_floor": {
+      "description": "Relations whose post-decay value landed exactly on `floor`\nthis pass. Pre-existing at-floor relations are excluded.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "relations_decayed": {
+      "description": "Relations whose confidence was strictly reduced this pass.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entities_scanned",
+    "entities_updated",
+    "relations_decayed",
+    "relations_at_floor",
+    "dry_run"
+  ]
+}

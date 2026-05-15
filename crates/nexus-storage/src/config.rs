@@ -16,9 +16,9 @@
 use std::path::Path;
 
 pub use nexus_formats::config::{
-    AiConfig, AiModel, AiProvider, AppConfig, CoreSettings, EditorSettings, GitSettings,
-    McpConfig, McpServerEntry, OpenFileEntry, PanelConfig, PanelLayout, PluginSettings,
-    PreviewSettings, SearchSettings, WorkspaceState,
+    AiConfig, AiModel, AiProvider, AppConfig, CoreSettings, DreamCycleSettings, EditorSettings,
+    GitSettings, McpConfig, McpServerEntry, OpenFileEntry, PanelConfig, PanelLayout,
+    PluginSettings, PreviewSettings, SearchSettings, WorkspaceState,
 };
 
 use crate::StorageError;

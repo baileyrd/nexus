@@ -326,6 +326,40 @@ enum GraphCommand {
         #[command(subcommand)]
         command: EntityCommand,
     },
+    /// Dream Cycle — BL-129 entity-graph maintenance.
+    #[command(name = "dream-cycle")]
+    DreamCycle {
+        #[command(subcommand)]
+        command: DreamCycleCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum DreamCycleCommand {
+    /// Run one or every supported maintenance phase. Thin slice
+    /// surfaces `dedup` + `decay`; `enrich` + `infer` land in the
+    /// close-out.
+    Run {
+        /// Restrict to a single phase. Omit to run every supported
+        /// phase in sequence.
+        #[arg(long, value_parser = ["dedup", "decay"])]
+        phase: Option<String>,
+        /// Multiplicative decay factor in `(0.0, 1.0]`. Defaults to
+        /// `0.95` server-side when omitted.
+        #[arg(long)]
+        decay_factor: Option<f32>,
+        /// Lower bound for relation confidence. Defaults to `0.10`
+        /// server-side when omitted.
+        #[arg(long)]
+        decay_floor: Option<f32>,
+        /// Similarity threshold for the dedup phase. Defaults to
+        /// `0.92` server-side when omitted.
+        #[arg(long)]
+        review_threshold: Option<f32>,
+        /// Compute counts but skip rewrites for the decay phase.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1755,6 +1789,22 @@ fn main() {
                 EntityCommand::Duplicates { threshold } => {
                     commands::graph::entity_duplicates(&mut app, threshold)
                 }
+            },
+            GraphCommand::DreamCycle { command } => match command {
+                DreamCycleCommand::Run {
+                    phase,
+                    decay_factor,
+                    decay_floor,
+                    review_threshold,
+                    dry_run,
+                } => commands::graph::dream_cycle_run(
+                    &mut app,
+                    phase.as_deref(),
+                    decay_factor,
+                    decay_floor,
+                    review_threshold,
+                    dry_run,
+                ),
             },
         },
 

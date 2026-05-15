@@ -341,6 +341,14 @@ pub const HANDLER_ENTITY_UPSERT: u32 = 67;
 /// similarity over `id + aliases + description`; only same-type
 /// pairs are reported. Threshold defaults to `0.92`.
 pub const HANDLER_ENTITY_FIND_DUPLICATES: u32 = 68;
+/// BL-129 thin slice — `entity_decay_relations`. Args:
+/// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
+/// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
+/// multiplies each relation's confidence by `factor`, clamps to
+/// `floor`, and atomically rewrites any file that changed. Already-
+/// at-floor relations are skipped (idempotent across cycles). When
+/// `dry_run` is true the counts are computed but no file is touched.
+pub const HANDLER_ENTITY_DECAY_RELATIONS: u32 = 69;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -541,6 +549,9 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_ENTITY_FIND_DUPLICATES => {
                 return dispatch_entity_find_duplicates(&self.forge_root, args);
+            }
+            HANDLER_ENTITY_DECAY_RELATIONS => {
+                return dispatch_entity_decay_relations(&self.forge_root, args);
             }
             _ => {}
         }
@@ -1575,6 +1586,70 @@ fn dispatch_entity_find_duplicates(
         &crate::ipc::EntityFindDuplicatesResult { pairs },
         "entity_find_duplicates",
     )
+}
+
+fn dispatch_entity_decay_relations(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntityDecayRelationsArgs =
+        parse_args(args, "entity_decay_relations")?;
+    let params = crate::entity_index::DecayParams {
+        factor: parsed.factor.unwrap_or(0.95),
+        floor:  parsed.floor.unwrap_or(0.10),
+    };
+    let dry_run = parsed.dry_run.unwrap_or(false);
+
+    let entities_dir = forge_root.join(crate::entity_index::ENTITIES_DIR);
+    let mut result = crate::ipc::EntityDecayRelationsResult {
+        dry_run,
+        ..Default::default()
+    };
+    let Ok(read_dir) = std::fs::read_dir(&entities_dir) else {
+        // Missing entities/ dir is not an error — return zero counts so
+        // the dream cycle CLI prints "no entities" cleanly.
+        return to_value(&result, "entity_decay_relations");
+    };
+
+    let temp_dir = forge_root.join(".forge").join("temp");
+    if !dry_run {
+        std::fs::create_dir_all(&temp_dir).map_err(|e| {
+            exec_err(format!("entity_decay_relations: create temp dir: {e}"))
+        })?;
+    }
+
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let is_md = path.extension().and_then(|s| s.to_str()).is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+        });
+        if !is_md {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        result.entities_scanned += 1;
+        let Some(decayed) = crate::entity_index::decay_file_content(&content, &params) else {
+            continue;
+        };
+        result.entities_updated += 1;
+        result.relations_decayed += decayed.relations_decayed;
+        result.relations_at_floor += decayed.relations_at_floor;
+        if dry_run {
+            continue;
+        }
+        crate::atomic_write(&path, decayed.content.as_bytes(), &temp_dir).map_err(|e| {
+            exec_err(format!(
+                "entity_decay_relations: write {}: {e}",
+                path.display()
+            ))
+        })?;
+    }
+    to_value(&result, "entity_decay_relations")
 }
 
 fn dispatch_config_read(

@@ -276,6 +276,102 @@ pub fn entity_related(app: &mut App, id: &str, direction: &str) -> Result<()> {
     Ok(())
 }
 
+/// `nexus graph dream-cycle run` — BL-129 thin slice. Runs the
+/// `dedup` and/or `decay` phases (close-out adds `enrich` + `infer`).
+///
+/// Phase ordering matches the spec: dedup → decay. `None` runs every
+/// supported phase. All thresholds / factors fall back to server-side
+/// defaults when not supplied.
+pub fn dream_cycle_run(
+    app: &mut App,
+    phase: Option<&str>,
+    decay_factor: Option<f32>,
+    decay_floor: Option<f32>,
+    review_threshold: Option<f32>,
+    dry_run: bool,
+) -> Result<()> {
+    let run_dedup = phase.is_none_or(|p| p == "dedup");
+    let run_decay = phase.is_none_or(|p| p == "decay");
+
+    let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+
+    if run_dedup {
+        let pairs = ipc::entity_find_duplicates(runtime, rt, review_threshold)
+            .map_err(|e| anyhow::anyhow!("dream-cycle dedup failed: {e}"))?;
+        match format {
+            OutputFormat::Json | OutputFormat::Jsonl => {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "phase": "dedup",
+                        "pairs": pairs.iter().map(|p| serde_json::json!({
+                            "a": p.a,
+                            "b": p.b,
+                            "similarity": p.similarity,
+                        })).collect::<Vec<_>>(),
+                    })
+                );
+            }
+            _ => {
+                let threshold_label = review_threshold
+                    .map_or_else(|| "default".to_string(), |t| format!("{t:.2}"));
+                if pairs.is_empty() {
+                    println!(
+                        "dedup    : no duplicate candidates above threshold {threshold_label}"
+                    );
+                } else {
+                    println!(
+                        "dedup    : {n} candidate pair(s) above threshold {threshold_label}",
+                        n = pairs.len(),
+                    );
+                    for p in &pairs {
+                        println!("  {:.3}  {}  {}", p.similarity, p.a, p.b);
+                    }
+                }
+            }
+        }
+    }
+
+    if run_decay {
+        let outcome = ipc::entity_decay_relations(
+            runtime,
+            rt,
+            decay_factor,
+            decay_floor,
+            dry_run,
+        )
+        .map_err(|e| anyhow::anyhow!("dream-cycle decay failed: {e}"))?;
+        match format {
+            OutputFormat::Json | OutputFormat::Jsonl => {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "phase": "decay",
+                        "entities_scanned":   outcome.entities_scanned,
+                        "entities_updated":   outcome.entities_updated,
+                        "relations_decayed":  outcome.relations_decayed,
+                        "relations_at_floor": outcome.relations_at_floor,
+                        "dry_run":            outcome.dry_run,
+                    })
+                );
+            }
+            _ => {
+                let mode = if outcome.dry_run { " (dry-run)" } else { "" };
+                println!(
+                    "decay    : scanned {scanned}, updated {updated}, decayed {decayed}, at-floor {floor}{mode}",
+                    scanned = outcome.entities_scanned,
+                    updated = outcome.entities_updated,
+                    decayed = outcome.relations_decayed,
+                    floor   = outcome.relations_at_floor,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// `nexus graph entity duplicates` — Jaccard-similar entity pairs.
 pub fn entity_duplicates(app: &mut App, threshold: f32) -> Result<()> {
     let format = app.format();

@@ -744,6 +744,60 @@ pub struct EntityFindDuplicatesResult {
     pub pairs: Vec<EntityDuplicatePairRow>,
 }
 
+// ── BL-129 — entity_decay_relations ──────────────────────────────────────────
+
+/// Args for `com.nexus.storage::entity_decay_relations` (handler 69).
+///
+/// Each entity file under `<forge>/entities/` is read, its relation
+/// confidences are multiplied by `factor` and clamped to `floor`, and
+/// the file is atomically rewritten when any relation changes. Already-
+/// at-floor relations are skipped so successive cycles converge.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityDecayRelationsArgs {
+    /// Multiplicative decay factor in `(0.0, 1.0]`. Defaults to
+    /// `0.95` — matches Thoth's Dream-Cycle decay rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub factor: Option<f32>,
+    /// Lower bound for relation confidence after decay. Defaults to
+    /// `0.10`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<f32>,
+    /// When `true`, compute counts but do not write any file. Useful
+    /// for `nexus graph dream-cycle run --phase decay --dry-run` and
+    /// for the shell to surface a preview before the user commits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+}
+
+/// Return type for `com.nexus.storage::entity_decay_relations`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityDecayRelationsResult {
+    /// Total entity files scanned (parsed successfully).
+    pub entities_scanned: u32,
+    /// Entity files that had at least one relation modified and
+    /// (unless `dry_run`) rewritten on disk.
+    pub entities_updated: u32,
+    /// Relations whose confidence was strictly reduced this pass.
+    pub relations_decayed: u32,
+    /// Relations whose post-decay value landed exactly on `floor`
+    /// this pass. Pre-existing at-floor relations are excluded.
+    pub relations_at_floor: u32,
+    /// Reflects the request: when `true`, no files were written.
+    pub dry_run: bool,
+}
+
 #[cfg(test)]
 mod read_frontmatter_tests {
     use super::*;

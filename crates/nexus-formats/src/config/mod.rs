@@ -16,8 +16,8 @@ mod workspace;
 
 pub use ai::{AiConfig, AiModel, AiProvider};
 pub use app::{
-    AppConfig, CoreSettings, EditorSettings, GitSettings, PluginSettings, PreviewSettings,
-    SearchSettings,
+    AppConfig, CoreSettings, DreamCycleSettings, EditorSettings, GitSettings, PluginSettings,
+    PreviewSettings, SearchSettings,
 };
 pub use mcp::{McpConfig, McpServerEntry};
 pub use workspace::{OpenFileEntry, PanelConfig, PanelLayout, WorkspaceState};

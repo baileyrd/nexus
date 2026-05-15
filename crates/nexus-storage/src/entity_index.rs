@@ -822,6 +822,144 @@ fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
     out
 }
 
+// ── BL-129 Dream Cycle — confidence decay ───────────────────────────────────
+
+/// Parameters for [`decay_file_content`]. Defaults match the
+/// Dream-Cycle config block (`factor = 0.95`, `floor = 0.10`).
+#[derive(Debug, Clone, Copy)]
+pub struct DecayParams {
+    /// Multiplicative factor applied to each relation's confidence.
+    /// Clamped to `[0.0, 1.0]`; values at or above `1.0` short-circuit
+    /// the decay (`decay_file_content` returns `None`).
+    pub factor: f32,
+    /// Lower bound for confidence post-decay. Relations already at or
+    /// below the floor are left alone so repeated cycles converge.
+    pub floor: f32,
+}
+
+impl Default for DecayParams {
+    fn default() -> Self {
+        Self {
+            factor: 0.95,
+            floor:  0.10,
+        }
+    }
+}
+
+/// Outcome of [`decay_file_content`] for one entity file. `None`
+/// means the file is unchanged (no parsable frontmatter, no
+/// relations, every relation already at floor, or `factor` is a no-op).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecayedFile {
+    /// New full file content, ready for atomic write.
+    pub content: String,
+    /// Number of relations whose confidence was reduced this pass.
+    pub relations_decayed: u32,
+    /// Number of relations that landed exactly on `floor` as a result
+    /// of this pass. Pre-existing at-floor relations are skipped and
+    /// do not count.
+    pub relations_at_floor: u32,
+}
+
+/// Apply confidence decay to every relation in one entity markdown
+/// source string. Pure transform — the caller owns the I/O.
+///
+/// Frontmatter keys outside the thin-slice schema are dropped on
+/// rewrite (same posture as `entity_upsert`); the free-form markdown
+/// body is preserved verbatim. Relation kinds re-flow through
+/// [`normalize_relation_type`] inside [`render_entity_markdown`] so
+/// any drift toward non-canonical vocabulary is corrected on the way
+/// out.
+#[must_use]
+pub fn decay_file_content(content: &str, params: &DecayParams) -> Option<DecayedFile> {
+    let factor = params.factor.clamp(0.0, 1.0);
+    let floor  = params.floor.clamp(0.0, 1.0);
+    // A factor at-or-above 1 cannot lower any confidence — short-circuit
+    // before touching the parser.
+    if factor >= 1.0 - f32::EPSILON {
+        return None;
+    }
+    let (yaml_src, body) = split_frontmatter(content);
+    let yaml_src = yaml_src?;
+    let raw: RawEntityFrontmatter = serde_yml::from_str(yaml_src).ok()?;
+    let entity_type = raw
+        .entity_type
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    let relations_in = raw.relations.unwrap_or_default();
+    if relations_in.is_empty() {
+        return None;
+    }
+
+    let mut relations_decayed = 0u32;
+    let mut relations_at_floor = 0u32;
+    let mut any_changed = false;
+    let mut out: Vec<EntityUpsertRelation> = Vec::with_capacity(relations_in.len());
+    for r in relations_in {
+        let target = r.target.trim().to_string();
+        let kind = r.kind.trim().to_string();
+        if target.is_empty() || kind.is_empty() {
+            continue;
+        }
+        let old = r.confidence.unwrap_or(1.0).clamp(0.0, 1.0);
+        let new = if old <= floor + f32::EPSILON {
+            // Already at-or-below floor — preserve verbatim so the
+            // round-trip is byte-stable for these relations.
+            old
+        } else {
+            let decayed = (old * factor).max(floor);
+            if decayed < old - f32::EPSILON {
+                relations_decayed += 1;
+                any_changed = true;
+                if (decayed - floor).abs() <= f32::EPSILON {
+                    relations_at_floor += 1;
+                }
+            }
+            decayed
+        };
+        out.push(EntityUpsertRelation {
+            target,
+            kind,
+            confidence: Some(new),
+        });
+    }
+    if !any_changed {
+        return None;
+    }
+
+    let aliases = raw
+        .aliases
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let description = raw
+        .description
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+    let payload = EntityUpsert {
+        id: String::new(), // not consumed by render_entity_markdown
+        entity_type,
+        aliases,
+        description,
+        relations: out,
+    };
+    let mut new_content = render_entity_markdown(&payload);
+    if !body.is_empty() {
+        // `split_frontmatter` strips leading newlines; re-insert one
+        // blank-line separator so the file's body stays readable.
+        new_content.push('\n');
+        new_content.push_str(body);
+    }
+    Some(DecayedFile {
+        content: new_content,
+        relations_decayed,
+        relations_at_floor,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1216,6 +1354,97 @@ mod tests {
         let rec = parse_entity("x", "entities/x.md", &md).expect("parses");
         assert!((rec.relations[0].confidence - 1.0).abs() < 1e-5);
         assert!(rec.relations[1].confidence.abs() < 1e-5);
+    }
+
+    // ── BL-129 decay_file_content ───────────────────────────────────────────
+
+    fn entity_src(relations_yaml: &str, body: &str) -> String {
+        format!(
+            "---\nentity_type: person\ndescription: A person.\n{relations_yaml}---\n{body}"
+        )
+    }
+
+    #[test]
+    fn decay_reduces_confidence_by_factor() {
+        let src = entity_src(
+            "relations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
+            "",
+        );
+        let out = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
+            .expect("relation should decay");
+        assert_eq!(out.relations_decayed, 1);
+        assert_eq!(out.relations_at_floor, 0);
+        let rec = parse_entity("e", "entities/e.md", &out.content).expect("parses");
+        assert!((rec.relations[0].confidence - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn decay_clamps_to_floor_and_counts_at_floor() {
+        let src = entity_src(
+            "relations:\n  - target: nexus\n    type: works_on\n    confidence: 0.15\n",
+            "",
+        );
+        let out = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
+            .expect("clamps to floor");
+        assert_eq!(out.relations_decayed, 1);
+        assert_eq!(out.relations_at_floor, 1);
+        let rec = parse_entity("e", "entities/e.md", &out.content).expect("parses");
+        assert!((rec.relations[0].confidence - 0.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn decay_skips_relations_already_at_floor() {
+        let src = entity_src(
+            "relations:\n  - target: nexus\n    type: works_on\n    confidence: 0.1\n",
+            "",
+        );
+        assert!(decay_file_content(&src, &DecayParams { factor: 0.95, floor: 0.1 }).is_none());
+    }
+
+    #[test]
+    fn decay_no_relations_is_noop() {
+        let src = entity_src("", "");
+        assert!(decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
+    }
+
+    #[test]
+    fn decay_factor_one_is_noop() {
+        let src = entity_src(
+            "relations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
+            "",
+        );
+        assert!(decay_file_content(&src, &DecayParams { factor: 1.0, floor: 0.1 }).is_none());
+    }
+
+    #[test]
+    fn decay_preserves_body() {
+        let src = entity_src(
+            "relations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
+            "Free-form notes about the entity.\n\nA second paragraph.\n",
+        );
+        let out = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
+            .expect("relation should decay");
+        assert!(out.content.contains("Free-form notes about the entity."));
+        assert!(out.content.contains("A second paragraph."));
+    }
+
+    #[test]
+    fn decay_no_frontmatter_is_noop() {
+        let src = "Just a body, no frontmatter.\n";
+        assert!(decay_file_content(src, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
+    }
+
+    #[test]
+    fn decay_is_idempotent_after_reaching_floor() {
+        // Iterate the pass; the second call (after the relation
+        // clamps) must report no change.
+        let src = entity_src(
+            "relations:\n  - target: nexus\n    type: works_on\n    confidence: 0.15\n",
+            "body",
+        );
+        let first = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
+            .expect("first pass decays");
+        assert!(decay_file_content(&first.content, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
     }
 }
 

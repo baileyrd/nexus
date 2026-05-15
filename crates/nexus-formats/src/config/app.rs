@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub plugins: PluginSettings,
     /// Git integration.
     pub git: GitSettings,
+    /// Dream Cycle (BL-129) — scheduled entity-graph maintenance.
+    pub dream_cycle: DreamCycleSettings,
     /// Flat key/value bag mirrored by the shell's settings registry.
     /// Keys follow the `pluginId.fieldName` convention (e.g.
     /// `"nexus.editor.fontSize"`). Values can be any TOML scalar or
@@ -174,6 +176,56 @@ impl Default for GitSettings {
             auto_commit_interval_secs: 1800,
             auto_commit_on_save:       false,
             auto_commit_debounce_secs: 5,
+        }
+    }
+}
+
+/// Dream Cycle (BL-129) — scheduled entity-graph maintenance.
+///
+/// Four phases run in sequence (`dedup`, `enrich`, `decay`, `infer`)
+/// against the BL-128 entity graph. The thin slice surfaces only
+/// `dedup` + `decay`; the remaining phases land in the BL-129
+/// close-out and inherit the same configuration block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DreamCycleSettings {
+    /// When `false`, the cron trigger never fires and the CLI emits a
+    /// `disabled` notice. Direct invocation via `nexus graph
+    /// dream-cycle run --force` still works (close-out).
+    pub enabled: bool,
+    /// Cron expression for the scheduled trigger. Local time. The
+    /// default (`"0 2 * * *"`) fires at 02:00 every day to match the
+    /// Thoth reference behaviour.
+    pub schedule: String,
+    /// Auto-merge threshold for the `dedup` phase. Pairs whose Jaccard
+    /// similarity meets or exceeds this value merge silently; values
+    /// in `[review_threshold, merge_threshold)` are surfaced for
+    /// review. Range `[0.0, 1.0]`; default `0.97`.
+    pub merge_threshold: f32,
+    /// Surface-for-review threshold for the `dedup` phase. Pairs at
+    /// or above this value (and below `merge_threshold`) are returned
+    /// to the CLI / shell as duplicate candidates. Range `[0.0, 1.0]`;
+    /// default `0.92`.
+    pub review_threshold: f32,
+    /// Multiplicative decay factor applied to every relation
+    /// confidence per cycle. Range `(0.0, 1.0]`; default `0.95`.
+    /// Set to `1.0` to disable decay without disabling the cycle.
+    pub decay_factor: f32,
+    /// Lower bound for relation confidence post-decay. Relations
+    /// already at or below the floor are skipped (no churn). Range
+    /// `[0.0, 1.0]`; default `0.1`.
+    pub decay_floor: f32,
+}
+
+impl Default for DreamCycleSettings {
+    fn default() -> Self {
+        Self {
+            enabled:          false,
+            schedule:         "0 2 * * *".into(),
+            merge_threshold:  0.97,
+            review_threshold: 0.92,
+            decay_factor:     0.95,
+            decay_floor:      0.10,
         }
     }
 }

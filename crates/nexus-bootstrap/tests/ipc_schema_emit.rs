@@ -31,7 +31,8 @@ use nexus_ai::ipc::{
 use nexus_ai::{Citation, RagResponse};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
-    EntityDuplicatePairRow, EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs,
+    EntityDecayRelationsArgs, EntityDecayRelationsResult, EntityDuplicatePairRow,
+    EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs,
     EntityGetResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
@@ -216,6 +217,14 @@ fn emit_all_schemas_impl() {
     write_schema::<EntityDuplicatePairRow>("com_nexus_storage__entity_find_duplicates", "pair");
     write_schema::<EntityFindDuplicatesResult>(
         "com_nexus_storage__entity_find_duplicates",
+        "result",
+    );
+    write_schema::<EntityDecayRelationsArgs>(
+        "com_nexus_storage__entity_decay_relations",
+        "args",
+    );
+    write_schema::<EntityDecayRelationsResult>(
+        "com_nexus_storage__entity_decay_relations",
         "result",
     );
 

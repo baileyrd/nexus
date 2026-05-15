@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityDecayRelationsArgs",
+  "description": "Args for `com.nexus.storage::entity_decay_relations` (handler 69).\n\nEach entity file under `<forge>/entities/` is read, its relation\nconfidences are multiplied by `factor` and clamped to `floor`, and\nthe file is atomically rewritten when any relation changes. Already-\nat-floor relations are skipped so successive cycles converge.",
+  "type": "object",
+  "properties": {
+    "dry_run": {
+      "description": "When `true`, compute counts but do not write any file. Useful\nfor `nexus graph dream-cycle run --phase decay --dry-run` and\nfor the shell to surface a preview before the user commits.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "factor": {
+      "description": "Multiplicative decay factor in `(0.0, 1.0]`. Defaults to\n`0.95` — matches Thoth's Dream-Cycle decay rate.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "floor": {
+      "description": "Lower bound for relation confidence after decay. Defaults to\n`0.10`.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    }
+  },
+  "additionalProperties": false
+}
