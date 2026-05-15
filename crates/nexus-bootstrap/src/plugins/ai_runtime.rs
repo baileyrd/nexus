@@ -37,6 +37,8 @@ pub(super) fn register(
                         "pool_stats",
                         nexus_ai_runtime::core_plugin::HANDLER_POOL_STATS,
                     ),
+                    // BL-134 Phase 2 — sync wait-until-terminal.
+                    ("wait_for", nexus_ai_runtime::core_plugin::HANDLER_WAIT_FOR),
                 ]),
             ),
             forge_root,

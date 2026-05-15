@@ -219,6 +219,16 @@ plugin = "com.nexus.ai.runtime"
 command = "pool_stats"
 caps = ["ai.runtime.observe"]
 
+# BL-134 Phase 2 — sync wait-until-terminal primitive. Read-shaped
+# (does not mutate the run); rides on the observe cap rather than a
+# new `wait` cap. The agent's `delegate` shim and the CLI's
+# `nexus agent wait` verb are the intended callers; community plugins
+# do not get observe by default.
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "wait_for"
+caps = ["ai.runtime.observe"]
+
 # ─── com.nexus.notifications — inbox surface (BL-136, ADR 0029) ──────
 
 [[handler]]

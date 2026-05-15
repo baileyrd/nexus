@@ -15,11 +15,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::events::AiEvent;
 use crate::{
-    AgentRun, AgentRunSummary, EventRing, AiRuntimeListArgs, RunStatus, SharedEventRing, TaskPriority,
+    AgentRun, AgentRunSummary, AiRuntimeListArgs, EventRing, RunStatus, SharedEventRing, TaskPriority,
 };
 
 /// One run's bookkeeping. Stored in the shared map; the per-run event
@@ -36,6 +37,24 @@ pub(crate) struct RunRow {
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
     pub events: SharedEventRing,
+    /// Notifier fired once the run reaches a terminal status
+    /// (Completed / Failed / Cancelled). `wait_for` callers grab
+    /// this Arc and await `notified()`. Callers MUST check the
+    /// status synchronously BEFORE constructing the `notified()`
+    /// future to avoid the lost-wakeup race — the handler in
+    /// `core_plugin::handle_wait_for` does this two-step (call
+    /// `is_terminal` first, then build `notified()`, then re-check
+    /// status before awaiting).
+    pub terminal: Arc<Notify>,
+}
+
+/// Returns true for statuses that mean the worker has finished and
+/// the run's outcome is no longer going to change.
+pub(crate) fn is_terminal(status: &RunStatus) -> bool {
+    matches!(
+        status,
+        RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+    )
 }
 
 /// Thread-safe handle to the run store. Cloned around to give each
@@ -74,10 +93,26 @@ impl Store {
             started_at: None,
             finished_at: None,
             events: Arc::clone(&ring),
+            terminal: Arc::new(Notify::new()),
         };
         let mut g = self.inner.lock().expect("store poisoned");
         g.insert(task_id, row);
         ring
+    }
+
+    /// Grab the terminal-state notifier for a run. Used by the
+    /// `wait_for` IPC handler to await completion without busy-polling.
+    pub(crate) fn terminal_notify(&self, task_id: Uuid) -> Option<Arc<Notify>> {
+        let g = self.inner.lock().expect("store poisoned");
+        g.get(&task_id).map(|row| Arc::clone(&row.terminal))
+    }
+
+    /// Check whether a run is already in a terminal status. Lets
+    /// `wait_for` short-circuit before the `notified()` await arm in
+    /// the (common) case where the caller polls late.
+    pub(crate) fn is_terminal(&self, task_id: Uuid) -> Option<bool> {
+        let g = self.inner.lock().expect("store poisoned");
+        g.get(&task_id).map(|row| is_terminal(&row.status))
     }
 
     /// Borrow the per-run ring without taking the outer lock for the
@@ -90,28 +125,42 @@ impl Store {
     }
 
     /// Advance the run's status + timestamps if the event implies a
-    /// transition. Returns `true` when the row was found.
+    /// transition. Returns `true` when the row was found. When the
+    /// transition is terminal (Completed / Failed / Cancelled) the
+    /// row's `terminal` notifier is signalled so any `wait_for`
+    /// callers parked on `notified()` wake up.
     pub(crate) fn observe_status(&self, event: &AiEvent) -> bool {
         let task_id = event.task_id();
         let Some(transition) = event.implied_status() else {
             return self.inner.lock().expect("store poisoned").contains_key(&task_id);
         };
-        let mut g = self.inner.lock().expect("store poisoned");
-        let Some(row) = g.get_mut(&task_id) else {
-            return false;
-        };
-        match transition {
-            RunStatus::Running if row.started_at.is_none() => {
-                row.started_at = Some(Utc::now());
-            }
-            RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled => {
-                if row.finished_at.is_none() {
-                    row.finished_at = Some(Utc::now());
+        let terminal_notifier = {
+            let mut g = self.inner.lock().expect("store poisoned");
+            let Some(row) = g.get_mut(&task_id) else {
+                return false;
+            };
+            match transition {
+                RunStatus::Running if row.started_at.is_none() => {
+                    row.started_at = Some(Utc::now());
                 }
+                RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled => {
+                    if row.finished_at.is_none() {
+                        row.finished_at = Some(Utc::now());
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+            row.status = transition.clone();
+            // Only grab a clone of the Arc<Notify> if the new status is
+            // terminal; non-terminal transitions don't need to wake
+            // anyone. The outer-lock guard is dropped before we fire
+            // the notify so concurrent `wait_for` calls don't deadlock
+            // on the map lock during `notified().await` re-entry.
+            is_terminal(&transition).then(|| Arc::clone(&row.terminal))
+        };
+        if let Some(notify) = terminal_notifier {
+            notify.notify_waiters();
         }
-        row.status = transition;
         true
     }
 
@@ -270,6 +319,60 @@ mod tests {
             text: "hello".into(),
         });
         assert_eq!(fetched.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn terminal_notify_returns_arc_per_run() {
+        let store = Store::new();
+        let id = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        store.insert(id, "session", TaskPriority::Interactive, None, "x");
+        store.insert(other, "session", TaskPriority::Interactive, None, "x");
+        let a = store.terminal_notify(id).expect("notify present");
+        let b = store.terminal_notify(id).expect("notify present");
+        assert!(Arc::ptr_eq(&a, &b), "same run must hand out the same Arc");
+        let c = store.terminal_notify(other).expect("notify present");
+        assert!(!Arc::ptr_eq(&a, &c), "different runs must have distinct Arcs");
+        assert!(store.terminal_notify(Uuid::new_v4()).is_none());
+    }
+
+    #[test]
+    fn is_terminal_reflects_status_transitions() {
+        let store = Store::new();
+        let id = Uuid::new_v4();
+        store.insert(id, "session", TaskPriority::Interactive, None, "x");
+        assert_eq!(store.is_terminal(id), Some(false));
+        store.observe_status(&AiEvent::Started { task_id: id, attempt: 1 });
+        assert_eq!(store.is_terminal(id), Some(false));
+        store.observe_status(&AiEvent::Finished {
+            task_id: id,
+            outcome: serde_json::Value::Null,
+        });
+        assert_eq!(store.is_terminal(id), Some(true));
+        assert_eq!(store.is_terminal(Uuid::new_v4()), None);
+    }
+
+    #[tokio::test]
+    async fn observe_status_terminal_transition_wakes_waiters() {
+        let store = Store::new();
+        let id = Uuid::new_v4();
+        store.insert(id, "session", TaskPriority::Interactive, None, "x");
+        let notify = store.terminal_notify(id).unwrap();
+        let notified = notify.notified();
+        // Drive the transition from another task — `notify_waiters`
+        // must wake the parked future even though it was constructed
+        // before the transition fired.
+        let store_clone = store.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            store_clone.observe_status(&AiEvent::Finished {
+                task_id: id,
+                outcome: serde_json::Value::Null,
+            });
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), notified)
+            .await
+            .expect("notified must fire");
     }
 
     #[test]

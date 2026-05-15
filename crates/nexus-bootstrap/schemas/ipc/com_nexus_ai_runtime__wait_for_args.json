@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeWaitForArgs",
+  "description": "`wait_for` arg envelope — blocks the IPC reply until the named\ntask reaches a terminal status (Completed / Failed / Cancelled) or\nthe optional timeout elapses.",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "description": "Task to wait on.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "timeout_ms": {
+      "description": "Optional wall-clock timeout in milliseconds. When the run is\nstill non-terminal at deadline, the handler returns the run's\ncurrent snapshot with `status` unchanged (`Queued` / `Running` /\n`Paused`). `None` waits indefinitely — appropriate for callers\n(e.g. agent `delegate`) that already enforce their own ceiling.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "default": null,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "task_id"
+  ]
+}

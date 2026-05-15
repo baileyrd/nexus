@@ -2,7 +2,7 @@
 
 /**
  * Args for `com.nexus.workflow::run` (handler id `5`). Lifted from
- * an inline `struct Args` inside [`lookup_by_args`] by audit-2026-05-01
+ * an inline `struct Args` inside `lookup_by_args` by audit-2026-05-01
  * P1-3 (#113) so the schema generator can see the shape.
  */
 export type RunWorkflowArgs = { 

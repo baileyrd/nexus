@@ -28,7 +28,8 @@ use crate::pool::WorkerPool;
 use crate::scheduler::Store;
 use crate::{
     AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs,
-    AiRuntimeSubmitReply, PoolStats, RunStatus, PLUGIN_ID,
+    AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus,
+    PLUGIN_ID,
 };
 
 /// `submit` handler id.
@@ -47,6 +48,8 @@ pub const HANDLER_LIST: u32 = 6;
 pub const HANDLER_EVENTS: u32 = 7;
 /// `pool_stats` handler id.
 pub const HANDLER_POOL_STATS: u32 = 8;
+/// `wait_for` handler id — BL-134 Phase 2 sync-wait primitive.
+pub const HANDLER_WAIT_FOR: u32 = 9;
 
 /// Default plugin id used as the `caller_plugin_id` when the
 /// dispatcher hasn't supplied one (Phase 1 always uses the bootstrap-
@@ -140,6 +143,7 @@ impl CorePlugin for AiRuntimeCorePlugin {
                 HANDLER_GET => handle_get(&store, &args),
                 HANDLER_LIST => handle_list(&store, &args),
                 HANDLER_EVENTS => handle_events(&store, &args),
+                HANDLER_WAIT_FOR => handle_wait_for(&store, &args).await,
                 HANDLER_POOL_STATS => {
                     let metrics = pool_metrics.ok_or_else(pool_unwired)?;
                     Ok(handle_pool_stats(&store, metrics))
@@ -328,6 +332,59 @@ fn handle_events(store: &Store, args: &serde_json::Value) -> Result<serde_json::
         .map_err(|e| exec_err(format!("events: serialize: {e}")))
 }
 
+/// Block until `task_id` reaches a terminal status, or the optional
+/// `timeout_ms` elapses. Returns the full `AgentRun` snapshot at the
+/// point the wait completed; the reply's `timed_out` flag tells the
+/// caller whether the deadline expired (status is still non-terminal)
+/// or the run actually finished.
+///
+/// Race-free against the worker calling `observe_status` concurrently:
+/// we (1) check status, (2) build the `notified()` future BEFORE
+/// re-checking status (the Notify documentation guarantees a future
+/// constructed at time T sees every `notify_waiters()` after T), and
+/// (3) re-check status — so a transition between (1) and (2) cannot
+/// be missed.
+async fn handle_wait_for(
+    store: &Store,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: AiRuntimeWaitForArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("wait_for: invalid args: {e}")))?;
+
+    let notify = store
+        .terminal_notify(parsed.task_id)
+        .ok_or_else(|| exec_err(format!("wait_for: task_id {} not found", parsed.task_id)))?;
+
+    // Step 1 — short-circuit if already terminal.
+    let already_terminal = store.is_terminal(parsed.task_id).unwrap_or(false);
+    let timed_out = if already_terminal {
+        false
+    } else {
+        // Step 2 — build the future BEFORE the second status check.
+        let notified = notify.notified();
+        tokio::pin!(notified);
+
+        // Step 3 — re-check status; a transition between step 1 and
+        // step 2's future construction would have stored a "ready"
+        // permit, so awaiting the pinned future returns immediately.
+        if store.is_terminal(parsed.task_id) == Some(true) {
+            false
+        } else if let Some(ms) = parsed.timeout_ms {
+            let timeout = std::time::Duration::from_millis(ms);
+            tokio::time::timeout(timeout, notified).await.is_err()
+        } else {
+            notified.await;
+            false
+        }
+    };
+
+    let run = store
+        .get(parsed.task_id)
+        .ok_or_else(|| exec_err(format!("wait_for: task_id {} not found", parsed.task_id)))?;
+    let reply = AiRuntimeWaitForReply { run, timed_out };
+    serde_json::to_value(&reply).map_err(|e| exec_err(format!("wait_for: serialize: {e}")))
+}
+
 fn handle_pool_stats(store: &Store, metrics: crate::pool::PoolMetrics) -> serde_json::Value {
     let queued = store.count_status(&RunStatus::Queued);
     let running = store.count_status(&RunStatus::Running);
@@ -439,6 +496,80 @@ mod tests {
         let err = fut.await.unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("pool not started"), "actual: {msg}");
+    }
+
+    #[tokio::test]
+    async fn wait_for_unknown_task_id_errors() {
+        let mut plugin = AiRuntimeCorePlugin::new();
+        let args = serde_json::json!({ "task_id": uuid::Uuid::new_v4() });
+        let fut = plugin.dispatch_async(HANDLER_WAIT_FOR, &args).unwrap();
+        let err = fut.await.unwrap_err();
+        assert!(format!("{err}").contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn wait_for_terminal_run_returns_immediately() {
+        // Seed a store with a finished run, build a plugin pointing at
+        // it, dispatch wait_for, expect timed_out=false + status
+        // reflecting the terminal state.
+        let plugin = AiRuntimeCorePlugin::new();
+        let id = uuid::Uuid::new_v4();
+        plugin
+            .store
+            .insert(id, "session", TaskPriority::Interactive, None, "x");
+        plugin.store.observe_status(&AiEvent::Finished {
+            task_id: id,
+            outcome: serde_json::json!({"ok": true}),
+        });
+        let args = serde_json::json!({ "task_id": id });
+        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
+        assert!(!reply.timed_out);
+        assert_eq!(reply.run.status, RunStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn wait_for_blocks_until_worker_finishes() {
+        let plugin = AiRuntimeCorePlugin::new();
+        let id = uuid::Uuid::new_v4();
+        plugin
+            .store
+            .insert(id, "session", TaskPriority::Interactive, None, "x");
+        let store_clone = plugin.store.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            store_clone.observe_status(&AiEvent::Finished {
+                task_id: id,
+                outcome: serde_json::Value::Null,
+            });
+        });
+        let args = serde_json::json!({ "task_id": id });
+        let started = std::time::Instant::now();
+        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
+        assert!(!reply.timed_out);
+        assert_eq!(reply.run.status, RunStatus::Completed);
+        // Loose bound — the spawn lag + scheduler hop means the wait
+        // takes >0 but well under the 1s test budget.
+        assert!(started.elapsed() >= std::time::Duration::from_millis(10));
+    }
+
+    #[tokio::test]
+    async fn wait_for_with_timeout_returns_timed_out_when_run_still_running() {
+        let plugin = AiRuntimeCorePlugin::new();
+        let id = uuid::Uuid::new_v4();
+        plugin
+            .store
+            .insert(id, "session", TaskPriority::Interactive, None, "x");
+        plugin.store.observe_status(&AiEvent::Started {
+            task_id: id,
+            attempt: 1,
+        });
+        let args = serde_json::json!({ "task_id": id, "timeout_ms": 25 });
+        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
+        assert!(reply.timed_out);
+        assert_eq!(reply.run.status, RunStatus::Running);
     }
 
     #[tokio::test]

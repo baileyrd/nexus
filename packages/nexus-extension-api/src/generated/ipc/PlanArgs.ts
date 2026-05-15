@@ -2,7 +2,6 @@
 import type { Plan } from "./Plan";
 
 /**
- * Args for `com.nexus.agent::run_plan` (handler id `7`). Lifted from
- * inline by audit-2026-05-01 P1-3 (#113).
+ * Args for `com.nexus.agent::run_plan` (handler id `7`).
  */
 export type PlanArgs = { plan: Plan, };

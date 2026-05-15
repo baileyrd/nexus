@@ -66,8 +66,8 @@ use nexus_notifications::Channel as NotificationsChannel;
 use nexus_ai_runtime::events::AiEvent as AiRuntimeEvent;
 use nexus_ai_runtime::{
     AgentRun, AgentRunSummary, AgentTaskKind, AiRuntimeControlArgs, AiRuntimeEventsArgs,
-    AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs, AiRuntimeSubmitReply, PoolStats,
-    RunStatus, TaskPriority,
+    AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs, AiRuntimeSubmitReply,
+    AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus, TaskPriority,
 };
 // nexus-git uses a wire-mirror module — handlers emit ad-hoc
 // `serde_json::json!` and the impl types in `nexus_git::types`
@@ -370,6 +370,9 @@ fn emit_all_schemas_impl() {
     write_schema::<AiRuntimeListArgs>("com_nexus_ai_runtime__list", "args");
     write_schema::<AiRuntimeEventsArgs>("com_nexus_ai_runtime__events", "args");
     write_schema::<AiRuntimeControlArgs>("com_nexus_ai_runtime__control", "args");
+    // Phase 2 — sync wait-until-terminal primitive.
+    write_schema::<AiRuntimeWaitForArgs>("com_nexus_ai_runtime__wait_for", "args");
+    write_schema::<AiRuntimeWaitForReply>("com_nexus_ai_runtime__wait_for", "reply");
     write_schema::<AgentTaskKind>("com_nexus_ai_runtime", "task_kind");
     write_schema::<AgentRun>("com_nexus_ai_runtime__get", "result");
     write_schema::<AgentRunSummary>("com_nexus_ai_runtime__list", "summary");

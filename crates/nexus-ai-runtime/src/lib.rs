@@ -374,6 +374,56 @@ pub struct AiRuntimeEventsArgs {
     pub since_seq: Option<u64>,
 }
 
+/// `wait_for` arg envelope — blocks the IPC reply until the named
+/// task reaches a terminal status (Completed / Failed / Cancelled) or
+/// the optional timeout elapses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeWaitForArgs {
+    /// Task to wait on.
+    pub task_id: uuid::Uuid,
+    /// Optional wall-clock timeout in milliseconds. When the run is
+    /// still non-terminal at deadline, the handler returns the run's
+    /// current snapshot with `status` unchanged (`Queued` / `Running` /
+    /// `Paused`). `None` waits indefinitely — appropriate for callers
+    /// (e.g. agent `delegate`) that already enforce their own ceiling.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+/// `wait_for` reply shape. Mirrors the existing `AgentRun` payload but
+/// adds a `timed_out` discriminator so the caller doesn't have to
+/// inspect `status` against the terminal set to figure out whether the
+/// wait completed or expired. Failed-run details still live in the
+/// embedded `AgentRun.events` ring.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeWaitForReply {
+    /// Live run snapshot at the moment the wait completed (or timed
+    /// out). When `timed_out` is `true`, `status` is one of the
+    /// non-terminal variants.
+    pub run: AgentRun,
+    /// `true` when the wait expired before the run reached a terminal
+    /// status; `false` when the run reached a terminal state.
+    pub timed_out: bool,
+}
+
 /// `pool_stats` reply shape — exposed so a shell observability panel
 /// can render queue depth + utilisation without scraping logs.
 #[derive(Debug, Clone, Serialize, Deserialize)]

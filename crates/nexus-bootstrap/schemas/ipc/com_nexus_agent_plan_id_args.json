@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "PlanIdArgs",
-  "description": "Args for `com.nexus.agent::history_get` and related plan-id-keyed\nhandlers. Lifted from inline by audit-2026-05-01 P1-3 (#113).",
+  "description": "Args for `com.nexus.agent::history_get` and related plan-id-keyed handlers.",
   "type": "object",
   "properties": {
     "plan_id": {

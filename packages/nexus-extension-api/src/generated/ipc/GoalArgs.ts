@@ -2,6 +2,5 @@
 
 /**
  * Args for `com.nexus.agent::plan` and `::run` (handler ids `1`, `2`).
- * Lifted from inline by audit-2026-05-01 P1-3 (#113).
  */
 export type GoalArgs = { goal: string, archetype: string | null, };

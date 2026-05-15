@@ -1,0 +1,496 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeWaitForReply",
+  "description": "`wait_for` reply shape. Mirrors the existing `AgentRun` payload but\nadds a `timed_out` discriminator so the caller doesn't have to\ninspect `status` against the terminal set to figure out whether the\nwait completed or expired. Failed-run details still live in the\nembedded `AgentRun.events` ring.",
+  "type": "object",
+  "properties": {
+    "run": {
+      "description": "Live run snapshot at the moment the wait completed (or timed\nout). When `timed_out` is `true`, `status` is one of the\nnon-terminal variants.",
+      "$ref": "#/$defs/AgentRun"
+    },
+    "timed_out": {
+      "description": "`true` when the wait expired before the run reached a terminal\nstatus; `false` when the run reached a terminal state.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "run",
+    "timed_out"
+  ],
+  "$defs": {
+    "AgentRun": {
+      "description": "Live state of a submitted task, returned by `get` and embedded in\n`list` summaries. The `events` field carries the bounded replay\nbuffer (most recent up to [`PER_RUN_EVENT_BUFFER_CAP`]) so a fresh\nobserver can backfill what they missed.",
+      "type": "object",
+      "properties": {
+        "caller_plugin_id": {
+          "description": "Caller plugin id captured at submission time.",
+          "type": "string"
+        },
+        "events": {
+          "description": "Replay buffer of typed events for this run. Bounded; older\nevents fall off when the buffer reaches\n[`PER_RUN_EVENT_BUFFER_CAP`].",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AiEvent"
+          }
+        },
+        "finished_at": {
+          "description": "Terminal-state timestamp; `None` while running.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "kind": {
+          "description": "Discriminator label (`\"session\"` / `\"ai_stream\"` / …) — the\nfull `AgentTaskKind` payload is not echoed back to keep this\nreply small.",
+          "type": "string"
+        },
+        "parent": {
+          "description": "Optional parent task id passed to `submit`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "priority": {
+          "description": "Priority the task was submitted with.",
+          "$ref": "#/$defs/TaskPriority"
+        },
+        "started_at": {
+          "description": "Worker-start timestamp; `None` while queued.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "status": {
+          "description": "Current run status.",
+          "$ref": "#/$defs/RunStatus"
+        },
+        "submitted_at": {
+          "description": "Submission timestamp (UTC).",
+          "type": "string",
+          "format": "date-time"
+        },
+        "task_id": {
+          "description": "Server-allocated task id.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "kind",
+        "priority",
+        "caller_plugin_id",
+        "status",
+        "submitted_at",
+        "events"
+      ]
+    },
+    "AiEvent": {
+      "description": "Typed AI/agent lifecycle event.\n\nEvery variant carries `task_id` so consumers can dispatch by run.\n`tag` (serde) is `kind` to keep TS unions ergonomic on the shell\nside; field shapes mirror the ADR-0028 proposed types but stay\nJSON-friendly (no `&'static str` on the wire).",
+      "oneOf": [
+        {
+          "description": "`submit` accepted the task; the worker has not started yet.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "submitted"
+            },
+            "kind_label": {
+              "description": "`AgentTaskKind::label()` snapshot.",
+              "type": "string"
+            },
+            "priority": {
+              "description": "Priority bucket the task was queued under.",
+              "$ref": "#/$defs/TaskPriority"
+            },
+            "task_id": {
+              "description": "Server-allocated task id.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "kind_label",
+            "priority"
+          ]
+        },
+        {
+          "description": "Worker began executing this task.",
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "description": "1-based attempt counter — Phase 1 always emits `1`; later\nphases bump on retry.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "started"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "attempt"
+          ]
+        },
+        {
+          "description": "Wraps `com.nexus.ai.stream_chunk`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "token_chunk"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "text": {
+              "description": "Raw text chunk emitted by the underlying stream.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "text"
+          ]
+        },
+        {
+          "description": "Reserved — Phase 2 will populate when the agent executor emits\nper-tool-call breadcrumbs through the runtime.",
+          "type": "object",
+          "properties": {
+            "args_preview": {
+              "description": "Truncated args preview — never the full payload.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "tool_called"
+            },
+            "name": {
+              "description": "Tool name (e.g. `read_file`).",
+              "type": "string"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "tool_use_id": {
+              "description": "LLM-allocated tool-use id.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "tool_use_id",
+            "name",
+            "args_preview"
+          ]
+        },
+        {
+          "description": "Reserved — Phase 2 will populate alongside `ToolCalled`.",
+          "type": "object",
+          "properties": {
+            "is_error": {
+              "description": "`true` when the tool surfaced an error.",
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "tool_result"
+            },
+            "summary": {
+              "description": "Truncated body preview.",
+              "type": "string"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "tool_use_id": {
+              "description": "LLM-allocated tool-use id this is the response to.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "tool_use_id",
+            "is_error",
+            "summary"
+          ]
+        },
+        {
+          "description": "Wraps `com.nexus.agent.round_proposed` — agent waiting for\napproval to dispatch a round of tool calls.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "round_proposed"
+            },
+            "narration": {
+              "description": "Agent narration accompanying the round (truncated by\nagent producer; not re-truncated here).",
+              "type": "string"
+            },
+            "round": {
+              "description": "1-based round number.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "round",
+            "narration"
+          ]
+        },
+        {
+          "description": "Wraps `com.nexus.agent.round_decided`.",
+          "type": "object",
+          "properties": {
+            "decision_kind": {
+              "description": "`\"approve\"` / `\"deny\"` / `\"timeout\"` — string for forward\ncompatibility with whatever decision kinds Phase 2 adds.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "round_decided"
+            },
+            "round": {
+              "description": "1-based round number.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "round",
+            "decision_kind"
+          ]
+        },
+        {
+          "description": "Reserved — Phase 5.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "paused"
+            },
+            "reason": {
+              "description": "Human-readable reason captured from `pause` / approval\ntimeout / etc.",
+              "type": "string"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "reason"
+          ]
+        },
+        {
+          "description": "Reserved — Phase 5.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "resumed"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id"
+          ]
+        },
+        {
+          "description": "Reserved — Phase 5.",
+          "type": "object",
+          "properties": {
+            "by": {
+              "description": "Source of the cancellation (`\"caller\"` / `\"deadline\"` / …).",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "cancelled"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "by"
+          ]
+        },
+        {
+          "description": "Worker finished cleanly. The `outcome` JSON is the verbatim\nreply body the underlying handler returned.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "finished"
+            },
+            "outcome": {
+              "description": "Reply body from the underlying IPC dispatch."
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "outcome"
+          ]
+        },
+        {
+          "description": "Worker finished with an error. `error` is the serialized\n`PluginError`; `retriable` is reserved for Phase 2 retry\npolicy and Phase-1 always emits `false`.",
+          "type": "object",
+          "properties": {
+            "error": {
+              "description": "Serialized error string.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "failed"
+            },
+            "retriable": {
+              "description": "Whether the scheduler should retry. Phase 1: always\n`false` (no retry policy).",
+              "type": "boolean"
+            },
+            "task_id": {
+              "description": "Task id this event belongs to.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id",
+            "error",
+            "retriable"
+          ]
+        }
+      ]
+    },
+    "RunStatus": {
+      "description": "Coarse-grained run lifecycle. Mapped from per-event transitions in\n[`scheduler::Store::record_event`]. Failed/aborted runs carry the\nerror message in their last [`events::AiEvent::Failed`].",
+      "oneOf": [
+        {
+          "description": "Submitted, not yet picked up by a worker.",
+          "type": "string",
+          "const": "queued"
+        },
+        {
+          "description": "Worker has begun executing.",
+          "type": "string",
+          "const": "running"
+        },
+        {
+          "description": "Reserved for Phase 5 — worker is suspended pending `resume`.",
+          "type": "string",
+          "const": "paused"
+        },
+        {
+          "description": "Reserved for Phase 5 — caller asked to cancel before completion.",
+          "type": "string",
+          "const": "cancelled"
+        },
+        {
+          "description": "Worker finished and the underlying call returned `Ok`.",
+          "type": "string",
+          "const": "completed"
+        },
+        {
+          "description": "Worker finished and the underlying call returned `Err`. The\n`error` string lives in the run's terminal `Failed` event.",
+          "type": "string",
+          "const": "failed"
+        }
+      ]
+    },
+    "TaskPriority": {
+      "description": "Priority bucket for an [`AgentTask`]. The Phase-1 scheduler treats\nevery priority equally (FIFO across the single queue); BL-134\nPhase 5 splits the pool into per-priority `JoinSet`s so `Critical`\ncan preempt a `Background` burst.",
+      "oneOf": [
+        {
+          "description": "Indexing-daemon-style work the user is not waiting on.",
+          "type": "string",
+          "const": "background"
+        },
+        {
+          "description": "Default. Interactive agent runs the user is watching.",
+          "type": "string",
+          "const": "interactive"
+        },
+        {
+          "description": "Reserved for Phase 5 — preempts other priorities.",
+          "type": "string",
+          "const": "critical"
+        }
+      ]
+    }
+  }
+}

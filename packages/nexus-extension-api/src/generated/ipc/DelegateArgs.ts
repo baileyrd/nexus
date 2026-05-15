@@ -2,16 +2,11 @@
 
 /**
  * Args for `com.nexus.agent::delegate` (handler id 24).
- *
- * Shape mirrors [`SessionRunArgs`] with `archetype` required —
- * delegation always names a target archetype so the caller can
- * be explicit about which agent's posture handles the sub-goal.
  */
 export type DelegateArgs = { 
 /**
  * Target archetype short name (one of the ids returned by
- * `list_archetypes`). Required — the parent agent has to pick
- * the child's posture rather than relying on a default.
+ * `list_archetypes`).
  */
 archetype: string, 
 /**
@@ -20,23 +15,17 @@ archetype: string,
 goal: string, 
 /**
  * Optional override for the sub-session's system prompt.
- * When unset, the archetype's prompt is used directly.
  */
 system: string | null, 
 /**
- * Auto-approve the sub-session's rounds (matches `session_run`).
- * Defaults to `true` since a delegation is a tool-call inside
- * another agent's run — prompting twice for the same human is
- * usually noise.
+ * Auto-approve the sub-session's rounds. Defaults to `true`.
  */
 auto_approve: boolean, 
 /**
- * Approval-callback timeout (only used when `auto_approve =
- * false`).
+ * Approval-callback timeout when `auto_approve = false`.
  */
 approval_timeout_secs: bigint | null, 
 /**
- * Prompt for every round when `auto_approve = false` (otherwise
- * the policy uses DG-34's risk-aware gating).
+ * Prompt for every round when `auto_approve = false`.
  */
 strict_approval: boolean, };

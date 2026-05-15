@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RunWorkflowArgs",
-  "description": "Args for `com.nexus.workflow::run` (handler id `5`). Lifted from\nan inline `struct Args` inside [`lookup_by_args`] by audit-2026-05-01\nP1-3 (#113) so the schema generator can see the shape.",
+  "description": "Args for `com.nexus.workflow::run` (handler id `5`). Lifted from\nan inline `struct Args` inside `lookup_by_args` by audit-2026-05-01\nP1-3 (#113) so the schema generator can see the shape.",
   "type": "object",
   "properties": {
     "name": {

@@ -2,16 +2,9 @@
 
 /**
  * Args for `com.nexus.agent::list_tools` (handler id 18).
- *
- * `capabilities` (when present) is the list of [`crate::Capability`]
- * id strings (e.g. `["fs.read", "git.read"]`) the agent holds. The
- * handler filters the registry to tools whose `required_capabilities`
- * are a subset of that list. Omitting the field returns the full
- * catalogue.
  */
 export type ListToolsArgs = { 
 /**
- * Optional capability filter. Strings parsed via
- * [`crate::Capability::from_str`]; unknown ids are rejected.
+ * Optional capability filter.
  */
 capabilities: Array<string> | null, };
