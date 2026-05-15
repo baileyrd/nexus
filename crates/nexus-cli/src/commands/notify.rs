@@ -56,8 +56,9 @@ fn validate_channel(s: &str) -> Result<&'static str> {
         "desktop" => Ok("desktop"),
         "discord" => Ok("discord"),
         "telegram" => Ok("telegram"),
+        "email" => Ok("email"),
         other => Err(anyhow::anyhow!(
-            "unknown channel '{other}': expected one of desktop / discord / telegram"
+            "unknown channel '{other}': expected one of desktop / discord / telegram / email"
         )),
     }
 }
@@ -76,6 +77,9 @@ mod tests {
         assert_eq!(validate_channel("telegram").unwrap(), "telegram");
         assert_eq!(validate_channel("Telegram").unwrap(), "telegram");
         assert_eq!(validate_channel("TELEGRAM").unwrap(), "telegram");
+        assert_eq!(validate_channel("email").unwrap(), "email");
+        assert_eq!(validate_channel("Email").unwrap(), "email");
+        assert_eq!(validate_channel("EMAIL").unwrap(), "email");
     }
 
     #[test]

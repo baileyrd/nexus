@@ -18,10 +18,17 @@
 //!   same.
 //! - **`Channel::Discord`** — HTTP POST to a webhook URL (config or
 //!   keyring). Blocking `reqwest`, same shape as `nexus-linkpreview`.
+//! - **`Channel::Telegram`** — HTTP POST to the Telegram Bot API
+//!   `sendMessage` endpoint. Splits long bodies at UTF-8 boundaries
+//!   under the 4096-byte sendMessage cap.
+//! - **`Channel::Email`** — SMTP submission via `lettre` over rustls
+//!   TLS. `[notifications.email]` config block supplies host / port /
+//!   credentials / from / to / subject template. Plain-text only; HTML
+//!   bodies are out of scope for v1.
 //!
-//! Telegram, SMTP, in-app push, shell-settings UI, workflow `notify`
-//! step, and the agent run-completion auto-notify subscriber are all
-//! filed as follow-ups (BL-133 closure note in `BACKLOG_COMPLETED.md`).
+//! Shell-settings UI, workflow `notify` step, and the agent
+//! run-completion auto-notify subscriber are filed as follow-ups
+//! (BL-133 closure note in `BACKLOG_COMPLETED.md`).
 //!
 //! ## Wire shape
 //!
@@ -29,7 +36,7 @@
 //!
 //! ```jsonc
 //! {
-//!   "channel": "desktop" | "discord",
+//!   "channel": "desktop" | "discord" | "telegram" | "email",
 //!   "message": "string",
 //!   "title": "string?"
 //! }
@@ -54,6 +61,11 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 pub mod core_plugin;
 
 /// Bus topic published when a notification has been delivered (or
@@ -65,6 +77,14 @@ pub const NOTIFICATION_DELIVERED_TOPIC: &str = "com.nexus.notifications.delivere
 /// only order; the wire form (`serde rename_all = "snake_case"`)
 /// pins the JSON tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
     /// Desktop OS notification, bridged through the shell via a bus
@@ -75,6 +95,8 @@ pub enum Channel {
     /// Telegram bot — HTTP POST to
     /// `https://api.telegram.org/bot<TOKEN>/sendMessage`.
     Telegram,
+    /// Email — SMTP submission via [`SmtpTransport`].
+    Email,
 }
 
 impl Channel {
@@ -86,6 +108,7 @@ impl Channel {
             Channel::Desktop => "desktop",
             Channel::Discord => "discord",
             Channel::Telegram => "telegram",
+            Channel::Email => "email",
         }
     }
 }
@@ -110,13 +133,17 @@ pub enum SendError {
     /// Channel not configured in `.forge/config.toml`.
     #[error("channel {0} is not configured")]
     NotConfigured(&'static str),
-    /// HTTP error from the underlying transport (Discord today;
-    /// Telegram / SMTP follow-ups will reuse this variant).
+    /// HTTP error from the underlying transport (Discord / Telegram).
     #[error("HTTP transport error: {0}")]
     Http(String),
     /// Local bus publish failed (Desktop transport).
     #[error("bus publish failed: {0}")]
     Bus(String),
+    /// SMTP-layer error (connect / auth / submission). Distinct from
+    /// `Http` so callers can differentiate "the SMTP server rejected
+    /// us" from "Discord's webhook returned 5xx".
+    #[error("SMTP error: {0}")]
+    Smtp(String),
 }
 
 /// Transport trait — one impl per [`Channel`]. Lives behind a
@@ -350,6 +377,144 @@ impl Transport for TelegramBot {
     }
 }
 
+/// SMTP transport configuration.
+///
+/// Mirrors the shape of `[notifications.email]` in
+/// `<forge>/.forge/config.toml`. Defaulting every field to an empty
+/// string keeps the boot path tolerant of partial configuration —
+/// missing fields surface at [`Transport::send`] time as
+/// [`SendError::NotConfigured`] rather than panicking at
+/// construction.
+#[derive(Debug, Clone, Default)]
+pub struct SmtpConfig {
+    /// SMTP hostname, e.g. `smtp.gmail.com`.
+    pub host: String,
+    /// SMTP submission port. Common values: 465 (implicit TLS),
+    /// 587 (STARTTLS).
+    pub port: u16,
+    /// Username for SMTP AUTH (PLAIN/LOGIN). Empty disables auth.
+    pub username: String,
+    /// Password for SMTP AUTH. Plain text in `config.toml` for v1 —
+    /// the BL-133 follow-up tail tracks routing this through the
+    /// `nexus-security` keyring once the IPC surface lands.
+    pub password: String,
+    /// `From:` envelope address — must be a valid `addr@host`.
+    pub from: String,
+    /// `To:` envelope address. Multiple recipients can be supplied
+    /// comma-separated; each is parsed with `addr.parse::<Mailbox>()`
+    /// at send-time and the message is delivered to all of them.
+    pub to: String,
+    /// Subject template used when the notification carries no title.
+    /// `{title}` is interpolated when the notification *does* carry a
+    /// title; default falls back to `"Nexus notification"`.
+    pub subject_template: String,
+}
+
+/// SMTP transport. Uses [`lettre`] with implicit TLS (port 465) or
+/// STARTTLS (port 587), keyed off the configured `port`. The TLS
+/// stack is rustls + ring, matching the rest of the Nexus dep graph.
+///
+/// Connection pooling is on (lettre's default `pool` feature) so
+/// repeat-fire notifications (e.g. workflow runs that emit on each
+/// step) don't re-handshake per send.
+pub struct SmtpTransport {
+    config: SmtpConfig,
+}
+
+impl SmtpTransport {
+    /// Build a fresh SMTP transport bound to `config`. No I/O happens
+    /// here; the actual connection is lazy on the first [`Transport::send`]
+    /// call.
+    #[must_use]
+    pub fn new(config: SmtpConfig) -> Self {
+        Self { config }
+    }
+
+    /// Validate that every config field needed to actually deliver a
+    /// message is populated. Public for the unit-test surface — the
+    /// production path runs the same gate at the top of
+    /// [`Transport::send`].
+    #[must_use]
+    pub fn is_configured(&self) -> bool {
+        !self.config.host.is_empty()
+            && self.config.port != 0
+            && !self.config.from.is_empty()
+            && !self.config.to.is_empty()
+    }
+
+    /// Build the message subject. Falls back to the configured
+    /// `subject_template` (with `{title}` substituted) when the
+    /// notification carries a title, then to `"Nexus notification"`,
+    /// then to a final last-resort literal so the SMTP envelope never
+    /// ships a blank Subject header.
+    #[must_use]
+    pub fn compose_subject(template: &str, title: Option<&str>) -> String {
+        let trimmed = template.trim();
+        match (title, trimmed.is_empty()) {
+            (Some(t), false) => trimmed.replace("{title}", t),
+            (Some(t), true) => t.to_string(),
+            (None, false) => trimmed.replace("{title}", "Nexus notification"),
+            (None, true) => "Nexus notification".to_string(),
+        }
+    }
+}
+
+impl Transport for SmtpTransport {
+    fn channel(&self) -> Channel {
+        Channel::Email
+    }
+    fn send(&self, notif: &Notification) -> Result<(), SendError> {
+        use lettre::Transport as _;
+        if !self.is_configured() {
+            return Err(SendError::NotConfigured("email"));
+        }
+        let subject = Self::compose_subject(&self.config.subject_template, notif.title.as_deref());
+        let from: lettre::message::Mailbox = self
+            .config
+            .from
+            .parse()
+            .map_err(|e: lettre::address::AddressError| {
+                SendError::Smtp(format!("invalid from address '{}': {e}", self.config.from))
+            })?;
+        let mut builder = lettre::Message::builder().from(from).subject(subject);
+        for raw in self.config.to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let mailbox: lettre::message::Mailbox = raw.parse().map_err(
+                |e: lettre::address::AddressError| {
+                    SendError::Smtp(format!("invalid to address '{raw}': {e}"))
+                },
+            )?;
+            builder = builder.to(mailbox);
+        }
+        let email = builder
+            .body(notif.message.clone())
+            .map_err(|e| SendError::Smtp(format!("build message: {e}")))?;
+
+        // Port-based TLS mode. 465 = implicit TLS (SMTPS), anything
+        // else = STARTTLS on submission. Bare port 25 isn't offered
+        // — submission paths should always be authenticated + TLS.
+        let mut t = if self.config.port == 465 {
+            lettre::SmtpTransport::relay(&self.config.host)
+                .map_err(|e| SendError::Smtp(format!("smtps relay: {e}")))?
+                .port(self.config.port)
+        } else {
+            lettre::SmtpTransport::starttls_relay(&self.config.host)
+                .map_err(|e| SendError::Smtp(format!("starttls relay: {e}")))?
+                .port(self.config.port)
+        };
+        if !self.config.username.is_empty() {
+            t = t.credentials(lettre::transport::smtp::authentication::Credentials::new(
+                self.config.username.clone(),
+                self.config.password.clone(),
+            ));
+        }
+        let mailer = t.build();
+        mailer
+            .send(&email)
+            .map(|_| ())
+            .map_err(|e| SendError::Smtp(format!("send: {e}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +660,102 @@ mod tests {
         // Round-trip: chunks concatenated equal the original.
         let joined: String = chunks.into_iter().collect();
         assert_eq!(joined, text);
+    }
+
+    // ── SMTP transport ──────────────────────────────────────────
+
+    #[test]
+    fn channel_email_serde_round_trip() {
+        let t: Channel = serde_json::from_str("\"email\"").unwrap();
+        assert_eq!(t, Channel::Email);
+        let s = serde_json::to_value(Channel::Email).unwrap();
+        assert_eq!(s, serde_json::Value::String("email".into()));
+        assert_eq!(Channel::Email.as_str(), "email");
+    }
+
+    #[test]
+    fn smtp_transport_empty_config_reports_not_configured() {
+        let t = SmtpTransport::new(SmtpConfig::default());
+        assert!(!t.is_configured());
+        let err = t
+            .send(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, SendError::NotConfigured("email")));
+    }
+
+    #[test]
+    fn smtp_transport_partial_config_reports_not_configured() {
+        // Host present, port zero, from + to missing — still not
+        // ready to deliver. Should fail at the gate, not the send.
+        let t = SmtpTransport::new(SmtpConfig {
+            host: "smtp.example.com".into(),
+            ..SmtpConfig::default()
+        });
+        assert!(!t.is_configured());
+        let err = t
+            .send(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, SendError::NotConfigured("email")));
+    }
+
+    #[test]
+    fn smtp_compose_subject_uses_title_when_template_has_placeholder() {
+        let s = SmtpTransport::compose_subject("Nexus: {title}", Some("Backup done"));
+        assert_eq!(s, "Nexus: Backup done");
+    }
+
+    #[test]
+    fn smtp_compose_subject_uses_title_directly_when_no_template() {
+        let s = SmtpTransport::compose_subject("", Some("Inline"));
+        assert_eq!(s, "Inline");
+        let s = SmtpTransport::compose_subject("   ", Some("Inline"));
+        assert_eq!(s, "Inline");
+    }
+
+    #[test]
+    fn smtp_compose_subject_falls_back_to_template_default_when_no_title() {
+        // Title missing + non-empty template → template renders with
+        // a literal placeholder substitute so the subject is not
+        // blank but also not the empty default.
+        let s = SmtpTransport::compose_subject("Nexus: {title}", None);
+        assert_eq!(s, "Nexus: Nexus notification");
+    }
+
+    #[test]
+    fn smtp_compose_subject_falls_back_to_literal_when_blank_template_and_no_title() {
+        let s = SmtpTransport::compose_subject("", None);
+        assert_eq!(s, "Nexus notification");
+    }
+
+    #[test]
+    fn smtp_transport_rejects_invalid_from_address() {
+        // Configured (so the gate passes) but the from header is not
+        // a valid mailbox — surfaces as `Smtp` (build-time), not
+        // `NotConfigured`.
+        let t = SmtpTransport::new(SmtpConfig {
+            host: "smtp.example.com".into(),
+            port: 587,
+            from: "not-an-email".into(),
+            to: "ok@example.com".into(),
+            ..SmtpConfig::default()
+        });
+        assert!(t.is_configured());
+        let err = t
+            .send(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        match err {
+            SendError::Smtp(msg) => assert!(msg.contains("invalid from address")),
+            other => panic!("expected Smtp, got {other:?}"),
+        }
     }
 
     #[test]

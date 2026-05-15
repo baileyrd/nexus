@@ -1296,6 +1296,7 @@ fn register_core_plugins(
     // filed as follow-ups.
     let discord_webhook_url = load_discord_webhook_url(forge_root);
     let (telegram_bot_token, telegram_chat_id) = load_telegram_config(forge_root);
+    let smtp_config = load_smtp_config(forge_root);
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -1313,6 +1314,7 @@ fn register_core_plugins(
                 discord_webhook_url,
                 telegram_bot_token,
                 telegram_chat_id,
+                smtp_config,
             )),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.notifications")?;
@@ -2126,6 +2128,79 @@ fn load_telegram_config(forge_root: &std::path::Path) -> (String, String) {
                 "config.toml: [notifications.telegram] failed to parse; credentials unset"
             );
             (String::new(), String::new())
+        }
+    }
+}
+
+/// BL-133 follow-up — pull `[notifications.email]` out of
+/// `<forge>/.forge/config.toml`. Missing file / section / fields fall
+/// back to a `SmtpConfig::default()` shape (every field empty / port 0)
+/// which surfaces at `send(channel: email, ...)` time as
+/// `SendError::NotConfigured`. Same fallback behaviour as
+/// [`load_telegram_config`]. The plain-text password in config.toml is
+/// a deliberate v1 trade-off; the BL-133 follow-up tail tracks moving
+/// the credential through the `nexus-security` keyring once the IPC
+/// surface lands.
+fn load_smtp_config(forge_root: &std::path::Path) -> nexus_notifications::SmtpConfig {
+    #[derive(serde::Deserialize, Default)]
+    struct Wrapper {
+        #[serde(default)]
+        notifications: Notifications,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct Notifications {
+        #[serde(default)]
+        email: EmailCfg,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct EmailCfg {
+        #[serde(default)]
+        host: String,
+        #[serde(default)]
+        port: u16,
+        #[serde(default)]
+        username: String,
+        #[serde(default)]
+        password: String,
+        #[serde(default)]
+        from: String,
+        #[serde(default)]
+        to: String,
+        #[serde(default)]
+        subject_template: String,
+    }
+    let path = forge_root.join(".forge").join("config.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return nexus_notifications::SmtpConfig::default();
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: read failed; smtp credentials unset"
+            );
+            return nexus_notifications::SmtpConfig::default();
+        }
+    };
+    match toml::from_str::<Wrapper>(&text) {
+        Ok(w) => nexus_notifications::SmtpConfig {
+            host: w.notifications.email.host,
+            port: w.notifications.email.port,
+            username: w.notifications.email.username,
+            password: w.notifications.email.password,
+            from: w.notifications.email.from,
+            to: w.notifications.email.to,
+            subject_template: w.notifications.email.subject_template,
+        },
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: [notifications.email] failed to parse; smtp credentials unset"
+            );
+            nexus_notifications::SmtpConfig::default()
         }
     }
 }

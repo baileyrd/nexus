@@ -180,6 +180,12 @@ petgraph = "0.7"
 # HTTP client (AI provider calls)
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2"] }
 
+# SMTP client (BL-133 follow-up: email notification transport).
+# `rustls-tls` keeps the TLS stack aligned with reqwest's rustls + ring
+# graph above; no native-tls / openssl pulled in. Defaults disabled to
+# avoid grabbing native-tls + a tokio-runtime transport we don't use.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls-tls", "ring", "webpki-roots", "pool", "hostname"] }
+
 # MCP server + client (client is used by the Host-side integration that lets
 # Nexus connect to external MCP servers listed in `mcp.toml`)
 # BL-023: enabled `transport-streamable-http-client*` + `client-side-sse`

@@ -42,6 +42,9 @@ use nexus_storage::ipc::{
 // pilot.
 use nexus_linkpreview::core_plugin::FetchArgs as LinkPreviewFetchArgs;
 use nexus_linkpreview::LinkPreview;
+// BL-133 — multi-channel notification dispatcher.
+use nexus_notifications::core_plugin::{SendArgs as NotificationsSendArgs, SendReply as NotificationsSendReply};
+use nexus_notifications::Channel as NotificationsChannel;
 // nexus-git uses a wire-mirror module — handlers emit ad-hoc
 // `serde_json::json!` and the impl types in `nexus_git::types`
 // don't even derive `Serialize`.
@@ -244,6 +247,15 @@ fn emit_all_schemas_impl() {
     // into the schema generator (audit-2026-05-01 P1-3, issue #113).
     write_schema::<LinkPreviewFetchArgs>("com_nexus_linkpreview__fetch", "args");
     write_schema::<LinkPreview>("com_nexus_linkpreview__fetch", "result");
+
+    // ── com.nexus.notifications::send (BL-133) ───────────────────────────
+    // Multi-channel notification dispatcher — desktop / discord /
+    // telegram / email (BL-133 follow-up). Args + reply are wire-tagged
+    // through a single `Channel` enum; the schema makes the wire form
+    // explicit for shell-side and 3rd-party consumers.
+    write_schema::<NotificationsSendArgs>("com_nexus_notifications__send", "args");
+    write_schema::<NotificationsSendReply>("com_nexus_notifications__send", "reply");
+    write_schema::<NotificationsChannel>("com_nexus_notifications", "channel");
 
     // ── com.nexus.git (P1-3 #113) ────────────────────────────────────────
     // Wire-mirror types — impl emits ad-hoc `serde_json::json!`.

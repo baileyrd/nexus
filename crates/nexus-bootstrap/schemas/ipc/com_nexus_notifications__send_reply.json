@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SendReply",
+  "description": "Reply for `com.nexus.notifications::send`. Lightweight — the\ncaller can branch on the `delivered` flag without parsing per-\ntransport status fields.",
+  "type": "object",
+  "properties": {
+    "channel": {
+      "description": "Echoes the channel that was used so consumers don't have to\nthread the request shape back through.",
+      "$ref": "#/$defs/Channel"
+    },
+    "delivered": {
+      "description": "`true` when the transport accepted the notification.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "delivered",
+    "channel"
+  ],
+  "$defs": {
+    "Channel": {
+      "description": "Supported notification channels for v1. Add variants in append-\nonly order; the wire form (`serde rename_all = \"snake_case\"`)\npins the JSON tag.",
+      "oneOf": [
+        {
+          "description": "Desktop OS notification, bridged through the shell via a bus\nevent ([`NOTIFICATION_DELIVERED_TOPIC`]).",
+          "type": "string",
+          "const": "desktop"
+        },
+        {
+          "description": "Discord webhook — HTTP POST to a configured URL.",
+          "type": "string",
+          "const": "discord"
+        },
+        {
+          "description": "Telegram bot — HTTP POST to\n`https://api.telegram.org/bot<TOKEN>/sendMessage`.",
+          "type": "string",
+          "const": "telegram"
+        },
+        {
+          "description": "Email — SMTP submission via [`SmtpTransport`].",
+          "type": "string",
+          "const": "email"
+        }
+      ]
+    }
+  }
+}
