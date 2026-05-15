@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use nexus_bootstrap::dap_contribution_wiring::{wire_dap_contributions, DapWireOutcome};
 use nexus_bootstrap::{Runtime, build_cli_runtime};
 use nexus_kernel::EventBus;
-use nexus_plugins::{PluginManager, PluginManagerConfig};
+use nexus_plugins::{PluginManager, PluginManagerConfig, PluginManifest};
 use tokio::runtime::Runtime as TokioRuntime;
 
 use crate::output::OutputFormat;
@@ -114,5 +115,66 @@ impl App {
             self.plugins = Some(manager);
         }
         Ok(self.plugins.as_mut().expect("just initialised"))
+    }
+
+    /// BL-113 Phase 1d — issue `com.nexus.dap::register_adapter` IPC
+    /// calls for every DAP contribution declared by currently-loaded
+    /// community plugins, so any later DAP-host call (`list_adapters`,
+    /// `launch`, …) sees the merged adapter set.
+    ///
+    /// Assumes [`Self::plugins`] has already loaded the community
+    /// plugins (`plugins.load_all()`). Plugins with no DAP
+    /// contributions cost a single manifest iteration; only plugins
+    /// that declared `[[registrations.protocol_hosts.dap]]` entries
+    /// trigger an IPC dispatch.
+    ///
+    /// Best-effort: per-adapter rejections / transport errors are
+    /// returned in the outcome list (see
+    /// [`nexus_bootstrap::dap_contribution_wiring::DapWireStatus`])
+    /// rather than aborting the pass.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_dap_contributions(&mut self) -> Result<Vec<DapWireOutcome>> {
+        // Step 1: snapshot currently-loaded manifests. Clones because
+        // the `&PluginManager` borrow has to end before we can re-borrow
+        // `&mut self` for `runtime()`.
+        let manifests: Vec<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins
+                .list()
+                .iter()
+                .filter_map(|info| plugins.manifest(&info.id).cloned())
+                .collect()
+        };
+        if manifests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Step 2: dispatch through the runtime's IPC surface.
+        let (runtime, rt) = self.runtime()?;
+        let manifest_refs: Vec<&PluginManifest> = manifests.iter().collect();
+        let outcomes = rt.block_on(wire_dap_contributions(&runtime.context, &manifest_refs));
+        Ok(outcomes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_forge() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        nexus_storage::StorageEngine::init(dir.path()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn wire_dap_contributions_is_a_noop_when_no_community_plugins_are_installed() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app.wire_dap_contributions().expect("wire ok");
+        assert!(outcomes.is_empty(), "outcomes: {outcomes:?}");
     }
 }

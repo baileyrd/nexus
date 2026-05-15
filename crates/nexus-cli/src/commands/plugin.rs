@@ -266,9 +266,41 @@ pub fn scaffold(
 /// registered `subcommand` via `[[registrations.cli_subcommand]]`. The
 /// remaining `args` are passed as a JSON array.
 pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> Result<()> {
-    let plugins = app.plugins()?;
-    plugins.load_all()?;
+    app.plugins()?.load_all()?;
 
+    // BL-113 Phase 1d — wire any DAP contributions the loaded plugins
+    // declared so a subcommand that ends up hitting `com.nexus.dap`
+    // sees the merged adapter set. Best-effort: failures log but do
+    // not block the subcommand the user actually invoked.
+    match app.wire_dap_contributions() {
+        Ok(outcomes) => {
+            use nexus_bootstrap::dap_contribution_wiring::DapWireStatus;
+            for outcome in &outcomes {
+                if matches!(outcome.status, DapWireStatus::Ok) {
+                    tracing::info!(
+                        plugin_id = %outcome.plugin_id,
+                        adapter = %outcome.adapter_name,
+                        "wired DAP adapter contribution",
+                    );
+                } else {
+                    tracing::warn!(
+                        plugin_id = %outcome.plugin_id,
+                        adapter = %outcome.adapter_name,
+                        status = ?outcome.status,
+                        "DAP adapter contribution skipped",
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "DAP contribution wiring failed; subcommand proceeds without wired adapters",
+            );
+        }
+    }
+
+    let plugins = app.plugins()?;
     let args_json = serde_json::json!(args);
 
     match plugins.dispatch_cli(subcommand, &args_json) {
