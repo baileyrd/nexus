@@ -271,7 +271,13 @@ impl CorePlugin for AgentCorePlugin {
                     handlers::memory::handle_memory_export(ctx, &args).await
                 }
                 HANDLER_DELEGATE => {
-                    handlers::delegate::handle_delegate(ctx, pending_approvals, &args).await
+                    // BL-134 Phase 2b — delegate routes through the
+                    // ai-runtime; `pending_approvals` no longer needed
+                    // because session execution happens on the runtime
+                    // worker pool and approval bus events flow through
+                    // the agent's regular dispatch path of
+                    // `session_run`.
+                    handlers::delegate::handle_delegate(ctx, &args).await
                 }
                 HANDLER_SEARCH_TRANSCRIPTS => {
                     handlers::search_transcripts::handle_search_transcripts(&args)

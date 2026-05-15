@@ -544,6 +544,15 @@ pub fn agent_capabilities() -> CapabilitySet {
         // produce read-only plans. No `ai.tools.mcp` — MCP reach is
         // opt-in per call.
         Capability::AiToolsWrite,
+        // BL-134 Phase 2b: `delegate` no longer runs `session_run`
+        // inline — it submits an `AgentTaskKind::Session` to
+        // `com.nexus.ai.runtime` and awaits via `wait_for`. The two
+        // caps below gate those calls. No `ai.runtime.control` —
+        // delegate never cancels / pauses / resumes the sub-task; if
+        // a parent session aborts, the child runs to completion
+        // observably and the parent surfaces the timeout.
+        Capability::AiRuntimeSubmit,
+        Capability::AiRuntimeObserve,
     ]
     .into_iter()
     .collect()
