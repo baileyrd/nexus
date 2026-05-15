@@ -249,6 +249,10 @@ fn parse_register_adapter_spec(args: &Value) -> Result<DapAdapterSpec, PluginErr
                 .collect()
         })
         .unwrap_or_default();
+    // BL-113 — opaque shell-facing payload. The contribution-wire layer
+    // packs `launch_config_schema` + cosmetic fields here; the host
+    // round-trips it verbatim and never interprets it.
+    let metadata = args.get("metadata").cloned();
     Ok(DapAdapterSpec {
         name,
         command,
@@ -257,6 +261,7 @@ fn parse_register_adapter_spec(args: &Value) -> Result<DapAdapterSpec, PluginErr
         file_types,
         disabled,
         env,
+        metadata,
     })
 }
 
@@ -380,6 +385,7 @@ impl CorePlugin for DapCorePlugin {
                             "file_types": spec.file_types,
                             "disabled": spec.disabled,
                             "connected": false,
+                            "metadata": spec.metadata,
                         })
                     })
                     .collect();
@@ -674,6 +680,7 @@ impl CorePlugin for DapCorePlugin {
                                 "file_types": spec.file_types,
                                 "disabled": spec.disabled,
                                 "connected": connected.contains(&spec.name),
+                                "metadata": spec.metadata,
                             })
                         })
                         .collect();

@@ -206,3 +206,71 @@ async fn wire_handles_empty_manifest_set_without_dispatching() {
     let outcomes = wire_dap_contributions(&forge.runtime.context, &[]).await;
     assert!(outcomes.is_empty());
 }
+
+/// BL-113 — the in-tree reference plugin at
+/// `plugins/first-party-dap-python/manifest.toml` parses, wires
+/// through `register_adapter`, and surfaces on `list_adapters` with
+/// the shell-only fields packed into `metadata` so the launch form
+/// can read them without an extra IPC.
+#[tokio::test(flavor = "current_thread")]
+async fn first_party_dap_python_plugin_wires_and_surfaces_metadata() {
+    // Resolve `plugins/first-party-dap-python/manifest.toml` relative
+    // to the workspace root. `CARGO_MANIFEST_DIR` is
+    // `crates/nexus-bootstrap` when this test runs, so two `..` hops
+    // get us back to the repo root.
+    let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("plugins")
+        .join("first-party-dap-python")
+        .join("manifest.toml");
+    let toml = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", manifest_path.display()));
+    let manifest = parse_manifest(&toml, manifest_path.to_str().unwrap()).unwrap();
+    assert_eq!(manifest.id, "first-party.dap.python");
+    assert_eq!(manifest.registrations.protocol_hosts.dap.len(), 1);
+    let dap = &manifest.registrations.protocol_hosts.dap[0];
+    assert_eq!(dap.id, "python");
+    assert_eq!(dap.command, "python3");
+    assert_eq!(dap.args, ["-m", "debugpy.adapter"]);
+    assert_eq!(
+        dap.launch_config_schema.as_deref(),
+        Some("./launch.schema.json"),
+    );
+
+    let forge = MinimalForge::new();
+    let outcomes = wire_dap_contributions(&forge.runtime.context, &[&manifest]).await;
+    assert_eq!(outcomes.len(), 1);
+    assert!(
+        matches!(outcomes[0].status, DapWireStatus::Ok),
+        "first-party.dap.python should wire cleanly, got {:?}",
+        outcomes[0].status,
+    );
+
+    let reply = forge
+        .ipc_call("com.nexus.dap", "list_adapters", serde_json::json!({}))
+        .await
+        .unwrap();
+    let entries = reply.as_array().unwrap();
+    let python = entries
+        .iter()
+        .find(|e| e["name"] == "python")
+        .expect("python adapter should appear in list_adapters");
+    assert_eq!(python["command"], "python3");
+    let metadata = &python["metadata"];
+    assert_eq!(metadata["plugin_id"], "first-party.dap.python");
+    assert_eq!(metadata["display_name"], "Python (debugpy)");
+    assert_eq!(metadata["launch_config_schema"], "./launch.schema.json");
+    // `root_markers` was set in the manifest; the wire surface
+    // carries it under metadata so the shell can score "this adapter
+    // applies to this workspace" without a second IPC.
+    assert_eq!(
+        metadata["root_markers"],
+        serde_json::json!([
+            "pyproject.toml",
+            "setup.py",
+            "requirements.txt",
+            ".git",
+        ]),
+    );
+}

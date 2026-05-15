@@ -31,4 +31,14 @@ disabled: boolean,
 /**
  * `true` if currently connected via the pool.
  */
-connected: boolean, };
+connected: boolean, 
+/**
+ * BL-113 — opaque shell-facing payload populated by the
+ * contribution-wiring layer when the adapter came through
+ * `[[registrations.protocol_hosts.dap]]` rather than `dap.toml`.
+ * Carries the contributing plugin's `launch_config_schema` (inline
+ * JSON Schema) and cosmetic fields (`display_name`, etc.) so the
+ * shell can render a typed launch-config form without needing a
+ * separate IPC round-trip. `null` for TOML-loaded entries.
+ */
+metadata?: unknown | null, };

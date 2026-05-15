@@ -171,6 +171,8 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 >
 > **Live smoke against real `debugpy` shipped 2026-05-15 on `bl-081-dap-debugger`**. New `crates/nexus-dap/tests/end_to_end.rs::live_smoke_debugpy_initialize_handshake` spawns Python's upstream `debugpy.adapter` (the same DAP server VS Code uses), completes `initialize`, asserts capabilities (`supports_configuration_done` + `supports_function_breakpoints`), and disconnects cleanly. Honours `$NEXUS_DAP_LIVE_DEBUGPY_PYTHON` (full path to a venv python with `debugpy` installed); falls back to probing `python3` on `$PATH`; skips silently otherwise. Scope intentionally narrow (handshake + caps + clean exit) since `launch`/breakpoints/`continue` need a target script + deterministic stop semantics the mock already covers exhaustively. The value is catching regressions in `transport.rs` / `protocol.rs` / `client.rs` that our hand-rolled mock would mirror by construction. `codelldb` / `js-debug` / `delve` smoke remains an operator step until those binaries are on a dev box.
 
+> **First-party DAP reference plugin shipped 2026-05-15 on `bl-081-dap-debugger`**. New `plugins/first-party-dap-python/` (manifest-only, no wasm) declares debugpy as a DAP adapter via `[[registrations.protocol_hosts.dap]]` with a complete `launch.schema.json` JSON Schema (program / args / cwd / stopOnEntry / justMyCode fields). To carry the schema reference to the shell, `DapAdapterSpec` and the `register_adapter` / `list_adapters` wire types gained an opaque `metadata: Option<JsonValue>` field; `nexus-bootstrap::dap_contribution_to_spec` packs the manifest's shell-only fields (`display_name`, `launch_config_schema`, `root_markers`, `variable_renderers`) into `metadata` at contribution-wire time, the host stores it verbatim and round-trips it through `list_adapters` for the shell to read. `launch_config_schema` rides as a relative path string (not inline content) so the conversion stays a pure manifest-transform — shell resolves the path against the plugin directory it already knows from `scan_plugin_directory_at`. 4 new tests (2 unit tests for the metadata builder + 1 wire-args forward test + 1 integration test loading the actual `plugins/first-party-dap-python/manifest.toml` and asserting `metadata` lands on `list_adapters`). The shell-side launch-form renderer that consumes `metadata.launch_config_schema` is filed as a follow-up below — the manifest contribution path is demonstrated end-to-end up to the wire boundary, but the actual form-rendering UX is a separate concern since the debugger panel has no launch UI today.
+
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
 **Effort**: Large (4–6 weeks). First cut implemented; depends on BL-113 for the adapter-config shape before merging.
 **Crates**: new `nexus-dap`, new `shell/src/plugins/nexus/debugger/`
@@ -234,6 +236,22 @@ Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML c
 - `nexus-mcp.host` migrates last; `mcp.toml` keeps working
 - Future `nexus-acp` crate (Hermes Feature 7) consumes the contribution loader as its only adapter source — no `acp.toml` to migrate from
 - Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path)
+
+---
+
+### Follow-up: shell-side launch-config form renderer (from BL-113 first-party DAP plugin)
+
+**Source**: BL-113 deferral. Filed 2026-05-15.
+**Effort**: Medium. ~200–300 LOC across `shell/src/plugins/nexus/debugger/`.
+**Crates**: shell (`nexus.debugger` plugin).
+
+The first-party `first-party.dap.python` plugin shipped on `bl-081-dap-debugger` plumbs the contributed `launch_config_schema` to the shell via the host's opaque `metadata` field on `list_adapters`. What's still missing is the actual form-rendering UX:
+
+1. A `<LaunchPicker>` dropdown in `DebuggerPanel.tsx` listing adapters from `list_adapters`, badged by `metadata.display_name`.
+2. A `<LaunchConfigForm>` component that reads `metadata.launch_config_schema` (relative path), resolves it against the plugin directory, fetches via Tauri fs, and renders a typed form. Minimum coverage: top-level `type: object` with `string` / `boolean` / `array<string>` property kinds (debugpy's launch spec uses only these). Defaults from the schema seed initial values.
+3. Submit calls `useDebuggerStore.startSession(api, { adapter, ...formValues })`.
+
+Gating: the panel has no launch UI today, so this is a net-new feature track rather than a polish pass. The infrastructure to feed it (manifest contribution → host metadata → wire surface) is in place.
 
 ---
 

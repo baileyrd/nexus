@@ -87,6 +87,20 @@ pub struct DapAdapterSpec {
     /// the host process's environment.
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// BL-113 — opaque shell-facing payload set at contribution-wire
+    /// time. The host never interprets it; it survives a round-trip
+    /// through `list_adapters` so the shell can render a typed
+    /// launch-config form from the contributing plugin's schema.
+    ///
+    /// Currently populated by `nexus-bootstrap::dap_contribution_to_spec`
+    /// with `{"launch_config_schema": <inline JSON Schema>, ...}` when
+    /// the contributing plugin declares `launch_config_schema` in its
+    /// manifest. TOML-loaded entries always have `metadata = None`
+    /// since `dap.toml` has no equivalent field — keeps the existing
+    /// `deny_unknown_fields` posture intact for TOML.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Parsed `dap.toml` plus runtime-merged plugin contributions.
@@ -456,6 +470,7 @@ disabled = true
             file_types: vec![],
             disabled: false,
             env: HashMap::new(),
+            metadata: None,
         }
     }
 

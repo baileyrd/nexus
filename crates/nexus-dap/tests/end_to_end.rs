@@ -220,6 +220,7 @@ async fn full_debug_session_lifecycle() {
         file_types: vec!["mock".to_string()],
         disabled: false,
         env: Default::default(),
+        metadata: None,
     };
 
     let client = timeout(
@@ -350,6 +351,7 @@ async fn drain_events_returns_queued_batch() {
         file_types: vec!["mock".to_string()],
         disabled: false,
         env: Default::default(),
+        metadata: None,
     };
     let client = timeout(
         Duration::from_secs(15),
@@ -402,6 +404,7 @@ async fn live_smoke_debugpy_initialize_handshake() {
         file_types: vec!["py".to_string()],
         disabled: false,
         env: Default::default(),
+        metadata: None,
     };
 
     let client = timeout(

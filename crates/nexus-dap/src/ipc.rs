@@ -39,6 +39,16 @@ pub struct DapAdapterEntry {
     pub disabled: bool,
     /// `true` if currently connected via the pool.
     pub connected: bool,
+    /// BL-113 — opaque shell-facing payload populated by the
+    /// contribution-wiring layer when the adapter came through
+    /// `[[registrations.protocol_hosts.dap]]` rather than `dap.toml`.
+    /// Carries the contributing plugin's `launch_config_schema` (inline
+    /// JSON Schema) and cosmetic fields (`display_name`, etc.) so the
+    /// shell can render a typed launch-config form without needing a
+    /// separate IPC round-trip. `null` for TOML-loaded entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown | null"))]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Args for `launch` (handler `2`).
@@ -370,8 +380,13 @@ pub struct DapOk {
 /// Args for `register_adapter` (handler `20`). Mirrors a
 /// [`crate::config::DapAdapterSpec`] plus the contributing plugin's
 /// reverse-DNS id. The host crate stays protocol-only per ADR 0027 —
-/// shell-side fields (`display_name`, `launch_config_schema`,
-/// `variable_renderers`, `root_markers`) are intentionally absent.
+/// shell-side cosmetic fields (`display_name`, `variable_renderers`,
+/// `root_markers`) remain absent — they don't affect host behaviour.
+/// `metadata` is an opaque pass-through: the host stores it verbatim
+/// and round-trips it on `list_adapters` so the shell can render a
+/// typed launch-config form from the contributing plugin's
+/// `launch_config_schema` (packed under `metadata.launch_config_schema`
+/// by `nexus-bootstrap::dap_contribution_to_spec`).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "ts-export", derive(TS))]
 #[cfg_attr(
@@ -407,6 +422,14 @@ pub struct DapRegisterAdapterArgs {
     /// Reverse-DNS id of the contributing plugin; used for diagnostics
     /// and as the authorisation key for `unregister_adapter`.
     pub plugin_id: String,
+    /// Opaque shell-facing payload. The host never interprets it; it
+    /// flows through `list_adapters` as-is. Populated by
+    /// `nexus-bootstrap::dap_contribution_to_spec` with the
+    /// contributing plugin's `launch_config_schema` (inline JSON
+    /// Schema) + cosmetic shell-only fields. `null` is fine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown | null"))]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Reply for `register_adapter` (handler `20`).

@@ -162,6 +162,7 @@ fn register_adapter_args(spec: &DapAdapterSpec, plugin_id: &str) -> Value {
         "disabled": spec.disabled,
         "env": spec.env,
         "plugin_id": plugin_id,
+        "metadata": spec.metadata,
     })
 }
 
@@ -266,6 +267,7 @@ mod tests {
             file_types: vec!["rs".into()],
             disabled: false,
             env: std::iter::once(("RUST_BACKTRACE".to_string(), "1".to_string())).collect(),
+            metadata: None,
         };
         let args = register_adapter_args(&spec, "community.rust");
         assert_eq!(args["name"], "rust");
@@ -276,5 +278,37 @@ mod tests {
         assert_eq!(args["disabled"], false);
         assert_eq!(args["env"]["RUST_BACKTRACE"], "1");
         assert_eq!(args["plugin_id"], "community.rust");
+        // `metadata` is absent on the spec → forwarded as JSON null.
+        assert_eq!(args["metadata"], json!(null));
+    }
+
+    #[test]
+    fn register_adapter_args_forwards_metadata_verbatim() {
+        // BL-113 — opaque `metadata` (shell-only fields packed by
+        // `dap_contribution_to_spec`) flows through the wire-args
+        // helper untouched so the host can round-trip it on
+        // `list_adapters` for the shell launch form.
+        let spec = DapAdapterSpec {
+            name: "rust".into(),
+            command: "codelldb".into(),
+            args: vec![],
+            adapter_type: None,
+            file_types: vec![],
+            disabled: false,
+            env: Default::default(),
+            metadata: Some(json!({
+                "plugin_id": "community.rust",
+                "display_name": "Rust (codelldb)",
+                "launch_config_schema": "./launch.schema.json",
+                "root_markers": ["Cargo.toml"],
+            })),
+        };
+        let args = register_adapter_args(&spec, "community.rust");
+        assert_eq!(args["metadata"]["display_name"], "Rust (codelldb)");
+        assert_eq!(
+            args["metadata"]["launch_config_schema"],
+            "./launch.schema.json",
+        );
+        assert_eq!(args["metadata"]["root_markers"], json!(["Cargo.toml"]));
     }
 }

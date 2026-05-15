@@ -69,15 +69,29 @@ pub fn lsp_contributions_to_specs(set: &ContributedAdapterSet) -> Vec<(LspServer
 /// pair-by-pair drain.
 ///
 /// `display_name`, `root_markers`, `launch_config_schema`, and
-/// `variable_renderers` are intentionally dropped on this side — per
-/// ADR 0027 the host crates stay protocol-only and never resolve those
-/// identifiers. The shell consults them through the contributing
-/// plugin's exports table at render time.
+/// `variable_renderers` don't affect host behaviour, so they don't
+/// land in the typed spec fields — but the shell needs them to render
+/// a typed launch-config form, badge the adapter in the picker, and
+/// pick variable formatters. They ride along as opaque `metadata` on
+/// the spec instead: the host stores the JSON verbatim and surfaces it
+/// on `list_adapters` so the shell can read it without an extra IPC.
+///
+/// `launch_config_schema` is passed through **as the relative path
+/// string** declared in the manifest, not as inline schema content —
+/// resolving it would require reading the plugin's filesystem from a
+/// pure manifest-transform function. The shell resolves the path
+/// against the plugin directory it already knows from
+/// `scan_plugin_directory_at` (which the Tauri bridge serves).
+///
+/// `metadata` is `Some({...})` whenever at least one shell-only field
+/// is non-empty; otherwise `None` so TOML-loaded specs and barebones
+/// contributions look identical on the wire.
 #[must_use]
 pub fn dap_contribution_to_spec(
     contribution: ContributedAdapter<DapProtocolHostReg>,
 ) -> (DapAdapterSpec, String) {
     let ContributedAdapter { plugin_id, adapter } = contribution;
+    let metadata = build_dap_contribution_metadata(&plugin_id, &adapter);
     let spec = DapAdapterSpec {
         // ADR 0027 keeps the manifest's `id` as the stable identifier;
         // the host's `name` field plays the same role on this side.
@@ -90,8 +104,72 @@ pub fn dap_contribution_to_spec(
         file_types: adapter.file_types,
         disabled: adapter.disabled,
         env: adapter.env.into_iter().collect(),
+        metadata,
     };
     (spec, plugin_id)
+}
+
+/// Pack the manifest's shell-only fields into the opaque `metadata`
+/// JSON the host round-trips on `list_adapters`. Returns `None` when
+/// every shell-only field is empty so contributions that don't care
+/// about a launch-config form look identical to TOML entries on the
+/// wire.
+fn build_dap_contribution_metadata(
+    plugin_id: &str,
+    adapter: &DapProtocolHostReg,
+) -> Option<serde_json::Value> {
+    let has_payload = adapter.display_name.is_some()
+        || adapter.launch_config_schema.is_some()
+        || !adapter.root_markers.is_empty()
+        || !adapter.variable_renderers.is_empty();
+    if !has_payload {
+        return None;
+    }
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "plugin_id".to_string(),
+        serde_json::Value::String(plugin_id.to_string()),
+    );
+    if let Some(name) = &adapter.display_name {
+        obj.insert(
+            "display_name".to_string(),
+            serde_json::Value::String(name.clone()),
+        );
+    }
+    if let Some(path) = &adapter.launch_config_schema {
+        // Relative-path-as-string; shell resolves against the plugin dir.
+        obj.insert(
+            "launch_config_schema".to_string(),
+            serde_json::Value::String(path.clone()),
+        );
+    }
+    if !adapter.root_markers.is_empty() {
+        obj.insert(
+            "root_markers".to_string(),
+            serde_json::Value::Array(
+                adapter
+                    .root_markers
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !adapter.variable_renderers.is_empty() {
+        obj.insert(
+            "variable_renderers".to_string(),
+            serde_json::Value::Array(
+                adapter
+                    .variable_renderers
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    Some(serde_json::Value::Object(obj))
 }
 
 /// Convert every DAP contribution in `set` into the merge-ready list.
@@ -325,6 +403,78 @@ env = { RUST_BACKTRACE = "1" }
             spec.env.get("RUST_BACKTRACE").map(String::as_str),
             Some("1"),
         );
+        // BL-113 — shell-only fields ride through opaque `metadata`.
+        let md = spec
+            .metadata
+            .as_ref()
+            .expect("contribution with display_name + schema + markers + renderers should set metadata");
+        assert_eq!(md["plugin_id"], "community.rust-debug");
+        assert_eq!(md["display_name"], "Rust (codelldb)");
+        assert_eq!(md["launch_config_schema"], "./launch.schema.json");
+        assert_eq!(md["root_markers"], serde_json::json!(["Cargo.toml"]));
+        assert_eq!(
+            md["variable_renderers"],
+            serde_json::json!(["rust_vec", "rust_option"]),
+        );
+    }
+
+    #[test]
+    fn dap_conversion_omits_metadata_when_all_shell_fields_empty() {
+        let toml = r#"
+[plugin]
+id = "community.bare-dap"
+name = "Bare DAP"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.dap]]
+id = "bare"
+command = "bare-adapter"
+"#;
+        let set = collect_for(toml);
+        let specs = dap_contributions_to_specs(&set);
+        assert_eq!(specs.len(), 1);
+        // No display_name, no launch_config_schema, no root_markers, no
+        // variable_renderers → metadata stays None so the wire shape is
+        // indistinguishable from a TOML-loaded entry.
+        assert!(specs[0].0.metadata.is_none());
+    }
+
+    #[test]
+    fn dap_conversion_includes_metadata_when_only_one_shell_field_set() {
+        let toml = r#"
+[plugin]
+id = "community.partial-dap"
+name = "Partial DAP"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.dap]]
+id = "only-schema"
+command = "x"
+launch_config_schema = "./launch.schema.json"
+"#;
+        let set = collect_for(toml);
+        let specs = dap_contributions_to_specs(&set);
+        let md = specs[0]
+            .0
+            .metadata
+            .as_ref()
+            .expect("schema-only contribution still emits metadata");
+        assert_eq!(md["plugin_id"], "community.partial-dap");
+        assert_eq!(md["launch_config_schema"], "./launch.schema.json");
+        // Fields that weren't set in the manifest are absent (not null).
+        assert!(md.get("display_name").is_none());
+        assert!(md.get("root_markers").is_none());
+        assert!(md.get("variable_renderers").is_none());
     }
 
     #[test]

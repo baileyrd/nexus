@@ -313,6 +313,7 @@ mod tests {
                 file_types: vec![],
                 disabled: true,
                 env: HashMap::new(),
+                metadata: None,
             },
         );
         let cfg = DapHostConfig {

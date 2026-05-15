@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "DapRegisterAdapterArgs",
-  "description": "Args for `register_adapter` (handler `20`). Mirrors a\n[`crate::config::DapAdapterSpec`] plus the contributing plugin's\nreverse-DNS id. The host crate stays protocol-only per ADR 0027 —\nshell-side fields (`display_name`, `launch_config_schema`,\n`variable_renderers`, `root_markers`) are intentionally absent.",
+  "description": "Args for `register_adapter` (handler `20`). Mirrors a\n[`crate::config::DapAdapterSpec`] plus the contributing plugin's\nreverse-DNS id. The host crate stays protocol-only per ADR 0027 —\nshell-side cosmetic fields (`display_name`, `variable_renderers`,\n`root_markers`) remain absent — they don't affect host behaviour.\n`metadata` is an opaque pass-through: the host stores it verbatim\nand round-trips it on `list_adapters` so the shell can render a\ntyped launch-config form from the contributing plugin's\n`launch_config_schema` (packed under `metadata.launch_config_schema`\nby `nexus-bootstrap::dap_contribution_to_spec`).",
   "type": "object",
   "properties": {
     "adapter_type": {
@@ -43,6 +43,9 @@
       "items": {
         "type": "string"
       }
+    },
+    "metadata": {
+      "description": "Opaque shell-facing payload. The host never interprets it; it\nflows through `list_adapters` as-is. Populated by\n`nexus-bootstrap::dap_contribution_to_spec` with the\ncontributing plugin's `launch_config_schema` (inline JSON\nSchema) + cosmetic shell-only fields. `null` is fine."
     },
     "name": {
       "description": "Stable adapter identifier (`DapAdapterSpec::name`).",

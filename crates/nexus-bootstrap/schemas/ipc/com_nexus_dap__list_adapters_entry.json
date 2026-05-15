@@ -37,6 +37,9 @@
         "type": "string"
       }
     },
+    "metadata": {
+      "description": "BL-113 — opaque shell-facing payload populated by the\ncontribution-wiring layer when the adapter came through\n`[[registrations.protocol_hosts.dap]]` rather than `dap.toml`.\nCarries the contributing plugin's `launch_config_schema` (inline\nJSON Schema) and cosmetic fields (`display_name`, etc.) so the\nshell can render a typed launch-config form without needing a\nseparate IPC round-trip. `null` for TOML-loaded entries."
+    },
     "name": {
       "description": "Configured adapter name.",
       "type": "string"
