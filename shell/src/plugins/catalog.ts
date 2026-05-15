@@ -223,6 +223,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
       'BL-133 — subscribes to com.nexus.notifications.delivered (Desktop channel) and routes the payload through api.notifications.show. Without this plugin the bus event fires with no observable effect.',
     load: () => import('./nexus/notifications').then(m => m.notificationsPlugin),
   },
+  {
+    id: 'nexus.notificationsInbox', name: 'Notification Center',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description:
+      'BL-136 — persistent inbox panel for notifications. Reads from com.nexus.notifications::inbox_list and lets the user mark read / dismiss / jump-to-source. Without this plugin notifications are still toasted live by nexus.notifications, but the history is not surfaced.',
+    load: () => import('./nexus/notificationsInbox').then(m => m.notificationsInboxPlugin),
+  },
   // ── UX primitives ──────────────────────────────────────────────────────────
   {
     id: 'nexus.commandPalette', name: 'Command Palette',

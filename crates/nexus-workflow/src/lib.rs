@@ -32,6 +32,7 @@ pub mod core_plugin;
 pub mod cron;
 pub mod digests;
 mod executor;
+mod handlers;
 mod interpolate;
 mod parse;
 mod registry;

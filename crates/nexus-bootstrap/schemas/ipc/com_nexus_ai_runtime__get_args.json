@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeGetArgs",
+  "description": "`get` arg shape.",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "description": "Task to fetch.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "task_id"
+  ]
+}

@@ -179,6 +179,18 @@ enum ForgeCommand {
     Status,
     /// Rebuild the index from files on disk
     Reindex,
+    /// Walk the forge and report files-vs-index drift (BL-137).
+    ///
+    /// Read-only by default: prints files on disk that the index
+    /// doesn't know about, indexed files that have been deleted from
+    /// disk, and entries where the on-disk `mtime` disagrees with the
+    /// indexed `modified_at`. Pass `--fix` to invoke `rebuild_index`
+    /// when drift is detected.
+    Doctor {
+        /// After reporting, rebuild the index if any drift was found.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Import another forge into this one (BL-083). Walks the
     /// source, hashes every file, classifies as copy / skip / conflict,
     /// then either reports the plan (`--dry-run`) or applies it.
@@ -570,14 +582,26 @@ struct NotifyArgs {
 #[derive(Subcommand)]
 enum NotifyCommand {
     /// Send a notification through `com.nexus.notifications::send`.
-    /// `desktop` routes through the kernel bus → shell toast; other
-    /// channels (Discord today; Telegram / SMTP filed as
-    /// follow-ups) need their transport configured in
-    /// `.forge/config.toml::[notifications.<channel>]`.
+    ///
+    /// BL-135 — either `--channel` (override path; bypass the
+    /// router) or `--source` (router path; consults
+    /// `<forge>/.forge/notifications.toml`) must be supplied. When
+    /// neither is supplied the CLI defaults `--source cli` so a
+    /// bare `nexus notify send "msg"` invocation routes through the
+    /// `[sources.cli]` block.
     Send {
-        /// Channel: `desktop` | `discord` | `telegram`.
+        /// Explicit target channel — `desktop` | `discord` | `telegram` | `email`.
+        /// Bypasses the BL-135 router. Cannot be used together with `--source`.
+        #[arg(long, conflicts_with = "source")]
+        channel: Option<String>,
+        /// BL-135 source tag — feeds the router to pick channels
+        /// from `notifications.toml`.
         #[arg(long)]
-        channel: String,
+        source: Option<String>,
+        /// Optional severity (`debug` / `info` / `warn` / `error`).
+        /// Defaults to `info` server-side.
+        #[arg(long)]
+        severity: Option<String>,
         /// Message body.
         message: String,
         /// Optional title — transports that need a header fall back
@@ -1694,6 +1718,7 @@ fn main() {
             }
             ForgeCommand::Status => commands::forge::status(&mut app),
             ForgeCommand::Reindex => commands::forge::reindex(&mut app),
+            ForgeCommand::Doctor { fix } => commands::forge::doctor(&mut app, fix),
             ForgeCommand::Import { source, dry_run, on_conflict } => {
                 commands::forge::import(&mut app, &source, dry_run, &on_conflict)
             }
@@ -2081,8 +2106,15 @@ fn main() {
         }
 
         Commands::Notify(args) => match args.command {
-            NotifyCommand::Send { channel, message, title } => {
-                commands::notify::send(&mut app, &channel, &message, title.as_deref())
+            NotifyCommand::Send { channel, source, severity, message, title } => {
+                commands::notify::send(
+                    &mut app,
+                    channel.as_deref(),
+                    source.as_deref(),
+                    severity.as_deref(),
+                    &message,
+                    title.as_deref(),
+                )
             }
         },
 

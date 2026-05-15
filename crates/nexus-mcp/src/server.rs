@@ -34,6 +34,11 @@ const SKILLS_PLUGIN: &str = "com.nexus.skills";
 /// code-symbol index. Kept as a separate const so the plugin id is
 /// reusable from a future `git_call` helper.
 const GIT_PLUGIN: &str = "com.nexus.git";
+/// BL-137 — `nexus_kernel_stats` reaches into `com.nexus.security` for
+/// the live [`nexus_kernel::KernelMetrics`] snapshot, since the
+/// security plugin's `metrics_snapshot` handler is the canonical
+/// IPC surface for the global metrics registry. Read-only.
+const SECURITY_PLUGIN: &str = "com.nexus.security";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longer timeout for AI calls — they make outbound HTTP requests to the
 /// chat + embedding providers.
@@ -228,6 +233,10 @@ struct NexusImpactInput {
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct NexusDetectChangesInput {}
 
+/// Input for the `nexus_kernel_stats` tool (BL-137). No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct NexusKernelStatsInput {}
+
 // ── Output types ─────────────────────────────────────────────────────────────
 
 /// BL-115 — explanation surfaced verbatim on every `degraded: true`
@@ -396,6 +405,21 @@ struct NexusDetectChangesOutput {
     /// Same caveat as `nexus_context` / `nexus_impact`.
     degraded: bool,
     degraded_reason: Option<String>,
+}
+
+/// Output for `nexus_kernel_stats` (BL-137). Mirrors the
+/// `MetricsSnapshot` shape returned by
+/// `com.nexus.security::metrics_snapshot`. Field names + types match
+/// so an MCP client can reach for the same keys the shell health
+/// panel uses. `null` when the snapshot is unavailable (kernel
+/// metrics not installed — only happens in tests that don't boot a
+/// full runtime).
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct NexusKernelStatsOutput {
+    /// `null` when `nexus_kernel::metrics::global()` is unset (no
+    /// runtime up) — otherwise the snapshot blob mirrored verbatim
+    /// from `com.nexus.security::metrics_snapshot`.
+    snapshot: Option<serde_json::Value>,
 }
 
 /// Output for reading a note.
@@ -653,6 +677,20 @@ impl NexusMcpServer {
         let value = self
             .context
             .ipc_call(GIT_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// BL-137 — `com.nexus.security` IPC client used by `nexus_kernel_stats`.
+    async fn security_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(SECURITY_PLUGIN, command, args, IPC_TIMEOUT)
             .await
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
@@ -1347,6 +1385,27 @@ impl NexusMcpServer {
             degraded: true,
             degraded_reason: Some(BL115_DEGRADED_REASON.to_string()),
         })
+    }
+
+    #[tool(
+        name = "nexus_kernel_stats",
+        description = "Snapshot the kernel's BL-093 metrics: per-(plugin, command) IPC call counters + duration histograms (p50/p95/p99), event-bus publish counters, capability-check counters by outcome, plugin-lifecycle-hook histograms, current event-bus queue depth, and `metrics_dropped_total` (sentinel for the per-metric key cap). Read-only. Useful for monitoring kernel hot paths or diagnosing latency / capability-deny regressions from an agent."
+    )]
+    async fn nexus_kernel_stats(
+        &self,
+        Parameters(_input): Parameters<NexusKernelStatsInput>,
+    ) -> Json<NexusKernelStatsOutput> {
+        match self
+            .security_call::<serde_json::Value>("metrics_snapshot", serde_json::json!({}))
+            .await
+        {
+            Ok(v) if v.is_null() => Json(NexusKernelStatsOutput { snapshot: None }),
+            Ok(v) => Json(NexusKernelStatsOutput { snapshot: Some(v) }),
+            Err(e) => {
+                tracing::error!("nexus_kernel_stats: {e}");
+                Json(NexusKernelStatsOutput { snapshot: None })
+            }
+        }
     }
 
     /// Shared symbol query: `path` is optional, `limit` is the hard

@@ -370,6 +370,24 @@ A scheduled background pass that keeps the entity knowledge graph (BL-128) clean
 
 **Close-out landed 2026-05-15** — the remaining three phases plus the scheduler. `com.nexus.storage::entity_merge` merges `drop` into `keep` (union aliases, longer description, max-confidence per `(target, kind)` relation, drop's id appended as an alias so dangling references still resolve, atomic rewrite + drop-file removal). The CLI's `dedup` phase now auto-merges pairs at or above `--merge-threshold` (deterministic across pair order: a single entity can't be merged into two different survivors in one cycle) and surfaces the rest above `--review-threshold` for the user. Two new AI handlers — `com.nexus.ai::enrich_entity` (RAG-augmented LLM expansion when description < `min_description_chars`, write-back via `entity_upsert`) and `com.nexus.ai::infer_entity_relations` (LLM proposes new typed relations against `entity_recall` candidates, JSON-fenced reply parsed defensively, written as `confidence: 0.5` drafts; emits `com.nexus.dream_cycle.proposals` kernel event when any proposals land for shell notification consumption). The TUI bootstrap spawns a `DreamCycleScheduler` thread that polls the config every 60 s when disabled and uses `nexus_workflow::CronSchedule` (the same parser user workflows use) to compute the next fire time when enabled. CLI run path stays available for on-demand invocation; `--phase` now accepts `dedup|decay|enrich|infer`.
 
+> **Verification 2026-05-15** — 6 of 7 DoD bullets shipped; the inference-proposals bullet's backend half landed (`com.nexus.dream_cycle.proposals` kernel event published, drafts written at `confidence: 0.5`) but no shell consumer exists yet. Filed as the follow-up below.
+
+---
+
+### Follow-up: shell subscriber for Dream Cycle relation proposals (from BL-129)
+
+**Source**: BL-129 verification 2026-05-15.
+**Effort**: Small. Shell-side plugin only; backend already publishes the event.
+**Crates**: new `shell/src/plugins/nexus/dreamCycle/`; no Rust changes.
+
+`com.nexus.ai::infer_entity_relations` already writes draft relations at `confidence: 0.5` and publishes `com.nexus.dream_cycle.proposals` on the kernel bus when any proposals land. The BL-129 DoD's "shell notification surfaces 'N new relation proposals from Dream Cycle' with an approve/skip action" needs a shell plugin that subscribes to that event and:
+
+1. Counts the proposals in the payload, surfaces a toast through `api.notifications.show` (or routes through the BL-133 `nexus.notifications` plugin) with the `N new relation proposals` text.
+2. Provides an inbox / panel listing the draft relations (entity pair, proposed kind, confidence) with per-row approve / skip actions.
+3. Approve bumps `confidence` to a configurable confirmed value (default `1.0`) via `entity_upsert`; skip removes the draft via the same handler with the relation omitted from the payload.
+
+Mirror the BL-133 shell-subscriber shape (`shell/src/plugins/nexus/notifications/index.ts`) — small plugin, default-on, registered in `shell/src/plugins/catalog.ts`.
+
 ---
 
 _BL-130 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `crates/nexus-ai/src/sanitize.rs` ships `Scanner::with_default_patterns(InjectionPolicy)` with four pattern families (role-override / invisible-unicode / hidden-HTML / data-exfiltration) and four policies (`Off` / `Warn` / `Redact` / `Reject`). `ScanResult` carries the rewritten text + per-match `Finding`s + a `rejected` flag. New `build_rag_prompt_budgeted_with_scanner` variant in `rag.rs` layers the scanner after the BL-017 redactor (so audit snippets don't carry already-stripped secrets); the legacy `build_rag_prompt_budgeted` keeps byte-for-byte BL-018 semantics for callers passing `scanner: None`. `rag::query` (called by `handle_ask`) threads `AiConfig::injection_policy` end-to-end and emits a `tracing::warn` per finding under `nexus_ai::sanitize` for operator visibility. Tool-result + MCP-output + entity-prepend wire points are documented follow-ups — the agent tool-loop and MCP host assemble strings from arbitrary handler responses with no central chokepoint today, and the entity graph (BL-128) hasn't shipped. Per-source-type config (`[ai.injection_policy] rag_chunks = "warn"`, etc.) collapsed to a single `injection_policy: InjectionPolicy` field on `AiConfig` — the per-source split adds config surface without a real use case until other wire points land. 27 new tests (24 in the sanitize module covering every pattern class + each policy + UTF-8 snippet safety; 3 in rag.rs pinning the Warn/Reject paths and `Scanner=None` byte-identity). `cargo test -p nexus-ai` 249/249; `cargo clippy -p nexus-ai --all-targets` clean._
@@ -704,10 +722,14 @@ BL-144 builds the **host** side (Nexus → external agents). This BL builds the 
 
 ### BL-134: `nexus-ai-runtime` — unified AI/agent event loop
 
+> **Phase 1 landed 2026-05-15** on branch `bl-134-ai-runtime`. New `crates/nexus-ai-runtime/` core plugin (`com.nexus.ai.runtime`) registered after notifications in bootstrap. IPC surface: `submit` / `get` / `list` / `events` / `pool_stats` (5 of 8 handlers). `cancel` / `pause` / `resume` reserved for Phase 5 — they appear in the manifest + cap matrix but return a typed "Phase 5 not wired" error. `AgentTaskKind::Session` is the only kind wired; `AiStream` / `WorkflowAiStep` reject with a "reserved for Phase N" message at submit time. Three new capabilities (`ai.runtime.submit` / `.control` / `.observe`) added to `nexus-plugin-api::Capability` and to the per-handler cap matrix in bootstrap. Worker pool: dedicated multi-thread tokio runtime, `worker_threads = max(2, num_cpus / 2)`, started on `wire_context`. Typed `AiEvent` channel emits `Submitted` / `Started` / `Finished` / `Failed` directly from the worker; correlation back from `com.nexus.ai.stream_*` / `com.nexus.agent.round_*` is **deferred to Phase 2** (requires a session-id mapping). 24 in-crate unit tests + 5 bootstrap IPC tests + new dep-invariants row + ts-rs/schemars bindings + ipc-drift script entry.
+>
+> **Phases 2–5 still open:** Phase 2 (delegate shim + AiEvent correlation), Phase 3 (workflow `async = true`), Phase 4 (indexing-daemon migration), Phase 5 (cancel/pause/resume + `Critical` priority). **Phase 6 (notification router refactor) closed 2026-05-15 via [BL-135](BACKLOG_COMPLETED.md#bl-135-notification-router-refactor--2026-05-15).**
+
 **Source**: Architectural review 2026-05-14 — full design in [ADR 0028](../adr/0028-ai-agent-event-loop.md). Filed 2026-05-14.
 **Effort**: Large. 5-phase migration (~4–6 weeks); Phase 6 (notification router) lands in parallel with Phase 1.
 **Crates**: new `nexus-ai-runtime`; touches `nexus-bootstrap` (registration + cap matrix), `nexus-agent` (`delegate` shim), `nexus-workflow` (optional `async = true` steps), `nexus-ai` (`indexing_daemon` migrates to the shared pool), `nexus-notifications` (becomes a consumer of `AiEvent`).
-**Related**: ADR 0028 (this work), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md) (cap matrix this extends), [ADR 0024](../adr/0024-agent-session-tool-loop.md) (session loop the runtime drives), [BL-135](#bl-135-notification-router-refactor) (Phase 6), [BL-138](#bl-138-default-deny-capability-registration) (pre-req: cap matrix needs default-deny before the runtime's 3 new caps land).
+**Related**: ADR 0028 (this work), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md) (cap matrix this extends), [ADR 0024](../adr/0024-agent-session-tool-loop.md) (session loop the runtime drives), [BL-135](BACKLOG_COMPLETED.md#bl-135-notification-router-refactor--2026-05-15) (Phase 6 — closed), [BL-138](#bl-138-default-deny-capability-registration) (pre-req: cap matrix needs default-deny before the runtime's 3 new caps land).
 
 Three independent gaps in the current AI/agent stack — no first-class agent task scheduler, no typed cross-subsystem AI event channel, and no dedicated worker pool — point at the same missing primitive. ADR 0028 promotes the three existing *prototypes* (`BusBridgePolicy::pending_approvals`, the `com.nexus.ai.stream_*` topics, `nexus-ai::indexing_daemon`'s dedicated tokio runtime) into one named subsystem: a new `nexus-ai-runtime` core plugin (`com.nexus.ai.runtime`) that owns the scheduler, the typed `AiEvent` republisher, and a multi-thread tokio worker pool. Preserves all four invariants (file-as-truth, microkernel isolation, IPC over direct calls, capabilities); existing `stream_*` and `round_proposed` topics stay; republisher is additive.
 
@@ -722,43 +744,21 @@ Three independent gaps in the current AI/agent stack — no first-class agent ta
 - ts-rs / schemars bindings for `AgentTask`, `AgentRun`, `AiEvent`; `scripts/check_ipc_drift.sh` clean.
 
 **Open follow-ups carved off into their own BLs** (separate scope, not gating):
-- Notification router refactor — [BL-135](#bl-135-notification-router-refactor) (Phase 6 of the migration; can land in parallel with Phase 1).
+- Notification router refactor — [BL-135](BACKLOG_COMPLETED.md#bl-135-notification-router-refactor--2026-05-15) (Phase 6 of the migration; **closed 2026-05-15**).
 - Notification Center (persistent inbox + read/unread) — [BL-136](#bl-136-notification-center--persistent-inbox--shell-panel) (sibling ADR; builds on BL-135).
 - Task DAG visualiser, persistence across restart, per-caller quotas — listed in ADR 0028 §Open follow-ups; not BLs yet.
 
 ---
 
-### BL-135: Notification router refactor
+### BL-135: Notification router refactor → closed 2026-05-15
 
-**Source**: ADR 0028 §"Integration with `nexus-notifications`" + Phase 6. Filed 2026-05-14.
-**Effort**: Medium. Pure refactor of `nexus-notifications`; no new transports.
-**Crates**: `nexus-notifications`, `nexus-bootstrap` (config loading).
-**Related**: [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop), [BL-136](#bl-136-notification-center--persistent-inbox--shell-panel), [ADR 0028](../adr/0028-ai-agent-event-loop.md).
-
-Today every producer hardcodes which channel/transport it targets (the workflow `notify` step picks a channel inline; agent CLI auto-notify picks one; the shell toast subscriber listens to one topic; future `AiEvent` consumers would each pick channels too). This scales poorly once the runtime adds a fourth high-volume source. Pull producer→transport routing out of producers and into a single forge-local config that the notifications plugin reads on `on_start` and reloads via the existing file watcher.
-
-**Definition of done:**
-- New `<forge>/.forge/notifications.toml` schema parsed in `nexus-notifications`:
-  - `[sources.<name>] on = [...]`, `route = [channel, ...]`, `min_severity`, `quiet_hours`
-  - `[channels.<name>]` block for per-channel config (Discord URL, Telegram chat-id, SMTP server) — existing `[notifications.<channel>]` blocks in `config.toml` migrate to here.
-- Built-in router inside `nexus-notifications` subscribes to event sources by topic prefix and dispatches `Notification` records to configured transports.
-- Built-in `AiEvent` subscriber (listens on `com.nexus.ai.runtime.*`) translates typed events into `Notification` records — works even before BL-134 Phase 1 fully lands; if the runtime topic is silent the source is dormant.
-- Existing producers (workflow `notify` step, CLI `--notify-after-secs`, shell toast subscriber) drop their hardcoded channel selection and emit a `Notification` carrying a `source` tag; legacy callers that pass an explicit channel keep working (router treats explicit-channel as an override).
-- Live-reload on config change verified by a unit test.
-- `scripts/check_ipc_drift.sh` clean if the IPC envelope shifts.
-
-**Non-goals (call out, don't do here):**
-- No new transports. Slack / Matrix / ntfy / web-push are deferred until someone asks.
-- No persistent inbox — that's BL-136.
+**See [`BACKLOG_COMPLETED.md`](BACKLOG_COMPLETED.md) for the close note.** Forge-local `<forge>/.forge/notifications.toml` schema + `Router` + `AiEvent` subscriber + producer migration + live-reload all shipped. Legacy `[notifications.*]` blocks remain as a fallback for forges that haven't authored `notifications.toml`.
 
 ---
 
-### BL-136: Notification Center — persistent inbox + shell panel
+### BL-136: Notification Center → closed 2026-05-15
 
-**Source**: ADR 0028 §"Integration with `nexus-notifications`" §3 — sibling ADR. Filed 2026-05-14.
-**Effort**: Medium. Builds on BL-135's router.
-**Crates**: `nexus-notifications`, shell plugin under `shell/src/plugins/nexus/notificationsInbox/`.
-**Related**: [BL-135](#bl-135-notification-router-refactor) (pre-req), [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (provides the AI/agent source).
+**See [`BACKLOG_COMPLETED.md`](BACKLOG_COMPLETED.md#bl-136-notification-center--persistent-inbox--shell-panel--2026-05-15) for the close note.** Phase 1 (backend — `inbox.rs` SQLite store, 4 IPC handlers, retention, 2 capabilities, dispatch-time write subscriber, ts-rs/schemars bindings, 18 tests) + Phase 2 (shell plugin `nexus.notificationsInbox` — sidebar leaf, unread header, source filter chips, mark-read / dismiss / jump-to-source for `task_id`-carrying rows) both shipped on `bl-134-ai-runtime`. ADR 0029.
 
 Today `com.nexus.notifications.delivered` is fire-and-forget — once a transport accepts, there is no history, no read/unread state, no "what did I miss while I was away." Add a derived inbox under `<forge>/.forge/notifications/inbox.db` (rebuildable from the live event stream and transport-side history where available) plus a shell panel that queries it via IPC.
 
@@ -780,18 +780,40 @@ Today `com.nexus.notifications.delivered` is fire-and-forget — once a transpor
 **Effort**: Mixed (sub-items range Small to Medium).
 **Status**: Umbrella entry. The two HIGH-severity items are carved out as standalone BLs ([BL-138](#bl-138-default-deny-capability-registration), [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop)); the remainder are tracked as sub-bullets here until they're picked up.
 
+> **Status (2026-05-15, third pass — umbrella closed)** — every remaining sub-item shipped:
+> - ✅ **`BusBridgePolicy::pending_approvals` bounded.** `crates/nexus-agent/src/handlers/shared.rs` gained `PENDING_APPROVALS_CAP = 64` + a `PendingEntry { tx, inserted_at }` wrapper. New `insert_pending_bounded` prunes entries older than `MAX_APPROVAL_TIMEOUT_SECS` then evicts the oldest until the cap is met. Evictions log at `warn` so a stuck shell is observable. 3 new unit tests pin under-cap / over-cap / aged-out behaviour. The leaked-`oneshot::Sender` failure mode the architecture review flagged is closed regardless of whether BL-134 Phase 5 lands.
+> - ✅ **WASM commitment.** [ADR 0030](../adr/0030-defer-wasm-community-runtime.md) — defer the WASM community runtime; the iframe sandbox is the canonical community surface going forward. ADR 0030 partially supersedes the WASM half of ADR 0016. `WasmSandbox` stays in tree as scaffolding so the door isn't closed, but no new feature work is gated on WASM-side parity.
+> - ✅ **`forge doctor` CLI.** New `nexus forge doctor [--fix]` subcommand walks the forge for `.md` files, joins against `com.nexus.storage::query_files`, and reports `missing` / `stale` / `mtime_drift` triples. JSON and text output supported. `--fix` invokes `rebuild_index` when drift is detected. Implementation in `crates/nexus-cli/src/commands/forge.rs::{doctor, walk_markdown_files}`.
+> - ✅ **`KernelMetrics` in MCP + TUI.** MCP gains `nexus_kernel_stats` (no params; returns the `metrics_snapshot` blob verbatim) wired into the existing `tool_router` via a new `security_call` helper. TUI gains a Shift+K toggleable kernel-stats overlay (`crates/nexus-tui/src/ui/kernel_stats.rs`) that renders the same snapshot as four sections (gauge + dropped sentinel, IPC top-10, event-bus top-10, capability checks top-10). Both consume `com.nexus.security::metrics_snapshot`, the same handler the shell health panel already calls.
+>
+> BL-137 umbrella is closed.
+
+> **Status (2026-05-15, second pass)** — `core_plugin.rs` decompositions for the three crate-side monoliths landed:
+> - `crates/nexus-agent/src/core_plugin.rs`: 2784 → 679 lines. Handler bodies moved to `crates/nexus-agent/src/handlers/{plan,history,session,round,custom,memory,delegate,search_transcripts,list_tools}.rs` plus `shared.rs` (~780 lines for bus-bridge policy, kernel-tool bridge, archetype resolver, error converters). 154 unit tests pass.
+> - `crates/nexus-workflow/src/core_plugin.rs`: 3427 → 2115 lines. Handler bodies moved to `crates/nexus-workflow/src/handlers/{list,get,reload,validate,templates,run_history,next_fire,digest,run}.rs` plus `shared.rs`. The `run.rs` module is ~955 lines because the action-dispatcher + step-parsers (terminal / notify) cluster naturally. Plugin-lifetime wiring (cron / file_event / git_event / mcp_event / webhook / digest schedulers + their spec types) stayed inline. 189 unit tests pass.
+> - `crates/nexus-ai/src/core_plugin.rs`: 4001 → 1645 lines (~half of which is the in-file `#[cfg(test)]` modules — production code outside tests is well under 700 lines). Handler bodies moved to `crates/nexus-ai/src/handlers/{config,ask,stream_chat,stream_ask,propose,enrich,entity,index,search,session,activity}.rs` plus `shared.rs` (~730 lines: provider factories, system-prompt floor, `EngineEnvelope` for `com.nexus.ai.stream_*` bus contract, tool-loop dispatch adapter, `mode=complete` post-processing). All `com.nexus.ai.stream_*` topic literals preserved (the IPC topic-prefix invariant test still passes). 249 unit tests pass.
+>
+> **Status (2026-05-15)** — Five sub-items closed in the first pass:
+> - ✅ **IPC topic-prefix invariant.** New static-source scan at `crates/nexus-bootstrap/tests/ipc_topic_prefix_invariant.rs` walks every `crates/nexus-*/src/**/*.rs` + `crates/nexus-bootstrap/src/**/*.rs`, extracts each `.publish(LITERAL, …)` call, and asserts the topic literal lies in the owning plugin's namespace OR is one of the kernel-shared topics. Dynamic (variable / `format!`) topics are reported in a diagnostic block but not failed. Wired into `scripts/check_ipc_drift.sh`. An OWNERS sanity test cross-checks the table against the live `PLUGIN_ID` constants per crate.
+> - ✅ **Capability inventory auto-generation.** New `crates/nexus-security/tests/capability_inventory_emit.rs` materialises `docs/generated/capabilities.md` from `Capability::ALL` + `nexus_security::risk_level`; `check_ipc_drift.sh` now diffs the `docs/generated/` tree alongside the existing TS / JSON-Schema trees. ADR 0002 carries a fresh addendum pointing at the generated file as the live mirror; the original 2026-04-16 table is preserved per the immutable-body convention.
+> - ✅ **Tauri command boundary snapshot test.** New `shell/src-tauri/tests/tauri_command_boundary.rs` reads `shell/src-tauri/src/lib.rs`, extracts the body of the `invoke_handler!` block, and pins the 24-command surface against a hard-coded `EXPECTED` list. Failure message points at ADR 0011 / "shell host stays thin" so a future contributor knows to route through `kernel_invoke` → `ipc_call` rather than adding a new bespoke command.
+> - ✅ **Decompose `nexus-bootstrap` plugin registration.** `crates/nexus-bootstrap/src/lib.rs` was 2463 lines; now 867. The 19 plugin-registration blocks moved to one file each under `crates/nexus-bootstrap/src/plugins/<name>.rs`, with the shared helpers (`LifecycleFlags`, `core_manifest{,_with_ipc}`, `with_v1_aliases`, `RegisterCoreResultExt`) and a `register_all` orchestrator in `plugins/mod.rs`. Registration order is preserved (security → storage → … → terminal). The 38 existing `nexus-bootstrap` unit tests + every integration test pass; workspace `cargo build` clean.
+> - ✅ **Document tokio runtime ownership.** New `docs/architecture/runtime-ownership.md` catalogues every frontend-owned runtime (CLI / TUI / MCP / Tauri shell), subsystem-owned exception (`nexus-ai-runtime` worker pool), ambient-runtime consumers (`Handle::try_current()` sites in notifications / audio / workflow), `spawn_blocking` sites (kernel dispatcher / git worker / terminal / fastembed / notifications inbox), and direct `tokio::spawn` sites. Linked from `docs/README.md`.
+>
+> **Still open** under this umbrella: oversized `core_plugin.rs` files (Medium; eased by BL-134 Phase 1), `BusBridgePolicy::pending_approvals` bound (subsumed by BL-134 Phase 5), `forge doctor` CLI (Medium), WASM commitment call (Low priority), and `KernelMetrics` in MCP + TUI (Medium).
+
 The review surfaced 12 prioritized items beyond BL-134 / 135 / 136. Two are HIGH severity and own their own BL; the rest sit here:
 
-- **Decompose oversized `core_plugin.rs` files.** `nexus-workflow` (3369 LoC), `nexus-ai` (3237), `nexus-agent` (2641), and `nexus-bootstrap/src/lib.rs` (2347) are single-file monoliths. Pull each `handle_*` into a `handlers/` submodule per crate; keep the `CorePlugin` trait impl thin. Medium effort; mechanical refactor. *Eases BL-134 Phase 1, but Phase 1 can land regardless.*
-- **IPC + audit-log drift detection.** Extend `scripts/check_ipc_drift.sh` with an integration test that boots a runtime and asserts every plugin only emits bus events under its own `type_id` prefix. Catches the failure mode where a plugin republishes someone else's topic. Small effort.
-- **Capability inventory auto-generation.** Today the canonical list in `Capability::ALL` (`crates/nexus-plugin-api/src/capability.rs`) is duplicated by hand in ADR 0002 and ADR 0022. Generate the inventory table at doc-build time; remove hand-maintained copies from ADR text. Small effort.
-- **Tauri command boundary snapshot test.** Snapshot the 23-command set registered by `invoke_handler!` in `shell/src-tauri/src/lib.rs` into a test fixture; assert in CI that any new `#[tauri::command]` is paired with an ADR. Prevents creep against the "shell host stays thin" invariant. Small effort.
-- **Bound `BusBridgePolicy::pending_approvals`.** Today the map is unbounded with no TTL; a stuck shell leaks `oneshot::Sender`s. Cap at 64 entries and prune past `MAX_APPROVAL_TIMEOUT_SECS = 3600`. Subsumed by BL-134 Phase 5 (the queue moves into the runtime), so if BL-134 ships first this collapses. Otherwise: Small effort, directly in `nexus-agent::core_plugin.rs`.
-- **`forge doctor` CLI for index drift.** ADR 0003 says the file watcher rebuilds the SQLite + Tantivy indexes; there's no documented MTTR target and no tool to validate. Add `nexus forge doctor` that walks `.forge/` and reports files-vs-index drift. Medium effort.
-- **Decide WASM commitment.** ADR 0016 is "native vs WASM" but no production WASM plugin exists today; the iframe runtime (ADR 0015) is the actual community-plugin surface. Either commit (ship one real WASM community plugin) or document iframe-only and move WASM to "deferred experiment." Large if committing, trivial if deferring. Low priority — costs are small today, will rise.
-- **Decompose `nexus-bootstrap` plugin registration.** The 2347-line `lib.rs` registers core plugins inline with order-dependent comments; pull each block into `nexus-bootstrap/src/plugins/<name>.rs`. Small effort. *Same family as the `core_plugin.rs` decomposition above.*
-- **Document tokio runtime ownership.** `nexus-ai::indexing_daemon` builds its own runtime; the workflow scheduler does `Handle::try_current()`; the kernel uses `spawn_blocking`. Nobody owns "is the system idle?" Add `docs/architecture/runtime-ownership.md` cataloguing each spawn site. Small effort; immediate doc step before BL-134's structural fix.
-- **Render `KernelMetrics` in MCP + TUI.** BL-093 collects the metrics; the shell health panel renders them; CLI / TUI / MCP do not. Add an MCP tool `nexus_kernel_stats` and a TUI panel reading the same JSON snapshot. Medium effort.
+- ✅ **Decompose oversized `core_plugin.rs` files.** *Closed 2026-05-15 — `nexus-bootstrap/src/lib.rs` (first pass), then `nexus-agent`, `nexus-workflow`, `nexus-ai` `core_plugin.rs` decompositions (second pass). See status notes above.*
+- ✅ **IPC + audit-log drift detection.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Capability inventory auto-generation.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Tauri command boundary snapshot test.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Bound `BusBridgePolicy::pending_approvals`.** *Closed 2026-05-15 — see status note above.*
+- ✅ **`forge doctor` CLI for index drift.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Decide WASM commitment.** *Closed 2026-05-15 — see [ADR 0030](../adr/0030-defer-wasm-community-runtime.md). Iframe is the canonical community runtime; WASM moves to deferred experiment.*
+- ✅ **Decompose `nexus-bootstrap` plugin registration.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Document tokio runtime ownership.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Render `KernelMetrics` in MCP + TUI.** *Closed 2026-05-15 — see status note above.*
 
 Items above can be promoted to their own BL when picked up. Re-evaluate priorities after BL-134 Phase 1 lands (Phase 1 may collapse or change several of these).
 
@@ -801,8 +823,12 @@ Items above can be promoted to their own BL when picked up. Re-evaluate prioriti
 
 **Source**: Architectural review 2026-05-14 (HIGH severity). Filed 2026-05-14.
 **Effort**: Small.
-**Crates**: `nexus-bootstrap`, `nexus-plugin-api`.
+**Crates**: `nexus-bootstrap`, `nexus-plugin-api`, `nexus-plugins`.
 **Related**: [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (pre-req: runtime adds 3 new caps), [ADR 0002](../adr/0002-hierarchical-capability-strings.md), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md).
+
+> **Status (2026-05-15)** — **Closed.** Phase 1 shipped the TOML-driven cap matrix at `crates/nexus-bootstrap/cap_matrix.toml` + the 17 historical `add_cap_requirement(…)` entries; Phase 2 classified every remaining IPC handler (245 bare commands across 19 plugins) as `unrestricted = "<why>"` and dropped the `#[ignore]` on `every_ipc_handler_is_classified`. The completeness test now runs unconditionally — a new IPC handler that ships without a matrix row breaks CI. ADR 0002 carries the canonical cross-link (2026-05-15 addendum). Args-aware policies (ADR 0022 Phase 2) live in `crates/nexus-bootstrap/src/cap_policies.rs` keyed by the matrix's `policy = "<name>"` field.
+>
+> **AUDIT follow-ups (not gating, surfaced by the migration)** — Phase 2 preserved pre-BL-138 behaviour; rows tagged `# AUDIT:` in the matrix are candidates for real cap elevation in dedicated review PRs. Notable: `com.nexus.security::set_secret` / `::delete_secret` / `::clear_audit_log` (no cap today), `com.nexus.linkpreview::fetch` and `com.nexus.git::push` / `::push_tags` (outbound HTTP, candidate for `net.http`), `com.nexus.terminal::send_input` / `::send_raw_input` / `::run_saved` / `::adhoc_promote` (write into a live PTY, candidate for `process.spawn`), `com.nexus.agent::delegate` / `::plan` and `com.nexus.ai::resolve_credentials` (currently ipc.call-only, plausible candidates for `ai.chat` / in-tree-only markers).
 
 The per-handler capability matrix in `nexus-bootstrap/src/lib.rs` is now 30+ hand-maintained `add_cap_requirement(...)` entries spanning ADR 0002 (14 original caps), ADR 0022 (8 per-handler AI caps), and pending ADR 0028 work (3 new `ai.runtime.*` caps). A single missing entry is a silent privilege-escalation bug — the handler dispatches without a cap check.
 

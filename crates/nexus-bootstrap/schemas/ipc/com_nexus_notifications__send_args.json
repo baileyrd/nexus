@@ -1,16 +1,44 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SendArgs",
-  "description": "Args for `com.nexus.notifications::send` (handler id `1`).\n\nLifted to a file-scope public type so the schema generator can\nemit a JSON Schema + TypeScript binding for the IPC contract.\nMatches the `nexus-linkpreview::FetchArgs` pattern.",
+  "description": "Args for `com.nexus.notifications::send` (handler id `1`).\n\nOne of `channel` or `source` must be present:\n- `channel` set, `source` unset: legacy override path; routed\n  directly to that transport.\n- `source` set, `channel` unset: BL-135 router path; consults\n  `notifications.toml` to pick channels.\n- Both set: `channel` wins (override path); the `source` tag is\n  recorded for observability but does not change the routing.\n- Neither set: rejected at parse time.",
   "type": "object",
   "properties": {
     "channel": {
-      "description": "Target channel — one of [`Channel`]'s snake_case variants.",
-      "$ref": "#/$defs/Channel"
+      "description": "Explicit target channel — the override path. When set, the\nrouter is not consulted.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Channel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "message": {
       "description": "Notification body. UTF-8, no length cap at the IPC layer.",
       "type": "string"
+    },
+    "severity": {
+      "description": "Optional severity (`debug` / `info` / `warn` / `error`).\nDefaults to `info` when omitted. Only consulted on the router\npath; override-path callers can still supply it for\nobservability.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Severity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source": {
+      "description": "BL-135 source tag — feeds the router to pick channels from\n`notifications.toml`.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     },
     "title": {
       "description": "Optional title. When omitted, transports that need a header\nfall back to `\"Nexus\"`.",
@@ -23,7 +51,6 @@
   },
   "additionalProperties": false,
   "required": [
-    "channel",
     "message"
   ],
   "$defs": {
@@ -49,6 +76,31 @@
           "description": "Email — SMTP submission via [`SmtpTransport`].",
           "type": "string",
           "const": "email"
+        }
+      ]
+    },
+    "Severity": {
+      "description": "Severity associated with a [`crate::Notification`] dispatch.\n\nWire form is snake_case (`debug` / `info` / `warn` / `error`). The\nordering matters — the router filters out events below a source's\n`min_severity`, so the `PartialOrd` derive must reflect the\ndeclaration order (`Debug < Info < Warn < Error`).",
+      "oneOf": [
+        {
+          "description": "Verbose lifecycle traces. Filtered by every source by default.",
+          "type": "string",
+          "const": "debug"
+        },
+        {
+          "description": "Default level. Routine completion events.",
+          "type": "string",
+          "const": "info"
+        },
+        {
+          "description": "Worth surfacing — degraded behaviour, retries, soft failures.",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Hard failure. Pages-grade signal.",
+          "type": "string",
+          "const": "error"
         }
       ]
     }

@@ -1,0 +1,1766 @@
+# BL-138 — per-handler capability matrix.
+#
+# Every IPC handler registered by an in-tree core plugin MUST appear in
+# this file, classified as either:
+#   - `caps = [...]`        → caller must hold every listed cap (on top
+#                             of the unconditional `ipc.call` check).
+#   - `unrestricted = "…"`  → handler is intentionally available to any
+#                             caller with `ipc.call`. The string is the
+#                             one-line rationale (read-only probe,
+#                             version negotiation, etc.). Replaces the
+#                             pre-BL-138 implicit default.
+#
+# Optional fields:
+#   - `note   = "…"`        → free-form audit trail.
+#   - `policy = "name"`     → references a named args-aware closure in
+#                             `crates/nexus-bootstrap/src/cap_policies.rs`
+#                             (ADR 0022 Phase 2). Stacks on top of `caps`.
+#
+# Handler version aliases (`<cmd>.v1` per ADR 0021) do NOT need a row
+# here — the matrix applier auto-mirrors a classification onto every
+# `.v<N>` alias of the same handler. Author the bare `cmd` once.
+#
+# The `cap_matrix_complete` integration test boots a runtime, walks
+# every `(plugin, command)` pair in the live registry, and fails if any
+# handler is missing a row. BL-138 Phase 1 ships the matrix structure
+# plus the 17 historical `add_cap_requirement` entries below — the
+# completeness test is `#[ignore]`d until per-service-plugin follow-ups
+# land the unrestricted classifications for the remaining handlers.
+#
+# When adding a new IPC handler:
+#   1. Decide whether the handler needs an extra cap (think: does it
+#      spawn processes, write external files, mutate credentials,
+#      reach the network, surface to AI as a tool, etc.). If yes →
+#      `caps = ["…"]`. If no → `unrestricted = "<why>"`.
+#   2. Append the row here.
+#   3. Run `cargo test -p nexus-bootstrap --test cap_matrix_complete --
+#      --ignored` to confirm.
+#
+# Doc cross-link: `docs/adr/0002-hierarchical-capability-strings.md`.
+
+# ─── com.nexus.terminal — process-spawning surfaces (issue #77) ──────
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "create_session"
+caps = ["process.spawn"]
+note = "spawns arbitrary processes with guest-supplied shell/working_dir/env"
+
+# ─── com.nexus.mcp.host — process-spawning surfaces (issue #77) ──────
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "connect"
+caps = ["process.spawn"]
+note = "spawns the MCP server's command over stdio"
+
+# ─── com.nexus.ai — per-handler caps (ADR 0022) ──────────────────────
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "stream_chat"
+caps = ["ai.chat"]
+policy = "ai_tools_policy"
+note = "ADR 0022 Phase 2 — tools=auto requires ai.tools.write; auto_with_mcp adds ai.tools.mcp"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "stream_ask"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "ask"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "semantic_search"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "enrich_file"
+caps = ["ai.chat"]
+
+# BL-129 Dream-Cycle phases share the AiChat gate.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "enrich_entity"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "infer_entity_relations"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "propose_tool_calls"
+caps = ["ai.chat"]
+policy = "ai_tools_policy"
+
+# BL-116 — single-turn chat completion under the same ai.chat gate.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "generate_docs"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "index_file"
+caps = ["ai.index"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "index_trigger"
+caps = ["ai.index"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_load"
+caps = ["ai.session.read"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_list"
+caps = ["ai.session.read"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_save"
+caps = ["ai.session.write"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_delete"
+caps = ["ai.session.write"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "set_config"
+caps = ["ai.config.write"]
+note = "hot-swap provider credentials — equivalent in surface to process.spawn"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "activity_clear"
+caps = ["ai.activity.write"]
+
+# ─── com.nexus.agent — session-loop reach (ADR 0024 Phase 2a) ────────
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_run"
+caps = ["ai.chat"]
+note = "drives the same tool-loop machinery as stream_chat"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "round_decide"
+caps = ["ai.chat"]
+note = "reply to round_proposed — pinned to match session_run"
+
+# ─── com.nexus.audio — microphone / speaker reach (BL-117) ───────────
+
+[[handler]]
+plugin = "com.nexus.audio"
+command = "transcribe"
+caps = ["audio.record"]
+note = "privacy-sensitive — captures ambient room audio"
+
+[[handler]]
+plugin = "com.nexus.audio"
+command = "synthesize"
+caps = ["audio.synthesize"]
+
+# ─── com.nexus.ai.runtime — BL-134 Phase 1 (ADR 0028) ────────────────
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "submit"
+caps = ["ai.runtime.submit"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "cancel"
+caps = ["ai.runtime.control"]
+note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "pause"
+caps = ["ai.runtime.control"]
+note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "resume"
+caps = ["ai.runtime.control"]
+note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "get"
+caps = ["ai.runtime.observe"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "list"
+caps = ["ai.runtime.observe"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "events"
+caps = ["ai.runtime.observe"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "pool_stats"
+caps = ["ai.runtime.observe"]
+
+# ─── com.nexus.notifications — inbox surface (BL-136, ADR 0029) ──────
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_list"
+caps = ["notifications.inbox.read"]
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_stats"
+caps = ["notifications.inbox.read"]
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_mark_read"
+caps = ["notifications.inbox.write"]
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_dismiss"
+caps = ["notifications.inbox.write"]
+
+# ═════════════════════════════════════════════════════════════════════
+# BL-138 Phase 2 — `unrestricted` classifications for the remaining
+# IPC handlers. Each row preserves the pre-BL-138 behaviour (any
+# caller with `ipc.call` may dispatch); the rationale documents WHY
+# no extra cap is required so a future auditor sees the intent
+# rather than the omission.
+#
+# Rows tagged `# AUDIT:` are candidates for a follow-up cap review:
+# they preserve current behaviour today but the security author
+# believed elevation might be warranted. Spinning those into real
+# `caps = […]` requirements is out of scope for the no-behaviour-
+# change Phase 2 migration; they're flagged so a follow-up PR can
+# pick them up cleanly.
+# ═════════════════════════════════════════════════════════════════════
+
+# ─── com.nexus.agent ─────────────────────────────────────────────────
+
+# AUDIT: drives an AI tool-loop under the hood (same machinery as
+# session_run, which now requires ai.chat). Currently implicit per
+# pre-BL-138 behaviour; candidate for ai.chat in a follow-up.
+[[handler]]
+plugin = "com.nexus.agent"
+command = "delegate"
+unrestricted = "agent delegate shim — preserves pre-BL-138 surface; ai.chat elevation tracked as AUDIT follow-up"
+
+# AUDIT: same shape as delegate.
+[[handler]]
+plugin = "com.nexus.agent"
+command = "plan"
+unrestricted = "agent planner — drives a chat call internally; ai.chat elevation tracked as AUDIT follow-up"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "history_get"
+unrestricted = "read-only transcript history fetch"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "history_list"
+unrestricted = "read-only transcript history index"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "history_delete"
+unrestricted = "transcript history pruning — forge-local fs gated downstream by storage fs.write"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "list_archetypes"
+unrestricted = "read-only catalog of built-in agent archetypes"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "list_custom"
+unrestricted = "read-only catalog of user-authored agent archetypes"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "list_tools"
+unrestricted = "read-only catalog of agent-tool registrations"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "memory_record"
+unrestricted = "writes to plugin-owned KV — gated downstream by the agent context's kv.write"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "memory_query"
+unrestricted = "read-only KV lookup of agent memory entries"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "memory_export"
+unrestricted = "read-only dump of agent memory entries"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "memory_prune"
+unrestricted = "KV-only memory rotation; gated downstream by kv.write"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "search_transcripts"
+unrestricted = "read-only fts query over transcript history"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_get"
+unrestricted = "read-only fetch of a stored agent session"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_list"
+unrestricted = "read-only list of stored agent sessions"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_delete"
+unrestricted = "deletes a stored agent session — KV-only mutation gated downstream by kv.write"
+
+# ─── com.nexus.ai — read-only / inert handlers (ADR 0022 §read-only) ─
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "status"
+unrestricted = "read-only provider status; safe negotiation surface for settings UI"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "config"
+unrestricted = "read-only view of the active provider config (no secrets returned)"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "index_status"
+unrestricted = "read-only daemon status of the AI indexer"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "vectorstore_count"
+unrestricted = "read-only vector count; observability surface"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "activity_list"
+unrestricted = "read-only activity timeline (sibling of activity_clear which is gated by ai.activity.write)"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "entity_recall"
+unrestricted = "read-only entity-graph recall over the storage index"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "enrich_apply"
+unrestricted = "writes proposed enrichments back via storage — gated downstream by storage::write_file's fs.write check"
+
+# AUDIT: returns provider keyring material via the agent/audio call
+# paths. Currently called only from in-tree contexts; an unscoped
+# caller exfiltrating credentials would be a real problem. Candidate
+# for an ai.* cap or an internal-only marker in a follow-up.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "resolve_credentials"
+unrestricted = "internal credential plumbing for the audio/agent contexts; AUDIT — candidate for in-tree-only marker"
+
+# ─── com.nexus.audio ─────────────────────────────────────────────────
+
+[[handler]]
+plugin = "com.nexus.audio"
+command = "status"
+unrestricted = "read-only probe of the active backend pair; safe for settings UI"
+
+# ─── com.nexus.comments — forge-local thread store ───────────────────
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "list"
+unrestricted = "read-only fetch of threads attached to a file"
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "create_thread"
+unrestricted = "creates a comment thread row in forge-local storage; downstream fs.write gates the actual disk write"
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "add_reply"
+unrestricted = "appends a reply to a thread — same downstream gating as create_thread"
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "edit_comment"
+unrestricted = "edits an existing reply body — forge-local mutation, downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "delete_comment"
+unrestricted = "removes a reply — forge-local mutation, downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "delete_thread"
+unrestricted = "removes an entire thread — forge-local mutation, downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.comments"
+command = "set_resolved"
+unrestricted = "toggles thread resolved state — forge-local mutation, downstream fs.write gated"
+
+# ─── com.nexus.database — Bases compute/IO surface ───────────────────
+
+[[handler]]
+plugin = "com.nexus.database"
+command = "formula_eval"
+unrestricted = "pure-compute formula evaluation over base record fields"
+
+[[handler]]
+plugin = "com.nexus.database"
+command = "compute_rollup"
+unrestricted = "pure-compute rollup aggregation over base records"
+
+[[handler]]
+plugin = "com.nexus.database"
+command = "resolve_relation"
+unrestricted = "read-only relation traversal over the base index"
+
+[[handler]]
+plugin = "com.nexus.database"
+command = "apply_view"
+unrestricted = "read-only view application (sort/filter/group) over base records"
+
+[[handler]]
+plugin = "com.nexus.database"
+command = "csv_import"
+unrestricted = "parses CSV into typed records — downstream fs.write gates the actual base persistence"
+
+[[handler]]
+plugin = "com.nexus.database"
+command = "csv_export"
+unrestricted = "serialises a base view to CSV; returned as a string, no fs side effect in this handler"
+
+# ─── com.nexus.editor — CM6 session orchestration ────────────────────
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "open"
+unrestricted = "reads a file via storage::read_file (downstream fs.read) and tracks a session"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "close"
+unrestricted = "drops in-memory session state; no fs side effect"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "list_open"
+unrestricted = "read-only enumeration of open editor sessions"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "get_markdown"
+unrestricted = "returns the canonical session text — read-only"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "get_tree"
+unrestricted = "returns the session's block tree — read-only"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "apply_transaction"
+unrestricted = "mutates in-memory CM6 doc state; persistence happens via save which routes through storage::write_file"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "save"
+unrestricted = "routes through storage::write_file — downstream fs.write check applies"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "undo"
+unrestricted = "in-memory CM6 undo step; no fs side effect until save"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "redo"
+unrestricted = "in-memory CM6 redo step; no fs side effect until save"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "stamp_block"
+unrestricted = "assigns a stable block id — in-memory only until save"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "resolve_block_link"
+unrestricted = "read-only block-link resolution over the storage index"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "execute_database_view"
+unrestricted = "read-only base-view execution embedded in the editor surface"
+
+[[handler]]
+plugin = "com.nexus.editor"
+command = "sync_content"
+unrestricted = "reloads a session from storage after an external file change; no caller-side fs effect"
+
+# ─── com.nexus.formats — pure (de)serialization ──────────────────────
+
+[[handler]]
+plugin = "com.nexus.formats"
+command = "import_notion"
+unrestricted = "parses a Notion archive into typed records — fs reads route through storage"
+
+[[handler]]
+plugin = "com.nexus.formats"
+command = "export_notion"
+unrestricted = "serialises forge state to the Notion shape — fs writes route through storage"
+
+# ─── com.nexus.git — operates on `.git` inside the forge root ────────
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "status"
+unrestricted = "read-only working-tree status"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "log"
+unrestricted = "read-only commit history"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "branches"
+unrestricted = "read-only branch list"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "blame"
+unrestricted = "read-only per-line blame attribution"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "diff_file"
+unrestricted = "read-only working-tree-vs-index diff for a single file"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "diff_staged"
+unrestricted = "read-only index-vs-HEAD diff"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "file_status"
+unrestricted = "read-only per-file status"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "file_statuses"
+unrestricted = "read-only batched file status"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "lfs_status"
+unrestricted = "read-only LFS pointer/state inspection"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "list_tags"
+unrestricted = "read-only tag list"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "conflict_files"
+unrestricted = "read-only enumeration of conflicted paths"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "conflict_versions"
+unrestricted = "read-only ours/theirs/base content for a conflict"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stash_list"
+unrestricted = "read-only stash enumeration"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stage_file"
+unrestricted = "stages a working-tree file — mutates .git inside forge root, no external fs reach"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stage_all"
+unrestricted = "stages every working-tree change — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stage_hunks"
+unrestricted = "stages selected hunks — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "unstage_file"
+unrestricted = "unstages a path — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "unstage_all"
+unrestricted = "unstages every staged change — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "unstage_hunks"
+unrestricted = "unstages selected hunks — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "discard_hunks"
+unrestricted = "reverse-applies hunks to the working tree — mutates files inside the forge root, gated by storage fs.write semantics"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "commit"
+unrestricted = "writes a commit object — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "create_branch"
+unrestricted = "creates a branch ref — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "delete_branch"
+unrestricted = "deletes a branch ref — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "switch_branch"
+unrestricted = "checkout — mutates working tree inside forge root and HEAD inside .git"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "create_tag"
+unrestricted = "creates a tag ref — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "delete_tag"
+unrestricted = "deletes a tag ref — mutates .git inside forge root"
+
+# AUDIT: outbound network reach to a remote. Currently implicit per
+# pre-BL-138 behaviour; candidate for net.http elevation.
+[[handler]]
+plugin = "com.nexus.git"
+command = "push"
+unrestricted = "publishes commits to a remote — AUDIT: candidate for net.http elevation in a follow-up"
+
+# AUDIT: same as push.
+[[handler]]
+plugin = "com.nexus.git"
+command = "push_tags"
+unrestricted = "publishes tags to a remote — AUDIT: candidate for net.http elevation in a follow-up"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "merge"
+unrestricted = "merges a branch — mutates .git + working tree inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "abort_merge"
+unrestricted = "aborts an in-progress merge — restores .git + working tree"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "rebase"
+unrestricted = "rewrites local history onto another ref — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "abort_rebase"
+unrestricted = "aborts an in-progress rebase — restores .git + working tree"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "cherry_pick"
+unrestricted = "applies a commit onto HEAD — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "abort_cherry_pick"
+unrestricted = "aborts an in-progress cherry-pick"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stash_push"
+unrestricted = "stashes working-tree changes — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stash_pop"
+unrestricted = "restores a stash entry — mutates .git + working tree inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "stash_drop"
+unrestricted = "drops a stash entry — mutates .git inside forge root"
+
+# ─── com.nexus.linkpreview ───────────────────────────────────────────
+
+# AUDIT: outbound HTTP. Handler context holds NetHttp; caller is
+# currently implicit per pre-BL-138 behaviour. Candidate for net.http
+# elevation in a follow-up.
+[[handler]]
+plugin = "com.nexus.linkpreview"
+command = "fetch"
+unrestricted = "fetches link-preview metadata from arbitrary URLs — AUDIT: candidate for net.http elevation in a follow-up"
+
+# ─── com.nexus.lsp — protocol surface over already-launched servers ──
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "list_servers"
+unrestricted = "read-only enumeration of configured LSP servers"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "open_file"
+unrestricted = "tracks a textDocument open against the relevant LSP server; the LSP server process was launched at plugin start, not by this handler"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "close_file"
+unrestricted = "tracks a textDocument close"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "change_file"
+unrestricted = "forwards a textDocument change — pure protocol message"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "completions"
+unrestricted = "read-only completion request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "hover"
+unrestricted = "read-only hover request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "definition"
+unrestricted = "read-only go-to-definition request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "references"
+unrestricted = "read-only find-references request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "code_actions"
+unrestricted = "read-only code-actions request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "format"
+unrestricted = "formatting request — returns edits, caller applies via editor session"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "rename"
+unrestricted = "rename request — returns a workspace-edit, caller applies via editor session"
+
+# ─── com.nexus.mcp.host — operates on already-connected servers ──────
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "list_servers"
+unrestricted = "read-only enumeration of configured MCP servers"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "list_tools"
+unrestricted = "read-only enumeration of tools on connected servers"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "list_prompts"
+unrestricted = "read-only enumeration of prompts on connected servers"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "list_resources"
+unrestricted = "read-only enumeration of resources on connected servers"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "disconnect"
+unrestricted = "tears down a connection started by `connect` — no new spawn"
+
+# AUDIT: invokes a tool on a connected MCP server; the tool's side
+# effects (file writes, network calls, etc.) happen in the MCP
+# server's own process, not the host plugin. The `connect` spawn
+# gate already restricts who could attach a server in the first place,
+# so this preserves that posture.
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "call_tool"
+unrestricted = "invokes a tool on a previously-connected MCP server (which holds its own caps)"
+
+# ─── com.nexus.notifications ─────────────────────────────────────────
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "send"
+unrestricted = "intentional surface for any plugin to surface a notification — ui.notify gates the toast transport downstream"
+
+# ─── com.nexus.security — keyring + audit log surface ────────────────
+
+[[handler]]
+plugin = "com.nexus.security"
+command = "get_secret"
+unrestricted = "reads a keyring entry — caller-identity-scoped lookup; the namespace prefix prevents cross-plugin reads"
+
+# AUDIT: writes/deletes keyring material. Currently implicit
+# per pre-BL-138 behaviour; arguably the highest-severity AUDIT row
+# in the matrix — a hostile community plugin with ipc.call could
+# overwrite stored secrets. Candidate for a dedicated `security.*`
+# cap or an in-tree-only marker in a follow-up.
+[[handler]]
+plugin = "com.nexus.security"
+command = "set_secret"
+unrestricted = "writes a keyring entry — AUDIT: candidate for a security.* cap in a follow-up"
+
+# AUDIT: same as set_secret.
+[[handler]]
+plugin = "com.nexus.security"
+command = "delete_secret"
+unrestricted = "deletes a keyring entry — AUDIT: candidate for a security.* cap in a follow-up"
+
+[[handler]]
+plugin = "com.nexus.security"
+command = "list_secret_names"
+unrestricted = "read-only list of keyring entry names (no values returned)"
+
+[[handler]]
+plugin = "com.nexus.security"
+command = "query_audit_log"
+unrestricted = "read-only audit log query"
+
+# AUDIT: destroys audit history — exactly the surface a hostile
+# caller would target to cover its tracks. Candidate for a dedicated
+# `security.audit.write` cap in a follow-up.
+[[handler]]
+plugin = "com.nexus.security"
+command = "clear_audit_log"
+unrestricted = "truncates the audit log — AUDIT: candidate for security.audit.write in a follow-up"
+
+[[handler]]
+plugin = "com.nexus.security"
+command = "metrics_snapshot"
+unrestricted = "read-only snapshot of kernel metrics for observability"
+
+# ─── com.nexus.skills ────────────────────────────────────────────────
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "list"
+unrestricted = "read-only catalog of installed skills"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "get"
+unrestricted = "read-only fetch of a single skill"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "list_by_context"
+unrestricted = "read-only context-filtered skill catalog"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "triggered_by"
+unrestricted = "read-only lookup of skills triggered by a phrase"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "render"
+unrestricted = "pure-string render of a skill template"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "compose"
+unrestricted = "pure-string composition of multiple skill outputs"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "invoke"
+unrestricted = "executes a skill via storage/AI dispatch — downstream handlers carry their own cap checks"
+
+[[handler]]
+plugin = "com.nexus.skills"
+command = "reload"
+unrestricted = "rescans the forge for skill files — read-only fs traversal"
+
+# ─── com.nexus.storage — read-only handlers ──────────────────────────
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "query_files"
+unrestricted = "read-only file enumeration with filters"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "read_file"
+unrestricted = "read-only forge-relative file read; downstream fs.read check applies if the path resolves external"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "read_frontmatter"
+unrestricted = "read-only frontmatter extraction"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "find_in_files"
+unrestricted = "read-only ripgrep-style content search"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "search"
+unrestricted = "read-only Tantivy FTS query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "file_exists"
+unrestricted = "read-only existence check"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "list_dir"
+unrestricted = "read-only directory enumeration"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "backlinks"
+unrestricted = "read-only backlink query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "backlinks_to_block"
+unrestricted = "read-only block-level backlink query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "outgoing_links"
+unrestricted = "read-only outgoing-link enumeration"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "unresolved_links"
+unrestricted = "read-only enumeration of unresolved wiki-links"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "list_all_links"
+unrestricted = "read-only enumeration of every wiki-link"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "graph_stats"
+unrestricted = "read-only graph stats"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "graph_neighbors"
+unrestricted = "read-only graph neighbour query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "query_tags"
+unrestricted = "read-only tag enumeration"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "query_tasks"
+unrestricted = "read-only task list"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "query_blocks"
+unrestricted = "read-only block query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "query_symbol"
+unrestricted = "read-only symbol lookup"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_get"
+unrestricted = "read-only entity fetch"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_search"
+unrestricted = "read-only entity search"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_relations"
+unrestricted = "read-only entity relation traversal"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_find_duplicates"
+unrestricted = "read-only duplicate detection over the entity index"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "vector_query"
+unrestricted = "read-only nearest-neighbour vector query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "vectorstore_count"
+unrestricted = "read-only vector count"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "config_read"
+unrestricted = "read-only kernel/storage config"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "settings_read"
+unrestricted = "read-only forge settings"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "canvas_read"
+unrestricted = "read-only canvas file parse"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "canvas_nodes"
+unrestricted = "read-only canvas node enumeration"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "canvas_edges"
+unrestricted = "read-only canvas edge enumeration"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_list"
+unrestricted = "read-only enumeration of Bases"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_load"
+unrestricted = "read-only fetch of a single Base"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_index"
+unrestricted = "read-only Base index fetch"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_query"
+unrestricted = "read-only Base query"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "obsidian_base_query"
+unrestricted = "read-only Obsidian-shape Base query"
+
+# ─── com.nexus.storage — mutating handlers (gated by fs.write) ───────
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "write_file"
+unrestricted = "writes a forge-relative file — gated downstream by the storage plugin's fs.write check; external paths are rejected there"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "write_vault_file"
+unrestricted = "writes a vault-scoped file — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "write_default_gitignore"
+unrestricted = "writes the default .gitignore on forge init — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "note_append"
+unrestricted = "appends text to a note — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "create_file"
+unrestricted = "creates a forge-relative file — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "create_dir"
+unrestricted = "creates a forge-relative directory — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "delete_file"
+unrestricted = "deletes a forge-relative file — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "delete_entry"
+unrestricted = "deletes a forge-relative entry (file or dir) — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "rename_entry"
+unrestricted = "renames a forge-relative entry — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "toggle_task"
+unrestricted = "toggles a task checkbox in a note — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "replace_in_files"
+unrestricted = "find/replace across multiple files — downstream fs.write gated per file"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "import_forge"
+unrestricted = "ingests an external archive into the forge — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "rebuild_index"
+unrestricted = "rebuilds the SQLite index from files — re-derives forge-internal state, no new fs reach"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "rebuild_search_index"
+unrestricted = "rebuilds the Tantivy FTS index — re-derives forge-internal state, no new fs reach"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "vector_insert"
+unrestricted = "writes a vector row to .forge/index.db — internal state mutation"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "vector_delete_by_file"
+unrestricted = "removes vector rows for a deleted file — internal state mutation"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_upsert"
+unrestricted = "upserts an entity row — internal state mutation"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_merge"
+unrestricted = "merges duplicate entities — internal state mutation"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "entity_decay_relations"
+unrestricted = "decays low-confidence entity relations — internal state mutation"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "config_reset"
+unrestricted = "resets kernel/storage config to defaults — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "settings_write"
+unrestricted = "writes forge settings — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "canvas_write"
+unrestricted = "writes a canvas file — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "canvas_patch"
+unrestricted = "patches a canvas file — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_create"
+unrestricted = "creates a Base — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_property_create"
+unrestricted = "adds a property to a Base — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_property_update"
+unrestricted = "updates a Base property — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_property_delete"
+unrestricted = "deletes a Base property — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_property_rename"
+unrestricted = "renames a Base property — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_record_create"
+unrestricted = "creates a Base record — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_record_update"
+unrestricted = "updates a Base record — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_record_delete"
+unrestricted = "hard-deletes a Base record — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_record_soft_delete"
+unrestricted = "soft-deletes a Base record — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_record_restore"
+unrestricted = "restores a soft-deleted Base record — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_view_create"
+unrestricted = "creates a Base view — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_view_update"
+unrestricted = "updates a Base view — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "base_view_delete"
+unrestricted = "deletes a Base view — downstream fs.write gated"
+
+# ─── com.nexus.templates ─────────────────────────────────────────────
+
+[[handler]]
+plugin = "com.nexus.templates"
+command = "list"
+unrestricted = "read-only template catalog"
+
+[[handler]]
+plugin = "com.nexus.templates"
+command = "get"
+unrestricted = "read-only fetch of a single template"
+
+[[handler]]
+plugin = "com.nexus.templates"
+command = "render"
+unrestricted = "pure-string template render"
+
+[[handler]]
+plugin = "com.nexus.templates"
+command = "apply"
+unrestricted = "applies a rendered template via storage::write_file — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.templates"
+command = "reload"
+unrestricted = "rescans the forge for template files — read-only fs traversal"
+
+# ─── com.nexus.terminal — non-spawn handlers ─────────────────────────
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "list_sessions"
+unrestricted = "read-only enumeration of live terminal sessions"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "get_session_info"
+unrestricted = "read-only metadata for a session"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "close_session"
+unrestricted = "tears down a session previously spawned via create_session (which is process.spawn gated)"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "pump"
+unrestricted = "drains pending output from a session's PTY — no new spawn"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "read_output"
+unrestricted = "read-only session output history"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "read_raw_since"
+unrestricted = "read-only raw PTY byte history since a marker"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "search_output"
+unrestricted = "read-only fts over session output"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "cross_session_search"
+unrestricted = "read-only fts across every session's output"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "wait_for_pattern"
+unrestricted = "blocks until a regex appears in session output — read-only"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "suggest"
+unrestricted = "read-only command-suggestion query over history"
+
+# AUDIT: writes arbitrary bytes into a shell PTY. The shell process
+# itself was created by the process.spawn-gated `create_session`, but
+# once attached this is the channel for executing further commands
+# inside it. Candidate for elevation alongside `send_raw_input` and
+# `run_saved`/`adhoc_promote` in a follow-up.
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "send_input"
+unrestricted = "writes a command into a live PTY — AUDIT: candidate for process.spawn elevation in a follow-up"
+
+# AUDIT: same as send_input, byte-level.
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "send_raw_input"
+unrestricted = "writes raw bytes into a live PTY — AUDIT: candidate for process.spawn elevation in a follow-up"
+
+# AUDIT: replays a saved command into a live PTY.
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "run_saved"
+unrestricted = "runs a saved command in a session — AUDIT: candidate for process.spawn elevation in a follow-up"
+
+# AUDIT: same shape; promotes an ad-hoc command and runs it.
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "adhoc_promote"
+unrestricted = "converts an ad-hoc command to a saved command and runs it — AUDIT: candidate for process.spawn elevation in a follow-up"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "saved_list"
+unrestricted = "read-only saved-command catalog"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "saved_create"
+unrestricted = "creates a saved command — KV-only mutation, no spawn"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "saved_update"
+unrestricted = "updates a saved command — KV-only mutation, no spawn"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "saved_delete"
+unrestricted = "deletes a saved command — KV-only mutation, no spawn"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "saved_reorder"
+unrestricted = "reorders saved commands — KV-only mutation"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "adhoc_list"
+unrestricted = "read-only ad-hoc command history"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "adhoc_get"
+unrestricted = "read-only fetch of a single ad-hoc command"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "adhoc_delete"
+unrestricted = "deletes an ad-hoc history entry — KV-only mutation"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "open_in_terminal"
+unrestricted = "opens the host's terminal app on a path — host-level invocation, not a kernel spawn"
+
+# ─── com.nexus.theme — forge-local theme config ──────────────────────
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "get_available_themes"
+unrestricted = "read-only enumeration of bundled and forge-local themes"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "get_available_snippets"
+unrestricted = "read-only enumeration of CSS snippets"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "get_theme_config"
+unrestricted = "read-only current theme config"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "compute_variables"
+unrestricted = "pure-compute resolution of theme variables"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "apply_theme"
+unrestricted = "switches active theme — forge-local settings mutation, downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "apply_config"
+unrestricted = "writes a full theme config — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "set_mode"
+unrestricted = "toggles light/dark mode — forge-local settings mutation"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "toggle_snippet"
+unrestricted = "enables/disables a CSS snippet — forge-local settings mutation"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "reorder_snippets"
+unrestricted = "reorders CSS snippets — forge-local settings mutation"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "set_plugin_overrides"
+unrestricted = "applies plugin theme overrides — forge-local settings mutation"
+
+[[handler]]
+plugin = "com.nexus.theme"
+command = "reload"
+unrestricted = "rescans the forge for theme files — read-only fs traversal"
+
+# ─── com.nexus.workflow ──────────────────────────────────────────────
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "list"
+unrestricted = "read-only workflow catalog"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "get"
+unrestricted = "read-only fetch of a workflow"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "validate"
+unrestricted = "pure validation of a workflow file"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "next_fire"
+unrestricted = "read-only next-fire-time for a cron schedule"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "run_history"
+unrestricted = "read-only run-history listing"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "templates_list"
+unrestricted = "read-only template catalog for the workflow editor"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "templates_get"
+unrestricted = "read-only single-template fetch"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "templates_init"
+unrestricted = "seeds a forge with the default workflow templates — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "set_digest_config"
+unrestricted = "updates the digest scheduler config — KV-only mutation"
+
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "reload"
+unrestricted = "rescans the forge for workflow files — read-only fs traversal"
+
+# AUDIT: drives arbitrary plugins via ipc_call (issue #77 laundering
+# surface — workflow's own caps are pinned to ipc.call + minimal
+# direct caps, but each step it dispatches is gated by the target
+# plugin's own cap requirements). Tracked under #77 and BL-134
+# Phase 3 (`async = true` steps).
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "run"
+unrestricted = "executes a workflow on demand — each step is gated by the target handler's caps (see issue #77)"
+
+# AUDIT: same shape as run; cron-driven digest pipeline.
+[[handler]]
+plugin = "com.nexus.workflow"
+command = "run_digest"
+unrestricted = "runs the digest pipeline on demand — each step is gated by the target handler's caps (see issue #77)"
+
+# ─── com.nexus.dap — debug adapter host (BL-081) ─────────────────────
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "launch"
+caps = ["process.spawn"]
+note = "spawns a debug adapter process and starts a debuggee under it"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "attach"
+caps = ["process.spawn"]
+note = "spawns a debug adapter process to attach to an already-running target"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "list_adapters"
+unrestricted = "read-only listing of configured + plugin-contributed adapters"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "configuration_done"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "disconnect"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "terminate"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "set_breakpoints"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "set_function_breakpoints"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "set_exception_breakpoints"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "continue"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "next"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "step_in"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "step_out"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "pause"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "threads"
+unrestricted = "session-scoped DAP read verb — returns thread list"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "stack_trace"
+unrestricted = "session-scoped DAP read verb — returns stack frames"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "scopes"
+unrestricted = "session-scoped DAP read verb — returns variable scopes"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "variables"
+unrestricted = "session-scoped DAP read verb — returns variables"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "evaluate"
+unrestricted = "session-scoped DAP evaluate — runs an expression against the paused debuggee"
+
+# BL-113 Phase 1c — plugin contribution lifecycle. Called by the
+# bootstrap-side wiring at plugin load/unload; not user-facing.
+[[handler]]
+plugin = "com.nexus.dap"
+command = "register_adapter"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "unregister_adapter"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"
+
+# ─── com.nexus.acp — agent client protocol host (BL-144) ─────────────
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "list_agents"
+unrestricted = "read-only listing of configured + plugin-contributed agents"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "initialize"
+caps = ["process.spawn"]
+note = "spawns the configured ACP agent process to start a session"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "propose"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "accept"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "reject"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "disconnect"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+# BL-113 Phase 4 — plugin contribution lifecycle. Same shape as the
+# DAP/LSP/MCP contribution verbs.
+[[handler]]
+plugin = "com.nexus.acp"
+command = "register_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "unregister_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"
+
+# ─── com.nexus.lsp — protocol-host additions ─────────────────────────
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "execute_command"
+unrestricted = "LSP workspace/executeCommand — already gated by LSP server spawn from list_servers"
+
+# BL-113 Phase 2b — plugin contribution lifecycle.
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "register_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "unregister_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"
+
+# ─── com.nexus.mcp.host — protocol-host additions ────────────────────
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "register_tool"
+unrestricted = "dynamic-tool registry write — invoked by plugins to advertise IPC handlers as MCP tools"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "unregister_tool"
+unrestricted = "dynamic-tool registry write — invoked by plugins on disable"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "list_dynamic_tools"
+unrestricted = "read-only listing of plugin-registered dynamic tools"
+
+# BL-113 Phase 3b — plugin contribution lifecycle.
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "register_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "unregister_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"

@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InboxEntry",
+  "description": "One row of the inbox table.",
+  "type": "object",
+  "properties": {
+    "body": {
+      "description": "Notification body.",
+      "type": "string"
+    },
+    "channels": {
+      "description": "Channels the router picked. Empty when every transport\nrejected (still inserted — the inbox is the source of \"this\nfired\" history).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Channel"
+      }
+    },
+    "dismissed_at": {
+      "description": "Set when the user dismisses the row; `None` until.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "id": {
+      "description": "Stable UUIDv4 generated at insert time.",
+      "type": "string"
+    },
+    "payload_json": {
+      "description": "Caller-supplied JSON blob — used for `task_id` cross-links to\nthe BL-134 observability panel. May be `None`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "read_at": {
+      "description": "Set when the user marks the row read; `None` until.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "severity": {
+      "description": "Severity tag at dispatch time.",
+      "$ref": "#/$defs/Severity"
+    },
+    "source": {
+      "description": "Source tag from the router path, or `\"override\"` for explicit-\nchannel sends.",
+      "type": "string"
+    },
+    "title": {
+      "description": "Optional title (may be `None` even when the caller supplied one\nand a transport defaulted to \"Nexus\" — the inbox preserves the\ncaller's view).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ts": {
+      "description": "Insert time in Unix seconds.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "source",
+    "severity",
+    "body",
+    "channels",
+    "ts"
+  ],
+  "$defs": {
+    "Channel": {
+      "description": "Supported notification channels for v1. Add variants in append-\nonly order; the wire form (`serde rename_all = \"snake_case\"`)\npins the JSON tag.",
+      "oneOf": [
+        {
+          "description": "Desktop OS notification, bridged through the shell via a bus\nevent ([`NOTIFICATION_DELIVERED_TOPIC`]).",
+          "type": "string",
+          "const": "desktop"
+        },
+        {
+          "description": "Discord webhook — HTTP POST to a configured URL.",
+          "type": "string",
+          "const": "discord"
+        },
+        {
+          "description": "Telegram bot — HTTP POST to\n`https://api.telegram.org/bot<TOKEN>/sendMessage`.",
+          "type": "string",
+          "const": "telegram"
+        },
+        {
+          "description": "Email — SMTP submission via [`SmtpTransport`].",
+          "type": "string",
+          "const": "email"
+        }
+      ]
+    },
+    "Severity": {
+      "description": "Severity associated with a [`crate::Notification`] dispatch.\n\nWire form is snake_case (`debug` / `info` / `warn` / `error`). The\nordering matters — the router filters out events below a source's\n`min_severity`, so the `PartialOrd` derive must reflect the\ndeclaration order (`Debug < Info < Warn < Error`).",
+      "oneOf": [
+        {
+          "description": "Verbose lifecycle traces. Filtered by every source by default.",
+          "type": "string",
+          "const": "debug"
+        },
+        {
+          "description": "Default level. Routine completion events.",
+          "type": "string",
+          "const": "info"
+        },
+        {
+          "description": "Worth surfacing — degraded behaviour, retries, soft failures.",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Hard failure. Pages-grade signal.",
+          "type": "string",
+          "const": "error"
+        }
+      ]
+    }
+  }
+}

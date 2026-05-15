@@ -48,6 +48,13 @@ export const CAPABILITY_TO_KERNEL_STRING: Record<Capability, string> = {
   // BL-117 — audio subsystem caps.
   AudioRecord:      'audio.record',
   AudioSynthesize:  'audio.synthesize',
+  // BL-134 / ADR 0028 — ai-runtime caps.
+  AiRuntimeSubmit:  'ai.runtime.submit',
+  AiRuntimeControl: 'ai.runtime.control',
+  AiRuntimeObserve: 'ai.runtime.observe',
+  // BL-136 / ADR 0029 — notification inbox caps.
+  NotificationsInboxRead:  'notifications.inbox.read',
+  NotificationsInboxWrite: 'notifications.inbox.write',
 }
 
 /** Dotted → PascalCase; inverse of the above. */

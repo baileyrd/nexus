@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InboxStats",
+  "description": "Stats reply for `inbox_stats`.",
+  "type": "object",
+  "properties": {
+    "by_source": {
+      "description": "Per-source unread counts. Sources with zero unread are\nomitted.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      }
+    },
+    "total": {
+      "description": "Total non-dismissed rows in the inbox.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "unread": {
+      "description": "Rows with `read_at IS NULL AND dismissed_at IS NULL`.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "total",
+    "unread",
+    "by_source"
+  ]
+}

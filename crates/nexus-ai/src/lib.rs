@@ -16,6 +16,7 @@ mod anthropic;
 mod chunker;
 mod config;
 pub mod core_plugin;
+mod handlers;
 mod embedding;
 /// BL-116 — `com.nexus.ai::generate_docs` implementation. Lives in
 /// its own module so the prompt-building + doc-comment-wrapping

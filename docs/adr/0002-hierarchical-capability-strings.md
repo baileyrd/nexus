@@ -60,3 +60,57 @@ lives at [ADR 0022 §Inventory note (2026-05-12)](0022-per-handler-ai-capabiliti
 mirrored from `crates/nexus-plugin-api/src/capability.rs::Capability::ALL`.
 
 [ADR 0022]: 0022-per-handler-ai-capabilities.md
+
+## Addendum 2026-05-15 — BL-138 default-deny registration
+
+The historical "if a handler is not listed in `add_cap_requirement(…)`,
+its only caller requirement is `ipc.call`" rule was a silent-omission
+hazard: a new handler that *should* have required an extra cap shipped
+unrestricted unless the author remembered to extend the matrix. BL-138
+replaces the hand-maintained call wall in `nexus-bootstrap/src/lib.rs`
+with a TOML matrix at `crates/nexus-bootstrap/cap_matrix.toml`, applied
+at bootstrap by [`nexus_bootstrap::cap_matrix::apply`].
+
+Every in-tree IPC handler ships as one row in the matrix, declared as
+either:
+
+- `caps = [...]` — caller must hold each listed capability (still on
+  top of the unconditional `ipc.call` check). Equivalent to the
+  pre-BL-138 `add_cap_requirement(…)` entry.
+- `unrestricted = "<why>"` — handler is intentionally available to any
+  caller with `ipc.call`; the string is the one-line rationale
+  (read-only probe, version negotiation, etc.). Replaces the
+  pre-BL-138 implicit default.
+
+A `cap_matrix_complete` integration test under
+`crates/nexus-bootstrap/tests/` walks every live `(plugin, command)`
+pair and fails CI if any is missing from the matrix. BL-138 Phase 2
+(2026-05-15) classified the remaining ~245 handlers, so the
+completeness sweep now runs unconditionally — a new IPC handler that
+ships without a matrix row breaks CI immediately.
+
+Args-aware capability requirements (ADR 0022 Phase 2's
+`stream_chat` / `propose_tool_calls` `tools=…` lookup) cannot live in
+TOML, so each closure is registered under a stable name in
+`crates/nexus-bootstrap/src/cap_policies.rs` and the matrix row
+references it via `policy = "<name>"`.
+
+`register_handler_caps` / `register_handler_unrestricted` on
+[`SharedPluginLoader`] are the canonical Rust-side registration API
+the matrix loader uses; they should not be called directly from any
+new bootstrap code. New entries go in the TOML file.
+
+## Addendum 2026-05-15 — BL-137 capability inventory auto-generation
+
+The hand-maintained table above (2026-04-16 snapshot) and ADR 0022's
+"Inventory" table have been the canonical-by-convention listings, but
+they drift the moment a `Capability` variant is added. BL-137 closes the
+loop: [`docs/generated/capabilities.md`](../generated/capabilities.md)
+is emitted from `nexus_kernel::Capability::ALL` +
+`nexus_security::risk::risk_level` at test time, and
+`scripts/check_ipc_drift.sh` `git diff`s the file so an unrun generator
+fails CI the same way an unregenerated TS binding does.
+
+The original ADR table is preserved per the immutable-body convention;
+treat the generated file as the live mirror going forward. The table
+emitter lives in `crates/nexus-security/tests/capability_inventory_emit.rs`.

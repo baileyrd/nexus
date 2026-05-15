@@ -46,6 +46,7 @@ mod agents;
 mod archetypes;
 pub mod core_plugin;
 pub mod custom_agent;
+mod handlers;
 mod llm;
 pub mod memory;
 pub mod session;

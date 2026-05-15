@@ -27,8 +27,8 @@ pub use composite::{CompositeIpcDispatcher, FallbackCell};
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{
-    CapRequirementFn, CorePlugin, CorePluginFuture, PluginBackend, PluginLoader,
-    SharedPluginLoader,
+    CapRequirementFn, CorePlugin, CorePluginFuture, HandlerClassification, PluginBackend,
+    PluginLoader, SharedPluginLoader,
 };
 pub use manifest::{
     AcpProtocolHostReg, ActivationConfig, CliSubcommandReg, DapProtocolHostReg,

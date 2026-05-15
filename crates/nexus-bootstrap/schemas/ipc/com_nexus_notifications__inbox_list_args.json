@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InboxListArgs",
+  "description": "Args for `com.nexus.notifications::inbox_list` (handler id `2`).",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Page size — default 100, capped at 1000.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "default": null,
+      "minimum": 0
+    },
+    "since": {
+      "description": "Only return rows with `ts >= since` (Unix seconds).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64",
+      "default": null
+    },
+    "source": {
+      "description": "Restrict to a single source tag.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "status": {
+      "description": "`\"all\"` (default), `\"unread\"`, or `\"dismissed\"`.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false
+}

@@ -66,7 +66,32 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
+pub mod config;
 pub mod core_plugin;
+pub mod inbox;
+pub mod router;
+
+pub use config::{
+    ChannelsConfig, ConfigError, DiscordChannel, EmailChannel, InboxConfig, NotificationsConfig,
+    QuietHours, ResolvedSource, Severity, SourceConfig, TelegramChannel,
+};
+pub use inbox::{Inbox, InboxEntry, InboxError, InboxStats, NewEntry, StatusFilter};
+pub use router::{Resolution, Router};
+
+/// Default location of the BL-136 inbox database, relative to the
+/// forge root. Bootstrap threads `<forge_root>/.forge/notifications/inbox.db`
+/// into the plugin constructor; tests use [`Inbox::in_memory`].
+pub const INBOX_DB_RELPATH: &str = ".forge/notifications/inbox.db";
+
+/// Bus topic published when a new row lands in the inbox. Payload is
+/// `{ id, source, severity, ts }` — used by the shell to bump its
+/// unread badge without polling [`Inbox::stats`].
+pub const INBOX_APPENDED_TOPIC: &str = "com.nexus.notifications.inbox.appended";
+
+/// Default location of the BL-135 router config, relative to the
+/// forge root. Bootstrap and the file-watcher live-reload path both
+/// reference this so the path stays single-sourced.
+pub const NOTIFICATIONS_CONFIG_RELPATH: &str = ".forge/notifications.toml";
 
 /// Bus topic published when a notification has been delivered (or
 /// attempted) on a frontend-rendered channel. Shell subscribers can

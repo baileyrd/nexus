@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentTaskKind",
+  "description": "Discriminator + payload for a queued task. Phase 1 only handles\n[`AgentTaskKind::Session`]; the other variants are reserved so the\nwire shape doesn't break when later phases add them.",
+  "oneOf": [
+    {
+      "description": "Drive `com.nexus.agent::session_run` to completion. The body\nis forwarded verbatim to the agent plugin.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Args passed to `com.nexus.agent::session_run`."
+        },
+        "kind": {
+          "type": "string",
+          "const": "session"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "args"
+      ]
+    },
+    {
+      "description": "Reserved for Phase 2+ — single AI streaming turn.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Args passed to `com.nexus.ai::stream_chat`."
+        },
+        "kind": {
+          "type": "string",
+          "const": "ai_stream"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "args"
+      ]
+    },
+    {
+      "description": "Reserved for Phase 3 — async workflow step.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Step args (workflow-defined)."
+        },
+        "kind": {
+          "type": "string",
+          "const": "workflow_ai_step"
+        },
+        "step": {
+          "description": "Step index within the workflow.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "workflow": {
+          "description": "Workflow id.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "workflow",
+        "step",
+        "args"
+      ]
+    }
+  ]
+}
