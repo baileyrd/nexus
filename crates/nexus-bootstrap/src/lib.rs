@@ -38,6 +38,12 @@ use nexus_plugins::{
 pub mod agent;
 pub mod forge_template;
 mod audit_sqlite;
+/// BL-138 — TOML-driven per-handler capability matrix loader. See
+/// [`cap_matrix::apply`] and the companion `cap_matrix.toml`.
+pub mod cap_matrix;
+/// BL-138 — named args-aware capability policies referenceable from
+/// the cap matrix. See [`cap_policies::resolve`].
+pub mod cap_policies;
 pub mod crdt_publisher;
 pub mod database;
 pub mod dream_cycle;
@@ -212,173 +218,19 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
 
     let shared = Arc::new(SharedPluginLoader::new(loader));
 
-    // Per-(target, command) capability gate (issue #77). Both of these
-    // handlers spawn arbitrary processes — terminal `create_session`
-    // takes a guest-supplied `shell` + `working_dir` + `env`, MCP
-    // `connect` spawns the MCP server's `command` over stdio. Pre-#77
-    // any caller holding `IpcCall` could reach them, laundering the
-    // effect of `ProcessSpawn` through `IpcCall`. Now the kernel
-    // context's `ipc_call` denies the dispatch unless the caller also
-    // holds `ProcessSpawn`. Combined with #73 (workflow/agent contexts
-    // dropped from `Capability::ALL`), this means a `.workflows/*.toml`
-    // step or LLM-generated tool call can no longer escalate through
-    // these surfaces.
-    shared.add_cap_requirement(
-        "com.nexus.terminal",
-        "create_session",
-        vec![Capability::ProcessSpawn],
-    );
-    shared.add_cap_requirement(
-        "com.nexus.mcp.host",
-        "connect",
-        vec![Capability::ProcessSpawn],
-    );
-
-    // Per-handler ai.* capability gates per ADR 0022. Closes the AI
-    // audit's §4 finding ("any caller with ipc.call can invoke any AI
-    // handler"). Read-only handlers (status, config, index_status,
-    // vectorstore_count, activity_list, apply) keep the ipc.call-only
-    // default — they're either inert or already gated downstream
-    // (apply writes via storage, which has its own fs.write check).
-    for (cmd, cap) in [
-        ("stream_chat", Capability::AiChat),
-        ("stream_ask", Capability::AiChat),
-        ("ask", Capability::AiChat),
-        ("semantic_search", Capability::AiChat),
-        ("enrich_file", Capability::AiChat),
-        // BL-129 Dream-Cycle phases — share the same AiChat gate as
-        // enrich_file since they ultimately invoke the chat provider.
-        ("enrich_entity", Capability::AiChat),
-        ("infer_entity_relations", Capability::AiChat),
-        ("propose_tool_calls", Capability::AiChat),
-        // BL-116 — generate_docs dispatches a single-turn chat
-        // completion, gated under the same ai.chat capability the
-        // rest of the chat surface uses.
-        ("generate_docs", Capability::AiChat),
-        ("index_file", Capability::AiIndex),
-        ("index_trigger", Capability::AiIndex),
-        ("session_load", Capability::AiSessionRead),
-        ("session_list", Capability::AiSessionRead),
-        ("session_save", Capability::AiSessionWrite),
-        ("session_delete", Capability::AiSessionWrite),
-        ("set_config", Capability::AiConfigWrite),
-        ("activity_clear", Capability::AiActivityWrite),
-    ] {
-        shared.add_cap_requirement("com.nexus.ai", cmd, vec![cap]);
-    }
-
-    // ADR 0022 Phase 2 — args-aware tool-policy enforcement. A
-    // caller that requests `tools=auto` (the default) needs
-    // `ai.tools.write` because the registry includes `write_file`;
-    // `auto_with_mcp` additionally needs `ai.tools.mcp`. Read-only
-    // (`tools=auto_readonly`) and no-tools paths add nothing on top
-    // of `ai.chat`. Both `stream_chat` and `propose_tool_calls`
-    // honour the same field, so they share the closure.
-    let tool_policy_fn: nexus_plugins::CapRequirementFn = Arc::new(|args: &serde_json::Value| {
-        // The `tools` field is optional and defaults to Auto. Both
-        // arg envelopes carry `tools` at the top level with the
-        // same shape, so a permissive lookup works for both.
-        let policy = args
-            .get("tools")
-            .and_then(|v| serde_json::from_value::<nexus_ai::ipc::AiToolPolicy>(v.clone()).ok())
-            .unwrap_or_default();
-        nexus_ai::ipc::extra_caps_for_policy(policy)
-    });
-    shared.add_cap_requirement_fn("com.nexus.ai", "stream_chat", Arc::clone(&tool_policy_fn));
-    shared.add_cap_requirement_fn(
-        "com.nexus.ai",
-        "propose_tool_calls",
-        Arc::clone(&tool_policy_fn),
-    );
-
-    // ADR 0024 Phase 2a — agent session_run drives the same
-    // tool-loop machinery as stream_chat, just with approval policy
-    // injected. Gate on ai.chat (consistent with propose_tool_calls)
-    // so a caller without it can't reach session_run either.
-    shared.add_cap_requirement(
-        "com.nexus.agent",
-        "session_run",
-        vec![Capability::AiChat],
-    );
-    // round_decide is the caller's reply to a round_proposed event;
-    // mirroring the cap on session_run keeps the surface consistent
-    // (a caller without ai.chat couldn't have started the session
-    // anyway, but pinning the gate avoids a future regression where
-    // a bystander plugin pushes decisions into someone else's session).
-    shared.add_cap_requirement(
-        "com.nexus.agent",
-        "round_decide",
-        vec![Capability::AiChat],
-    );
-
-    // BL-117 — audio subsystem caps. Microphone capture (transcribe)
-    // is privacy-sensitive; speaker output (synthesize) is annoying
-    // but not destructive. `status` is read-only and ungated so a
-    // settings panel can probe the active backend pair without a cap
-    // negotiation.
-    shared.add_cap_requirement(
-        "com.nexus.audio",
-        "transcribe",
-        vec![Capability::AudioRecord],
-    );
-    shared.add_cap_requirement(
-        "com.nexus.audio",
-        "synthesize",
-        vec![Capability::AudioSynthesize],
-    );
-
-    // BL-134 Phase 1 — `com.nexus.ai.runtime` cap matrix per ADR
-    // 0028 §"Capability gates". `submit` consumes worker capacity;
-    // `cancel`/`pause`/`resume` mutate someone else's run;
-    // `get`/`list`/`events`/`pool_stats` are read-only over typed
-    // run state. Reserved Phase-5 handlers carry the `Control` cap
-    // even though the handlers themselves return a "Phase 5 not
-    // wired" error today — pinning the gate now means flipping the
-    // implementation later doesn't open a privilege gap.
-    shared.add_cap_requirement(
-        "com.nexus.ai.runtime",
-        "submit",
-        vec![Capability::AiRuntimeSubmit],
-    );
-    shared.add_cap_requirement(
-        "com.nexus.ai.runtime",
-        "cancel",
-        vec![Capability::AiRuntimeControl],
-    );
-    shared.add_cap_requirement(
-        "com.nexus.ai.runtime",
-        "pause",
-        vec![Capability::AiRuntimeControl],
-    );
-    shared.add_cap_requirement(
-        "com.nexus.ai.runtime",
-        "resume",
-        vec![Capability::AiRuntimeControl],
-    );
-    for cmd in ["get", "list", "events", "pool_stats"] {
-        shared.add_cap_requirement(
-            "com.nexus.ai.runtime",
-            cmd,
-            vec![Capability::AiRuntimeObserve],
-        );
-    }
-
-    // BL-136 / ADR 0029 — notifications inbox cap matrix. List/stats
-    // read; mark_read/dismiss mutate the user-state columns.
-    for cmd in ["inbox_list", "inbox_stats"] {
-        shared.add_cap_requirement(
-            "com.nexus.notifications",
-            cmd,
-            vec![Capability::NotificationsInboxRead],
-        );
-    }
-    for cmd in ["inbox_mark_read", "inbox_dismiss"] {
-        shared.add_cap_requirement(
-            "com.nexus.notifications",
-            cmd,
-            vec![Capability::NotificationsInboxWrite],
-        );
-    }
+    // BL-138 — apply the TOML-driven per-handler capability matrix.
+    // The companion `cap_matrix.toml` is the single source of truth
+    // for every handler that needs more than the default `ipc.call`
+    // check, replacing the hand-maintained `add_cap_requirement(…)`
+    // wall that previously lived here. Adds run before any plugin
+    // dispatches, so the matrix is in effect by the time the first
+    // `ipc_call` arrives.
+    //
+    // Issue #77 + ADR 0022 + ADR 0028 + BL-117 + BL-136 — every
+    // historical entry from those landings is now a row in the
+    // matrix file. See `cap_matrix.toml` for the rationale per
+    // handler.
+    cap_matrix::apply(&shared).context("failed to apply cap matrix")?;
 
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 

@@ -1,0 +1,242 @@
+# BL-138 — per-handler capability matrix.
+#
+# Every IPC handler registered by an in-tree core plugin MUST appear in
+# this file, classified as either:
+#   - `caps = [...]`        → caller must hold every listed cap (on top
+#                             of the unconditional `ipc.call` check).
+#   - `unrestricted = "…"`  → handler is intentionally available to any
+#                             caller with `ipc.call`. The string is the
+#                             one-line rationale (read-only probe,
+#                             version negotiation, etc.). Replaces the
+#                             pre-BL-138 implicit default.
+#
+# Optional fields:
+#   - `note   = "…"`        → free-form audit trail.
+#   - `policy = "name"`     → references a named args-aware closure in
+#                             `crates/nexus-bootstrap/src/cap_policies.rs`
+#                             (ADR 0022 Phase 2). Stacks on top of `caps`.
+#
+# Handler version aliases (`<cmd>.v1` per ADR 0021) do NOT need a row
+# here — the matrix applier auto-mirrors a classification onto every
+# `.v<N>` alias of the same handler. Author the bare `cmd` once.
+#
+# The `cap_matrix_complete` integration test boots a runtime, walks
+# every `(plugin, command)` pair in the live registry, and fails if any
+# handler is missing a row. BL-138 Phase 1 ships the matrix structure
+# plus the 17 historical `add_cap_requirement` entries below — the
+# completeness test is `#[ignore]`d until per-service-plugin follow-ups
+# land the unrestricted classifications for the remaining handlers.
+#
+# When adding a new IPC handler:
+#   1. Decide whether the handler needs an extra cap (think: does it
+#      spawn processes, write external files, mutate credentials,
+#      reach the network, surface to AI as a tool, etc.). If yes →
+#      `caps = ["…"]`. If no → `unrestricted = "<why>"`.
+#   2. Append the row here.
+#   3. Run `cargo test -p nexus-bootstrap --test cap_matrix_complete --
+#      --ignored` to confirm.
+#
+# Doc cross-link: `docs/adr/0002-hierarchical-capability-strings.md`.
+
+# ─── com.nexus.terminal — process-spawning surfaces (issue #77) ──────
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "create_session"
+caps = ["process.spawn"]
+note = "spawns arbitrary processes with guest-supplied shell/working_dir/env"
+
+# ─── com.nexus.mcp.host — process-spawning surfaces (issue #77) ──────
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "connect"
+caps = ["process.spawn"]
+note = "spawns the MCP server's command over stdio"
+
+# ─── com.nexus.ai — per-handler caps (ADR 0022) ──────────────────────
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "stream_chat"
+caps = ["ai.chat"]
+policy = "ai_tools_policy"
+note = "ADR 0022 Phase 2 — tools=auto requires ai.tools.write; auto_with_mcp adds ai.tools.mcp"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "stream_ask"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "ask"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "semantic_search"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "enrich_file"
+caps = ["ai.chat"]
+
+# BL-129 Dream-Cycle phases share the AiChat gate.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "enrich_entity"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "infer_entity_relations"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "propose_tool_calls"
+caps = ["ai.chat"]
+policy = "ai_tools_policy"
+
+# BL-116 — single-turn chat completion under the same ai.chat gate.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "generate_docs"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "index_file"
+caps = ["ai.index"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "index_trigger"
+caps = ["ai.index"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_load"
+caps = ["ai.session.read"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_list"
+caps = ["ai.session.read"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_save"
+caps = ["ai.session.write"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "session_delete"
+caps = ["ai.session.write"]
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "set_config"
+caps = ["ai.config.write"]
+note = "hot-swap provider credentials — equivalent in surface to process.spawn"
+
+[[handler]]
+plugin = "com.nexus.ai"
+command = "activity_clear"
+caps = ["ai.activity.write"]
+
+# ─── com.nexus.agent — session-loop reach (ADR 0024 Phase 2a) ────────
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_run"
+caps = ["ai.chat"]
+note = "drives the same tool-loop machinery as stream_chat"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "round_decide"
+caps = ["ai.chat"]
+note = "reply to round_proposed — pinned to match session_run"
+
+# ─── com.nexus.audio — microphone / speaker reach (BL-117) ───────────
+
+[[handler]]
+plugin = "com.nexus.audio"
+command = "transcribe"
+caps = ["audio.record"]
+note = "privacy-sensitive — captures ambient room audio"
+
+[[handler]]
+plugin = "com.nexus.audio"
+command = "synthesize"
+caps = ["audio.synthesize"]
+
+# ─── com.nexus.ai.runtime — BL-134 Phase 1 (ADR 0028) ────────────────
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "submit"
+caps = ["ai.runtime.submit"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "cancel"
+caps = ["ai.runtime.control"]
+note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "pause"
+caps = ["ai.runtime.control"]
+note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "resume"
+caps = ["ai.runtime.control"]
+note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "get"
+caps = ["ai.runtime.observe"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "list"
+caps = ["ai.runtime.observe"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "events"
+caps = ["ai.runtime.observe"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "pool_stats"
+caps = ["ai.runtime.observe"]
+
+# ─── com.nexus.notifications — inbox surface (BL-136, ADR 0029) ──────
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_list"
+caps = ["notifications.inbox.read"]
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_stats"
+caps = ["notifications.inbox.read"]
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_mark_read"
+caps = ["notifications.inbox.write"]
+
+[[handler]]
+plugin = "com.nexus.notifications"
+command = "inbox_dismiss"
+caps = ["notifications.inbox.write"]

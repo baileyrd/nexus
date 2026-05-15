@@ -2203,6 +2203,28 @@ fn plugin_info_from(
 pub type CapRequirementFn =
     Arc<dyn Fn(&serde_json::Value) -> Vec<Capability> + Send + Sync>;
 
+/// BL-138 — explicit classification recorded by bootstrap for every
+/// IPC handler. The cap table (`cap_requirements`) only stores the
+/// commands that need *extra* caps beyond `IpcCall`; this map
+/// records the security author's intent for **every** registered
+/// handler, including the explicitly-unrestricted ones (read-only
+/// probes, version checks, etc.). The integration test under
+/// `crates/nexus-bootstrap/tests/` walks every live
+/// `(plugin, command)` pair and fails CI if any handler is missing
+/// a classification — preventing the "silent privilege-escalation
+/// by omission" failure mode where a new handler ships without
+/// being added to the cap matrix.
+#[derive(Debug, Clone)]
+pub enum HandlerClassification {
+    /// Handler requires the listed caps (on top of `IpcCall`).
+    /// Mirrors the entry recorded in `cap_requirements`.
+    Required(Vec<Capability>),
+    /// Handler is intentionally available to any caller holding
+    /// `IpcCall`. The string is the human-readable reason
+    /// recorded at the call site (matrix `unrestricted = "…"`).
+    Unrestricted(String),
+}
+
 /// Shared handle that lets a [`nexus_kernel::KernelPluginContext`] dispatch
 /// IPC calls into a [`PluginLoader`].
 ///
@@ -2232,6 +2254,19 @@ pub struct SharedPluginLoader {
     /// their results are unioned.
     cap_requirement_fns:
         std::sync::RwLock<HashMap<(String, String), CapRequirementFn>>,
+    /// BL-138 — explicit per-handler classification, populated by
+    /// bootstrap (via [`Self::register_handler_caps`] /
+    /// [`Self::register_handler_unrestricted`]) when the cap matrix
+    /// file is applied. A handler appearing in `cap_requirements`
+    /// MUST also appear here; the converse is also true (a
+    /// classified handler may be `Unrestricted` with no entry in
+    /// `cap_requirements`). The completeness invariant — every IPC
+    /// handler in the live registry has an entry — is asserted by
+    /// the `cap_matrix_complete` integration test, not at runtime,
+    /// so an unclassified handler is a CI failure rather than a
+    /// production reject.
+    classifications:
+        std::sync::RwLock<HashMap<(String, String), HandlerClassification>>,
 }
 
 impl SharedPluginLoader {
@@ -2242,6 +2277,7 @@ impl SharedPluginLoader {
             inner: Mutex::new(loader),
             cap_requirements: std::sync::RwLock::new(HashMap::new()),
             cap_requirement_fns: std::sync::RwLock::new(HashMap::new()),
+            classifications: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -2346,6 +2382,96 @@ impl SharedPluginLoader {
             .write()
             .expect("ipc cap-requirement-fns lock poisoned");
         map.insert((target_plugin_id.into(), command_id.into()), f);
+    }
+
+    /// BL-138 — record a `Required` classification AND populate the
+    /// runtime cap table in one call. Bootstrap should prefer this
+    /// over a bare [`Self::add_cap_requirement`] so the
+    /// `cap_matrix_complete` test sees the handler as classified.
+    ///
+    /// # Panics
+    /// Panics if the classifications lock is poisoned.
+    pub fn register_handler_caps(
+        &self,
+        target_plugin_id: impl Into<String>,
+        command_id: impl Into<String>,
+        caps: Vec<Capability>,
+    ) {
+        let target = target_plugin_id.into();
+        let command = command_id.into();
+        self.add_cap_requirement(target.clone(), command.clone(), caps.clone());
+        let mut map = self
+            .classifications
+            .write()
+            .expect("handler classifications lock poisoned");
+        map.insert((target, command), HandlerClassification::Required(caps));
+    }
+
+    /// BL-138 — record an `Unrestricted` classification for a
+    /// handler. No entry is added to the cap table — the only
+    /// caller-side requirement remains `IpcCall`, identical to the
+    /// pre-BL-138 default. The `reason` string is the matrix's
+    /// `unrestricted = "…"` value; it ships into the loader so a
+    /// future audit tool can dump every "no extra cap" handler with
+    /// its justification.
+    ///
+    /// # Panics
+    /// Panics if the classifications lock is poisoned.
+    pub fn register_handler_unrestricted(
+        &self,
+        target_plugin_id: impl Into<String>,
+        command_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) {
+        let target = target_plugin_id.into();
+        let command = command_id.into();
+        let mut map = self
+            .classifications
+            .write()
+            .expect("handler classifications lock poisoned");
+        map.insert(
+            (target, command),
+            HandlerClassification::Unrestricted(reason.into()),
+        );
+    }
+
+    /// BL-138 — true iff bootstrap has recorded a classification
+    /// (`Required` or `Unrestricted`) for `(plugin, command)`. The
+    /// `cap_matrix_complete` integration test walks the live
+    /// registry and asserts every entry returns true here.
+    ///
+    /// # Panics
+    /// Panics if the classifications lock is poisoned.
+    #[must_use]
+    pub fn is_handler_classified(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+    ) -> bool {
+        let map = self
+            .classifications
+            .read()
+            .expect("handler classifications lock poisoned");
+        map.contains_key(&(target_plugin_id.to_string(), command_id.to_string()))
+    }
+
+    /// BL-138 — snapshot the recorded classifications. Used by the
+    /// `cap_matrix_complete` test to render a useful diff when the
+    /// completeness assertion fails.
+    ///
+    /// # Panics
+    /// Panics if the classifications lock is poisoned.
+    #[must_use]
+    pub fn handler_classifications(
+        &self,
+    ) -> Vec<((String, String), HandlerClassification)> {
+        let map = self
+            .classifications
+            .read()
+            .expect("handler classifications lock poisoned");
+        map.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 }
 

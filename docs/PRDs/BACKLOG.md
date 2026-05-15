@@ -658,8 +658,12 @@ Items above can be promoted to their own BL when picked up. Re-evaluate prioriti
 
 **Source**: Architectural review 2026-05-14 (HIGH severity). Filed 2026-05-14.
 **Effort**: Small.
-**Crates**: `nexus-bootstrap`, `nexus-plugin-api`.
+**Crates**: `nexus-bootstrap`, `nexus-plugin-api`, `nexus-plugins`.
 **Related**: [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (pre-req: runtime adds 3 new caps), [ADR 0002](../adr/0002-hierarchical-capability-strings.md), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md).
+
+> **Status (2026-05-15)** — **Phase 1 landed.** TOML-driven cap matrix at `crates/nexus-bootstrap/cap_matrix.toml`, applied at bootstrap by `nexus_bootstrap::cap_matrix::apply`. The 17 historical `add_cap_requirement(…)` entries (terminal, MCP, ADR 0022 ai.*, ADR 0024 agent, BL-117 audio, BL-134 ai.runtime, BL-136 inbox) are migrated and pinned by `historical_cap_requirements_survive_migration` in `crates/nexus-bootstrap/tests/cap_matrix_complete.rs`. The completeness test `every_ipc_handler_is_classified` is `#[ignore]`d pending the per-service-plugin follow-ups that classify the remaining ~150+ handlers as `unrestricted = "<why>"`. ADR 0002 cross-link added (2026-05-15 addendum). Args-aware policies (ADR 0022 Phase 2) live in `crates/nexus-bootstrap/src/cap_policies.rs` keyed by the matrix's `policy = "<name>"` field.
+>
+> **Phase 2 still open** — per-service-plugin migration: classify every remaining IPC handler in `nexus-storage`, `nexus-editor`, `nexus-git`, `nexus-comments`, `nexus-skills`, `nexus-templates`, `nexus-theme`, `nexus-formats`, `nexus-workflow`, `nexus-database`, `nexus-security`, `nexus-lsp`, `nexus-linkpreview`, `nexus-mcp` (non-`connect`), `nexus-terminal` (non-`create_session`), `nexus-notifications` (non-inbox), `nexus-ai` (status / read-only handlers). Each PR adds `unrestricted = "<why>"` rows; once every plugin is in, drop the `#[ignore]` on `every_ipc_handler_is_classified`.
 
 The per-handler capability matrix in `nexus-bootstrap/src/lib.rs` is now 30+ hand-maintained `add_cap_requirement(...)` entries spanning ADR 0002 (14 original caps), ADR 0022 (8 per-handler AI caps), and pending ADR 0028 work (3 new `ai.runtime.*` caps). A single missing entry is a silent privilege-escalation bug — the handler dispatches without a cap check.
 
