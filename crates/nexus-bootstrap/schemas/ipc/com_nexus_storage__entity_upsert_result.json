@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityUpsertResult",
+  "description": "Return type for `com.nexus.storage::entity_upsert`.",
+  "type": "object",
+  "properties": {
+    "relpath": {
+      "description": "Forge-relative path of the entity markdown file that was\nwritten (`entities/<id>.md`).",
+      "type": "string"
+    },
+    "replaced": {
+      "description": "`true` when an existing file was replaced, `false` for a fresh\ncreate. The atomic-write path makes both cases observable\natomically — this flag just lets a UI distinguish them.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath",
+    "replaced"
+  ]
+}

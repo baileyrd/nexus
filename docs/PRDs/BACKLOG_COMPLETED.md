@@ -424,6 +424,49 @@ The companion to BL-017. Where the redactor strips outbound PII / secrets from r
 
 ---
 
+### BL-128: Personal entity knowledge graph (Thoth port) ✅ (2026-05-14)
+
+**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14. Shipped 2026-05-14 across two commits — initial thin slice (`37348101`) then close (this PR).
+**Files**: `crates/nexus-storage/src/entity_index.rs` (new — file-backed `EntityIndex`, the 11-entry `ENTITY_TYPES` + 40-entry `RELATION_TYPES` vocabularies, `normalize_relation_type`, `find_duplicates` Jaccard scan, `render_entity_markdown` for the upsert path); `crates/nexus-storage/src/ipc.rs` (10 new wire types covering all five handlers); `crates/nexus-storage/src/core_plugin.rs` (HANDLER ids 64..68 + dispatch fns for all five handlers, atomic-write integration on the upsert path); `crates/nexus-storage/src/lib.rs` (`pub mod entity_index`); `crates/nexus-bootstrap/src/lib.rs` (manifest entries for all five handlers); `crates/nexus-bootstrap/src/storage.rs` (typed IPC client helpers `entity_search` / `entity_get` / `entity_relations` / `entity_upsert` / `entity_find_duplicates` + DTOs); `crates/nexus-bootstrap/tests/ipc_schema_emit.rs` (10 new schema emits); `crates/nexus-cli/src/main.rs` + `crates/nexus-cli/src/commands/graph.rs` (`nexus graph entity list|show|search|related|duplicates`); `crates/nexus-agent/src/core_plugin.rs` (`compose_entity_preamble` splice into the planner system prompt).
+**Related**: Sibling Thoth ports BL-129 / BL-130 / BL-131 / BL-132 / BL-133. BL-129's Dream-Cycle dedup phase consumes `entity_find_duplicates`.
+
+Adds a second graph layer orthogonal to the existing document-link graph: typed entities (`person`, `place`, `project`, …) with typed directional relations (`knows`, `lives_in`, `works_on`, …) and confidence scores. Entities live as plain markdown files under `<forge>/entities/` — same file-as-truth invariant as the rest of storage; the SQLite-and-FAISS pieces of the original DoD are filed as a follow-up under the BL-128 marker in `BACKLOG.md` rather than load-bearing here.
+
+**What landed.**
+
+- **`entity_index` module** (`crates/nexus-storage/src/entity_index.rs`). Parses every `*.md` under `<forge>/entities/` into an in-memory `EntityIndex` per IPC call (sub-millisecond for O(dozens) of entity files; the per-call rebuild keeps the wire shape stable for a future watcher-cached layer). Frontmatter shape: `entity_type`, `aliases`, `description`, `relations: [{target, type, confidence}]`. Missing `description` falls back to the first non-empty body paragraph truncated at 240 chars. Aliases that collide with another entity's canonical id silently lose; alias targets in relation edges are resolved to canonical ids at query time, mirroring the wikilink resolution convention.
+- **Canonical vocabularies.** `ENTITY_TYPES` (11 entries: `person`, `preference`, `fact`, `event`, `place`, `project`, `organisation`, `concept`, `skill`, `media`, `self_knowledge`). `RELATION_TYPES` (40 entries grouped by family, location, work, knowledge, media, ownership, temporal, causality, generic). `normalize_relation_type(input)` lowercases, replaces `' '` / `'-'` with `'_'`, looks up a 35-entry alias table (`"spouse"` → `"married_to"`, `"reports to"` → `"managed_by"`, `"works for"` → `"employed_by"`, etc.); unknown inputs fall back to `"related_to"`. Applied on the write path (`entity_upsert`) so the on-disk file always carries canonical vocabulary regardless of what the LLM or user submitted.
+- **Five IPC handlers** under `com.nexus.storage`:
+  - `entity_search` (handler 64) — substring scoring over `id` (exact 100, contains 75), `aliases` (exact 90, contains 60), `description` (contains 40). Optional `entity_type` filter; empty query returns lexicographically-first hits up to `limit`.
+  - `entity_get` (handler 65) — canonical-id-then-alias lookup, full payload + outgoing relations.
+  - `entity_relations` (handler 66) — `outgoing` / `incoming` / `both` directional traversal, stable ordering by `(from, to, kind)`.
+  - `entity_upsert` (handler 67) — file-as-truth write-through. Renders the payload via `render_entity_markdown`, writes through `crate::atomic_write` (temp-fsync-rename in `<forge>/.forge/temp`) so a concurrent read sees old-or-new content, never a torn write. Validates `id` is a bare file stem (rejects `'/'` / `'\'` / `'..'`); rejects empty `id` or `entity_type`. Returns `{ relpath, replaced }`.
+  - `entity_find_duplicates` (handler 68) — Jaccard token similarity over `id + aliases + description`, restricted to same `entity_type` pairs. Threshold defaults to `0.92` (Thoth's review threshold). Pairs sorted by descending similarity then ascending `(a, b)`.
+- **Bootstrap helpers + CLI.** `nexus-bootstrap::storage` exports typed client wrappers for all five handlers + DTOs. New `nexus graph entity` subcommand tree: `list [--type T] [-l N]`, `show <id>`, `search <query> [--type T] [-l N]`, `related <id> [--direction outgoing|incoming|both]`, `duplicates [--threshold 0.92]`. All five honour `--format json|jsonl` for scripting.
+- **Agent integration.** `nexus-agent::core_plugin::compose_entity_preamble` calls `entity_search` with the session goal and splices a `"Known entities relevant to this goal (from the forge's `entities/` directory):"` block into the planner system prompt next to the existing memory + skills preambles. IPC errors / missing `entities/` directory / zero matches all fall through silently — the entity surface is opt-in and a forge without one pays nothing.
+- **10 IPC wire types** under `feature = "ts-export"` derive: `EntitySearchArgs` / `EntitySearchHitRow` / `EntitySearchResult`; `EntityGetArgs` / `EntityRecordRow` / `EntityRelationRow` / `EntityGetResult`; `EntityRelationsArgs` / `EntityRelationsResultRow` / `EntityRelationsResult`; `EntityUpsertRelationRow` / `EntityUpsertArgs` / `EntityUpsertResult`; `EntityFindDuplicatesArgs` / `EntityDuplicatePairRow` / `EntityFindDuplicatesResult`. `scripts/check_ipc_drift.sh` regenerated the 16 TS bindings + 16 JSON Schemas.
+
+**Tests**:
+
+- `nexus-storage` 22 module tests (file-backed load/parse, alias resolution, substring search ranking + type filter, in/out/both relation traversal, `RelationDirection::parse` mapping, `ENTITY_TYPES` / `RELATION_TYPES` vocab populated, `normalize_relation_type` canonicalises common variants, `find_duplicates` pairs same-type + orders by similarity, `render_entity_markdown` round-trips through the parser including alias quoting + confidence clamping + omitted optional sections).
+- `nexus-agent` 3 tests on the pure `format_entity_preamble` renderer (empty hits → `None`, hits missing `id` skipped, well-formed hits render the canonical block).
+- `nexus-bootstrap --lib` 37/37 pass with the new manifest entries; `dep_invariants` confirms the new helpers don't violate microkernel isolation.
+- `nexus-storage --lib` 393/393 across the full lib suite.
+- `cargo clippy -p nexus-storage -p nexus-bootstrap -p nexus-cli --lib --tests` clean.
+- `scripts/check_ipc_drift.sh` regenerated 16 schemas + 16 TS files; the script's `git ls-files --others` gate now passes.
+
+**Definition of done coverage**:
+- ✅ `nexus-storage` parses `entity_type` + `relations` frontmatter (deliberately as a file-backed `EntityIndex` rather than a SQLite-table extension — see follow-up).
+- ⏸ Petgraph edges extended with `type: String` / `confidence: f32` — filed as a follow-up under the BL-128 marker in `BACKLOG.md`. Touches every existing `EdgeData` consumer; the entity surface doesn't need it for the current substring + Jaccard rankers.
+- ⏸ FAISS embedding index over entity descriptions — filed as a follow-up. Substring + Jaccard rankers are the placeholder; FAISS is the next step when an entity forge crosses ~hundreds of files or recall quality becomes the binding constraint.
+- ✅ `normalize_relation_type` table covering the 40-relation vocabulary (35-entry alias table + identity passthrough + `"related_to"` fallback).
+- ✅ Five new `com.nexus.storage` IPC handlers (`entity_search`, `entity_get`, `entity_relations`, `entity_upsert`, `entity_find_duplicates`).
+- ⏸ `nexus.entityGraph` shell plugin — filed as a follow-up. Bootstrap helpers + IPC types + canvas-reuse plan are documented; the CLI surface covers the same five operations in the meantime.
+- ✅ Agent integration: `compose_entity_preamble` splices `entity_search` hits into the planner system prompt.
+- ✅ CLI: `nexus graph entity list|show|search|related|duplicates` (Duplicates added beyond the original DoD because BL-129 needs it; original DoD's four verbs all present).
+
+---
+
 ### BL-054: Nexus OS Mode — Agentic OS methodology layer ✅ (2026-05-14 umbrella close — shipped 2026-05-07)
 
 **Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)

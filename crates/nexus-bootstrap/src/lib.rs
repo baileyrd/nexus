@@ -717,6 +717,14 @@ fn register_core_plugins(
                         "entity_relations",
                         nexus_storage::core_plugin::HANDLER_ENTITY_RELATIONS,
                     ),
+                    (
+                        "entity_upsert",
+                        nexus_storage::core_plugin::HANDLER_ENTITY_UPSERT,
+                    ),
+                    (
+                        "entity_find_duplicates",
+                        nexus_storage::core_plugin::HANDLER_ENTITY_FIND_DUPLICATES,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),

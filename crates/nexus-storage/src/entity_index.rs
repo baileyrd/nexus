@@ -340,6 +340,310 @@ impl EntityIndex {
         });
         out
     }
+
+    /// Find pairs of entities whose normalised token sets overlap by
+    /// at least `threshold` (Jaccard similarity over `id + aliases +
+    /// description`). Pairs are returned sorted by descending
+    /// similarity then ascending `(a, b)` for determinism.
+    ///
+    /// BL-129's Dream-Cycle dedup phase reads this list: pairs above
+    /// the auto-merge threshold (default 0.97) are merged silently,
+    /// the rest queued for user review.
+    ///
+    /// Different `entity_type`s never pair — a `person` named "java"
+    /// and a `skill` named "java" are not duplicates of each other.
+    #[must_use]
+    pub fn find_duplicates(&self, threshold: f32) -> Vec<DuplicateCandidate> {
+        let entries: Vec<(&String, &EntityRecord, std::collections::HashSet<String>)> = self
+            .by_id
+            .values()
+            .map(|r| {
+                let mut tokens = tokenise(&r.id);
+                for alias in &r.aliases {
+                    tokens.extend(tokenise(alias));
+                }
+                tokens.extend(tokenise(&r.description));
+                (&r.id, r, tokens)
+            })
+            .collect();
+
+        let mut candidates = Vec::new();
+        for i in 0..entries.len() {
+            for j in (i + 1)..entries.len() {
+                let (id_a, rec_a, tok_a) = &entries[i];
+                let (id_b, rec_b, tok_b) = &entries[j];
+                if !rec_a.entity_type.eq_ignore_ascii_case(&rec_b.entity_type) {
+                    continue;
+                }
+                let sim = jaccard(tok_a, tok_b);
+                if sim >= threshold {
+                    let (a, b) = if id_a <= id_b {
+                        ((*id_a).clone(), (*id_b).clone())
+                    } else {
+                        ((*id_b).clone(), (*id_a).clone())
+                    };
+                    candidates.push(DuplicateCandidate { a, b, similarity: sim });
+                }
+            }
+        }
+        candidates.sort_by(|x, y| {
+            y.similarity
+                .partial_cmp(&x.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| x.a.cmp(&y.a))
+                .then_with(|| x.b.cmp(&y.b))
+        });
+        candidates
+    }
+}
+
+/// One pair returned by [`EntityIndex::find_duplicates`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuplicateCandidate {
+    /// Lexicographically-smaller entity id.
+    pub a: String,
+    /// Lexicographically-greater entity id.
+    pub b: String,
+    /// Jaccard token similarity in `[0.0, 1.0]`.
+    pub similarity: f32,
+}
+
+fn tokenise(text: &str) -> std::collections::HashSet<String> {
+    text.to_ascii_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() > 1)
+        .map(str::to_string)
+        .collect()
+}
+
+fn jaccard(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f32 {
+    if a.is_empty() && b.is_empty() {
+        return 0.0;
+    }
+    let intersect = a.intersection(b).count();
+    let union = a.union(b).count();
+    if union == 0 {
+        0.0
+    } else {
+        #[allow(clippy::cast_precision_loss)]
+        let val = intersect as f32 / union as f32;
+        val
+    }
+}
+
+// ── Canonical vocabularies (BL-128 close) ────────────────────────────────────
+
+/// The 11 canonical entity types from the Thoth vocabulary. The
+/// thin-slice [`parse_entity`] accepts any string; this list is the
+/// vocabulary that downstream consumers (CLI guidance, validation,
+/// the deferred shell explorer) recognise.
+pub const ENTITY_TYPES: &[&str] = &[
+    "person",
+    "preference",
+    "fact",
+    "event",
+    "place",
+    "project",
+    "organisation",
+    "concept",
+    "skill",
+    "media",
+    "self_knowledge",
+];
+
+/// The canonical relation vocabulary — 40+ entries grouped by family,
+/// location, work, knowledge, media, ownership, temporal, causality,
+/// and generic semantics. LLM-emitted variants flow through
+/// [`normalize_relation_type`] before any of these match.
+pub const RELATION_TYPES: &[&str] = &[
+    // family / social
+    "knows",
+    "friend_of",
+    "married_to",
+    "parent_of",
+    "child_of",
+    "sibling_of",
+    "partner_of",
+    // location
+    "lives_in",
+    "works_at",
+    "born_in",
+    "located_in",
+    "from",
+    // work
+    "works_on",
+    "manages",
+    "managed_by",
+    "employed_by",
+    "employs",
+    "collaborates_with",
+    // knowledge
+    "proficient_in",
+    "certified_in",
+    "studies",
+    "studied_at",
+    "knows_about",
+    // media
+    "reading",
+    "watching",
+    "listening_to",
+    "authored",
+    "created",
+    // ownership / membership
+    "owns",
+    "member_of",
+    "belongs_to",
+    "part_of",
+    // temporal
+    "preceded_by",
+    "followed_by",
+    "happened_on",
+    // causality
+    "causes",
+    "caused_by",
+    "enables",
+    // generic
+    "related_to",
+    "references",
+    "mentioned_in",
+];
+
+/// Normalise an LLM-or-user-provided relation type to one of the
+/// canonical [`RELATION_TYPES`]. Lowercase + replace ` ` / `-` with
+/// `_`, then look up a small alias table. Unknown inputs fall back
+/// to `"related_to"` — same choice Thoth makes, and a safer landing
+/// zone for AI-proposed relations than erroring out.
+#[must_use]
+pub fn normalize_relation_type(input: &str) -> &'static str {
+    let lower = input.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+    let alias: &str = match lower.as_str() {
+        "is_friend_of" | "friend" => "friend_of",
+        "spouse" | "spouse_of" | "wife_of" | "husband_of" => "married_to",
+        "is_parent_of" | "father_of" | "mother_of" => "parent_of",
+        "is_child_of" | "son_of" | "daughter_of" => "child_of",
+        "brother_of" | "sister_of" => "sibling_of",
+        "lives_at" | "resides_in" | "resides_at" => "lives_in",
+        "born_at" => "born_in",
+        "located_at" | "in" => "located_in",
+        "from_city" | "originally_from" => "from",
+        "working_on" | "contributes_to" => "works_on",
+        "is_manager_of" | "manages_team" => "manages",
+        "is_managed_by" | "reports_to" => "managed_by",
+        "works_for" | "employee_of" => "employed_by",
+        "hires" => "employs",
+        "works_with" => "collaborates_with",
+        "skilled_in" | "expert_in" | "fluent_in" => "proficient_in",
+        "has_certification_in" => "certified_in",
+        "studying" | "learning" => "studies",
+        "alumnus_of" | "graduated_from" => "studied_at",
+        "currently_reading" => "reading",
+        "currently_watching" => "watching",
+        "currently_listening_to" | "listening" => "listening_to",
+        "wrote" | "author_of" | "authored_by" => "authored",
+        "created_by" | "made" => "created",
+        "owner_of" | "has" => "owns",
+        "is_member_of" => "member_of",
+        "before" | "comes_before" => "preceded_by",
+        "after" | "comes_after" | "next" => "followed_by",
+        "on" | "occurred_on" | "happened_at" => "happened_on",
+        "leads_to" | "results_in" => "causes",
+        "due_to" | "result_of" => "caused_by",
+        other => other,
+    };
+    for canon in RELATION_TYPES {
+        if alias == *canon {
+            return canon;
+        }
+    }
+    "related_to"
+}
+
+// ── Upsert (file-as-truth write-through) ─────────────────────────────────────
+
+/// Frontmatter payload for [`upsert_entity_file`]. The `id` becomes
+/// the file stem (`entities/<id>.md`); the rest of the fields map
+/// directly to the on-disk YAML keys recognised by [`parse_entity`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityUpsert {
+    /// Canonical id — becomes the markdown file stem.
+    pub id: String,
+    /// `entity_type:` frontmatter key.
+    pub entity_type: String,
+    /// `aliases:` frontmatter key. Empty list omits the field on disk.
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// `description:` frontmatter key. Empty string omits the field.
+    #[serde(default)]
+    pub description: String,
+    /// `relations:` frontmatter list. Empty list omits the field.
+    /// Relation kinds pass through [`normalize_relation_type`] so the
+    /// on-disk file always carries canonical vocabulary regardless of
+    /// what the caller submitted.
+    #[serde(default)]
+    pub relations: Vec<EntityUpsertRelation>,
+}
+
+/// One relation entry inside [`EntityUpsert::relations`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityUpsertRelation {
+    /// Target entity id (or alias — preserved verbatim on disk).
+    pub target: String,
+    /// Free-form relation kind. Normalised before writing.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`. Defaults to `1.0` when absent.
+    #[serde(default)]
+    pub confidence: Option<f32>,
+}
+
+/// Render an [`EntityUpsert`] into the canonical on-disk markdown
+/// representation. Pure function — extracted so the upsert IPC
+/// handler is a thin wrapper around `atomic_write`, and so unit
+/// tests can pin the wire-shape projection without touching the
+/// filesystem.
+#[must_use]
+pub fn render_entity_markdown(payload: &EntityUpsert) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("---\n");
+    let _ = writeln!(out, "entity_type: {}", yaml_escape(&payload.entity_type));
+    if !payload.aliases.is_empty() {
+        out.push_str("aliases:\n");
+        for alias in &payload.aliases {
+            let _ = writeln!(out, "  - {}", yaml_escape(alias));
+        }
+    }
+    if !payload.description.is_empty() {
+        let _ = writeln!(out, "description: {}", yaml_escape(&payload.description));
+    }
+    if !payload.relations.is_empty() {
+        out.push_str("relations:\n");
+        for rel in &payload.relations {
+            let _ = writeln!(out, "  - target: {}", yaml_escape(&rel.target));
+            let canon = normalize_relation_type(&rel.kind);
+            let _ = writeln!(out, "    type: {canon}");
+            if let Some(conf) = rel.confidence {
+                let _ = writeln!(out, "    confidence: {}", conf.clamp(0.0, 1.0));
+            }
+        }
+    }
+    out.push_str("---\n");
+    out
+}
+
+fn yaml_escape(s: &str) -> String {
+    let needs_quotes = s.is_empty()
+        || s.starts_with([' ', '\t', '"', '\'', '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '%', '@', '`'])
+        || s.contains(['\n', '"', ':'])
+        || s.trim() != s;
+    if needs_quotes {
+        let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
+    } else {
+        s.to_string()
+    }
 }
 
 /// One hit in [`EntityIndex::search`].
@@ -750,6 +1054,168 @@ mod tests {
         assert_eq!(RelationDirection::parse(Some("both")), RelationDirection::Both);
         assert_eq!(RelationDirection::parse(None), RelationDirection::Both);
         assert_eq!(RelationDirection::parse(Some("nope")), RelationDirection::Both);
+    }
+
+    #[test]
+    fn canonical_vocabularies_are_populated() {
+        assert_eq!(ENTITY_TYPES.len(), 11);
+        assert!(ENTITY_TYPES.contains(&"person"));
+        assert!(ENTITY_TYPES.contains(&"self_knowledge"));
+        assert!(
+            RELATION_TYPES.len() >= 40,
+            "BL-128 DoD requires ≥40 relations, got {}",
+            RELATION_TYPES.len()
+        );
+        assert!(RELATION_TYPES.contains(&"related_to"));
+    }
+
+    #[test]
+    fn normalize_relation_type_canonicalises_common_variants() {
+        assert_eq!(normalize_relation_type("Spouse"), "married_to");
+        assert_eq!(normalize_relation_type("works for"), "employed_by");
+        assert_eq!(normalize_relation_type("REPORTS-TO"), "managed_by");
+        assert_eq!(normalize_relation_type("knows"), "knows");
+        assert_eq!(normalize_relation_type("zorgblatts"), "related_to");
+    }
+
+    #[test]
+    fn find_duplicates_pairs_high_overlap_same_type() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\naliases: [Al]\ndescription: Forge engineer working on storage.\n",
+            "",
+        );
+        write_entity(
+            dir.path(),
+            "al",
+            "entity_type: person\naliases: [Alice]\ndescription: Storage engineer working on forge.\n",
+            "",
+        );
+        write_entity(
+            dir.path(),
+            "nexus",
+            "entity_type: project\ndescription: Forge engineer working on storage.\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let dupes = index.find_duplicates(0.5);
+        assert!(
+            dupes.iter().any(|d| d.a == "al" && d.b == "alice"),
+            "expected alice/al pair, got {dupes:?}"
+        );
+        assert!(
+            dupes.iter().all(|d| d.a != "nexus" && d.b != "nexus"),
+            "different entity_types must not pair (got {dupes:?})"
+        );
+    }
+
+    #[test]
+    fn find_duplicates_orders_by_descending_similarity() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alpha",
+            "entity_type: person\ndescription: red green blue\n",
+            "",
+        );
+        write_entity(
+            dir.path(),
+            "beta",
+            "entity_type: person\ndescription: red green blue yellow\n",
+            "",
+        );
+        write_entity(
+            dir.path(),
+            "gamma",
+            "entity_type: person\ndescription: red blue indigo violet\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let dupes = index.find_duplicates(0.1);
+        assert!(dupes.len() >= 2);
+        for window in dupes.windows(2) {
+            assert!(
+                window[0].similarity >= window[1].similarity,
+                "duplicates must be sorted descending: {dupes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_entity_markdown_round_trips_through_parser() {
+        let payload = EntityUpsert {
+            id: "alice".to_string(),
+            entity_type: "person".to_string(),
+            aliases: vec!["Al".to_string(), "Dr. Smith".to_string()],
+            description: "Engineer on the storage team.".to_string(),
+            relations: vec![
+                EntityUpsertRelation {
+                    target: "nexus".to_string(),
+                    kind: "works on".to_string(),
+                    confidence: Some(0.9),
+                },
+                EntityUpsertRelation {
+                    target: "bob".to_string(),
+                    kind: "REPORTS-TO".to_string(),
+                    confidence: None,
+                },
+            ],
+        };
+        let md = render_entity_markdown(&payload);
+        let rec = parse_entity("alice", "entities/alice.md", &md).expect("parses");
+        assert_eq!(rec.entity_type, "person");
+        assert_eq!(rec.aliases, vec!["Al", "Dr. Smith"]);
+        assert_eq!(rec.description, "Engineer on the storage team.");
+        assert_eq!(rec.relations.len(), 2);
+        assert_eq!(rec.relations[0].target, "nexus");
+        assert_eq!(rec.relations[0].kind, "works_on");
+        assert!((rec.relations[0].confidence - 0.9).abs() < 1e-5);
+        assert_eq!(rec.relations[1].kind, "managed_by");
+        assert!((rec.relations[1].confidence - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn render_entity_markdown_omits_empty_optional_sections() {
+        let payload = EntityUpsert {
+            id: "minimal".to_string(),
+            entity_type: "concept".to_string(),
+            aliases: Vec::new(),
+            description: String::new(),
+            relations: Vec::new(),
+        };
+        let md = render_entity_markdown(&payload);
+        assert!(!md.contains("aliases:"));
+        assert!(!md.contains("description:"));
+        assert!(!md.contains("relations:"));
+        assert!(md.contains("entity_type: concept"));
+    }
+
+    #[test]
+    fn render_entity_markdown_clamps_confidence_into_unit_interval() {
+        let payload = EntityUpsert {
+            id: "x".to_string(),
+            entity_type: "person".to_string(),
+            aliases: Vec::new(),
+            description: String::new(),
+            relations: vec![
+                EntityUpsertRelation {
+                    target: "y".to_string(),
+                    kind: "knows".to_string(),
+                    confidence: Some(2.5),
+                },
+                EntityUpsertRelation {
+                    target: "z".to_string(),
+                    kind: "knows".to_string(),
+                    confidence: Some(-0.4),
+                },
+            ],
+        };
+        let md = render_entity_markdown(&payload);
+        let rec = parse_entity("x", "entities/x.md", &md).expect("parses");
+        assert!((rec.relations[0].confidence - 1.0).abs() < 1e-5);
+        assert!(rec.relations[1].confidence.abs() < 1e-5);
     }
 }
 

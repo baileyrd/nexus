@@ -321,6 +321,55 @@ enum GraphCommand {
         #[arg(short, long, default_value_t = 1)]
         depth: usize,
     },
+    /// Personal entity graph operations (BL-128)
+    Entity {
+        #[command(subcommand)]
+        command: EntityCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum EntityCommand {
+    /// List entities (optionally filtered by `--type`)
+    List {
+        /// Filter to a single canonical entity_type.
+        #[arg(long)]
+        r#type: Option<String>,
+        /// Maximum hits to return.
+        #[arg(short, long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Show one entity by canonical id or alias.
+    Show {
+        /// Canonical id or one of the entity's aliases.
+        id: String,
+    },
+    /// Substring search across entity ids / aliases / descriptions.
+    Search {
+        /// Query string. Empty string returns the first `--limit` entities.
+        query: String,
+        /// Optional `entity_type` filter.
+        #[arg(long)]
+        r#type: Option<String>,
+        /// Maximum hits to return.
+        #[arg(short, long, default_value_t = 10)]
+        limit: u32,
+    },
+    /// Show outgoing / incoming / both relations for one entity.
+    Related {
+        /// Canonical id or one of the entity's aliases.
+        id: String,
+        /// One of `outgoing`, `incoming`, `both`.
+        #[arg(long, default_value = "both")]
+        direction: String,
+    },
+    /// List same-type entity pairs with Jaccard similarity ≥ threshold
+    /// (BL-129's Dream-Cycle dedup seed).
+    Duplicates {
+        /// Minimum similarity in `[0.0, 1.0]`. Defaults to 0.92.
+        #[arg(long, default_value_t = 0.92)]
+        threshold: f32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1690,6 +1739,23 @@ fn main() {
             GraphCommand::Neighbors { path, depth } => {
                 commands::graph::neighbors(&mut app, &path, depth)
             }
+            GraphCommand::Entity { command } => match command {
+                EntityCommand::List { r#type, limit } => {
+                    commands::graph::entity_list(&mut app, r#type.as_deref(), limit)
+                }
+                EntityCommand::Show { id } => commands::graph::entity_show(&mut app, &id),
+                EntityCommand::Search {
+                    query,
+                    r#type,
+                    limit,
+                } => commands::graph::entity_search(&mut app, &query, r#type.as_deref(), limit),
+                EntityCommand::Related { id, direction } => {
+                    commands::graph::entity_related(&mut app, &id, &direction)
+                }
+                EntityCommand::Duplicates { threshold } => {
+                    commands::graph::entity_duplicates(&mut app, threshold)
+                }
+            },
         },
 
         Commands::Tags(args) => match args.command {

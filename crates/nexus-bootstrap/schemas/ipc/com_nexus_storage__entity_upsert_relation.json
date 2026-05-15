@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityUpsertRelationRow",
+  "description": "One outgoing relation entry inside [`EntityUpsertArgs::relations`].\nRelation kinds are normalised through\n`crate::entity_index::normalize_relation_type` before being written\nto disk, so callers can submit free-form LLM output without\npreprocessing.",
+  "type": "object",
+  "properties": {
+    "confidence": {
+      "description": "Confidence in `[0.0, 1.0]`. Absent ⇒ `1.0` on disk.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "target": {
+      "description": "Target entity id (or alias — preserved verbatim).",
+      "type": "string"
+    },
+    "type": {
+      "description": "Free-form relation kind. Normalised before persistence.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "type"
+  ]
+}

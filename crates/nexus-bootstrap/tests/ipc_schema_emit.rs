@@ -31,10 +31,12 @@ use nexus_ai::ipc::{
 use nexus_ai::{Citation, RagResponse};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
-    EntityGetArgs, EntityGetResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
+    EntityDuplicatePairRow, EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs,
+    EntityGetResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
-    EntitySearchResult, ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry,
-    StorageListDirResult, StorageNoteAppendArgs, StorageNoteAppendResult, StorageQuerySymbolArgs,
+    EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
+    ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
+    StorageNoteAppendArgs, StorageNoteAppendResult, StorageQuerySymbolArgs,
     StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
     StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
     StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
@@ -207,6 +209,15 @@ fn emit_all_schemas_impl() {
     write_schema::<EntityRelationsArgs>("com_nexus_storage__entity_relations", "args");
     write_schema::<EntityRelationsResultRow>("com_nexus_storage__entity_relations", "row");
     write_schema::<EntityRelationsResult>("com_nexus_storage__entity_relations", "result");
+    write_schema::<EntityUpsertRelationRow>("com_nexus_storage__entity_upsert", "relation");
+    write_schema::<EntityUpsertArgs>("com_nexus_storage__entity_upsert", "args");
+    write_schema::<EntityUpsertResult>("com_nexus_storage__entity_upsert", "result");
+    write_schema::<EntityFindDuplicatesArgs>("com_nexus_storage__entity_find_duplicates", "args");
+    write_schema::<EntityDuplicatePairRow>("com_nexus_storage__entity_find_duplicates", "pair");
+    write_schema::<EntityFindDuplicatesResult>(
+        "com_nexus_storage__entity_find_duplicates",
+        "result",
+    );
 
     // ── com.nexus.ai::stream_ask ─────────────────────────────────────────
     write_schema::<AiStreamAskArgs>("com_nexus_ai__stream_ask", "args");

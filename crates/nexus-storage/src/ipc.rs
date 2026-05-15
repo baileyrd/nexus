@@ -625,6 +625,125 @@ pub struct EntityRelationsResult {
     pub relations: Vec<EntityRelationsResultRow>,
 }
 
+// ── BL-128 close — entity_upsert / entity_find_duplicates ────────────────────
+
+/// One outgoing relation entry inside [`EntityUpsertArgs::relations`].
+/// Relation kinds are normalised through
+/// `crate::entity_index::normalize_relation_type` before being written
+/// to disk, so callers can submit free-form LLM output without
+/// preprocessing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityUpsertRelationRow {
+    /// Target entity id (or alias — preserved verbatim).
+    pub target: String,
+    /// Free-form relation kind. Normalised before persistence.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`. Absent ⇒ `1.0` on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+}
+
+/// Args for `com.nexus.storage::entity_upsert` (handler 67).
+///
+/// `id` becomes the markdown file stem under `<forge>/entities/`.
+/// All other fields map directly to the on-disk YAML keys recognised
+/// by the thin-slice parser. Existing files are overwritten via the
+/// atomic-write path (temp-fsync-rename) so a concurrent read
+/// observes either the old or the new content, never a torn write.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityUpsertArgs {
+    /// Canonical id — becomes the markdown file stem.
+    pub id: String,
+    /// `entity_type:` frontmatter key.
+    pub entity_type: String,
+    /// `aliases:` frontmatter key. Empty list omits the field on disk.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    /// `description:` frontmatter key. Empty string omits the field.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// `relations:` frontmatter list. Empty list omits the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relations: Vec<EntityUpsertRelationRow>,
+}
+
+/// Return type for `com.nexus.storage::entity_upsert`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityUpsertResult {
+    /// Forge-relative path of the entity markdown file that was
+    /// written (`entities/<id>.md`).
+    pub relpath: String,
+    /// `true` when an existing file was replaced, `false` for a fresh
+    /// create. The atomic-write path makes both cases observable
+    /// atomically — this flag just lets a UI distinguish them.
+    pub replaced: bool,
+}
+
+/// Args for `com.nexus.storage::entity_find_duplicates` (handler 68).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityFindDuplicatesArgs {
+    /// Minimum Jaccard similarity in `[0.0, 1.0]` for a pair to be
+    /// reported. Defaults to `0.92` when absent — matches Thoth's
+    /// Dream-Cycle review threshold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f32>,
+}
+
+/// One pair in [`EntityFindDuplicatesResult::pairs`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityDuplicatePairRow {
+    /// Lexicographically-smaller entity id.
+    pub a: String,
+    /// Lexicographically-greater entity id.
+    pub b: String,
+    /// Jaccard token similarity in `[0.0, 1.0]`.
+    pub similarity: f32,
+}
+
+/// Return type for `com.nexus.storage::entity_find_duplicates`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityFindDuplicatesResult {
+    /// Pairs ordered by descending similarity then ascending `(a, b)`.
+    pub pairs: Vec<EntityDuplicatePairRow>,
+}
+
 #[cfg(test)]
 mod read_frontmatter_tests {
     use super::*;

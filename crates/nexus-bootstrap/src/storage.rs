@@ -536,3 +536,205 @@ pub fn graph_neighbors(
         serde_json::json!({ "path": path, "depth": depth }),
     )
 }
+
+// ── BL-128 entity-graph helpers ───────────────────────────────────────────────
+
+/// One hit returned by [`entity_search`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntitySearchHit {
+    /// Canonical entity id (file stem).
+    pub id: String,
+    /// `entity_type` from frontmatter.
+    pub entity_type: String,
+    /// One-line description (frontmatter or fallback body paragraph).
+    pub description: String,
+    /// Forge-relative path of the markdown file.
+    pub relpath: String,
+    /// Match score per
+    /// `nexus_storage::entity_index::EntityIndex::search`'s doc-comment.
+    pub score: i32,
+}
+
+/// Full entity payload returned by [`entity_get`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityRecord {
+    /// Canonical id (file stem).
+    pub id: String,
+    /// `entity_type` from frontmatter.
+    pub entity_type: String,
+    /// Aliases from frontmatter (after empty-string filtering).
+    pub aliases: Vec<String>,
+    /// One-line description (frontmatter or fallback body paragraph).
+    pub description: String,
+    /// Outgoing relations declared on this entity.
+    pub relations: Vec<EntityRelation>,
+    /// Forge-relative path of the markdown file.
+    pub relpath: String,
+}
+
+/// One outgoing relation in [`EntityRecord::relations`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityRelation {
+    /// Target entity id (or alias).
+    pub target: String,
+    /// Free-form relation kind.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+}
+
+/// One row in [`entity_relations`]'s response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityRelationEdge {
+    /// Source entity id.
+    pub from: String,
+    /// Target entity id (alias-resolved).
+    pub to: String,
+    /// Free-form relation kind.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+}
+
+/// Mirror of `nexus_storage::ipc::EntityUpsertArgs` for the IPC client.
+#[derive(Debug, Clone, Serialize)]
+pub struct EntityUpsert {
+    /// Canonical id — becomes the markdown file stem under `entities/`.
+    pub id: String,
+    /// `entity_type:` frontmatter key.
+    pub entity_type: String,
+    /// `aliases:` frontmatter key. Omitted on disk when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    /// `description:` frontmatter key. Omitted on disk when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// `relations:` frontmatter list. Omitted on disk when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relations: Vec<EntityUpsertRelation>,
+}
+
+/// One relation entry inside [`EntityUpsert::relations`].
+#[derive(Debug, Clone, Serialize)]
+pub struct EntityUpsertRelation {
+    /// Target entity id or alias.
+    pub target: String,
+    /// Free-form relation kind. Normalised server-side before persistence.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`. Absent ⇒ `1.0` on disk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+}
+
+/// Result of [`entity_upsert`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityUpsertOutcome {
+    /// Forge-relative path of the entity markdown file that was written.
+    pub relpath: String,
+    /// `true` when an existing file was replaced.
+    pub replaced: bool,
+}
+
+/// One pair returned by [`entity_find_duplicates`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityDuplicatePair {
+    /// Lexicographically-smaller entity id.
+    pub a: String,
+    /// Lexicographically-greater entity id.
+    pub b: String,
+    /// Jaccard token similarity in `[0.0, 1.0]`.
+    pub similarity: f32,
+}
+
+/// Substring-rank search over the file-backed `entities/` index.
+pub fn entity_search(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    query: &str,
+    entity_type: Option<&str>,
+    limit: Option<u32>,
+) -> Result<Vec<EntitySearchHit>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        results: Vec<EntitySearchHit>,
+    }
+    let mut args = serde_json::json!({ "query": query });
+    if let Some(t) = entity_type {
+        args["entity_type"] = serde_json::Value::String(t.to_string());
+    }
+    if let Some(l) = limit {
+        args["limit"] = serde_json::Value::from(l);
+    }
+    let resp: Resp = call(runtime, rt, "entity_search", args)?;
+    Ok(resp.results)
+}
+
+/// Look up one entity by canonical id or alias.
+pub fn entity_get(runtime: &Runtime, rt: &TokioRuntime, id: &str) -> Result<Option<EntityRecord>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        #[serde(default)]
+        entity: Option<EntityRecord>,
+    }
+    let resp: Resp = call(
+        runtime,
+        rt,
+        "entity_get",
+        serde_json::json!({ "id": id }),
+    )?;
+    Ok(resp.entity)
+}
+
+/// Outgoing / incoming / both relations for an entity. `direction`
+/// is one of `"outgoing"`, `"incoming"`, `"both"`; unknown values
+/// map to `"both"` server-side.
+pub fn entity_relations(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    id: &str,
+    direction: Option<&str>,
+) -> Result<Vec<EntityRelationEdge>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        relations: Vec<EntityRelationEdge>,
+    }
+    let mut args = serde_json::json!({ "id": id });
+    if let Some(d) = direction {
+        args["direction"] = serde_json::Value::String(d.to_string());
+    }
+    let resp: Resp = call(runtime, rt, "entity_relations", args)?;
+    Ok(resp.relations)
+}
+
+/// File-as-truth write-through. Creates or replaces
+/// `<forge>/entities/<id>.md` via the atomic temp-fsync-rename path.
+pub fn entity_upsert(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    payload: &EntityUpsert,
+) -> Result<EntityUpsertOutcome> {
+    let args = serde_json::to_value(payload).context("serialize EntityUpsert")?;
+    call(runtime, rt, "entity_upsert", args)
+}
+
+/// Find pairs of same-type entities whose token sets overlap by at
+/// least `threshold` (defaults to `0.92` server-side when `None`).
+pub fn entity_find_duplicates(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    threshold: Option<f32>,
+) -> Result<Vec<EntityDuplicatePair>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        pairs: Vec<EntityDuplicatePair>,
+    }
+    let mut args = serde_json::json!({});
+    if let Some(t) = threshold {
+        args["threshold"] = serde_json::Value::from(t);
+    }
+    let resp: Resp = call(runtime, rt, "entity_find_duplicates", args)?;
+    Ok(resp.pairs)
+}

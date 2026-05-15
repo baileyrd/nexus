@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityFindDuplicatesArgs",
+  "description": "Args for `com.nexus.storage::entity_find_duplicates` (handler 68).",
+  "type": "object",
+  "properties": {
+    "threshold": {
+      "description": "Minimum Jaccard similarity in `[0.0, 1.0]` for a pair to be\nreported. Defaults to `0.92` when absent — matches Thoth's\nDream-Cycle review threshold.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    }
+  },
+  "additionalProperties": false
+}

@@ -328,6 +328,19 @@ pub const HANDLER_ENTITY_GET: u32 = 65;
 /// [`crate::ipc::EntityRelationsArgs`]. Returns
 /// [`crate::ipc::EntityRelationsResult`]. Direction defaults to `"both"`.
 pub const HANDLER_ENTITY_RELATIONS: u32 = 66;
+/// BL-128 close — `entity_upsert`. Args: [`crate::ipc::EntityUpsertArgs`].
+/// Returns [`crate::ipc::EntityUpsertResult`]. Atomically writes the
+/// entity markdown file under `<forge>/entities/<id>.md` (temp-fsync-
+/// rename via `crate::atomic_write`). Relation kinds are normalised
+/// through `crate::entity_index::normalize_relation_type` before
+/// persistence so on-disk vocabulary stays canonical.
+pub const HANDLER_ENTITY_UPSERT: u32 = 67;
+/// BL-128 close — `entity_find_duplicates`. Args:
+/// [`crate::ipc::EntityFindDuplicatesArgs`]. Returns
+/// [`crate::ipc::EntityFindDuplicatesResult`]. Jaccard token
+/// similarity over `id + aliases + description`; only same-type
+/// pairs are reported. Threshold defaults to `0.92`.
+pub const HANDLER_ENTITY_FIND_DUPLICATES: u32 = 68;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -522,6 +535,12 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_ENTITY_RELATIONS => {
                 return dispatch_entity_relations(&self.forge_root, args);
+            }
+            HANDLER_ENTITY_UPSERT => {
+                return dispatch_entity_upsert(&self.forge_root, args);
+            }
+            HANDLER_ENTITY_FIND_DUPLICATES => {
+                return dispatch_entity_find_duplicates(&self.forge_root, args);
             }
             _ => {}
         }
@@ -1477,6 +1496,87 @@ fn dispatch_entity_relations(
     )
 }
 
+fn dispatch_entity_upsert(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntityUpsertArgs = parse_args(args, "entity_upsert")?;
+    let id_trimmed = parsed.id.trim();
+    if id_trimmed.is_empty() {
+        return Err(exec_err("entity_upsert: 'id' must be non-empty".to_string()));
+    }
+    if id_trimmed.contains(['/', '\\']) || id_trimmed.contains("..") {
+        return Err(exec_err(
+            "entity_upsert: 'id' must be a bare file stem (no path separators or '..')"
+                .to_string(),
+        ));
+    }
+    let entity_type_trimmed = parsed.entity_type.trim();
+    if entity_type_trimmed.is_empty() {
+        return Err(exec_err(
+            "entity_upsert: 'entity_type' must be non-empty".to_string(),
+        ));
+    }
+    let payload = crate::entity_index::EntityUpsert {
+        id: id_trimmed.to_string(),
+        entity_type: entity_type_trimmed.to_string(),
+        aliases: parsed
+            .aliases
+            .into_iter()
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect(),
+        description: parsed.description.trim().to_string(),
+        relations: parsed
+            .relations
+            .into_iter()
+            .map(|r| crate::entity_index::EntityUpsertRelation {
+                target: r.target,
+                kind: r.kind,
+                confidence: r.confidence,
+            })
+            .collect(),
+    };
+    let markdown = crate::entity_index::render_entity_markdown(&payload);
+    let target = forge_root
+        .join(crate::entity_index::ENTITIES_DIR)
+        .join(format!("{}.md", payload.id));
+    let replaced = target.exists();
+    let temp_dir = forge_root.join(".forge").join("temp");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| exec_err(format!("entity_upsert: create temp dir: {e}")))?;
+    crate::atomic_write(&target, markdown.as_bytes(), &temp_dir)
+        .map_err(|e| exec_err(format!("entity_upsert: write {}: {e}", target.display())))?;
+    let result = crate::ipc::EntityUpsertResult {
+        relpath: format!("{}/{}.md", crate::entity_index::ENTITIES_DIR, payload.id),
+        replaced,
+    };
+    to_value(&result, "entity_upsert")
+}
+
+fn dispatch_entity_find_duplicates(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntityFindDuplicatesArgs =
+        parse_args(args, "entity_find_duplicates")?;
+    let threshold = parsed.threshold.unwrap_or(0.92).clamp(0.0, 1.0);
+    let index = crate::entity_index::EntityIndex::load(forge_root);
+    let pairs = index
+        .find_duplicates(threshold)
+        .into_iter()
+        .map(|p| crate::ipc::EntityDuplicatePairRow {
+            a: p.a,
+            b: p.b,
+            similarity: p.similarity,
+        })
+        .collect();
+    to_value(
+        &crate::ipc::EntityFindDuplicatesResult { pairs },
+        "entity_find_duplicates",
+    )
+}
+
 fn dispatch_config_read(
     forge_root: &std::path::Path,
     args: &serde_json::Value,
@@ -1852,6 +1952,8 @@ mod tests {
             ("HANDLER_ENTITY_SEARCH", HANDLER_ENTITY_SEARCH),
             ("HANDLER_ENTITY_GET", HANDLER_ENTITY_GET),
             ("HANDLER_ENTITY_RELATIONS", HANDLER_ENTITY_RELATIONS),
+            ("HANDLER_ENTITY_UPSERT", HANDLER_ENTITY_UPSERT),
+            ("HANDLER_ENTITY_FIND_DUPLICATES", HANDLER_ENTITY_FIND_DUPLICATES),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {

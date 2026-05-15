@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityFindDuplicatesResult",
+  "description": "Return type for `com.nexus.storage::entity_find_duplicates`.",
+  "type": "object",
+  "properties": {
+    "pairs": {
+      "description": "Pairs ordered by descending similarity then ascending `(a, b)`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntityDuplicatePairRow"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "pairs"
+  ],
+  "$defs": {
+    "EntityDuplicatePairRow": {
+      "description": "One pair in [`EntityFindDuplicatesResult::pairs`].",
+      "type": "object",
+      "properties": {
+        "a": {
+          "description": "Lexicographically-smaller entity id.",
+          "type": "string"
+        },
+        "b": {
+          "description": "Lexicographically-greater entity id.",
+          "type": "string"
+        },
+        "similarity": {
+          "description": "Jaccard token similarity in `[0.0, 1.0]`.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "a",
+        "b",
+        "similarity"
+      ]
+    }
+  }
+}

@@ -284,39 +284,20 @@ BL-127 Phase A's editor-engine measurements capture the CM6 → StateField / Vie
 
 ---
 
-### BL-128: Personal entity knowledge graph (Thoth port)
-
-**Source**: Thoth capability assessment — see [../research/thoth-capability-assessment.md](../research/thoth-capability-assessment.md). Filed 2026-05-14.
-**Effort**: Large. Independent of other Thoth ports.
-**Crates**: `nexus-storage` (indexing + graph extension), new shell plugin `nexus.entityGraph`.
-
-Nexus's petgraph today is a document-link graph: nodes are files, edges are wikilinks. Thoth proves there is significant value in a second, orthogonal layer — a **personal entity graph** where nodes are typed entities (people, places, events, projects, concepts, etc.) and edges are typed directional relationships with confidence scores. The two graphs are complementary: the document graph answers "what files reference what?"; the entity graph answers "what do I know about this person / event / concept?"
-
-**Design constraint (file-as-truth):** Entities must live as Markdown files, not as opaque DB rows. Each entity is a `.md` file in a user-designated folder (e.g. `<forge>/entities/`) with YAML frontmatter carrying `entity_type`, `aliases`, `tags`, and `relations` (a list of `{target, type, confidence}` objects). `nexus-storage` indexes these files like any other, extending the existing petgraph with typed-edge support and a FAISS-backed semantic recall index over entity descriptions.
-
-**Entity types (11 canonical):** `person`, `preference`, `fact`, `event`, `place`, `project`, `organisation`, `concept`, `skill`, `media`, `self_knowledge`.
-
-**Relation types (40+ controlled vocabulary):** family/social (`knows`, `friend_of`, `married_to`), location (`lives_in`, `works_at`, `born_in`), work (`works_on`, `manages`, `employed_by`), knowledge (`proficient_in`, `certified_in`, `studies`), media (`reading`, `watching`, `authored`), plus temporal, ownership, membership, and causality variants. A `normalize_relation_type` lookup maps LLM-generated variants to canonical forms.
-
-**IPC handlers** (new, in `nexus-storage`): `entity_search(query, [type])` — semantic recall via FAISS; `entity_get(id)` — fetch by ID or subject; `entity_relations(id, [direction])` — graph traversal; `entity_upsert(frontmatter)` — write-through to disk; `entity_find_duplicates(threshold)` — similarity scan for Dream Cycle (BL-129).
-
-**Definition of done:**
-- `nexus-storage` parses `entity_type` + `relations` frontmatter; extends petgraph edges with `type: String` and `confidence: f32`
-- FAISS embedding index (reuse `nexus-ai`'s embedding provider) built over entity `description` fields; incremental upsert on file-watch events
-- `normalize_relation_type` table covering at least the 40 relation types from the Thoth vocabulary
-- Five new `com.nexus.storage` IPC handlers: `entity_search`, `entity_get`, `entity_relations`, `entity_upsert`, `entity_find_duplicates`
-- `nexus.entityGraph` shell plugin: visual node/edge explorer (reuses existing graph canvas), sidebar entity detail panel, entity-creation palette command
-- Agent integration: `nexus-agent` system-prompt assembly queries `entity_search` for context-relevant entities and prepends them, mirroring the existing RAG retrieval path
-- CLI: `nexus graph entity list|show|search|related`
+_BL-128 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). All five planned IPC handlers (`entity_search`, `entity_get`, `entity_relations`, `entity_upsert`, `entity_find_duplicates`), the 11 canonical entity types + 40-entry relation vocabulary with `normalize_relation_type`, the agent system-prompt entity preamble, and the `nexus graph entity list|show|search|related|duplicates` CLI surface. The deferred-and-still-open DoD items — FAISS-backed semantic recall, petgraph typed-edge extension, and the `nexus.entityGraph` shell explorer — are filed as the follow-up below._
 
 ---
 
-_BL-128 thin slice closed 2026-05-14 — a file-backed personal entity surface that ships three of the five planned IPC handlers and the agent-prepend wire point. New `crates/nexus-storage/src/entity_index.rs` (~760 LOC) parses every `*.md` under `<forge>/entities/` into an in-memory `EntityIndex` per IPC call (parse cost is sub-millisecond for the expected O(dozens) of entity files; a watcher-cached version is forward-looking but unneeded today). Frontmatter shape is deliberately narrow: `entity_type`, `aliases`, `description`, `relations: [{target, type, confidence}]` — anything else passes through verbatim, and missing `description` falls back to the first non-empty body paragraph truncated at 240 chars. Alias targets in relation edges are resolved to canonical ids at query time. Three new `com.nexus.storage` IPC handlers — `entity_search` (substring match over id / aliases / description with score ranking + optional `entity_type` filter), `entity_get` (canonical-id-then-alias lookup), `entity_relations` (`outgoing` / `incoming` / `both` with stable ordering). All three carry `EntitySearchArgs` / `EntityGetArgs` / `EntityRelationsArgs` IPC types with `feature = "ts-export"` derives and regenerated TS + JSON Schema bindings. Agent wire-up: `nexus-agent::core_plugin::compose_entity_preamble` calls `entity_search` with the session goal and splices a `"Known entities relevant to this goal:"` block into the system prompt next to the existing memory + skills preambles; IPC errors / missing `entities/` / zero hits all fall through silently. 18 tests pin every code path (15 in the entity module covering load/parse/search/relations/alias resolution + 3 in `nexus-agent` for the pure preamble renderer). `cargo test -p nexus-storage --lib entity_index` 15/15; `cargo test -p nexus-agent --lib format_entity` 3/3; clippy clean for the new code; `scripts/check_ipc_drift.sh` regenerated 10 TS + 10 JSON Schema files. **Deferred** (the BL DoD's tail — these stay on this BL until they land):_
-- _Five-IPC full surface — `entity_upsert` (file-as-truth write-through, atomic+watcher integration) and `entity_find_duplicates` (similarity scan for BL-129's Dream Cycle) are not yet wired; the thin slice doesn't yet need them and BL-129 is the natural forcing function for the duplicate-finder._
-- _Petgraph typed-edge extension — the existing document-link graph keeps its untyped edges; entity edges live in the per-call `EntityIndex` only._
-- _FAISS-backed semantic recall — substring scoring (id-exact 100, alias-exact 90, id-contains 75, alias-contains 60, desc-contains 40) is the placeholder ranker. Reuse of `nexus-ai`'s embedding provider is the next obvious step once an entity forge crosses ~hundreds of files._
-- _Canonical entity-type / 40+ relation-type vocabularies — the thin slice does not normalise either field. `normalize_relation_type` lookup + the 11 canonical entity types stay deferred until a real curated forge exposes the need._
-- _Shell `nexus.entityGraph` plugin (visual explorer + sidebar + palette command), CLI `nexus graph entity ...`, file-watch-driven cache for the index — all gated on the thin slice surfacing actual demand._
+### Follow-up: BL-128 — FAISS recall, petgraph typed edges, shell explorer
+
+**Source**: BL-128 deferral. Filed 2026-05-14.
+**Effort**: Medium per item. Independent.
+
+The BL-128 close shipped the file-backed `EntityIndex` (per-call parse), the substring search ranker, and the SQLite-free dedup path. Three DoD tails were filed-not-shipped because each is a separate architectural change and the entity surface doesn't yet have the load they're designed for:
+
+- **FAISS-backed semantic recall.** Replace the substring ranker in `entity_search` with an embedding-based recall path. Reuses `nexus-ai`'s embedding provider; populates a FAISS index over entity `description` fields; rebuilds incrementally on file-watch events. Pick up once an entity forge crosses ~hundreds of files or once agent recall quality becomes the binding constraint.
+- **Petgraph typed-edge extension.** Today entity edges live in the file-backed `EntityIndex` only; the existing document `petgraph` keeps its untyped wikilink edges. Extending edge data with `type: String` + `confidence: f32` lets entity relations participate in the same hop-traversal / centrality queries as wikilinks. Risk: touches every existing `EdgeData` consumer.
+- **`nexus.entityGraph` shell plugin.** Visual node/edge explorer (reuses the existing graph canvas), sidebar entity detail panel, palette command for entity creation. Calls `entity_upsert` for create/edit, the BL-129 dedup-review surface for merge proposals.
 
 ---
 
@@ -587,6 +568,121 @@ BL-074 shipped the CRDT primitives and the in-process ops bus (`com.nexus.editor
 - Disconnect / reconnect handled gracefully (buffered ops replayed on reconnect)
 - `nexus collab serve` and `nexus collab join` CLI verbs documented in `nexus help collab`
 - 10 integration tests: relay message routing, presence broadcast, cursor annotation render, disconnect-reconnect op replay, auth token rejection
+### BL-134: `nexus-ai-runtime` — unified AI/agent event loop
+
+**Source**: Architectural review 2026-05-14 — full design in [ADR 0028](../adr/0028-ai-agent-event-loop.md). Filed 2026-05-14.
+**Effort**: Large. 5-phase migration (~4–6 weeks); Phase 6 (notification router) lands in parallel with Phase 1.
+**Crates**: new `nexus-ai-runtime`; touches `nexus-bootstrap` (registration + cap matrix), `nexus-agent` (`delegate` shim), `nexus-workflow` (optional `async = true` steps), `nexus-ai` (`indexing_daemon` migrates to the shared pool), `nexus-notifications` (becomes a consumer of `AiEvent`).
+**Related**: ADR 0028 (this work), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md) (cap matrix this extends), [ADR 0024](../adr/0024-agent-session-tool-loop.md) (session loop the runtime drives), [BL-135](#bl-135-notification-router-refactor) (Phase 6), [BL-138](#bl-138-default-deny-capability-registration) (pre-req: cap matrix needs default-deny before the runtime's 3 new caps land).
+
+Three independent gaps in the current AI/agent stack — no first-class agent task scheduler, no typed cross-subsystem AI event channel, and no dedicated worker pool — point at the same missing primitive. ADR 0028 promotes the three existing *prototypes* (`BusBridgePolicy::pending_approvals`, the `com.nexus.ai.stream_*` topics, `nexus-ai::indexing_daemon`'s dedicated tokio runtime) into one named subsystem: a new `nexus-ai-runtime` core plugin (`com.nexus.ai.runtime`) that owns the scheduler, the typed `AiEvent` republisher, and a multi-thread tokio worker pool. Preserves all four invariants (file-as-truth, microkernel isolation, IPC over direct calls, capabilities); existing `stream_*` and `round_proposed` topics stay; republisher is additive.
+
+**Definition of done** (each phase ships independently; see ADR 0028 §Migration):
+- **Phase 1** — `nexus-ai-runtime` crate skeleton; `submit` / `get` / `list` / `events` / `pool_stats` IPC; `AgentTaskKind::Session` only; republish existing `com.nexus.ai.*` and `com.nexus.agent.*` as typed `AiEvent`s; shell observability panel reads from `events`; no caller behaviour change.
+- **Phase 2** — `com.nexus.agent::delegate` (handler 24) re-implemented on top of the runtime; `delegate.v1` alias preserves synchronous-await shape (ADR 0021).
+- **Phase 3** — `async = true` workflow step parsing; `notify` / `ai_prompt` / `ai_decision` opt in.
+- **Phase 4** — `nexus-ai::indexing_daemon` migrates to the runtime's pool; its bespoke `tokio::runtime::Builder::new_current_thread()` is removed.
+- **Phase 5** — `cancel` / `pause` / `resume` handlers + `Critical` priority bucket.
+- Three new capabilities land (`ai.runtime.submit` / `.control` / `.observe`) wired through `nexus-bootstrap`'s cap matrix.
+- `crates/nexus-bootstrap/tests/dep_invariants.rs` gains a row asserting CLI / TUI / MCP don't depend on `nexus-ai-runtime` directly.
+- ts-rs / schemars bindings for `AgentTask`, `AgentRun`, `AiEvent`; `scripts/check_ipc_drift.sh` clean.
+
+**Open follow-ups carved off into their own BLs** (separate scope, not gating):
+- Notification router refactor — [BL-135](#bl-135-notification-router-refactor) (Phase 6 of the migration; can land in parallel with Phase 1).
+- Notification Center (persistent inbox + read/unread) — [BL-136](#bl-136-notification-center--persistent-inbox--shell-panel) (sibling ADR; builds on BL-135).
+- Task DAG visualiser, persistence across restart, per-caller quotas — listed in ADR 0028 §Open follow-ups; not BLs yet.
+
+---
+
+### BL-135: Notification router refactor
+
+**Source**: ADR 0028 §"Integration with `nexus-notifications`" + Phase 6. Filed 2026-05-14.
+**Effort**: Medium. Pure refactor of `nexus-notifications`; no new transports.
+**Crates**: `nexus-notifications`, `nexus-bootstrap` (config loading).
+**Related**: [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop), [BL-136](#bl-136-notification-center--persistent-inbox--shell-panel), [ADR 0028](../adr/0028-ai-agent-event-loop.md).
+
+Today every producer hardcodes which channel/transport it targets (the workflow `notify` step picks a channel inline; agent CLI auto-notify picks one; the shell toast subscriber listens to one topic; future `AiEvent` consumers would each pick channels too). This scales poorly once the runtime adds a fourth high-volume source. Pull producer→transport routing out of producers and into a single forge-local config that the notifications plugin reads on `on_start` and reloads via the existing file watcher.
+
+**Definition of done:**
+- New `<forge>/.forge/notifications.toml` schema parsed in `nexus-notifications`:
+  - `[sources.<name>] on = [...]`, `route = [channel, ...]`, `min_severity`, `quiet_hours`
+  - `[channels.<name>]` block for per-channel config (Discord URL, Telegram chat-id, SMTP server) — existing `[notifications.<channel>]` blocks in `config.toml` migrate to here.
+- Built-in router inside `nexus-notifications` subscribes to event sources by topic prefix and dispatches `Notification` records to configured transports.
+- Built-in `AiEvent` subscriber (listens on `com.nexus.ai.runtime.*`) translates typed events into `Notification` records — works even before BL-134 Phase 1 fully lands; if the runtime topic is silent the source is dormant.
+- Existing producers (workflow `notify` step, CLI `--notify-after-secs`, shell toast subscriber) drop their hardcoded channel selection and emit a `Notification` carrying a `source` tag; legacy callers that pass an explicit channel keep working (router treats explicit-channel as an override).
+- Live-reload on config change verified by a unit test.
+- `scripts/check_ipc_drift.sh` clean if the IPC envelope shifts.
+
+**Non-goals (call out, don't do here):**
+- No new transports. Slack / Matrix / ntfy / web-push are deferred until someone asks.
+- No persistent inbox — that's BL-136.
+
+---
+
+### BL-136: Notification Center — persistent inbox + shell panel
+
+**Source**: ADR 0028 §"Integration with `nexus-notifications`" §3 — sibling ADR. Filed 2026-05-14.
+**Effort**: Medium. Builds on BL-135's router.
+**Crates**: `nexus-notifications`, shell plugin under `shell/src/plugins/nexus/notificationsInbox/`.
+**Related**: [BL-135](#bl-135-notification-router-refactor) (pre-req), [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (provides the AI/agent source).
+
+Today `com.nexus.notifications.delivered` is fire-and-forget — once a transport accepts, there is no history, no read/unread state, no "what did I miss while I was away." Add a derived inbox under `<forge>/.forge/notifications/inbox.db` (rebuildable from the live event stream and transport-side history where available) plus a shell panel that queries it via IPC.
+
+**Definition of done:**
+- New ADR (sibling to 0028) covering inbox schema, retention policy, and the read/unread contract.
+- SQLite table at `.forge/notifications/inbox.db` with columns for id, source, severity, title, body, channels-routed-to, ts, read-at, dismissed-at, payload-json. Rebuildable from the runtime's `AiEvent` stream + transport delivery confirmations (`read_at` / `dismissed_at` are user-state, not derivable — preserved across rebuild).
+- New IPC handlers on `com.nexus.notifications`: `inbox_list({ since?, status?, limit? })`, `inbox_mark_read({ id|ids })`, `inbox_dismiss({ id|ids })`, `inbox_stats({})`.
+- Built-in subscriber inside `nexus-notifications` writes one inbox row per `Notification` dispatch — regardless of whether any transport succeeded, so un-routed notifications still land in the inbox.
+- Shell plugin `nexus.notificationsInbox` (default-on, sidebar leaf): unread count badge, filter chips per source, click-to-mark-read, dismiss action, jump-to-source for `AiEvent`-sourced entries (opens the BL-134 observability panel scoped to the originating `task_id`).
+- Retention: configurable cap in `notifications.toml::[inbox]` (default: keep 1000 rows or 30 days, whichever is smaller); rotation runs on `on_start` and on each insert past the cap.
+- Capabilities: `notifications.inbox.read` and `.write` (write covers mark-read / dismiss). Granted to the shell by default; community plugins do not get them.
+- Unit + integration tests pin rebuild semantics: dropping `inbox.db` and replaying the recent event stream reconstructs the same row set (modulo user-state columns).
+
+---
+
+### BL-137: Architectural review (2026-05-14) follow-ups
+
+**Source**: Architectural review 2026-05-14 (summary in ADR 0028's context + companion chat report). Filed 2026-05-14.
+**Effort**: Mixed (sub-items range Small to Medium).
+**Status**: Umbrella entry. The two HIGH-severity items are carved out as standalone BLs ([BL-138](#bl-138-default-deny-capability-registration), [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop)); the remainder are tracked as sub-bullets here until they're picked up.
+
+The review surfaced 12 prioritized items beyond BL-134 / 135 / 136. Two are HIGH severity and own their own BL; the rest sit here:
+
+- **Decompose oversized `core_plugin.rs` files.** `nexus-workflow` (3369 LoC), `nexus-ai` (3237), `nexus-agent` (2641), and `nexus-bootstrap/src/lib.rs` (2347) are single-file monoliths. Pull each `handle_*` into a `handlers/` submodule per crate; keep the `CorePlugin` trait impl thin. Medium effort; mechanical refactor. *Eases BL-134 Phase 1, but Phase 1 can land regardless.*
+- **IPC + audit-log drift detection.** Extend `scripts/check_ipc_drift.sh` with an integration test that boots a runtime and asserts every plugin only emits bus events under its own `type_id` prefix. Catches the failure mode where a plugin republishes someone else's topic. Small effort.
+- **Capability inventory auto-generation.** Today the canonical list in `Capability::ALL` (`crates/nexus-plugin-api/src/capability.rs`) is duplicated by hand in ADR 0002 and ADR 0022. Generate the inventory table at doc-build time; remove hand-maintained copies from ADR text. Small effort.
+- **Tauri command boundary snapshot test.** Snapshot the 23-command set registered by `invoke_handler!` in `shell/src-tauri/src/lib.rs` into a test fixture; assert in CI that any new `#[tauri::command]` is paired with an ADR. Prevents creep against the "shell host stays thin" invariant. Small effort.
+- **Bound `BusBridgePolicy::pending_approvals`.** Today the map is unbounded with no TTL; a stuck shell leaks `oneshot::Sender`s. Cap at 64 entries and prune past `MAX_APPROVAL_TIMEOUT_SECS = 3600`. Subsumed by BL-134 Phase 5 (the queue moves into the runtime), so if BL-134 ships first this collapses. Otherwise: Small effort, directly in `nexus-agent::core_plugin.rs`.
+- **`forge doctor` CLI for index drift.** ADR 0003 says the file watcher rebuilds the SQLite + Tantivy indexes; there's no documented MTTR target and no tool to validate. Add `nexus forge doctor` that walks `.forge/` and reports files-vs-index drift. Medium effort.
+- **Decide WASM commitment.** ADR 0016 is "native vs WASM" but no production WASM plugin exists today; the iframe runtime (ADR 0015) is the actual community-plugin surface. Either commit (ship one real WASM community plugin) or document iframe-only and move WASM to "deferred experiment." Large if committing, trivial if deferring. Low priority — costs are small today, will rise.
+- **Decompose `nexus-bootstrap` plugin registration.** The 2347-line `lib.rs` registers core plugins inline with order-dependent comments; pull each block into `nexus-bootstrap/src/plugins/<name>.rs`. Small effort. *Same family as the `core_plugin.rs` decomposition above.*
+- **Document tokio runtime ownership.** `nexus-ai::indexing_daemon` builds its own runtime; the workflow scheduler does `Handle::try_current()`; the kernel uses `spawn_blocking`. Nobody owns "is the system idle?" Add `docs/architecture/runtime-ownership.md` cataloguing each spawn site. Small effort; immediate doc step before BL-134's structural fix.
+- **Render `KernelMetrics` in MCP + TUI.** BL-093 collects the metrics; the shell health panel renders them; CLI / TUI / MCP do not. Add an MCP tool `nexus_kernel_stats` and a TUI panel reading the same JSON snapshot. Medium effort.
+
+Items above can be promoted to their own BL when picked up. Re-evaluate priorities after BL-134 Phase 1 lands (Phase 1 may collapse or change several of these).
+
+---
+
+### BL-138: Default-deny capability registration
+
+**Source**: Architectural review 2026-05-14 (HIGH severity). Filed 2026-05-14.
+**Effort**: Small.
+**Crates**: `nexus-bootstrap`, `nexus-plugin-api`.
+**Related**: [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (pre-req: runtime adds 3 new caps), [ADR 0002](../adr/0002-hierarchical-capability-strings.md), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md).
+
+The per-handler capability matrix in `nexus-bootstrap/src/lib.rs` is now 30+ hand-maintained `add_cap_requirement(...)` entries spanning ADR 0002 (14 original caps), ADR 0022 (8 per-handler AI caps), and pending ADR 0028 work (3 new `ai.runtime.*` caps). A single missing entry is a silent privilege-escalation bug — the handler dispatches without a cap check.
+
+Introduce a `register_handler_caps!` macro (or typed builder) that pairs every `register_handler` call with an explicit capability binding or an explicit `caps_unrestricted()` opt-out. Assert at bootstrap that every handler in the live registry has a corresponding cap entry; default-deny on any handler that doesn't. Run the assertion in a `dep_invariants`-style integration test so a missed entry breaks CI rather than shipping.
+
+**Definition of done:**
+- `register_handler_caps!` (or equivalent typed builder) in `nexus-plugin-api` or `nexus-bootstrap`; every existing call site migrated.
+- Bootstrap-time assertion: every registered handler has a cap entry (or an explicit no-cap opt-out).
+- New integration test under `crates/nexus-bootstrap/tests/` that boots a runtime and fails if any handler is missing a cap entry.
+- Explicit `caps_unrestricted()` (or named `Capability::None`) opt-out for the genuinely-no-cap handlers (version probes, health checks); each opt-out site carries a one-line `// no-cap: <why>` comment.
+- The 30+ existing entries in `nexus-bootstrap/src/lib.rs` migrate without behaviour change (existing-cap-matrix snapshot test verifies).
+- Doc cross-link in ADR 0002 pointing at the macro as the canonical registration shape.
+
+Pre-req for [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) — the runtime's 3 new caps should land through the new macro, not by extending the hand-maintained matrix.
 
 ---
 
