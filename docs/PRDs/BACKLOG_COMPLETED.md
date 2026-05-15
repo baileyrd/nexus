@@ -8,6 +8,150 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-145: `nexus-acp` server — inbound ACP surface for external clients (Hermes Feature 7) ✅ (2026-05-15)
+
+**Source**: Hermes capability port plan — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md) §"Feature 7 — ACP Adapter". Filed 2026-05-15.
+**Effort**: Medium.
+**Crates**: `nexus-acp` (shared with BL-144 per the open-question resolution: "one crate, two roles"); `nexus-cli` (binary entry-point — `nexus acp serve`).
+**Related**: BL-144 (inverse direction — outbound host); BL-134 (provides the typed `AiEvent` channel a Phase 2 streaming variant would subscribe to).
+
+**Phase 1 shipped 2026-05-15** in the same crate as BL-144. New `AcpServer::new(Arc<KernelPluginContext>)` + `serve(reader, writer)` reads line-delimited JSON-RPC 2.0 requests, dispatches each through `context.ipc_call(...)` against a closed allow-list, writes the response envelope back. Method routing table at `nexus_acp::server::route_method`: `agent/run` → `com.nexus.agent::session_run`, `agent/list` → `session_list`, `agent/get` → `session_get`. Unknown methods → `-32601`; underlying `IpcError` → `-32000` with the kernel error string in `message`.
+
+New `nexus acp serve` CLI verb (under `commands/acp.rs` mirroring `nexus mcp serve`) builds a CLI runtime, wraps the context in `Arc`, and blocks on `serve(tokio::io::stdin(), tokio::io::stdout())` until the parent disconnects. Returns `Ok(())` on graceful EOF; binary entry-point under `Commands::Acp(AcpArgs)`.
+
+Tests: 5-test matrix per the DoD against `tokio::io::duplex` (happy-path `agent/list` round-trip, unknown-method `-32601`, invalid-params kernel error, pipelined requests preserve response order, graceful EOF returns `Ok(())`) plus a 6th routing-table assertion pinning the agent-plugin id so a future rename can't silently break the three documented methods. Fixture uses `tokio::join!` (not `tokio::spawn`) because `KernelPluginContext` isn't `'static`.
+
+**Phase 2 (streaming notifications) deferred** — the BL DoD already gates it on either bus subscription or BL-134's typed `AiEvent` channel.
+
+---
+
+### BL-144: `nexus-acp` host — outbound ACP adapter integration (BL-113 Phase 4) ✅ (2026-05-15)
+
+**Source**: BL-113 Phase 4 — see [ADR 0027](../adr/0027-protocol-host-contribution-model.md) §Phase 4. Filed 2026-05-15.
+**Effort**: Medium.
+**Crates**: new `nexus-acp` core plugin; `nexus-plugins` (`AcpProtocolHostReg` already shipped in BL-113 Phase 0a); `nexus-bootstrap` (new `acp_contribution_wiring` module); `nexus-cli` (lifecycle wiring).
+**Related**: BL-113 Phase 4 (this closes it); BL-145 (inverse direction — inbound ACP server, separate BL).
+
+Shipped 2026-05-15 alongside BL-145 (both halves live in one crate; chose "one crate, two roles" since the JSON-RPC framing is shared). New `nexus-acp` core plugin (transport / client / pool / config / core_plugin / ipc) mirrors `nexus-lsp` layer-for-layer with three deliberate diffs: **(1)** line-delimited JSON-RPC framing instead of LSP's `Content-Length:` prelude — matches the Hermes Feature 7 wire shape and stays debuggable from a terminal; **(2)** no `acp.toml` flat-TOML class — ADR 0027 §Phase 4 lands ACP greenfield under the contribution model, so the registry starts empty and is populated entirely via `register_server`; **(3)** `AcpAdapterSpec` carries a `capabilities: Vec<String>` declarative-tags field surfaced verbatim through `list_agents` (resolution of the ADR 0027 §Phase 4 spec-fields spike).
+
+IPC surface registers under `com.nexus.acp`: `list_agents` (sync), `initialize` / `propose` / `accept` / `reject` / `disconnect` (async), `register_server` / `unregister_server` (BL-113 sync). Agent-pushed notifications fan out as `com.nexus.acp.<method-with-dots>` on the kernel bus. New `nexus-bootstrap::acp_contribution_wiring` + `protocol_host_specs::acp_contribution_to_spec` (mirrors the DAP/LSP/MCP equivalents); `protocol_host_specs::build_acp_contribution_metadata` unconditionally packs the contributing plugin's reverse-DNS id into the opaque `metadata` payload. New `App::wire_acp_contributions{,_for_plugin}` + `unwire_acp_contributions_for_plugin` in `nexus-cli`; the load-time / enable / disable call sites all gained an ACP step alongside the existing DAP / LSP / MCP wiring.
+
+First-party reference plugin shipped at `plugins/first-party-acp-echo/` (manifest-only, no wasm) declares an echo agent via `[[registrations.protocol_hosts.acp]]` with capability tag `["echo"]`; the supporting `echo_agent.py` implements the line-delimited JSON-RPC `initialize` / `propose` / `accept` / `reject` round-trip. The `first_party_acp_echo_plugin_wires_and_surfaces_metadata` bootstrap integration test loads the actual manifest and asserts the contribution surfaces on `list_agents` with the packed metadata.
+
+Tests: 30 unit tests in `nexus-acp` (config / pool / dispatch / transport / server / IPC export bindings) + 4 `protocol_host_specs` tests + 6 `acp_contribution_wiring` integration tests against `MinimalForge` + 1 new `dep_invariants` row pinning the no-direct-dep posture on `nexus-agent` / `nexus-ai` / `nexus-storage`. IPC drift script extended; 8 new ts-rs bindings + 8 new JSON schemas committed.
+
+**Deferred:** Phase 3 shell-side agent picker (defer until at least one community ACP plugin exists). Hardening at the kernel-handler verb level (caller-identity threading for `register_server` authorisation) inherits the BL-113 follow-up posture.
+
+---
+
+### BL-138: Default-deny capability registration ✅ (2026-05-15)
+
+**Source**: Architectural review 2026-05-14 (HIGH severity). Filed 2026-05-14.
+**Effort**: Small.
+**Crates**: `nexus-bootstrap`, `nexus-plugin-api`, `nexus-plugins`.
+**Related**: BL-134 (pre-req: runtime adds 3 new caps), [ADR 0002](../adr/0002-hierarchical-capability-strings.md), [ADR 0022](../adr/0022-per-handler-ai-capabilities.md).
+
+Phase 1 shipped the TOML-driven cap matrix at `crates/nexus-bootstrap/cap_matrix.toml` + the 17 historical `add_cap_requirement(…)` entries; Phase 2 classified every remaining IPC handler (245 bare commands across 19 plugins) as `unrestricted = "<why>"` and dropped the `#[ignore]` on `every_ipc_handler_is_classified`. The completeness test now runs unconditionally — a new IPC handler that ships without a matrix row breaks CI. ADR 0002 carries the canonical cross-link (2026-05-15 addendum). Args-aware policies (ADR 0022 Phase 2) live in `crates/nexus-bootstrap/src/cap_policies.rs` keyed by the matrix's `policy = "<name>"` field.
+
+**AUDIT follow-ups (not gating, surfaced by the migration)** — Phase 2 preserved pre-BL-138 behaviour; rows tagged `# AUDIT:` in the matrix are candidates for real cap elevation in dedicated review PRs. Notable: `com.nexus.security::set_secret` / `::delete_secret` / `::clear_audit_log` (no cap today), `com.nexus.linkpreview::fetch` and `com.nexus.git::push` / `::push_tags` (outbound HTTP, candidate for `net.http`), `com.nexus.terminal::send_input` / `::send_raw_input` / `::run_saved` / `::adhoc_promote` (live PTY writes, candidate for `process.spawn`), `com.nexus.agent::delegate` / `::plan` and `com.nexus.ai::resolve_credentials` (currently ipc.call-only, plausible candidates for `ai.chat` / in-tree-only markers).
+
+---
+
+### BL-137: Architectural review (2026-05-14) follow-ups ✅ (2026-05-15 umbrella close)
+
+**Source**: Architectural review 2026-05-14 (summary in ADR 0028's context + companion chat report). Filed 2026-05-14.
+**Effort**: Mixed (sub-items range Small to Medium).
+**Status**: Umbrella closed across three passes. The two HIGH-severity items were carved out as standalone BLs ([BL-138](#bl-138-default-deny-capability-registration--2026-05-15) and BL-134); the remainder shipped under this umbrella.
+
+**First pass (2026-05-15)** — five sub-items closed:
+- **IPC topic-prefix invariant.** New static-source scan at `crates/nexus-bootstrap/tests/ipc_topic_prefix_invariant.rs` walks every `crates/nexus-*/src/**/*.rs` + `crates/nexus-bootstrap/src/**/*.rs`, extracts each `.publish(LITERAL, …)` call, and asserts the topic literal lies in the owning plugin's namespace OR is one of the kernel-shared topics. Dynamic (variable / `format!`) topics are reported in a diagnostic block but not failed. Wired into `scripts/check_ipc_drift.sh`. An OWNERS sanity test cross-checks the table against the live `PLUGIN_ID` constants per crate.
+- **Capability inventory auto-generation.** New `crates/nexus-security/tests/capability_inventory_emit.rs` materialises `docs/generated/capabilities.md` from `Capability::ALL` + `nexus_security::risk_level`; `check_ipc_drift.sh` now diffs the `docs/generated/` tree alongside the existing TS / JSON-Schema trees. ADR 0002 carries a fresh addendum pointing at the generated file as the live mirror; the original 2026-04-16 table is preserved per the immutable-body convention.
+- **Tauri command boundary snapshot test.** New `shell/src-tauri/tests/tauri_command_boundary.rs` reads `shell/src-tauri/src/lib.rs`, extracts the body of the `invoke_handler!` block, and pins the 24-command surface against a hard-coded `EXPECTED` list. Failure message points at ADR 0011 / "shell host stays thin" so a future contributor knows to route through `kernel_invoke` → `ipc_call` rather than adding a new bespoke command.
+- **Decompose `nexus-bootstrap` plugin registration.** `crates/nexus-bootstrap/src/lib.rs` was 2463 lines; now 867. The 19 plugin-registration blocks moved to one file each under `crates/nexus-bootstrap/src/plugins/<name>.rs`, with shared helpers (`LifecycleFlags`, `core_manifest{,_with_ipc}`, `with_v1_aliases`, `RegisterCoreResultExt`) and a `register_all` orchestrator in `plugins/mod.rs`. Registration order preserved (security → storage → … → terminal).
+- **Document tokio runtime ownership.** New `docs/architecture/runtime-ownership.md` catalogues every frontend-owned runtime (CLI / TUI / MCP / Tauri shell), subsystem-owned exception (`nexus-ai-runtime` worker pool), ambient-runtime consumers (`Handle::try_current()` sites), `spawn_blocking` sites, and direct `tokio::spawn` sites. Linked from `docs/README.md`.
+
+**Second pass (2026-05-15)** — `core_plugin.rs` decompositions for the three crate-side monoliths:
+- `crates/nexus-agent/src/core_plugin.rs`: 2784 → 679 lines. Handler bodies moved to `crates/nexus-agent/src/handlers/{plan,history,session,round,custom,memory,delegate,search_transcripts,list_tools}.rs` plus `shared.rs`. 154 unit tests pass.
+- `crates/nexus-workflow/src/core_plugin.rs`: 3427 → 2115 lines. Handler bodies moved to `crates/nexus-workflow/src/handlers/{list,get,reload,validate,templates,run_history,next_fire,digest,run}.rs` plus `shared.rs`. Plugin-lifetime wiring (cron / file_event / git_event / mcp_event / webhook / digest schedulers) stayed inline. 189 unit tests pass.
+- `crates/nexus-ai/src/core_plugin.rs`: 4001 → 1645 lines (~half of which is in-file `#[cfg(test)]` modules). Handler bodies moved to `crates/nexus-ai/src/handlers/{config,ask,stream_chat,stream_ask,propose,enrich,entity,index,search,session,activity}.rs` plus `shared.rs`. All `com.nexus.ai.stream_*` topic literals preserved (IPC topic-prefix invariant test still passes). 249 unit tests pass.
+
+**Third pass (2026-05-15, umbrella close)** — remaining four sub-items shipped:
+- **`BusBridgePolicy::pending_approvals` bounded.** `crates/nexus-agent/src/handlers/shared.rs` gained `PENDING_APPROVALS_CAP = 64` + a `PendingEntry { tx, inserted_at }` wrapper. New `insert_pending_bounded` prunes entries older than `MAX_APPROVAL_TIMEOUT_SECS` then evicts the oldest until the cap is met. Evictions log at `warn`. 3 new unit tests pin under-cap / over-cap / aged-out behaviour. The leaked-`oneshot::Sender` failure mode is closed regardless of whether BL-134 Phase 5 lands.
+- **WASM commitment.** [ADR 0030](../adr/0030-defer-wasm-community-runtime.md) — defer the WASM community runtime; the iframe sandbox is the canonical community surface going forward. `WasmSandbox` stays in tree as scaffolding so the door isn't closed.
+- **`forge doctor` CLI.** New `nexus forge doctor [--fix]` subcommand walks the forge for `.md` files, joins against `com.nexus.storage::query_files`, and reports `missing` / `stale` / `mtime_drift` triples. JSON and text output supported. `--fix` invokes `rebuild_index`. Implementation in `crates/nexus-cli/src/commands/forge.rs::{doctor, walk_markdown_files}`.
+- **`KernelMetrics` in MCP + TUI.** MCP gains `nexus_kernel_stats` (no params; returns the `metrics_snapshot` blob verbatim) wired into the existing `tool_router` via a new `security_call` helper. TUI gains a Shift+K toggleable kernel-stats overlay (`crates/nexus-tui/src/ui/kernel_stats.rs`) that renders the same snapshot as four sections (gauge + dropped sentinel, IPC top-10, event-bus top-10, capability checks top-10). Both consume `com.nexus.security::metrics_snapshot`, the same handler the shell health panel already calls.
+
+---
+
+### BL-129: Dream Cycle — knowledge refinement engine (Thoth port) ✅ (2026-05-15)
+
+**Source**: Thoth capability assessment. Filed 2026-05-14.
+**Effort**: Medium. Depended on BL-128 (entity graph).
+**Crates**: `nexus-workflow`, `nexus-storage`, `nexus-ai`.
+
+A scheduled background pass that keeps the entity knowledge graph (BL-128) clean and enriched without manual curation. Four phases: duplicate detection (auto-merge above `merge_threshold`, queue for review above `review_threshold`), description enrichment (RAG-augmented LLM expansion when description < `min_description_chars`), confidence decay (multiplicative `decay_factor`, clamped at `decay_floor`), relationship inference (LLM proposes new typed relations against `entity_recall` candidates, written as `confidence: 0.5` drafts).
+
+**Thin slice landed 2026-05-15** — `dedup` + `decay` phases plus the CLI + config block. `entity_find_duplicates` was already shipped by BL-128 close; the thin slice added the `com.nexus.storage::entity_decay_relations` handler (multiplicative `decay_factor` clamped at `decay_floor`, idempotent across cycles, atomic temp-fsync-rename per file, free-form body preserved), the `[dream_cycle]` block in `nexus-formats::AppConfig` (defaults: disabled, `0 2 * * *`, 0.97 / 0.92 / 0.95 / 0.10), and `nexus graph dream-cycle run [--phase dedup|decay] [--dry-run] [--decay-factor F] [--decay-floor F] [--review-threshold T]`.
+
+**Close-out landed 2026-05-15** — the remaining three phases plus the scheduler. `com.nexus.storage::entity_merge` merges `drop` into `keep` (union aliases, longer description, max-confidence per `(target, kind)` relation, drop's id appended as an alias so dangling references still resolve, atomic rewrite + drop-file removal). The CLI's `dedup` phase now auto-merges pairs at or above `--merge-threshold` (deterministic across pair order: a single entity can't be merged into two different survivors in one cycle) and surfaces the rest above `--review-threshold` for the user. Two new AI handlers — `com.nexus.ai::enrich_entity` and `com.nexus.ai::infer_entity_relations` (LLM proposes new typed relations against `entity_recall` candidates, JSON-fenced reply parsed defensively, written as `confidence: 0.5` drafts; emits `com.nexus.dream_cycle.proposals` kernel event when any proposals land). The TUI bootstrap spawns a `DreamCycleScheduler` thread that polls the config every 60 s when disabled and uses `nexus_workflow::CronSchedule` to compute the next fire time when enabled. CLI run path stays available for on-demand invocation; `--phase` now accepts `dedup|decay|enrich|infer`.
+
+**Verification 2026-05-15** — 6 of 7 DoD bullets shipped; the inference-proposals bullet's backend half landed (`com.nexus.dream_cycle.proposals` kernel event published, drafts written at `confidence: 0.5`) but no shell consumer exists yet. Filed as a follow-up in BACKLOG.md.
+
+---
+
+### BL-113: Protocol-host contribution model for LSP / DAP / MCP / ACP ✅ (2026-05-15 umbrella close)
+
+**Source**: BL-081 review (2026-05-13) — full design in [ADR 0027](../adr/0027-protocol-host-contribution-model.md).
+**Effort**: Large.
+**Crates**: `nexus-lsp`, `nexus-dap`, `nexus-mcp`, `nexus-acp`, `nexus-plugins` (contribution loader), `nexus-bootstrap`.
+**Related**: BL-081 (merged alongside on PR #163); BL-144 / BL-145 (Phase 4 — ACP host + inbound server, shipped 2026-05-15).
+
+Lifts adapter declarations from per-host flat TOML to a shared plugin contribution point (`contributes.protocolHosts.{lsp,dap,mcp,acp}`). Host crates stay core and protocol-only; plugins contribute adapter definitions through `[[registrations.protocol_hosts.<host>]]`. Flat TOML stays as legacy fallback for the three existing hosts during the transition; ACP lands greenfield (no `acp.toml`).
+
+**Phase 0a shipped 2026-05-14.** ADR 0027 accepted (open questions pinned to decisions). New `[[registrations.protocol_hosts.{lsp,dap,mcp,acp}]]` manifest section: public types (`ProtocolHostsContribution`, `LspProtocolHostReg`, `DapProtocolHostReg`, `McpProtocolHostReg`, `AcpProtocolHostReg`) live in `nexus-plugins::manifest`; new `nexus-plugins::contributions` module exposes `ContributedAdapter<T>` + `collect_contributions(&[&PluginManifest])`. 10 unit tests across parsing + aggregation.
+
+**Phases 2a + 3a shipped 2026-05-14.** Host-side merge primitives on `main`. `LspHostConfig::merge_contributed(Vec<(LspServerSpec, plugin_id)>)` and `McpHostConfig::merge_contributed(Vec<(name, McpServerSpec, plugin_id)>)` accept contributed adapter specs and merge with **TOML-wins** precedence. Both return a typed skip report (`LspMergeSkip` / `McpMergeSkip`) carrying `(name, plugin_id, reason)`. MCP factors per-spec validation out of `validate` into a shared `validate_spec` rule so contributions go through the same transport-aware checks as TOML entries. New `nexus-bootstrap::protocol_host_specs` is the only place in tree that maps `ContributedAdapter<*ProtocolHostReg>` → host spec; preserves contribution order; MCP transport string (`http` / `ws|websocket` / unknown → `stdio`) parsed defensively. 8 + 4 unit tests.
+
+**Phases 1a–1e shipped 2026-05-15 — on `main` via PR #163.** The DAP track end-to-end: merge primitives → runtime register/unregister IPC → bootstrap-side wiring helper → CLI integration on community-plugin load + per-plugin enable/disable.
+
+- Phase 1a — DAP merge primitives mirroring 2a/3a. `DapHostConfig::merge_contributed` with `DapMergeSkipReason::{TomlOverride, InvalidName, InvalidCommand}`, TOML-wins, preserves input order. New `dap_contribution_to_spec` / `dap_contributions_to_specs` in `nexus-bootstrap::protocol_host_specs`; shell-only fields (`display_name`, `root_markers`, `launch_config_schema`, `variable_renderers`) dropped per "host stays protocol-only". 6 unit tests.
+- Phase 1b — host-side runtime register/unregister. New `DapHostConfig.contributed_by: HashMap<name, plugin_id>` provenance tracking; new `register_contributed` / `unregister_contributed` returning `Result<DapAdapterSpec, UnregisterError::{NotFound, TomlEntry, NotOwnedByPlugin{actual_owner}}>`. New IPC handlers 20 (`register_adapter`) + 21 (`unregister_adapter`), strict-shape wire types, 4 new ts-rs bindings + 4 new JSON schemas. `DapCorePlugin.config` switched from `Option<Arc<DapHostConfig>>` to `Arc<RwLock<DapHostConfig>>`; async dispatch takes a per-future snapshot. 11 new tests.
+- Phase 1c — bootstrap-side wiring. New `nexus-bootstrap::dap_contribution_wiring::wire_dap_contributions` / `unwire_dap_contributions_for_plugin` issue IPC once per contribution. Best-effort: per-adapter outcomes don't short-circuit. `DapWireStatus` maps every host reply status plus `DispatchError` / `UnexpectedReply`. 4 module unit tests + 5 integration tests against `MinimalForge`.
+- Phase 1d — CLI integration at load time. New `App::wire_dap_contributions()` in `nexus-cli` handles the dual-borrow choreography. Called from `dispatch_external` after `plugins.load_all()`.
+- Phase 1e — runtime enable/disable hooks. New `App::wire_dap_contributions_for_plugin(plugin_id)` + `unwire_dap_contributions_for_plugin(plugin_id)`. The `nexus plugin enable / disable` CLI commands call them at the lifecycle boundary. Shared `log_dap_wire_outcomes(result, verb)` helper.
+
+**Phases 2b + 3b shipped 2026-05-15 — on `main` via PR #163.** The LSP and MCP tracks mirror Phase 1 layer-for-layer.
+
+- Phase 2b — LSP runtime register/unregister. New `LspHostConfig.contributed_by`; new `register_contributed` / `unregister_contributed`. New IPC handlers 13 + 14 on `com.nexus.lsp`, 4 new ts-rs bindings + 4 new JSON schemas. `LspCorePlugin.config` → `Arc<RwLock<LspHostConfig>>`. New bootstrap helper `lsp_contribution_wiring`. 5 LSP module tests + 5 bootstrap integration tests.
+- Phase 3b — MCP runtime register/unregister. Same shape, adapted for MCP's `BTreeMap<name, McpServerSpec>` keying and per-transport validator (stdio needs `command`, http/websocket need `url`). New IPC handlers 11 + 12 on `com.nexus.mcp.host`; register reply carries `reason: Option<String>` because MCP's per-transport validator emits a free-form message. `McpHostPlugin.config` → `Arc<RwLock<McpHostConfig>>`. New bootstrap helper `mcp_contribution_wiring` with `Invalid(String)` variant. 5 MCP module tests + 5 bootstrap integration tests.
+
+CLI integration shared across all three protocols. `App::wire_{lsp,mcp}_contributions()` / `_for_plugin()` / `unwire_{lsp,mcp}_contributions_for_plugin()` mirror DAP. `dispatch_external` wires all three after `plugins.load_all()`; `nexus plugin enable / disable` wires/unwires per-plugin contributions in the same lifecycle order (wire AFTER enable, unwire BEFORE disable). Three log-outcome helpers in `nexus-cli::commands::plugin` emit `tracing::info` on `Ok` and `tracing::warn` otherwise; wiring failures don't block user-facing operations.
+
+Bootstrap-side handler-id alias registration extended: `com.nexus.lsp` exports `execute_command` + the two BL-113 verbs; `com.nexus.mcp.host` exports `register_tool` / `unregister_tool` / `list_dynamic_tools` + the two BL-113 verbs.
+
+**Phase 4 closed** — greenfield ACP host shipped as BL-144 (outbound) and BL-145 (inbound) on 2026-05-15.
+
+**Capability surface for `register_adapter` resolved**: no new capability at the verb level; the contribution path is the manifest-declared shape and the bootstrap wiring helper is the only intended caller. Runtime usage capabilities (`process.spawn`, `net.connect`) ride on the contributing plugin's existing grants and are checked at the `launch` / `connect` boundary. See ADR 0027 §Open Question #3. Hard enforcement at the verb level would need kernel-side caller-identity threading; filed as a hardening follow-up in BACKLOG.md.
+
+---
+
+### BL-081: DAP debugger integration ✅ (2026-05-15)
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md).
+**Effort**: Large (4–6 weeks).
+**Crates**: new `nexus-dap`, new `shell/src/plugins/nexus/debugger/`.
+**Related**: BL-076 (nexus-lsp — shipped); BL-113 (protocol-host contribution model — merged alongside via PR #163).
+
+Merged to `main` 2026-05-15 via PR #163 (merge commit `fec1ce52`) after BL-113 Phases 1–3 landed alongside. The first-cut implementation (nexus-dap host crate, 19-handler IPC surface, shell debugger panel, Python mock e2e test, 46 Rust + 17 shell tests, green workspace) was originally held on `bl-081-dap-debugger` while BL-113's contribution model was decided; the branch carried BL-081 + BL-113 Phases 1a–1e (DAP) + 2b/3b (LSP/MCP) and shipped as one merge once Phase 0a / 2a / 3a were already on main.
+
+**CM6 breakpoint gutter shipped 2026-05-15** (commit `75063bcd`). New `shell/src/plugins/nexus/editor/cm/breakpointGutter.ts` ships a CM6 `gutter()` extension wired into the editor's code-mode bundle next to the BL-079 git gutter / BL-077 LSP client. Click toggles route through `useDebuggerStore.toggleBreakpoint(api, relpath, line)` — the store records the breakpoint locally and dispatches `set_breakpoints` to the active adapter (no-op when no session is running; the next launch replays cached entries pre-`configurationDone`). The gutter subscribes to the Zustand store via a `{ getSnapshot, subscribe }` adapter so any source of mutation keeps every open view's gutter in sync. Pure factors `linesForPath` + `lineSetsEqual` short-circuit unchanged sets so the editor's transaction stream stays quiet on no-op store mutations. 13 new tests; shell suite stays green at 1438/1439 (one pre-existing skip).
+
+**Live smoke against real `debugpy` shipped 2026-05-15** (commit `9c48d083`). New `crates/nexus-dap/tests/end_to_end.rs::live_smoke_debugpy_initialize_handshake` spawns Python's upstream `debugpy.adapter` (the same DAP server VS Code uses), completes `initialize`, asserts capabilities (`supports_configuration_done` + `supports_function_breakpoints`), and disconnects cleanly. Honours `$NEXUS_DAP_LIVE_DEBUGPY_PYTHON`; falls back to probing `python3` on `$PATH`; skips silently otherwise. Scope intentionally narrow (handshake + caps + clean exit) since `launch`/breakpoints/`continue` need a target script + deterministic stop semantics the mock already covers exhaustively. `codelldb` / `js-debug` / `delve` smoke remains an operator step.
+
+**First-party DAP reference plugin shipped 2026-05-15** (commit `92e2af69`). New `plugins/first-party-dap-python/` (manifest-only, no wasm) declares debugpy as a DAP adapter via `[[registrations.protocol_hosts.dap]]` with a complete `launch.schema.json` JSON Schema (program / args / cwd / stopOnEntry / justMyCode fields). `DapAdapterSpec` and the `register_adapter` / `list_adapters` wire types gained an opaque `metadata: Option<JsonValue>` field; `nexus-bootstrap::dap_contribution_to_spec` packs the manifest's shell-only fields (`display_name`, `launch_config_schema`, `root_markers`, `variable_renderers`) into `metadata` at contribution-wire time. `launch_config_schema` rides as a relative path string (not inline content) so the conversion stays a pure manifest-transform. 4 new tests. The shell-side launch-form renderer that consumes `metadata.launch_config_schema` is filed as a follow-up in BACKLOG.md.
+
+---
+
 ### Spike triple-shot ✅ (2026-05-13)
 
 Three small spikes filed during the BL-1xx perf sweep, all closed in one pass:
