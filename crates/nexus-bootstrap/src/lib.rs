@@ -50,6 +50,12 @@ pub mod terminal;
 /// plugin-lifecycle callback shape is settled by Phase 1.
 pub mod protocol_host_specs;
 
+/// BL-113 Phase 1c — bootstrap-side wiring that issues
+/// `com.nexus.dap::register_adapter` IPC calls for each DAP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod dap_contribution_wiring;
+
 /// Render a markdown note to a standalone HTML string.
 ///
 /// Re-exported from `nexus-formats` (pure format library, no `SQLite`).
@@ -1609,6 +1615,15 @@ fn register_core_plugins(
                     ("scopes", nexus_dap::core_plugin::HANDLER_SCOPES),
                     ("variables", nexus_dap::core_plugin::HANDLER_VARIABLES),
                     ("evaluate", nexus_dap::core_plugin::HANDLER_EVALUATE),
+                    // BL-113 Phase 1c — plugin contribution lifecycle.
+                    (
+                        "register_adapter",
+                        nexus_dap::core_plugin::HANDLER_REGISTER_ADAPTER,
+                    ),
+                    (
+                        "unregister_adapter",
+                        nexus_dap::core_plugin::HANDLER_UNREGISTER_ADAPTER,
+                    ),
                 ]),
             ),
             forge_root,
