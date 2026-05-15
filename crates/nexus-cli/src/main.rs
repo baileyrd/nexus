@@ -175,6 +175,18 @@ enum ForgeCommand {
     Status,
     /// Rebuild the index from files on disk
     Reindex,
+    /// Walk the forge and report files-vs-index drift (BL-137).
+    ///
+    /// Read-only by default: prints files on disk that the index
+    /// doesn't know about, indexed files that have been deleted from
+    /// disk, and entries where the on-disk `mtime` disagrees with the
+    /// indexed `modified_at`. Pass `--fix` to invoke `rebuild_index`
+    /// when drift is detected.
+    Doctor {
+        /// After reporting, rebuild the index if any drift was found.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Import another forge into this one (BL-083). Walks the
     /// source, hashes every file, classifies as copy / skip / conflict,
     /// then either reports the plan (`--dry-run`) or applies it.
@@ -1682,6 +1694,7 @@ fn main() {
             }
             ForgeCommand::Status => commands::forge::status(&mut app),
             ForgeCommand::Reindex => commands::forge::reindex(&mut app),
+            ForgeCommand::Doctor { fix } => commands::forge::doctor(&mut app, fix),
             ForgeCommand::Import { source, dry_run, on_conflict } => {
                 commands::forge::import(&mut app, &source, dry_run, &on_conflict)
             }

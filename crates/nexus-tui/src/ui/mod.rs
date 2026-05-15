@@ -11,6 +11,7 @@ use crate::app::{Mode, TuiApp};
 mod ai;
 mod backlinks;
 mod file_tree;
+mod kernel_stats;
 mod status_bar;
 mod tasks;
 mod terminal;
@@ -80,6 +81,13 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
     // Search overlay rendered on top of everything.
     if app.mode == Mode::Search {
         render_search_overlay(frame, app);
+    }
+
+    // BL-137 — kernel-stats overlay layered above the search popup
+    // so the close keystroke (Shift+K) always resolves before the
+    // user toggles modes underneath.
+    if app.kernel_stats.visible {
+        kernel_stats::render(frame, app, frame.area());
     }
 }
 

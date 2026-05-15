@@ -594,10 +594,11 @@ mod tests {
         let pending: Arc<PendingApprovals> =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
-        pending
-            .lock()
-            .unwrap()
-            .insert("sess-abc".to_string(), tx);
+        crate::handlers::shared::insert_pending_bounded(
+            &mut pending.lock().unwrap(),
+            "sess-abc".to_string(),
+            tx,
+        );
 
         let args = serde_json::json!({ "session_id": "sess-abc", "kind": "approve_all" });
         let reply = handle_round_decide(Arc::clone(&pending), &args)
@@ -630,10 +631,11 @@ mod tests {
         let pending: Arc<PendingApprovals> =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
-        pending
-            .lock()
-            .unwrap()
-            .insert("sess-1".to_string(), tx);
+        crate::handlers::shared::insert_pending_bounded(
+            &mut pending.lock().unwrap(),
+            "sess-1".to_string(),
+            tx,
+        );
 
         let args = serde_json::json!({
             "session_id": "sess-1",
@@ -663,10 +665,11 @@ mod tests {
         let pending: Arc<PendingApprovals> =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
-        pending
-            .lock()
-            .unwrap()
-            .insert("sess-2".to_string(), tx);
+        crate::handlers::shared::insert_pending_bounded(
+            &mut pending.lock().unwrap(),
+            "sess-2".to_string(),
+            tx,
+        );
         drop(rx);
 
         let args = serde_json::json!({ "session_id": "sess-2", "kind": "approve_all" });

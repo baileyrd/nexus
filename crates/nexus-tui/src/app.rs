@@ -350,6 +350,43 @@ impl Default for BacklinksState {
     }
 }
 
+// ── KernelStatsState ─────────────────────────────────────────────────────────
+
+/// BL-137 — state for the kernel-stats overlay (toggled with Shift+K).
+/// Reads `com.nexus.security::metrics_snapshot` on each open so the
+/// view is a fresh point-in-time capture rather than a streaming
+/// dashboard. The raw JSON value is cached in `snapshot` to keep
+/// `ui::kernel_stats::render` allocation-free.
+pub struct KernelStatsState {
+    /// Whether the overlay is currently visible.
+    pub visible: bool,
+    /// Latest snapshot fetched from
+    /// `com.nexus.security::metrics_snapshot`. `None` until the first
+    /// successful fetch, or after an error (with the error in
+    /// `last_error`).
+    pub snapshot: Option<serde_json::Value>,
+    /// Error message from the most recent fetch attempt, if any.
+    pub last_error: Option<String>,
+}
+
+impl KernelStatsState {
+    /// Create a fresh, hidden state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            snapshot: None,
+            last_error: None,
+        }
+    }
+}
+
+impl Default for KernelStatsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TaskViewState ────────────────────────────────────────────────────────────
 
 /// A single task entry for display in the task list view.
@@ -667,6 +704,8 @@ pub struct TuiApp {
     pub terminal: TerminalPanelState,
     /// AIG-07 — AI chat panel state.
     pub ai: AiPanelState,
+    /// BL-137 — kernel-stats overlay state.
+    pub kernel_stats: KernelStatsState,
     /// Cached status bar statistics.
     pub status_info: StatusInfo,
     /// Nexus runtime providing the kernel plugin context used for all storage
@@ -734,6 +773,7 @@ impl TuiApp {
             task_view: TaskViewState::new(),
             terminal: TerminalPanelState::new(),
             ai: AiPanelState::new(),
+            kernel_stats: KernelStatsState::new(),
             status_info: StatusInfo::new(),
             runtime,
             rt,
@@ -903,6 +943,35 @@ impl TuiApp {
         match ipc::backlinks(&self.runtime, &self.rt, &path) {
             Ok(results) => self.backlinks.load(results),
             Err(_) => self.backlinks.load(Vec::new()),
+        }
+    }
+
+    /// BL-137 — toggle the kernel-stats overlay. On opening, fetches
+    /// a fresh `com.nexus.security::metrics_snapshot` so the panel
+    /// shows a current point-in-time capture rather than the previous
+    /// session's snapshot.
+    pub fn toggle_kernel_stats(&mut self) {
+        self.kernel_stats.visible = !self.kernel_stats.visible;
+        if !self.kernel_stats.visible {
+            return;
+        }
+        use std::time::Duration;
+        use nexus_kernel::PluginContext;
+        let result = self.rt.block_on(self.runtime.context.ipc_call(
+            "com.nexus.security",
+            "metrics_snapshot",
+            serde_json::json!({}),
+            Duration::from_secs(5),
+        ));
+        match result {
+            Ok(value) => {
+                self.kernel_stats.snapshot = if value.is_null() { None } else { Some(value) };
+                self.kernel_stats.last_error = None;
+            }
+            Err(e) => {
+                self.kernel_stats.snapshot = None;
+                self.kernel_stats.last_error = Some(e.to_string());
+            }
         }
     }
 

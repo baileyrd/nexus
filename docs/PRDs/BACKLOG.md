@@ -637,6 +637,14 @@ Today `com.nexus.notifications.delivered` is fire-and-forget — once a transpor
 **Effort**: Mixed (sub-items range Small to Medium).
 **Status**: Umbrella entry. The two HIGH-severity items are carved out as standalone BLs ([BL-138](#bl-138-default-deny-capability-registration), [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop)); the remainder are tracked as sub-bullets here until they're picked up.
 
+> **Status (2026-05-15, third pass — umbrella closed)** — every remaining sub-item shipped:
+> - ✅ **`BusBridgePolicy::pending_approvals` bounded.** `crates/nexus-agent/src/handlers/shared.rs` gained `PENDING_APPROVALS_CAP = 64` + a `PendingEntry { tx, inserted_at }` wrapper. New `insert_pending_bounded` prunes entries older than `MAX_APPROVAL_TIMEOUT_SECS` then evicts the oldest until the cap is met. Evictions log at `warn` so a stuck shell is observable. 3 new unit tests pin under-cap / over-cap / aged-out behaviour. The leaked-`oneshot::Sender` failure mode the architecture review flagged is closed regardless of whether BL-134 Phase 5 lands.
+> - ✅ **WASM commitment.** [ADR 0030](../adr/0030-defer-wasm-community-runtime.md) — defer the WASM community runtime; the iframe sandbox is the canonical community surface going forward. ADR 0030 partially supersedes the WASM half of ADR 0016. `WasmSandbox` stays in tree as scaffolding so the door isn't closed, but no new feature work is gated on WASM-side parity.
+> - ✅ **`forge doctor` CLI.** New `nexus forge doctor [--fix]` subcommand walks the forge for `.md` files, joins against `com.nexus.storage::query_files`, and reports `missing` / `stale` / `mtime_drift` triples. JSON and text output supported. `--fix` invokes `rebuild_index` when drift is detected. Implementation in `crates/nexus-cli/src/commands/forge.rs::{doctor, walk_markdown_files}`.
+> - ✅ **`KernelMetrics` in MCP + TUI.** MCP gains `nexus_kernel_stats` (no params; returns the `metrics_snapshot` blob verbatim) wired into the existing `tool_router` via a new `security_call` helper. TUI gains a Shift+K toggleable kernel-stats overlay (`crates/nexus-tui/src/ui/kernel_stats.rs`) that renders the same snapshot as four sections (gauge + dropped sentinel, IPC top-10, event-bus top-10, capability checks top-10). Both consume `com.nexus.security::metrics_snapshot`, the same handler the shell health panel already calls.
+>
+> BL-137 umbrella is closed.
+
 > **Status (2026-05-15, second pass)** — `core_plugin.rs` decompositions for the three crate-side monoliths landed:
 > - `crates/nexus-agent/src/core_plugin.rs`: 2784 → 679 lines. Handler bodies moved to `crates/nexus-agent/src/handlers/{plan,history,session,round,custom,memory,delegate,search_transcripts,list_tools}.rs` plus `shared.rs` (~780 lines for bus-bridge policy, kernel-tool bridge, archetype resolver, error converters). 154 unit tests pass.
 > - `crates/nexus-workflow/src/core_plugin.rs`: 3427 → 2115 lines. Handler bodies moved to `crates/nexus-workflow/src/handlers/{list,get,reload,validate,templates,run_history,next_fire,digest,run}.rs` plus `shared.rs`. The `run.rs` module is ~955 lines because the action-dispatcher + step-parsers (terminal / notify) cluster naturally. Plugin-lifetime wiring (cron / file_event / git_event / mcp_event / webhook / digest schedulers + their spec types) stayed inline. 189 unit tests pass.
@@ -657,12 +665,12 @@ The review surfaced 12 prioritized items beyond BL-134 / 135 / 136. Two are HIGH
 - ✅ **IPC + audit-log drift detection.** *Closed 2026-05-15 — see status note above.*
 - ✅ **Capability inventory auto-generation.** *Closed 2026-05-15 — see status note above.*
 - ✅ **Tauri command boundary snapshot test.** *Closed 2026-05-15 — see status note above.*
-- **Bound `BusBridgePolicy::pending_approvals`.** Today the map is unbounded with no TTL; a stuck shell leaks `oneshot::Sender`s. Cap at 64 entries and prune past `MAX_APPROVAL_TIMEOUT_SECS = 3600`. Subsumed by BL-134 Phase 5 (the queue moves into the runtime), so if BL-134 ships first this collapses. Otherwise: Small effort, directly in `nexus-agent::core_plugin.rs`.
-- **`forge doctor` CLI for index drift.** ADR 0003 says the file watcher rebuilds the SQLite + Tantivy indexes; there's no documented MTTR target and no tool to validate. Add `nexus forge doctor` that walks `.forge/` and reports files-vs-index drift. Medium effort.
-- **Decide WASM commitment.** ADR 0016 is "native vs WASM" but no production WASM plugin exists today; the iframe runtime (ADR 0015) is the actual community-plugin surface. Either commit (ship one real WASM community plugin) or document iframe-only and move WASM to "deferred experiment." Large if committing, trivial if deferring. Low priority — costs are small today, will rise.
+- ✅ **Bound `BusBridgePolicy::pending_approvals`.** *Closed 2026-05-15 — see status note above.*
+- ✅ **`forge doctor` CLI for index drift.** *Closed 2026-05-15 — see status note above.*
+- ✅ **Decide WASM commitment.** *Closed 2026-05-15 — see [ADR 0030](../adr/0030-defer-wasm-community-runtime.md). Iframe is the canonical community runtime; WASM moves to deferred experiment.*
 - ✅ **Decompose `nexus-bootstrap` plugin registration.** *Closed 2026-05-15 — see status note above.*
 - ✅ **Document tokio runtime ownership.** *Closed 2026-05-15 — see status note above.*
-- **Render `KernelMetrics` in MCP + TUI.** BL-093 collects the metrics; the shell health panel renders them; CLI / TUI / MCP do not. Add an MCP tool `nexus_kernel_stats` and a TUI panel reading the same JSON snapshot. Medium effort.
+- ✅ **Render `KernelMetrics` in MCP + TUI.** *Closed 2026-05-15 — see status note above.*
 
 Items above can be promoted to their own BL when picked up. Re-evaluate priorities after BL-134 Phase 1 lands (Phase 1 may collapse or change several of these).
 

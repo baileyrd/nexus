@@ -46,19 +46,19 @@ pub(crate) async fn handle_round_decide(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let parsed: RoundDecideArgs = parse(args, "round_decide")?;
-    let tx = {
+    let entry = {
         let mut map = pending
             .lock()
             .map_err(|e| exec_err(format!("round_decide: pending lock poisoned: {e}")))?;
         map.remove(&parsed.session_id)
     };
-    let Some(tx) = tx else {
+    let Some(entry) = entry else {
         return Err(exec_err(format!(
             "round_decide: no pending approval for session '{}'",
             parsed.session_id
         )));
     };
-    if tx.send(parsed.decision.into()).is_err() {
+    if entry.tx.send(parsed.decision.into()).is_err() {
         return Err(exec_err(format!(
             "round_decide: session '{}' is no longer awaiting a decision",
             parsed.session_id

@@ -48,6 +48,10 @@ later revised, write a new ADR that supersedes the old one.
 | [0024](0024-agent-session-tool-loop.md) | Agent session tool-loop (ADR-0023 Phase 2) | Accepted |
 | [0025](0025-retire-legacy-planner-ipc.md) | Retire legacy planner IPC | Accepted |
 | [0026](0026-collaborative-editing-crdt-layer.md) | Collaborative editing CRDT layer (BL-074 Phase 1) | Accepted |
+| [0027](0027-protocol-host-contribution-model.md) | Protocol-host contribution model (BL-113) | Accepted |
+| [0028](0028-ai-agent-event-loop.md) | AI agent event loop (BL-134) | Accepted |
+| [0029](0029-notification-center-persistent-inbox.md) | Notification Center persistent inbox (BL-136) | Accepted |
+| [0030](0030-defer-wasm-community-runtime.md) | Defer WASM community runtime; iframe is the surface (BL-137) | Accepted (partial supersede of 0016) |
 
 ## How ADRs relate to PRDs and BACKLOG
 

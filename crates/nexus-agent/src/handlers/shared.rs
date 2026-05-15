@@ -34,10 +34,72 @@ pub(crate) const DEFAULT_APPROVAL_TIMEOUT_SECS: u64 = 1800;
 /// Hard cap on the caller-supplied `approval_timeout_secs` override.
 pub(crate) const MAX_APPROVAL_TIMEOUT_SECS: u64 = 3600;
 
-/// Map of pending approval awaits keyed by session id.
-pub(crate) type PendingApprovals = std::sync::Mutex<
-    std::collections::HashMap<String, tokio::sync::oneshot::Sender<crate::RoundDecision>>,
->;
+/// Maximum entries retained in the pending-approvals map. BL-137:
+/// caps the previously-unbounded `HashMap` so a stuck shell can no
+/// longer leak `oneshot::Sender`s. Subsumed by BL-134 Phase 5 (the
+/// queue will move into the runtime); kept here until that lands.
+pub(crate) const PENDING_APPROVALS_CAP: usize = 64;
+
+/// Single entry in the pending-approvals map, paired with the
+/// `Instant` it was inserted so the cleanup pass can age stale
+/// entries out past [`MAX_APPROVAL_TIMEOUT_SECS`]. The sender is
+/// `Option`-wrapped because the cleanup path takes it without
+/// removing the map entry (the take returns ownership of the channel
+/// so the closing-side notifies the awaiter).
+pub(crate) struct PendingEntry {
+    pub(crate) tx: tokio::sync::oneshot::Sender<crate::RoundDecision>,
+    pub(crate) inserted_at: std::time::Instant,
+}
+
+/// Map of pending approval awaits keyed by session id. Bounded at
+/// [`PENDING_APPROVALS_CAP`] with entries pruned past
+/// [`MAX_APPROVAL_TIMEOUT_SECS`] on each insert. Use
+/// [`insert_pending_bounded`] for inserts, not raw `HashMap::insert`.
+pub(crate) type PendingApprovals =
+    std::sync::Mutex<std::collections::HashMap<String, PendingEntry>>;
+
+/// Bounded insert into the pending-approvals map. Prunes entries
+/// older than [`MAX_APPROVAL_TIMEOUT_SECS`] first; if the map is
+/// still at capacity, evicts the oldest entry (the receiver on that
+/// side observes a closed channel and aborts cleanly). Returns the
+/// number of evicted entries for observability.
+pub(crate) fn insert_pending_bounded(
+    map: &mut std::collections::HashMap<String, PendingEntry>,
+    session_id: String,
+    tx: tokio::sync::oneshot::Sender<crate::RoundDecision>,
+) -> usize {
+    let now = std::time::Instant::now();
+    let max_age = std::time::Duration::from_secs(MAX_APPROVAL_TIMEOUT_SECS);
+    let before = map.len();
+    map.retain(|_, entry| now.duration_since(entry.inserted_at) < max_age);
+    let aged = before - map.len();
+
+    let mut evicted = aged;
+    while map.len() >= PENDING_APPROVALS_CAP {
+        // Evict the entry with the earliest `inserted_at`. There is
+        // at most `PENDING_APPROVALS_CAP` entries to scan, so this is
+        // bounded-cost.
+        if let Some(oldest_key) = map
+            .iter()
+            .min_by_key(|(_, e)| e.inserted_at)
+            .map(|(k, _)| k.clone())
+        {
+            map.remove(&oldest_key);
+            evicted += 1;
+        } else {
+            break;
+        }
+    }
+
+    map.insert(
+        session_id,
+        PendingEntry {
+            tx,
+            inserted_at: now,
+        },
+    );
+    evicted
+}
 
 // ── Error / serde plumbing ──────────────────────────────────────────────────
 
@@ -678,7 +740,14 @@ impl crate::SessionPolicy for BusBridgePolicy {
         let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
         match self.pending.lock() {
             Ok(mut map) => {
-                map.insert(self.session_id.clone(), tx);
+                let evicted = insert_pending_bounded(&mut map, self.session_id.clone(), tx);
+                if evicted > 0 {
+                    tracing::warn!(
+                        session_id = %self.session_id,
+                        evicted,
+                        "pending-approvals map evicted aged/oldest entries on insert"
+                    );
+                }
             }
             Err(e) => {
                 return crate::RoundDecision::Abort(format!(
@@ -778,5 +847,62 @@ where
             )
             .await
         }
+    }
+}
+
+#[cfg(test)]
+mod pending_bounded_tests {
+    use super::*;
+
+    /// Inserting up to `PENDING_APPROVALS_CAP` entries keeps every one.
+    #[test]
+    fn under_cap_keeps_every_entry() {
+        let mut map = std::collections::HashMap::new();
+        for i in 0..PENDING_APPROVALS_CAP {
+            let (tx, _rx) = tokio::sync::oneshot::channel();
+            let evicted = insert_pending_bounded(&mut map, format!("sess-{i}"), tx);
+            assert_eq!(evicted, 0);
+        }
+        assert_eq!(map.len(), PENDING_APPROVALS_CAP);
+    }
+
+    /// Past the cap, the oldest entry is evicted on each new insert.
+    #[test]
+    fn over_cap_evicts_oldest() {
+        let mut map = std::collections::HashMap::new();
+        // Fill to cap.
+        for i in 0..PENDING_APPROVALS_CAP {
+            let (tx, _rx) = tokio::sync::oneshot::channel();
+            insert_pending_bounded(&mut map, format!("sess-{i}"), tx);
+        }
+        assert!(map.contains_key("sess-0"));
+        // One more push — sess-0 is the oldest, so it gets evicted.
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        let evicted = insert_pending_bounded(&mut map, "sess-new".into(), tx);
+        assert_eq!(evicted, 1);
+        assert_eq!(map.len(), PENDING_APPROVALS_CAP);
+        assert!(!map.contains_key("sess-0"));
+        assert!(map.contains_key("sess-new"));
+    }
+
+    /// An entry older than `MAX_APPROVAL_TIMEOUT_SECS` is aged out by
+    /// the next insert, even when the map is under cap.
+    #[test]
+    fn aged_entry_pruned_on_insert() {
+        let mut map = std::collections::HashMap::new();
+        let (tx_old, _rx_old) = tokio::sync::oneshot::channel();
+        map.insert(
+            "sess-stale".into(),
+            PendingEntry {
+                tx: tx_old,
+                inserted_at: std::time::Instant::now()
+                    - std::time::Duration::from_secs(MAX_APPROVAL_TIMEOUT_SECS + 1),
+            },
+        );
+        let (tx_new, _rx_new) = tokio::sync::oneshot::channel();
+        let evicted = insert_pending_bounded(&mut map, "sess-fresh".into(), tx_new);
+        assert_eq!(evicted, 1);
+        assert!(!map.contains_key("sess-stale"));
+        assert!(map.contains_key("sess-fresh"));
     }
 }

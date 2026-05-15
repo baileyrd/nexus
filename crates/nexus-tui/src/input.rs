@@ -97,6 +97,14 @@ fn handle_normal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             }
             return Ok(());
         }
+        // BL-137 — toggle the kernel-stats overlay (Shift+K). Read-only
+        // snapshot of the BL-093 metrics registry; refetches each open
+        // so the panel reflects current point-in-time state rather
+        // than the last view.
+        (KeyModifiers::SHIFT, KeyCode::Char('K')) | (_, KeyCode::Char('K')) => {
+            app.toggle_kernel_stats();
+            return Ok(());
+        }
         // Open terminal panel + switch to Terminal mode so keystrokes
         // start flowing into the PTY. Bound on a capital `T` so it
         // doesn't collide with the task-view toggle.

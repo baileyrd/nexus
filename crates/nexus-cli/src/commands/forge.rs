@@ -197,6 +197,192 @@ pub fn import(
     Ok(())
 }
 
+/// BL-137 — diagnostic walk of `<forge>` vs. the SQLite index. Reports
+/// files on disk but not indexed (`missing`), files in the index but
+/// missing on disk (`stale`), and entries where the on-disk `mtime`
+/// disagrees with the indexed `modified_at` (`mtime_drift`).
+///
+/// Read-only by default. Pass `fix = true` to invoke
+/// `com.nexus.storage::rebuild_index` after the report when any drift
+/// is found.
+pub fn doctor(app: &mut App, fix: bool) -> Result<()> {
+    let format = app.format();
+    let forge_root = app.forge_root().to_path_buf();
+    let (runtime, rt) = app.runtime()?;
+
+    let indexed = ipc::query_files(runtime, rt)
+        .map_err(|e| anyhow::anyhow!("doctor: query_files: {e}"))?;
+    let indexed_by_path: std::collections::HashMap<&str, &ipc::FileRecord> = indexed
+        .iter()
+        .map(|r| (r.path.as_str(), r))
+        .collect();
+
+    let on_disk = walk_markdown_files(&forge_root)?;
+    let on_disk_set: std::collections::HashSet<&str> =
+        on_disk.iter().map(|(rel, _)| rel.as_str()).collect();
+
+    let mut missing: Vec<String> = on_disk
+        .iter()
+        .filter(|(rel, _)| !indexed_by_path.contains_key(rel.as_str()))
+        .map(|(rel, _)| rel.clone())
+        .collect();
+    missing.sort();
+
+    let mut stale: Vec<String> = indexed
+        .iter()
+        .filter(|r| !on_disk_set.contains(r.path.as_str()))
+        .map(|r| r.path.clone())
+        .collect();
+    stale.sort();
+
+    let mut mtime_drift: Vec<(String, i64, i64)> = Vec::new();
+    for (rel, disk_mtime) in &on_disk {
+        if let Some(rec) = indexed_by_path.get(rel.as_str()) {
+            // Skip if the index has no recorded mtime (defaults to 0).
+            if rec.modified_at != 0 && rec.modified_at != *disk_mtime {
+                mtime_drift.push((rel.clone(), *disk_mtime, rec.modified_at));
+            }
+        }
+    }
+    mtime_drift.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let drifted = !missing.is_empty() || !stale.is_empty() || !mtime_drift.is_empty();
+
+    // Report ---------------------------------------------------------------
+    match format {
+        OutputFormat::Json | OutputFormat::Jsonl => {
+            print_success(
+                format,
+                "forge doctor",
+                &serde_json::json!({
+                    "location": forge_root.display().to_string(),
+                    "files_on_disk":   on_disk.len(),
+                    "files_indexed":   indexed.len(),
+                    "missing":         missing,
+                    "stale":           stale,
+                    "mtime_drift":     mtime_drift
+                        .iter()
+                        .map(|(p, d, i)| serde_json::json!({
+                            "path": p, "disk_mtime": d, "index_mtime": i
+                        }))
+                        .collect::<Vec<_>>(),
+                    "drift": drifted,
+                }),
+            );
+        }
+        _ => {
+            println!("Forge location : {}", forge_root.display());
+            println!("Files on disk  : {}", on_disk.len());
+            println!("Files indexed  : {}", indexed.len());
+            if missing.is_empty() && stale.is_empty() && mtime_drift.is_empty() {
+                println!("No drift detected.");
+            } else {
+                if !missing.is_empty() {
+                    println!("\nMissing from index ({}):", missing.len());
+                    for p in &missing {
+                        println!("  {p}");
+                    }
+                }
+                if !stale.is_empty() {
+                    println!("\nStale in index ({}):", stale.len());
+                    for p in &stale {
+                        println!("  {p}");
+                    }
+                }
+                if !mtime_drift.is_empty() {
+                    println!("\nmtime drift ({}):", mtime_drift.len());
+                    for (p, disk, idx) in &mtime_drift {
+                        println!("  {p}  disk={disk} index={idx}");
+                    }
+                }
+            }
+        }
+    }
+
+    if fix && drifted {
+        let stats = ipc::rebuild_index(runtime, rt)
+            .map_err(|e| anyhow::anyhow!("doctor --fix: rebuild_index: {e}"))?;
+        match format {
+            OutputFormat::Json | OutputFormat::Jsonl => {
+                print_success(
+                    format,
+                    "forge doctor --fix",
+                    &serde_json::json!({
+                        "files_processed": stats.files_processed,
+                        "blocks_indexed":  stats.blocks_indexed,
+                        "duration_ms":     stats.duration_ms,
+                    }),
+                );
+            }
+            _ => {
+                println!(
+                    "\nReindexed {} file(s) in {}ms.",
+                    stats.files_processed, stats.duration_ms
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Walk `forge_root` for `*.md` files, returning `(forge-relative path,
+/// mtime-seconds)` tuples. Skips `.forge/`, `.git/`, and any other
+/// dot-prefixed directory at any depth — mirrors the storage engine's
+/// ignore rules well enough for the doctor's drift report without
+/// pulling in `nexus-storage` directly.
+fn walk_markdown_files(forge_root: &std::path::Path) -> Result<Vec<(String, i64)>> {
+    let mut out: Vec<(String, i64)> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![forge_root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for ent in entries.flatten() {
+            let path = ent.path();
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            // Skip hidden directories (`.forge`, `.git`, etc.) at every level.
+            if name.starts_with('.') {
+                continue;
+            }
+            let file_type = match ent.file_type() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let rel = match path.strip_prefix(forge_root) {
+                Ok(p) => p
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                Err(_) => continue,
+            };
+            let mtime = ent
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+            out.push((rel, mtime));
+        }
+    }
+    Ok(out)
+}
+
 /// Rebuild the index from files on disk.
 ///
 /// Clears the existing index and re-indexes every file in the forge,
