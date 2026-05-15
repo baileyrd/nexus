@@ -1310,6 +1310,74 @@ async fn compose_memory_preamble(
     crate::memory::format_memory_preamble(&entries, DECISION_CAP, RECENT_CAP)
 }
 
+/// BL-128 thin slice — call `com.nexus.storage::entity_search` with
+/// the goal text and render the matching entities as a prompt-time
+/// recall preamble. Returns `None` when:
+///   * the IPC call fails (storage plugin missing / unwired),
+///   * the response shape is wrong,
+///   * the forge has no `entities/` directory yet, or
+///   * no entity matches the goal.
+///
+/// The thin-slice scope is single-pass: the goal text is sent as the
+/// `query` field of one search call. A richer pass would tokenise the
+/// goal and union per-token hits, but the single substring scan keeps
+/// the prompt-assembly path deterministic + cheap.
+async fn compose_entity_preamble(ctx: &KernelPluginContext, goal: &str) -> Option<String> {
+    const ENTITY_RECALL_CAP: u64 = 5;
+    let response = ctx
+        .ipc_call(
+            "com.nexus.storage",
+            "entity_search",
+            serde_json::json!({
+                "query": goal,
+                "limit": ENTITY_RECALL_CAP,
+            }),
+            Duration::from_secs(5),
+        )
+        .await
+        .ok()?;
+    let hits = response.get("results")?.as_array()?;
+    if hits.is_empty() {
+        return None;
+    }
+    format_entity_preamble(hits)
+}
+
+/// Pure renderer for [`compose_entity_preamble`]. Extracted so unit
+/// tests can pin the wire-shape projection without standing up a
+/// kernel context.
+fn format_entity_preamble(hits: &[serde_json::Value]) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for hit in hits {
+        let id = hit.get("id").and_then(serde_json::Value::as_str)?;
+        let entity_type = hit
+            .get("entity_type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("entity");
+        let description = hit
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if description.is_empty() {
+            lines.push(format!("- {id} ({entity_type})"));
+        } else {
+            lines.push(format!("- {id} ({entity_type}): {description}"));
+        }
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    let mut out = String::from(
+        "Known entities relevant to this goal (from the forge's `entities/` directory):\n",
+    );
+    for line in lines {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    Some(out.trim_end().to_string())
+}
+
 /// DG-36 follow-up — run a session with an optional
 /// [`crate::ManifestPolicyGate`] wrapping the base policy. Centralises
 /// the "wrap if Some, pass through if None" branching so
@@ -1894,6 +1962,14 @@ async fn system_prompt_with_skills(
         }
     }
 
+    // BL-128 thin slice — splice in any personal-entity context that
+    // matches the goal text. Missing `entities/` directory / IPC
+    // errors / zero matches all fall through silently.
+    if let Some(entity_preamble) = compose_entity_preamble(ctx, goal).await {
+        prompt.push_str("\n\n");
+        prompt.push_str(&entity_preamble);
+    }
+
     let response = ctx
         .ipc_call(
             "com.nexus.skills",
@@ -2245,6 +2321,45 @@ fn to_value<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── BL-128 thin slice — entity preamble renderer ─────────────────────────
+
+    #[test]
+    fn format_entity_preamble_returns_none_for_empty_hits() {
+        assert!(format_entity_preamble(&[]).is_none());
+    }
+
+    #[test]
+    fn format_entity_preamble_skips_hits_missing_id() {
+        // A wire-shape glitch from the storage handler shouldn't blow up
+        // the renderer — `?` on the id field collapses to None, but the
+        // outer loop just bails. We accept a stricter "all-or-nothing"
+        // semantic here for the thin slice.
+        let hits = vec![serde_json::json!({ "entity_type": "person" })];
+        assert!(format_entity_preamble(&hits).is_none());
+    }
+
+    #[test]
+    fn format_entity_preamble_renders_known_entities_block() {
+        let hits = vec![
+            serde_json::json!({
+                "id": "alice",
+                "entity_type": "person",
+                "description": "Engineer working on nexus.",
+            }),
+            serde_json::json!({
+                "id": "nexus",
+                "entity_type": "project",
+                "description": "",
+            }),
+        ];
+        let out = format_entity_preamble(&hits).expect("preamble");
+        assert!(out.starts_with("Known entities relevant to this goal"));
+        assert!(out.contains("- alice (person): Engineer working on nexus."));
+        // No description → no trailing colon-space-text.
+        assert!(out.contains("- nexus (project)"));
+        assert!(!out.contains("- nexus (project):"));
+    }
 
     /// DG-37 — `delegate` rejects an empty archetype name. The
     /// parent agent has to be explicit about which sub-archetype

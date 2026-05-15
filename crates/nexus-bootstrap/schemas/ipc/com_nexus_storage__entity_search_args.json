@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntitySearchArgs",
+  "description": "Args for `com.nexus.storage::entity_search` (handler 64).",
+  "type": "object",
+  "properties": {
+    "entity_type": {
+      "description": "Optional case-insensitive filter on `entity_type`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "description": "Maximum hits to return. Defaults to 10 when absent.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "query": {
+      "description": "Substring query against entity id / aliases / description.\nEmpty string returns the lexicographically-first `limit`\nrecords — useful for \"give me anything\" agent prepends.",
+      "type": "string",
+      "default": ""
+    }
+  },
+  "additionalProperties": false
+}

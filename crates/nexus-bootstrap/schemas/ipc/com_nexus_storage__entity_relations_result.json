@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRelationsResult",
+  "description": "Return type for `com.nexus.storage::entity_relations`.",
+  "type": "object",
+  "properties": {
+    "relations": {
+      "description": "Rows ordered by (from, to, kind) ascending.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntityRelationsResultRow"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relations"
+  ],
+  "$defs": {
+    "EntityRelationsResultRow": {
+      "description": "One row in [`EntityRelationsResult::relations`]. Aliased targets\nare resolved to their canonical id before this row is emitted.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "description": "Confidence in `[0.0, 1.0]`.",
+          "type": "number",
+          "format": "float"
+        },
+        "from": {
+          "description": "Source entity id.",
+          "type": "string"
+        },
+        "to": {
+          "description": "Target entity id (alias-resolved).",
+          "type": "string"
+        },
+        "type": {
+          "description": "Free-form relation kind.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "type",
+        "confidence"
+      ]
+    }
+  }
+}

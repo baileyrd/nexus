@@ -446,6 +446,185 @@ pub struct StorageQuerySymbolResult {
     pub symbols: Vec<StorageSymbolRow>,
 }
 
+// ── BL-128 — entity_search / entity_get / entity_relations ───────────────────
+
+/// Args for `com.nexus.storage::entity_search` (handler 64).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntitySearchArgs {
+    /// Substring query against entity id / aliases / description.
+    /// Empty string returns the lexicographically-first `limit`
+    /// records — useful for "give me anything" agent prepends.
+    #[serde(default)]
+    pub query: String,
+    /// Optional case-insensitive filter on `entity_type`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_type: Option<String>,
+    /// Maximum hits to return. Defaults to 10 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One hit in [`EntitySearchResult::results`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntitySearchHitRow {
+    /// Canonical entity id (file stem).
+    pub id: String,
+    /// `entity_type` declared in frontmatter.
+    pub entity_type: String,
+    /// One-line description (frontmatter `description:` or first
+    /// body paragraph, capped at 240 chars).
+    pub description: String,
+    /// Forge-relative path of the entity markdown file.
+    pub relpath: String,
+    /// Score from [`crate::entity_index::EntityIndex::search`].
+    pub score: i32,
+}
+
+/// Return type for `com.nexus.storage::entity_search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntitySearchResult {
+    /// Hits ordered by descending score then ascending id.
+    pub results: Vec<EntitySearchHitRow>,
+}
+
+/// Args for `com.nexus.storage::entity_get` (handler 65).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityGetArgs {
+    /// Canonical id or one of the entity's aliases.
+    pub id: String,
+}
+
+/// One outgoing relation declared on an [`EntityRecordRow`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRelationRow {
+    /// Target entity id or alias as declared on disk.
+    pub target: String,
+    /// Free-form relation kind.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`. Defaults to `1.0` on disk.
+    pub confidence: f32,
+}
+
+/// Full entity payload returned by `entity_get`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRecordRow {
+    /// Canonical entity id (file stem).
+    pub id: String,
+    /// `entity_type` declared in frontmatter.
+    pub entity_type: String,
+    /// Aliases declared in frontmatter (after empty-string filtering).
+    pub aliases: Vec<String>,
+    /// One-line description (frontmatter or fallback first paragraph).
+    pub description: String,
+    /// Outgoing relations declared on this entity.
+    pub relations: Vec<EntityRelationRow>,
+    /// Forge-relative path of the entity markdown file.
+    pub relpath: String,
+}
+
+/// Return type for `com.nexus.storage::entity_get`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityGetResult {
+    /// The entity, or `null` when no id / alias matched. Always
+    /// present on the wire (no `skip_serializing_if`) so consumers
+    /// can distinguish "not found" from a malformed response.
+    pub entity: Option<EntityRecordRow>,
+}
+
+/// Args for `com.nexus.storage::entity_relations` (handler 66).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRelationsArgs {
+    /// Canonical id or alias.
+    pub id: String,
+    /// One of `"outgoing"` / `"incoming"` / `"both"`. Defaults to
+    /// `"both"` when absent or unrecognised.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<String>,
+}
+
+/// One row in [`EntityRelationsResult::relations`]. Aliased targets
+/// are resolved to their canonical id before this row is emitted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRelationsResultRow {
+    /// Source entity id.
+    pub from: String,
+    /// Target entity id (alias-resolved).
+    pub to: String,
+    /// Free-form relation kind.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+}
+
+/// Return type for `com.nexus.storage::entity_relations`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRelationsResult {
+    /// Rows ordered by (from, to, kind) ascending.
+    pub relations: Vec<EntityRelationsResultRow>,
+}
+
 #[cfg(test)]
 mod read_frontmatter_tests {
     use super::*;

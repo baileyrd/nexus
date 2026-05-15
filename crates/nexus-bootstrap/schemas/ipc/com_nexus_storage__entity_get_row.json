@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRecordRow",
+  "description": "Full entity payload returned by `entity_get`.",
+  "type": "object",
+  "properties": {
+    "aliases": {
+      "description": "Aliases declared in frontmatter (after empty-string filtering).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "description": {
+      "description": "One-line description (frontmatter or fallback first paragraph).",
+      "type": "string"
+    },
+    "entity_type": {
+      "description": "`entity_type` declared in frontmatter.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Canonical entity id (file stem).",
+      "type": "string"
+    },
+    "relations": {
+      "description": "Outgoing relations declared on this entity.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntityRelationRow"
+      }
+    },
+    "relpath": {
+      "description": "Forge-relative path of the entity markdown file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "entity_type",
+    "aliases",
+    "description",
+    "relations",
+    "relpath"
+  ],
+  "$defs": {
+    "EntityRelationRow": {
+      "description": "One outgoing relation declared on an [`EntityRecordRow`].",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "description": "Confidence in `[0.0, 1.0]`. Defaults to `1.0` on disk.",
+          "type": "number",
+          "format": "float"
+        },
+        "target": {
+          "description": "Target entity id or alias as declared on disk.",
+          "type": "string"
+        },
+        "type": {
+          "description": "Free-form relation kind.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "type",
+        "confidence"
+      ]
+    }
+  }
+}

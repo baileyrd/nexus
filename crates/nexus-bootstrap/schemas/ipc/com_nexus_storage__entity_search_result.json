@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntitySearchResult",
+  "description": "Return type for `com.nexus.storage::entity_search`.",
+  "type": "object",
+  "properties": {
+    "results": {
+      "description": "Hits ordered by descending score then ascending id.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntitySearchHitRow"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "results"
+  ],
+  "$defs": {
+    "EntitySearchHitRow": {
+      "description": "One hit in [`EntitySearchResult::results`].",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "One-line description (frontmatter `description:` or first\nbody paragraph, capped at 240 chars).",
+          "type": "string"
+        },
+        "entity_type": {
+          "description": "`entity_type` declared in frontmatter.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Canonical entity id (file stem).",
+          "type": "string"
+        },
+        "relpath": {
+          "description": "Forge-relative path of the entity markdown file.",
+          "type": "string"
+        },
+        "score": {
+          "description": "Score from [`crate::entity_index::EntityIndex::search`].",
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "entity_type",
+        "description",
+        "relpath",
+        "score"
+      ]
+    }
+  }
+}

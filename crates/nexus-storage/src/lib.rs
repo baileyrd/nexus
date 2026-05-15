@@ -37,6 +37,10 @@ pub mod vectorstore;
 /// engine's `write_file` / `rebuild_index` paths and the
 /// `com.nexus.git.commit` subscription in [`core_plugin`].
 pub mod code_index;
+/// BL-128 thin slice: file-backed personal entity index. Lives under
+/// `<forge>/entities/` and powers the agent's `entity_search` /
+/// `entity_get` / `entity_relations` IPC handlers.
+pub mod entity_index;
 
 pub mod ipc;
 

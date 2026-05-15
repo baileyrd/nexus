@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRelationsArgs",
+  "description": "Args for `com.nexus.storage::entity_relations` (handler 66).",
+  "type": "object",
+  "properties": {
+    "direction": {
+      "description": "One of `\"outgoing\"` / `\"incoming\"` / `\"both\"`. Defaults to\n`\"both\"` when absent or unrecognised.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "description": "Canonical id or alias.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRelationRow",
+  "description": "One outgoing relation declared on an [`EntityRecordRow`].",
+  "type": "object",
+  "properties": {
+    "confidence": {
+      "description": "Confidence in `[0.0, 1.0]`. Defaults to `1.0` on disk.",
+      "type": "number",
+      "format": "float"
+    },
+    "target": {
+      "description": "Target entity id or alias as declared on disk.",
+      "type": "string"
+    },
+    "type": {
+      "description": "Free-form relation kind.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "type",
+    "confidence"
+  ]
+}

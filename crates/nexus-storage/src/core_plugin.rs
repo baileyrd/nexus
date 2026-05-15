@@ -315,6 +315,20 @@ pub const HANDLER_SETTINGS_WRITE: u32 = 62;
 /// MCP tools and the BL-116 doc generator.
 pub const HANDLER_QUERY_SYMBOL: u32 = 63;
 
+/// BL-128 thin slice — `entity_search`. Args: [`crate::ipc::EntitySearchArgs`].
+/// Returns [`crate::ipc::EntitySearchResult`]. Reads `<forge>/entities/*.md`
+/// at call time (no SQLite involvement). Empty / missing `entities/`
+/// directory returns an empty result.
+pub const HANDLER_ENTITY_SEARCH: u32 = 64;
+/// BL-128 thin slice — `entity_get`. Args: [`crate::ipc::EntityGetArgs`].
+/// Returns [`crate::ipc::EntityGetResult`] with `entity: null` when
+/// neither the canonical id nor any alias resolves.
+pub const HANDLER_ENTITY_GET: u32 = 65;
+/// BL-128 thin slice — `entity_relations`. Args:
+/// [`crate::ipc::EntityRelationsArgs`]. Returns
+/// [`crate::ipc::EntityRelationsResult`]. Direction defaults to `"both"`.
+pub const HANDLER_ENTITY_RELATIONS: u32 = 66;
+
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
 ///
@@ -499,6 +513,15 @@ impl CorePlugin for StorageCorePlugin {
                     .write_default_gitignore()
                     .map_err(|e| exec_err(format!("write_default_gitignore: {e}")))?;
                 return Ok(serde_json::json!({ "wrote": wrote }));
+            }
+            HANDLER_ENTITY_SEARCH => {
+                return dispatch_entity_search(&self.forge_root, args);
+            }
+            HANDLER_ENTITY_GET => {
+                return dispatch_entity_get(&self.forge_root, args);
+            }
+            HANDLER_ENTITY_RELATIONS => {
+                return dispatch_entity_relations(&self.forge_root, args);
             }
             _ => {}
         }
@@ -1383,6 +1406,77 @@ fn config_kind(args: &serde_json::Value) -> Result<&str, PluginError> {
         .ok_or_else(|| exec_err("config: missing 'kind' string argument".to_string()))
 }
 
+fn dispatch_entity_search(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntitySearchArgs = parse_args(args, "entity_search")?;
+    let limit = parsed.limit.unwrap_or(10).max(1) as usize;
+    let index = crate::entity_index::EntityIndex::load(forge_root);
+    let hits = index.search(&parsed.query, parsed.entity_type.as_deref(), limit);
+    let result = crate::ipc::EntitySearchResult {
+        results: hits
+            .into_iter()
+            .map(|h| crate::ipc::EntitySearchHitRow {
+                id: h.id,
+                entity_type: h.entity_type,
+                description: h.description,
+                relpath: h.relpath,
+                score: h.score,
+            })
+            .collect(),
+    };
+    to_value(&result, "entity_search")
+}
+
+fn dispatch_entity_get(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntityGetArgs = parse_args(args, "entity_get")?;
+    let index = crate::entity_index::EntityIndex::load(forge_root);
+    let entity = index.get(&parsed.id).map(|rec| crate::ipc::EntityRecordRow {
+        id: rec.id.clone(),
+        entity_type: rec.entity_type.clone(),
+        aliases: rec.aliases.clone(),
+        description: rec.description.clone(),
+        relations: rec
+            .relations
+            .iter()
+            .map(|r| crate::ipc::EntityRelationRow {
+                target: r.target.clone(),
+                kind: r.kind.clone(),
+                confidence: r.confidence,
+            })
+            .collect(),
+        relpath: rec.relpath.clone(),
+    });
+    to_value(&crate::ipc::EntityGetResult { entity }, "entity_get")
+}
+
+fn dispatch_entity_relations(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntityRelationsArgs = parse_args(args, "entity_relations")?;
+    let direction = crate::entity_index::RelationDirection::parse(parsed.direction.as_deref());
+    let index = crate::entity_index::EntityIndex::load(forge_root);
+    let relations = index
+        .relations(&parsed.id, direction)
+        .into_iter()
+        .map(|r| crate::ipc::EntityRelationsResultRow {
+            from: r.from,
+            to: r.to,
+            kind: r.kind,
+            confidence: r.confidence,
+        })
+        .collect();
+    to_value(
+        &crate::ipc::EntityRelationsResult { relations },
+        "entity_relations",
+    )
+}
+
 fn dispatch_config_read(
     forge_root: &std::path::Path,
     args: &serde_json::Value,
@@ -1754,6 +1848,10 @@ mod tests {
             ("HANDLER_WRITE_DEFAULT_GITIGNORE", HANDLER_WRITE_DEFAULT_GITIGNORE),
             ("HANDLER_SETTINGS_READ", HANDLER_SETTINGS_READ),
             ("HANDLER_SETTINGS_WRITE", HANDLER_SETTINGS_WRITE),
+            ("HANDLER_QUERY_SYMBOL", HANDLER_QUERY_SYMBOL),
+            ("HANDLER_ENTITY_SEARCH", HANDLER_ENTITY_SEARCH),
+            ("HANDLER_ENTITY_GET", HANDLER_ENTITY_GET),
+            ("HANDLER_ENTITY_RELATIONS", HANDLER_ENTITY_RELATIONS),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {
@@ -1983,5 +2081,141 @@ mod tests {
         // Snippet trailing newlines are normalised too.
         assert_eq!(build_appended("a", "b\n"), "a\n\nb\n");
         assert_eq!(build_appended("a", "b\n\n"), "a\n\nb\n");
+    }
+
+    // ── BL-128 thin slice — entity dispatch arms ─────────────────────────────
+
+    fn seed_entity(forge: &std::path::Path, stem: &str, frontmatter: &str, body: &str) {
+        let dir = forge.join(crate::entity_index::ENTITIES_DIR);
+        std::fs::create_dir_all(&dir).expect("mkdir entities");
+        std::fs::write(
+            dir.join(format!("{stem}.md")),
+            format!("---\n{frontmatter}---\n{body}"),
+        )
+        .expect("write entity");
+    }
+
+    #[test]
+    fn entity_search_returns_typed_hits_and_filters_by_type() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+        seed_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\ndescription: Engineer working on nexus.\n",
+            "",
+        );
+        seed_entity(
+            dir.path(),
+            "nexus",
+            "entity_type: project\ndescription: A microkernel forge.\n",
+            "",
+        );
+
+        let resp = plugin
+            .dispatch(
+                HANDLER_ENTITY_SEARCH,
+                &serde_json::json!({ "query": "nexus" }),
+            )
+            .expect("entity_search ok");
+        let results = resp
+            .get("results")
+            .and_then(serde_json::Value::as_array)
+            .expect("results array");
+        // alice's description mentions "nexus" so it matches alongside
+        // the canonical "nexus" project entity — but nexus ranks higher.
+        assert!(results.len() >= 1);
+        assert_eq!(results[0].get("id").and_then(|v| v.as_str()), Some("nexus"));
+
+        let typed = plugin
+            .dispatch(
+                HANDLER_ENTITY_SEARCH,
+                &serde_json::json!({ "query": "", "entity_type": "person" }),
+            )
+            .expect("entity_search with filter");
+        let typed_results = typed.get("results").and_then(serde_json::Value::as_array).unwrap();
+        assert_eq!(typed_results.len(), 1);
+        assert_eq!(typed_results[0].get("id").and_then(|v| v.as_str()), Some("alice"));
+    }
+
+    #[test]
+    fn entity_get_returns_null_for_missing_and_record_for_present() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+        seed_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\naliases: [Al]\nrelations:\n  - target: nexus\n    type: works_on\n",
+            "",
+        );
+
+        let missing = plugin
+            .dispatch(HANDLER_ENTITY_GET, &serde_json::json!({ "id": "ghost" }))
+            .expect("get ghost ok");
+        assert!(missing.get("entity").is_some_and(serde_json::Value::is_null));
+
+        let present = plugin
+            .dispatch(HANDLER_ENTITY_GET, &serde_json::json!({ "id": "Al" }))
+            .expect("get by alias ok");
+        let entity = present.get("entity").expect("entity field");
+        assert_eq!(entity.get("id").and_then(|v| v.as_str()), Some("alice"));
+        assert_eq!(
+            entity.get("entity_type").and_then(|v| v.as_str()),
+            Some("person"),
+        );
+        let relations = entity
+            .get("relations")
+            .and_then(serde_json::Value::as_array)
+            .expect("relations array");
+        assert_eq!(relations.len(), 1);
+        assert_eq!(
+            relations[0].get("target").and_then(|v| v.as_str()),
+            Some("nexus"),
+        );
+    }
+
+    #[test]
+    fn entity_relations_default_both_with_alias_resolution() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+        seed_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\nrelations:\n  - target: nexus\n    type: works_on\n",
+            "",
+        );
+        seed_entity(
+            dir.path(),
+            "bob",
+            "entity_type: person\nrelations:\n  - target: alice\n    type: knows\n",
+            "",
+        );
+        seed_entity(dir.path(), "nexus", "entity_type: project\n", "");
+
+        let both = plugin
+            .dispatch(
+                HANDLER_ENTITY_RELATIONS,
+                &serde_json::json!({ "id": "alice" }),
+            )
+            .expect("relations both");
+        let rows = both
+            .get("relations")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        // alice has 1 outgoing (alice→nexus) + 1 incoming (bob→alice) = 2.
+        assert_eq!(rows.len(), 2);
+
+        let outgoing_only = plugin
+            .dispatch(
+                HANDLER_ENTITY_RELATIONS,
+                &serde_json::json!({ "id": "alice", "direction": "outgoing" }),
+            )
+            .expect("relations outgoing");
+        let rows = outgoing_only
+            .get("relations")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("to").and_then(|v| v.as_str()), Some("nexus"));
     }
 }
