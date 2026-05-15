@@ -178,6 +178,33 @@ fn python_available() -> bool {
         .unwrap_or(false)
 }
 
+/// BL-081 live smoke — locate a Python interpreter with `debugpy`
+/// installed. Honours `$NEXUS_DAP_LIVE_DEBUGPY_PYTHON` (full path to
+/// a python binary in a venv where `pip install debugpy` has been
+/// run); falls back to probing `python3` on `$PATH`. Returns `None`
+/// when no working interpreter is found so the live-smoke test
+/// skips silently on machines without the adapter installed.
+fn find_debugpy_python() -> Option<String> {
+    let candidates: Vec<String> = std::env::var("NEXUS_DAP_LIVE_DEBUGPY_PYTHON")
+        .ok()
+        .into_iter()
+        .chain(std::iter::once("python3".to_string()))
+        .collect();
+    for c in candidates {
+        let ok = std::process::Command::new(&c)
+            .args(["-c", "import debugpy; raise SystemExit(0)"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Some(c);
+        }
+    }
+    None
+}
+
 #[tokio::test]
 async fn full_debug_session_lifecycle() {
     if !python_available() {
@@ -345,4 +372,65 @@ async fn drain_events_returns_queued_batch() {
     let kinds: Vec<&str> = drained.iter().map(|e| e.event.as_str()).collect();
     // Order is preserved by the mpsc channel.
     assert!(kinds.contains(&"initialized") || kinds.contains(&"stopped"));
+}
+
+/// BL-081 live smoke — exercise the host against a real upstream
+/// `debugpy.adapter` (Python's DAP server, the same one VS Code uses).
+///
+/// Scope is deliberately narrow: initialize handshake, capability
+/// negotiation, and clean disconnect. Going further (launch /
+/// setBreakpoints / continue / stack inspection) needs a target
+/// Python program and deterministic stop semantics, which the mock
+/// adapter already covers exhaustively. The value of this test is
+/// confirming that an *unmodified* upstream adapter speaks the same
+/// envelope our framing/parsing assumes — protecting against subtle
+/// regressions in `transport.rs` / `protocol.rs` / `client.rs` that
+/// our hand-rolled mock would mirror by construction.
+///
+/// Silently skipped on machines without `debugpy` installed.
+#[tokio::test]
+async fn live_smoke_debugpy_initialize_handshake() {
+    let Some(py) = find_debugpy_python() else {
+        eprintln!("debugpy not installed on any candidate Python — skipping live smoke");
+        return;
+    };
+    let spec = DapAdapterSpec {
+        name: "debugpy".to_string(),
+        command: py,
+        args: vec!["-m".to_string(), "debugpy.adapter".to_string()],
+        adapter_type: Some("python".to_string()),
+        file_types: vec!["py".to_string()],
+        disabled: false,
+        env: Default::default(),
+    };
+
+    let client = timeout(
+        Duration::from_secs(15),
+        DapClient::connect("debugpy", &spec),
+    )
+    .await
+    .expect("debugpy connect did not deadlock")
+    .expect("debugpy initialize succeeded");
+
+    let caps = client.capabilities().await;
+    // Upstream debugpy ships these in every release we'd realistically
+    // exercise; if one drops, capability negotiation regressed and a
+    // user-facing feature (e.g. function breakpoints UI in the panel)
+    // would silently degrade.
+    assert!(
+        caps.supports_configuration_done,
+        "debugpy must advertise configurationDone",
+    );
+    assert!(
+        caps.supports_function_breakpoints,
+        "debugpy must advertise function breakpoints",
+    );
+
+    // Don't `launch` — that needs a real target script and a stop
+    // hook we'd have to author here. The handshake + caps assertion
+    // is the load-bearing live-smoke signal.
+    let _ = client
+        .send_request("disconnect", Some(json!({"terminateDebuggee": false})))
+        .await;
+    drop(client);
 }
