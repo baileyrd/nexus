@@ -1,0 +1,44 @@
+/* shell/src/plugins/nexus/editor/cm/breakpointGutter.css
+ *
+ * BL-081 follow-up — visual styling for the clickable breakpoint
+ * gutter. Sits to the left of the git gutter and CM6's built-in line
+ * numbers; reserves a fixed-width column so empty rows remain
+ * clickable.
+ */
+
+.cm-gutters .nexus-debugger-gutter {
+  width: 14px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.cm-gutters .nexus-debugger-gutter .cm-gutterElement {
+  /* Make the entire row clickable, not just the dot area. */
+  padding: 0;
+}
+
+.nexus-debugger-gutter-marker {
+  width: 10px;
+  height: 10px;
+  margin: 4px auto;
+  border-radius: 50%;
+}
+
+.nexus-debugger-gutter-bp {
+  background: #d33;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* Hover affordance on the empty rows — a faint outlined dot hints
+ * that clicking will mint a breakpoint. */
+.cm-gutters .nexus-debugger-gutter .cm-gutterElement:hover .nexus-debugger-gutter-marker {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(220, 50, 50, 0.55);
+}
+
+/* Initial-spacer marker reserves width but stays invisible. */
+.cm-gutters .nexus-debugger-gutter .cm-gutterElement .nexus-debugger-gutter-marker.nexus-debugger-gutter-bp {
+  /* Active breakpoints stay solid regardless of hover. */
+  background: #d33;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
