@@ -441,6 +441,147 @@ Today config lives in `.forge/config.toml` only; the panel would mediate the sam
 
 ---
 
+### BL-139: Per-keystroke edit prediction
+
+**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
+**Effort**: Medium. AI plumbing and CM6 editor already exist; new pieces are the prediction-request loop and ghost-text renderer.
+**Crates**: `nexus-ai` (new `predict` IPC handler), `shell/src/plugins/nexus/editor/` (CM6 prediction extension).
+
+Nexus's `nexus-editor` has on-demand inline completion ("Complete at cursor") triggered by an explicit action. Zed ships *continuous* per-keystroke prediction: every keystroke fires a debounced async request to a prediction provider; the result appears as dismissible ghost text; `Tab` accepts. Zed's default provider is Zeta (an open-source model trained on permissive data); Nexus's multi-provider AI layer means Ollama (local, zero-cost) is the natural default.
+
+**Scope:**
+
+- New `com.nexus.ai::predict` IPC handler — accepts `{ prefix: string, suffix: string, language: string, file_path: string }`, returns `{ completion: string }`. Routes to Ollama (`/api/generate` with `suffix` fill-in-middle mode) or Anthropic/OpenAI as configured.
+- CM6 extension in `shell/src/plugins/nexus/editor/cm/editPrediction.ts` — 150 ms debounced `ViewPlugin`; cancels in-flight request on each keystroke; renders accepted completion as a `Decoration.widget` ghost-text span; `Tab` dispatches an `insertCompletionText` transaction; `Escape` clears.
+- New `nexus.editor.editPrediction` settings key: `{ enabled: boolean, provider: 'ollama' | 'openai' | 'anthropic', model: string, debounceMs: number }`.
+- Extension activates only in code-mode tabs (BL-075 routing) and document-mode markdown; skips binary tabs.
+
+**Definition of done:**
+- `com.nexus.ai::predict` handler registered; routes to Ollama FIM by default
+- Ghost-text renders within 300 ms on a local Ollama model for ≤200-token prefix
+- `Tab` accepts; `Escape` / any non-Tab keypress clears
+- `nexus.editor.editPrediction.enabled = false` disables the extension (no background requests)
+- Setting is off by default (opt-in — avoids surprise network/GPU usage on first launch)
+- 6 unit tests: debounce coalescing, in-flight cancel, ghost-text render, Tab accept, Escape clear, disabled guard
+
+---
+
+### BL-140: SSH remote forge
+
+**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
+**Effort**: Large. Requires a headless server binary and a proxying IPC transport.
+**Crates**: new `nexus-remote` crate; `nexus-cli` (`--forge-path ssh://…` flag); `nexus-bootstrap` (runtime factory for headless mode).
+
+Today `NEXUS_FORGE_PATH` must be a local filesystem path. Zed solves remote development by running a headless server (`zed --headless`) on the target machine and connecting the local UI via SSH. Nexus's IPC-first architecture (all capability behind `context.ipc_call(...)`) makes the same split natural: the remote side runs the full kernel + plugin stack; the local shell proxies IPC calls over a stdio or WebSocket channel.
+
+**Phase 1 — headless server (`nexus serve`):**
+- `nexus serve --forge-path /path/to/forge --port 7654` (or `--stdio`) — starts `build_cli_runtime`, opens a JSON-RPC listener, dispatches incoming `ipc_call` messages to the kernel, streams events back.
+- SSH target: `ssh user@host nexus serve --forge-path /remote/forge --stdio` — the local CLI/shell pipes its stdin/stdout through the SSH connection.
+
+**Phase 2 — remote forge path syntax:**
+- `--forge-path ssh://user@host/remote/forge` accepted by CLI and Tauri shell's forge picker.
+- `nexus-bootstrap::build_remote_runtime(forge_uri)` dials the SSH subprocess, returns a `Runtime` whose `ipc_call` marshals over the pipe.
+
+**Phase 3 — Tauri shell remote open:**
+- "Open remote forge…" in the shell's forge picker; prompts for `ssh://user@host/path`.
+- Connection state badge in status bar (connected / reconnecting / disconnected).
+
+**Definition of done:**
+- `nexus serve --stdio` accepts JSON-RPC `ipc_call` + `event_subscribe` frames, replies in kind
+- `nexus --forge-path ssh://user@host/path <command>` transparently proxies all IPC
+- Shell can open a remote forge; all existing plugins work without modification (they call `context.ipc_call` which the proxy handles)
+- Reconnect on SSH drop with exponential backoff (reuse `nexus-mcp` connection-pool pattern)
+- Documented in `docs/developer/remote-forge.md`
+
+---
+
+### BL-141: Multibuffer / multi-excerpt view
+
+**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
+**Effort**: Medium–Large. Extends the block-tree model; touches editor open flow and LSP wiring.
+**Crates**: `nexus-editor` (excerpt block type, synthetic session), `nexus-storage` (multi-file read), shell editor plugin.
+
+Zed's multibuffer is a single editable tab containing *excerpts* (ranges) from multiple different files — useful for project-wide diagnostics (every error, editable in place), find-all-references results, and rename refactoring preview. Nexus's block-tree model is excerpt-friendly: a synthetic document composed of `ExcerptBlock` nodes, each referencing `(relpath, line_start, line_end)`, can be constructed without changing the on-disk model.
+
+**Scope:**
+
+- New `ExcerptBlock` variant in `nexus-editor`'s block types: `{ source_relpath, line_start, line_end, content_snapshot }`.
+- New `com.nexus.editor::open_excerpts` IPC handler: accepts `[{ relpath, line_start, line_end, label? }]`, constructs a synthetic read-write buffer, returns a session ID. Edits within an excerpt dispatch through `apply_transaction` on the source file's session; saves to the source file. Read-only mode available for reference excerpts (e.g. definition peek).
+- Shell editor plugin: `nexus.editor.openExcerpts(items)` — opens the synthetic buffer in a new tab with a `📄 N files` title.
+- Consumers:
+  - **Diagnostics panel** ("Open all in multibuffer" button) — replaces the current single-file-at-a-time diagnostics flow.
+  - **Find-all-references** LSP result — open references as an excerpt view.
+  - **Rename refactoring** preview — show all affected locations before confirming.
+
+**Definition of done:**
+- `open_excerpts` returns a synthetic session; reads show correct content from source files
+- Edits within an excerpt round-trip through `apply_transaction` on the source file and persist on save
+- "Open diagnostics in multibuffer" renders all LSP errors across the project in one tab, each error editable
+- Excerpt separators show file path + line range header
+- 8 unit tests: construction, multi-file reads, edit round-trip, read-only guard, empty excerpt list, overlapping ranges dedup
+
+---
+
+### BL-142: REPL / in-buffer evaluation
+
+**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
+**Effort**: Medium. Builds on existing `nexus-terminal` PTY infrastructure.
+**Crates**: `nexus-terminal` (new `repl_*` IPC handlers), `shell/src/plugins/nexus/editor/` (cell block type + output rendering).
+
+Zed ships Jupyter-style REPL execution: code cells in an editor buffer run against a language kernel; output renders inline below the cell. Nexus's block-tree MDX editor and `nexus-terminal`'s PTY session management are the natural foundation.
+
+**Scope:**
+
+- New MDX block type `<Repl lang="python" />` (or fenced code block with `repl` meta): marks a cell for in-buffer execution.
+- New IPC handlers in `nexus-terminal`: `repl.start(lang, kernel_command)` → `session_id`; `repl.eval(session_id, code)` → streams `stdout/stderr` lines; `repl.stop(session_id)`.
+- CM6 decoration: "Run" button gutter marker on repl cells; `Shift-Enter` keybinding to eval the current cell.
+- Output block rendered below the cell as a `<ReplOutput />` MDX component: text, ANSI-stripped, error-highlighted. Output is ephemeral (not persisted to the source file).
+- Language kernels configured via `nexus.editor.replKernels`: `{ python: "python3 -i", node: "node --interactive", ... }`.
+- Works in both document-mode (markdown + MDX) and code-mode tabs.
+
+**Definition of done:**
+- `repl.start` / `repl.eval` / `repl.stop` IPC handlers wired and tested against a Python3 subprocess
+- `Shift-Enter` on a repl cell streams output into the inline output block within 500 ms
+- ANSI codes stripped; error output red-highlighted
+- Multiple concurrent repl sessions supported (one per kernel per tab)
+- `nexus.editor.replKernels` setting controls which languages are enabled (default: `{}` — opt-in)
+- 6 integration tests: start/eval/stop lifecycle, concurrent sessions, error output, Shift-Enter keymap, output cleared on re-eval, session cleaned up on tab close
+
+---
+
+### BL-143: Live collaboration network transport
+
+**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
+**Effort**: Large. Platform-level — requires a network transport, presence protocol, and shell UI.
+**Crates**: new `nexus-collab` core plugin; `nexus-kernel` (transport registration); `nexus-bootstrap` (wiring); `shell/src/plugins/nexus/collab/`.
+**Related**: [BL-074](#bl-074-collaborative-editing--crdt-layer) (CRDT layer, shipped — provides the merge semantics); ADR 0026.
+
+BL-074 shipped the CRDT primitives and the in-process ops bus (`com.nexus.editor.ops.<relpath>`). Two sessions on the *same machine* (two Nexus windows opening the same forge) already exchange ops via the kernel event bus. What's missing is a *network transport* so two users on different machines can edit together in real time — the "multiplayer" scenario Zed built as a core primitive.
+
+**Phase 1 — local-network WebSocket transport (MVP):**
+- `nexus collab serve --port 7700` starts a WebSocket relay in `nexus-collab`; relays `com.nexus.editor.ops.*` envelopes between connected peers.
+- `nexus collab join ws://host:7700` — local instance connects to a relay; the collab plugin bridges the WebSocket into the local kernel event bus.
+- Presence: connected peers broadcast a `com.nexus.collab.presence` event with `{ user_id, display_name, cursor: { relpath, block_id } }`; the shell renders remote cursors as coloured overlays in the editor (existing `AnnotationSystem` extended with ephemeral remote-cursor annotations).
+- Authentication: shared secret in the URL (`ws://host:7700?token=…`) or `nexus-security` keyring.
+
+**Phase 2 — shell UI:**
+- Collaboration panel plugin (`nexus.collab`) in the shell: shows connected peers, their active files, cursor positions.
+- "Share this forge" button — starts a relay and copies the join URL to clipboard.
+- Remote cursor annotations in the CM6 editor (coloured caret + display name tooltip).
+
+**Phase 3 (deferred) — hosted relay / channels:**
+- Zed-style persistent channels with voice (WebRTC) and screen sharing are out of scope for Phase 1/2. Defer until Phase 2 is validated.
+
+**Definition of done (Phase 1 + 2):**
+- Two machines on the same LAN can concurrently edit a shared forge with CRDT convergence
+- Remote cursors visible in the editor within 200 ms of movement
+- Presence panel lists connected peers and their active files
+- Disconnect / reconnect handled gracefully (buffered ops replayed on reconnect)
+- `nexus collab serve` and `nexus collab join` CLI verbs documented in `nexus help collab`
+- 10 integration tests: relay message routing, presence broadcast, cursor annotation render, disconnect-reconnect op replay, auth token rejection
+
+---
+
 _BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Almost everything in the DoD already shipped under `nexus.files` (sidebar tree, expand/collapse, drag-to-reorder, full context menu, live `com.nexus.storage` event sync). The only material gap was the file-type icon set, now closed via a `getFileIcon(name)` helper covering `.md` / source files / structured config and a generic fallback._
 
 ---
@@ -677,6 +818,13 @@ Four external-project assessments under [`../research/`](../research/) each carr
     - Runtime approval gates in the agent loop (pause-and-ask before destructive steps) → **[BL-132](#bl-132-runtime-approval-gates-in-the-agent-loop-thoth-port)**
     - Multi-channel notification output (OS, Telegram, Discord, SMTP) → **[BL-133](#bl-133-multi-channel-notification-output-thoth-port)**
   Medium-priority items held here until capacity opens: vision (`nexus-vision` plugin — screen/file image analysis via local Ollama vision model); built-in web search (Tavily + DuckDuckGo handlers in `nexus-ai`); browser automation (Playwright via `nexus-browser` plugin); chart generation (10 Plotly-equivalent chart types in `nexus-formats` or `nexus-ai`); health/habit tracker (`nexus-tracker` plugin or Bases extension); Docker sandbox for terminal sessions (shadow workspace + patch-apply in `nexus-terminal`); custom tool builder UX (wizard shell plugin wrapping `nexus plugin scaffold`). Skip items (Gmail, Calendar, image/video gen, X/Twitter, Arxiv/Wolfram/Weather — all reachable via MCP): these are community plugin territory.
+- **Zed capability assessment** — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Zed is a GPU-accelerated multiplayer code editor with strong AI-native features, a WASM extension system, and a DAP debugger. Nexus's terminal, git, and AI subsystems are richer; Zed leads on real-time networked collaboration, per-keystroke edit prediction, remote development, and a few editor-paradigm primitives (multibuffers, REPL). Assessment filed 2026-05-14; five P1/P2 capabilities promoted:
+    - Per-keystroke ghost-text edit prediction (continuous CM6 completion loop, Ollama-compatible) → **[BL-139](#bl-139-per-keystroke-edit-prediction)**
+    - Live collaboration network transport — Zed-style WebSocket/WebRTC peer sync beyond the current in-process ops bus → **[BL-143](#bl-143-live-collaboration-network-transport)**
+    - SSH remote forge (headless Nexus server; local shell, remote `NEXUS_FORGE_PATH`) → **[BL-140](#bl-140-ssh-remote-forge)**
+    - Multibuffer / multi-excerpt view (editable excerpts from ≥2 files in one pane) → **[BL-141](#bl-141-multibuffer--multi-excerpt-view)**
+    - REPL / in-buffer evaluation (Jupyter-style cell execution via `nexus-terminal`) → **[BL-142](#bl-142-repl--in-buffer-evaluation)**
+  Vim mode (**BL-070** — shipped 2026-05-06), DAP debugger (**BL-081** — implemented on branch, parked on **BL-113**), and ACP external-agent hosting (**BL-113** Phase 4) are already tracked. P3 items held here until capacity opens: lightweight `tasks.toml` shorthand in `nexus-workflow` for single-command tasks; central graphical settings editor shell plugin; multi-line regex verification in `nexus-storage` find/replace. Skip items: GPUI rendering (Tauri/WebView is sufficient for the notes use case), 800-language extension ecosystem (markdown-first scope).
 
 ---
 
