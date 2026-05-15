@@ -80,6 +80,10 @@ pub fn uninstall(app: &mut App, plugin_id: &str) -> Result<()> {
 /// Enable the plugin identified by `plugin_id`.
 pub fn enable(app: &mut App, plugin_id: &str) -> Result<()> {
     app.plugins()?.enable(plugin_id)?;
+    // BL-113 Phase 1e — wire the just-enabled plugin's DAP
+    // contributions (if any) so they appear in the DAP host's runtime
+    // adapter map. Best-effort: log outcomes, never block the enable.
+    log_dap_wire_outcomes(app.wire_dap_contributions_for_plugin(plugin_id), "wired");
     let format = app.format();
     print_success(
         format,
@@ -91,6 +95,16 @@ pub fn enable(app: &mut App, plugin_id: &str) -> Result<()> {
 
 /// Disable the plugin identified by `plugin_id`.
 pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
+    // BL-113 Phase 1e — unwire BEFORE the disable lifecycle hook
+    // fires so the DAP host removes contributions while the plugin's
+    // manifest is still readable. Order matters even though the
+    // manifest survives disable() today (plugin stays loaded, just
+    // marked Stopped) — keeping unwire-first matches the symmetric
+    // "wire-after-enable" pattern.
+    log_dap_wire_outcomes(
+        app.unwire_dap_contributions_for_plugin(plugin_id),
+        "unwired",
+    );
     app.plugins()?.disable(plugin_id)?;
     let format = app.format();
     print_success(
@@ -99,6 +113,39 @@ pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
         &serde_json::json!({ "id": plugin_id, "status": "stopped" }),
     );
     Ok(())
+}
+
+fn log_dap_wire_outcomes(
+    result: Result<Vec<nexus_bootstrap::dap_contribution_wiring::DapWireOutcome>>,
+    verb_past: &'static str,
+) {
+    use nexus_bootstrap::dap_contribution_wiring::DapWireStatus;
+    match result {
+        Ok(outcomes) => {
+            for outcome in &outcomes {
+                if matches!(outcome.status, DapWireStatus::Ok) {
+                    tracing::info!(
+                        plugin_id = %outcome.plugin_id,
+                        adapter = %outcome.adapter_name,
+                        "{verb_past} DAP adapter contribution",
+                    );
+                } else {
+                    tracing::warn!(
+                        plugin_id = %outcome.plugin_id,
+                        adapter = %outcome.adapter_name,
+                        status = ?outcome.status,
+                        "DAP adapter contribution skipped",
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "DAP contribution {verb_past} pass failed; plugin state change still applied",
+            );
+        }
+    }
 }
 
 /// Revoke a HIGH-risk capability previously granted to `plugin_id`
@@ -272,33 +319,7 @@ pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> 
     // declared so a subcommand that ends up hitting `com.nexus.dap`
     // sees the merged adapter set. Best-effort: failures log but do
     // not block the subcommand the user actually invoked.
-    match app.wire_dap_contributions() {
-        Ok(outcomes) => {
-            use nexus_bootstrap::dap_contribution_wiring::DapWireStatus;
-            for outcome in &outcomes {
-                if matches!(outcome.status, DapWireStatus::Ok) {
-                    tracing::info!(
-                        plugin_id = %outcome.plugin_id,
-                        adapter = %outcome.adapter_name,
-                        "wired DAP adapter contribution",
-                    );
-                } else {
-                    tracing::warn!(
-                        plugin_id = %outcome.plugin_id,
-                        adapter = %outcome.adapter_name,
-                        status = ?outcome.status,
-                        "DAP adapter contribution skipped",
-                    );
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "DAP contribution wiring failed; subcommand proceeds without wired adapters",
-            );
-        }
-    }
+    log_dap_wire_outcomes(app.wire_dap_contributions(), "wired");
 
     let plugins = app.plugins()?;
     let args_json = serde_json::json!(args);

@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use nexus_bootstrap::dap_contribution_wiring::{wire_dap_contributions, DapWireOutcome};
+use nexus_bootstrap::dap_contribution_wiring::{
+    unwire_dap_contributions_for_plugin, wire_dap_contributions, DapWireOutcome,
+};
 use nexus_bootstrap::{Runtime, build_cli_runtime};
 use nexus_kernel::EventBus;
 use nexus_plugins::{PluginManager, PluginManagerConfig, PluginManifest};
@@ -158,6 +160,71 @@ impl App {
         let outcomes = rt.block_on(wire_dap_contributions(&runtime.context, &manifest_refs));
         Ok(outcomes)
     }
+
+    /// BL-113 Phase 1e — wire just one plugin's DAP contributions.
+    /// Used by `nexus plugin enable <id>` after the enable lifecycle
+    /// hook fires, so the just-enabled plugin's contributed adapters
+    /// become visible to the DAP host.
+    ///
+    /// Returns an empty outcome list when the plugin is unknown to the
+    /// manager or declares no DAP contributions — the caller decides
+    /// whether to surface either as an error.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_dap_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<DapWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.dap.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(wire_dap_contributions(&runtime.context, &[&manifest]));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 1e — unwire just one plugin's DAP contributions.
+    /// Used by `nexus plugin disable <id>` immediately before the
+    /// disable lifecycle hook fires, so the about-to-be-disabled
+    /// plugin's contributed adapters are removed from the DAP host's
+    /// runtime map.
+    ///
+    /// Returns an empty outcome list when the plugin is unknown to the
+    /// manager or declares no DAP contributions.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn unwire_dap_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<DapWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.dap.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(unwire_dap_contributions_for_plugin(
+            &runtime.context,
+            &manifest,
+        ));
+        Ok(outcomes)
+    }
 }
 
 #[cfg(test)]
@@ -176,5 +243,25 @@ mod tests {
         let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
         let outcomes = app.wire_dap_contributions().expect("wire ok");
         assert!(outcomes.is_empty(), "outcomes: {outcomes:?}");
+    }
+
+    #[test]
+    fn wire_for_unknown_plugin_returns_empty_outcomes() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app
+            .wire_dap_contributions_for_plugin("community.does-not-exist")
+            .expect("wire ok");
+        assert!(outcomes.is_empty());
+    }
+
+    #[test]
+    fn unwire_for_unknown_plugin_returns_empty_outcomes() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app
+            .unwire_dap_contributions_for_plugin("community.does-not-exist")
+            .expect("unwire ok");
+        assert!(outcomes.is_empty());
     }
 }
