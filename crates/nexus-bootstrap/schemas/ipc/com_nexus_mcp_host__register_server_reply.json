@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpRegisterServerReply",
+  "description": "Reply for `register_server` (handler `11`).\n\n`status` is one of `\"ok\"`, `\"toml_override\"`, `\"invalid_name\"`,\n`\"invalid\"` (with a `reason` field).",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "`true` iff the server was inserted (status == `\"ok\"`).",
+      "type": "boolean"
+    },
+    "reason": {
+      "description": "Populated when `status = \"invalid\"` with the host's validator\nmessage (e.g. `\"server 'fs' has empty command\"`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "description": "One of `\"ok\"`, `\"toml_override\"`, `\"invalid_name\"`, `\"invalid\"`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "status"
+  ]
+}

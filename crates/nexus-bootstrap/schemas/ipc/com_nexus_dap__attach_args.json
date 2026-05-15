@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapAttachArgs",
+  "description": "Args for `attach` (handler `3`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name from `dap.toml`.",
+      "type": "string"
+    },
+    "extra": {
+      "description": "Adapter-specific extras (merged into the `attach` request body)."
+    },
+    "pid": {
+      "description": "Target process id (when attaching by PID).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "port": {
+      "description": "Target TCP port (when attaching to a remote debug server).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter"
+  ]
+}

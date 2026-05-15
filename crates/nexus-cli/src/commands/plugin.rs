@@ -80,6 +80,12 @@ pub fn uninstall(app: &mut App, plugin_id: &str) -> Result<()> {
 /// Enable the plugin identified by `plugin_id`.
 pub fn enable(app: &mut App, plugin_id: &str) -> Result<()> {
     app.plugins()?.enable(plugin_id)?;
+    // BL-113 Phase 1e/2b/3b — wire the just-enabled plugin's protocol
+    // host contributions (if any) so they appear in the DAP / LSP / MCP
+    // host's runtime maps. Best-effort: log outcomes, never block enable.
+    log_dap_wire_outcomes(app.wire_dap_contributions_for_plugin(plugin_id), "wired");
+    log_lsp_wire_outcomes(app.wire_lsp_contributions_for_plugin(plugin_id), "wired");
+    log_mcp_wire_outcomes(app.wire_mcp_contributions_for_plugin(plugin_id), "wired");
     let format = app.format();
     print_success(
         format,
@@ -91,6 +97,21 @@ pub fn enable(app: &mut App, plugin_id: &str) -> Result<()> {
 
 /// Disable the plugin identified by `plugin_id`.
 pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
+    // BL-113 Phase 1e/2b/3b — unwire BEFORE the disable lifecycle hook
+    // fires so each protocol host removes contributions while the
+    // plugin's manifest is still readable.
+    log_dap_wire_outcomes(
+        app.unwire_dap_contributions_for_plugin(plugin_id),
+        "unwired",
+    );
+    log_lsp_wire_outcomes(
+        app.unwire_lsp_contributions_for_plugin(plugin_id),
+        "unwired",
+    );
+    log_mcp_wire_outcomes(
+        app.unwire_mcp_contributions_for_plugin(plugin_id),
+        "unwired",
+    );
     app.plugins()?.disable(plugin_id)?;
     let format = app.format();
     print_success(
@@ -99,6 +120,105 @@ pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
         &serde_json::json!({ "id": plugin_id, "status": "stopped" }),
     );
     Ok(())
+}
+
+fn log_dap_wire_outcomes(
+    result: Result<Vec<nexus_bootstrap::dap_contribution_wiring::DapWireOutcome>>,
+    verb_past: &'static str,
+) {
+    use nexus_bootstrap::dap_contribution_wiring::DapWireStatus;
+    match result {
+        Ok(outcomes) => {
+            for outcome in &outcomes {
+                if matches!(outcome.status, DapWireStatus::Ok) {
+                    tracing::info!(
+                        plugin_id = %outcome.plugin_id,
+                        adapter = %outcome.adapter_name,
+                        "{verb_past} DAP adapter contribution",
+                    );
+                } else {
+                    tracing::warn!(
+                        plugin_id = %outcome.plugin_id,
+                        adapter = %outcome.adapter_name,
+                        status = ?outcome.status,
+                        "DAP adapter contribution skipped",
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "DAP contribution {verb_past} pass failed; plugin state change still applied",
+            );
+        }
+    }
+}
+
+fn log_lsp_wire_outcomes(
+    result: Result<Vec<nexus_bootstrap::lsp_contribution_wiring::LspWireOutcome>>,
+    verb_past: &'static str,
+) {
+    use nexus_bootstrap::lsp_contribution_wiring::LspWireStatus;
+    match result {
+        Ok(outcomes) => {
+            for outcome in &outcomes {
+                if matches!(outcome.status, LspWireStatus::Ok) {
+                    tracing::info!(
+                        plugin_id = %outcome.plugin_id,
+                        server = %outcome.server_name,
+                        "{verb_past} LSP server contribution",
+                    );
+                } else {
+                    tracing::warn!(
+                        plugin_id = %outcome.plugin_id,
+                        server = %outcome.server_name,
+                        status = ?outcome.status,
+                        "LSP server contribution skipped",
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "LSP contribution {verb_past} pass failed; plugin state change still applied",
+            );
+        }
+    }
+}
+
+fn log_mcp_wire_outcomes(
+    result: Result<Vec<nexus_bootstrap::mcp_contribution_wiring::McpWireOutcome>>,
+    verb_past: &'static str,
+) {
+    use nexus_bootstrap::mcp_contribution_wiring::McpWireStatus;
+    match result {
+        Ok(outcomes) => {
+            for outcome in &outcomes {
+                if matches!(outcome.status, McpWireStatus::Ok) {
+                    tracing::info!(
+                        plugin_id = %outcome.plugin_id,
+                        server = %outcome.server_name,
+                        "{verb_past} MCP server contribution",
+                    );
+                } else {
+                    tracing::warn!(
+                        plugin_id = %outcome.plugin_id,
+                        server = %outcome.server_name,
+                        status = ?outcome.status,
+                        "MCP server contribution skipped",
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "MCP contribution {verb_past} pass failed; plugin state change still applied",
+            );
+        }
+    }
 }
 
 /// Revoke a HIGH-risk capability previously granted to `plugin_id`
@@ -266,9 +386,17 @@ pub fn scaffold(
 /// registered `subcommand` via `[[registrations.cli_subcommand]]`. The
 /// remaining `args` are passed as a JSON array.
 pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> Result<()> {
-    let plugins = app.plugins()?;
-    plugins.load_all()?;
+    app.plugins()?.load_all()?;
 
+    // BL-113 Phase 1d/2b/3b — wire any DAP / LSP / MCP contributions
+    // the loaded plugins declared so a subcommand that ends up hitting
+    // one of those protocol hosts sees the merged set.
+    // Best-effort: failures log but do not block the subcommand.
+    log_dap_wire_outcomes(app.wire_dap_contributions(), "wired");
+    log_lsp_wire_outcomes(app.wire_lsp_contributions(), "wired");
+    log_mcp_wire_outcomes(app.wire_mcp_contributions(), "wired");
+
+    let plugins = app.plugins()?;
     let args_json = serde_json::json!(args);
 
     match plugins.dispatch_cli(subcommand, &args_json) {

@@ -36,7 +36,7 @@ mod transport;
 pub use client::{LspClient, LspClientError, OpenDocument};
 pub use config::{
     LspConfigError, LspHostConfig, LspServerSpec, MergeSkip as LspMergeSkip,
-    MergeSkipReason as LspMergeSkipReason,
+    MergeSkipReason as LspMergeSkipReason, UnregisterError as LspUnregisterError,
 };
 pub use core_plugin::LspCorePlugin;
 pub use pool::{ConnectionPool, PoolConfig};

@@ -166,6 +166,12 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 ### BL-081: DAP debugger integration
 
 > **Parked on branch `bl-081-dap-debugger` (2026-05-13)** pending [BL-113](#bl-113-protocol-host-contribution-model-for-lsp--dap--mcp). The first-cut implementation (nexus-dap host crate, 19-handler IPC surface, shell debugger panel, Python mock e2e test, 46 Rust + 17 shell tests, green workspace) builds out the existing flat-`dap.toml` pattern that BL-113 is proposing to replace. Rather than land that pattern on main and then immediately rework it, the work is held on the branch and lands once BL-113's contribution model is decided. Full spec in [BL-081-dap-debugger.md](BL-081-dap-debugger.md) lives on the branch.
+>
+> **CM6 breakpoint gutter shipped 2026-05-15 on `bl-081-dap-debugger`** (parked alongside the rest). New `shell/src/plugins/nexus/editor/cm/breakpointGutter.ts` ships a CM6 `gutter()` extension wired into the editor's code-mode bundle next to the BL-079 git gutter / BL-077 LSP client. Click toggles route through `useDebuggerStore.toggleBreakpoint(api, relpath, line)` — the store records the breakpoint locally and dispatches `set_breakpoints` to the active adapter (no-op when no session is running; the next launch replays cached entries pre-`configurationDone`). The gutter subscribes to the Zustand store via a `{ getSnapshot, subscribe }` adapter so any source of mutation (panel, other tab) keeps every open view's gutter in sync. Pure factors `linesForPath` + `lineSetsEqual` short-circuit unchanged sets so the editor's transaction stream stays quiet on no-op store mutations. 13 new tests (3 + 4 pure-factor, 6 lifecycle/click via happy-dom CM6 mount); shell suite stays green at 1438/1439 (one pre-existing skip).
+>
+> **Live smoke against real `debugpy` shipped 2026-05-15 on `bl-081-dap-debugger`**. New `crates/nexus-dap/tests/end_to_end.rs::live_smoke_debugpy_initialize_handshake` spawns Python's upstream `debugpy.adapter` (the same DAP server VS Code uses), completes `initialize`, asserts capabilities (`supports_configuration_done` + `supports_function_breakpoints`), and disconnects cleanly. Honours `$NEXUS_DAP_LIVE_DEBUGPY_PYTHON` (full path to a venv python with `debugpy` installed); falls back to probing `python3` on `$PATH`; skips silently otherwise. Scope intentionally narrow (handshake + caps + clean exit) since `launch`/breakpoints/`continue` need a target script + deterministic stop semantics the mock already covers exhaustively. The value is catching regressions in `transport.rs` / `protocol.rs` / `client.rs` that our hand-rolled mock would mirror by construction. `codelldb` / `js-debug` / `delve` smoke remains an operator step until those binaries are on a dev box.
+
+> **First-party DAP reference plugin shipped 2026-05-15 on `bl-081-dap-debugger`**. New `plugins/first-party-dap-python/` (manifest-only, no wasm) declares debugpy as a DAP adapter via `[[registrations.protocol_hosts.dap]]` with a complete `launch.schema.json` JSON Schema (program / args / cwd / stopOnEntry / justMyCode fields). To carry the schema reference to the shell, `DapAdapterSpec` and the `register_adapter` / `list_adapters` wire types gained an opaque `metadata: Option<JsonValue>` field; `nexus-bootstrap::dap_contribution_to_spec` packs the manifest's shell-only fields (`display_name`, `launch_config_schema`, `root_markers`, `variable_renderers`) into `metadata` at contribution-wire time, the host stores it verbatim and round-trips it through `list_adapters` for the shell to read. `launch_config_schema` rides as a relative path string (not inline content) so the conversion stays a pure manifest-transform — shell resolves the path against the plugin directory it already knows from `scan_plugin_directory_at`. 4 new tests (2 unit tests for the metadata builder + 1 wire-args forward test + 1 integration test loading the actual `plugins/first-party-dap-python/manifest.toml` and asserting `metadata` lands on `list_adapters`). The shell-side launch-form renderer that consumes `metadata.launch_config_schema` is filed as a follow-up below — the manifest contribution path is demonstrated end-to-end up to the wire boundary, but the actual form-rendering UX is a separate concern since the debugger panel has no launch UI today.
 
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
 **Effort**: Large (4–6 weeks). First cut implemented; depends on BL-113 for the adapter-config shape before merging.
@@ -188,12 +194,34 @@ _BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 >
 > **Phases 2a + 3a shipped 2026-05-14.** Host-side merge primitives on `main` ready for activation. `LspHostConfig::merge_contributed(Vec<(LspServerSpec, plugin_id)>)` and `McpHostConfig::merge_contributed(Vec<(name, McpServerSpec, plugin_id)>)` accept contributed adapter specs and merge with **TOML-wins** precedence. Both return a typed skip report (`LspMergeSkip` / `McpMergeSkip`) carrying `(name, plugin_id, reason)` so the bootstrap-side caller can log conflicts. MCP factors per-spec validation out of `validate` into a shared `validate_spec` rule so contributions go through the same transport-aware checks as TOML entries. New `nexus-bootstrap::protocol_host_specs` is the only place in tree that maps `ContributedAdapter<*ProtocolHostReg>` → host spec; preserves contribution order; MCP transport string (`http` / `ws|websocket` / unknown → `stdio`) parsed defensively. 8 + 4 unit tests across the merge + converter layers.
 >
-> **Phases 1, 2b, 3b, 4 still open.** Phase 1 (DAP on the new shape; lands on the parked `bl-081-dap-debugger` branch). Phase 2b / 3b (bootstrap-side activation: register_adapter / unregister_adapter IPC pair + post-plugin-scan merge call) waits for Phase 1's lifecycle-callback design. Phase 4 (greenfield ACP host when Hermes Feature 7 is picked up).
+> **Phases 1a–1e shipped 2026-05-15 on `bl-081-dap-debugger`** (parked pending the BL-081 merge — not yet on `main`). The DAP track end-to-end: merge primitives → runtime register/unregister IPC → bootstrap-side wiring helper → CLI integration on community-plugin load + per-plugin enable/disable.
+>
+> Phase 1a — DAP merge primitives mirroring 2a/3a. `DapHostConfig::merge_contributed(Vec<(DapAdapterSpec, plugin_id)>) -> Vec<DapMergeSkip>` with `DapMergeSkipReason::{TomlOverride, InvalidName, InvalidCommand}`, TOML-wins, preserves input order. New `dap_contribution_to_spec` / `dap_contributions_to_specs` in `nexus-bootstrap::protocol_host_specs`; shell-only fields (`display_name`, `root_markers`, `launch_config_schema`, `variable_renderers`) dropped per "host stays protocol-only". 6 unit tests.
+>
+> Phase 1b — host-side runtime register/unregister surface. New `DapHostConfig.contributed_by: HashMap<name, plugin_id>` provenance tracking; new `register_contributed` (single-spec) + `unregister_contributed` returning `Result<DapAdapterSpec, UnregisterError::{NotFound, TomlEntry, NotOwnedByPlugin{actual_owner}}>`; `merge_contributed` re-implemented atop `register_contributed` so the batch path also populates provenance. New IPC handlers 20 (`register_adapter`) + 21 (`unregister_adapter`), strict-shape wire types, 4 new ts-rs bindings + 4 new JSON schemas. `DapCorePlugin.config` switched from `Option<Arc<DapHostConfig>>` to `Arc<RwLock<DapHostConfig>>`; async dispatch takes a per-future snapshot so in-flight commands see a consistent adapter view even when the master config mutates underneath. 11 new tests (6 config + 5 dispatch).
+>
+> Phase 1c — bootstrap-side wiring. New `nexus-bootstrap::dap_contribution_wiring::wire_dap_contributions(ctx, &[&PluginManifest]) -> Vec<DapWireOutcome>` and `unwire_dap_contributions_for_plugin(ctx, &PluginManifest) -> Vec<DapWireOutcome>` issue `com.nexus.dap::register_adapter` / `unregister_adapter` IPC once per contribution. Best-effort: per-adapter outcomes don't short-circuit. `DapWireStatus` maps every host reply status plus `DispatchError` / `UnexpectedReply` for transport / contract failures the host can't express. 4 module unit tests + 5 integration tests against a real `MinimalForge`-booted runtime (wire registers + populates `list_adapters`; invalid command surfaces as `InvalidCommand` without dirtying the map; wire→unwire round-trip clears the map; second unwire returns `NotFound`; cross-plugin unwire is refused with `NotOwnedByPlugin{actual_owner}` and leaves the owner's adapters intact).
+>
+> Phase 1d — CLI integration at load time. New `App::wire_dap_contributions()` in `nexus-cli` handles the dual-borrow choreography (snapshot loaded manifests through the plugin manager, drop borrow, dispatch through runtime). Called from `dispatch_external` after `plugins.load_all()` so any plugin-supplied CLI subcommand sees DAP contributions wired before the subcommand runs. Smoke test pins the empty-plugins-dir case.
+>
+> Phase 1e — runtime enable/disable hooks. New `App::wire_dap_contributions_for_plugin(plugin_id)` + `unwire_dap_contributions_for_plugin(plugin_id)`. The `nexus plugin enable / disable` CLI commands call them at the lifecycle boundary (wire AFTER enable, unwire BEFORE disable). Shared `log_dap_wire_outcomes(result, verb)` helper across all three call sites. Best-effort: outcomes logged via tracing, wiring failures don't block the user-facing operation.
+>
+> **Phases 2b + 3b shipped 2026-05-15 on `bl-081-dap-debugger`** (parked pending the BL-081 merge — not yet on `main`). The LSP and MCP tracks mirror Phase 1 layer-for-layer.
+>
+> Phase 2b — LSP runtime register/unregister. New `LspHostConfig.contributed_by: HashMap<name, plugin_id>` provenance tracking; new `register_contributed` (single-spec) / `unregister_contributed` (`Result<LspServerSpec, LspUnregisterError::{NotFound, TomlEntry, NotOwnedByPlugin{actual_owner}}>`); `merge_contributed` re-implemented atop `register_contributed`. New IPC handlers 13 (`register_server`) + 14 (`unregister_server`), strict-shape wire types (`LspRegisterServerArgs/Reply`, `LspUnregisterServerArgs/Reply`), 4 new ts-rs bindings + 4 new JSON schemas. `LspCorePlugin.config` switched from `Option<Arc<LspHostConfig>>` to `Arc<RwLock<LspHostConfig>>`; async dispatch takes a per-future snapshot so in-flight commands see a consistent server view even when the master config mutates. New bootstrap helper `nexus-bootstrap::lsp_contribution_wiring::wire_lsp_contributions(ctx, &[&PluginManifest])` / `unwire_lsp_contributions_for_plugin(ctx, &PluginManifest)` issues `com.nexus.lsp::register_server` / `unregister_server` once per contribution. Per-server outcomes via `LspWireOutcome` + `LspWireStatus`. 5 LSP module unit tests + 5 bootstrap integration tests against a real `MinimalForge`-booted runtime (wire registers + populates `list_servers`; invalid command surfaces as `InvalidCommand`; wire→unwire round-trip clears the map; second unwire returns `NotFound`; cross-plugin unwire refused with `NotOwnedByPlugin{actual_owner}` and leaves owner's servers intact).
+>
+> Phase 3b — MCP runtime register/unregister. Same shape, adapted for MCP's `BTreeMap<name, McpServerSpec>` keying and per-transport validator (stdio needs `command`, http/websocket need `url`). New `McpHostConfig.contributed_by` provenance (skipped from serde — runtime state only); new `register_contributed(name, spec, plugin_id)` / `unregister_contributed` with `McpUnregisterError::{NotFound, TomlEntry, NotOwnedByPlugin{actual_owner}}`; `merge_contributed` re-implemented atop the single-spec path. New IPC handlers 11 (`register_server`) + 12 (`unregister_server`) on `com.nexus.mcp.host`, wire types (`McpRegisterServerArgs/Reply`, `McpUnregisterServerArgs/Reply`); the register reply carries `reason: Option<String>` because MCP's per-transport validator emits a free-form message (versus DAP/LSP's tight closed-set skip reasons). `McpHostPlugin.config` switched to `Arc<RwLock<McpHostConfig>>` with per-future async snapshot. New bootstrap helper `nexus-bootstrap::mcp_contribution_wiring::wire_mcp_contributions` / `unwire_mcp_contributions_for_plugin` with `McpWireOutcome` + `McpWireStatus` (includes `Invalid(String)` variant for the validator message). 5 MCP module unit tests + 5 bootstrap integration tests covering the same matrix.
+>
+> CLI integration shared across all three protocols. `App::wire_{lsp,mcp}_contributions()` / `_for_plugin()` / `unwire_{lsp,mcp}_contributions_for_plugin()` mirror the DAP App-level methods; `dispatch_external` wires all three after `plugins.load_all()`, and `nexus plugin enable / disable` wires/unwires per-plugin contributions in the same lifecycle order DAP uses (wire AFTER enable, unwire BEFORE disable). Three log-outcome helpers in `nexus-cli::commands::plugin` (one per protocol) emit `tracing::info` on `Ok` outcomes and `tracing::warn` on every other status; wiring failures don't block user-facing operations.
+>
+> Bootstrap-side handler-id alias registration extended: `com.nexus.lsp` now exports `execute_command` (BL-077 follow-up that was previously missing from the alias table) + the two BL-113 verbs; `com.nexus.mcp.host` exports `register_tool` / `unregister_tool` / `list_dynamic_tools` (DG-39 verbs that were previously missing from the alias table) + the two BL-113 verbs. The PluginLifecycleObserver-trait refactor mentioned as a deferral target is still open — three consumers now exist, but the per-protocol shape is small enough that the refactor lands cleanly anytime someone wants it.
+>
+> **Phase 4 still open.** Greenfield ACP host is now tracked as [BL-144](#bl-144-nexus-acp-host--outbound-acp-adapter-integration-bl-113-phase-4) (minted 2026-05-15). The inverse direction — an inbound ACP server exposing Nexus's agent surface to external Hermes-compatible clients — is tracked separately as [BL-145](#bl-145-nexus-acp-server--inbound-acp-surface-for-external-clients) because the two are inverse directions with different DoDs even though both live under `nexus-acp`. TUI has no community-plugin load surface today; shell (Tauri) loads plugins through its bridge and is its own integration.
 
 **Source**: BL-081 review (2026-05-13) — full design in [ADR 0027](../adr/0027-protocol-host-contribution-model.md).
 **Effort**: Large. Phase 0 (ADR + spike) ~1–2 days; Phase 1 (DAP on the new shape) ~1 wk; Phases 2–3 (LSP, MCP) ~1 wk each; Phase 4 (ACP) lands greenfield when the Hermes Feature-7 / ACP integration BL is picked up.
 **Crates**: `nexus-lsp`, `nexus-dap` (on the parked branch), `nexus-mcp`, future `nexus-acp`, `nexus-plugins` (contribution loader), shell-side plugin manifest schema.
-**Related**: ADR 0011 (plugin-first shell), [BL-081](#bl-081-dap-debugger-integration) (parked pending this), [BL-076](BACKLOG_COMPLETED.md) (nexus-lsp host — shipped under the legacy flat-TOML pattern this would replace), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet scoped as a BL; when it lands it inherits this model).
+**Related**: ADR 0011 (plugin-first shell), [BL-081](#bl-081-dap-debugger-integration) (parked pending this), [BL-076](BACKLOG_COMPLETED.md) (nexus-lsp host — shipped under the legacy flat-TOML pattern this would replace), [BL-144](#bl-144-nexus-acp-host--outbound-acp-adapter-integration-bl-113-phase-4) (Phase 4 — outbound ACP host), [BL-145](#bl-145-nexus-acp-server--inbound-acp-surface-for-external-clients) (Hermes Feature 7 — inbound ACP server).
 
 Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML config (`lsp.toml` / `mcp.toml` / `dap.toml`) listing their external adapters. ACP (Agent Communication Protocol — Hermes Feature 7, agent-to-agent stdio JSON-RPC) is the same shape and queued as a future `nexus-acp` crate. The pattern is consistent with the microkernel invariant but blocks per-adapter UX (launch-config schemas, variable renderers, hover providers, agent capability descriptors), has no marketplace/install path, and duplicates ~80%-identical config shapes across the host crates.
 
@@ -207,7 +235,35 @@ Today `nexus-lsp`, `nexus-mcp`, and (parked) `nexus-dap` each ship a flat TOML c
 - `nexus-lsp` migrates next; `lsp.toml` keeps working
 - `nexus-mcp.host` migrates last; `mcp.toml` keeps working
 - Future `nexus-acp` crate (Hermes Feature 7) consumes the contribution loader as its only adapter source — no `acp.toml` to migrate from
-- Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path)
+- Capability surface for `register_adapter` is decided (whether it's a new capability or rides on the existing contribution path) — **Resolved**: no new capability at the verb level; the contribution path is the manifest-declared shape and the bootstrap wiring helper is the only intended caller. Runtime usage capabilities (`process.spawn`, `net.connect`) ride on the contributing plugin's existing grants and are checked at the `launch` / `connect` boundary. See ADR 0027 §Open Question #3 ("Verified through Phase 1b/2b/3b" close-out, 2026-05-15). Hard enforcement at the verb level would need kernel-side caller-identity threading; filed as the hardening follow-up below.
+
+---
+
+### Follow-up: kernel-side caller-identity threading for register_adapter verb hardening (from BL-113)
+
+**Source**: BL-113 capability-surface resolution (ADR 0027 §Open Question #3). Filed 2026-05-15.
+**Effort**: Medium. Touches the kernel IPC dispatcher + every handler signature.
+**Crates**: `nexus-kernel`, every service crate that registers a handler.
+
+ADR 0027 resolves the capability question by treating contribution wiring as a declarative manifest pipeline (no verb-level gate). The trust model is **"plugins author manifests; bootstrap calls IPC."** Today there's no kernel-side enforcement preventing a plugin with `ipc.call` from invoking `com.nexus.dap::register_adapter` (or LSP / MCP equivalents) directly — bypassing the contribution pipeline. That can't escalate spawn privileges (those are checked at `launch` / `attach` / `connect`), but it does corrupt `contributed_by` provenance and skip marketplace install records.
+
+Hardening: thread the calling plugin's id through `IpcDispatch::call(...)` into the handler. Handlers that want it (`register_adapter`, `register_server`) can then refuse the call when the caller isn't the trusted bootstrap context. Touches every handler signature in tree — defer until the corruption becomes a real problem or until another concern (audit logs, per-caller rate limits) wants the same plumbing.
+
+---
+
+### Follow-up: shell-side launch-config form renderer (from BL-113 first-party DAP plugin)
+
+**Source**: BL-113 deferral. Filed 2026-05-15.
+**Effort**: Medium. ~200–300 LOC across `shell/src/plugins/nexus/debugger/`.
+**Crates**: shell (`nexus.debugger` plugin).
+
+The first-party `first-party.dap.python` plugin shipped on `bl-081-dap-debugger` plumbs the contributed `launch_config_schema` to the shell via the host's opaque `metadata` field on `list_adapters`. What's still missing is the actual form-rendering UX:
+
+1. A `<LaunchPicker>` dropdown in `DebuggerPanel.tsx` listing adapters from `list_adapters`, badged by `metadata.display_name`.
+2. A `<LaunchConfigForm>` component that reads `metadata.launch_config_schema` (relative path), resolves it against the plugin directory, fetches via Tauri fs, and renders a typed form. Minimum coverage: top-level `type: object` with `string` / `boolean` / `array<string>` property kinds (debugpy's launch spec uses only these). Defaults from the schema seed initial values.
+3. Submit calls `useDebuggerStore.startSession(api, { adapter, ...formValues })`.
+
+Gating: the panel has no launch UI today, so this is a net-new feature track rather than a polish pass. The infrastructure to feed it (manifest contribution → host metadata → wire surface) is in place.
 
 ---
 
@@ -559,6 +615,75 @@ BL-074 shipped the CRDT primitives and the in-process ops bus (`com.nexus.editor
 - Disconnect / reconnect handled gracefully (buffered ops replayed on reconnect)
 - `nexus collab serve` and `nexus collab join` CLI verbs documented in `nexus help collab`
 - 10 integration tests: relay message routing, presence broadcast, cursor annotation render, disconnect-reconnect op replay, auth token rejection
+
+---
+
+### BL-144: `nexus-acp` host — outbound ACP adapter integration (BL-113 Phase 4)
+
+**Source**: BL-113 Phase 4 unblocks once this is scoped — see [ADR 0027](../adr/0027-protocol-host-contribution-model.md) §Phase 4 and the BL-113 entry above. Filed 2026-05-15.
+**Effort**: Medium. ~3–5 days once the wire-level subset is pinned. The Phase 1–3 patterns from BL-113 (`nexus-dap` / `nexus-lsp` / `nexus-mcp`) are copy-paste; the new work is the ACP-specific spec fields and the JSON-RPC verbs.
+**Crates**: new `nexus-acp` core plugin; `nexus-plugins` (`AcpProtocolHostReg` already shipped in BL-113 Phase 0a); `nexus-bootstrap` (new `acp_contribution_wiring` module + registration); `nexus-cli` (lifecycle wiring); `shell/src/plugins/nexus/agents/` (optional Phase 2 — agent picker / capability viewer).
+**Related**: [BL-113](#bl-113-protocol-host-contribution-model-for-lsp--dap--mcp--acp) Phase 4 (this unblocks it); [BL-145](#bl-145-nexus-acp-server--inbound-acp-surface-for-external-clients) (inverse direction — separate BL); ADR 0027 §Phase 4 (open spike: ACP-specific spec fields).
+
+Today the contribution model in ADR 0027 names ACP as the fourth protocol host but no `nexus-acp` crate exists. ACP (Agent Communication Protocol) is stdio JSON-RPC and shape-matches LSP — same transport, same connection-pool / reconnect / event-fan-out concerns. This BL builds the *host* (outbound — Nexus dials *out* to external agent processes), mirroring the `nexus-lsp` shape so the host crate stays protocol-only and community plugins contribute agent adapters through `[[registrations.protocol_hosts.acp]]`.
+
+**Phase 1 — host crate + IPC surface:**
+- New `nexus-acp` crate following the BL-113 Phase 2b (LSP) layout exactly: `transport` (line-delimited JSON-RPC over stdio — adapt from `nexus-lsp::transport`), `client` (per-agent state), `pool` (connection pool with reconnect), `config` (`AcpHostConfig` with `Arc<RwLock<...>>` + `register_contributed` / `unregister_contributed` / `contributed_by` from day one — **no `acp.toml`** per ADR 0027 §Phase 4).
+- `AcpAdapterSpec` carrying the common host fields (name, command, args, env, disabled) plus an ACP-specific block to be settled by the spike (capability descriptors, agent-capability advertisements, A2A peer metadata — ADR 0027 §Phase 4 left this TBD).
+- IPC handlers for the ACP request/notification family (`initialize`, `propose`, `accept` / `reject`, agent-pushed events). Exact verb set comes from the spike (see ADR follow-up below).
+- BL-113 contribution verbs `register_server` / `unregister_server` baked in from day one.
+
+**Phase 2 — bootstrap + CLI integration:**
+- New `nexus_bootstrap::acp_contribution_wiring` module (mirror of `lsp_contribution_wiring`) + `protocol_host_specs::acp_contribution_to_spec` converter.
+- `register_core_plugins` registers `com.nexus.acp` with its handler-id alias table including the BL-113 verbs.
+- `App::{wire,unwire}_acp_contributions[_for_plugin]` in `nexus-cli`, fourth call site in `enable` / `disable` / `dispatch_external`. **At this point** the deferred `PluginLifecycleObserver` refactor (see BL-113 entry — "deferred until at least two consumers exist") is worth taking: four near-identical wire-up sites is the threshold.
+- Schema emission + drift-script entry for `nexus-acp`.
+
+**Phase 3 (optional) — shell-side UI:**
+- Agent picker plugin under `shell/src/plugins/nexus/agents/` consuming the contribution set for the agent-capability advertisements.
+- Defer until at least one community ACP plugin exists.
+
+**Definition of done (Phase 1 + 2):**
+- ADR 0027 §Phase 4 follow-up posted resolving the ACP-spec-fields spike (capability descriptors / A2A metadata).
+- `nexus-acp` crate ships with `Arc<RwLock<AcpHostConfig>>` + provenance + register/unregister IPC verbs.
+- `wire_acp_contributions` round-trips against `MinimalForge` with the same 5-test matrix used for LSP/MCP (register, invalid command, round-trip, intruder unwire refused, empty manifest set).
+- `nexus plugin enable/disable` wires/unwires per-plugin ACP contributions; `dispatch_external` wires on load.
+- IPC drift script passes; 4 new ts-rs bindings + 4 new JSON schemas committed.
+- One example community plugin (`first-party.acp.<something>`) demonstrates the contribution path end-to-end.
+- `dep_invariants` clean; `nexus-acp` depends only on `nexus-kernel` + `nexus-plugins` (no direct dep on `nexus-agent` or `nexus-ai` — agent calls route through `ipc_call`).
+
+---
+
+### BL-145: `nexus-acp` server — inbound ACP surface for external clients (Hermes Feature 7)
+
+**Source**: Hermes capability port plan — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md) §"Feature 7 — ACP Adapter". Filed 2026-05-15.
+**Effort**: Medium (M per the Hermes plan). Depends on Hermes Features 1–6 (the underlying multi-agent / delegation / memory / skills primitives that the JSON-RPC surface exposes). A streaming variant is a Phase 2 follow-up.
+**Crates**: new `nexus-acp` if BL-144 hasn't shipped yet (otherwise this layers an `AcpServer` type into the same crate); `nexus-bootstrap` (binary entry-point — `nexus acp serve` or a dedicated `nexus-acp-server` binary). No direct dep on `nexus-agent` or `nexus-ai` — all agent calls route through `runtime.context.ipc_call(...)`.
+**Related**: [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md) Features 1–6 (pre-reqs); [BL-144](#bl-144-nexus-acp-host--outbound-acp-adapter-integration-bl-113-phase-4) (inverse direction, separate BL); [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (provides the typed `AiEvent` channel a streaming variant subscribes to).
+
+BL-144 builds the **host** side (Nexus → external agents). This BL builds the **server** side (external Hermes-compatible clients → Nexus). They're inverse directions and the wire-level contracts overlap but the system shape is opposite: BL-144 spawns child processes and proxies into them; BL-145 exposes Nexus's existing `com.nexus.agent::*` IPC surface over JSON-RPC stdio so an external IDE / agent can drive Nexus's agent loop. Both can live in `nexus-acp` (parallel `AcpHost` / `AcpServer` types) or land as a sibling `nexus-acp-server` crate — decide at scoping time based on shared transport code reuse.
+
+**Phase 1 — JSON-RPC stdio server (non-streaming):**
+- `AcpServer::new(forge_root)` builds a kernel runtime through `nexus_bootstrap::build_cli_runtime`.
+- `AcpServer::serve_stdio().await` reads line-delimited JSON-RPC 2.0 requests on stdin, dispatches each through `runtime.context.ipc_call(...)`, writes the result/error envelope to stdout.
+- Method map (from Hermes Feature 7 §"Methods exposed"): `agent/run` → `com.nexus.agent::session_run`; `agent/list` → `session_list`; `agent/get` → `session_get`. Additional verbs (`skill/list`, `mem/search`, etc.) per the Hermes plan's per-feature exposure.
+- Binary entry-point: `nexus acp serve` (or a dedicated `nexus-acp-server` binary) consumed by Hermes-compatible clients as a stdio child process.
+
+**Phase 2 — streaming notifications:**
+- `StreamingAcpServer` subscribes to `com.nexus.agent.round_proposed` and the `com.nexus.ai.stream_*` bus topics (or the typed `AiEvent` channel from [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) once it lands) and forwards each as a JSON-RPC notification on stdout.
+- The streaming variant requires no client-side polling; tool-loop progress, partial completions, and agent approval prompts surface in real time.
+
+**Definition of done (Phase 1):**
+- `nexus acp serve` starts an ACP server bound to stdio.
+- The three documented methods (`agent/run` / `agent/list` / `agent/get`) round-trip cleanly with a Hermes-compatible test client.
+- JSON-RPC 2.0 error envelopes for unknown methods, invalid params, and underlying `IpcError`.
+- A new ADR (or extension of ADR 0027) pins which Nexus IPC surfaces are exposed and which are intentionally not (capability gate at the server boundary).
+- 5 integration tests against a tokio in-process duplex pipe: happy-path request, unknown-method error, invalid-params error, parallel requests, graceful disconnect.
+
+**Open question** (resolve at scoping): does BL-145 land as `AcpServer` inside the BL-144 `nexus-acp` crate (one crate, two roles) or as a sibling `nexus-acp-server` (clean separation, duplicates the JSON-RPC framing)? Lean toward one crate if BL-144 ships first.
+
+---
+
 ### BL-134: `nexus-ai-runtime` — unified AI/agent event loop
 
 **Source**: Architectural review 2026-05-14 — full design in [ADR 0028](../adr/0028-ai-agent-event-loop.md). Filed 2026-05-14.

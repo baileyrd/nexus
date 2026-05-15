@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpRegisterServerArgs",
+  "description": "Args for `register_server` (handler `11`). Mirrors an\n[`crate::config::McpServerSpec`] plus a name + the contributing\nplugin's reverse-DNS id. The host crate stays protocol-only per\nADR 0027; shell-side fields are intentionally absent.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "CLI args appended at spawn time.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Executable to spawn — required for stdio.",
+      "type": "string",
+      "default": ""
+    },
+    "disabled": {
+      "description": "`true` to keep the entry registered but skip spawning.",
+      "type": "boolean",
+      "default": false
+    },
+    "env": {
+      "description": "Environment merged on top of the host process's environment\nat spawn time (stdio only).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "name": {
+      "description": "Stable server identifier (the BTreeMap key used by the host).",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Reverse-DNS id of the contributing plugin.",
+      "type": "string"
+    },
+    "transport": {
+      "description": "Wire-level transport — one of `\"stdio\"`, `\"http\"`, `\"websocket\"`.\nUnknown values fall back to stdio at conversion time.",
+      "type": "string",
+      "default": "stdio"
+    },
+    "url": {
+      "description": "Endpoint URL — required for remote transports.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "plugin_id"
+  ]
+}

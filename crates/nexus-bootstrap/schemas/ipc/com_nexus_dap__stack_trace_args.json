@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapStackTraceArgs",
+  "description": "Args for `stack_trace` (handler `16`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "levels": {
+      "description": "Max frames to return. Defaults to adapter's choice (typically\nunlimited).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "start_frame": {
+      "description": "First frame to return (0-based). Defaults to 0.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "thread_id": {
+      "description": "DAP thread id.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "thread_id"
+  ]
+}

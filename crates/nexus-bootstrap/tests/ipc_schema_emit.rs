@@ -64,14 +64,26 @@ use nexus_git::ipc::{
 // existing handlers construct ad-hoc JSON via `serde_json::json!`.
 use nexus_mcp::ipc::{
     McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply,
-    McpPromptEntry, McpResourceEntry, McpServerArgs, McpServerEntry, McpToolEntry,
+    McpPromptEntry, McpRegisterServerArgs, McpRegisterServerReply, McpResourceEntry,
+    McpServerArgs, McpServerEntry, McpToolEntry, McpUnregisterServerArgs,
+    McpUnregisterServerReply,
 };
 // nexus-lsp uses a wire-mirror module — the handlers emit ad-hoc
 // `serde_json::json!` and accept `Value` in (BL-076).
 use nexus_lsp::ipc::{
     LspChangeFileArgs, LspCodeActionsArgs, LspExecuteCommandArgs, LspOk, LspOpenFileArgs,
-    LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRenameArgs,
-    LspServerEntry,
+    LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs,
+    LspRegisterServerArgs, LspRegisterServerReply, LspRenameArgs, LspServerEntry,
+    LspUnregisterServerArgs, LspUnregisterServerReply,
+};
+// nexus-dap (BL-081) — wire-mirror types; handlers emit ad-hoc
+// `serde_json::json!` like nexus-lsp.
+use nexus_dap::ipc::{
+    DapAdapterArgs, DapAdapterEntry, DapAttachArgs, DapEvaluateArgs, DapFunctionBreakpoint,
+    DapLaunchArgs, DapOk, DapRegisterAdapterArgs, DapRegisterAdapterReply, DapScopesArgs,
+    DapSetBreakpointsArgs, DapSetExceptionBreakpointsArgs, DapSetFunctionBreakpointsArgs,
+    DapSourceBreakpoint, DapStackTraceArgs, DapThreadArgs, DapUnregisterAdapterArgs,
+    DapUnregisterAdapterReply, DapVariablesArgs,
 };
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
 use nexus_agent::transcript_search::{SearchArgs as TranscriptSearchArgs, TranscriptHit};
@@ -339,6 +351,11 @@ fn emit_all_schemas_impl() {
     write_schema::<McpConnectReply>("com_nexus_mcp_host__connect", "reply");
     write_schema::<McpDisconnectMissReply>("com_nexus_mcp_host__disconnect", "miss_reply");
     write_schema::<McpCallToolReply>("com_nexus_mcp_host__call_tool", "reply");
+    // BL-113 Phase 3b — plugin contribution registration verbs.
+    write_schema::<McpRegisterServerArgs>("com_nexus_mcp_host__register_server", "args");
+    write_schema::<McpRegisterServerReply>("com_nexus_mcp_host__register_server", "reply");
+    write_schema::<McpUnregisterServerArgs>("com_nexus_mcp_host__unregister_server", "args");
+    write_schema::<McpUnregisterServerReply>("com_nexus_mcp_host__unregister_server", "reply");
 
     // ── com.nexus.lsp (BL-076) ───────────────────────────────────────────
     // Wire-mirror types — the impl emits ad-hoc `serde_json::json!`.
@@ -353,6 +370,40 @@ fn emit_all_schemas_impl() {
     write_schema::<LspCodeActionsArgs>("com_nexus_lsp__code_actions", "args");
     write_schema::<LspExecuteCommandArgs>("com_nexus_lsp__execute_command", "args");
     write_schema::<LspOk>("com_nexus_lsp", "ok");
+    // BL-113 Phase 2b — plugin contribution registration verbs.
+    write_schema::<LspRegisterServerArgs>("com_nexus_lsp__register_server", "args");
+    write_schema::<LspRegisterServerReply>("com_nexus_lsp__register_server", "reply");
+    write_schema::<LspUnregisterServerArgs>("com_nexus_lsp__unregister_server", "args");
+    write_schema::<LspUnregisterServerReply>("com_nexus_lsp__unregister_server", "reply");
+
+    // ── com.nexus.dap (BL-081) ───────────────────────────────────────────
+    // Wire-mirror types — the impl emits ad-hoc `serde_json::json!`.
+    write_schema::<DapAdapterEntry>("com_nexus_dap__list_adapters", "entry");
+    write_schema::<DapLaunchArgs>("com_nexus_dap__launch", "args");
+    write_schema::<DapAttachArgs>("com_nexus_dap__attach", "args");
+    write_schema::<DapAdapterArgs>("com_nexus_dap", "adapter_args");
+    write_schema::<DapSourceBreakpoint>("com_nexus_dap", "source_breakpoint");
+    write_schema::<DapSetBreakpointsArgs>("com_nexus_dap__set_breakpoints", "args");
+    write_schema::<DapFunctionBreakpoint>("com_nexus_dap", "function_breakpoint");
+    write_schema::<DapSetFunctionBreakpointsArgs>(
+        "com_nexus_dap__set_function_breakpoints",
+        "args",
+    );
+    write_schema::<DapSetExceptionBreakpointsArgs>(
+        "com_nexus_dap__set_exception_breakpoints",
+        "args",
+    );
+    write_schema::<DapThreadArgs>("com_nexus_dap", "thread_args");
+    write_schema::<DapStackTraceArgs>("com_nexus_dap__stack_trace", "args");
+    write_schema::<DapScopesArgs>("com_nexus_dap__scopes", "args");
+    write_schema::<DapVariablesArgs>("com_nexus_dap__variables", "args");
+    write_schema::<DapEvaluateArgs>("com_nexus_dap__evaluate", "args");
+    write_schema::<DapOk>("com_nexus_dap", "ok");
+    // BL-113 Phase 1b — plugin contribution registration verbs.
+    write_schema::<DapRegisterAdapterArgs>("com_nexus_dap__register_adapter", "args");
+    write_schema::<DapRegisterAdapterReply>("com_nexus_dap__register_adapter", "reply");
+    write_schema::<DapUnregisterAdapterArgs>("com_nexus_dap__unregister_adapter", "args");
+    write_schema::<DapUnregisterAdapterReply>("com_nexus_dap__unregister_adapter", "reply");
 
     // ── com.nexus.agent (P1-3 #113) ──────────────────────────────────────
     write_schema::<GoalArgs>("com_nexus_agent__plan", "args");

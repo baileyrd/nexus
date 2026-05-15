@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapEvaluateArgs",
+  "description": "Args for `evaluate` (handler `19`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "context": {
+      "description": "`\"watch\"` / `\"repl\"` / `\"hover\"` / `\"clipboard\"` — adapter\nuses the context to gate side effects.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expression": {
+      "description": "Expression to evaluate.",
+      "type": "string"
+    },
+    "frame_id": {
+      "description": "Frame id to evaluate against. When absent, evaluates in\nglobal scope.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "expression"
+  ]
+}

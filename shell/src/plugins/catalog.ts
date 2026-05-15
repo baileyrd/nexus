@@ -451,6 +451,14 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/searchPanel').then(m => m.searchPanelPlugin),
   },
   {
+    id: 'nexus.debugger', name: 'Debugger',
+    version: '0.1.0', core: false,
+    activationEvents: ['onCommand:nexus.debugger.focus', 'onView:debugger-panel'],
+    description:
+      'BL-081 — DAP debugger panel. Toolbar (continue / step over / step in / step out / pause / stop), call stack, scopes + variables, watch expressions, breakpoints, and output. Backed by `com.nexus.dap`; configure adapters in `<forge>/.forge/dap.toml`.',
+    load: () => import('./nexus/debugger').then(m => m.debuggerPlugin),
+  },
+  {
     id: 'nexus.outgoingLinks', name: 'Outgoing Links',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Side panel listing every link, embed, and unresolved reference in the active note.',

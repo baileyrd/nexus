@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapScopesArgs",
+  "description": "Args for `scopes` (handler `17`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "frame_id": {
+      "description": "DAP frame id (from `stackTrace`).",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "frame_id"
+  ]
+}

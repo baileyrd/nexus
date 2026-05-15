@@ -50,6 +50,24 @@ pub mod terminal;
 /// plugin-lifecycle callback shape is settled by Phase 1.
 pub mod protocol_host_specs;
 
+/// BL-113 Phase 1c — bootstrap-side wiring that issues
+/// `com.nexus.dap::register_adapter` IPC calls for each DAP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod dap_contribution_wiring;
+
+/// BL-113 Phase 2b — bootstrap-side wiring that issues
+/// `com.nexus.lsp::register_server` IPC calls for each LSP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod lsp_contribution_wiring;
+
+/// BL-113 Phase 3b — bootstrap-side wiring that issues
+/// `com.nexus.mcp.host::register_server` IPC calls for each MCP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod mcp_contribution_wiring;
+
 /// Render a markdown note to a standalone HTML string.
 ///
 /// Re-exported from `nexus-formats` (pure format library, no `SQLite`).
@@ -537,6 +555,7 @@ fn register_core_plugins(
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
     use nexus_lsp::LspCorePlugin;
+    use nexus_dap::DapCorePlugin;
     use nexus_mcp::McpHostPlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
@@ -1528,6 +1547,27 @@ fn register_core_plugins(
                     ),
                     ("connect", nexus_mcp::core_plugin::HANDLER_CONNECT),
                     ("disconnect", nexus_mcp::core_plugin::HANDLER_DISCONNECT),
+                    (
+                        "register_tool",
+                        nexus_mcp::core_plugin::HANDLER_REGISTER_TOOL,
+                    ),
+                    (
+                        "unregister_tool",
+                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_TOOL,
+                    ),
+                    (
+                        "list_dynamic_tools",
+                        nexus_mcp::core_plugin::HANDLER_LIST_DYNAMIC_TOOLS,
+                    ),
+                    // BL-113 Phase 3b — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_mcp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
                 ]),
             ),
             forge_root,
@@ -1564,6 +1604,19 @@ fn register_core_plugins(
                     ("rename", nexus_lsp::core_plugin::HANDLER_RENAME),
                     ("code_actions", nexus_lsp::core_plugin::HANDLER_CODE_ACTIONS),
                     ("format", nexus_lsp::core_plugin::HANDLER_FORMAT),
+                    (
+                        "execute_command",
+                        nexus_lsp::core_plugin::HANDLER_EXECUTE_COMMAND,
+                    ),
+                    // BL-113 Phase 2b — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_lsp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_lsp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
                 ]),
             ),
             forge_root,
@@ -1573,6 +1626,59 @@ fn register_core_plugins(
             )),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.lsp")?;
+
+    // DAP host orchestrator — loads `<forge>/.forge/dap.toml`, lazily spawns
+    // configured debug adapters, proxies DAP requests over IPC, and
+    // republishes adapter-pushed events on the kernel bus as
+    // `com.nexus.dap.<event>`. BL-081.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.dap",
+                "DAP Host",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: true,
+                    on_stop: true,
+                },
+                &with_v1_aliases(&[
+                    ("list_adapters", nexus_dap::core_plugin::HANDLER_LIST_ADAPTERS),
+                    ("launch", nexus_dap::core_plugin::HANDLER_LAUNCH),
+                    ("attach", nexus_dap::core_plugin::HANDLER_ATTACH),
+                    ("configuration_done", nexus_dap::core_plugin::HANDLER_CONFIGURATION_DONE),
+                    ("disconnect", nexus_dap::core_plugin::HANDLER_DISCONNECT),
+                    ("terminate", nexus_dap::core_plugin::HANDLER_TERMINATE),
+                    ("set_breakpoints", nexus_dap::core_plugin::HANDLER_SET_BREAKPOINTS),
+                    ("set_function_breakpoints", nexus_dap::core_plugin::HANDLER_SET_FUNCTION_BREAKPOINTS),
+                    ("set_exception_breakpoints", nexus_dap::core_plugin::HANDLER_SET_EXCEPTION_BREAKPOINTS),
+                    ("continue", nexus_dap::core_plugin::HANDLER_CONTINUE),
+                    ("next", nexus_dap::core_plugin::HANDLER_NEXT),
+                    ("step_in", nexus_dap::core_plugin::HANDLER_STEP_IN),
+                    ("step_out", nexus_dap::core_plugin::HANDLER_STEP_OUT),
+                    ("pause", nexus_dap::core_plugin::HANDLER_PAUSE),
+                    ("threads", nexus_dap::core_plugin::HANDLER_THREADS),
+                    ("stack_trace", nexus_dap::core_plugin::HANDLER_STACK_TRACE),
+                    ("scopes", nexus_dap::core_plugin::HANDLER_SCOPES),
+                    ("variables", nexus_dap::core_plugin::HANDLER_VARIABLES),
+                    ("evaluate", nexus_dap::core_plugin::HANDLER_EVALUATE),
+                    // BL-113 Phase 1c — plugin contribution lifecycle.
+                    (
+                        "register_adapter",
+                        nexus_dap::core_plugin::HANDLER_REGISTER_ADAPTER,
+                    ),
+                    (
+                        "unregister_adapter",
+                        nexus_dap::core_plugin::HANDLER_UNREGISTER_ADAPTER,
+                    ),
+                ]),
+            ),
+            forge_root,
+            Box::new(DapCorePlugin::new(
+                forge_root.to_path_buf(),
+                Some(Arc::clone(event_bus)),
+            )),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.dap")?;
 
     // Git integration — wraps GitWorker behind IPC and publishes bus events
     // (branch_changed, commit, dirty_changed) for any plugin or UI that

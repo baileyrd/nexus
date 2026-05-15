@@ -19,6 +19,7 @@ ts-export = [
     "nexus-git/ts-export",
     "nexus-mcp/ts-export",
     "nexus-lsp/ts-export",
+    "nexus-dap/ts-export",
     "nexus-agent/ts-export",
     "nexus-comments/ts-export",
     "nexus-theme/ts-export",
@@ -50,6 +51,7 @@ nexus-theme = { path = "../nexus-theme" }
 nexus-git = { path = "../nexus-git" }
 nexus-mcp = { path = "../nexus-mcp" }
 nexus-lsp = { path = "../nexus-lsp" }
+nexus-dap = { path = "../nexus-dap" }
 nexus-types = { path = "../nexus-types" }
 nexus-agent = { path = "../nexus-agent" }
 nexus-skills = { path = "../nexus-skills" }
