@@ -1,0 +1,27 @@
+[package]
+name = "nexus-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus ACP host + server — outbound Agent Communication Protocol host for external agent processes (BL-144) and inbound JSON-RPC surface exposing Nexus's agent IPC to Hermes-compatible clients (BL-145)"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+
+[features]
+# Mirror nexus-lsp / nexus-dap: TS bindings + JSON Schema export gated
+# behind a feature so the production build doesn't pull ts-rs.
+ts-export = ["dep:ts-rs"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "io-util"] }

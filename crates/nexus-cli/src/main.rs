@@ -119,6 +119,10 @@ enum Commands {
     Term(TermArgs),
     /// MCP (Model Context Protocol): run server or operate as host
     Mcp(McpArgs),
+    /// ACP (Agent Communication Protocol — BL-145 / Hermes Feature 7):
+    /// expose Nexus's agent IPC surface to external clients over a
+    /// stdio JSON-RPC 2.0 server.
+    Acp(AcpArgs),
     /// Sync operations (coming soon)
     Sync(StubArgs),
     /// Git operations (read-only)
@@ -773,6 +777,26 @@ enum McpCommand {
         #[arg(long, default_value = "{}")]
         arguments: String,
     },
+}
+
+// ---------------------------------------------------------------------------
+// ACP (BL-145 / Hermes Feature 7)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct AcpArgs {
+    #[command(subcommand)]
+    command: AcpCommand,
+}
+
+#[derive(Subcommand)]
+enum AcpCommand {
+    /// Start the inbound ACP JSON-RPC 2.0 server on stdio. Exposes a
+    /// fixed allow-list of `com.nexus.agent` IPC verbs (`agent/run`,
+    /// `agent/list`, `agent/get`) to a Hermes-compatible parent
+    /// process. Pure proxy — every method dispatches through the
+    /// kernel's `ipc_call` boundary.
+    Serve,
 }
 
 // ---------------------------------------------------------------------------
@@ -2032,6 +2056,9 @@ fn main() {
                 tool,
                 arguments,
             } => commands::mcp::host_call(&mut app, &server, &tool, &arguments),
+        },
+        Commands::Acp(args) => match args.command {
+            AcpCommand::Serve => commands::acp::serve(&app),
         },
         Commands::Sync(_) => stubs::not_implemented("sync"),
         Commands::Git(args) => match args.command {

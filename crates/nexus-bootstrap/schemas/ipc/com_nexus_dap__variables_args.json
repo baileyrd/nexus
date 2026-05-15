@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapVariablesArgs",
+  "description": "Args for `variables` (handler `18`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "count": {
+      "description": "Max children to return.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "filter": {
+      "description": "Optional `\"named\"` / `\"indexed\"` filter for paginated types.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Start offset for paginated reads.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
+    "variables_reference": {
+      "description": "Reference returned by an earlier `scopes` / `variables` reply.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "variables_reference"
+  ]
+}

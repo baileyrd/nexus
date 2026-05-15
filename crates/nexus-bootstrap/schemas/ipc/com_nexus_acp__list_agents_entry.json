@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpAgentEntry",
+  "description": "One entry in the `list_agents` reply array.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Process arguments.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capabilities": {
+      "description": "Declarative capability tags advertised by the contribution.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Executable path or name.",
+      "type": "string"
+    },
+    "connected": {
+      "description": "`true` while a child process for this agent is alive in the\npool — the shell can render a green/grey status dot.",
+      "type": "boolean"
+    },
+    "disabled": {
+      "description": "`true` if the adapter is registered but disabled.",
+      "type": "boolean"
+    },
+    "metadata": {
+      "description": "Opaque shell-only metadata round-tripped from contribution\ntime. Carries `plugin_id`, `display_name`, and any future\nshell-only fields."
+    },
+    "name": {
+      "description": "Stable agent identifier.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "command",
+    "args",
+    "capabilities",
+    "disabled",
+    "connected"
+  ]
+}

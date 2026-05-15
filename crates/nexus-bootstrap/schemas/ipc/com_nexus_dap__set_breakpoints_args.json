@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapSetBreakpointsArgs",
+  "description": "Args for `set_breakpoints` (handler `7`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name from `dap.toml`.",
+      "type": "string"
+    },
+    "breakpoints": {
+      "description": "Replacement breakpoint set for this source. An empty array\nclears all breakpoints in the file.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DapSourceBreakpoint"
+      }
+    },
+    "source_path": {
+      "description": "Source path (absolute, host filesystem).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "source_path",
+    "breakpoints"
+  ],
+  "$defs": {
+    "DapSourceBreakpoint": {
+      "description": "One row in [`DapSetBreakpointsArgs::breakpoints`].",
+      "type": "object",
+      "properties": {
+        "condition": {
+          "description": "Adapter-evaluated boolean expression; breakpoint only fires\nwhen truthy.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hit_condition": {
+          "description": "Hit-count expression (e.g. `\"> 10\"`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "description": "1-based line number.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "log_message": {
+          "description": "Turns the breakpoint into a logpoint (prints `log_message`\ninstead of pausing).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "line"
+      ]
+    }
+  }
+}

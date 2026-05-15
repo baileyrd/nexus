@@ -217,6 +217,123 @@ pub struct McpCallToolReply {
     pub truncated: bool,
 }
 
+// ── BL-113 Phase 3b — register_server / unregister_server ───────────────────
+
+/// Args for `register_server` (handler `11`). Mirrors an
+/// [`crate::config::McpServerSpec`] plus a name + the contributing
+/// plugin's reverse-DNS id. The host crate stays protocol-only per
+/// ADR 0027; shell-side fields are intentionally absent.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpRegisterServerArgs {
+    /// Stable server identifier (the BTreeMap key used by the host).
+    pub name: String,
+    /// Wire-level transport — one of `"stdio"`, `"http"`, `"websocket"`.
+    /// Unknown values fall back to stdio at conversion time.
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    /// Executable to spawn — required for stdio.
+    #[serde(default)]
+    pub command: String,
+    /// CLI args appended at spawn time.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment merged on top of the host process's environment
+    /// at spawn time (stdio only).
+    #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "Record<string, string>"))]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Endpoint URL — required for remote transports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// `true` to keep the entry registered but skip spawning.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Reverse-DNS id of the contributing plugin.
+    pub plugin_id: String,
+}
+
+fn default_transport() -> String {
+    "stdio".to_string()
+}
+
+/// Reply for `register_server` (handler `11`).
+///
+/// `status` is one of `"ok"`, `"toml_override"`, `"invalid_name"`,
+/// `"invalid"` (with a `reason` field).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpRegisterServerReply {
+    /// `true` iff the server was inserted (status == `"ok"`).
+    pub ok: bool,
+    /// One of `"ok"`, `"toml_override"`, `"invalid_name"`, `"invalid"`.
+    pub status: String,
+    /// Populated when `status = "invalid"` with the host's validator
+    /// message (e.g. `"server 'fs' has empty command"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Args for `unregister_server` (handler `12`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpUnregisterServerArgs {
+    /// Server `name` to remove.
+    pub name: String,
+    /// Reverse-DNS id of the plugin claiming to own the entry.
+    pub plugin_id: String,
+}
+
+/// Reply for `unregister_server` (handler `12`).
+///
+/// `status` is one of `"ok"`, `"not_found"`, `"toml_entry"`,
+/// `"not_owned_by_plugin"`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpUnregisterServerReply {
+    /// `true` iff the server was removed (status == `"ok"`).
+    pub ok: bool,
+    /// One of `"ok"`, `"not_found"`, `"toml_entry"`,
+    /// `"not_owned_by_plugin"`.
+    pub status: String,
+    /// Populated when `status = "not_owned_by_plugin"` so the caller
+    /// can log who actually contributed the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_owner: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -40,6 +40,7 @@ pub use auth::{AuthError, McpAuth, McpAuthSecret, ResolvedAuth};
 pub use client::{McpClient, McpClientError};
 pub use config::{
     McpConfigError, McpHostConfig, McpMergeSkip, McpMergeSkipReason, McpServerSpec, McpTransport,
+    McpUnregisterError,
 };
 pub use core_plugin::McpHostPlugin;
 pub use dynamic_tools::{DynamicTool, DynamicToolRegistry, RegistryError as ToolRegistryError};

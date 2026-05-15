@@ -2,9 +2,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use nexus_bootstrap::acp_contribution_wiring::{
+    unwire_acp_contributions_for_plugin, wire_acp_contributions, AcpWireOutcome,
+};
+use nexus_bootstrap::dap_contribution_wiring::{
+    unwire_dap_contributions_for_plugin, wire_dap_contributions, DapWireOutcome,
+};
+use nexus_bootstrap::lsp_contribution_wiring::{
+    unwire_lsp_contributions_for_plugin, wire_lsp_contributions, LspWireOutcome,
+};
+use nexus_bootstrap::mcp_contribution_wiring::{
+    unwire_mcp_contributions_for_plugin, wire_mcp_contributions, McpWireOutcome,
+};
 use nexus_bootstrap::{Runtime, build_cli_runtime};
 use nexus_kernel::EventBus;
-use nexus_plugins::{PluginManager, PluginManagerConfig};
+use nexus_plugins::{PluginManager, PluginManagerConfig, PluginManifest};
 use tokio::runtime::Runtime as TokioRuntime;
 
 use crate::output::OutputFormat;
@@ -114,5 +126,401 @@ impl App {
             self.plugins = Some(manager);
         }
         Ok(self.plugins.as_mut().expect("just initialised"))
+    }
+
+    /// BL-113 Phase 1d — issue `com.nexus.dap::register_adapter` IPC
+    /// calls for every DAP contribution declared by currently-loaded
+    /// community plugins, so any later DAP-host call (`list_adapters`,
+    /// `launch`, …) sees the merged adapter set.
+    ///
+    /// Assumes [`Self::plugins`] has already loaded the community
+    /// plugins (`plugins.load_all()`). Plugins with no DAP
+    /// contributions cost a single manifest iteration; only plugins
+    /// that declared `[[registrations.protocol_hosts.dap]]` entries
+    /// trigger an IPC dispatch.
+    ///
+    /// Best-effort: per-adapter rejections / transport errors are
+    /// returned in the outcome list (see
+    /// [`nexus_bootstrap::dap_contribution_wiring::DapWireStatus`])
+    /// rather than aborting the pass.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_dap_contributions(&mut self) -> Result<Vec<DapWireOutcome>> {
+        // Step 1: snapshot currently-loaded manifests. Clones because
+        // the `&PluginManager` borrow has to end before we can re-borrow
+        // `&mut self` for `runtime()`.
+        let manifests: Vec<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins
+                .list()
+                .iter()
+                .filter_map(|info| plugins.manifest(&info.id).cloned())
+                .collect()
+        };
+        if manifests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Step 2: dispatch through the runtime's IPC surface.
+        let (runtime, rt) = self.runtime()?;
+        let manifest_refs: Vec<&PluginManifest> = manifests.iter().collect();
+        let outcomes = rt.block_on(wire_dap_contributions(&runtime.context, &manifest_refs));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 1e — wire just one plugin's DAP contributions.
+    /// Used by `nexus plugin enable <id>` after the enable lifecycle
+    /// hook fires, so the just-enabled plugin's contributed adapters
+    /// become visible to the DAP host.
+    ///
+    /// Returns an empty outcome list when the plugin is unknown to the
+    /// manager or declares no DAP contributions — the caller decides
+    /// whether to surface either as an error.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_dap_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<DapWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.dap.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(wire_dap_contributions(&runtime.context, &[&manifest]));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 1e — unwire just one plugin's DAP contributions.
+    /// Used by `nexus plugin disable <id>` immediately before the
+    /// disable lifecycle hook fires, so the about-to-be-disabled
+    /// plugin's contributed adapters are removed from the DAP host's
+    /// runtime map.
+    ///
+    /// Returns an empty outcome list when the plugin is unknown to the
+    /// manager or declares no DAP contributions.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn unwire_dap_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<DapWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.dap.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(unwire_dap_contributions_for_plugin(
+            &runtime.context,
+            &manifest,
+        ));
+        Ok(outcomes)
+    }
+
+    // ── BL-113 Phase 2b — LSP variants ──────────────────────────────────────
+
+    /// BL-113 Phase 2b — issue `com.nexus.lsp::register_server` IPC
+    /// calls for every LSP contribution declared by currently-loaded
+    /// community plugins.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_lsp_contributions(&mut self) -> Result<Vec<LspWireOutcome>> {
+        let manifests: Vec<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins
+                .list()
+                .iter()
+                .filter_map(|info| plugins.manifest(&info.id).cloned())
+                .collect()
+        };
+        if manifests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let manifest_refs: Vec<&PluginManifest> = manifests.iter().collect();
+        let outcomes = rt.block_on(wire_lsp_contributions(&runtime.context, &manifest_refs));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 2b — wire one plugin's LSP contributions after
+    /// `nexus plugin enable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn wire_lsp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<LspWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.lsp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(wire_lsp_contributions(&runtime.context, &[&manifest]));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 2b — unwire one plugin's LSP contributions before
+    /// `nexus plugin disable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn unwire_lsp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<LspWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.lsp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(unwire_lsp_contributions_for_plugin(
+            &runtime.context,
+            &manifest,
+        ));
+        Ok(outcomes)
+    }
+
+    // ── BL-113 Phase 3b — MCP variants ──────────────────────────────────────
+
+    /// BL-113 Phase 3b — issue `com.nexus.mcp.host::register_server`
+    /// IPC calls for every MCP contribution declared by
+    /// currently-loaded community plugins.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_mcp_contributions(&mut self) -> Result<Vec<McpWireOutcome>> {
+        let manifests: Vec<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins
+                .list()
+                .iter()
+                .filter_map(|info| plugins.manifest(&info.id).cloned())
+                .collect()
+        };
+        if manifests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let manifest_refs: Vec<&PluginManifest> = manifests.iter().collect();
+        let outcomes = rt.block_on(wire_mcp_contributions(&runtime.context, &manifest_refs));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 3b — wire one plugin's MCP contributions after
+    /// `nexus plugin enable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn wire_mcp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<McpWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.mcp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(wire_mcp_contributions(&runtime.context, &[&manifest]));
+        Ok(outcomes)
+    }
+
+    /// BL-113 Phase 3b — unwire one plugin's MCP contributions before
+    /// `nexus plugin disable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn unwire_mcp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<McpWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.mcp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(unwire_mcp_contributions_for_plugin(
+            &runtime.context,
+            &manifest,
+        ));
+        Ok(outcomes)
+    }
+
+    // ── BL-113 Phase 4 / BL-144 — ACP variants ──────────────────────────────
+
+    /// BL-144 — issue `com.nexus.acp::register_server` IPC calls for
+    /// every ACP contribution declared by currently-loaded community
+    /// plugins.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_acp_contributions(&mut self) -> Result<Vec<AcpWireOutcome>> {
+        let manifests: Vec<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins
+                .list()
+                .iter()
+                .filter_map(|info| plugins.manifest(&info.id).cloned())
+                .collect()
+        };
+        if manifests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let manifest_refs: Vec<&PluginManifest> = manifests.iter().collect();
+        let outcomes = rt.block_on(wire_acp_contributions(&runtime.context, &manifest_refs));
+        Ok(outcomes)
+    }
+
+    /// BL-144 — wire one plugin's ACP contributions after
+    /// `nexus plugin enable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn wire_acp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<AcpWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.acp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(wire_acp_contributions(&runtime.context, &[&manifest]));
+        Ok(outcomes)
+    }
+
+    /// BL-144 — unwire one plugin's ACP contributions before
+    /// `nexus plugin disable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn unwire_acp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<AcpWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.acp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(unwire_acp_contributions_for_plugin(
+            &runtime.context,
+            &manifest,
+        ));
+        Ok(outcomes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_forge() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        nexus_storage::StorageEngine::init(dir.path()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn wire_dap_contributions_is_a_noop_when_no_community_plugins_are_installed() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app.wire_dap_contributions().expect("wire ok");
+        assert!(outcomes.is_empty(), "outcomes: {outcomes:?}");
+    }
+
+    #[test]
+    fn wire_for_unknown_plugin_returns_empty_outcomes() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app
+            .wire_dap_contributions_for_plugin("community.does-not-exist")
+            .expect("wire ok");
+        assert!(outcomes.is_empty());
+    }
+
+    #[test]
+    fn unwire_for_unknown_plugin_returns_empty_outcomes() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app
+            .unwire_dap_contributions_for_plugin("community.does-not-exist")
+            .expect("unwire ok");
+        assert!(outcomes.is_empty());
+    }
+
+    #[test]
+    fn wire_lsp_contributions_is_a_noop_when_no_community_plugins_are_installed() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app.wire_lsp_contributions().expect("wire ok");
+        assert!(outcomes.is_empty(), "outcomes: {outcomes:?}");
+    }
+
+    #[test]
+    fn wire_mcp_contributions_is_a_noop_when_no_community_plugins_are_installed() {
+        let forge = empty_forge();
+        let mut app = App::new(forge.path().to_path_buf(), OutputFormat::Text);
+        let outcomes = app.wire_mcp_contributions().expect("wire ok");
+        assert!(outcomes.is_empty(), "outcomes: {outcomes:?}");
     }
 }

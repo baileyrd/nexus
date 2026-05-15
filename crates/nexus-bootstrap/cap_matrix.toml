@@ -1562,3 +1562,205 @@ unrestricted = "executes a workflow on demand — each step is gated by the targ
 plugin = "com.nexus.workflow"
 command = "run_digest"
 unrestricted = "runs the digest pipeline on demand — each step is gated by the target handler's caps (see issue #77)"
+
+# ─── com.nexus.dap — debug adapter host (BL-081) ─────────────────────
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "launch"
+caps = ["process.spawn"]
+note = "spawns a debug adapter process and starts a debuggee under it"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "attach"
+caps = ["process.spawn"]
+note = "spawns a debug adapter process to attach to an already-running target"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "list_adapters"
+unrestricted = "read-only listing of configured + plugin-contributed adapters"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "configuration_done"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "disconnect"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "terminate"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "set_breakpoints"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "set_function_breakpoints"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "set_exception_breakpoints"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "continue"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "next"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "step_in"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "step_out"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "pause"
+unrestricted = "session-scoped DAP control verb — launch already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "threads"
+unrestricted = "session-scoped DAP read verb — returns thread list"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "stack_trace"
+unrestricted = "session-scoped DAP read verb — returns stack frames"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "scopes"
+unrestricted = "session-scoped DAP read verb — returns variable scopes"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "variables"
+unrestricted = "session-scoped DAP read verb — returns variables"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "evaluate"
+unrestricted = "session-scoped DAP evaluate — runs an expression against the paused debuggee"
+
+# BL-113 Phase 1c — plugin contribution lifecycle. Called by the
+# bootstrap-side wiring at plugin load/unload; not user-facing.
+[[handler]]
+plugin = "com.nexus.dap"
+command = "register_adapter"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.dap"
+command = "unregister_adapter"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"
+
+# ─── com.nexus.acp — agent client protocol host (BL-144) ─────────────
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "list_agents"
+unrestricted = "read-only listing of configured + plugin-contributed agents"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "initialize"
+caps = ["process.spawn"]
+note = "spawns the configured ACP agent process to start a session"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "propose"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "accept"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "reject"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "disconnect"
+unrestricted = "session-scoped ACP verb — initialize already gated process.spawn"
+
+# BL-113 Phase 4 — plugin contribution lifecycle. Same shape as the
+# DAP/LSP/MCP contribution verbs.
+[[handler]]
+plugin = "com.nexus.acp"
+command = "register_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.acp"
+command = "unregister_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"
+
+# ─── com.nexus.lsp — protocol-host additions ─────────────────────────
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "execute_command"
+unrestricted = "LSP workspace/executeCommand — already gated by LSP server spawn from list_servers"
+
+# BL-113 Phase 2b — plugin contribution lifecycle.
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "register_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "unregister_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"
+
+# ─── com.nexus.mcp.host — protocol-host additions ────────────────────
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "register_tool"
+unrestricted = "dynamic-tool registry write — invoked by plugins to advertise IPC handlers as MCP tools"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "unregister_tool"
+unrestricted = "dynamic-tool registry write — invoked by plugins on disable"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "list_dynamic_tools"
+unrestricted = "read-only listing of plugin-registered dynamic tools"
+
+# BL-113 Phase 3b — plugin contribution lifecycle.
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "register_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin load"
+
+[[handler]]
+plugin = "com.nexus.mcp.host"
+command = "unregister_server"
+unrestricted = "contribution lifecycle — invoked by bootstrap-side wiring at plugin disable"

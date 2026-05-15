@@ -55,6 +55,30 @@ pub mod terminal;
 /// plugin-lifecycle callback shape is settled by Phase 1.
 pub mod protocol_host_specs;
 
+/// BL-113 Phase 1c — bootstrap-side wiring that issues
+/// `com.nexus.dap::register_adapter` IPC calls for each DAP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod dap_contribution_wiring;
+
+/// BL-113 Phase 2b — bootstrap-side wiring that issues
+/// `com.nexus.lsp::register_server` IPC calls for each LSP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod lsp_contribution_wiring;
+
+/// BL-113 Phase 3b — bootstrap-side wiring that issues
+/// `com.nexus.mcp.host::register_server` IPC calls for each MCP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod mcp_contribution_wiring;
+
+/// BL-113 Phase 4 / BL-144 — bootstrap-side wiring that issues
+/// `com.nexus.acp::register_server` IPC calls for each ACP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod acp_contribution_wiring;
+
 /// Render a markdown note to a standalone HTML string.
 ///
 /// Re-exported from `nexus-formats` (pure format library, no `SQLite`).

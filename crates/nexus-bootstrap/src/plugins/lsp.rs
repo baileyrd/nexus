@@ -41,6 +41,19 @@ pub(super) fn register(
                     ("rename", nexus_lsp::core_plugin::HANDLER_RENAME),
                     ("code_actions", nexus_lsp::core_plugin::HANDLER_CODE_ACTIONS),
                     ("format", nexus_lsp::core_plugin::HANDLER_FORMAT),
+                    (
+                        "execute_command",
+                        nexus_lsp::core_plugin::HANDLER_EXECUTE_COMMAND,
+                    ),
+                    // BL-113 Phase 2b — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_lsp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_lsp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
                 ]),
             ),
             forge_root,

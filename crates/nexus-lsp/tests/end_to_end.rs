@@ -307,7 +307,10 @@ async fn call_with_reconnect_replays_open_documents_after_transient_failure() {
     // Stand up a host config the pool can route by name.
     let mut servers = HashMap::new();
     servers.insert("mock".to_string(), spec.clone());
-    let cfg = LspHostConfig { servers };
+    let cfg = LspHostConfig {
+        servers,
+        contributed_by: HashMap::new(),
+    };
 
     // Tight backoff so the test stays under a second.
     let pool_cfg = PoolConfig {

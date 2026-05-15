@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapSetFunctionBreakpointsArgs",
+  "description": "Args for `set_function_breakpoints` (handler `8`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "breakpoints": {
+      "description": "Replacement set of function breakpoints.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DapFunctionBreakpoint"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "breakpoints"
+  ],
+  "$defs": {
+    "DapFunctionBreakpoint": {
+      "description": "One function-breakpoint row.",
+      "type": "object",
+      "properties": {
+        "condition": {
+          "description": "Optional condition expression.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Function name to break on.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    }
+  }
+}

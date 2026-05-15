@@ -46,6 +46,27 @@ pub(super) fn register(
                     ),
                     ("connect", nexus_mcp::core_plugin::HANDLER_CONNECT),
                     ("disconnect", nexus_mcp::core_plugin::HANDLER_DISCONNECT),
+                    (
+                        "register_tool",
+                        nexus_mcp::core_plugin::HANDLER_REGISTER_TOOL,
+                    ),
+                    (
+                        "unregister_tool",
+                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_TOOL,
+                    ),
+                    (
+                        "list_dynamic_tools",
+                        nexus_mcp::core_plugin::HANDLER_LIST_DYNAMIC_TOOLS,
+                    ),
+                    // BL-113 Phase 3b — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_mcp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
                 ]),
             ),
             forge_root,

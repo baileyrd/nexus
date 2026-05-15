@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpAgentArgs",
+  "description": "Args for `initialize` (handler `2`). Triggers a lazy connect for\n`agent` and returns the agent-reported capabilities object.",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "description": "Stable agent identifier (the contributing manifest's `id`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "agent"
+  ]
+}

@@ -1,0 +1,46 @@
+[plugin]
+id = "first-party.dap.python"
+name = "Python Debugger (debugpy)"
+version = "0.1.0"
+trust_level = "community"
+api_version = "1"
+
+# BL-113 reference plugin: declarative-only, no [wasm] / [js] block.
+# Trust level is `community` (the only non-core option today); the
+# `first-party.` id prefix marks it as ships-with-Nexus rather than
+# third-party.
+# Demonstrates the `[[registrations.protocol_hosts.dap]]` contribution
+# path end-to-end. When loaded, the bootstrap-side wiring helper
+# (`nexus-bootstrap::dap_contribution_wiring::wire_dap_contributions`)
+# issues `com.nexus.dap::register_adapter` so the host treats this
+# adapter the same way it would a `dap.toml` entry — except the spec
+# carries a `metadata.launch_config_schema` opaque payload the shell
+# uses to render a typed launch-config form.
+#
+# Install: copy this directory into `<forge>/.forge/plugins/` (or
+# `~/.nexus-shell/plugins/`). Requires `debugpy` to be importable
+# from whichever `python3` is on `$PATH`:
+#
+#     python3 -m pip install --user debugpy
+
+[capabilities]
+required = []
+optional = []
+
+[[registrations.protocol_hosts.dap]]
+id = "python"
+display_name = "Python (debugpy)"
+command = "python3"
+args = ["-m", "debugpy.adapter"]
+file_types = ["py"]
+root_markers = ["pyproject.toml", "setup.py", "requirements.txt", ".git"]
+launch_config_schema = "./launch.schema.json"
+# Variable renderers are optional shell-side exports for value
+# formatting; this reference plugin doesn't ship any.
+variable_renderers = []
+
+[registrations.protocol_hosts.dap.env]
+PYTHONUNBUFFERED = "1"
+
+[lifecycle]
+on_init = false

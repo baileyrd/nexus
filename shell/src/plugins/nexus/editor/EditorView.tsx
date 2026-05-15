@@ -17,9 +17,12 @@ import { gitGutterExt } from './cm/gitGutter'
 import { gitBlameExt } from './cm/gitBlame'
 import { lspExtension } from './cm/lspClient'
 import { LspIpc } from './cm/lspIpc'
+import { breakpointGutterExt } from './cm/breakpointGutter'
+import { useDebuggerStore } from '../debugger/debuggerStore'
 import { useEditorBlameStore } from './blameStore'
 import { useConfigValue } from '../../../stores/configStore'
 import './cm/gitGutter.css'
+import './cm/breakpointGutter.css'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
 import { multiCursorPromoteExt } from './cm/multiCursorPromote'
@@ -1038,6 +1041,29 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               runtime?.reportBridgeError?.('git gutter', err),
           })
         : null
+    // BL-081 follow-up — clickable breakpoint gutter for code-mode
+    // tabs. Routes click → `useDebuggerStore.toggleBreakpoint` which
+    // both records the breakpoint locally and dispatches
+    // `set_breakpoints` to the active adapter (no-op when no session
+    // is running; the next launch replays cached entries).
+    const breakpointGutterExtension =
+      editorMode === 'code' && runtime?.kernel && !isUntitled(tab.relpath)
+        ? breakpointGutterExt({
+            relpath: tab.relpath,
+            store: {
+              getSnapshot: () =>
+                useDebuggerStore.getState().breakpointsByPath,
+              subscribe: (fn) => useDebuggerStore.subscribe(fn),
+            },
+            onToggle: (relpath, line) => {
+              const api = runtime?.kernel
+              if (!api) return
+              void useDebuggerStore
+                .getState()
+                .toggleBreakpoint(api, relpath, line)
+            },
+          })
+        : null
     // BL-079 — inline blame, controlled by `useEditorBlameStore`.
     // The toggle command flips the boolean; this read happens at
     // render time so a flip + remount picks up the new value.
@@ -1096,6 +1122,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       const base: import('@codemirror/state').Extension[] = []
       if (languageExtension !== null) base.push(languageExtension)
       else if (isMarkdown(tab.name)) base.push(markdownLang({ extensions: [Table] }))
+      if (breakpointGutterExtension !== null) base.push(breakpointGutterExtension)
       if (gitGutterExtension !== null) base.push(gitGutterExtension)
       if (gitBlameExtension !== null) base.push(gitBlameExtension)
       if (lspClientExtension !== null) base.push(lspClientExtension)

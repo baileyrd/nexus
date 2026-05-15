@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Python launch configuration",
+  "description": "BL-113 reference launch-config form for the debugpy DAP adapter. The shell reads this from `metadata.launch_config_schema` on the host-emitted `DapAdapterEntry` and renders a typed form whose values are passed verbatim as `launch` request arguments. Field set is the minimum the upstream `debugpy.adapter` recognises.",
+  "type": "object",
+  "required": ["program"],
+  "properties": {
+    "program": {
+      "type": "string",
+      "title": "Program",
+      "description": "Absolute path to the Python script to debug.",
+      "default": "${file}"
+    },
+    "args": {
+      "type": "array",
+      "title": "Arguments",
+      "description": "argv tail passed to the script.",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "cwd": {
+      "type": "string",
+      "title": "Working directory",
+      "description": "Directory the script runs in. Defaults to the program's parent.",
+      "default": "${workspaceFolder}"
+    },
+    "stopOnEntry": {
+      "type": "boolean",
+      "title": "Stop on entry",
+      "description": "Pause at the script's first line so breakpoints set before launch hit deterministically.",
+      "default": false
+    },
+    "justMyCode": {
+      "type": "boolean",
+      "title": "Just my code",
+      "description": "Skip stepping into library / site-packages frames.",
+      "default": true
+    }
+  },
+  "additionalProperties": false
+}

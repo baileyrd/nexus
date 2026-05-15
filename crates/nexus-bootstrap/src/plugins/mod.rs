@@ -12,11 +12,13 @@ use anyhow::Result;
 use nexus_kernel::EventBus;
 use nexus_plugins::{parse_manifest, PluginError, PluginLoader, PluginManifest};
 
+mod acp;
 mod agent;
 mod ai;
 mod ai_runtime;
 mod audio;
 mod comments;
+mod dap;
 mod database;
 mod editor;
 mod formats;
@@ -61,6 +63,8 @@ pub(crate) fn register_all(
     agent::register(loader, forge_root, event_bus)?;
     mcp::register(loader, forge_root, event_bus)?;
     lsp::register(loader, forge_root, event_bus)?;
+    dap::register(loader, forge_root, event_bus)?;
+    acp::register(loader, forge_root, event_bus)?;
     git::register(loader, forge_root, event_bus)?;
     terminal::register(loader, forge_root, event_bus)?;
     Ok(())

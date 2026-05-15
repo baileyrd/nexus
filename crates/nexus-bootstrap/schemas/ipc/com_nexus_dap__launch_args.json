@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapLaunchArgs",
+  "description": "Args for `launch` (handler `2`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name from `dap.toml`.",
+      "type": "string"
+    },
+    "args": {
+      "description": "CLI args forwarded to the debuggee.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "cwd": {
+      "description": "Working directory for the debuggee.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "env": {
+      "description": "Extra environment for the debuggee.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "extra": {
+      "description": "Adapter-specific extras (merged into the `launch` request body)."
+    },
+    "mode": {
+      "description": "`\"launch\"` (default) or `\"debug\"` / `\"run\"` — adapter-specific\nhint passed through verbatim in the `mode` field.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "program": {
+      "description": "Path to the program / entry-point to launch.",
+      "type": "string"
+    },
+    "stop_on_entry": {
+      "description": "`true` → adapter should stop at program entry.",
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "program"
+  ]
+}

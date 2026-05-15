@@ -13,6 +13,8 @@ members = [
     "crates/nexus-ai-runtime",
     "crates/nexus-mcp",
     "crates/nexus-lsp",
+    "crates/nexus-dap",
+    "crates/nexus-acp",
     "crates/nexus-cli",
     "crates/nexus-tui",
     "crates/nexus-git",

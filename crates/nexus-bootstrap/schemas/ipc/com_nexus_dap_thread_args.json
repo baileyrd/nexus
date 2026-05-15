@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapThreadArgs",
+  "description": "Args for `continue` / `next` / `step_in` / `step_out` / `pause`\n(handlers `10`..=`14`).",
+  "type": "object",
+  "properties": {
+    "adapter": {
+      "description": "Adapter name.",
+      "type": "string"
+    },
+    "thread_id": {
+      "description": "DAP thread id.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "adapter",
+    "thread_id"
+  ]
+}

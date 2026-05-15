@@ -269,3 +269,125 @@ pub struct LspOk {
     /// Always `true`.
     pub ok: bool,
 }
+
+// ── BL-113 Phase 2b — register_server / unregister_server ───────────────────
+
+/// Args for `register_server` (handler `13`). Mirrors a
+/// [`crate::config::LspServerSpec`] plus the contributing plugin's
+/// reverse-DNS id. The host crate stays protocol-only per ADR 0027 —
+/// shell-side fields (`display_name`, `launch_config_schema`,
+/// `variable_renderers`) are intentionally absent.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LspRegisterServerArgs {
+    /// Stable server identifier (`LspServerSpec::name`).
+    pub name: String,
+    /// Executable to spawn.
+    pub command: String,
+    /// CLI args appended at spawn time.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// File extensions the server handles.
+    #[serde(default)]
+    pub file_types: Vec<String>,
+    /// Workspace-root marker file names.
+    #[serde(default)]
+    pub root_markers: Vec<String>,
+    /// `true` to keep the entry registered but skip spawning.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Environment merged on top of the host process's environment
+    /// at spawn time.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "Record<string, string>"))]
+    pub env: std::collections::HashMap<String, String>,
+    /// Reverse-DNS id of the contributing plugin; used for diagnostics
+    /// and as the authorisation key for `unregister_server`.
+    pub plugin_id: String,
+}
+
+/// Reply for `register_server` (handler `13`).
+///
+/// `status` is one of:
+/// - `"ok"` — server registered successfully.
+/// - `"toml_override"` — the `name` is already taken by a TOML-loaded
+///   entry or another plugin's contribution; nothing was inserted.
+/// - `"invalid_name"` / `"invalid_command"` — `name` or `command` was
+///   empty / whitespace-only; nothing was inserted.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LspRegisterServerReply {
+    /// `true` iff the server was inserted (status == `"ok"`).
+    pub ok: bool,
+    /// One of `"ok"`, `"toml_override"`, `"invalid_name"`,
+    /// `"invalid_command"`.
+    pub status: String,
+}
+
+/// Args for `unregister_server` (handler `14`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LspUnregisterServerArgs {
+    /// Server `name` to remove.
+    pub name: String,
+    /// Reverse-DNS id of the plugin claiming to own the entry. Must
+    /// match the plugin recorded at register time, otherwise the host
+    /// refuses with `status = "not_owned_by_plugin"`.
+    pub plugin_id: String,
+}
+
+/// Reply for `unregister_server` (handler `14`).
+///
+/// `status` is one of:
+/// - `"ok"` — server removed.
+/// - `"not_found"` — no server exists under that `name`.
+/// - `"toml_entry"` — the name belongs to a TOML-loaded entry; plugins
+///   cannot unregister TOML-pinned servers.
+/// - `"not_owned_by_plugin"` — name exists and was plugin-contributed,
+///   but by a different plugin. `actual_owner` carries the real owner's
+///   reverse-DNS id for diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LspUnregisterServerReply {
+    /// `true` iff the server was removed (status == `"ok"`).
+    pub ok: bool,
+    /// One of `"ok"`, `"not_found"`, `"toml_entry"`,
+    /// `"not_owned_by_plugin"`.
+    pub status: String,
+    /// Populated when `status = "not_owned_by_plugin"` so the caller
+    /// can log who actually contributed the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_owner: Option<String>,
+}

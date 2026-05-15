@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpProposeArgs",
+  "description": "Args for `propose` (handler `3`). The `params` blob is agent-\nspecific; the host forwards it verbatim.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "description": "Symbolic action name the agent advertised in its capability\nlist (`\"delegate\"`, `\"tool_call\"`, `\"search\"`, …). Carried as\n`method` on the JSON-RPC request to the agent.",
+      "type": "string"
+    },
+    "agent": {
+      "description": "Stable agent identifier.",
+      "type": "string"
+    },
+    "params": {
+      "description": "Action-specific JSON payload. Forwarded verbatim as the\nJSON-RPC `params` field.",
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "agent",
+    "action"
+  ]
+}

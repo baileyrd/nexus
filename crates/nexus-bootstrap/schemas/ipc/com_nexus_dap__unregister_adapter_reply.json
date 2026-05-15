@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DapUnregisterAdapterReply",
+  "description": "Reply for `unregister_adapter` (handler `21`).\n\n`status` is one of:\n- `\"ok\"` — adapter removed.\n- `\"not_found\"` — no adapter exists under that `name`.\n- `\"toml_entry\"` — the name belongs to a TOML-loaded entry; plugins\n  cannot unregister TOML-pinned adapters.\n- `\"not_owned_by_plugin\"` — name exists and was plugin-contributed,\n  but by a different plugin. `actual_owner` carries the real owner's\n  reverse-DNS id for diagnostics.",
+  "type": "object",
+  "properties": {
+    "actual_owner": {
+      "description": "Populated when `status = \"not_owned_by_plugin\"` so the caller\ncan log who actually contributed the entry.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ok": {
+      "description": "`true` iff the adapter was removed (status == `\"ok\"`).",
+      "type": "boolean"
+    },
+    "status": {
+      "description": "One of `\"ok\"`, `\"not_found\"`, `\"toml_entry\"`,\n`\"not_owned_by_plugin\"`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "status"
+  ]
+}

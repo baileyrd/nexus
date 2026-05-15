@@ -34,6 +34,13 @@ const FORBIDDEN: &[(&str, &str)] = &[
     // MCP dispatches `nexus_ask` via `ipc_call(AI_PLUGIN, "ask", ...)`; it
     // must not link the AI engine directly.
     ("nexus-mcp", "nexus-ai"),
+    // BL-145 — the inbound ACP server is a pure JSON-RPC proxy over the
+    // agent IPC surface. Linking `nexus-agent` directly would let it
+    // bypass kernel mediation; route through `ipc_call("com.nexus.agent",
+    // …)` instead. (Same posture as `nexus-mcp` → `nexus-ai`.)
+    ("nexus-acp", "nexus-agent"),
+    ("nexus-acp", "nexus-ai"),
+    ("nexus-acp", "nexus-storage"),
     // Kernel is backend-agnostic: the KV trait lives here, but the SQLite
     // impl is in `nexus-kv` and must be injected via `Kernel::new`.
     ("nexus-kernel", "rusqlite"),

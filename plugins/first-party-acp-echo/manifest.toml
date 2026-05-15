@@ -1,0 +1,44 @@
+[plugin]
+id = "first-party.acp.echo"
+name = "ACP Echo Agent (reference)"
+version = "0.1.0"
+trust_level = "community"
+api_version = "1"
+
+# BL-144 reference plugin: declarative-only, no [wasm] / [js] block.
+# Demonstrates the `[[registrations.protocol_hosts.acp]]` contribution
+# path end-to-end. When loaded, the bootstrap-side wiring helper
+# (`nexus-bootstrap::acp_contribution_wiring::wire_acp_contributions`)
+# issues `com.nexus.acp::register_server` so the host treats this
+# agent the same way a future flat-TOML entry would — except ACP has
+# no flat-TOML class (ADR 0027 §Phase 4 lands ACP greenfield under
+# the contribution model).
+#
+# The "echo" adapter itself is intentionally minimal: `echo_agent.py`
+# implements the bare-minimum line-delimited JSON-RPC `initialize` /
+# `propose` / `accept` / `reject` handshake and echoes proposal params
+# back as agent notifications. The point is the contribution wire
+# path, not the agent logic; replace the command with a real ACP
+# agent (Hermes, etc.) in a production install.
+#
+# Install: copy this directory into `<forge>/.forge/plugins/` (or
+# `~/.nexus-shell/plugins/`). The script reference is wired at install
+# time but the host won't spawn it until a user calls
+# `com.nexus.acp::initialize {"agent": "echo"}`.
+
+[capabilities]
+required = []
+optional = []
+
+[[registrations.protocol_hosts.acp]]
+id = "echo"
+display_name = "Echo Agent (reference)"
+command = "python3"
+args = ["./echo_agent.py"]
+capabilities = ["echo"]
+
+[registrations.protocol_hosts.acp.env]
+PYTHONUNBUFFERED = "1"
+
+[lifecycle]
+on_init = false

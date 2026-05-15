@@ -1,8 +1,8 @@
 # ADR 0027: Protocol-Host Contribution Model for LSP / DAP / MCP / ACP
 
-**Date:** 2026-05-13 (proposed), 2026-05-14 (Phase 0a accepted)
-**Status:** Accepted — Phase 0a shipped. Tracks as **BL-113** in the backlog.
-**Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/BACKLOG_COMPLETED.md) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host, parked on `bl-081-dap-debugger` pending this ADR), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet implemented; named here so the future crate lands on the contribution model from day one).
+**Date:** 2026-05-13 (proposed), 2026-05-14 (Phase 0a accepted), 2026-05-15 (Phases 1–3 merged on `main` via PR #163), 2026-05-15 (Phase 4 shipped — BL-144 + BL-145)
+**Status:** Accepted — every phase shipped. Phases 0a / 1a–1e (DAP) / 2a + 2b (LSP) / 3a + 3b (MCP) landed via PR #163 (2026-05-15). Phase 4 (ACP) shipped same day as the new `nexus-acp` crate — outbound host (BL-144) and inbound server (BL-145) live in one crate, two roles. Tracks as **BL-113** in the backlog; per-phase close notes under the BL entries.
+**Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/BACKLOG_COMPLETED.md) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host — merged on `main` via PR #163, 2026-05-15), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet implemented; named here so the future crate lands on the contribution model from day one).
 
 ## Context
 
@@ -12,8 +12,8 @@ Three Nexus core plugins host external-process protocol adapters today, and a fo
 |---|---|---|---|---|
 | `nexus-lsp` | `com.nexus.lsp` | `<forge>/.forge/lsp.toml` | rust-analyzer, typescript-language-server | shipped (BL-076) |
 | `nexus-mcp` | `com.nexus.mcp.host` | `<forge>/.forge/mcp.toml` | filesystem, git, custom MCP servers | shipped |
-| `nexus-dap` | `com.nexus.dap` | `<forge>/.forge/dap.toml` | codelldb, debugpy, js-debug, dlv | parked branch (BL-081) |
-| `nexus-acp` | `com.nexus.acp` (proposed) | `<forge>/.forge/acp.toml` (proposed) | Hermes-shaped sub-agents, external A2A peers | not built — Hermes Feature 7 |
+| `nexus-dap` | `com.nexus.dap` | `<forge>/.forge/dap.toml` | codelldb, debugpy, js-debug, dlv | shipped (BL-081, PR #163 — 2026-05-15) |
+| `nexus-acp` | `com.nexus.acp` | _none — contribution-only_ | Hermes-shaped sub-agents, external A2A peers | shipped (BL-144 outbound + BL-145 inbound — 2026-05-15) |
 
 All four follow the same shape: the *host* is a core Rust plugin registered at bootstrap; the *adapters* are external executables named in a flat TOML config. The host proxies a protocol surface (JSON-RPC for LSP/MCP/ACP, a `type`-tagged JSON envelope for DAP) over IPC and republishes server-pushed messages on the kernel bus.
 
@@ -73,8 +73,10 @@ id = "hermes-rust-reviewer"
 display_name = "Rust Code Reviewer (Hermes)"
 command = "hermes-agent"
 args = ["--profile", "rust-reviewer"]
-# Optional declarative agent metadata — equivalent to LSP's `file_types` /
-# DAP's `launch_config_schema`. Exact field set TBD during the Phase 4 spike.
+# Declarative capability tags surfaced verbatim through `list_agents`.
+# (Resolution of the Phase 4 spike — the host stays protocol-only;
+# capabilities are advertised, not enforced. See the "ACP spec-fields
+# spike resolution" paragraph at the bottom of "Open questions".)
 capabilities = ["delegate", "tools", "memory"]
 ```
 
@@ -140,6 +142,27 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
    (e.g. spawning the executable, opening the TCP socket) ride on the
    plugin's existing capability grants (`process.spawn`, `net.connect`)
    per the standard capability path.
+
+   **Verified through Phase 1b/2b/3b (2026-05-15).** The
+   `com.nexus.dap::register_adapter` / `com.nexus.lsp::register_server`
+   / `com.nexus.mcp.host::register_server` handlers shipped without a
+   capability gate at the verb level, matching this resolution.
+   Trust model: **plugins author manifest contributions; the bootstrap
+   wiring helper (`nexus-bootstrap::{dap,lsp,mcp}_contribution_wiring::
+   wire_*`) is the only caller of these verbs in tree.** A plugin with
+   `ipc.call` could today reach the verb directly — there's no kernel-
+   level caller-identity threading to refuse the call — but that path
+   bypasses the manifest pipeline (no `contributed_by` provenance, no
+   per-plugin lifecycle attribution, no marketplace install record),
+   and the resulting adapter still couldn't *spawn* anything its
+   contributing plugin didn't already hold `process.spawn` /
+   `net.connect` for, because spawn capabilities are checked at the
+   `launch` / `attach` boundary not at registration. Hard enforcement
+   ("refuse `register_adapter` unless the invoker is core") would
+   require the kernel IPC dispatch to expose caller identity to
+   handlers, which is a separate concern filed as a future hardening
+   item — flagged here so the option stays on the table without
+   blocking BL-113 closure.
 4. **Schema validation timing.** Resolved: **both sides validate,
    host-side is authoritative.** The shell renders the launch-config
    form against the JSON Schema referenced in
@@ -147,6 +170,25 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
    The host crate re-validates on the `register_adapter` payload as the
    authoritative gate. Phase 0a does not yet ship validation — the
    Phase 1 DAP rollout is the first time the host sees one.
+
+5. **ACP-specific spec fields (Phase 4 spike).** Resolved 2026-05-15
+   alongside the BL-144 / BL-145 close-out. The `AcpAdapterSpec`
+   carries the same core fields LSP/DAP/MCP do (name, command, args,
+   env, disabled) plus **`capabilities: Vec<String>`** — declarative
+   tags advertised by the contribution and surfaced verbatim through
+   `list_agents`. The host does **not** gate behaviour on this set;
+   runtime usage capabilities (`process.spawn` to launch the agent,
+   `net.connect` if a future remote-ACP transport lands) ride on the
+   contributing plugin's standard capability grants, identical to the
+   precedent set by the other three protocols. Shell-only fields
+   (`display_name`, plus the always-present `plugin_id` provenance) ride
+   in the opaque `metadata` payload — same shape DAP uses for
+   `launch_config_schema` / `variable_renderers`. The decision to **not**
+   ship a flat `acp.toml` (only contributions) is the load-bearing diff
+   from LSP/DAP/MCP: ACP arrived under the contribution model from day
+   one and never needs a deprecation window for legacy syntax. See
+   `crates/nexus-acp/src/config.rs::AcpAdapterSpec` for the canonical
+   shape and the BL-144 close-out for the wire details.
 
 ## Phase 0a — shipped 2026-05-14
 
