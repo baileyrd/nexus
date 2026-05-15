@@ -84,11 +84,10 @@ either:
 
 A `cap_matrix_complete` integration test under
 `crates/nexus-bootstrap/tests/` walks every live `(plugin, command)`
-pair and fails CI if any is missing from the matrix. The completeness
-sweep is `#[ignore]`d during BL-138 Phase 1 (which ships the
-infrastructure plus the 17 historical entries); the per-service-plugin
-follow-ups that classify the remaining ~150+ handlers as
-`unrestricted = "<why>"` un-ignore it.
+pair and fails CI if any is missing from the matrix. BL-138 Phase 2
+(2026-05-15) classified the remaining ~245 handlers, so the
+completeness sweep now runs unconditionally — a new IPC handler that
+ships without a matrix row breaks CI immediately.
 
 Args-aware capability requirements (ADR 0022 Phase 2's
 `stream_chat` / `propose_tool_calls` `tools=…` lookup) cannot live in

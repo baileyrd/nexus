@@ -7,25 +7,15 @@
 //! classifying it in `cap_matrix.toml` — go pick `caps = [...]` or
 //! `unrestricted = \"…\"`."
 //!
-//! ## Phase 1 vs full migration
+//! BL-138 Phase 2 (closed 2026-05-15) classified every remaining IPC
+//! handler as `unrestricted = "<why>"` in `cap_matrix.toml`, so this
+//! test now runs unconditionally. The failure mode it guards against
+//! is "you added a new handler without updating `cap_matrix.toml`."
 //!
-//! BL-138 Phase 1 ships the matrix infrastructure plus the 17
-//! historical `add_cap_requirement` entries. The remaining ~150+ IPC
-//! handlers across `nexus-storage`, `nexus-editor`, `nexus-git`,
-//! `nexus-comments`, etc. are still in the legacy "implicit
-//! unrestricted, requires only `ipc.call`" state — moving them to
-//! explicit `unrestricted = "<why>"` rows is the per-service-plugin
-//! follow-up tracked under BL-138's DoD.
-//!
-//! Until those follow-ups land this test is `#[ignore]`d so the rest
-//! of the BL-138 infra can ship. Run it locally with:
-//!
-//! ```text
-//! cargo test -p nexus-bootstrap --test cap_matrix_complete -- --ignored
-//! ```
-//!
-//! The body prints a sorted list of unclassified handlers, so the CI
-//! failure for the eventual un-`ignore` is the entire fix.
+//! On failure the body prints a sorted list of unclassified
+//! `(plugin, command)` pairs. The fix is to pick `caps = […]` or
+//! `unrestricted = "<why>"` for each and append the row to
+//! `cap_matrix.toml`.
 
 use std::collections::BTreeSet;
 
@@ -38,7 +28,6 @@ fn scratch_forge() -> tempfile::TempDir {
 }
 
 #[test]
-#[ignore = "BL-138 Phase 1 — completeness gated on per-service-plugin unrestricted classifications; run with --ignored to see the punch list"]
 fn every_ipc_handler_is_classified() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build cli runtime");
