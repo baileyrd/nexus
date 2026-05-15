@@ -18,6 +18,7 @@ nexus-security = { path = "../nexus-security" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
 nexus-mcp = { path = "../nexus-mcp" }
+nexus-acp = { path = "../nexus-acp" }
 nexus-git = { path = "../nexus-git" }
 nexus-terminal = { path = "../nexus-terminal" }
 nexus-tui = { path = "../nexus-tui" }

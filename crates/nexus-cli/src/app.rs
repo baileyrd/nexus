@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use nexus_bootstrap::acp_contribution_wiring::{
+    unwire_acp_contributions_for_plugin, wire_acp_contributions, AcpWireOutcome,
+};
 use nexus_bootstrap::dap_contribution_wiring::{
     unwire_dap_contributions_for_plugin, wire_dap_contributions, DapWireOutcome,
 };
@@ -382,6 +385,84 @@ impl App {
         }
         let (runtime, rt) = self.runtime()?;
         let outcomes = rt.block_on(unwire_mcp_contributions_for_plugin(
+            &runtime.context,
+            &manifest,
+        ));
+        Ok(outcomes)
+    }
+
+    // ── BL-113 Phase 4 / BL-144 — ACP variants ──────────────────────────────
+
+    /// BL-144 — issue `com.nexus.acp::register_server` IPC calls for
+    /// every ACP contribution declared by currently-loaded community
+    /// plugins.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation. Per-call
+    /// IPC failures do not surface here — see the outcome list.
+    pub fn wire_acp_contributions(&mut self) -> Result<Vec<AcpWireOutcome>> {
+        let manifests: Vec<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins
+                .list()
+                .iter()
+                .filter_map(|info| plugins.manifest(&info.id).cloned())
+                .collect()
+        };
+        if manifests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let manifest_refs: Vec<&PluginManifest> = manifests.iter().collect();
+        let outcomes = rt.block_on(wire_acp_contributions(&runtime.context, &manifest_refs));
+        Ok(outcomes)
+    }
+
+    /// BL-144 — wire one plugin's ACP contributions after
+    /// `nexus plugin enable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn wire_acp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<AcpWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.acp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(wire_acp_contributions(&runtime.context, &[&manifest]));
+        Ok(outcomes)
+    }
+
+    /// BL-144 — unwire one plugin's ACP contributions before
+    /// `nexus plugin disable <id>`.
+    ///
+    /// # Errors
+    /// Propagates errors from runtime / Tokio initialisation.
+    pub fn unwire_acp_contributions_for_plugin(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<Vec<AcpWireOutcome>> {
+        let manifest: Option<PluginManifest> = {
+            let plugins = self.plugins()?;
+            plugins.manifest(plugin_id).cloned()
+        };
+        let Some(manifest) = manifest else {
+            return Ok(Vec::new());
+        };
+        if manifest.registrations.protocol_hosts.acp.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (runtime, rt) = self.runtime()?;
+        let outcomes = rt.block_on(unwire_acp_contributions_for_plugin(
             &runtime.context,
             &manifest,
         ));
