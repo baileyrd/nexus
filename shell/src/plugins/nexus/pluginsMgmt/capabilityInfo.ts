@@ -86,6 +86,15 @@ export const CAPABILITY_INFO: Record<Capability, CapabilityMeta> = {
   // ── audio.* — BL-117 ────────────────────────────────────────────
   AudioSynthesize: { risk: 'low',    description: 'Play synthesized speech through your speakers' },
   AudioRecord:     { risk: 'high',   description: 'Capture audio from your microphone' },
+
+  // ── ai.runtime.* — BL-134 / ADR 0028 ────────────────────────────
+  AiRuntimeObserve: { risk: 'low',    description: 'Read AI runtime task state (list/get/events/pool stats)' },
+  AiRuntimeSubmit:  { risk: 'medium', description: 'Submit AI agent tasks to the runtime scheduler' },
+  AiRuntimeControl: { risk: 'medium', description: 'Cancel, pause, or resume an in-flight AI runtime task' },
+
+  // ── notifications.inbox.* — BL-136 / ADR 0029 ───────────────────
+  NotificationsInboxRead:  { risk: 'low', description: 'Read the persistent notification inbox' },
+  NotificationsInboxWrite: { risk: 'low', description: 'Mark notifications read or dismiss them' },
 }
 
 /** All capability variants known to the shell, in stable display order. */

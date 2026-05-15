@@ -34,6 +34,10 @@ test('CAPABILITY_INFO covers every Capability variant', () => {
     'AiConfigWrite', 'AiActivityWrite', 'AiToolsWrite', 'AiToolsMcp',
     // BL-117 audio subsystem
     'AudioRecord', 'AudioSynthesize',
+    // BL-134 / ADR 0028 ai-runtime
+    'AiRuntimeSubmit', 'AiRuntimeControl', 'AiRuntimeObserve',
+    // BL-136 / ADR 0029 notification inbox
+    'NotificationsInboxRead', 'NotificationsInboxWrite',
   ]
   for (const variant of expected) {
     assert.ok(

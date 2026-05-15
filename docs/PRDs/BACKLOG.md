@@ -613,14 +613,9 @@ Three independent gaps in the current AI/agent stack — no first-class agent ta
 
 ---
 
-### BL-136: Notification Center — persistent inbox + shell panel
+### BL-136: Notification Center → closed 2026-05-15
 
-**Source**: ADR 0028 §"Integration with `nexus-notifications`" §3 — sibling ADR. Filed 2026-05-14.
-**Effort**: Medium. Builds on BL-135's router.
-**Crates**: `nexus-notifications`, shell plugin under `shell/src/plugins/nexus/notificationsInbox/`.
-**Related**: [BL-135](#bl-135-notification-router-refactor) (pre-req), [BL-134](#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (provides the AI/agent source).
-
-**Status (2026-05-15):** Phase 1 (backend) landed on `bl-134-ai-runtime` — [ADR 0029](../adr/0029-notification-center-persistent-inbox.md), `crates/nexus-notifications/src/inbox.rs` (SQLite-backed store at `<forge>/.forge/notifications/inbox.db`), four new IPC handlers (`inbox_list` id 2, `inbox_mark_read` id 3, `inbox_dismiss` id 4, `inbox_stats` id 5), dispatch-time write subscriber inside `dispatch_send` + `dispatch_routed_with_payload` (router-path *and* override-path sends produce a row), retention via `notifications.toml::[inbox]` (default min(1000 rows, 30 days); row-cap amortised per insert, age-cap once on `on_start`), two new capabilities (`notifications.inbox.read` / `.write`, both Low risk in `nexus-security::risk`), ts-rs + JSON-Schema bindings emitted under `packages/nexus-extension-api/src/generated/ipc/` + `crates/nexus-bootstrap/schemas/ipc/`, 12 unit + 6 IPC integration tests pinning insert / list / mark_read / dismiss / stats / row-cap / rebuild user-state preservation. Bus-side: new `com.nexus.notifications.inbox.appended` topic fires per insert. Phase 2 (shell plugin `nexus.notificationsInbox`) lands in a sibling branch and consumes the IPC surface only.
+**See [`BACKLOG_COMPLETED.md`](BACKLOG_COMPLETED.md#bl-136-notification-center--persistent-inbox--shell-panel--2026-05-15) for the close note.** Phase 1 (backend — `inbox.rs` SQLite store, 4 IPC handlers, retention, 2 capabilities, dispatch-time write subscriber, ts-rs/schemars bindings, 18 tests) + Phase 2 (shell plugin `nexus.notificationsInbox` — sidebar leaf, unread header, source filter chips, mark-read / dismiss / jump-to-source for `task_id`-carrying rows) both shipped on `bl-134-ai-runtime`. ADR 0029.
 
 Today `com.nexus.notifications.delivered` is fire-and-forget — once a transport accepts, there is no history, no read/unread state, no "what did I miss while I was away." Add a derived inbox under `<forge>/.forge/notifications/inbox.db` (rebuildable from the live event stream and transport-side history where available) plus a shell panel that queries it via IPC.
 

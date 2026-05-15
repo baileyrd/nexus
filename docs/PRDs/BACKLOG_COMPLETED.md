@@ -253,6 +253,59 @@ The motivating observation: BL-123..126 each propose a typing-latency fix, but w
 
 ---
 
+### BL-136: Notification Center — persistent inbox + shell panel ✅ (2026-05-15)
+
+**Source**: [BACKLOG.md#bl-136-notification-center--persistent-inbox--shell-panel](BACKLOG.md). Filed 2026-05-14; closed 2026-05-15.
+**ADR**: [0029-notification-center-persistent-inbox](../adr/0029-notification-center-persistent-inbox.md).
+**Files**:
+*Phase 1 (backend)* — `crates/nexus-notifications/src/inbox.rs` (new — SQLite-backed `Inbox` store with insert/list/mark_read/dismiss/stats + snapshot_user_state/apply_user_state); `crates/nexus-notifications/src/lib.rs` (re-exports + `INBOX_DB_RELPATH` + `INBOX_APPENDED_TOPIC`); `crates/nexus-notifications/src/core_plugin.rs` (`InboxListArgs` / `InboxIdsArgs` / `InboxUpdatedReply`; 4 new handlers; `from_config_with_inbox`; `dispatch_routed_with_payload` + `write_inbox_row` hook into both router-path and override-path sends; `on_start` runs the age-cap sweep); `crates/nexus-notifications/Cargo.toml` (+`rusqlite` + `uuid`); `crates/nexus-plugin-api/src/capability.rs` (+`NotificationsInboxRead`/`Write`); `crates/nexus-security/src/risk.rs` (Low-risk classification); `crates/nexus-bootstrap/src/lib.rs` (cap matrix; handler id registration; inbox path threading; `on_start: true` lifecycle flip); `crates/nexus-bootstrap/tests/{ipc_schema_emit,notifications_inbox_ipc}.rs`; ts-rs + JSON-Schema bindings under `packages/nexus-extension-api/src/generated/ipc/` + `crates/nexus-bootstrap/schemas/ipc/`.
+*Phase 2 (shell plugin)* — `shell/src/plugins/nexus/notificationsInbox/{index.ts,NotificationsInboxView.tsx,notificationsInboxStore.ts}`; `shell/src/plugins/catalog.ts` (default-on registration); `shell/src/plugins/core/capabilityPrompt/capabilityMapping.ts` + `shell/src/plugins/nexus/pluginsMgmt/capabilityInfo.ts` (BL-134 + BL-136 cap entries); `shell/tests/{capability-info,notifications-inbox-store}.test.ts`.
+**Related**: [BL-135](#bl-135-notification-router-refactor--2026-05-15) (router this builds on), [BL-134](BACKLOG.md#bl-134-nexus-ai-runtime--unified-aiagent-event-loop) (AiEvent source).
+
+`com.nexus.notifications.delivered` was fire-and-forget pre-BL-136: a Notification fanned out, transports either accepted or didn't, and the event disappeared. A user who closed the shell at 02:00 had no way to discover that the 03:15 Dream Cycle finished — the toast surface was unmounted, history was nowhere. BL-136 lands a derived inbox under `<forge>/.forge/notifications/inbox.db` that mirrors every routed (and override-path) dispatch, plus a shell sidebar leaf rendering it.
+
+**What landed.**
+
+**Phase 1 — backend.**
+
+- **SQLite store at `<forge>/.forge/notifications/inbox.db`.** One `inbox` table — `id` (UUIDv4), `source` (router tag or `"override"` for explicit-channel sends), `severity`, `title`, `body`, `channels` (JSON array of routed channel names — empty when zero transports accepted), `ts`, `read_at`, `dismissed_at`, `payload_json`. Three indexes (`ts DESC`, partial `read_at IS NULL`, `(source, ts DESC)`). `Connection` wrapped in `Mutex` so the plugin (`Send + Sync`) can own it.
+- **Four new IPC handlers on `com.nexus.notifications`.** `inbox_list` (id 2) — filter by `since` / `status` (`all` / `unread` / `dismissed`) / `source` / `limit` (default 100, capped 1000); newest-first. `inbox_mark_read` (id 3) and `inbox_dismiss` (id 4) — batched id lists; dismiss also stamps `read_at` if the row was unread. `inbox_stats` (id 5) — `{ total, unread, by_source: { src: count } }`.
+- **Dispatch-time write subscriber.** Inside `dispatch_send` / `dispatch_routed_with_payload`. Every `Routed` resolution writes a row regardless of transport success; `UnknownSource` / `Filtered` don't write (the router rejected the notification, so the inbox would lie if it claimed one was sent). Override-path sends record under a synthetic `source = "override"`. Per-insert publishes `com.nexus.notifications.inbox.appended` (`{ id, source, severity, ts }`) so consumers can bump unread counters without polling.
+- **Retention.** Configurable under `notifications.toml::[inbox]` — `max_rows` (default 1000) + `max_age_days` (default 30). Row-cap amortised across inserts via `DELETE … WHERE id IN (SELECT id FROM inbox ORDER BY rowid ASC LIMIT N)` (`rowid` is monotonic across inserts in the same second — `ts` alone would tie on UUIDv4 ids). Age-cap runs once on `on_start` (cheaper than per-insert).
+- **Two new capabilities** — `notifications.inbox.read` (gates `inbox_list` / `inbox_stats`) and `notifications.inbox.write` (gates `inbox_mark_read` / `inbox_dismiss`). Both Low risk in `nexus-security::risk` (no network egress, no spawned processes — only a derived store + user-state column mutation). Wired into the bootstrap cap matrix alongside the BL-134 `ai.runtime.*` trio that the same review missed (now committed via ts-export regen).
+- **Rebuild semantics** — `snapshot_user_state` / `clear` / `apply_user_state` round-trip `(id, read_at, dismissed_at)` across a teardown + replay. Phase-1 ships these as library functions; a CLI surface lands in Phase 3.
+
+**Phase 2 — shell plugin `nexus.notificationsInbox`.**
+
+- Sidebar leaf via `views.register({ slot: 'paneMode', … })` + an activity-bar entry at priority 57 (between Activity at 55 and Processes at 60) using a Lucide-style bell `iconPath`. Default-on in the catalog.
+- Zustand store mirroring the row shape; hydrates from `inbox_list` on `workspace:opened` + on activity-bar reveal. Live updates via `com.nexus.notifications.inbox.appended` — the topic carries only the id, so the subscriber re-fetches via `inbox_list` (the IPC is cheap and remains source of truth).
+- View renders header (unread / total counts, "Mark all read" button), per-source filter chip row, and a scrollable list. Each row: severity dot, time, source, severity tag, title (optional), body, "routed to: …" line, ✓ / × icon buttons. Click-row marks unread rows read; ✓ does the same explicitly; × dismisses (and `markDismissed` in the store also stamps `read_at`).
+- **Jump-to-source** — when `payload_json` parses to `{ task_id: <string> }`, a "Jump to run →" button appears. Clicking executes `nexus.aiRuntime.revealTask` (a command the future BL-134 Phase 2 observability panel will register); on rejection (no panel yet) it emits `nexus.notificationsInbox:jump-to-task` so any consumer can wire itself up without coupling to this plugin.
+- Optimistic local mutation on `markRead` / `dismiss` (the IPC reply doesn't carry per-id detail and the append topic doesn't fire for user-state changes); auto-resync via `inbox_list` on IPC failure.
+- Catalog entry registered default-on. `shell/src/plugins/core/capabilityPrompt/capabilityMapping.ts` and `shell/src/plugins/nexus/pluginsMgmt/capabilityInfo.ts` extended so install-time consent + Settings > Plugins describe `notifications.inbox.*` (and the previously-missing `ai.runtime.*` trio).
+
+**Tests** (`cargo test -p nexus-notifications` 68/68, `cargo test -p nexus-bootstrap --test notifications_inbox_ipc` 6/6, `pnpm --filter nexus-shell test` 1415/1415):
+- `inbox` module: insert round-trips through get; mark_read only flips unread rows; dismiss also marks read; list filters unread / by source / orders newest-first; row-cap trims oldest after insert; row-cap zero disables trim; stats reflects unread + per-source; snapshot+clear+apply round-trips user-state across a rebuild; channels array round-trips through the JSON column; empty channels signals routed-zero-transports.
+- Bootstrap-driven IPC: `inbox_list` empty on fresh forge; `inbox_stats` zero on fresh forge; `send` → `inbox_list` round-trip records a row with the expected source/body/channels; `inbox_mark_read` flips the unread count; `inbox_dismiss` also marks read + drops from `total`; `inbox_list` rejects unknown status filter.
+- Shell store: hydrate replaces and sets `hydrated`; prepend dedupes by id; mark_read leaves already-read rows alone; mark_dismissed sets dismissed_at + read_at where missing; `deriveStats` counts per-source unread skipping dismissed; `parsePayloadTaskId` handles null / empty / non-JSON / `{}` / non-string `task_id` / well-formed payload.
+
+**IPC shape additions** (drift-checked):
+- `InboxEntry` — the row shape with `id`, `source`, `severity`, `title?`, `body`, `channels`, `ts`, `read_at?`, `dismissed_at?`, `payload_json?`.
+- `InboxListArgs` — `{ since?, status?, source?, limit? }`.
+- `InboxIdsArgs` — `{ ids: string[] }` (shared between mark_read and dismiss).
+- `InboxUpdatedReply` — `{ updated: u32 }`.
+- `InboxStats` — `{ total: u32, unread: u32, by_source: { [src]: u32 } }`.
+- New capability strings: `notifications.inbox.read`, `notifications.inbox.write`.
+
+**Definition of done coverage**: ✅ ADR 0029; ✅ SQLite store at `<forge>/.forge/notifications/inbox.db` with the documented columns; ✅ four IPC handlers (`inbox_list`, `inbox_mark_read`, `inbox_dismiss`, `inbox_stats`); ✅ built-in subscriber writes one row per Notification dispatch regardless of transport success; ✅ shell plugin `nexus.notificationsInbox` default-on with unread badge in the header, filter chips per source, click-to-mark-read, dismiss action, jump-to-source for `task_id`-carrying entries; ✅ retention via `[inbox]` knobs (default min(1000 rows, 30 days)); ✅ capabilities (`.read` / `.write`) granted to the shell by default; ✅ unit + integration tests pin rebuild semantics (drop + replay + apply_user_state reconstructs the row set modulo user-state columns).
+
+**Out-of-scope / non-goals**:
+- The Phase 1 rebuild path ships as a library function only — `nexus notifications rebuild` CLI is Phase 3 follow-up.
+- No multi-select / relation inline editing in the shell panel — single-row mark/dismiss covers every use case in the DoD.
+- "Jump to run →" depends on a future BL-134 Phase 2 observability panel registering `nexus.aiRuntime.revealTask`. Until then the click fires the `nexus.notificationsInbox:jump-to-task` event; the affordance is dormant but not broken.
+
+---
+
 ### BL-135: Notification router refactor ✅ (2026-05-15)
 
 **Source**: [BACKLOG.md#bl-135-notification-router-refactor](BACKLOG.md). Filed 2026-05-14; closed 2026-05-15.
