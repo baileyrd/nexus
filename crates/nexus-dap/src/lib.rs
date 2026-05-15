@@ -24,7 +24,10 @@ pub mod protocol;
 pub mod transport;
 
 pub use client::{AdapterCapabilities, DapClient, DapClientError, SourceBreakpointSpec};
-pub use config::{DapAdapterSpec, DapConfigError, DapHostConfig};
+pub use config::{
+    DapAdapterSpec, DapConfigError, DapHostConfig, MergeSkip as DapMergeSkip,
+    MergeSkipReason as DapMergeSkipReason,
+};
 pub use core_plugin::DapCorePlugin;
 pub use pool::{ConnectionPool, PoolConfig};
 pub use protocol::{ProtocolEvent, ProtocolMessage, ProtocolRequest, ProtocolResponse};

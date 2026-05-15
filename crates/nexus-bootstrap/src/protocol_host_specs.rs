@@ -1,22 +1,23 @@
 //! BL-113 / ADR 0027 — bridge between manifest-side
-//! `nexus_plugins::ContributedAdapter<{Lsp,Mcp}ProtocolHostReg>` and
-//! the host-side `{Lsp,Mcp}ServerSpec` shapes.
+//! `nexus_plugins::ContributedAdapter<{Lsp,Dap,Mcp}ProtocolHostReg>`
+//! and the host-side `{Lsp,Dap,Mcp}` spec shapes.
 //!
 //! This module is the only place in the tree that does that mapping
 //! so the host crates don't have to depend on `nexus-plugins` and the
 //! manifest types don't have to know about per-host spec shapes.
 //!
-//! Phase 2a/3a (this module) is the conversion layer. Phase 2b/3b will
-//! wire the result through `LspHostConfig::merge_contributed` /
-//! `McpHostConfig::merge_contributed` after the plugin scan completes
-//! — needs a plugin-lifecycle callback design that's deliberately
-//! held until Phase 1 (DAP) lands and we know what the callback shape
-//! looks like in practice.
+//! Phase 1a/2a/3a (this module) is the conversion layer. Phase 1b/2b/3b
+//! will wire the result through `DapHostConfig::merge_contributed` /
+//! `LspHostConfig::merge_contributed` / `McpHostConfig::merge_contributed`
+//! after the plugin scan completes — needs a plugin-lifecycle callback
+//! design that's tracked under BL-113.
 
+use nexus_dap::DapAdapterSpec;
 use nexus_lsp::LspServerSpec;
 use nexus_mcp::{McpServerSpec, McpTransport};
 use nexus_plugins::{
-    ContributedAdapter, ContributedAdapterSet, LspProtocolHostReg, McpProtocolHostReg,
+    ContributedAdapter, ContributedAdapterSet, DapProtocolHostReg, LspProtocolHostReg,
+    McpProtocolHostReg,
 };
 
 /// Convert a single LSP contribution into the pair shape
@@ -56,6 +57,52 @@ pub fn lsp_contributions_to_specs(set: &ContributedAdapterSet) -> Vec<(LspServer
         .iter()
         .cloned()
         .map(lsp_contribution_to_spec)
+        .collect()
+}
+
+/// Convert a single DAP contribution into the pair shape
+/// `DapHostConfig::merge_contributed` expects: `(spec, plugin_id)`.
+///
+/// `DapProtocolHostReg.env` is a `BTreeMap` (matches the manifest
+/// TOML's ordered table); `DapAdapterSpec.env` is a `HashMap` (matches
+/// the host's existing flat-TOML schema). The conversion is a
+/// pair-by-pair drain.
+///
+/// `display_name`, `root_markers`, `launch_config_schema`, and
+/// `variable_renderers` are intentionally dropped on this side — per
+/// ADR 0027 the host crates stay protocol-only and never resolve those
+/// identifiers. The shell consults them through the contributing
+/// plugin's exports table at render time.
+#[must_use]
+pub fn dap_contribution_to_spec(
+    contribution: ContributedAdapter<DapProtocolHostReg>,
+) -> (DapAdapterSpec, String) {
+    let ContributedAdapter { plugin_id, adapter } = contribution;
+    let spec = DapAdapterSpec {
+        // ADR 0027 keeps the manifest's `id` as the stable identifier;
+        // the host's `name` field plays the same role on this side.
+        name: adapter.id,
+        command: adapter.command,
+        args: adapter.args,
+        // The manifest has no `type` field — the cosmetic adapter-type
+        // hint is dap.toml-only and stays `None` for contributions.
+        adapter_type: None,
+        file_types: adapter.file_types,
+        disabled: adapter.disabled,
+        env: adapter.env.into_iter().collect(),
+    };
+    (spec, plugin_id)
+}
+
+/// Convert every DAP contribution in `set` into the merge-ready list.
+/// Preserves contribution order so the host's skip list is stable
+/// across calls.
+#[must_use]
+pub fn dap_contributions_to_specs(set: &ContributedAdapterSet) -> Vec<(DapAdapterSpec, String)> {
+    set.dap
+        .iter()
+        .cloned()
+        .map(dap_contribution_to_spec)
         .collect()
 }
 
@@ -233,6 +280,83 @@ command = "x"
     fn empty_contribution_set_yields_empty_specs() {
         let set = ContributedAdapterSet::default();
         assert!(lsp_contributions_to_specs(&set).is_empty());
+        assert!(dap_contributions_to_specs(&set).is_empty());
         assert!(mcp_contributions_to_specs(&set).is_empty());
+    }
+
+    #[test]
+    fn dap_conversion_round_trips_every_field() {
+        let toml = r#"
+[plugin]
+id = "community.rust-debug"
+name = "Rust Debugger"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.dap]]
+id = "rust"
+display_name = "Rust (codelldb)"
+command = "codelldb"
+args = ["--port", "0"]
+file_types = ["rs"]
+root_markers = ["Cargo.toml"]
+launch_config_schema = "./launch.schema.json"
+variable_renderers = ["rust_vec", "rust_option"]
+disabled = true
+env = { RUST_BACKTRACE = "1" }
+"#;
+        let set = collect_for(toml);
+        let specs = dap_contributions_to_specs(&set);
+        assert_eq!(specs.len(), 1);
+        let (spec, plugin_id) = &specs[0];
+        assert_eq!(plugin_id, "community.rust-debug");
+        assert_eq!(spec.name, "rust");
+        assert_eq!(spec.command, "codelldb");
+        assert_eq!(spec.args, ["--port", "0"]);
+        assert_eq!(spec.file_types, ["rs"]);
+        assert!(spec.disabled);
+        // adapter_type is None for contributions — dap.toml-only field.
+        assert!(spec.adapter_type.is_none());
+        assert_eq!(
+            spec.env.get("RUST_BACKTRACE").map(String::as_str),
+            Some("1"),
+        );
+    }
+
+    #[test]
+    fn dap_conversion_preserves_input_order() {
+        let toml = r#"
+[plugin]
+id = "community.multi-dap"
+name = "Multi DAP"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.dap]]
+id = "alpha"
+command = "a"
+
+[[registrations.protocol_hosts.dap]]
+id = "beta"
+command = "b"
+
+[[registrations.protocol_hosts.dap]]
+id = "gamma"
+command = "c"
+"#;
+        let set = collect_for(toml);
+        let specs = dap_contributions_to_specs(&set);
+        assert_eq!(specs.len(), 3);
+        assert_eq!(specs[0].0.name, "alpha");
+        assert_eq!(specs[1].0.name, "beta");
+        assert_eq!(specs[2].0.name, "gamma");
     }
 }
