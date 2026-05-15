@@ -178,7 +178,14 @@ impl Transport for DesktopTransport {
 /// transcripts should pre-split.
 pub struct DiscordWebhook {
     webhook_url: String,
-    client: reqwest::blocking::Client,
+    // Lazy so the inner reqwest "internal sync runtime" thread isn't
+    // spawned at boot. `reqwest::blocking::Client::new()` panics under
+    // debug-assertions when called from a thread already inside a tokio
+    // async context (it builds + drops a current-thread runtime for a
+    // sanity check), which the shell's `boot_kernel` async-Tauri-command
+    // is. Building on first `send` runs through `spawn_blocking`, where
+    // tokio's blocking-region check passes.
+    client: std::sync::OnceLock<reqwest::blocking::Client>,
 }
 
 impl DiscordWebhook {
@@ -190,7 +197,7 @@ impl DiscordWebhook {
     pub fn new(webhook_url: String) -> Self {
         Self {
             webhook_url,
-            client: reqwest::blocking::Client::new(),
+            client: std::sync::OnceLock::new(),
         }
     }
 }
@@ -214,6 +221,7 @@ impl Transport for DiscordWebhook {
         );
         let resp = self
             .client
+            .get_or_init(reqwest::blocking::Client::new)
             .post(&self.webhook_url)
             .json(&serde_json::json!({ "username": "Nexus", "content": body }))
             .send()
@@ -236,7 +244,8 @@ impl Transport for DiscordWebhook {
 pub struct TelegramBot {
     bot_token: String,
     chat_id: String,
-    client: reqwest::blocking::Client,
+    // Lazy — see the same note on `DiscordWebhook::client`.
+    client: std::sync::OnceLock<reqwest::blocking::Client>,
 }
 
 impl TelegramBot {
@@ -251,7 +260,7 @@ impl TelegramBot {
         Self {
             bot_token,
             chat_id,
-            client: reqwest::blocking::Client::new(),
+            client: std::sync::OnceLock::new(),
         }
     }
 
@@ -322,6 +331,7 @@ impl Transport for TelegramBot {
         for chunk in Self::split_at_byte_limit(&body, TELEGRAM_MAX_BYTES) {
             let resp = self
                 .client
+                .get_or_init(reqwest::blocking::Client::new)
                 .post(&url)
                 .json(&serde_json::json!({
                     "chat_id": self.chat_id,

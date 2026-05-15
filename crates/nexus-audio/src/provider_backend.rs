@@ -299,7 +299,16 @@ where
             .enable_all()
             .build()
             .map_err(AudioError::Io)?;
-        rt.block_on(fut)
+        let result = rt.block_on(fut);
+        // Drop the runtime on a fresh OS thread. `Handle::try_current()`
+        // returning `Err` does not guarantee the calling thread is fully
+        // outside tokio (e.g. a kernel `spawn_blocking` site whose
+        // task-local handle was cleared, or a re-entered `block_on`),
+        // and the blocking-pool shutdown in `Runtime::drop` panics if it
+        // runs inside an async context. Moving the drop off-thread
+        // sidesteps that check.
+        std::thread::spawn(move || drop(rt));
+        result
     }
 }
 
