@@ -1324,6 +1324,34 @@ async fn compose_memory_preamble(
 /// the prompt-assembly path deterministic + cheap.
 async fn compose_entity_preamble(ctx: &KernelPluginContext, goal: &str) -> Option<String> {
     const ENTITY_RECALL_CAP: u64 = 5;
+
+    // BL-128 close — try the FAISS-backed `com.nexus.ai::entity_recall`
+    // first; fall back to the substring-ranking
+    // `com.nexus.storage::entity_search` on any error (missing
+    // embedder, IPC plumbing failure, no AI provider configured).
+    // Both handlers emit the same `{ results: [{ id, entity_type,
+    // description, ... }] }` shape so the renderer is shared.
+    if let Ok(response) = ctx
+        .ipc_call(
+            "com.nexus.ai",
+            "entity_recall",
+            serde_json::json!({
+                "query": goal,
+                "limit": ENTITY_RECALL_CAP,
+            }),
+            Duration::from_secs(15),
+        )
+        .await
+    {
+        if let Some(hits) = response.get("results").and_then(serde_json::Value::as_array) {
+            if !hits.is_empty() {
+                if let Some(rendered) = format_entity_preamble(hits) {
+                    return Some(rendered);
+                }
+            }
+        }
+    }
+
     let response = ctx
         .ipc_call(
             "com.nexus.storage",

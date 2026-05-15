@@ -284,20 +284,7 @@ BL-127 Phase A's editor-engine measurements capture the CM6 → StateField / Vie
 
 ---
 
-_BL-128 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). All five planned IPC handlers (`entity_search`, `entity_get`, `entity_relations`, `entity_upsert`, `entity_find_duplicates`), the 11 canonical entity types + 40-entry relation vocabulary with `normalize_relation_type`, the agent system-prompt entity preamble, and the `nexus graph entity list|show|search|related|duplicates` CLI surface. The deferred-and-still-open DoD items — FAISS-backed semantic recall, petgraph typed-edge extension, and the `nexus.entityGraph` shell explorer — are filed as the follow-up below._
-
----
-
-### Follow-up: BL-128 — FAISS recall, petgraph typed edges, shell explorer
-
-**Source**: BL-128 deferral. Filed 2026-05-14.
-**Effort**: Medium per item. Independent.
-
-The BL-128 close shipped the file-backed `EntityIndex` (per-call parse), the substring search ranker, and the SQLite-free dedup path. Three DoD tails were filed-not-shipped because each is a separate architectural change and the entity surface doesn't yet have the load they're designed for:
-
-- **FAISS-backed semantic recall.** Replace the substring ranker in `entity_search` with an embedding-based recall path. Reuses `nexus-ai`'s embedding provider; populates a FAISS index over entity `description` fields; rebuilds incrementally on file-watch events. Pick up once an entity forge crosses ~hundreds of files or once agent recall quality becomes the binding constraint.
-- **Petgraph typed-edge extension.** Today entity edges live in the file-backed `EntityIndex` only; the existing document `petgraph` keeps its untyped wikilink edges. Extending edge data with `type: String` + `confidence: f32` lets entity relations participate in the same hop-traversal / centrality queries as wikilinks. Risk: touches every existing `EdgeData` consumer.
-- **`nexus.entityGraph` shell plugin.** Visual node/edge explorer (reuses the existing graph canvas), sidebar entity detail panel, palette command for entity creation. Calls `entity_upsert` for create/edit, the BL-129 dedup-review surface for merge proposals.
+_BL-128 closed 2026-05-14 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). All five planned IPC handlers (`entity_search`, `entity_get`, `entity_relations`, `entity_upsert`, `entity_find_duplicates`), the 11 canonical entity types + 40-entry relation vocabulary with `normalize_relation_type`, FAISS-backed semantic recall via the new `com.nexus.ai::entity_recall` handler (layered on the existing shared chunk vectorstore — entity files auto-embed alongside other markdown by the indexing daemon), the agent system-prompt entity preamble (recall-first with substring fallback), and the `nexus graph entity list|show|search|related|duplicates` CLI surface. Two original DoD bullets — petgraph typed-edge extension and the `nexus.entityGraph` shell explorer — were dropped from BL-128 scope after re-evaluation; see the close note for rationale (typed edges duplicate the existing `entity_relations` IPC + invasive `EdgeData` refactor; shell explorer is pure UX over capabilities already exposed by the CLI + agent path). If either becomes needed, file a fresh BL._
 
 ---
 

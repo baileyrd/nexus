@@ -1131,6 +1131,15 @@ fn register_core_plugins(
                         "generate_docs",
                         nexus_ai::core_plugin::HANDLER_GENERATE_DOCS,
                     ),
+                    // BL-128 close — `entity_recall`: FAISS-backed
+                    // entity recall layered on the shared chunk
+                    // vectorstore. Callers fall back to the
+                    // substring-ranking `entity_search` when no
+                    // embedder is configured.
+                    (
+                        "entity_recall",
+                        nexus_ai::core_plugin::HANDLER_ENTITY_RECALL,
+                    ),
                 ]),
             ),
             forge_root,

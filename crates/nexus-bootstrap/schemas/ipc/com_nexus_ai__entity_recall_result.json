@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRecallResult",
+  "description": "Return type for `com.nexus.ai::entity_recall`.",
+  "type": "object",
+  "properties": {
+    "results": {
+      "description": "Entity hits ordered by descending score.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntityRecallHitRow"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "results"
+  ],
+  "$defs": {
+    "EntityRecallHitRow": {
+      "description": "One hit returned by `entity_recall`. Mirrors\n`nexus_storage::ipc::EntitySearchHitRow` so callers can union the\nsubstring and semantic paths under a single rendering pass — the\n`score` units differ (cosine similarity vs. the substring\n0..100 band), but agent / CLI consumers only need an ordering.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "One-line description (frontmatter `description:` or fallback\nfirst body paragraph, capped at 240 chars).",
+          "type": "string"
+        },
+        "entity_type": {
+          "description": "`entity_type` declared in frontmatter.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Canonical entity id (file stem).",
+          "type": "string"
+        },
+        "relpath": {
+          "description": "Forge-relative path of the entity markdown file.",
+          "type": "string"
+        },
+        "score": {
+          "description": "Cosine similarity of the best-matching chunk within the entity.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "entity_type",
+        "description",
+        "relpath",
+        "score"
+      ]
+    }
+  }
+}

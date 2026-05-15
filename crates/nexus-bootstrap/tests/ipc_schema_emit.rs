@@ -22,7 +22,7 @@ use nexus_ai::ipc::{
     AiActivityListArgs, AiActivityListResult, AiGenerateDocsArgs, AiGenerateDocsReply,
     AiProposeArgs, AiProposeReply, AiProposedToolCall, AiStreamAskArgs, AiStreamAskMessage,
     AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
-    AiToolPolicy, AiUnmappedToolCall,
+    AiToolPolicy, AiUnmappedToolCall, EntityRecallArgs, EntityRecallHitRow, EntityRecallResult,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
@@ -252,6 +252,11 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.ai::generate_docs (BL-116) ─────────────────────────────
     write_schema::<AiGenerateDocsArgs>("com_nexus_ai__generate_docs", "args");
     write_schema::<AiGenerateDocsReply>("com_nexus_ai__generate_docs", "reply");
+
+    // ── com.nexus.ai::entity_recall (BL-128 close) ──────────────────────
+    write_schema::<EntityRecallArgs>("com_nexus_ai__entity_recall", "args");
+    write_schema::<EntityRecallHitRow>("com_nexus_ai__entity_recall", "hit");
+    write_schema::<EntityRecallResult>("com_nexus_ai__entity_recall", "result");
 
     // ── com.nexus.ai::activity_list (BL-037) ─────────────────────────────
     // Per-forge AI activity timeline. The shell pane consumes

@@ -522,6 +522,71 @@ pub struct AiGenerateDocsReply {
     pub degraded_reason: Option<String>,
 }
 
+// ── BL-128 close — entity_recall (FAISS-backed) ──────────────────────────────
+
+/// Args for `com.nexus.ai::entity_recall` (handler 23).
+///
+/// Embeds the `query` through the configured provider, queries the
+/// shared chunk vectorstore, filters hits to files under
+/// `entities/`, and resolves each surviving stem back through
+/// `com.nexus.storage::entity_get`. When no embedder is configured
+/// the call returns an error and the agent / CLI is expected to
+/// fall back to the substring-ranking `com.nexus.storage::entity_search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRecallArgs {
+    /// Free-text query. The embedding pass treats this verbatim — the
+    /// agent typically sends the session goal here.
+    pub query: String,
+    /// Maximum entity hits to return. Defaults to 5 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One hit returned by `entity_recall`. Mirrors
+/// `nexus_storage::ipc::EntitySearchHitRow` so callers can union the
+/// substring and semantic paths under a single rendering pass — the
+/// `score` units differ (cosine similarity vs. the substring
+/// 0..100 band), but agent / CLI consumers only need an ordering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRecallHitRow {
+    /// Canonical entity id (file stem).
+    pub id: String,
+    /// `entity_type` declared in frontmatter.
+    pub entity_type: String,
+    /// One-line description (frontmatter `description:` or fallback
+    /// first body paragraph, capped at 240 chars).
+    pub description: String,
+    /// Forge-relative path of the entity markdown file.
+    pub relpath: String,
+    /// Cosine similarity of the best-matching chunk within the entity.
+    pub score: f32,
+}
+
+/// Return type for `com.nexus.ai::entity_recall`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityRecallResult {
+    /// Entity hits ordered by descending score.
+    pub results: Vec<EntityRecallHitRow>,
+}
+
 #[cfg(test)]
 mod stream_chat_serde_tests {
     use super::*;

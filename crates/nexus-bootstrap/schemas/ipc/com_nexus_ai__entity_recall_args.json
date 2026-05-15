@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRecallArgs",
+  "description": "Args for `com.nexus.ai::entity_recall` (handler 23).\n\nEmbeds the `query` through the configured provider, queries the\nshared chunk vectorstore, filters hits to files under\n`entities/`, and resolves each surviving stem back through\n`com.nexus.storage::entity_get`. When no embedder is configured\nthe call returns an error and the agent / CLI is expected to\nfall back to the substring-ranking `com.nexus.storage::entity_search`.",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Maximum entity hits to return. Defaults to 5 when absent.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "query": {
+      "description": "Free-text query. The embedding pass treats this verbatim — the\nagent typically sends the session goal here.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "query"
+  ]
+}
