@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InferEntityRelationsArgs",
+  "description": "Args for `com.nexus.ai::infer_entity_relations` (handler 25).\n\nLooks up the entity, gathers similar entities via `entity_recall`,\nasks the AI provider for proposed new relations, writes the\nsurviving proposals back through `com.nexus.storage::entity_upsert`\nat a fixed `confidence: 0.5` so a future cycle's decay treats them\nas low-trust.",
+  "type": "object",
+  "properties": {
+    "dry_run": {
+      "description": "When `true`, the handler computes the proposals but does not\nwrite them back. The proposals are still included in the reply.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "entity_id": {
+      "description": "Canonical entity id or alias to propose new relations for.",
+      "type": "string"
+    },
+    "max_proposals": {
+      "description": "Maximum number of candidate relations to keep from the model's\nresponse. Defaults to `3`.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entity_id"
+  ]
+}

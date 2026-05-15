@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EnrichEntityArgs",
+  "description": "Args for `com.nexus.ai::enrich_entity` (handler 24).\n\nReads the entity through `com.nexus.storage::entity_get`, gathers\nexisting-relation context, optionally runs RAG over the rest of\nthe forge for supporting snippets, asks the AI provider for an\nexpanded description, and (unless `dry_run`) atomically rewrites\nthe entity through `com.nexus.storage::entity_upsert`.",
+  "type": "object",
+  "properties": {
+    "dry_run": {
+      "description": "When `true`, the handler computes the proposed description\nbut does not write it back. The proposed text is still\nincluded in the response so callers can preview.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "entity_id": {
+      "description": "Canonical entity id or alias.",
+      "type": "string"
+    },
+    "min_description_chars": {
+      "description": "Minimum description length below which enrichment runs. When\nthe existing description is at or above this many characters\nthe handler short-circuits and reports `skipped: true`.\nDefaults to `80` when absent — matches the Dream-Cycle spec.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entity_id"
+  ]
+}

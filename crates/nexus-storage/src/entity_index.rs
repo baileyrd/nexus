@@ -822,6 +822,117 @@ fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
     out
 }
 
+// ── BL-129 Dream Cycle — merge ──────────────────────────────────────────────
+
+/// Result of [`merge_records`]. The `payload` is ready to be passed
+/// straight to [`render_entity_markdown`].
+#[derive(Debug, Clone)]
+pub struct MergedEntity {
+    /// The combined entity, ready to render.
+    pub payload: EntityUpsert,
+    /// New aliases on the survivor (includes the dropped entity's id
+    /// when it wasn't already aliased).
+    pub aliases_added: u32,
+    /// Relations added to the survivor (deduplicated on `(target, kind)`).
+    pub relations_added: u32,
+}
+
+/// Merge `drop` into `keep`. Pure function — caller owns the I/O.
+/// Aliases and relations are unioned (deduplicated case-insensitively
+/// on alias text, on `(target, kind)` for relations with the maximum
+/// confidence winning on conflict). The longer description survives;
+/// ties prefer `keep`. The dropped entity's canonical id is added to
+/// the survivor's alias list so back-references from other entities
+/// still resolve.
+#[must_use]
+pub fn merge_records(keep: &EntityRecord, drop: &EntityRecord) -> MergedEntity {
+    use std::collections::BTreeMap;
+
+    // Aliases: start with keep's, then add drop's aliases that aren't
+    // already present (case-insensitive). Always add drop's canonical id.
+    let mut alias_keys: std::collections::BTreeSet<String> = keep
+        .aliases
+        .iter()
+        .map(|a| a.to_ascii_lowercase())
+        .collect();
+    let mut aliases: Vec<String> = keep.aliases.clone();
+    let mut aliases_added = 0u32;
+    let try_add_alias = |a: &str, alias_keys: &mut std::collections::BTreeSet<String>, aliases: &mut Vec<String>, added: &mut u32| {
+        let trimmed = a.trim();
+        if trimmed.is_empty() || trimmed == keep.id {
+            return;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        if alias_keys.insert(key) {
+            aliases.push(trimmed.to_string());
+            *added += 1;
+        }
+    };
+    for a in &drop.aliases {
+        try_add_alias(a, &mut alias_keys, &mut aliases, &mut aliases_added);
+    }
+    // Add drop's canonical id as an alias so dangling references resolve.
+    try_add_alias(&drop.id, &mut alias_keys, &mut aliases, &mut aliases_added);
+
+    // Description: longer wins; tie favours `keep`.
+    let description = if drop.description.chars().count() > keep.description.chars().count() {
+        drop.description.clone()
+    } else {
+        keep.description.clone()
+    };
+
+    // Relations: keep's first, then merge drop's. Dedup on (target, kind);
+    // on conflict keep the max confidence. Order: insertion (keep first).
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut by_key: BTreeMap<(String, String), f32> = BTreeMap::new();
+    let mut relations_added = 0u32;
+    for r in &keep.relations {
+        let k = (r.target.clone(), r.kind.clone());
+        if by_key.insert(k.clone(), r.confidence).is_none() {
+            order.push(k);
+        }
+    }
+    for r in &drop.relations {
+        let k = (r.target.clone(), r.kind.clone());
+        match by_key.get_mut(&k) {
+            Some(existing) => {
+                if r.confidence > *existing {
+                    *existing = r.confidence;
+                }
+            }
+            None => {
+                by_key.insert(k.clone(), r.confidence);
+                order.push(k);
+                relations_added += 1;
+            }
+        }
+    }
+    let relations: Vec<EntityUpsertRelation> = order
+        .into_iter()
+        .map(|(target, kind)| {
+            let confidence = by_key.get(&(target.clone(), kind.clone())).copied().unwrap_or(1.0);
+            EntityUpsertRelation {
+                target,
+                kind,
+                confidence: Some(confidence),
+            }
+        })
+        .collect();
+
+    let payload = EntityUpsert {
+        id: keep.id.clone(),
+        entity_type: keep.entity_type.clone(),
+        aliases,
+        description,
+        relations,
+    };
+    MergedEntity {
+        payload,
+        aliases_added,
+        relations_added,
+    }
+}
+
 // ── BL-129 Dream Cycle — confidence decay ───────────────────────────────────
 
 /// Parameters for [`decay_file_content`]. Defaults match the
@@ -1432,6 +1543,98 @@ mod tests {
     fn decay_no_frontmatter_is_noop() {
         let src = "Just a body, no frontmatter.\n";
         assert!(decay_file_content(src, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
+    }
+
+    // ── BL-129 merge_records ────────────────────────────────────────────────
+
+    fn rec(
+        id: &str,
+        entity_type: &str,
+        aliases: &[&str],
+        description: &str,
+        relations: &[(&str, &str, f32)],
+    ) -> EntityRecord {
+        EntityRecord {
+            id: id.to_string(),
+            entity_type: entity_type.to_string(),
+            aliases: aliases.iter().map(|s| (*s).to_string()).collect(),
+            description: description.to_string(),
+            relations: relations
+                .iter()
+                .map(|(t, k, c)| EntityRelation {
+                    target: (*t).to_string(),
+                    kind: (*k).to_string(),
+                    confidence: *c,
+                })
+                .collect(),
+            relpath: format!("entities/{id}.md"),
+        }
+    }
+
+    #[test]
+    fn merge_unions_aliases_and_appends_dropped_id() {
+        let keep = rec("alice", "person", &["Al"], "Engineer.", &[]);
+        let drop = rec("alice-2", "person", &["Alice S."], "", &[]);
+        let m = merge_records(&keep, &drop);
+        assert!(m.payload.aliases.contains(&"Al".to_string()));
+        assert!(m.payload.aliases.contains(&"Alice S.".to_string()));
+        assert!(m.payload.aliases.contains(&"alice-2".to_string()));
+        // 'Alice S.' + 'alice-2' both new on keep
+        assert_eq!(m.aliases_added, 2);
+    }
+
+    #[test]
+    fn merge_dedupes_aliases_case_insensitively() {
+        let keep = rec("alice", "person", &["Al"], "", &[]);
+        let drop = rec("alice-2", "person", &["AL", "Alice"], "", &[]);
+        let m = merge_records(&keep, &drop);
+        // Already-present "AL" matches "Al"; "Alice" + "alice-2" added.
+        assert_eq!(m.aliases_added, 2);
+    }
+
+    #[test]
+    fn merge_picks_longer_description() {
+        let keep = rec("a", "person", &[], "short", &[]);
+        let drop = rec("b", "person", &[], "much longer description", &[]);
+        let m = merge_records(&keep, &drop);
+        assert_eq!(m.payload.description, "much longer description");
+    }
+
+    #[test]
+    fn merge_unions_relations_with_max_confidence() {
+        let keep = rec(
+            "a",
+            "person",
+            &[],
+            "",
+            &[("x", "knows", 0.4), ("y", "knows", 0.9)],
+        );
+        let drop = rec(
+            "b",
+            "person",
+            &[],
+            "",
+            &[
+                ("x", "knows", 0.7),     // dup — should keep 0.7 (max)
+                ("z", "works_on", 0.5),  // new
+            ],
+        );
+        let m = merge_records(&keep, &drop);
+        assert_eq!(m.relations_added, 1); // only z is new
+        let x = m
+            .payload
+            .relations
+            .iter()
+            .find(|r| r.target == "x")
+            .unwrap();
+        assert!((x.confidence.unwrap() - 0.7).abs() < 1e-5);
+        let z = m
+            .payload
+            .relations
+            .iter()
+            .find(|r| r.target == "z")
+            .unwrap();
+        assert!((z.confidence.unwrap() - 0.5).abs() < 1e-5);
     }
 
     #[test]

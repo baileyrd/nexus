@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InferEntityRelationsResult",
+  "description": "Reply for `com.nexus.ai::infer_entity_relations`.",
+  "type": "object",
+  "properties": {
+    "applied": {
+      "description": "`true` when the proposals were written back; `false` when\n`dry_run` was set or no proposals survived filtering.",
+      "type": "boolean"
+    },
+    "entity_id": {
+      "description": "Canonical entity id (after alias resolution).",
+      "type": "string"
+    },
+    "proposals": {
+      "description": "Proposals that survived target-existence + duplicate-filter\nchecks. Empty when the model returned nothing usable.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/InferredRelationRow"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entity_id",
+    "proposals",
+    "applied"
+  ],
+  "$defs": {
+    "InferredRelationRow": {
+      "description": "One proposed relation in [`InferEntityRelationsResult::proposals`].",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "description": "Confidence assigned to the proposal. Always `0.5` for the\nthin close-out; future iterations may vary per proposal.",
+          "type": "number",
+          "format": "float"
+        },
+        "target": {
+          "description": "Target entity canonical id (after resolution).",
+          "type": "string"
+        },
+        "type": {
+          "description": "Relation kind, normalised against the canonical vocabulary.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "type",
+        "confidence"
+      ]
+    }
+  }
+}

@@ -22,7 +22,9 @@ use nexus_ai::ipc::{
     AiActivityListArgs, AiActivityListResult, AiGenerateDocsArgs, AiGenerateDocsReply,
     AiProposeArgs, AiProposeReply, AiProposedToolCall, AiStreamAskArgs, AiStreamAskMessage,
     AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
-    AiToolPolicy, AiUnmappedToolCall, EntityRecallArgs, EntityRecallHitRow, EntityRecallResult,
+    AiToolPolicy, AiUnmappedToolCall, EnrichEntityArgs, EnrichEntityResult, EntityRecallArgs,
+    EntityRecallHitRow, EntityRecallResult, InferEntityRelationsArgs,
+    InferEntityRelationsResult, InferredRelationRow,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
@@ -32,7 +34,8 @@ use nexus_ai::{Citation, RagResponse};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
     EntityDecayRelationsArgs, EntityDecayRelationsResult, EntityDuplicatePairRow,
-    EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs,
+    EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs, EntityMergeArgs,
+    EntityMergeResult,
     EntityGetResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
@@ -225,6 +228,22 @@ fn emit_all_schemas_impl() {
     );
     write_schema::<EntityDecayRelationsResult>(
         "com_nexus_storage__entity_decay_relations",
+        "result",
+    );
+    write_schema::<EntityMergeArgs>("com_nexus_storage__entity_merge", "args");
+    write_schema::<EntityMergeResult>("com_nexus_storage__entity_merge", "result");
+    write_schema::<EnrichEntityArgs>("com_nexus_ai__enrich_entity", "args");
+    write_schema::<EnrichEntityResult>("com_nexus_ai__enrich_entity", "result");
+    write_schema::<InferEntityRelationsArgs>(
+        "com_nexus_ai__infer_entity_relations",
+        "args",
+    );
+    write_schema::<InferredRelationRow>(
+        "com_nexus_ai__infer_entity_relations",
+        "row",
+    );
+    write_schema::<InferEntityRelationsResult>(
+        "com_nexus_ai__infer_entity_relations",
         "result",
     );
 

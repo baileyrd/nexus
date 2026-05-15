@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EnrichEntityResult",
+  "description": "Reply for `com.nexus.ai::enrich_entity`.",
+  "type": "object",
+  "properties": {
+    "applied": {
+      "description": "`true` when the new description was written to disk; `false`\nwhen `dry_run` or `skipped`.",
+      "type": "boolean"
+    },
+    "entity_id": {
+      "description": "Canonical entity id (after alias resolution).",
+      "type": "string"
+    },
+    "new_description": {
+      "description": "AI-generated description. Empty when `skipped: true`.",
+      "type": "string"
+    },
+    "original_description": {
+      "description": "Description present before the call (empty when the entity had\nnone).",
+      "type": "string"
+    },
+    "skipped": {
+      "description": "`true` when the original description already met the length\nthreshold and the AI was not invoked.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entity_id",
+    "original_description",
+    "new_description",
+    "skipped",
+    "applied"
+  ]
+}

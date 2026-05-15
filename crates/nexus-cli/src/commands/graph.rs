@@ -1,5 +1,6 @@
 use anyhow::Result;
 use nexus_bootstrap::storage as ipc;
+use nexus_kernel::PluginContext;
 
 use crate::app::App;
 use crate::output::{print_list, OutputFormat};
@@ -276,58 +277,117 @@ pub fn entity_related(app: &mut App, id: &str, direction: &str) -> Result<()> {
     Ok(())
 }
 
-/// `nexus graph dream-cycle run` — BL-129 thin slice. Runs the
-/// `dedup` and/or `decay` phases (close-out adds `enrich` + `infer`).
+/// `nexus graph dream-cycle run` — BL-129. Runs `dedup`, `decay`,
+/// `enrich`, and `infer` in spec order. `None` runs every phase.
 ///
-/// Phase ordering matches the spec: dedup → decay. `None` runs every
-/// supported phase. All thresholds / factors fall back to server-side
-/// defaults when not supplied.
+/// `dedup` auto-merges pairs at or above `merge_threshold` (default
+/// `0.97`) and surfaces the remainder above `review_threshold`
+/// (default `0.92`). `decay` rewrites every entity file in-place.
+/// `enrich` and `infer` require a configured AI provider; they
+/// short-circuit with a "skipped — no provider" message otherwise.
+#[allow(clippy::too_many_arguments)]
 pub fn dream_cycle_run(
     app: &mut App,
     phase: Option<&str>,
     decay_factor: Option<f32>,
     decay_floor: Option<f32>,
     review_threshold: Option<f32>,
+    merge_threshold: Option<f32>,
     dry_run: bool,
 ) -> Result<()> {
     let run_dedup = phase.is_none_or(|p| p == "dedup");
     let run_decay = phase.is_none_or(|p| p == "decay");
+    let run_enrich = phase.is_none_or(|p| p == "enrich");
+    let run_infer = phase.is_none_or(|p| p == "infer");
 
     let format = app.format();
     let (runtime, rt) = app.runtime()?;
 
     if run_dedup {
-        let pairs = ipc::entity_find_duplicates(runtime, rt, review_threshold)
+        let merge_thr = merge_threshold.unwrap_or(0.97);
+        // Use the lower of the two thresholds as the IPC review floor so
+        // we still see merge candidates even if `--merge-threshold` is
+        // below the server-side default.
+        let scan_floor = review_threshold
+            .unwrap_or(0.92)
+            .min(merge_thr);
+        let pairs = ipc::entity_find_duplicates(runtime, rt, Some(scan_floor))
             .map_err(|e| anyhow::anyhow!("dream-cycle dedup failed: {e}"))?;
+
+        // Partition into auto-merge vs review tiers. Within each tier,
+        // sort by descending similarity (already done by IPC).
+        let mut merged: Vec<(String, String, f32, usize, usize)> = Vec::new();
+        let mut review: Vec<(String, String, f32)> = Vec::new();
+        // Track ids that already participated in a merge this pass so a
+        // single entity can't be merged into two different survivors in
+        // one cycle (deterministic across pair order).
+        let mut consumed: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        for p in &pairs {
+            if p.similarity >= merge_thr {
+                if consumed.contains(&p.a) || consumed.contains(&p.b) {
+                    // Skip — defer to next cycle when one side reappears.
+                    continue;
+                }
+                if dry_run {
+                    merged.push((p.a.clone(), p.b.clone(), p.similarity, 0, 0));
+                    consumed.insert(p.b.clone());
+                    continue;
+                }
+                let outcome = ipc::entity_merge(runtime, rt, &p.a, &p.b).map_err(|e| {
+                    anyhow::anyhow!("dream-cycle dedup: merge {} ← {} failed: {e}", p.a, p.b)
+                })?;
+                consumed.insert(outcome.dropped.clone());
+                merged.push((
+                    outcome.kept,
+                    outcome.dropped,
+                    p.similarity,
+                    outcome.aliases_added as usize,
+                    outcome.relations_added as usize,
+                ));
+            } else {
+                review.push((p.a.clone(), p.b.clone(), p.similarity));
+            }
+        }
+
         match format {
             OutputFormat::Json | OutputFormat::Jsonl => {
                 println!(
                     "{}",
                     serde_json::json!({
                         "phase": "dedup",
-                        "pairs": pairs.iter().map(|p| serde_json::json!({
-                            "a": p.a,
-                            "b": p.b,
-                            "similarity": p.similarity,
+                        "merged": merged.iter().map(|(k, d, s, a, r)| serde_json::json!({
+                            "kept": k,
+                            "dropped": d,
+                            "similarity": s,
+                            "aliases_added": a,
+                            "relations_added": r,
                         })).collect::<Vec<_>>(),
+                        "review": review.iter().map(|(a, b, s)| serde_json::json!({
+                            "a": a,
+                            "b": b,
+                            "similarity": s,
+                        })).collect::<Vec<_>>(),
+                        "dry_run": dry_run,
                     })
                 );
             }
             _ => {
-                let threshold_label = review_threshold
-                    .map_or_else(|| "default".to_string(), |t| format!("{t:.2}"));
-                if pairs.is_empty() {
+                let mode = if dry_run { " (dry-run)" } else { "" };
+                println!(
+                    "dedup    : {m} merged, {r} for review (merge≥{mt:.2}, review≥{rt:.2}){mode}",
+                    m = merged.len(),
+                    r = review.len(),
+                    mt = merge_thr,
+                    rt = review_threshold.unwrap_or(0.92),
+                );
+                for (kept, dropped, sim, aliases, relations) in &merged {
                     println!(
-                        "dedup    : no duplicate candidates above threshold {threshold_label}"
+                        "  merge {sim:.3}  {kept} ← {dropped}  (+{aliases} aliases, +{relations} relations)"
                     );
-                } else {
-                    println!(
-                        "dedup    : {n} candidate pair(s) above threshold {threshold_label}",
-                        n = pairs.len(),
-                    );
-                    for p in &pairs {
-                        println!("  {:.3}  {}  {}", p.similarity, p.a, p.b);
-                    }
+                }
+                for (a, b, sim) in &review {
+                    println!("  review {sim:.3}  {a}  {b}");
                 }
             }
         }
@@ -369,7 +429,141 @@ pub fn dream_cycle_run(
         }
     }
 
+    if run_enrich || run_infer {
+        // Both phases iterate over every entity, so list once.
+        let entity_ids = list_entity_ids(runtime, rt)?;
+
+        if run_enrich {
+            let mut enriched = 0u32;
+            let mut skipped = 0u32;
+            let mut failures: Vec<String> = Vec::new();
+            for id in &entity_ids {
+                let args = serde_json::json!({
+                    "entity_id": id,
+                    "dry_run": dry_run,
+                });
+                match ai_ipc_call(runtime, rt, "enrich_entity", args) {
+                    Ok(reply) => {
+                        if reply.get("skipped").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                            skipped += 1;
+                        } else if reply.get("applied").and_then(serde_json::Value::as_bool).unwrap_or(false)
+                            || dry_run
+                        {
+                            enriched += 1;
+                        }
+                    }
+                    Err(e) => failures.push(format!("{id}: {e}")),
+                }
+            }
+            match format {
+                OutputFormat::Json | OutputFormat::Jsonl => {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "phase": "enrich",
+                            "enriched": enriched,
+                            "skipped":  skipped,
+                            "failed":   failures.len(),
+                            "dry_run":  dry_run,
+                        })
+                    );
+                }
+                _ => {
+                    let mode = if dry_run { " (dry-run)" } else { "" };
+                    println!(
+                        "enrich   : enriched {enriched}, skipped {skipped}, failed {failed}{mode}",
+                        failed = failures.len(),
+                    );
+                    if let Some(first) = failures.first() {
+                        println!("  first failure: {first}");
+                    }
+                }
+            }
+        }
+
+        if run_infer {
+            let mut proposals_total = 0u32;
+            let mut entities_with_proposals = 0u32;
+            let mut failures: Vec<String> = Vec::new();
+            for id in &entity_ids {
+                let args = serde_json::json!({
+                    "entity_id": id,
+                    "dry_run":   dry_run,
+                });
+                match ai_ipc_call(runtime, rt, "infer_entity_relations", args) {
+                    Ok(reply) => {
+                        let n = reply
+                            .get("proposals")
+                            .and_then(serde_json::Value::as_array)
+                            .map_or(0, Vec::len) as u32;
+                        if n > 0 {
+                            entities_with_proposals += 1;
+                            proposals_total += n;
+                        }
+                    }
+                    Err(e) => failures.push(format!("{id}: {e}")),
+                }
+            }
+            match format {
+                OutputFormat::Json | OutputFormat::Jsonl => {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "phase": "infer",
+                            "entities_with_proposals": entities_with_proposals,
+                            "proposals_total":         proposals_total,
+                            "failed":                  failures.len(),
+                            "dry_run":                 dry_run,
+                        })
+                    );
+                }
+                _ => {
+                    let mode = if dry_run { " (dry-run)" } else { "" };
+                    println!(
+                        "infer    : {proposals_total} new proposal(s) across {entities_with_proposals} \
+                         entity/-ies, failed {failed}{mode}",
+                        failed = failures.len(),
+                    );
+                    if let Some(first) = failures.first() {
+                        println!("  first failure: {first}");
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// List every canonical entity id in the forge. Uses the empty-query
+/// path of `entity_search` (returns everything ordered by id ascending,
+/// up to `limit`). The 5000 cap is a defensive ceiling — the dream
+/// cycle is intended for personal forges with O(hundreds) of entities.
+fn list_entity_ids(
+    runtime: &nexus_bootstrap::Runtime,
+    rt: &tokio::runtime::Runtime,
+) -> Result<Vec<String>> {
+    let hits = ipc::entity_search(runtime, rt, "", None, Some(5000))
+        .map_err(|e| anyhow::anyhow!("dream-cycle: list entities failed: {e}"))?;
+    Ok(hits.into_iter().map(|h| h.id).collect())
+}
+
+/// Direct IPC call into `com.nexus.ai`. The bootstrap crate exposes
+/// typed helpers for storage but not for AI, so this is the narrowest
+/// adapter we need for the dream-cycle CLI.
+fn ai_ipc_call(
+    runtime: &nexus_bootstrap::Runtime,
+    rt: &tokio::runtime::Runtime,
+    command: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value> {
+    rt.block_on(runtime.context.ipc_call(
+        "com.nexus.ai",
+        command,
+        args,
+        std::time::Duration::from_secs(120),
+    ))
+    .map_err(|e| anyhow::anyhow!("AI ipc call '{command}' failed: {e}"))
 }
 
 /// `nexus graph entity duplicates` — Jaccard-similar entity pairs.

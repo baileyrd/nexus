@@ -341,6 +341,14 @@ pub const HANDLER_ENTITY_UPSERT: u32 = 67;
 /// similarity over `id + aliases + description`; only same-type
 /// pairs are reported. Threshold defaults to `0.92`.
 pub const HANDLER_ENTITY_FIND_DUPLICATES: u32 = 68;
+/// BL-129 close — `entity_merge`. Args: [`crate::ipc::EntityMergeArgs`].
+/// Returns [`crate::ipc::EntityMergeResult`]. Merges `drop` into `keep`
+/// (union aliases + relations, longer description, `drop`'s id added as
+/// an alias on `keep` so dangling outgoing references still resolve)
+/// and deletes `drop`'s file. The atomic-write path is used for the
+/// `keep` rewrite; the delete runs after the rewrite succeeds.
+pub const HANDLER_ENTITY_MERGE: u32 = 70;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -552,6 +560,9 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_ENTITY_DECAY_RELATIONS => {
                 return dispatch_entity_decay_relations(&self.forge_root, args);
+            }
+            HANDLER_ENTITY_MERGE => {
+                return dispatch_entity_merge(&self.forge_root, args);
             }
             _ => {}
         }
@@ -1586,6 +1597,90 @@ fn dispatch_entity_find_duplicates(
         &crate::ipc::EntityFindDuplicatesResult { pairs },
         "entity_find_duplicates",
     )
+}
+
+fn dispatch_entity_merge(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::EntityMergeArgs = parse_args(args, "entity_merge")?;
+    let keep_id = parsed.keep.trim().to_string();
+    let drop_id = parsed.drop.trim().to_string();
+    if keep_id.is_empty() || drop_id.is_empty() {
+        return Err(exec_err(
+            "entity_merge: 'keep' and 'drop' must both be non-empty".to_string(),
+        ));
+    }
+    if keep_id == drop_id {
+        return Err(exec_err(
+            "entity_merge: 'keep' and 'drop' must differ".to_string(),
+        ));
+    }
+    for id in [&keep_id, &drop_id] {
+        if id.contains(['/', '\\']) || id.contains("..") {
+            return Err(exec_err(
+                "entity_merge: ids must be bare file stems (no path separators or '..')".to_string(),
+            ));
+        }
+    }
+
+    let index = crate::entity_index::EntityIndex::load(forge_root);
+    let Some(keep_rec) = index.get(&keep_id).cloned() else {
+        return Err(exec_err(format!(
+            "entity_merge: 'keep' entity '{keep_id}' not found"
+        )));
+    };
+    // `drop` may resolve via alias — refuse alias-only drops because the
+    // delete needs a concrete file path.
+    let Some(drop_rec) = index.get(&drop_id).cloned() else {
+        return Err(exec_err(format!(
+            "entity_merge: 'drop' entity '{drop_id}' not found"
+        )));
+    };
+    if drop_rec.id != drop_id {
+        return Err(exec_err(format!(
+            "entity_merge: 'drop' must be a canonical id (got alias for '{}')",
+            drop_rec.id
+        )));
+    }
+    if keep_rec.id == drop_rec.id {
+        return Err(exec_err(
+            "entity_merge: 'keep' and 'drop' resolved to the same entity".to_string(),
+        ));
+    }
+
+    let merged = crate::entity_index::merge_records(&keep_rec, &drop_rec);
+
+    let target = forge_root
+        .join(crate::entity_index::ENTITIES_DIR)
+        .join(format!("{}.md", keep_rec.id));
+    let temp_dir = forge_root.join(".forge").join("temp");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| exec_err(format!("entity_merge: create temp dir: {e}")))?;
+    let markdown = crate::entity_index::render_entity_markdown(&merged.payload);
+    crate::atomic_write(&target, markdown.as_bytes(), &temp_dir).map_err(|e| {
+        exec_err(format!("entity_merge: write {}: {e}", target.display()))
+    })?;
+
+    let drop_path = forge_root
+        .join(crate::entity_index::ENTITIES_DIR)
+        .join(format!("{}.md", drop_rec.id));
+    if drop_path.exists() {
+        std::fs::remove_file(&drop_path).map_err(|e| {
+            exec_err(format!(
+                "entity_merge: remove {}: {e}",
+                drop_path.display()
+            ))
+        })?;
+    }
+
+    let result = crate::ipc::EntityMergeResult {
+        kept:            keep_rec.id,
+        dropped:         drop_rec.id,
+        aliases_added:   merged.aliases_added,
+        relations_added: merged.relations_added,
+    };
+    to_value(&result, "entity_merge")
 }
 
 fn dispatch_entity_decay_relations(

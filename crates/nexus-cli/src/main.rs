@@ -336,13 +336,15 @@ enum GraphCommand {
 
 #[derive(Subcommand)]
 enum DreamCycleCommand {
-    /// Run one or every supported maintenance phase. Thin slice
-    /// surfaces `dedup` + `decay`; `enrich` + `infer` land in the
-    /// close-out.
+    /// Run one or every supported maintenance phase: `dedup` (with
+    /// auto-merge above `--merge-threshold`), `decay`, `enrich`
+    /// (LLM-expanded descriptions), and `infer` (LLM-proposed new
+    /// relations). The latter two require a configured AI provider
+    /// and surface per-entity failures in the report.
     Run {
-        /// Restrict to a single phase. Omit to run every supported
-        /// phase in sequence.
-        #[arg(long, value_parser = ["dedup", "decay"])]
+        /// Restrict to a single phase. Omit to run every phase in
+        /// the spec order: dedup → decay → enrich → infer.
+        #[arg(long, value_parser = ["dedup", "decay", "enrich", "infer"])]
         phase: Option<String>,
         /// Multiplicative decay factor in `(0.0, 1.0]`. Defaults to
         /// `0.95` server-side when omitted.
@@ -352,11 +354,19 @@ enum DreamCycleCommand {
         /// server-side when omitted.
         #[arg(long)]
         decay_floor: Option<f32>,
-        /// Similarity threshold for the dedup phase. Defaults to
-        /// `0.92` server-side when omitted.
+        /// Surface-for-review threshold for the dedup phase. Pairs at
+        /// or above this value (and below `--merge-threshold`) are
+        /// reported but not merged. Defaults to `0.92`.
         #[arg(long)]
         review_threshold: Option<f32>,
-        /// Compute counts but skip rewrites for the decay phase.
+        /// Auto-merge threshold for the dedup phase. Pairs at or above
+        /// this value are silently merged (lex-smaller id survives).
+        /// Defaults to `0.97`.
+        #[arg(long)]
+        merge_threshold: Option<f32>,
+        /// Compute counts but skip every write (no decay rewrites, no
+        /// auto-merges). Surfaced counts still reflect what *would*
+        /// have changed.
         #[arg(long)]
         dry_run: bool,
     },
@@ -1796,6 +1806,7 @@ fn main() {
                     decay_factor,
                     decay_floor,
                     review_threshold,
+                    merge_threshold,
                     dry_run,
                 } => commands::graph::dream_cycle_run(
                     &mut app,
@@ -1803,6 +1814,7 @@ fn main() {
                     decay_factor,
                     decay_floor,
                     review_threshold,
+                    merge_threshold,
                     dry_run,
                 ),
             },

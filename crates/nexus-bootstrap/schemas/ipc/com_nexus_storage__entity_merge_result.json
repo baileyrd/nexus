@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityMergeResult",
+  "description": "Return type for `com.nexus.storage::entity_merge`.",
+  "type": "object",
+  "properties": {
+    "aliases_added": {
+      "description": "Aliases added to `kept` (not previously present on it). Includes\n`drop`'s canonical id when it was not already an alias.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "dropped": {
+      "description": "Canonical id of the entity that was deleted (echoes `drop`).",
+      "type": "string"
+    },
+    "kept": {
+      "description": "Canonical id of the surviving entity (echoes `keep`).",
+      "type": "string"
+    },
+    "relations_added": {
+      "description": "Relations added to `kept` (deduplicated on `(target, kind)`).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kept",
+    "dropped",
+    "aliases_added",
+    "relations_added"
+  ]
+}

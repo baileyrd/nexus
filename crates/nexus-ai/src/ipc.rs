@@ -587,6 +587,127 @@ pub struct EntityRecallResult {
     pub results: Vec<EntityRecallHitRow>,
 }
 
+// ── BL-129 close — enrich_entity / infer_entity_relations ────────────────────
+
+/// Args for `com.nexus.ai::enrich_entity` (handler 24).
+///
+/// Reads the entity through `com.nexus.storage::entity_get`, gathers
+/// existing-relation context, optionally runs RAG over the rest of
+/// the forge for supporting snippets, asks the AI provider for an
+/// expanded description, and (unless `dry_run`) atomically rewrites
+/// the entity through `com.nexus.storage::entity_upsert`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EnrichEntityArgs {
+    /// Canonical entity id or alias.
+    pub entity_id: String,
+    /// Minimum description length below which enrichment runs. When
+    /// the existing description is at or above this many characters
+    /// the handler short-circuits and reports `skipped: true`.
+    /// Defaults to `80` when absent — matches the Dream-Cycle spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_description_chars: Option<u32>,
+    /// When `true`, the handler computes the proposed description
+    /// but does not write it back. The proposed text is still
+    /// included in the response so callers can preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+}
+
+/// Reply for `com.nexus.ai::enrich_entity`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EnrichEntityResult {
+    /// Canonical entity id (after alias resolution).
+    pub entity_id: String,
+    /// Description present before the call (empty when the entity had
+    /// none).
+    pub original_description: String,
+    /// AI-generated description. Empty when `skipped: true`.
+    pub new_description: String,
+    /// `true` when the original description already met the length
+    /// threshold and the AI was not invoked.
+    pub skipped: bool,
+    /// `true` when the new description was written to disk; `false`
+    /// when `dry_run` or `skipped`.
+    pub applied: bool,
+}
+
+/// Args for `com.nexus.ai::infer_entity_relations` (handler 25).
+///
+/// Looks up the entity, gathers similar entities via `entity_recall`,
+/// asks the AI provider for proposed new relations, writes the
+/// surviving proposals back through `com.nexus.storage::entity_upsert`
+/// at a fixed `confidence: 0.5` so a future cycle's decay treats them
+/// as low-trust.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct InferEntityRelationsArgs {
+    /// Canonical entity id or alias to propose new relations for.
+    pub entity_id: String,
+    /// Maximum number of candidate relations to keep from the model's
+    /// response. Defaults to `3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_proposals: Option<u32>,
+    /// When `true`, the handler computes the proposals but does not
+    /// write them back. The proposals are still included in the reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+}
+
+/// One proposed relation in [`InferEntityRelationsResult::proposals`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct InferredRelationRow {
+    /// Target entity canonical id (after resolution).
+    pub target: String,
+    /// Relation kind, normalised against the canonical vocabulary.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence assigned to the proposal. Always `0.5` for the
+    /// thin close-out; future iterations may vary per proposal.
+    pub confidence: f32,
+}
+
+/// Reply for `com.nexus.ai::infer_entity_relations`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct InferEntityRelationsResult {
+    /// Canonical entity id (after alias resolution).
+    pub entity_id: String,
+    /// Proposals that survived target-existence + duplicate-filter
+    /// checks. Empty when the model returned nothing usable.
+    pub proposals: Vec<InferredRelationRow>,
+    /// `true` when the proposals were written back; `false` when
+    /// `dry_run` was set or no proposals survived filtering.
+    pub applied: bool,
+}
+
 #[cfg(test)]
 mod stream_chat_serde_tests {
     use super::*;

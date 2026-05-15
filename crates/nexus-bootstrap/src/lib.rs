@@ -40,6 +40,7 @@ pub mod forge_template;
 mod audit_sqlite;
 pub mod crdt_publisher;
 pub mod database;
+pub mod dream_cycle;
 pub mod storage;
 pub mod terminal;
 /// BL-113 / ADR 0027 — manifest-side `ContributedAdapter` → host-side
@@ -245,6 +246,10 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         ("ask", Capability::AiChat),
         ("semantic_search", Capability::AiChat),
         ("enrich_file", Capability::AiChat),
+        // BL-129 Dream-Cycle phases — share the same AiChat gate as
+        // enrich_file since they ultimately invoke the chat provider.
+        ("enrich_entity", Capability::AiChat),
+        ("infer_entity_relations", Capability::AiChat),
         ("propose_tool_calls", Capability::AiChat),
         // BL-116 — generate_docs dispatches a single-turn chat
         // completion, gated under the same ai.chat capability the
@@ -729,6 +734,10 @@ fn register_core_plugins(
                         "entity_decay_relations",
                         nexus_storage::core_plugin::HANDLER_ENTITY_DECAY_RELATIONS,
                     ),
+                    (
+                        "entity_merge",
+                        nexus_storage::core_plugin::HANDLER_ENTITY_MERGE,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),
@@ -1143,6 +1152,14 @@ fn register_core_plugins(
                     (
                         "entity_recall",
                         nexus_ai::core_plugin::HANDLER_ENTITY_RECALL,
+                    ),
+                    (
+                        "enrich_entity",
+                        nexus_ai::core_plugin::HANDLER_ENRICH_ENTITY,
+                    ),
+                    (
+                        "infer_entity_relations",
+                        nexus_ai::core_plugin::HANDLER_INFER_ENTITY_RELATIONS,
                     ),
                 ]),
             ),

@@ -744,6 +744,58 @@ pub struct EntityFindDuplicatesResult {
     pub pairs: Vec<EntityDuplicatePairRow>,
 }
 
+// ── BL-129 — entity_merge ─────────────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::entity_merge` (handler 70).
+///
+/// Merges the entity identified by `drop` into the entity identified
+/// by `keep`. The surviving entity inherits:
+///   * `keep`'s canonical id + `entity_type` + `relpath`,
+///   * the union of both `aliases` lists (de-duplicated, plus `drop`'s
+///     canonical id is added as a new alias to preserve back-references),
+///   * the longer of the two descriptions,
+///   * the union of both `relations` lists, de-duplicated on
+///     `(target, kind)` with the maximum confidence kept on conflict.
+///
+/// `drop`'s markdown file is then deleted. Outgoing references in
+/// other entities that pointed to `drop` are NOT rewritten — the
+/// alias just appended to `keep` ensures they still resolve through
+/// the alias-lookup path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityMergeArgs {
+    /// Canonical id of the entity that survives the merge.
+    pub keep: String,
+    /// Canonical id of the entity that is merged into `keep` and
+    /// then deleted. Must differ from `keep`.
+    pub drop: String,
+}
+
+/// Return type for `com.nexus.storage::entity_merge`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntityMergeResult {
+    /// Canonical id of the surviving entity (echoes `keep`).
+    pub kept: String,
+    /// Canonical id of the entity that was deleted (echoes `drop`).
+    pub dropped: String,
+    /// Aliases added to `kept` (not previously present on it). Includes
+    /// `drop`'s canonical id when it was not already an alias.
+    pub aliases_added: u32,
+    /// Relations added to `kept` (deduplicated on `(target, kind)`).
+    pub relations_added: u32,
+}
+
 // ── BL-129 — entity_decay_relations ──────────────────────────────────────────
 
 /// Args for `com.nexus.storage::entity_decay_relations` (handler 69).

@@ -739,6 +739,35 @@ pub fn entity_find_duplicates(
     Ok(resp.pairs)
 }
 
+/// BL-129 — outcome of [`entity_merge`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityMergeOutcome {
+    /// Canonical id of the surviving entity (echoes the `keep` arg).
+    pub kept: String,
+    /// Canonical id of the deleted entity (echoes the `drop` arg).
+    pub dropped: String,
+    /// Aliases newly added to the survivor (including `drop`'s id).
+    pub aliases_added: u32,
+    /// Relations newly added to the survivor.
+    pub relations_added: u32,
+}
+
+/// BL-129 — merge `drop` into `keep`. Caller picks the surviving id;
+/// the convention is the lexicographically-smaller of the pair.
+pub fn entity_merge(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    keep: &str,
+    drop: &str,
+) -> Result<EntityMergeOutcome> {
+    call(
+        runtime,
+        rt,
+        "entity_merge",
+        serde_json::json!({ "keep": keep, "drop": drop }),
+    )
+}
+
 /// BL-129 — multiplicative confidence decay across every entity
 /// relation. `factor` and `floor` fall back server-side to `0.95`
 /// and `0.10` when `None`. When `dry_run` is true, counts are

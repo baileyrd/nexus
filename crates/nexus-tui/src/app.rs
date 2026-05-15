@@ -685,6 +685,13 @@ pub struct TuiApp {
     pub forge_root: PathBuf,
     /// Set to `true` to request a clean exit on the next event loop tick.
     pub should_quit: bool,
+    /// BL-129 — background dream-cycle scheduler. `None` when the
+    /// scheduler failed to spawn (logged at warn). Held purely for
+    /// its `Drop` impl: when the `App` is dropped the scheduler
+    /// signals its worker thread and joins it. `#[allow(dead_code)]`
+    /// because the field is never read after construction.
+    #[allow(dead_code)]
+    pub dream_cycle: Option<nexus_bootstrap::dream_cycle::DreamCycleScheduler>,
 }
 
 impl TuiApp {
@@ -705,6 +712,17 @@ impl TuiApp {
                 .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?,
         );
 
+        // BL-129 — spawn the dream-cycle scheduler. The handle gates
+        // its own work on `[dream_cycle].enabled`, so a forge that
+        // hasn't opted in does nothing beyond a 60s config-poll loop.
+        let dream_cycle = match nexus_bootstrap::dream_cycle::spawn(&runtime, forge_root.clone()) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                tracing::warn!(error = %e, "dream_cycle: scheduler not spawned");
+                None
+            }
+        };
+
         let mut app = Self {
             mode: Mode::Normal,
             focus: Focus::FileTree,
@@ -721,6 +739,7 @@ impl TuiApp {
             rt,
             forge_root,
             should_quit: false,
+            dream_cycle,
         };
 
         app.refresh_tree()?;

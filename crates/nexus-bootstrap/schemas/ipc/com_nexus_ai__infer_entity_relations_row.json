@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InferredRelationRow",
+  "description": "One proposed relation in [`InferEntityRelationsResult::proposals`].",
+  "type": "object",
+  "properties": {
+    "confidence": {
+      "description": "Confidence assigned to the proposal. Always `0.5` for the\nthin close-out; future iterations may vary per proposal.",
+      "type": "number",
+      "format": "float"
+    },
+    "target": {
+      "description": "Target entity canonical id (after resolution).",
+      "type": "string"
+    },
+    "type": {
+      "description": "Relation kind, normalised against the canonical vocabulary.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "type",
+    "confidence"
+  ]
+}

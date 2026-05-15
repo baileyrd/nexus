@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityMergeArgs",
+  "description": "Args for `com.nexus.storage::entity_merge` (handler 70).\n\nMerges the entity identified by `drop` into the entity identified\nby `keep`. The surviving entity inherits:\n  * `keep`'s canonical id + `entity_type` + `relpath`,\n  * the union of both `aliases` lists (de-duplicated, plus `drop`'s\n    canonical id is added as a new alias to preserve back-references),\n  * the longer of the two descriptions,\n  * the union of both `relations` lists, de-duplicated on\n    `(target, kind)` with the maximum confidence kept on conflict.\n\n`drop`'s markdown file is then deleted. Outgoing references in\nother entities that pointed to `drop` are NOT rewritten — the\nalias just appended to `keep` ensures they still resolve through\nthe alias-lookup path.",
+  "type": "object",
+  "properties": {
+    "drop": {
+      "description": "Canonical id of the entity that is merged into `keep` and\nthen deleted. Must differ from `keep`.",
+      "type": "string"
+    },
+    "keep": {
+      "description": "Canonical id of the entity that survives the merge.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "keep",
+    "drop"
+  ]
+}
