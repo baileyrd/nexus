@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspRegisterServerReply",
+  "description": "Reply for `register_server` (handler `13`).\n\n`status` is one of:\n- `\"ok\"` — server registered successfully.\n- `\"toml_override\"` — the `name` is already taken by a TOML-loaded\n  entry or another plugin's contribution; nothing was inserted.\n- `\"invalid_name\"` / `\"invalid_command\"` — `name` or `command` was\n  empty / whitespace-only; nothing was inserted.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "`true` iff the server was inserted (status == `\"ok\"`).",
+      "type": "boolean"
+    },
+    "status": {
+      "description": "One of `\"ok\"`, `\"toml_override\"`, `\"invalid_name\"`,\n`\"invalid_command\"`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "status"
+  ]
+}

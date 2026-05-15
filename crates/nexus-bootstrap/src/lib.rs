@@ -56,6 +56,18 @@ pub mod protocol_host_specs;
 /// and unwires them at plugin disable / shutdown.
 pub mod dap_contribution_wiring;
 
+/// BL-113 Phase 2b — bootstrap-side wiring that issues
+/// `com.nexus.lsp::register_server` IPC calls for each LSP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod lsp_contribution_wiring;
+
+/// BL-113 Phase 3b — bootstrap-side wiring that issues
+/// `com.nexus.mcp.host::register_server` IPC calls for each MCP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod mcp_contribution_wiring;
+
 /// Render a markdown note to a standalone HTML string.
 ///
 /// Re-exported from `nexus-formats` (pure format library, no `SQLite`).
@@ -1535,6 +1547,27 @@ fn register_core_plugins(
                     ),
                     ("connect", nexus_mcp::core_plugin::HANDLER_CONNECT),
                     ("disconnect", nexus_mcp::core_plugin::HANDLER_DISCONNECT),
+                    (
+                        "register_tool",
+                        nexus_mcp::core_plugin::HANDLER_REGISTER_TOOL,
+                    ),
+                    (
+                        "unregister_tool",
+                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_TOOL,
+                    ),
+                    (
+                        "list_dynamic_tools",
+                        nexus_mcp::core_plugin::HANDLER_LIST_DYNAMIC_TOOLS,
+                    ),
+                    // BL-113 Phase 3b — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_mcp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
                 ]),
             ),
             forge_root,
@@ -1571,6 +1604,19 @@ fn register_core_plugins(
                     ("rename", nexus_lsp::core_plugin::HANDLER_RENAME),
                     ("code_actions", nexus_lsp::core_plugin::HANDLER_CODE_ACTIONS),
                     ("format", nexus_lsp::core_plugin::HANDLER_FORMAT),
+                    (
+                        "execute_command",
+                        nexus_lsp::core_plugin::HANDLER_EXECUTE_COMMAND,
+                    ),
+                    // BL-113 Phase 2b — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_lsp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_lsp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
                 ]),
             ),
             forge_root,

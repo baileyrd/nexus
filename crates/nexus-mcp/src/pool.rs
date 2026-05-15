@@ -370,9 +370,7 @@ mod tests {
     }
 
     fn empty_cfg() -> McpHostConfig {
-        McpHostConfig {
-            servers: std::collections::BTreeMap::new(),
-        }
+        McpHostConfig::default()
     }
 
     #[test]

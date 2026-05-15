@@ -30,12 +30,13 @@
 //! `NexusMcpServer` consults to expose plugin-published tools.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::json;
 
+use crate::config::{McpMergeSkipReason, McpServerSpec, McpTransport, McpUnregisterError};
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{McpClientError, McpHostConfig};
 
@@ -66,12 +67,24 @@ pub const HANDLER_UNREGISTER_TOOL: u32 = 9;
 /// IPC handler (sync, DG-39): list every tool currently in the
 /// dynamic-tool registry (no args).
 pub const HANDLER_LIST_DYNAMIC_TOOLS: u32 = 10;
+/// IPC handler (sync, BL-113 Phase 3b): register a plugin-contributed
+/// external MCP server.
+pub const HANDLER_REGISTER_SERVER: u32 = 11;
+/// IPC handler (sync, BL-113 Phase 3b): unregister a previously
+/// plugin-contributed external MCP server.
+pub const HANDLER_UNREGISTER_SERVER: u32 = 12;
 
 /// Core plugin that manages connections to external MCP servers.
+///
+/// The active server set lives behind a [`RwLock`] so the BL-113
+/// `register_server` / `unregister_server` IPC verbs can mutate it at
+/// runtime. Async dispatch handlers snapshot the config at dispatch
+/// time so an in-flight command keeps the server view it started
+/// with even if the master config mutates underneath.
 pub struct McpHostPlugin {
     forge_root: PathBuf,
     event_bus: Option<Arc<EventBus>>,
-    config: Option<Arc<McpHostConfig>>,
+    config: Arc<RwLock<McpHostConfig>>,
     pool: Arc<ConnectionPool>,
 }
 
@@ -82,39 +95,185 @@ impl McpHostPlugin {
         Self {
             forge_root,
             event_bus,
-            config: None,
+            config: Arc::new(RwLock::new(McpHostConfig::default())),
             pool: Arc::new(ConnectionPool::new(PoolConfig::default())),
         }
+    }
+}
+
+/// Snapshot the host config behind an `Arc<RwLock>` into a fresh
+/// `Arc<McpHostConfig>` so async dispatch keeps its existing
+/// pass-by-Arc helper signatures unchanged.
+fn snapshot_config(cell: &Arc<RwLock<McpHostConfig>>) -> Arc<McpHostConfig> {
+    Arc::new(
+        cell.read()
+            .expect("McpHostConfig RwLock poisoned")
+            .clone(),
+    )
+}
+
+fn parse_transport(raw: &str) -> McpTransport {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "http" => McpTransport::Http,
+        "ws" | "websocket" => McpTransport::Websocket,
+        _ => McpTransport::Stdio,
+    }
+}
+
+fn parse_register_server(
+    args: &serde_json::Value,
+) -> Result<(String, McpServerSpec, String), PluginError> {
+    let name = required_string(args, "name")?;
+    let plugin_id = required_string(args, "plugin_id")?;
+    let transport = args
+        .get("transport")
+        .and_then(serde_json::Value::as_str)
+        .map_or(McpTransport::Stdio, parse_transport);
+    let command = args
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let parse_args = args
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let env = args
+        .get("env")
+        .and_then(serde_json::Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let url = args
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let disabled = args
+        .get("disabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let spec = McpServerSpec {
+        transport,
+        command,
+        args: parse_args,
+        env,
+        url,
+        disabled,
+        ..McpServerSpec::default()
+    };
+    Ok((name, spec, plugin_id))
+}
+
+fn required_string(
+    args: &serde_json::Value,
+    key: &str,
+) -> Result<String, PluginError> {
+    args.get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("missing or empty required field `{key}`"),
+        })
+}
+
+fn handle_register_server(
+    config: &Arc<RwLock<McpHostConfig>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let (name, spec, plugin_id) = parse_register_server(args)?;
+    let mut cfg = config
+        .write()
+        .expect("McpHostConfig RwLock poisoned");
+    match cfg.register_contributed(name, spec, plugin_id) {
+        Ok(()) => Ok(json!({ "ok": true, "status": "ok" })),
+        Err(McpMergeSkipReason::TomlOverride) => {
+            Ok(json!({ "ok": false, "status": "toml_override" }))
+        }
+        Err(McpMergeSkipReason::InvalidName) => {
+            Ok(json!({ "ok": false, "status": "invalid_name" }))
+        }
+        Err(McpMergeSkipReason::Invalid(reason)) => Ok(json!({
+            "ok": false,
+            "status": "invalid",
+            "reason": reason,
+        })),
+    }
+}
+
+fn handle_unregister_server(
+    config: &Arc<RwLock<McpHostConfig>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let name = required_string(args, "name")?;
+    let plugin_id = required_string(args, "plugin_id")?;
+    let mut cfg = config
+        .write()
+        .expect("McpHostConfig RwLock poisoned");
+    match cfg.unregister_contributed(&name, &plugin_id) {
+        Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
+        Err(McpUnregisterError::NotFound) => {
+            Ok(json!({ "ok": false, "status": "not_found" }))
+        }
+        Err(McpUnregisterError::TomlEntry) => {
+            Ok(json!({ "ok": false, "status": "toml_entry" }))
+        }
+        Err(McpUnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
+            "ok": false,
+            "status": "not_owned_by_plugin",
+            "actual_owner": actual_owner,
+        })),
     }
 }
 
 impl CorePlugin for McpHostPlugin {
     fn on_init(&mut self) -> Result<(), PluginError> {
         let mcp_toml = self.forge_root.join(".forge").join("mcp.toml");
-        match McpHostConfig::read_from(&mcp_toml) {
+        let loaded = match McpHostConfig::read_from(&mcp_toml) {
             Ok(cfg) => {
                 tracing::info!(
                     plugin_id = PLUGIN_ID,
                     servers = cfg.servers.len(),
                     "loaded mcp.toml"
                 );
-                self.config = Some(Arc::new(cfg));
+                cfg
             }
             Err(crate::McpConfigError::Io { .. }) => {
                 tracing::debug!(
                     plugin_id = PLUGIN_ID,
                     "no mcp.toml found — MCP host has no external servers"
                 );
+                McpHostConfig::default()
             }
             Err(e) => {
                 tracing::warn!(plugin_id = PLUGIN_ID, error = %e, "failed to parse mcp.toml");
+                McpHostConfig::default()
             }
-        }
+        };
+        *self
+            .config
+            .write()
+            .expect("McpHostConfig RwLock poisoned") = loaded;
         Ok(())
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let server_count = self.config.as_ref().map_or(0, |c| c.servers.len());
+        let server_count = self
+            .config
+            .read()
+            .expect("McpHostConfig RwLock poisoned")
+            .servers
+            .len();
 
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
@@ -176,25 +335,26 @@ impl CorePlugin for McpHostPlugin {
     ) -> Result<serde_json::Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
-                let arr = self
+                let cfg = self
                     .config
-                    .as_ref()
-                    .map(|cfg| {
-                        cfg.servers
-                            .iter()
-                            .map(|(name, spec)| {
-                                json!({
-                                    "name": name,
-                                    "command": spec.command,
-                                    "args": spec.args,
-                                    "disabled": spec.disabled,
-                                })
-                            })
-                            .collect::<Vec<_>>()
+                    .read()
+                    .expect("McpHostConfig RwLock poisoned");
+                let arr: Vec<serde_json::Value> = cfg
+                    .servers
+                    .iter()
+                    .map(|(name, spec)| {
+                        json!({
+                            "name": name,
+                            "command": spec.command,
+                            "args": spec.args,
+                            "disabled": spec.disabled,
+                        })
                     })
-                    .unwrap_or_default();
+                    .collect();
                 Ok(serde_json::Value::Array(arr))
             }
+            HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
+            HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
             HANDLER_REGISTER_TOOL => {
                 let tool: crate::dynamic_tools::DynamicTool = serde_json::from_value(args.clone())
                     .map_err(|e| PluginError::ExecutionFailed {
@@ -244,7 +404,12 @@ impl CorePlugin for McpHostPlugin {
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
         let pool = Arc::clone(&self.pool);
-        let config = self.config.clone();
+        // BL-113 Phase 3b — async dispatchers consume an immutable
+        // snapshot of the host config taken at dispatch time. A
+        // concurrent `register_server` / `unregister_server` mutates
+        // the master config but won't affect this in-flight command's
+        // server view (the snapshot is per-future, not shared).
+        let config = Some(snapshot_config(&self.config));
 
         match handler_id {
             HANDLER_CONNECT => {
@@ -460,8 +625,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
         let mut plugin = make_plugin(dir.path());
         assert!(plugin.on_init().is_ok());
-        // read_from returns Ok(empty) for a missing file — config is Some but empty.
-        let cfg = plugin.config.as_ref().unwrap();
+        let cfg = plugin.config.read().unwrap();
         assert!(cfg.servers.is_empty());
     }
 
@@ -481,7 +645,7 @@ args = ["hello"]
         .unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        let cfg = plugin.config.as_ref().unwrap();
+        let cfg = plugin.config.read().unwrap();
         assert!(cfg.servers.contains_key("test"));
     }
 
@@ -680,5 +844,169 @@ disabled = true
         plugin
             .dispatch(HANDLER_UNREGISTER_TOOL, &json!({ "name": name }))
             .unwrap();
+    }
+
+    // ── BL-113 Phase 3b — register_server / unregister_server IPC ──────────────
+
+    fn register_server_args(
+        name: &str,
+        command: &str,
+        plugin_id: &str,
+    ) -> serde_json::Value {
+        json!({
+            "name": name,
+            "transport": "stdio",
+            "command": command,
+            "args": [],
+            "env": {},
+            "disabled": false,
+            "plugin_id": plugin_id,
+        })
+    }
+
+    #[test]
+    fn register_server_ipc_inserts_and_reports_ok() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_server_args("fs", "filesystem-mcp", "community.fs"),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(true));
+        assert_eq!(reply["status"], json!("ok"));
+        let cfg = plugin.config.read().unwrap();
+        assert!(cfg.servers.contains_key("fs"));
+        assert_eq!(cfg.contributed_by["fs"], "community.fs");
+    }
+
+    #[test]
+    fn register_server_ipc_rejects_collision_with_toml() {
+        let dir = tempdir().unwrap();
+        let forge_dir = dir.path().join(".forge");
+        std::fs::create_dir_all(&forge_dir).unwrap();
+        std::fs::write(
+            forge_dir.join("mcp.toml"),
+            r#"
+[servers.fs]
+command = "filesystem-from-toml"
+"#,
+        )
+        .unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_server_args("fs", "filesystem-from-plugin", "community.fs"),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(false));
+        assert_eq!(reply["status"], json!("toml_override"));
+        let cfg = plugin.config.read().unwrap();
+        assert_eq!(cfg.servers["fs"].command, "filesystem-from-toml");
+        assert!(!cfg.contributed_by.contains_key("fs"));
+    }
+
+    #[test]
+    fn register_server_ipc_surfaces_invalid_for_empty_command() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        // Empty command on stdio transport triggers the spec validator.
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &json!({
+                    "name": "bad",
+                    "transport": "stdio",
+                    "command": "",
+                    "plugin_id": "community.bad",
+                }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("invalid"));
+        let reason = reply["reason"].as_str().unwrap_or("");
+        assert!(reason.contains("empty command"), "reason was: {reason}");
+        assert!(plugin.config.read().unwrap().servers.is_empty());
+    }
+
+    #[test]
+    fn unregister_server_ipc_round_trip_with_owner_match() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_server_args("fs", "filesystem-mcp", "community.fs"),
+            )
+            .unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "fs", "plugin_id": "community.fs" }),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(true));
+        assert_eq!(reply["status"], json!("ok"));
+        assert!(plugin.config.read().unwrap().servers.is_empty());
+    }
+
+    #[test]
+    fn unregister_server_ipc_surfaces_each_skip_reason() {
+        let dir = tempdir().unwrap();
+        let forge_dir = dir.path().join(".forge");
+        std::fs::create_dir_all(&forge_dir).unwrap();
+        std::fs::write(
+            forge_dir.join("mcp.toml"),
+            r#"
+[servers.toml-pinned]
+command = "x"
+"#,
+        )
+        .unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_server_args("contrib", "x", "plugin.owner"),
+            )
+            .unwrap();
+
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "ghost", "plugin_id": "anyone" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("not_found"));
+
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "toml-pinned", "plugin_id": "anyone" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("toml_entry"));
+
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "contrib", "plugin_id": "plugin.intruder" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("not_owned_by_plugin"));
+        assert_eq!(reply["actual_owner"], json!("plugin.owner"));
+
+        let cfg = plugin.config.read().unwrap();
+        assert!(cfg.servers.contains_key("toml-pinned"));
+        assert!(cfg.servers.contains_key("contrib"));
     }
 }

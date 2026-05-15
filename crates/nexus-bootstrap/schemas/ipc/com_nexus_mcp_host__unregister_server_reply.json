@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpUnregisterServerReply",
+  "description": "Reply for `unregister_server` (handler `12`).\n\n`status` is one of `\"ok\"`, `\"not_found\"`, `\"toml_entry\"`,\n`\"not_owned_by_plugin\"`.",
+  "type": "object",
+  "properties": {
+    "actual_owner": {
+      "description": "Populated when `status = \"not_owned_by_plugin\"` so the caller\ncan log who actually contributed the entry.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ok": {
+      "description": "`true` iff the server was removed (status == `\"ok\"`).",
+      "type": "boolean"
+    },
+    "status": {
+      "description": "One of `\"ok\"`, `\"not_found\"`, `\"toml_entry\"`,\n`\"not_owned_by_plugin\"`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "status"
+  ]
+}

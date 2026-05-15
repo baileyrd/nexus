@@ -133,6 +133,13 @@ pub struct McpServerSpec {
 /// keyed by logical name; new tables (auth providers, transport selectors,
 /// per-server capability allow-lists) can be added without breaking
 /// existing files because `#[serde(default)]` makes every field optional.
+///
+/// TOML-loaded entries and plugin-contributed entries share the
+/// [`servers`] map; the [`contributed_by`] map distinguishes them
+/// for unregister authorisation. See BL-113 / ADR 0027.
+///
+/// [`servers`]: Self::servers
+/// [`contributed_by`]: Self::contributed_by
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct McpHostConfig {
     /// Ordered map of server name → spec. The name is the stable identifier
@@ -140,6 +147,17 @@ pub struct McpHostConfig {
     /// preserved by using [`BTreeMap`] rather than a hash map.
     #[serde(default)]
     pub servers: BTreeMap<String, McpServerSpec>,
+    /// BL-113 Phase 3b — maps server `name` to the contributing plugin's
+    /// reverse-DNS id for servers that came through
+    /// [`merge_contributed`] / [`register_contributed`]. TOML-loaded
+    /// entries do not appear here, so the host can refuse a plugin's
+    /// `unregister_server` against a TOML-pinned name. Not persisted
+    /// through serde — runtime state only.
+    ///
+    /// [`merge_contributed`]: Self::merge_contributed
+    /// [`register_contributed`]: Self::register_contributed
+    #[serde(default, skip)]
+    pub contributed_by: std::collections::HashMap<String, String>,
 }
 
 /// Error parsing `mcp.toml`.
@@ -280,34 +298,105 @@ impl McpHostConfig {
     ) -> Vec<McpMergeSkip> {
         let mut skipped = Vec::new();
         for (name, spec, plugin_id) in contributions {
-            if name.trim().is_empty() {
+            if let Err(reason) =
+                self.register_contributed(name.clone(), spec, plugin_id.clone())
+            {
                 skipped.push(McpMergeSkip {
                     name,
                     plugin_id,
-                    reason: McpMergeSkipReason::InvalidName,
+                    reason,
                 });
-                continue;
             }
-            if let Err(reason) = Self::validate_spec(&name, &spec) {
-                skipped.push(McpMergeSkip {
-                    name,
-                    plugin_id,
-                    reason: McpMergeSkipReason::Invalid(reason),
-                });
-                continue;
-            }
-            if self.servers.contains_key(&name) {
-                skipped.push(McpMergeSkip {
-                    name,
-                    plugin_id,
-                    reason: McpMergeSkipReason::TomlOverride,
-                });
-                continue;
-            }
-            self.servers.insert(name, spec);
         }
         skipped
     }
+
+    /// BL-113 Phase 3b — single-spec variant of [`merge_contributed`],
+    /// the inner per-contribution rule the batch merge calls into and
+    /// the entry point the `com.nexus.mcp.host::register_server` IPC
+    /// verb dispatches to at runtime.
+    ///
+    /// Validates `name` and the per-transport rules (same as
+    /// [`merge_contributed`]), refuses a name that any existing entry
+    /// already owns (TOML or plugin-contributed alike — plugins must
+    /// `unregister_server` before re-registering), inserts on success,
+    /// and records the contributing plugin in
+    /// [`contributed_by`](Self::contributed_by).
+    ///
+    /// # Errors
+    /// Returns an [`McpMergeSkipReason`] when the spec fails validation
+    /// or collides with an existing entry. On `Err`, the config is
+    /// unchanged.
+    pub fn register_contributed(
+        &mut self,
+        name: String,
+        spec: McpServerSpec,
+        plugin_id: String,
+    ) -> Result<(), McpMergeSkipReason> {
+        if name.trim().is_empty() {
+            return Err(McpMergeSkipReason::InvalidName);
+        }
+        if let Err(reason) = Self::validate_spec(&name, &spec) {
+            return Err(McpMergeSkipReason::Invalid(reason));
+        }
+        if self.servers.contains_key(&name) {
+            return Err(McpMergeSkipReason::TomlOverride);
+        }
+        self.servers.insert(name.clone(), spec);
+        self.contributed_by.insert(name, plugin_id);
+        Ok(())
+    }
+
+    /// BL-113 Phase 3b — remove a previously contributed server. The
+    /// `com.nexus.mcp.host::unregister_server` IPC verb's host entry
+    /// point.
+    ///
+    /// `plugin_id` must match the contributing plugin recorded in
+    /// [`contributed_by`](Self::contributed_by); this gates plugins
+    /// from unregistering servers they don't own (including any
+    /// TOML-pinned entry, which has no `contributed_by` row).
+    ///
+    /// # Errors
+    /// Returns [`McpUnregisterError::NotFound`] when no server exists
+    /// for `name`, [`McpUnregisterError::TomlEntry`] when the entry is
+    /// TOML-loaded (not in `contributed_by`), and
+    /// [`McpUnregisterError::NotOwnedByPlugin`] when the row exists
+    /// but was contributed by a different plugin.
+    pub fn unregister_contributed(
+        &mut self,
+        name: &str,
+        plugin_id: &str,
+    ) -> Result<McpServerSpec, McpUnregisterError> {
+        match self.contributed_by.get(name) {
+            None if self.servers.contains_key(name) => Err(McpUnregisterError::TomlEntry),
+            None => Err(McpUnregisterError::NotFound),
+            Some(owner) if owner != plugin_id => Err(McpUnregisterError::NotOwnedByPlugin {
+                actual_owner: owner.clone(),
+            }),
+            Some(_) => {
+                self.contributed_by.remove(name);
+                self.servers.remove(name).ok_or(McpUnregisterError::NotFound)
+            }
+        }
+    }
+}
+
+/// Why [`McpHostConfig::unregister_contributed`] refused. Distinguishes
+/// "this name was never registered" from "this name belongs to TOML /
+/// another plugin" so the IPC layer can surface a precise reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpUnregisterError {
+    /// No server exists under that name.
+    NotFound,
+    /// The server exists but came from `mcp.toml`, not a plugin
+    /// contribution — plugins can't unregister TOML-pinned entries.
+    TomlEntry,
+    /// The server exists and was plugin-contributed, but the calling
+    /// plugin isn't the one that contributed it.
+    NotOwnedByPlugin {
+        /// Reverse-DNS id of the plugin that actually owns the entry.
+        actual_owner: String,
+    },
 }
 
 /// One contributed MCP server that did not make it into the merged
@@ -591,5 +680,113 @@ mod tests {
         assert_eq!(skipped[1].plugin_id, "plug3");
         assert_eq!(cfg.servers.len(), 2);
         assert!(cfg.servers.contains_key("new1"));
+    }
+
+    #[test]
+    fn merge_contributed_populates_contributed_by_for_accepted_entries() {
+        let mut cfg = McpHostConfig::default();
+        cfg.servers
+            .insert("toml-pinned".into(), stdio_spec("x"));
+        let skipped = cfg.merge_contributed(vec![
+            ("contrib-a".into(), stdio_spec("x"), "plugin.a".into()),
+            ("contrib-b".into(), stdio_spec("y"), "plugin.b".into()),
+            ("toml-pinned".into(), stdio_spec("y"), "plugin.c".into()),
+        ]);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(cfg.contributed_by.len(), 2);
+        assert_eq!(cfg.contributed_by["contrib-a"], "plugin.a");
+        assert_eq!(cfg.contributed_by["contrib-b"], "plugin.b");
+        assert!(!cfg.contributed_by.contains_key("toml-pinned"));
+    }
+
+    // ── BL-113 Phase 3b — register_contributed / unregister_contributed ────────
+
+    #[test]
+    fn register_contributed_happy_path_inserts_and_records_provenance() {
+        let mut cfg = McpHostConfig::default();
+        assert!(cfg
+            .register_contributed(
+                "fs".into(),
+                stdio_spec("filesystem-mcp"),
+                "community.fs".into(),
+            )
+            .is_ok());
+        assert_eq!(cfg.servers["fs"].command, "filesystem-mcp");
+        assert_eq!(cfg.contributed_by["fs"], "community.fs");
+    }
+
+    #[test]
+    fn register_contributed_rejects_invalid_and_collisions() {
+        let mut cfg = McpHostConfig::default();
+        cfg.servers.insert("taken".into(), stdio_spec("x"));
+        assert_eq!(
+            cfg.register_contributed("".into(), stdio_spec("ok"), "p".into())
+                .unwrap_err(),
+            McpMergeSkipReason::InvalidName,
+        );
+        assert!(matches!(
+            cfg.register_contributed("empty".into(), stdio_spec(""), "p".into())
+                .unwrap_err(),
+            McpMergeSkipReason::Invalid(_),
+        ));
+        assert_eq!(
+            cfg.register_contributed("taken".into(), stdio_spec("y"), "p".into())
+                .unwrap_err(),
+            McpMergeSkipReason::TomlOverride,
+        );
+        cfg.register_contributed("contrib".into(), stdio_spec("x"), "p1".into())
+            .unwrap();
+        assert_eq!(
+            cfg.register_contributed("contrib".into(), stdio_spec("y"), "p2".into())
+                .unwrap_err(),
+            McpMergeSkipReason::TomlOverride,
+        );
+        assert_eq!(cfg.servers.len(), 2);
+        assert_eq!(cfg.contributed_by.len(), 1);
+        assert_eq!(cfg.contributed_by["contrib"], "p1");
+    }
+
+    #[test]
+    fn unregister_contributed_removes_when_owner_matches() {
+        let mut cfg = McpHostConfig::default();
+        cfg.register_contributed(
+            "fs".into(),
+            stdio_spec("filesystem-mcp"),
+            "community.fs".into(),
+        )
+        .unwrap();
+        let removed = cfg.unregister_contributed("fs", "community.fs").unwrap();
+        assert_eq!(removed.command, "filesystem-mcp");
+        assert!(!cfg.servers.contains_key("fs"));
+        assert!(!cfg.contributed_by.contains_key("fs"));
+    }
+
+    #[test]
+    fn unregister_contributed_distinguishes_not_found_toml_and_wrong_owner() {
+        let mut cfg = McpHostConfig::default();
+        cfg.servers.insert("toml".into(), stdio_spec("x"));
+        cfg.register_contributed(
+            "contrib".into(),
+            stdio_spec("x"),
+            "plugin.owner".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.unregister_contributed("ghost", "anyone").unwrap_err(),
+            McpUnregisterError::NotFound,
+        );
+        assert_eq!(
+            cfg.unregister_contributed("toml", "anyone").unwrap_err(),
+            McpUnregisterError::TomlEntry,
+        );
+        match cfg.unregister_contributed("contrib", "plugin.intruder") {
+            Err(McpUnregisterError::NotOwnedByPlugin { actual_owner }) => {
+                assert_eq!(actual_owner, "plugin.owner");
+            }
+            other => panic!("expected NotOwnedByPlugin, got {other:?}"),
+        }
+        assert!(cfg.servers.contains_key("toml"));
+        assert!(cfg.servers.contains_key("contrib"));
+        assert_eq!(cfg.contributed_by["contrib"], "plugin.owner");
     }
 }

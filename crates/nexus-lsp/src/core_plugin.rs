@@ -38,13 +38,14 @@
 //! dedicated background task that competes with kernel shutdown.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::{json, Value};
 
 use crate::client::LspClientError;
+use crate::config::{LspServerSpec, MergeSkipReason, UnregisterError};
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{LspConfigError, LspHostConfig};
 
@@ -79,12 +80,24 @@ pub const HANDLER_FORMAT: u32 = 11;
 /// the BL-077 follow-up: code actions whose `edit` field is missing
 /// but whose `command` field carries a server-side action name.
 pub const HANDLER_EXECUTE_COMMAND: u32 = 12;
+/// BL-113 Phase 2b plugin-contributed server add.
+pub const HANDLER_REGISTER_SERVER: u32 = 13;
+/// BL-113 Phase 2b plugin-contributed server remove.
+pub const HANDLER_UNREGISTER_SERVER: u32 = 14;
 
 /// Core plugin that manages connections to LSP servers.
+///
+/// The active server set lives behind a [`RwLock`] so the
+/// BL-113 `register_server` / `unregister_server` IPC verbs can
+/// mutate it at runtime after a plugin activates / deactivates.
+/// Async dispatch handlers snapshot the config at dispatch time
+/// (see [`snapshot_config`]) so an in-flight command keeps the
+/// server view it started with even if the master config mutates
+/// underneath.
 pub struct LspCorePlugin {
     forge_root: PathBuf,
     event_bus: Option<Arc<EventBus>>,
-    config: Option<Arc<LspHostConfig>>,
+    config: Arc<RwLock<LspHostConfig>>,
     pool: Arc<ConnectionPool>,
 }
 
@@ -99,23 +112,140 @@ impl LspCorePlugin {
         Self {
             forge_root,
             event_bus,
-            config: None,
+            config: Arc::new(RwLock::new(LspHostConfig::default())),
             pool,
         }
     }
 }
 
+/// Snapshot the host config behind an `Arc<RwLock>` into a fresh
+/// `Arc<LspHostConfig>` so async dispatch keeps its existing
+/// pass-by-Arc helper signatures unchanged.
+fn snapshot_config(cell: &Arc<RwLock<LspHostConfig>>) -> Arc<LspHostConfig> {
+    Arc::new(
+        cell.read()
+            .expect("LspHostConfig RwLock poisoned")
+            .clone(),
+    )
+}
+
+/// BL-113 Phase 2b — sync IPC handler for `register_server`. Parses
+/// `args` into an [`LspServerSpec`] + `plugin_id`, takes the host
+/// config's write lock, delegates the merge to
+/// [`LspHostConfig::register_contributed`], and returns a
+/// `{ok, status}` envelope. Validation errors are surfaced as a
+/// "skip" status (not a `PluginError`) so the caller can decide
+/// whether to log + continue or escalate.
+fn handle_register_server(
+    config: &Arc<RwLock<LspHostConfig>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let spec = parse_register_server_spec(args)?;
+    let plugin_id = parse_string_field(args, "plugin_id")?;
+    let mut cfg = config
+        .write()
+        .expect("LspHostConfig RwLock poisoned");
+    let status = match cfg.register_contributed(spec, plugin_id) {
+        Ok(()) => ("ok", true),
+        Err(MergeSkipReason::TomlOverride) => ("toml_override", false),
+        Err(MergeSkipReason::InvalidName) => ("invalid_name", false),
+        Err(MergeSkipReason::InvalidCommand) => ("invalid_command", false),
+    };
+    Ok(json!({ "ok": status.1, "status": status.0 }))
+}
+
+/// BL-113 Phase 2b — sync IPC handler for `unregister_server`.
+/// Parses `name` + `plugin_id` out of `args` and delegates to
+/// [`LspHostConfig::unregister_contributed`]. Authorisation is
+/// enforced inside the config method (the `plugin_id` must match the
+/// contributing plugin recorded at register time). On
+/// `NotOwnedByPlugin` the reply carries `actual_owner` so the caller
+/// can log who actually contributed the entry.
+fn handle_unregister_server(
+    config: &Arc<RwLock<LspHostConfig>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let name = parse_string_field(args, "name")?;
+    let plugin_id = parse_string_field(args, "plugin_id")?;
+    let mut cfg = config
+        .write()
+        .expect("LspHostConfig RwLock poisoned");
+    match cfg.unregister_contributed(&name, &plugin_id) {
+        Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
+        Err(UnregisterError::NotFound) => {
+            Ok(json!({ "ok": false, "status": "not_found" }))
+        }
+        Err(UnregisterError::TomlEntry) => {
+            Ok(json!({ "ok": false, "status": "toml_entry" }))
+        }
+        Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
+            "ok": false,
+            "status": "not_owned_by_plugin",
+            "actual_owner": actual_owner,
+        })),
+    }
+}
+
+fn parse_string_field(args: &Value, key: &str) -> Result<String, PluginError> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("missing or empty required field `{key}`"),
+        })
+}
+
+fn parse_register_server_spec(args: &Value) -> Result<LspServerSpec, PluginError> {
+    let name = parse_string_field(args, "name")?;
+    let command = parse_string_field(args, "command")?;
+    let parse_str_array = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let disabled = args
+        .get("disabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let env = args
+        .get("env")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(LspServerSpec {
+        name,
+        command,
+        args: parse_str_array("args"),
+        file_types: parse_str_array("file_types"),
+        root_markers: parse_str_array("root_markers"),
+        disabled,
+        env,
+    })
+}
+
 impl CorePlugin for LspCorePlugin {
     fn on_init(&mut self) -> Result<(), PluginError> {
         let toml_path = self.forge_root.join(".forge").join("lsp.toml");
-        match LspHostConfig::read_from(&toml_path) {
+        let loaded = match LspHostConfig::read_from(&toml_path) {
             Ok(cfg) => {
                 tracing::info!(
                     plugin_id = PLUGIN_ID,
                     servers = cfg.servers.len(),
                     "loaded lsp.toml"
                 );
-                self.config = Some(Arc::new(cfg));
+                cfg
             }
             Err(LspConfigError::Io { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
@@ -124,7 +254,7 @@ impl CorePlugin for LspCorePlugin {
                     plugin_id = PLUGIN_ID,
                     "no lsp.toml found — LSP host has no servers configured"
                 );
-                self.config = Some(Arc::new(LspHostConfig::default()));
+                LspHostConfig::default()
             }
             Err(e) => {
                 tracing::warn!(
@@ -132,14 +262,23 @@ impl CorePlugin for LspCorePlugin {
                     error = %e,
                     "failed to parse lsp.toml — LSP host disabled"
                 );
-                self.config = Some(Arc::new(LspHostConfig::default()));
+                LspHostConfig::default()
             }
-        }
+        };
+        *self
+            .config
+            .write()
+            .expect("LspHostConfig RwLock poisoned") = loaded;
         Ok(())
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let server_count = self.config.as_ref().map_or(0, |c| c.servers.len());
+        let server_count = self
+            .config
+            .read()
+            .expect("LspHostConfig RwLock poisoned")
+            .servers
+            .len();
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
                 PLUGIN_ID,
@@ -193,30 +332,31 @@ impl CorePlugin for LspCorePlugin {
     fn dispatch(
         &mut self,
         handler_id: u32,
-        _args: &Value,
+        args: &Value,
     ) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
-                let arr = self
+                let cfg = self
                     .config
-                    .as_ref()
-                    .map(|cfg| {
-                        cfg.servers
-                            .values()
-                            .map(|spec| {
-                                json!({
-                                    "name": spec.name,
-                                    "command": spec.command,
-                                    "args": spec.args,
-                                    "file_types": spec.file_types,
-                                    "disabled": spec.disabled,
-                                })
-                            })
-                            .collect::<Vec<_>>()
+                    .read()
+                    .expect("LspHostConfig RwLock poisoned");
+                let arr: Vec<Value> = cfg
+                    .servers
+                    .values()
+                    .map(|spec| {
+                        json!({
+                            "name": spec.name,
+                            "command": spec.command,
+                            "args": spec.args,
+                            "file_types": spec.file_types,
+                            "disabled": spec.disabled,
+                        })
                     })
-                    .unwrap_or_default();
+                    .collect();
                 Ok(Value::Array(arr))
             }
+            HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
+            HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
             HANDLER_OPEN_FILE
             | HANDLER_CLOSE_FILE
             | HANDLER_CHANGE_FILE
@@ -245,7 +385,12 @@ impl CorePlugin for LspCorePlugin {
         args: &Value,
     ) -> Option<CorePluginFuture> {
         let pool = Arc::clone(&self.pool);
-        let config = self.config.clone();
+        // BL-113 Phase 2b — async dispatchers consume an immutable
+        // snapshot of the host config taken at dispatch time. A
+        // concurrent `register_server` / `unregister_server` mutates
+        // the master config but won't affect this in-flight command's
+        // server view (the snapshot is per-future, not shared).
+        let config = Some(snapshot_config(&self.config));
         let bus = self.event_bus.clone();
 
         match handler_id {
@@ -676,7 +821,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
         let mut plugin = make_plugin(dir.path());
         assert!(plugin.on_init().is_ok());
-        assert!(plugin.config.as_ref().unwrap().servers.is_empty());
+        assert!(plugin.config.read().unwrap().servers.is_empty());
     }
 
     #[test]
@@ -696,7 +841,7 @@ file_types = ["rs"]
         .unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        let cfg = plugin.config.as_ref().unwrap();
+        let cfg = plugin.config.read().unwrap();
         assert!(cfg.servers.contains_key("rust-analyzer"));
     }
 
@@ -709,7 +854,7 @@ file_types = ["rs"]
         let mut plugin = make_plugin(dir.path());
         // Doesn't error — host stays disabled but plugin loads.
         plugin.on_init().unwrap();
-        assert!(plugin.config.as_ref().unwrap().servers.is_empty());
+        assert!(plugin.config.read().unwrap().servers.is_empty());
     }
 
     #[test]
@@ -802,5 +947,165 @@ disabled = true
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
         plugin.on_stop();
+    }
+
+    // ── BL-113 Phase 2b — register_server / unregister_server IPC ──────────────
+
+    fn register_args(name: &str, command: &str, plugin_id: &str) -> Value {
+        json!({
+            "name": name,
+            "command": command,
+            "args": [],
+            "file_types": ["rs"],
+            "root_markers": [],
+            "disabled": false,
+            "env": {},
+            "plugin_id": plugin_id,
+        })
+    }
+
+    #[test]
+    fn register_server_ipc_inserts_and_reports_ok() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_args("rust-analyzer", "rust-analyzer", "community.rust"),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(true));
+        assert_eq!(reply["status"], json!("ok"));
+        let cfg = plugin.config.read().unwrap();
+        assert!(cfg.servers.contains_key("rust-analyzer"));
+        assert_eq!(cfg.contributed_by["rust-analyzer"], "community.rust");
+    }
+
+    #[test]
+    fn register_server_ipc_rejects_collision_with_toml() {
+        let dir = tempdir().unwrap();
+        let forge_dir = dir.path().join(".forge");
+        std::fs::create_dir_all(&forge_dir).unwrap();
+        std::fs::write(
+            forge_dir.join("lsp.toml"),
+            r#"
+[[servers]]
+name = "ra"
+command = "rust-analyzer-from-toml"
+"#,
+        )
+        .unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_args("ra", "rust-analyzer-from-plugin", "community.rust"),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(false));
+        assert_eq!(reply["status"], json!("toml_override"));
+        let cfg = plugin.config.read().unwrap();
+        assert_eq!(cfg.servers["ra"].command, "rust-analyzer-from-toml");
+        assert!(!cfg.contributed_by.contains_key("ra"));
+    }
+
+    #[test]
+    fn register_server_ipc_rejects_missing_fields() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let err = plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &json!({
+                    "name": "ra",
+                    "plugin_id": "community.rust",
+                }),
+            )
+            .unwrap_err();
+        let PluginError::ExecutionFailed { reason, .. } = err else {
+            panic!("expected ExecutionFailed");
+        };
+        assert!(reason.contains("command"), "reason was: {reason}");
+    }
+
+    #[test]
+    fn unregister_server_ipc_round_trip_with_owner_match() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_args("ra", "rust-analyzer", "community.rust"),
+            )
+            .unwrap();
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "ra", "plugin_id": "community.rust" }),
+            )
+            .unwrap();
+        assert_eq!(reply["ok"], json!(true));
+        assert_eq!(reply["status"], json!("ok"));
+        assert!(plugin.config.read().unwrap().servers.is_empty());
+    }
+
+    #[test]
+    fn unregister_server_ipc_surfaces_each_skip_reason() {
+        let dir = tempdir().unwrap();
+        let forge_dir = dir.path().join(".forge");
+        std::fs::create_dir_all(&forge_dir).unwrap();
+        std::fs::write(
+            forge_dir.join("lsp.toml"),
+            r#"
+[[servers]]
+name = "toml-pinned"
+command = "x"
+"#,
+        )
+        .unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        plugin
+            .dispatch(
+                HANDLER_REGISTER_SERVER,
+                &register_args("contrib", "x", "plugin.owner"),
+            )
+            .unwrap();
+
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "ghost", "plugin_id": "anyone" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("not_found"));
+
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "toml-pinned", "plugin_id": "anyone" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("toml_entry"));
+
+        let reply = plugin
+            .dispatch(
+                HANDLER_UNREGISTER_SERVER,
+                &json!({ "name": "contrib", "plugin_id": "plugin.intruder" }),
+            )
+            .unwrap();
+        assert_eq!(reply["status"], json!("not_owned_by_plugin"));
+        assert_eq!(reply["actual_owner"], json!("plugin.owner"));
+
+        let cfg = plugin.config.read().unwrap();
+        assert!(cfg.servers.contains_key("toml-pinned"));
+        assert!(cfg.servers.contains_key("contrib"));
     }
 }
