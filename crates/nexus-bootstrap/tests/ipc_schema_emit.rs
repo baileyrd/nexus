@@ -85,6 +85,12 @@ use nexus_dap::ipc::{
     DapSourceBreakpoint, DapStackTraceArgs, DapThreadArgs, DapUnregisterAdapterArgs,
     DapUnregisterAdapterReply, DapVariablesArgs,
 };
+// nexus-acp (BL-144 / Hermes Feature 7) — wire-mirror types; handlers
+// emit ad-hoc `serde_json::json!` like nexus-lsp / nexus-dap.
+use nexus_acp::ipc::{
+    AcpAgentArgs, AcpAgentEntry, AcpDecisionArgs, AcpProposeArgs, AcpRegisterServerArgs,
+    AcpRegisterServerReply, AcpUnregisterServerArgs, AcpUnregisterServerReply,
+};
 use nexus_agent::core_plugin::{GoalArgs, PlanIdArgs};
 use nexus_agent::transcript_search::{SearchArgs as TranscriptSearchArgs, TranscriptHit};
 use nexus_agent::{Plan, Step, ToolCall};
@@ -404,6 +410,17 @@ fn emit_all_schemas_impl() {
     write_schema::<DapRegisterAdapterReply>("com_nexus_dap__register_adapter", "reply");
     write_schema::<DapUnregisterAdapterArgs>("com_nexus_dap__unregister_adapter", "args");
     write_schema::<DapUnregisterAdapterReply>("com_nexus_dap__unregister_adapter", "reply");
+
+    // ── com.nexus.acp (BL-144) ───────────────────────────────────────────
+    write_schema::<AcpAgentArgs>("com_nexus_acp", "agent_args");
+    write_schema::<AcpProposeArgs>("com_nexus_acp__propose", "args");
+    write_schema::<AcpDecisionArgs>("com_nexus_acp", "decision_args");
+    write_schema::<AcpAgentEntry>("com_nexus_acp__list_agents", "entry");
+    // BL-113 Phase 4 — plugin contribution registration verbs.
+    write_schema::<AcpRegisterServerArgs>("com_nexus_acp__register_server", "args");
+    write_schema::<AcpRegisterServerReply>("com_nexus_acp__register_server", "reply");
+    write_schema::<AcpUnregisterServerArgs>("com_nexus_acp__unregister_server", "args");
+    write_schema::<AcpUnregisterServerReply>("com_nexus_acp__unregister_server", "reply");
 
     // ── com.nexus.agent (P1-3 #113) ──────────────────────────────────────
     write_schema::<GoalArgs>("com_nexus_agent__plan", "args");

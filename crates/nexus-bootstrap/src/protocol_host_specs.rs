@@ -12,12 +12,13 @@
 //! after the plugin scan completes — needs a plugin-lifecycle callback
 //! design that's tracked under BL-113.
 
+use nexus_acp::AcpAdapterSpec;
 use nexus_dap::DapAdapterSpec;
 use nexus_lsp::LspServerSpec;
 use nexus_mcp::{McpServerSpec, McpTransport};
 use nexus_plugins::{
-    ContributedAdapter, ContributedAdapterSet, DapProtocolHostReg, LspProtocolHostReg,
-    McpProtocolHostReg,
+    AcpProtocolHostReg, ContributedAdapter, ContributedAdapterSet, DapProtocolHostReg,
+    LspProtocolHostReg, McpProtocolHostReg,
 };
 
 /// Convert a single LSP contribution into the pair shape
@@ -228,6 +229,74 @@ pub fn mcp_contributions_to_specs(
         .collect()
 }
 
+/// Convert a single ACP contribution into the pair shape
+/// [`nexus_acp::AcpHostConfig::register_contributed`] expects: `(spec,
+/// plugin_id)`.
+///
+/// `display_name` rides in opaque `metadata` alongside the contributing
+/// plugin's reverse-DNS id — same pattern DAP uses for its shell-only
+/// fields. The host stores the JSON verbatim and surfaces it through
+/// `list_agents` so the shell can read the contributing plugin's UX
+/// fields without an extra IPC round-trip.
+///
+/// `metadata` stays `None` whenever every shell-only field is empty so
+/// barebones contributions look identical on the wire to a future
+/// flat-TOML escape hatch (should one ever land).
+#[must_use]
+pub fn acp_contribution_to_spec(
+    contribution: ContributedAdapter<AcpProtocolHostReg>,
+) -> (AcpAdapterSpec, String) {
+    let ContributedAdapter { plugin_id, adapter } = contribution;
+    let metadata = build_acp_contribution_metadata(&plugin_id, &adapter);
+    let spec = AcpAdapterSpec {
+        name: adapter.id,
+        command: adapter.command,
+        args: adapter.args,
+        capabilities: adapter.capabilities,
+        disabled: adapter.disabled,
+        env: adapter.env.into_iter().collect(),
+        metadata,
+    };
+    (spec, plugin_id)
+}
+
+/// Pack the manifest's shell-only fields into the opaque `metadata`
+/// JSON the host round-trips on `list_agents`. Always carries the
+/// `plugin_id` so a shell consumer can attribute back to the
+/// contributing plugin.
+fn build_acp_contribution_metadata(
+    plugin_id: &str,
+    adapter: &AcpProtocolHostReg,
+) -> Option<serde_json::Value> {
+    // ACP carries `plugin_id` unconditionally — the agent picker needs
+    // it to render "shipped by <plugin>" tooltips, and the shell-side
+    // unregister flow uses it for affordance gating.
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "plugin_id".to_string(),
+        serde_json::Value::String(plugin_id.to_string()),
+    );
+    if let Some(name) = &adapter.display_name {
+        obj.insert(
+            "display_name".to_string(),
+            serde_json::Value::String(name.clone()),
+        );
+    }
+    Some(serde_json::Value::Object(obj))
+}
+
+/// Convert every ACP contribution in `set`. Preserves order.
+#[must_use]
+pub fn acp_contributions_to_specs(
+    set: &ContributedAdapterSet,
+) -> Vec<(AcpAdapterSpec, String)> {
+    set.acp
+        .iter()
+        .cloned()
+        .map(acp_contribution_to_spec)
+        .collect()
+}
+
 fn parse_mcp_transport(raw: &str) -> McpTransport {
     match raw.trim().to_ascii_lowercase().as_str() {
         "http" => McpTransport::Http,
@@ -360,6 +429,106 @@ command = "x"
         assert!(lsp_contributions_to_specs(&set).is_empty());
         assert!(dap_contributions_to_specs(&set).is_empty());
         assert!(mcp_contributions_to_specs(&set).is_empty());
+        assert!(acp_contributions_to_specs(&set).is_empty());
+    }
+
+    #[test]
+    fn acp_conversion_round_trips_every_field() {
+        let toml = r#"
+[plugin]
+id = "community.hermes"
+name = "Hermes Agent"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.acp]]
+id = "hermes"
+display_name = "Hermes"
+command = "hermes-agent"
+args = ["--stdio"]
+capabilities = ["delegate", "tools", "memory"]
+disabled = true
+env = { HERMES_LOG = "info" }
+"#;
+        let set = collect_for(toml);
+        let specs = acp_contributions_to_specs(&set);
+        assert_eq!(specs.len(), 1);
+        let (spec, plugin_id) = &specs[0];
+        assert_eq!(plugin_id, "community.hermes");
+        assert_eq!(spec.name, "hermes");
+        assert_eq!(spec.command, "hermes-agent");
+        assert_eq!(spec.args, ["--stdio"]);
+        assert_eq!(spec.capabilities, ["delegate", "tools", "memory"]);
+        assert!(spec.disabled);
+        assert_eq!(spec.env.get("HERMES_LOG").map(String::as_str), Some("info"));
+        let md = spec
+            .metadata
+            .as_ref()
+            .expect("metadata always present for ACP — carries plugin_id");
+        assert_eq!(md["plugin_id"], "community.hermes");
+        assert_eq!(md["display_name"], "Hermes");
+    }
+
+    #[test]
+    fn acp_conversion_carries_plugin_id_even_without_display_name() {
+        let toml = r#"
+[plugin]
+id = "community.bare-acp"
+name = "Bare ACP"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.acp]]
+id = "bare"
+command = "bare-agent"
+"#;
+        let set = collect_for(toml);
+        let specs = acp_contributions_to_specs(&set);
+        let md = specs[0].0.metadata.as_ref().unwrap();
+        assert_eq!(md["plugin_id"], "community.bare-acp");
+        // display_name absent — not null.
+        assert!(md.get("display_name").is_none());
+    }
+
+    #[test]
+    fn acp_conversion_preserves_input_order() {
+        let toml = r#"
+[plugin]
+id = "community.multi-acp"
+name = "Multi ACP"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.protocol_hosts.acp]]
+id = "alpha"
+command = "a"
+
+[[registrations.protocol_hosts.acp]]
+id = "beta"
+command = "b"
+
+[[registrations.protocol_hosts.acp]]
+id = "gamma"
+command = "c"
+"#;
+        let set = collect_for(toml);
+        let specs = acp_contributions_to_specs(&set);
+        assert_eq!(specs.len(), 3);
+        assert_eq!(specs[0].0.name, "alpha");
+        assert_eq!(specs[1].0.name, "beta");
+        assert_eq!(specs[2].0.name, "gamma");
     }
 
     #[test]

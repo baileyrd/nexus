@@ -86,6 +86,7 @@ pub fn enable(app: &mut App, plugin_id: &str) -> Result<()> {
     log_dap_wire_outcomes(app.wire_dap_contributions_for_plugin(plugin_id), "wired");
     log_lsp_wire_outcomes(app.wire_lsp_contributions_for_plugin(plugin_id), "wired");
     log_mcp_wire_outcomes(app.wire_mcp_contributions_for_plugin(plugin_id), "wired");
+    log_acp_wire_outcomes(app.wire_acp_contributions_for_plugin(plugin_id), "wired");
     let format = app.format();
     print_success(
         format,
@@ -110,6 +111,10 @@ pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
     );
     log_mcp_wire_outcomes(
         app.unwire_mcp_contributions_for_plugin(plugin_id),
+        "unwired",
+    );
+    log_acp_wire_outcomes(
+        app.unwire_acp_contributions_for_plugin(plugin_id),
         "unwired",
     );
     app.plugins()?.disable(plugin_id)?;
@@ -183,6 +188,39 @@ fn log_lsp_wire_outcomes(
             tracing::warn!(
                 error = %e,
                 "LSP contribution {verb_past} pass failed; plugin state change still applied",
+            );
+        }
+    }
+}
+
+fn log_acp_wire_outcomes(
+    result: Result<Vec<nexus_bootstrap::acp_contribution_wiring::AcpWireOutcome>>,
+    verb_past: &'static str,
+) {
+    use nexus_bootstrap::acp_contribution_wiring::AcpWireStatus;
+    match result {
+        Ok(outcomes) => {
+            for outcome in &outcomes {
+                if matches!(outcome.status, AcpWireStatus::Ok) {
+                    tracing::info!(
+                        plugin_id = %outcome.plugin_id,
+                        agent = %outcome.agent_name,
+                        "{verb_past} ACP agent contribution",
+                    );
+                } else {
+                    tracing::warn!(
+                        plugin_id = %outcome.plugin_id,
+                        agent = %outcome.agent_name,
+                        status = ?outcome.status,
+                        "ACP agent contribution skipped",
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "ACP contribution {verb_past} pass failed; plugin state change still applied",
             );
         }
     }
@@ -395,6 +433,7 @@ pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> 
     log_dap_wire_outcomes(app.wire_dap_contributions(), "wired");
     log_lsp_wire_outcomes(app.wire_lsp_contributions(), "wired");
     log_mcp_wire_outcomes(app.wire_mcp_contributions(), "wired");
+    log_acp_wire_outcomes(app.wire_acp_contributions(), "wired");
 
     let plugins = app.plugins()?;
     let args_json = serde_json::json!(args);

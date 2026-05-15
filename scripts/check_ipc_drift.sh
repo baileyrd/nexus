@@ -47,6 +47,9 @@ cargo test -p nexus-lsp --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (BL-081: dap) …"
 cargo test -p nexus-dap --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (BL-144: acp) …"
+cargo test -p nexus-acp --features ts-export --quiet --tests
+
 echo "[drift] regenerating IPC TS bindings (audit P1-3: agent) …"
 cargo test -p nexus-agent --features ts-export --quiet --tests
 

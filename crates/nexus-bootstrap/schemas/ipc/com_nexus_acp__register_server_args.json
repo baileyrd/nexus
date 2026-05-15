@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpRegisterServerArgs",
+  "description": "Args for `register_server` (handler `6`). Mirrors\n[`crate::config::AcpAdapterSpec`] plus the contributing plugin's\nreverse-DNS id. Shell-only fields ride in `metadata`.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "CLI args appended at spawn time.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "capabilities": {
+      "description": "Declarative capability tags.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Executable to spawn.",
+      "type": "string"
+    },
+    "disabled": {
+      "description": "`true` to keep the entry registered but skip spawning.",
+      "type": "boolean",
+      "default": false
+    },
+    "env": {
+      "description": "Environment merged on top of the host process's environment at\nspawn time.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "metadata": {
+      "description": "Opaque shell-only metadata. Pre-packed by the bootstrap-side\nconverter so the host can store it verbatim."
+    },
+    "name": {
+      "description": "Stable agent identifier ([`crate::config::AcpAdapterSpec::name`]).",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Reverse-DNS id of the contributing plugin. Authorisation key\nfor `unregister_server`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "command",
+    "plugin_id"
+  ]
+}

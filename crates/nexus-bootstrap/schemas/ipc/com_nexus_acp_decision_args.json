@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpDecisionArgs",
+  "description": "Args for `accept` / `reject` (handlers `4`/`5`).",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "description": "Stable agent identifier.",
+      "type": "string"
+    },
+    "proposal_id": {
+      "description": "Identifier of the proposal being acknowledged. Echoed back by\nthe agent on the original `propose` response.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Optional free-form reason. Plumbed through to the agent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "agent",
+    "proposal_id"
+  ]
+}

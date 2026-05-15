@@ -68,6 +68,12 @@ pub mod lsp_contribution_wiring;
 /// and unwires them at plugin disable / shutdown.
 pub mod mcp_contribution_wiring;
 
+/// BL-113 Phase 4 / BL-144 — bootstrap-side wiring that issues
+/// `com.nexus.acp::register_server` IPC calls for each ACP
+/// contribution found across a set of community plugin manifests,
+/// and unwires them at plugin disable / shutdown.
+pub mod acp_contribution_wiring;
+
 /// Render a markdown note to a standalone HTML string.
 ///
 /// Re-exported from `nexus-formats` (pure format library, no `SQLite`).
@@ -556,6 +562,7 @@ fn register_core_plugins(
     use nexus_git::GitCorePlugin;
     use nexus_lsp::LspCorePlugin;
     use nexus_dap::DapCorePlugin;
+    use nexus_acp::AcpCorePlugin;
     use nexus_mcp::McpHostPlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
@@ -1679,6 +1686,48 @@ fn register_core_plugins(
             )),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.dap")?;
+
+    // ACP host orchestrator — exposes the protocol-host contribution surface
+    // for community-plugin-supplied agent adapters (BL-144 / ADR 0027 Phase 4).
+    // No flat-TOML class — the registry starts empty and is populated at
+    // plugin-load time by `acp_contribution_wiring::wire_acp_contributions`.
+    // Agent-pushed notifications fan out on the kernel bus as
+    // `com.nexus.acp.<method-with-dots>`.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.acp",
+                "ACP Host",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: true,
+                    on_stop: true,
+                },
+                &with_v1_aliases(&[
+                    ("list_agents", nexus_acp::core_plugin::HANDLER_LIST_AGENTS),
+                    ("initialize", nexus_acp::core_plugin::HANDLER_INITIALIZE),
+                    ("propose", nexus_acp::core_plugin::HANDLER_PROPOSE),
+                    ("accept", nexus_acp::core_plugin::HANDLER_ACCEPT),
+                    ("reject", nexus_acp::core_plugin::HANDLER_REJECT),
+                    ("disconnect", nexus_acp::core_plugin::HANDLER_DISCONNECT),
+                    // BL-113 Phase 4 — plugin contribution lifecycle.
+                    (
+                        "register_server",
+                        nexus_acp::core_plugin::HANDLER_REGISTER_SERVER,
+                    ),
+                    (
+                        "unregister_server",
+                        nexus_acp::core_plugin::HANDLER_UNREGISTER_SERVER,
+                    ),
+                ]),
+            ),
+            forge_root,
+            Box::new(AcpCorePlugin::new(
+                forge_root.to_path_buf(),
+                Some(Arc::clone(event_bus)),
+            )),
+        )
+        .or_lifecycle_skip(event_bus, "com.nexus.acp")?;
 
     // Git integration — wraps GitWorker behind IPC and publishes bus events
     // (branch_changed, commit, dirty_changed) for any plugin or UI that
