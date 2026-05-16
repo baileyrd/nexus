@@ -17,7 +17,19 @@ const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
 // Distinct from `nexus.workspace.open` so the launcher's "Create OS
 // forge" affordance is a discrete code path rather than an overload.
 const COMMAND_OPEN_WITH_TEMPLATE = 'nexus.workspace.openWithTemplate'
+// BL-140 Phase 3b — open a remote (`ssh://...`) forge. Distinct from
+// `nexus.workspace.open` so the launcher's "Open remote forge…" entry
+// can dispatch a discrete code path.
+const COMMAND_OPEN_REMOTE = 'nexus.workspace.openRemote'
 const COMMAND_CLOSE = 'nexus.workspace.close'
+
+/// BL-140 Phase 3b — true if the supplied root looks like a transport
+/// URI rather than a local filesystem path. Matches the backend's
+/// detection (`://` substring) so the two sides agree on what's
+/// remote.
+function isRemoteUri(root: string): boolean {
+  return root.includes('://')
+}
 
 export const workspacePlugin: Plugin = {
   manifest: {
@@ -36,6 +48,11 @@ export const workspacePlugin: Plugin = {
         {
           id: COMMAND_SET_ROOT,
           title: 'Set Workspace Root',
+          category: 'Workspace',
+        },
+        {
+          id: COMMAND_OPEN_REMOTE,
+          title: 'Open Remote Forge…',
           category: 'Workspace',
         },
         {
@@ -120,14 +137,25 @@ export const workspacePlugin: Plugin = {
 
       if (path !== null && !popoutMode) {
         try {
-          await invoke('init_forge', { path, template: template ?? null })
-          // In the e2e harness the Rust `setup` hook may have already
-          // booted the kernel (NEXUS_E2E_VAULT path) — in that case
-          // skip boot_kernel rather than erroring with "kernel already
-          // booted". Normal runs hit the `!alreadyBooted` branch.
-          const alreadyBooted = await invoke<boolean>('kernel_is_booted')
-          if (!alreadyBooted) {
-            await invoke('boot_kernel', { path })
+          if (isRemoteUri(path)) {
+            // BL-140 Phase 3b — remote forge. The remote `nexus serve`
+            // already has the forge initialised; skip `init_forge` and
+            // route directly to `boot_remote`. Template parameter is
+            // ignored on remote (templates are local-only scaffolds).
+            const alreadyBooted = await invoke<boolean>('kernel_is_booted')
+            if (!alreadyBooted) {
+              await invoke('boot_remote', { uri: path })
+            }
+          } else {
+            await invoke('init_forge', { path, template: template ?? null })
+            // In the e2e harness the Rust `setup` hook may have already
+            // booted the kernel (NEXUS_E2E_VAULT path) — in that case
+            // skip boot_kernel rather than erroring with "kernel already
+            // booted". Normal runs hit the `!alreadyBooted` branch.
+            const alreadyBooted = await invoke<boolean>('kernel_is_booted')
+            if (!alreadyBooted) {
+              await invoke('boot_kernel', { path })
+            }
           }
         } catch (err) {
           clientLogger.error('[nexus.workspace] kernel boot failed for', path, err)
@@ -174,30 +202,46 @@ export const workspacePlugin: Plugin = {
     }
     clientLogger.info('[nexus.workspace] boot — persisted root:', persisted ?? '<none>')
     if (persisted) {
-      try {
-        const stillExists = await invoke<boolean>('path_exists', { path: persisted })
-        if (stillExists) {
-          clientLogger.info('[nexus.workspace] restoring', persisted)
-          try {
-            await setRoot(persisted)
-          } catch (err) {
-            // boot_kernel failed against the persisted path (corrupt forge,
-            // migration needed, etc.). setRoot already cleared storage +
-            // emitted workspace:closed, so the launcher will appear. Just
-            // log and move on rather than propagating out of activate().
-            clientLogger.warn(
-              '[nexus.workspace] kernel boot failed for persisted path, falling back to launcher:',
-              err,
-            )
+      // BL-140 Phase 3b — `path_exists` is local-only; skip the
+      // existence check for remote URIs and trust `boot_remote` to
+      // surface a reachability error if the host is dead. Local paths
+      // still get the pre-flight check.
+      if (isRemoteUri(persisted)) {
+        clientLogger.info('[nexus.workspace] restoring remote forge', persisted)
+        try {
+          await setRoot(persisted)
+        } catch (err) {
+          clientLogger.warn(
+            '[nexus.workspace] remote boot failed for persisted URI, falling back to launcher:',
+            err,
+          )
+        }
+      } else {
+        try {
+          const stillExists = await invoke<boolean>('path_exists', { path: persisted })
+          if (stillExists) {
+            clientLogger.info('[nexus.workspace] restoring', persisted)
+            try {
+              await setRoot(persisted)
+            } catch (err) {
+              // boot_kernel failed against the persisted path (corrupt forge,
+              // migration needed, etc.). setRoot already cleared storage +
+              // emitted workspace:closed, so the launcher will appear. Just
+              // log and move on rather than propagating out of activate().
+              clientLogger.warn(
+                '[nexus.workspace] kernel boot failed for persisted path, falling back to launcher:',
+                err,
+              )
+            }
+          } else {
+            clientLogger.info('[nexus.workspace] persisted path no longer exists, clearing')
+            api.storage.delete(STORAGE_KEY)
+            await setRoot(null)
           }
-        } else {
-          clientLogger.info('[nexus.workspace] persisted path no longer exists, clearing')
-          api.storage.delete(STORAGE_KEY)
+        } catch (err) {
+          clientLogger.warn('[nexus.workspace] failed to verify persisted path:', err)
           await setRoot(null)
         }
-      } catch (err) {
-        clientLogger.warn('[nexus.workspace] failed to verify persisted path:', err)
-        await setRoot(null)
       }
     } else {
       await setRoot(null)
@@ -249,6 +293,25 @@ export const workspacePlugin: Plugin = {
       }
       await setRoot(path)
       return path
+    })
+
+    // BL-140 Phase 3b — open a remote forge from an `ssh://...` URI.
+    // The launcher's "Open remote forge…" entry collects the URI from
+    // a modal and dispatches this command. Client-side validation
+    // only checks for the `ssh://` scheme; the backend's `boot_remote`
+    // does the full URI parse + spawn.
+    api.commands.register(COMMAND_OPEN_REMOTE, async (...args: unknown[]) => {
+      const uri = args[0]
+      if (typeof uri !== 'string' || uri.length === 0) {
+        throw new Error('openRemote requires a URI string')
+      }
+      if (!uri.startsWith('ssh://')) {
+        throw new Error(
+          `openRemote: unsupported scheme — expected ssh://, got: ${uri}`,
+        )
+      }
+      await setRoot(uri)
+      return uri
     })
 
     // Close the current workspace. Drains the kernel and clears UI state.

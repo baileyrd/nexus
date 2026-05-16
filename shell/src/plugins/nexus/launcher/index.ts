@@ -23,6 +23,7 @@ const EVENT_OPENED = 'workspace:opened'
 const EVENT_CLOSED = 'workspace:closed'
 const COMMAND_OPEN = 'nexus.workspace.open'
 const COMMAND_OPEN_WITH_TEMPLATE = 'nexus.workspace.openWithTemplate'
+const COMMAND_OPEN_REMOTE = 'nexus.workspace.openRemote'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
 
 export const launcherPlugin: Plugin = {
@@ -108,12 +109,37 @@ export const launcherPlugin: Plugin = {
       }
     }
 
+    // BL-140 Phase 3b — collect an `ssh://...` URI from a prompt and
+    // dispatch the workspace command. Same recents promotion semantics
+    // as local opens — the URI string is stored verbatim. A richer
+    // modal (saved-connections list, password manager integration)
+    // could replace this `prompt` later; the MVP keeps the surface
+    // tiny.
+    const onOpenRemote = async () => {
+      const uri = window.prompt(
+        'Open remote forge — enter an SSH URI:',
+        'ssh://user@host/abs/path',
+      )
+      if (!uri || uri.length === 0) return
+      try {
+        await api.commands.execute(COMMAND_OPEN_REMOTE, uri)
+        await useLauncherStore.getState().openPath(uri)
+      } catch (err) {
+        reportBootFailure(uri, err)
+      }
+    }
+
     // Wrap the view so it can close over the callbacks without other
     // plugins having to reach into the launcher's store. Written as
     // createElement since this is a .ts file (not .tsx); the child
     // component itself owns the JSX.
     const LauncherSlot = () =>
-      createElement(LauncherView, { onOpenFolder, onOpenWithOsTemplate, onActivatePath })
+      createElement(LauncherView, {
+        onOpenFolder,
+        onOpenWithOsTemplate,
+        onOpenRemote,
+        onActivatePath,
+      })
 
     api.views.register('nexus.launcher.view', {
       slot: 'overlay',

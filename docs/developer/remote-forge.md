@@ -6,9 +6,10 @@ over a transport (SSH child today) to a headless `nexus serve` on the
 other end. Same kernel, same plugins, same IPC verbs — they just live
 elsewhere.
 
-The on-the-wire feature set tracks BL-140. Phase 1 + 2a + 2b + 2c are
-shipped today; the Tauri shell remote-open UI (Phase 3) is still
-queued.
+The on-the-wire feature set tracks BL-140. Phase 1 + 2a + 2b + 2c +
+3a + 3b are all shipped — both the CLI and the Tauri shell can open
+a remote forge. The status-bar connection-state badge (Phase 3c) is
+the only remaining queued item on the BL.
 
 ---
 
@@ -54,6 +55,12 @@ nexus content list
 
 The CLI detects `://` in the path and routes through the remote
 runtime constructor. Anything without `://` is a local path.
+
+The **Tauri shell** has an "Open remote forge…" entry in the launcher
+that prompts for the same URI shape. Once entered, the URI is
+persisted to recents identically to local paths and reopens on
+subsequent shell launches; clicking it from the recents list works the
+same as a local forge would.
 
 ---
 
@@ -303,8 +310,19 @@ built via `build_remote_runtime_over_pipes(reader, writer, guard)`.
 - **No connection pooling across CLI invocations.** Each `nexus
   --forge-path ssh://...` invocation spawns a fresh SSH child. Use
   SSH `ControlMaster` to amortise.
-- **Tauri shell remote-open is not yet wired** (Phase 3). The CLI is
-  the only remote-forge consumer today.
+- **Tauri shell connection-state badge** is queued (Phase 3c). The
+  shell itself can open a remote forge today via the launcher's
+  "Open remote forge…" action; what's missing is a visual cue in the
+  status bar when the SSH connection is reconnecting or dead.
+- **Subscription replay on reconnect** isn't wired. When the SSH
+  connection drops and the `ReconnectingRuntime` rebuilds, every
+  remote subscription dies — the shell has to re-subscribe. In
+  practice this means plugins that watch kernel events (editor file
+  changes, activity timeline, the BL-074 ops bus) silently stop
+  receiving events after a remote reconnect until the plugin is
+  re-activated. Fix is a subscription registry on
+  `ReconnectingRuntime` that replays every active subscription
+  against the new client.
 
 ---
 

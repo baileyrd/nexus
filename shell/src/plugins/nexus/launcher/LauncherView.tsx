@@ -22,6 +22,9 @@ interface LauncherViewProps {
   /** BL-054 Phase 1 follow-up: pick a folder + scaffold the OS layout
    *  before booting. Surfaced as the "Create OS workspace" action. */
   onOpenWithOsTemplate: () => void
+  /** BL-140 Phase 3b: prompt for an `ssh://...` URI and dispatch
+   *  `nexus.workspace.openRemote`. */
+  onOpenRemote: () => void
   onActivatePath: (path: string) => void
 }
 
@@ -265,7 +268,7 @@ function ActionRow({
   )
 }
 
-export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onActivatePath }: LauncherViewProps) {
+export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onOpenRemote, onActivatePath }: LauncherViewProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const manageReturnTo = useLauncherStore((s) => s.manageReturnTo)
   const clearReturnTo = useLauncherStore((s) => s.setManageReturnTo)
@@ -302,6 +305,10 @@ export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onActivatePat
   const onCreateOs = () => {
     if (manageReturnTo) clearReturnTo(null)
     onOpenWithOsTemplate()
+  }
+  const onRemote = () => {
+    if (manageReturnTo) clearReturnTo(null)
+    onOpenRemote()
   }
 
   return (
@@ -465,11 +472,11 @@ export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onActivatePat
                 {/* Last row — strip the bottom border */}
                 <div style={{ borderBottom: 0 }}>
                   <ActionRow
-                    heading="Clone from git"
-                    description="Clone a remote workspace."
-                    buttonLabel="Sign in"
-                    variant="disabled"
-                    disabled
+                    heading="Open remote forge…"
+                    description="Connect to a headless nexus serve over SSH (ssh://user@host/path)."
+                    buttonLabel="Connect"
+                    variant="neutral"
+                    onClick={onRemote}
                   />
                 </div>
               </div>
