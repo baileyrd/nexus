@@ -68,6 +68,12 @@ itself (kernel, bootstrap, shell, etc.), see
 
 - [Authoring a core plugin](core-plugins/authoring.md)
 
+## Operational guides
+
+- [Remote forge over SSH](remote-forge.md) — `--forge-path ssh://...`
+  architecture, wire protocol, reconnect semantics, and SSH-config
+  tips (BL-140).
+
 ## Reference
 
 - [Reference index](reference.md) — pointers to authoritative API,
