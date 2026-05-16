@@ -687,6 +687,7 @@ pub fn run() {
             bridge::kernel_subscribe,
             bridge::kernel_unsubscribe,
             bridge::kernel_is_booted,
+            bridge::kernel_connection_state,
             windows::popout_window,
             windows::close_popout_window,
             windows::list_popout_windows,

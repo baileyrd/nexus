@@ -7,18 +7,24 @@
 //! must route through `kernel_invoke` → `ipc_call` and live in a service
 //! crate, not as a new bespoke command here.
 //!
-//! This test pins the current 25-command set. If you add or remove a command
+//! This test pins the current 26-command set. If you add or remove a command
 //! and this test fails, that's the system asking: **is this a host concern,
 //! or did this belong behind an IPC handler?** If it really is a host
 //! concern, update both the [`EXPECTED`] list below and add an ADR (or
 //! ADR addendum) explaining why.
 //!
 //! Recent additions:
-//! - `bridge::boot_remote` (BL-140 Phase 3) — top-level boot command for
+//! - `bridge::boot_remote` (BL-140 Phase 3a) — top-level boot command for
 //!   the `ssh://` remote-forge transport. Host concern under the same
 //!   rationale as `boot_kernel`: the choice of *which* runtime to build
 //!   has to happen before any plugin IPC, so it can't itself live behind
 //!   `kernel_invoke`. See `docs/developer/remote-forge.md`.
+//! - `bridge::kernel_connection_state` (BL-140 Phase 3c) — sync read of
+//!   the current `ConnectionState`. Host concern because the state lives
+//!   in the kernel-runtime managed-state slot; surfacing it via an IPC
+//!   verb would require a kernel-side plugin that doesn't exist (and
+//!   doesn't make sense — state is shell-side, observed from the
+//!   reconnecting wrapper).
 
 use std::fs;
 use std::path::PathBuf;
@@ -53,6 +59,7 @@ const EXPECTED: &[&str] = &[
     "bridge::kernel_subscribe",
     "bridge::kernel_unsubscribe",
     "bridge::kernel_is_booted",
+    "bridge::kernel_connection_state",
     "windows::popout_window",
     "windows::close_popout_window",
     "windows::list_popout_windows",

@@ -36,7 +36,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use nexus_bootstrap::invoker::{IpcInvoker, IpcInvokerError};
-use nexus_bootstrap::reconnect::{ReconnectingRuntime, SshConnectionFactory};
+use nexus_bootstrap::reconnect::{
+    ConnectionState, ReconnectingRuntime, SshConnectionFactory,
+};
 use nexus_bootstrap::Runtime;
 use nexus_kernel::{
     EventFilter, IpcErrorEnvelope, IpcErrorKind, Kernel, KernelPluginContext, NexusEvent,
@@ -63,6 +65,12 @@ const DEFAULT_INVOKE_TIMEOUT_MS: u64 = 30_000;
 /// disambiguates by `subscription_id` inside the envelope payload.
 const KERNEL_EVENT_CHANNEL: &str = "kernel:event";
 
+/// BL-140 Phase 3c — channel name for `ConnectionState` transitions
+/// forwarded from the [`ReconnectingRuntime`]'s state broadcast to the
+/// frontend. Only fires for remote forges; the status-bar badge plugin
+/// subscribes to render the badge.
+const CONNECTION_STATE_CHANNEL: &str = "kernel:connection-state";
+
 /// Payload shape emitted to the webview for every bridged kernel event.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +78,14 @@ struct KernelEventEnvelope {
     subscription_id: String,
     topic: String,
     payload: serde_json::Value,
+}
+
+/// Payload shape for `kernel:connection-state` events. `state` is the
+/// stable wire string from [`ConnectionState::as_str`] (one of
+/// `"idle"` / `"connected"` / `"reconnecting"` / `"disconnected"`).
+#[derive(Serialize, Clone)]
+struct ConnectionStateEnvelope {
+    state: &'static str,
 }
 
 /// Booted runtime — either a local kernel + plugin loader, or a remote
@@ -90,6 +106,15 @@ enum BootedRuntime {
     Remote {
         runtime: Arc<ReconnectingRuntime>,
         invoker: Arc<dyn IpcInvoker + Send + Sync>,
+        /// Background task forwarding [`ConnectionState`] transitions
+        /// from the reconnecting runtime onto the
+        /// `kernel:connection-state` Tauri channel. Aborted on
+        /// shutdown.
+        state_forwarder: JoinHandle<()>,
+        /// Latest [`ConnectionState`] observed. Read by the
+        /// `kernel_connection_state` Tauri command so the frontend
+        /// can render the badge before any transition has fired.
+        current_state: Arc<StdMutex<ConnectionState>>,
     },
 }
 
@@ -177,9 +202,18 @@ impl KernelRuntime {
     /// the first `kernel_invoke` triggers
     /// [`SshConnectionFactory::build`].
     ///
+    /// Spawns a background forwarder that observes
+    /// [`ConnectionState`] transitions on the reconnecting runtime
+    /// and re-emits them onto the `kernel:connection-state` Tauri
+    /// channel so the status-bar badge can render the current state.
+    ///
     /// Rejects when a runtime is already booted, same posture as
     /// [`Self::boot_at`].
-    pub async fn boot_remote_at(&self, uri_str: &str) -> Result<(), String> {
+    pub async fn boot_remote_at(
+        &self,
+        uri_str: &str,
+        app: AppHandle,
+    ) -> Result<(), String> {
         let uri = ForgeUri::parse(uri_str)
             .map_err(|e| format!("invalid forge URI '{uri_str}': {e}"))?;
         let mut guard = self.inner.lock().await;
@@ -189,9 +223,61 @@ impl KernelRuntime {
         let factory = Arc::new(SshConnectionFactory::new(uri));
         let runtime = Arc::new(ReconnectingRuntime::new(factory));
         let invoker = runtime.invoker();
-        *guard = Some(BootedRuntime::Remote { runtime, invoker });
+        let current_state: Arc<StdMutex<ConnectionState>> =
+            Arc::new(StdMutex::new(ConnectionState::Idle));
+
+        // Subscribe BEFORE storing the runtime so we don't miss any
+        // emit fired by a racy first dispatch.
+        let mut state_rx = runtime.subscribe_state();
+        let state_for_task = Arc::clone(&current_state);
+        let state_forwarder = tauri::async_runtime::spawn(async move {
+            loop {
+                match state_rx.recv().await {
+                    Ok(state) => {
+                        if let Ok(mut guard) = state_for_task.lock() {
+                            *guard = state;
+                        }
+                        // Broadcast to every window — connection state
+                        // is global to the workspace, not per-window
+                        // (every popout shares the same runtime).
+                        let envelope = ConnectionStateEnvelope {
+                            state: state.as_str(),
+                        };
+                        if let Err(e) =
+                            app.emit(CONNECTION_STATE_CHANNEL, envelope)
+                        {
+                            eprintln!(
+                                "[boot_remote] connection-state emit failed: {e}"
+                            );
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        *guard = Some(BootedRuntime::Remote {
+            runtime,
+            invoker,
+            state_forwarder,
+            current_state,
+        });
         self.booted.store(true, Ordering::Release);
         Ok(())
+    }
+
+    /// Snapshot of the current connection state. Returns
+    /// `ConnectionState::Idle` for local forges + when no runtime is
+    /// booted (the frontend renders no badge in those cases).
+    pub async fn connection_state(&self) -> ConnectionState {
+        let guard = self.inner.lock().await;
+        match guard.as_ref() {
+            Some(BootedRuntime::Remote { current_state, .. }) => current_state
+                .lock()
+                .map(|s| *s)
+                .unwrap_or(ConnectionState::Idle),
+            _ => ConnectionState::Idle,
+        }
     }
 
     /// BL-096 follow-up — live-revoke a previously-granted HIGH-risk
@@ -305,12 +391,17 @@ impl KernelRuntime {
                     }
                 }
             }
-            BootedRuntime::Remote { runtime, .. } => {
+            BootedRuntime::Remote {
+                runtime,
+                state_forwarder,
+                ..
+            } => {
                 // The remote kernel + plugins live on the server side
                 // and shut themselves down when the SSH transport
                 // closes. Locally we only need to reset the
                 // reconnecting wrapper (drops the current client +
-                // router).
+                // router) and abort the state forwarder.
+                state_forwarder.abort();
                 runtime.reset().await;
             }
         }
@@ -398,9 +489,21 @@ pub async fn boot_kernel(
 #[tauri::command]
 pub async fn boot_remote(
     uri: String,
+    app: AppHandle,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    runtime.boot_remote_at(&uri).await
+    runtime.boot_remote_at(&uri, app).await
+}
+
+/// BL-140 Phase 3c — return the current [`ConnectionState`] as its
+/// wire-form string. `"idle"` for local forges + un-booted state.
+/// The frontend uses this for the initial badge render before any
+/// `kernel:connection-state` event has fired.
+#[tauri::command]
+pub async fn kernel_connection_state(
+    runtime: tauri::State<'_, KernelRuntime>,
+) -> Result<&'static str, String> {
+    Ok(runtime.connection_state().await.as_str())
 }
 
 /// Tear down the kernel runtime if one is booted. Idempotent.

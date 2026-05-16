@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use nexus_bootstrap::invoker::IpcInvokerError;
-use nexus_bootstrap::reconnect::{ConnectionFactory, ReconnectingRuntime};
+use nexus_bootstrap::reconnect::{ConnectionFactory, ConnectionState, ReconnectingRuntime};
 use nexus_bootstrap::remote::{
     build_remote_runtime_over_pipes, NoopTransportGuard, RemoteRuntime,
 };
@@ -243,6 +243,124 @@ async fn schedule_exhaustion_surfaces_final_transport_error() {
         builds.load(std::sync::atomic::Ordering::SeqCst) >= 2,
         "factory should have been called more than once"
     );
+}
+
+#[tokio::test]
+async fn state_transitions_emit_on_reconnect_lifecycle() {
+    // Pre-stage two runtimes so reset → next call rebuilds via the
+    // factory and the state subscriber can observe the full
+    // Reconnecting → Connected arc.
+    let (rt1, forge1, server1) = boot_one();
+    let (rt2, forge2, server2) = boot_one();
+    let factory = StackedFactory {
+        pending: Mutex::new(vec![rt1, rt2]),
+        builds: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        _guards: vec![forge1, forge2],
+        _servers: vec![server1, server2],
+    };
+    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
+        Duration::from_millis(5),
+    ]);
+
+    let mut state_rx = runtime.subscribe_state();
+    let invoker = runtime.invoker();
+
+    // First call: Connected (the bare "successful first call" arm).
+    let _ = invoker
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "path": "" }),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("first call");
+    assert_eq!(
+        state_rx.recv().await.expect("connected event"),
+        ConnectionState::Connected
+    );
+
+    // Tear down the current transport. The next call will hit the
+    // reconnect path: Reconnecting → Connected via the second pre-
+    // staged runtime.
+    runtime.reset().await;
+
+    let _ = invoker
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "path": "" }),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("post-reset call");
+
+    // Could see either Connected directly (if ensure_connected paved
+    // the way before ipc_call's first attempt) OR Reconnecting →
+    // Connected. Drain everything we got, asserting the final state
+    // is Connected.
+    let mut last: Option<ConnectionState> = None;
+    while let Ok(Ok(state)) =
+        tokio::time::timeout(Duration::from_millis(50), state_rx.recv()).await
+    {
+        last = Some(state);
+    }
+    assert_eq!(last, Some(ConnectionState::Connected));
+}
+
+#[tokio::test]
+async fn schedule_exhaustion_emits_disconnected() {
+    let (rt1, forge1, server1) = boot_one();
+    let factory = StackedFactory {
+        pending: Mutex::new(vec![rt1]),
+        builds: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        _guards: vec![forge1],
+        _servers: vec![server1],
+    };
+    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
+        Duration::from_millis(5),
+        Duration::from_millis(5),
+    ]);
+
+    let mut state_rx = runtime.subscribe_state();
+    let invoker = runtime.invoker();
+
+    // First call succeeds → Connected.
+    let _ = invoker
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "path": "" }),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("first call");
+
+    runtime.reset().await;
+
+    // Reset means the factory is empty; the post-reset call walks
+    // the (very tight) backoff schedule, can't rebuild, surfaces
+    // Disconnected.
+    let _ = invoker
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "path": "" }),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap_err();
+
+    let mut saw_disconnected = false;
+    while let Ok(Ok(state)) =
+        tokio::time::timeout(Duration::from_millis(50), state_rx.recv()).await
+    {
+        if state == ConnectionState::Disconnected {
+            saw_disconnected = true;
+            break;
+        }
+    }
+    assert!(saw_disconnected, "should have observed Disconnected");
 }
 
 #[tokio::test]

@@ -40,11 +40,49 @@ use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::invoker::{IpcInvoker, IpcInvokerError};
 use crate::remote::{build_remote_runtime_ssh, RemoteRuntime};
 use nexus_remote::ForgeUri;
+
+/// Lifecycle state of the remote-forge connection, surfaced by
+/// [`ReconnectingRuntime::subscribe_state`] so the Tauri bridge can
+/// render a connection-state badge in the status bar.
+///
+/// State transitions are emitted on a `broadcast::Sender` so multiple
+/// subscribers can observe them without contention. Each
+/// `ReconnectingRuntime` starts in `Idle` (no connection built yet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    /// No connection has been built yet (initial state after
+    /// `ReconnectingRuntime::new`, or after `reset()` until the next
+    /// dispatch).
+    Idle,
+    /// A connection is live + the last `ipc_call` succeeded.
+    Connected,
+    /// A `Transport` failure was observed; the wrapper is walking the
+    /// backoff schedule trying to rebuild.
+    Reconnecting,
+    /// The backoff schedule exhausted without a successful retry. The
+    /// next dispatch will start the cycle over.
+    Disconnected,
+}
+
+impl ConnectionState {
+    /// Stable wire-form string used by the Tauri bridge when forwarding
+    /// state changes to the frontend. Lowercase + hyphenated so the
+    /// frontend can `switch` on it without normalisation.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Connected => "connected",
+            Self::Reconnecting => "reconnecting",
+            Self::Disconnected => "disconnected",
+        }
+    }
+}
 
 /// Default reconnect schedule — five attempts spaced
 /// `[100ms, 500ms, 2s, 10s, 30s]`. Matches the `nexus-mcp`
@@ -102,6 +140,10 @@ pub struct ReconnectingRuntime {
     factory: Arc<dyn ConnectionFactory>,
     current: Arc<Mutex<Option<RemoteRuntime>>>,
     backoff: Vec<Duration>,
+    /// Broadcast sender for [`ConnectionState`] transitions. Held
+    /// inside an `Arc` so the invoker (which lives independently of
+    /// the runtime) can share it.
+    state_tx: Arc<broadcast::Sender<ConnectionState>>,
 }
 
 impl ReconnectingRuntime {
@@ -110,10 +152,15 @@ impl ReconnectingRuntime {
     /// `factory.build()`.
     #[must_use]
     pub fn new(factory: Arc<dyn ConnectionFactory>) -> Self {
+        // Bounded channel — late subscribers can `Lagged` if a flurry
+        // of reconnects fires before they catch up; we don't care
+        // about per-event ordering for a UI badge, only the latest.
+        let (tx, _rx) = broadcast::channel(16);
         Self {
             factory,
             current: Arc::new(Mutex::new(None)),
             backoff: DEFAULT_BACKOFF.to_vec(),
+            state_tx: Arc::new(tx),
         }
     }
 
@@ -135,7 +182,21 @@ impl ReconnectingRuntime {
             factory: Arc::clone(&self.factory),
             current: Arc::clone(&self.current),
             backoff: self.backoff.clone(),
+            state_tx: Arc::clone(&self.state_tx),
         })
+    }
+
+    /// Subscribe to [`ConnectionState`] transitions. The returned
+    /// receiver fires whenever the wrapper notices a state change
+    /// while servicing an `ipc_call`.
+    ///
+    /// BL-140 Phase 3c — the Tauri bridge subscribes at `boot_remote`
+    /// time and forwards each transition to the frontend on the
+    /// `kernel:connection-state` channel so the status-bar badge can
+    /// reflect the current state.
+    #[must_use]
+    pub fn subscribe_state(&self) -> broadcast::Receiver<ConnectionState> {
+        self.state_tx.subscribe()
     }
 
     /// Tear down the current connection (if any). Subsequent dispatches
@@ -188,6 +249,16 @@ struct ReconnectingInvoker {
     factory: Arc<dyn ConnectionFactory>,
     current: Arc<Mutex<Option<RemoteRuntime>>>,
     backoff: Vec<Duration>,
+    state_tx: Arc<broadcast::Sender<ConnectionState>>,
+}
+
+impl ReconnectingInvoker {
+    /// Publish a state transition. Send errors (zero subscribers) are
+    /// silently ignored — the wire-up doesn't care if anyone is
+    /// listening.
+    fn emit_state(&self, state: ConnectionState) {
+        let _ = self.state_tx.send(state);
+    }
 }
 
 impl ReconnectingInvoker {
@@ -205,9 +276,19 @@ impl ReconnectingInvoker {
                 *slot = Some(rt);
                 Ok(())
             }
-            Err(e) => Err(IpcInvokerError::Transport(format!(
-                "initial connection: {e}"
-            ))),
+            Err(e) => {
+                // Initial build failure surfaces as Disconnected on
+                // the state channel — the wrapper tried, couldn't get
+                // a connection, and there's nothing more it will do
+                // until the next dispatch. The `ipc_call` path's own
+                // Reconnecting→Disconnected arc only fires when the
+                // very first call succeeded; for "never connected"
+                // sessions this is the only emit point.
+                self.emit_state(ConnectionState::Disconnected);
+                Err(IpcInvokerError::Transport(format!(
+                    "initial connection: {e}"
+                )))
+            }
         }
     }
 
@@ -258,6 +339,11 @@ impl IpcInvoker for ReconnectingInvoker {
         // Only Transport failures trigger reconnect. Server errors +
         // timeouts surface as-is.
         let Err(IpcInvokerError::Transport(first_err)) = first_attempt else {
+            // Non-Transport result (Ok, Remote, or Timeout) — the
+            // connection itself is healthy. Mark Connected if we
+            // weren't already (covers the first successful call after
+            // an Idle/Reconnecting state).
+            self.emit_state(ConnectionState::Connected);
             return first_attempt;
         };
         tracing::warn!(
@@ -266,6 +352,7 @@ impl IpcInvoker for ReconnectingInvoker {
             command_id = %command_id,
             "remote ipc_call transport failure; will attempt reconnect"
         );
+        self.emit_state(ConnectionState::Reconnecting);
         self.tear_down_current().await;
 
         // Walk the backoff schedule once. Each tick: sleep, rebuild,
@@ -305,15 +392,23 @@ impl IpcInvoker for ReconnectingInvoker {
                         command_id = %command_id,
                         "remote ipc_call recovered after reconnect"
                     );
+                    self.emit_state(ConnectionState::Connected);
                     return Ok(v);
                 }
                 Err(IpcInvokerError::Transport(e)) => {
                     last_err = format!("reconnect attempt {}: {e}", idx + 1);
                     self.tear_down_current().await;
                 }
-                Err(other) => return Err(other),
+                Err(other) => {
+                    // Server-reported error or timeout after reconnect
+                    // — the transport is healthy again even though
+                    // this specific call failed.
+                    self.emit_state(ConnectionState::Connected);
+                    return Err(other);
+                }
             }
         }
+        self.emit_state(ConnectionState::Disconnected);
         Err(IpcInvokerError::Transport(format!(
             "reconnect schedule exhausted: {last_err}"
         )))
