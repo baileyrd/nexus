@@ -210,12 +210,17 @@ impl Walker<'_, '_> {
                 self.insert_block(block, parent);
             }
             NodeValue::CodeBlock(cb) => {
-                // `cb.info` is the language tag. Math blocks `$$..$$`
+                // `cb.info` is the language tag plus optional
+                // whitespace-separated tokens. BL-142 Phase 2a:
+                // `repl` (anywhere after the language) marks the
+                // block as REPL-executable. Math blocks `$$..$$`
                 // sometimes parse as code blocks with empty info; we
                 // also catch them downstream via paragraph detection.
+                let (language, repl) = parse_code_fence_info(&cb.info);
                 let block = self.new_block(BlockType::CodeBlock {
-                    language: cb.info.clone(),
+                    language,
                     line_numbers: false,
+                    repl,
                 });
                 let mut block = block;
                 block.content = cb.literal.trim_end_matches('\n').to_string();
@@ -646,6 +651,82 @@ fn alignment_to_string(a: TableAlignment) -> String {
         TableAlignment::Left => "left".into(),
         TableAlignment::Center => "center".into(),
         TableAlignment::Right => "right".into(),
+    }
+}
+
+/// BL-142 Phase 2a — parse a fenced code block's info string into
+/// `(language, repl)`. The info string is whitespace-separated; the
+/// first token is the language hint, and a free-floating `repl`
+/// token anywhere after it marks the block as REPL-executable.
+///
+/// Examples:
+/// - `""` → `("", false)`
+/// - `"python"` → `("python", false)`
+/// - `"python repl"` → `("python", true)`
+/// - `"repl"` (only repl, no language) → `("", true)` — exotic but
+///   accepted so the serializer can faithfully round-trip
+///
+/// Unknown tokens are dropped silently — this matches the
+/// permissive posture of GitHub-style code-fence info strings
+/// (`{.python}`, ` ```rust,no_run`, etc.) where unrecognized hints
+/// are passed through without erroring the parse.
+pub(crate) fn parse_code_fence_info(info: &str) -> (String, bool) {
+    let mut tokens = info.split_whitespace();
+    let mut language = String::new();
+    let mut repl = false;
+    if let Some(first) = tokens.next() {
+        if first == "repl" {
+            repl = true;
+        } else {
+            language = first.to_string();
+        }
+    }
+    for tok in tokens {
+        if tok == "repl" {
+            repl = true;
+        }
+    }
+    (language, repl)
+}
+
+#[cfg(test)]
+mod fence_info_tests {
+    use super::parse_code_fence_info;
+
+    #[test]
+    fn empty_info() {
+        assert_eq!(parse_code_fence_info(""), (String::new(), false));
+    }
+
+    #[test]
+    fn language_only() {
+        assert_eq!(parse_code_fence_info("rust"), ("rust".to_string(), false));
+    }
+
+    #[test]
+    fn language_with_repl() {
+        assert_eq!(parse_code_fence_info("python repl"), ("python".to_string(), true));
+    }
+
+    #[test]
+    fn repl_only() {
+        assert_eq!(parse_code_fence_info("repl"), (String::new(), true));
+    }
+
+    #[test]
+    fn repl_anywhere_after_language() {
+        assert_eq!(
+            parse_code_fence_info("javascript noexec repl"),
+            ("javascript".to_string(), true),
+        );
+    }
+
+    #[test]
+    fn unknown_tokens_dropped() {
+        assert_eq!(
+            parse_code_fence_info("rust no_run nostdlib"),
+            ("rust".to_string(), false),
+        );
     }
 }
 

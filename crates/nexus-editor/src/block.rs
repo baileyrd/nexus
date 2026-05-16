@@ -162,6 +162,17 @@ pub enum BlockType {
         language: String,
         /// Show line numbers in the UI.
         line_numbers: bool,
+        /// BL-142 Phase 2 — when `true`, the editor renders a Run
+        /// gutter button next to the block and `Shift-Enter` inside
+        /// the block sends its contents to a REPL kernel for the
+        /// block's `language` (resolved via the
+        /// `nexus.editor.replKernels` shell config). Source markdown
+        /// expresses this via a `repl` token in the fence info string
+        /// (e.g. ` ```python repl ` or ` ```python repl,no-numbers `).
+        /// Defaults to `false` so existing code blocks are
+        /// unaffected.
+        #[serde(default, skip_serializing_if = "is_false")]
+        repl: bool,
     },
 
     /// Block-level LaTeX formula.
@@ -503,6 +514,13 @@ pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Helper for `#[serde(skip_serializing_if = "is_false")]` so default
+/// boolean flags (BL-142's `CodeBlock.repl`) round-trip cleanly
+/// without polluting serialized JSON for the common `false` case.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -548,6 +566,7 @@ mod tests {
         let _ = BlockType::CodeBlock {
             language: "rust".into(),
             line_numbers: false,
+            repl: false,
         };
         let _ = BlockType::MathBlock {
             formula: "E=mc^2".into(),

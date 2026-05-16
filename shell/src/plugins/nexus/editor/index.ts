@@ -150,6 +150,13 @@ const CONFIG_EDIT_PREDICTION_ENABLED = 'nexus.editor.editPrediction.enabled'
 const CONFIG_EDIT_PREDICTION_DEBOUNCE_MS = 'nexus.editor.editPrediction.debounceMs'
 const CONFIG_EDIT_PREDICTION_PROVIDER = 'nexus.editor.editPrediction.provider'
 const CONFIG_EDIT_PREDICTION_MODEL = 'nexus.editor.editPrediction.model'
+// BL-142 Phase 2a — re-export the config key + default from
+// `replKernels.ts` so the schema registration below stays in sync
+// with the parser/resolver helpers.
+import {
+  CONFIG_REPL_KERNELS,
+  REPL_KERNELS_DEFAULT_JSON,
+} from './replKernels.ts'
 // Visual settings — applied live via CSS custom properties on :root
 // (see applyEditorCssVars below) and via prop flow to CodeMirrorHost.
 const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
@@ -623,6 +630,14 @@ export const editorPlugin: Plugin = {
             'Model identifier the AI plugin should use for predictions. Same routing caveat as the provider field — informational only.',
           type: 'string',
           default: 'qwen2.5-coder:7b',
+        },
+        {
+          key: CONFIG_REPL_KERNELS,
+          title: 'REPL kernels (BL-142)',
+          description:
+            'JSON map from language tag to the kernel command string used by REPL-marked code blocks (` ```python repl `). Example: `{"python":"python3 -i","node":"node --interactive"}`. Default `{}` — opt-in: REPL execution is inert until at least one kernel is configured. Phase 2b lands the Run gutter + Shift-Enter binding that consumes this.',
+          type: 'string',
+          default: REPL_KERNELS_DEFAULT_JSON,
         },
       ],
     })

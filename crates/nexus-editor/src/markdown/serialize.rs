@@ -108,7 +108,9 @@ fn serialize_block(tree: &BlockTree, id: BlockId, out: &mut String) {
         } => {
             serialize_list_item(tree, block, *indent_level, Some(*number), out);
         }
-        BlockType::CodeBlock { language, .. } => serialize_code_block(language, block, out),
+        BlockType::CodeBlock { language, repl, .. } => {
+            serialize_code_block(language, *repl, block, out)
+        }
         BlockType::MathBlock { formula } => {
             out.push_str("$$\n");
             out.push_str(formula);
@@ -258,9 +260,20 @@ fn task_marker(block: &Block) -> Option<&'static str> {
     }
 }
 
-fn serialize_code_block(language: &str, block: &Block, out: &mut String) {
+fn serialize_code_block(language: &str, repl: bool, block: &Block, out: &mut String) {
     out.push_str("```");
     out.push_str(language);
+    if repl {
+        // Emit the `repl` token *after* the language so round-trip
+        // through `parse_code_fence_info` recovers `(language,
+        // repl=true)`. Empty-language case (`"```repl\n"`) still
+        // round-trips correctly because the parser treats a bare
+        // `repl` first token as `language=""`, `repl=true`.
+        if !language.is_empty() {
+            out.push(' ');
+        }
+        out.push_str("repl");
+    }
     out.push('\n');
     out.push_str(&block.content);
     if !block.content.ends_with('\n') {
@@ -541,11 +554,50 @@ mod tests {
         let mut tree = build(vec![BlockType::CodeBlock {
             language: "rust".into(),
             line_numbers: false,
+            repl: false,
         }]);
         let id = tree.root_blocks[0];
         tree.get_mut(id).unwrap().content = "fn main() {}".into();
         let out = serialize(&tree);
         assert!(out.contains("```rust\nfn main() {}\n```\n"));
+    }
+
+    /// BL-142 Phase 2a — the `repl` flag round-trips into a
+    /// `python repl` fence info string on serialize so a subsequent
+    /// parse sees the same flag.
+    #[test]
+    fn code_block_with_repl_emits_repl_token_in_fence() {
+        let mut tree = build(vec![BlockType::CodeBlock {
+            language: "python".into(),
+            line_numbers: false,
+            repl: true,
+        }]);
+        let id = tree.root_blocks[0];
+        tree.get_mut(id).unwrap().content = "print(1)".into();
+        let out = serialize(&tree);
+        assert!(
+            out.contains("```python repl\nprint(1)\n```\n"),
+            "expected '```python repl' fence; got:\n{out}"
+        );
+    }
+
+    /// BL-142 Phase 2a — `repl=true` with no language renders as
+    /// the bare `repl` token; round-trips back through
+    /// `parse_code_fence_info`.
+    #[test]
+    fn code_block_repl_only_emits_bare_repl_token() {
+        let mut tree = build(vec![BlockType::CodeBlock {
+            language: String::new(),
+            line_numbers: false,
+            repl: true,
+        }]);
+        let id = tree.root_blocks[0];
+        tree.get_mut(id).unwrap().content = "1+1".into();
+        let out = serialize(&tree);
+        assert!(
+            out.contains("```repl\n1+1\n```\n"),
+            "expected '```repl' bare fence; got:\n{out}"
+        );
     }
 
     #[test]
