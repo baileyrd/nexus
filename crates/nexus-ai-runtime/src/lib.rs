@@ -54,6 +54,7 @@ use ts_rs::TS;
 pub mod core_plugin;
 pub mod events;
 pub mod pool;
+pub mod republisher;
 pub mod scheduler;
 
 /// BL-134 Phase 4 — process-wide shared tokio handle accessor.

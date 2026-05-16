@@ -37,6 +37,16 @@ struct SessionRunArgs {
     strict_approval: bool,
     #[serde(default)]
     session_config: Option<crate::session::SessionConfig>,
+    /// BL-134 Phase 2b-ii — caller-supplied session id. When `Some`,
+    /// the handler uses this id instead of allocating its own
+    /// `Uuid::new_v4()` so the caller (today: `nexus-ai-runtime`)
+    /// can correlate mid-flight bus events (`stream_chunk`,
+    /// `round_proposed`) back to a runtime `task_id`. `None`
+    /// preserves the legacy self-allocate behaviour — every existing
+    /// non-runtime caller (CLI agent run, shell, MCP) leaves it
+    /// unset and gets the same UUID-per-run shape as before.
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,8 +164,16 @@ pub(crate) async fn handle_session_run(
 
     let session_config = parsed.session_config.clone().unwrap_or_default();
 
+    // BL-134 Phase 2b-ii — prefer the caller-supplied session id when
+    // present (typically the `nexus-ai-runtime` worker). Falling back
+    // to a fresh UUID preserves the legacy behaviour for every other
+    // call site that doesn't opt in.
+    let allocated_session_id = parsed
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     let session = if parsed.auto_approve {
-        let id = uuid::Uuid::new_v4().to_string();
         run_session_optionally_gated(
             &driver,
             &dispatcher,
@@ -164,7 +182,7 @@ pub(crate) async fn handle_session_run(
             &parsed.goal,
             &system,
             parsed.archetype.clone(),
-            id,
+            allocated_session_id,
             session_config,
         )
         .await
@@ -174,7 +192,7 @@ pub(crate) async fn handle_session_run(
             .unwrap_or(DEFAULT_APPROVAL_TIMEOUT_SECS)
             .clamp(1, MAX_APPROVAL_TIMEOUT_SECS);
         let policy = BusBridgePolicy {
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: allocated_session_id.clone(),
             ctx: Arc::clone(&ctx),
             pending: Arc::clone(&pending_approvals),
             timeout: Duration::from_secs(timeout),

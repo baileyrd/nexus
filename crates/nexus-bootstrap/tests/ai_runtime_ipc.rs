@@ -191,3 +191,106 @@ async fn bootstrap_publishes_shared_pool_handle_for_indexing_daemon() {
          indexing daemon falls back to a bespoke tokio runtime per BL-134 Phase 4"
     );
 }
+
+#[tokio::test]
+async fn republisher_translates_round_proposed_to_typed_ai_event() {
+    // BL-134 Phase 2b-ii — boot the runtime, manually register a
+    // (session_id → task_id) correlation via the public submit
+    // path, then publish a `com.nexus.agent.round_proposed` event
+    // with that session_id directly onto the kernel bus. The
+    // republisher subscribes to that topic in `wire_context`, looks
+    // up the correlation, and republishes as a typed
+    // `AiEvent::RoundProposed` under
+    // `com.nexus.ai.runtime.round_proposed`. We subscribe to the
+    // typed topic and assert the translated payload arrives.
+    use nexus_kernel::{EventFilter, NexusEvent};
+
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // Pin a session_id so we can drive the bus directly. Submit a
+    // Session task with the caller-supplied id; the runtime worker
+    // will try to call session_run (which will fail because the AI
+    // provider isn't configured) but that's fine — we only need the
+    // correlation entry to land before the worker reaches terminal.
+    // Hardcoded UUID v4 — saves wiring `uuid` into dev-dependencies
+    // just for one test. The wire only cares that this is a string
+    // the agent / republisher round-trip honours; opaqueness is the
+    // only contract.
+    let session_id = "11111111-2222-3333-4444-555555555555".to_string();
+    let submit_args = serde_json::json!({
+        "task": {
+            "kind": "session",
+            "args": {
+                "goal": "noop",
+                "session_id": &session_id,
+            }
+        }
+    });
+
+    // Subscribe to the typed-event output BEFORE submit so we don't
+    // race the worker.
+    let mut sub = runtime
+        .kernel
+        .event_bus()
+        .subscribe(EventFilter::CustomExact(
+            "com.nexus.ai.runtime.round_proposed".to_string(),
+        ));
+
+    let reply = call(&runtime, "submit", submit_args).await.expect("submit");
+    let _task_id = reply
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .expect("task_id")
+        .to_string();
+
+    // Wait briefly for the subscriber to register and the worker to
+    // ingest the correlation. The publish below is what the agent
+    // would have done from inside session_run; we shortcut directly
+    // to the bus.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    runtime
+        .kernel
+        .event_bus()
+        .publish_plugin(
+            "com.nexus.agent",
+            "com.nexus.agent.round_proposed",
+            serde_json::json!({
+                "session_id": session_id,
+                "round": 7,
+                "text": "I'd like to read the file",
+                "tool_calls": []
+            }),
+        )
+        .expect("publish round_proposed");
+
+    // Drain up to ~2s for the translated event. Once we see it,
+    // assert the typed shape.
+    let mut found = None;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(100), sub.recv()).await {
+            Ok(Ok(evt)) => {
+                if let NexusEvent::Custom { payload, .. } = &evt.event {
+                    found = Some(payload.clone());
+                    break;
+                }
+            }
+            Ok(Err(_closed)) => break,
+            Err(_timeout) => continue,
+        }
+    }
+
+    let payload = found.expect(
+        "typed AiEvent::RoundProposed must be republished within 2s of the inner publish",
+    );
+    assert_eq!(
+        payload.get("kind").and_then(|v| v.as_str()),
+        Some("round_proposed")
+    );
+    assert_eq!(payload.get("round").and_then(|v| v.as_i64()), Some(7));
+    assert_eq!(
+        payload.get("narration").and_then(|v| v.as_str()),
+        Some("I'd like to read the file")
+    );
+}

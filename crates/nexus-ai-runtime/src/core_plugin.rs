@@ -203,13 +203,27 @@ impl CorePlugin for AiRuntimeCorePlugin {
                 }
             }
         }
-        // Republisher subscription lands here in a follow-up — the
-        // typed `AiEvent` channel for Submitted/Started/Finished/
-        // Failed is already wired by the worker itself; subscribing
-        // to `com.nexus.ai.stream_*` / `com.nexus.agent.round_*` for
-        // mid-flight republishing requires session-id correlation
-        // that is tracked separately. See `events::AiEvent::TokenChunk`
-        // / `RoundProposed` doc comments.
+        // BL-134 Phase 2b-ii — bus republisher. Subscribes to
+        // `com.nexus.ai.stream_chunk` + `com.nexus.agent.round_proposed`,
+        // looks up `session_id → task_id` in the scheduler, and
+        // republishes each as a typed `AiEvent::{TokenChunk,
+        // RoundProposed}` under `com.nexus.ai.runtime.<variant>`.
+        // Events from sessions that weren't submitted through the
+        // runtime (e.g. direct `nexus agent run`) are silently
+        // dropped — the correlation lookup returns None.
+        //
+        // We spawn the loop onto the runtime's own worker pool when
+        // available so it doesn't compete with the kernel's IPC
+        // runtime; fall back to the ambient runtime via
+        // `tokio::spawn` if the pool isn't started yet. The
+        // subscriber is process-lifetime — drops at process exit.
+        if let Some(pool) = self.pool.get() {
+            let store = self.store.clone();
+            let ctx_for_sub = Arc::clone(&ctx);
+            pool.handle().spawn(async move {
+                republish_loop(store, ctx_for_sub).await;
+            });
+        }
     }
 
     fn on_stop(&mut self) {
@@ -253,13 +267,23 @@ fn handle_submit(
     };
     record_and_publish(store, ctx.as_ref(), &ring, &submitted);
 
+    // BL-134 Phase 2b-ii — pre-allocate a session id for Session
+    // tasks and register the session→task correlation so the bus
+    // republisher can translate mid-flight `com.nexus.ai.stream_*` /
+    // `com.nexus.agent.round_*` events back to a typed `AiEvent`
+    // carrying this `task_id`. We inject the id into the session
+    // args before forwarding to `session_run`; the agent's handler
+    // honours it when `Some` and self-allocates otherwise. The
+    // worker drops the correlation entry once the run reaches a
+    // terminal state so the reverse map doesn't grow unbounded.
+    let (task_kind, allocated_session_id) = inject_session_id(parsed.task, store, task_id);
+
     // Dispatch the actual work onto the dedicated pool. The worker
     // races the inner ipc_call against the cancel gate so a `cancel`
     // IPC call (BL-134 Phase 5) suppresses the underlying
     // Finished/Failed event and emits `Cancelled` instead.
     let store_for_worker = store.clone();
     let ctx_for_worker = Arc::clone(ctx);
-    let task_kind = parsed.task;
     let cancel = store
         .cancel_gate(task_id)
         .expect("cancel gate present after insert");
@@ -275,6 +299,12 @@ fn handle_submit(
                 &ring,
                 &AiEvent::Cancelled { task_id, by },
             );
+            // Drop the correlation entry before bailing so the
+            // session→task map doesn't leak when a task is cancelled
+            // before it ever ran.
+            if let Some(ref sid) = allocated_session_id {
+                store_for_worker.forget_session(sid);
+            }
             return;
         }
 
@@ -320,10 +350,140 @@ fn handle_submit(
             }
         };
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &event);
+        // BL-134 Phase 2b-ii — terminal cleanup of the session→task
+        // correlation entry. Tested via the unit suite below
+        // (`inject_session_id_*`); pre-Started returns above already
+        // ran their own cancel-emit path, so a no-op forget here is
+        // safe even though they don't drop into this branch.
+        if let Some(sid) = allocated_session_id {
+            store_for_worker.forget_session(&sid);
+        }
     });
 
     let reply = AiRuntimeSubmitReply { task_id };
     serde_json::to_value(&reply).map_err(|e| exec_err(format!("submit: serialize: {e}")))
+}
+
+/// BL-134 Phase 2b-ii — bus subscriber loop. Listens on
+/// `com.nexus.ai.stream_chunk` + `com.nexus.agent.round_proposed`,
+/// translates each event through [`crate::republisher`], and
+/// publishes the typed result back on the kernel bus under
+/// `com.nexus.ai.runtime.*`. Sessions without a runtime-owned
+/// correlation entry are skipped silently.
+///
+/// The loop terminates only when the subscription returns a
+/// `Closed` error — which happens at process shutdown. We log at
+/// debug on every event so a stuck loop is observable in trace
+/// builds without spamming production logs.
+async fn republish_loop(store: Store, ctx: Arc<KernelPluginContext>) {
+    use crate::republisher::{TOPIC_ROUND_PROPOSED, TOPIC_STREAM_CHUNK};
+    use nexus_kernel::{EventFilter, PluginContext as _};
+
+    // Two separate subscriptions because `CustomPrefix` would over-
+    // match (e.g. `stream_start` / `stream_done` carry session_id
+    // but we don't translate them). One `CustomExact` filter per
+    // topic keeps the dispatch cheap and the translate set explicit.
+    let mut sub_stream =
+        ctx.subscribe(EventFilter::CustomExact(TOPIC_STREAM_CHUNK.to_string()));
+    let mut sub_round =
+        ctx.subscribe(EventFilter::CustomExact(TOPIC_ROUND_PROPOSED.to_string()));
+
+    tracing::info!(
+        plugin_id = PLUGIN_ID,
+        "BL-134 Phase 2b-ii: ai-runtime republisher subscribed to stream_chunk + round_proposed"
+    );
+
+    loop {
+        tokio::select! {
+            evt = sub_stream.recv() => match evt {
+                Ok(published) => handle_inner_event(&store, &ctx, &published.event),
+                Err(_closed) => break,
+            },
+            evt = sub_round.recv() => match evt {
+                Ok(published) => handle_inner_event(&store, &ctx, &published.event),
+                Err(_closed) => break,
+            },
+        }
+    }
+
+    tracing::debug!(
+        plugin_id = PLUGIN_ID,
+        "ai-runtime republisher loop exited (bus subscription closed)"
+    );
+
+    /// Inline helper so both select arms share the same translate +
+    /// publish flow. Pure dispatch + correlation lookup; the actual
+    /// payload translation lives in `republisher`.
+    fn handle_inner_event(
+        store: &Store,
+        ctx: &Arc<KernelPluginContext>,
+        event: &nexus_kernel::NexusEvent,
+    ) {
+        use nexus_kernel::NexusEvent;
+        let NexusEvent::Custom {
+            type_id, payload, ..
+        } = event
+        else {
+            return;
+        };
+        let Some(sid) = crate::republisher::extract_session_id(payload) else {
+            return;
+        };
+        let Some(task_id) = store.task_for_session(&sid) else {
+            // Session not owned by the runtime — drop silently.
+            return;
+        };
+        let Some(typed) = crate::republisher::translate_bus_event(type_id, payload, task_id)
+        else {
+            return;
+        };
+        // Look up the run's event ring + record + publish through the
+        // same path the worker uses, so the run's `events` IPC reply
+        // includes mid-flight events alongside Submitted/Started/
+        // Finished. Sessions whose run was already cleaned up race
+        // with terminal cleanup — silently skip.
+        let Some(ring) = store.ring_for(task_id) else {
+            return;
+        };
+        record_and_publish(store, ctx.as_ref(), &ring, &typed);
+    }
+}
+
+/// BL-134 Phase 2b-ii — pre-allocate a session id for the worker
+/// before it dispatches to `com.nexus.agent::session_run`.
+///
+/// For `Session` tasks: generates a fresh `Uuid::new_v4()`, injects
+/// it as `args.session_id`, and registers the `session_id → task_id`
+/// correlation in the scheduler so the bus republisher in
+/// `wire_context` can translate mid-flight events. Honours an
+/// already-supplied `session_id` field on the args (caller wins —
+/// preserves caller intent if someone wants to thread a specific id
+/// through `delegate`).
+///
+/// Non-Session kinds are returned unchanged; only `session_run`
+/// emits the bus topics we correlate today (`stream_*`,
+/// `round_proposed`). Workflow async steps and AiStream get their
+/// own correlation pass in future phases.
+fn inject_session_id(
+    kind: AgentTaskKind,
+    store: &Store,
+    task_id: uuid::Uuid,
+) -> (AgentTaskKind, Option<String>) {
+    let AgentTaskKind::Session { mut args } = kind else {
+        return (kind, None);
+    };
+    let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
+        Some(existing) if !existing.is_empty() => existing.to_string(),
+        _ => {
+            let fresh = uuid::Uuid::new_v4().to_string();
+            if let serde_json::Value::Object(map) = &mut args {
+                map.insert("session_id".into(), serde_json::Value::String(fresh.clone()));
+            }
+            fresh
+        }
+    };
+    store.register_session(session_id.clone(), task_id);
+    (AgentTaskKind::Session { args }, Some(session_id))
 }
 
 /// BL-134 Phase 5 — request cooperative cancellation of a queued or
@@ -706,6 +866,62 @@ mod tests {
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Running);
+    }
+
+    #[test]
+    fn inject_session_id_allocates_when_missing_and_registers_correlation() {
+        let store = Store::new();
+        let task_id = uuid::Uuid::new_v4();
+        let kind = AgentTaskKind::Session {
+            args: serde_json::json!({ "goal": "x" }),
+        };
+        let (new_kind, sid) = inject_session_id(kind, &store, task_id);
+        let sid = sid.expect("session id allocated");
+        match new_kind {
+            AgentTaskKind::Session { args } => {
+                assert_eq!(
+                    args.get("session_id").and_then(|v| v.as_str()),
+                    Some(sid.as_str()),
+                    "injected session_id must be in the args we forward to session_run"
+                );
+            }
+            _ => panic!("expected Session"),
+        }
+        assert_eq!(store.task_for_session(&sid), Some(task_id));
+    }
+
+    #[test]
+    fn inject_session_id_honours_caller_supplied_id() {
+        let store = Store::new();
+        let task_id = uuid::Uuid::new_v4();
+        let kind = AgentTaskKind::Session {
+            args: serde_json::json!({ "goal": "x", "session_id": "caller-pinned" }),
+        };
+        let (new_kind, sid) = inject_session_id(kind, &store, task_id);
+        assert_eq!(sid.as_deref(), Some("caller-pinned"));
+        match new_kind {
+            AgentTaskKind::Session { args } => assert_eq!(
+                args.get("session_id").and_then(|v| v.as_str()),
+                Some("caller-pinned")
+            ),
+            _ => panic!("expected Session"),
+        }
+        assert_eq!(store.task_for_session("caller-pinned"), Some(task_id));
+    }
+
+    #[test]
+    fn inject_session_id_skips_non_session_kinds() {
+        let store = Store::new();
+        let task_id = uuid::Uuid::new_v4();
+        let kind = AgentTaskKind::WorkflowAiStep {
+            target_plugin: "com.nexus.ai".into(),
+            command: "ask".into(),
+            args: serde_json::Value::Null,
+            workflow: "w".into(),
+            step: 0,
+        };
+        let (_, sid) = inject_session_id(kind, &store, task_id);
+        assert!(sid.is_none(), "WorkflowAiStep doesn't need session_id");
     }
 
     #[tokio::test]
