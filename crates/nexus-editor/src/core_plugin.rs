@@ -22,9 +22,11 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::block::{Block, BlockType};
 use crate::markdown::{MarkdownParser, MarkdownSerializer, ParseOptions};
 use crate::tree::BlockTree;
 use crate::undo_tree::{PersistedUndoTree, UndoTree};
+use uuid::Uuid;
 
 /// Plugin id of the storage core plugin — the target of the editor's
 /// IPC `read_file`/`write_file` calls.
@@ -220,7 +222,49 @@ pub const HANDLER_EXECUTE_DATABASE_VIEW: u32 = 12;
 /// `apply_transaction` / `undo` / `redo`.
 pub const HANDLER_RESOLVE_BLOCK_LINK: u32 = 13;
 
+/// Handler id for `open_excerpts`. Args:
+/// `{ "items": [{ "relpath": String, "line_start": u32, "line_end": u32, "label": Option<String> }, ...] }`;
+/// Returns:
+/// `{ "relpath": String, "tree": BlockTree, ... }` (an
+/// [`EditorSnapshot`] keyed by a synthetic `multibuffer://<uuid>`
+/// relpath that subsequent reads should pass back to `get_tree` /
+/// `close`).
+///
+/// Constructs a read-only synthetic session whose root blocks are
+/// [`crate::BlockType::Excerpt`] entries — one per requested item,
+/// each carrying the captured snapshot of `relpath` lines
+/// `line_start..=line_end` (1-based, inclusive). Source files are
+/// read via `com.nexus.storage::read_file` (so capability checks +
+/// path resolution apply); a per-item read failure aborts the call.
+///
+/// BL-141 Phase 1 semantics:
+/// - Sessions are **read-only**: `apply_transaction` and `save`
+///   reject `is_synthetic` sessions explicitly. Phase 2 will route
+///   per-excerpt edits to the source files' sessions.
+/// - Empty `items` is rejected (`-32602` invalid params).
+/// - Overlapping ranges within a single source file are merged
+///   (same `relpath`, `(a.line_start..=a.line_end) ∩ (b.line_start..=b.line_end)
+///   != ∅`) so a multibuffer over diagnostics doesn't render the
+///   same lines twice.
+pub const HANDLER_OPEN_EXCERPTS: u32 = 14;
+
 // ── Wire types ───────────────────────────────────────────────────────────────
+
+/// Per-item input shape for [`HANDLER_OPEN_EXCERPTS`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExcerptRequest {
+    /// Forge-relative path of the source file to read from.
+    pub relpath: String,
+    /// First line to include (1-based, inclusive).
+    pub line_start: u32,
+    /// Last line to include (1-based, inclusive).
+    pub line_end: u32,
+    /// Optional caller-supplied label (e.g. the diagnostic message
+    /// or reference site name) rendered alongside the
+    /// `{relpath}#L{line_start}-L{line_end}` header.
+    #[serde(default)]
+    pub label: Option<String>,
+}
 
 /// Response shape for [`HANDLER_APPLY_TRANSACTION`] (BL-123).
 ///
@@ -325,6 +369,13 @@ struct Session {
     relpath: String,
     /// Monotonic mutation counter. See [`EditorSnapshot::revision`].
     revision: u64,
+    /// BL-141 — `true` for multibuffer / excerpt sessions assembled
+    /// from `open_excerpts`. Synthetic sessions are not backed by a
+    /// single source file on disk; `save` and `apply_transaction`
+    /// reject them so the caller can't silently corrupt the source
+    /// files behind their excerpts. (Read-write multibuffer with
+    /// per-excerpt edit routing is BL-141 Phase 2.)
+    is_synthetic: bool,
 }
 
 /// Editor core plugin.
@@ -464,6 +515,12 @@ impl CorePlugin for EditorCorePlugin {
             HANDLER_RESOLVE_BLOCK_LINK => {
                 handle_resolve_block_link_sync(&self.forge_root, &self.sessions, args)
             }
+            HANDLER_OPEN_EXCERPTS => Err(exec_err(
+                "open_excerpts requires the async dispatch path \
+                 (storage IPC for source-file reads); call via the \
+                 kernel runtime"
+                    .to_string(),
+            )),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -479,7 +536,8 @@ impl CorePlugin for EditorCorePlugin {
             | HANDLER_CLOSE
             | HANDLER_SAVE
             | HANDLER_EXECUTE_DATABASE_VIEW
-            | HANDLER_RESOLVE_BLOCK_LINK => {}
+            | HANDLER_RESOLVE_BLOCK_LINK
+            | HANDLER_OPEN_EXCERPTS => {}
             _ => return None,
         }
 
@@ -513,6 +571,9 @@ impl CorePlugin for EditorCorePlugin {
                         &args,
                     )
                     .await
+                }
+                HANDLER_OPEN_EXCERPTS => {
+                    handle_open_excerpts(&forge_root, sessions, ctx, &args).await
                 }
                 _ => Err(exec_err(format!("unknown async handler id {handler_id}"))),
             }
@@ -572,6 +633,7 @@ fn finish_open_with_undo(
         undo: restored_undo.unwrap_or_default(),
         relpath: relpath.to_string(),
         revision: 0,
+        is_synthetic: false,
     };
     let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
     guard.insert(relpath.to_string(), session);
@@ -913,6 +975,11 @@ fn handle_get_tree(
 }
 
 /// Serialize the session's block tree to markdown under the session lock.
+///
+/// BL-141: synthetic (multibuffer) sessions are rejected — they don't
+/// correspond to a single source file, so `save` can't sensibly write
+/// them anywhere. The Phase 2 implementation will dispatch to every
+/// excerpted source file individually.
 fn serialize_session(
     sessions: &Mutex<HashMap<String, Session>>,
     relpath: &str,
@@ -921,6 +988,12 @@ fn serialize_session(
     let s = guard
         .get(relpath)
         .ok_or_else(|| exec_err(format!("save: no open session for '{relpath}'")))?;
+    if s.is_synthetic {
+        return Err(exec_err(format!(
+            "save: session '{relpath}' is a read-only multibuffer; \
+             save the source files individually (BL-141 Phase 1)"
+        )));
+    }
     Ok(MarkdownSerializer::serialize(&s.tree))
 }
 
@@ -1216,6 +1289,197 @@ async fn handle_resolve_block_link_async(
     Ok(resolve_in_tree(&tree, block_id))
 }
 
+// ── BL-141 — open_excerpts ──────────────────────────────────────────────────
+
+/// Implementation of [`HANDLER_OPEN_EXCERPTS`]. Assembles a synthetic
+/// read-only session whose root blocks are
+/// [`crate::BlockType::Excerpt`] entries, one per merged input item.
+///
+/// Source files are read via `com.nexus.storage::read_file` (with a
+/// local-fs fallback for context-less unit tests). Per-source files
+/// are read once even if the input lists multiple ranges from the
+/// same path.
+async fn handle_open_excerpts(
+    forge_root: &Path,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    ctx: Option<Arc<KernelPluginContext>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let items_value = args
+        .get("items")
+        .ok_or_else(|| exec_err("open_excerpts: missing 'items'".to_string()))?
+        .clone();
+    let raw_items: Vec<ExcerptRequest> = serde_json::from_value(items_value)
+        .map_err(|e| exec_err(format!("open_excerpts: invalid 'items': {e}")))?;
+    if raw_items.is_empty() {
+        return Err(exec_err(
+            "open_excerpts: 'items' must be non-empty".to_string(),
+        ));
+    }
+
+    // Validate each item's line range up front; cheaper to fail fast
+    // than to pay for storage reads on a doomed call.
+    for (idx, item) in raw_items.iter().enumerate() {
+        if item.line_start == 0 || item.line_end == 0 {
+            return Err(exec_err(format!(
+                "open_excerpts: item {idx} has zero line number (1-based)"
+            )));
+        }
+        if item.line_start > item.line_end {
+            return Err(exec_err(format!(
+                "open_excerpts: item {idx} has line_start ({}) > line_end ({})",
+                item.line_start, item.line_end
+            )));
+        }
+    }
+
+    // Walk in input order; for each item merge with any previously-kept
+    // entry from the same source file whose range touches or overlaps.
+    // Preserves first-seen order across the assembled view, which
+    // matters for diagnostics / find-refs lists that flow in a
+    // meaningful sequence (e.g. file → file → file).
+    let merged = merge_excerpt_requests(raw_items);
+
+    // Read every unique source file exactly once. Per-file failures
+    // abort the call — a partial multibuffer is more confusing than a
+    // clear error.
+    let mut sources: HashMap<String, String> = HashMap::new();
+    for item in &merged {
+        if sources.contains_key(&item.relpath) {
+            continue;
+        }
+        let source = read_source_for_excerpts(forge_root, ctx.as_deref(), &item.relpath).await?;
+        sources.insert(item.relpath.clone(), source);
+    }
+
+    // Build the synthetic block tree.
+    let mut tree = BlockTree::default();
+    for item in merged {
+        let source = sources.get(&item.relpath).expect("just inserted");
+        let snippet = slice_lines(source, item.line_start, item.line_end);
+        let block = Block::new(BlockType::Excerpt {
+            source_relpath: item.relpath.clone(),
+            line_start: item.line_start,
+            line_end: item.line_end,
+            label: item.label.clone(),
+        })
+        .with_content(snippet);
+        let next_idx = tree.root_blocks.len();
+        tree.insert(block, None, next_idx)
+            .map_err(|e| exec_err(format!("open_excerpts: tree insert: {e}")))?;
+    }
+
+    let synthetic_relpath = format!("multibuffer://{}", Uuid::new_v4());
+    let session = Session {
+        tree,
+        undo: UndoTree::new(),
+        relpath: synthetic_relpath.clone(),
+        revision: 0,
+        is_synthetic: true,
+    };
+
+    {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        guard.insert(synthetic_relpath.clone(), session);
+    }
+    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    let s = guard
+        .get(&synthetic_relpath)
+        .expect("session was just inserted");
+    snapshot_to_value(&snapshot_of(s), "open_excerpts")
+}
+
+/// Per-source-file read used by `open_excerpts`. Mirrors the
+/// `read_file` shape of `handle_open_async` / `handle_resolve_block_link_async`.
+async fn read_source_for_excerpts(
+    forge_root: &Path,
+    ctx: Option<&KernelPluginContext>,
+    relpath: &str,
+) -> Result<String, PluginError> {
+    if let Some(ctx) = ctx {
+        #[derive(Deserialize)]
+        struct Resp {
+            bytes: Option<Vec<u8>>,
+        }
+        let value = ctx
+            .ipc_call(
+                STORAGE_PLUGIN_ID,
+                "read_file",
+                serde_json::json!({ "path": relpath }),
+                STORAGE_IPC_TIMEOUT,
+            )
+            .await
+            .map_err(|e| exec_err(format!("open_excerpts: storage.read_file '{relpath}': {e}")))?;
+        let resp: Resp = serde_json::from_value(value).map_err(|e| {
+            exec_err(format!(
+                "open_excerpts: storage.read_file decode '{relpath}': {e}"
+            ))
+        })?;
+        let bytes = resp
+            .bytes
+            .ok_or_else(|| exec_err(format!("open_excerpts: file not found: '{relpath}'")))?;
+        String::from_utf8(bytes)
+            .map_err(|_| exec_err(format!("open_excerpts: '{relpath}' is not UTF-8")))
+    } else {
+        let abs = resolve_within(forge_root, relpath)
+            .map_err(|e| exec_err(format!("open_excerpts: {e}")))?;
+        fs::read_to_string(&abs).map_err(|e| {
+            exec_err(format!(
+                "open_excerpts: read '{}': {e}",
+                abs.display()
+            ))
+        })
+    }
+}
+
+/// Merge per-source-file overlapping or adjacent ranges in
+/// first-appearance order. Two ranges `(a_s..=a_e)` and `(b_s..=b_e)`
+/// merge when `b_s <= a_e + 1` (i.e. touching counts as overlapping).
+/// Labels from later-merged-in items are dropped — the first item's
+/// label wins, matching the first-appearance semantic.
+fn merge_excerpt_requests(items: Vec<ExcerptRequest>) -> Vec<ExcerptRequest> {
+    let mut merged: Vec<ExcerptRequest> = Vec::new();
+    for item in items {
+        let mut consumed = false;
+        for existing in &mut merged {
+            if existing.relpath != item.relpath {
+                continue;
+            }
+            let touches = item.line_start <= existing.line_end.saturating_add(1)
+                && existing.line_start <= item.line_end.saturating_add(1);
+            if touches {
+                existing.line_start = existing.line_start.min(item.line_start);
+                existing.line_end = existing.line_end.max(item.line_end);
+                consumed = true;
+                break;
+            }
+        }
+        if !consumed {
+            merged.push(item);
+        }
+    }
+    merged
+}
+
+/// Extract the inclusive 1-based line range `[start, end]` from
+/// `source`, joining with `\n`. Out-of-range start clamps to an
+/// empty string; out-of-range end clamps to the source's last line.
+fn slice_lines(source: &str, start: u32, end: u32) -> String {
+    let total_usize = source.lines().count();
+    let total = u32::try_from(total_usize).unwrap_or(u32::MAX);
+    if start > total {
+        return String::new();
+    }
+    let start_idx = (start - 1) as usize;
+    let end_idx = (end.min(total) - 1) as usize;
+    source
+        .lines()
+        .skip(start_idx)
+        .take(end_idx - start_idx + 1)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// BL-126: structural sum of the user-controlled bytes carried by
 /// `tx`. Replaces the pre-BL-126 `serde_json::to_vec(&tx_value).len()`
 /// pre-check that paid for a throwaway full-tx serialize on the
@@ -1350,6 +1614,17 @@ fn handle_apply_transaction(
                 "apply_transaction: no open session for '{relpath}'"
             ))
         })?;
+        // BL-141 Phase 1 — multibuffer / excerpt sessions are read-only.
+        // Phase 2 will route per-excerpt edits to the source files'
+        // sessions; until then, refuse the call so the caller can't
+        // mutate the synthetic snapshot in a way that doesn't round-trip.
+        if s.is_synthetic {
+            return Err(exec_err(format!(
+                "apply_transaction: session '{relpath}' is a read-only \
+                 multibuffer; edit individual source files instead \
+                 (BL-141 Phase 1)"
+            )));
+        }
         // BL-073: capture the operation set before consuming `tx` so we
         // can scan new wikilink / block-ref annotations after apply and
         // auto-stamp inbound-link targets. The post-apply scan reads
@@ -1606,6 +1881,7 @@ fn handle_sync_content(
             undo: UndoTree::new(),
             relpath: relpath.clone(),
             revision: 0,
+            is_synthetic: false,
         });
         session.tree = tree;
         session.revision = session.revision.saturating_add(1);

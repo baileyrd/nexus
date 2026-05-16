@@ -295,6 +295,33 @@ pub enum BlockType {
         /// Deepest heading level to include.
         max_depth: u8,
     },
+
+    /// BL-141 — read-only excerpt from another file, rendered inline as
+    /// part of a synthetic multibuffer session. The `content` field of
+    /// the parent [`Block`] holds the snapshot text (the lines from
+    /// `source_relpath` between `line_start` and `line_end`, inclusive,
+    /// captured at `open_excerpts` time). `label` is an optional
+    /// caller-supplied header (e.g. the diagnostic message, the
+    /// reference site, the rename target name).
+    ///
+    /// Excerpt blocks live in synthetic sessions only — they're never
+    /// produced by markdown parse and never written back to disk
+    /// through `save`. Multibuffer sessions reject `apply_transaction`
+    /// in this first cut; read-write routing is deferred to BL-141
+    /// Phase 2.
+    Excerpt {
+        /// Forge-relative path of the source file this excerpt was
+        /// captured from.
+        source_relpath: String,
+        /// First line of the captured range (1-based, inclusive).
+        line_start: u32,
+        /// Last line of the captured range (1-based, inclusive).
+        line_end: u32,
+        /// Optional caller-supplied label rendered alongside the
+        /// `{source_relpath}#L{line_start}-L{line_end}` header (e.g.
+        /// the diagnostic message for a multibuffer of errors).
+        label: Option<String>,
+    },
 }
 
 /// Rendering mode for an [`BlockType::Embed`].

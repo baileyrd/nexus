@@ -32,7 +32,20 @@ const CMD = {
   stampBlock: 'stamp_block',
   executeDatabaseView: 'execute_database_view',
   resolveBlockLink: 'resolve_block_link',
+  openExcerpts: 'open_excerpts',
 } as const
+
+/** BL-141 — per-item input shape for `open_excerpts`. Mirrors the
+ *  Rust `ExcerptRequest` (`crates/nexus-editor/src/core_plugin.rs`). */
+export interface ExcerptRequest {
+  relpath: string
+  /** 1-based, inclusive. */
+  line_start: number
+  /** 1-based, inclusive. */
+  line_end: number
+  /** Optional caller-supplied header (e.g. the diagnostic message). */
+  label?: string
+}
 
 /** Result of a `stamp_block` IPC call. Mirrors the Rust handler's
  *  return shape — `block_id` is the lookup id (post-rekey it equals
@@ -230,6 +243,31 @@ export class EditorKernelClient {
       EDITOR_PLUGIN_ID,
       CMD.resolveBlockLink,
       { file_relpath: fileRelpath, block_id: blockId },
+    )
+  }
+
+  /**
+   * BL-141 Phase 1 — open a synthetic multibuffer session whose root
+   * blocks are `Excerpt` snippets pulled from one or more source
+   * files. Returns an [`EditorSnapshot`] keyed by a
+   * `multibuffer://<uuid>` synthetic relpath that subsequent reads
+   * (`getTree`, `close`) should pass back verbatim.
+   *
+   * Phase 1 is **read-only**: `applyTransaction` / `save` against the
+   * synthetic relpath surface an explicit error referencing BL-141.
+   * Overlapping ranges within the same source file are merged in
+   * first-appearance order; an empty `items` list is rejected.
+   *
+   * Renderer wire-up (file-path separators, per-excerpt headers) is
+   * Phase 1.5 — today the snapshot can be opened in the standard
+   * `EditorView`, which will render each excerpt's snapshot text but
+   * not yet decorate the synthetic block boundaries.
+   */
+  openExcerpts(items: ExcerptRequest[]): Promise<EditorSnapshot> {
+    return this.api.invoke<EditorSnapshot>(
+      EDITOR_PLUGIN_ID,
+      CMD.openExcerpts,
+      { items },
     )
   }
 

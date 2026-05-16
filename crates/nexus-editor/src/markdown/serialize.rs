@@ -166,8 +166,13 @@ fn serialize_block(tree: &BlockTree, id: BlockId, out: &mut String) {
         BlockType::SyncedBlock { .. }
         | BlockType::ColumnLayout { .. }
         | BlockType::Column { .. }
-        | BlockType::TableOfContents { .. } => {
+        | BlockType::TableOfContents { .. }
+        | BlockType::Excerpt { .. } => {
             // No canonical markdown form yet; emit content if any.
+            // BL-141 Excerpt blocks live in synthetic sessions only
+            // (never persisted), so the serialize path is reached only
+            // when `get_markdown` is called against a multibuffer for
+            // diagnostic / copy purposes.
             if block.content.is_empty() {
                 push_block_stamp_line(block, out);
             } else {

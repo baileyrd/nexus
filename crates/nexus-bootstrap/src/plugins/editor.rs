@@ -62,6 +62,10 @@ pub(super) fn register(
                         "resolve_block_link",
                         nexus_editor::core_plugin::HANDLER_RESOLVE_BLOCK_LINK,
                     ),
+                    (
+                        "open_excerpts",
+                        nexus_editor::core_plugin::HANDLER_OPEN_EXCERPTS,
+                    ),
                 ]),
             ),
             forge_root,
