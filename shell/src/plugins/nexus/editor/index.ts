@@ -157,6 +157,9 @@ import {
   CONFIG_REPL_KERNELS,
   REPL_KERNELS_DEFAULT_JSON,
 } from './replKernels.ts'
+// BL-142 Phase 2b.1 — tab-close teardown for REPL sessions.
+import { makeReplClient } from './replClient.ts'
+import { useReplStore } from './replStore.ts'
 // Visual settings — applied live via CSS custom properties on :root
 // (see applyEditorCssVars below) and via prop flow to CodeMirrorHost.
 const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
@@ -508,6 +511,14 @@ export const editorPlugin: Plugin = {
         }
       }
       useEditorStore.getState().closeTab(relpath)
+      // BL-142 Phase 2b.1 — tear down any REPL sessions tagged to
+      // this relpath so they don't leak on tab close. Best-effort:
+      // a transport error during teardown is swallowed by
+      // `stopForTab`, the store entry is cleared regardless so the
+      // tab-reopen path gets a clean slate.
+      void useReplStore
+        .getState()
+        .stopForTab(makeReplClient(api.kernel), relpath)
     }
 
     // Phase 7: legacy SlotRegistry slot:'editorArea' entry removed.
@@ -1832,6 +1843,13 @@ export const editorPlugin: Plugin = {
         if (/^untitled-\d+$/i.test(tab.relpath)) continue
         if (!mdRelpaths.has(tab.relpath)) {
           store.closeTab(tab.relpath)
+          // BL-142 Phase 2b.1 — same teardown as confirmAndClose;
+          // covers tabs that vanish because the workspace dropped
+          // their leaf (e.g. forge switch) rather than via the ×
+          // button.
+          void useReplStore
+            .getState()
+            .stopForTab(makeReplClient(api.kernel), tab.relpath)
         }
       }
 
