@@ -974,27 +974,118 @@ fn handle_get_tree(
     snapshot_to_value(&snapshot_of(s), "get_tree")
 }
 
-/// Serialize the session's block tree to markdown under the session lock.
+/// BL-141 Phase 2 — one excerpt to splice back into its source
+/// file's line range. Built by `plan_save` for synthetic sessions;
+/// applied by `splice_excerpts` after the source is read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExcerptSplice {
+    /// First line of the range to replace (1-based, inclusive).
+    line_start: u32,
+    /// Last line of the range to replace (1-based, inclusive).
+    line_end: u32,
+    /// New content (the user-edited multibuffer text for this
+    /// excerpt). May contain embedded newlines.
+    new_content: String,
+}
+
+/// BL-141 Phase 2 — what to do for a single `save` dispatch.
+enum SavePlan {
+    /// Regular session — write the canonical markdown serialization
+    /// to `relpath`.
+    Regular { markdown: String },
+    /// Synthetic (multibuffer) session — for each `(source_relpath,
+    /// splices)` pair, read the source file, apply every splice in
+    /// reverse-line-order, write back.
+    Splice {
+        sources: Vec<(String, Vec<ExcerptSplice>)>,
+    },
+}
+
+/// Plan the save under the session lock (so the IPC handler holds
+/// the lock for the minimum time + the actual I/O can happen
+/// without contending with concurrent dispatches).
 ///
-/// BL-141: synthetic (multibuffer) sessions are rejected — they don't
-/// correspond to a single source file, so `save` can't sensibly write
-/// them anywhere. The Phase 2 implementation will dispatch to every
-/// excerpted source file individually.
-fn serialize_session(
+/// Splits the path: regular sessions return their serialized
+/// markdown directly; synthetic sessions group their Excerpt
+/// blocks by source file so the caller can issue exactly one
+/// read+write per source even when multiple excerpts hit the same
+/// file.
+fn plan_save(
     sessions: &Mutex<HashMap<String, Session>>,
     relpath: &str,
-) -> Result<String, PluginError> {
+) -> Result<SavePlan, PluginError> {
     let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
     let s = guard
         .get(relpath)
         .ok_or_else(|| exec_err(format!("save: no open session for '{relpath}'")))?;
-    if s.is_synthetic {
-        return Err(exec_err(format!(
-            "save: session '{relpath}' is a read-only multibuffer; \
-             save the source files individually (BL-141 Phase 1)"
-        )));
+    if !s.is_synthetic {
+        return Ok(SavePlan::Regular {
+            markdown: MarkdownSerializer::serialize(&s.tree),
+        });
     }
-    Ok(MarkdownSerializer::serialize(&s.tree))
+    let mut by_source: HashMap<String, Vec<ExcerptSplice>> = HashMap::new();
+    for block_id in &s.tree.root_blocks {
+        let Some(block) = s.tree.blocks.get(block_id) else {
+            continue;
+        };
+        if let BlockType::Excerpt {
+            source_relpath,
+            line_start,
+            line_end,
+            ..
+        } = &block.ty
+        {
+            by_source
+                .entry(source_relpath.clone())
+                .or_default()
+                .push(ExcerptSplice {
+                    line_start: *line_start,
+                    line_end: *line_end,
+                    new_content: block.content.clone(),
+                });
+        }
+    }
+    // Stable ordering across saves: sort source relpaths alphabetically
+    // so test fixtures + audit logs see a deterministic write order.
+    let mut sources: Vec<(String, Vec<ExcerptSplice>)> = by_source.into_iter().collect();
+    sources.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(SavePlan::Splice { sources })
+}
+
+/// Splice every entry in `splices` into `old`. Splices are applied
+/// in reverse-line-order so earlier splices don't shift the line
+/// numbers of later ones. Out-of-range entries (line_start past
+/// `old`'s end) are skipped defensively rather than panicking — a
+/// stale multibuffer (e.g. one whose source was edited externally
+/// since the excerpt was captured) shouldn't crash the save.
+///
+/// Preserves the trailing newline if `old` ended with one, matching
+/// the canonical `MarkdownSerializer::serialize` convention.
+fn splice_excerpts(old: &str, mut splices: Vec<ExcerptSplice>) -> String {
+    // Sort by line_start descending — splice from the END of the
+    // file toward the start so a splice that grows or shrinks one
+    // range never invalidates the line numbers of a not-yet-applied
+    // splice further up the file.
+    splices.sort_by(|a, b| b.line_start.cmp(&a.line_start));
+    let trailing_nl = old.ends_with('\n');
+    let mut lines: Vec<String> = old.lines().map(String::from).collect();
+    for sp in splices {
+        let start_idx = (sp.line_start.saturating_sub(1)) as usize;
+        if start_idx > lines.len() {
+            // Excerpt range starts past EOF — skip; preserving the
+            // existing source content is better than appending the
+            // edit into an arbitrary spot.
+            continue;
+        }
+        let end_idx_exclusive = std::cmp::min(sp.line_end as usize, lines.len());
+        let new_lines: Vec<String> = sp.new_content.lines().map(String::from).collect();
+        lines.splice(start_idx..end_idx_exclusive, new_lines);
+    }
+    let mut out = lines.join("\n");
+    if trailing_nl {
+        out.push('\n');
+    }
+    out
 }
 
 fn handle_save_sync(
@@ -1003,10 +1094,33 @@ fn handle_save_sync(
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "save")?;
-    let markdown = serialize_session(sessions, &relpath)?;
-    let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("save: {e}")))?;
-    atomic_write(&abs, &markdown)
-        .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
+    match plan_save(sessions, &relpath)? {
+        SavePlan::Regular { markdown } => {
+            let abs = resolve_within(forge_root, &relpath)
+                .map_err(|e| exec_err(format!("save: {e}")))?;
+            atomic_write(&abs, &markdown)
+                .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
+        }
+        SavePlan::Splice { sources } => {
+            for (source_relpath, splices) in sources {
+                let abs = resolve_within(forge_root, &source_relpath)
+                    .map_err(|e| exec_err(format!("save: {e}")))?;
+                let old = fs::read_to_string(&abs).map_err(|e| {
+                    exec_err(format!(
+                        "save: read source '{}': {e}",
+                        abs.display()
+                    ))
+                })?;
+                let new = splice_excerpts(&old, splices);
+                atomic_write(&abs, &new).map_err(|e| {
+                    exec_err(format!(
+                        "save: write source '{}': {e}",
+                        abs.display()
+                    ))
+                })?;
+            }
+        }
+    }
     Ok(serde_json::json!({}))
 }
 
@@ -1017,27 +1131,77 @@ async fn handle_save_async(
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "save")?;
-    let markdown = serialize_session(&sessions, &relpath)?;
+    let plan = plan_save(&sessions, &relpath)?;
 
     if let Some(ctx) = ctx.as_deref() {
         // Canonical path: storage's `write_file` does temp + fsync +
         // rename and updates the SQLite index atomically with the disk
         // write so a later `open` sees consistent state.
-        ctx.ipc_call(
-            STORAGE_PLUGIN_ID,
-            "write_file",
-            serde_json::json!({ "path": relpath, "bytes": markdown.as_bytes() }),
-            STORAGE_IPC_TIMEOUT,
-        )
-        .await
-        .map_err(|e| exec_err(format!("save: storage.write_file: {e}")))?;
+        match plan {
+            SavePlan::Regular { markdown } => {
+                ctx.ipc_call(
+                    STORAGE_PLUGIN_ID,
+                    "write_file",
+                    serde_json::json!({ "path": relpath, "bytes": markdown.as_bytes() }),
+                    STORAGE_IPC_TIMEOUT,
+                )
+                .await
+                .map_err(|e| exec_err(format!("save: storage.write_file: {e}")))?;
+            }
+            SavePlan::Splice { sources } => {
+                for (source_relpath, splices) in sources {
+                    let old =
+                        read_source_for_excerpts(forge_root, Some(ctx), &source_relpath).await?;
+                    let new = splice_excerpts(&old, splices);
+                    ctx.ipc_call(
+                        STORAGE_PLUGIN_ID,
+                        "write_file",
+                        serde_json::json!({
+                            "path": source_relpath,
+                            "bytes": new.as_bytes(),
+                        }),
+                        STORAGE_IPC_TIMEOUT,
+                    )
+                    .await
+                    .map_err(|e| {
+                        exec_err(format!(
+                            "save: storage.write_file '{source_relpath}': {e}"
+                        ))
+                    })?;
+                }
+            }
+        }
         Ok(serde_json::json!({}))
     } else {
-        // Fallback for context-less unit tests.
-        let abs =
-            resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("save: {e}")))?;
-        atomic_write(&abs, &markdown)
-            .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
+        // Fallback for context-less unit tests — mirror the sync path
+        // (direct local-fs writes).
+        match plan {
+            SavePlan::Regular { markdown } => {
+                let abs = resolve_within(forge_root, &relpath)
+                    .map_err(|e| exec_err(format!("save: {e}")))?;
+                atomic_write(&abs, &markdown)
+                    .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
+            }
+            SavePlan::Splice { sources } => {
+                for (source_relpath, splices) in sources {
+                    let abs = resolve_within(forge_root, &source_relpath)
+                        .map_err(|e| exec_err(format!("save: {e}")))?;
+                    let old = fs::read_to_string(&abs).map_err(|e| {
+                        exec_err(format!(
+                            "save: read source '{}': {e}",
+                            abs.display()
+                        ))
+                    })?;
+                    let new = splice_excerpts(&old, splices);
+                    atomic_write(&abs, &new).map_err(|e| {
+                        exec_err(format!(
+                            "save: write source '{}': {e}",
+                            abs.display()
+                        ))
+                    })?;
+                }
+            }
+        }
         Ok(serde_json::json!({}))
     }
 }
@@ -1614,16 +1778,49 @@ fn handle_apply_transaction(
                 "apply_transaction: no open session for '{relpath}'"
             ))
         })?;
-        // BL-141 Phase 1 — multibuffer / excerpt sessions are read-only.
-        // Phase 2 will route per-excerpt edits to the source files'
-        // sessions; until then, refuse the call so the caller can't
-        // mutate the synthetic snapshot in a way that doesn't round-trip.
+        // BL-141 Phase 2 (Approach A) — multibuffer sessions accept
+        // `UpdateBlockContent` ops on Excerpt blocks. The lossy MVP
+        // treats each excerpt as opaque text: save-time splices the
+        // new content into the source file's line range. Structural
+        // ops (InsertBlock / DeleteBlock / ReparentBlock) stay
+        // rejected because they don't translate cleanly to a
+        // line-range splice without per-character position mapping
+        // (Approach B — deferred).
+        //
+        // Text-typing ops (InsertText / DeleteText) also stay
+        // rejected for now: routing them through `UpdateBlockContent`
+        // would require the shell to re-render the full excerpt on
+        // every keystroke, which is exactly the latency hit BL-123
+        // optimized away. The shell-side flow for Approach A is
+        // "edit in a textarea, dispatch one UpdateBlockContent on
+        // commit" — same shape as the bases inline-edit path.
         if s.is_synthetic {
-            return Err(exec_err(format!(
-                "apply_transaction: session '{relpath}' is a read-only \
-                 multibuffer; edit individual source files instead \
-                 (BL-141 Phase 1)"
-            )));
+            for op in &tx.operations {
+                let crate::Operation::UpdateBlockContent { id, .. } = op else {
+                    return Err(exec_err(format!(
+                        "apply_transaction: session '{relpath}' is a \
+                         multibuffer; only UpdateBlockContent ops on \
+                         Excerpt blocks are accepted in Phase 2 \
+                         Approach A (got a non-content op — InsertText / \
+                         DeleteText / InsertBlock / DeleteBlock / \
+                         ReparentBlock / UpdateAnnotations are routed \
+                         per-keystroke to the source file's session in a \
+                         future Approach B)"
+                    )));
+                };
+                let target = s.tree.blocks.get(id).ok_or_else(|| {
+                    exec_err(format!(
+                        "apply_transaction: multibuffer block {id} not found"
+                    ))
+                })?;
+                if !matches!(target.ty, BlockType::Excerpt { .. }) {
+                    return Err(exec_err(format!(
+                        "apply_transaction: multibuffer block {id} is not \
+                         an Excerpt block; only Excerpt blocks are editable \
+                         in a synthetic session"
+                    )));
+                }
+            }
         }
         // BL-073: capture the operation set before consuming `tx` so we
         // can scan new wikilink / block-ref annotations after apply and
@@ -2119,6 +2316,81 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod splice_tests {
+    use super::{splice_excerpts, ExcerptSplice};
+
+    fn sp(line_start: u32, line_end: u32, new_content: &str) -> ExcerptSplice {
+        ExcerptSplice {
+            line_start,
+            line_end,
+            new_content: new_content.to_string(),
+        }
+    }
+
+    #[test]
+    fn splice_single_range_preserves_surrounding_lines() {
+        let old = "L1\nL2\nL3\nL4\nL5\n";
+        let got = splice_excerpts(old, vec![sp(2, 4, "X\nY")]);
+        assert_eq!(got, "L1\nX\nY\nL5\n");
+    }
+
+    #[test]
+    fn splice_preserves_no_trailing_newline_when_source_had_none() {
+        let old = "L1\nL2\nL3";
+        let got = splice_excerpts(old, vec![sp(2, 2, "MID")]);
+        assert_eq!(got, "L1\nMID\nL3");
+    }
+
+    #[test]
+    fn splice_handles_growing_replacement() {
+        let old = "A\nB\nC\n";
+        let got = splice_excerpts(old, vec![sp(2, 2, "B1\nB2\nB3")]);
+        assert_eq!(got, "A\nB1\nB2\nB3\nC\n");
+    }
+
+    #[test]
+    fn splice_handles_shrinking_replacement() {
+        let old = "A\nB\nC\nD\nE\n";
+        let got = splice_excerpts(old, vec![sp(2, 4, "B+D")]);
+        assert_eq!(got, "A\nB+D\nE\n");
+    }
+
+    #[test]
+    fn splice_processes_multiple_ranges_in_reverse_order() {
+        // Two non-overlapping splices. The first one (lines 1-2) is
+        // a 2→1 line shrink; the second (lines 4-5) replaces with
+        // a 2→3 line grow. If we applied them in input order the
+        // first splice would shift the second's target range and
+        // we'd splice the wrong lines. Reverse-order processing
+        // dodges this entirely.
+        let old = "A\nB\nC\nD\nE\n";
+        let got = splice_excerpts(
+            old,
+            vec![sp(1, 2, "AB"), sp(4, 5, "DE1\nDE2\nDE3")],
+        );
+        assert_eq!(got, "AB\nC\nDE1\nDE2\nDE3\n");
+    }
+
+    #[test]
+    fn splice_out_of_range_start_is_skipped_defensively() {
+        // The excerpt range starts past EOF — e.g. a stale
+        // multibuffer whose source was truncated externally. Better
+        // to preserve the existing source than to append the edit
+        // into an arbitrary spot.
+        let old = "A\nB\n";
+        let got = splice_excerpts(old, vec![sp(10, 12, "ignored")]);
+        assert_eq!(got, "A\nB\n");
+    }
+
+    #[test]
+    fn splice_clamps_end_at_eof() {
+        let old = "A\nB\nC\n";
+        let got = splice_excerpts(old, vec![sp(2, 99, "X")]);
+        assert_eq!(got, "A\nX\n");
+    }
+}
 
 #[cfg(test)]
 mod tests {

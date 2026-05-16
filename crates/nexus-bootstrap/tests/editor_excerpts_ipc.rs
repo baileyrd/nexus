@@ -213,12 +213,12 @@ async fn open_excerpts_merges_overlapping_ranges_within_a_file() {
     assert_eq!(blocks[2].3, "L10");
 }
 
-/// 5) Read-only guard — `apply_transaction` against the synthetic
-///    session returns an error referencing the BL-141 Phase 1
-///    read-only posture, and the underlying source file's bytes are
-///    untouched.
+/// 5) Phase 2 — non-content ops (InsertText / DeleteText / structural)
+///    against the synthetic session still error with the BL-141
+///    Approach A semantics. The source file's bytes stay untouched
+///    when an op is rejected.
 #[tokio::test]
-async fn open_excerpts_session_rejects_apply_transaction_and_save() {
+async fn open_excerpts_session_rejects_non_content_ops() {
     use nexus_editor::{Operation, Transaction, TransactionMetadata};
 
     let forge = scratch_forge();
@@ -259,26 +259,216 @@ async fn open_excerpts_session_rejects_apply_transaction_and_save() {
         json!({ "relpath": snap.relpath, "transaction": tx }),
     )
     .await
-    .expect_err("apply_transaction must be rejected on multibuffer");
+    .expect_err("InsertText must be rejected on a multibuffer");
     assert!(
-        err.to_string().contains("read-only multibuffer"),
-        "expected 'read-only multibuffer' in error, got: {err}"
-    );
-
-    let save_err = call(
-        &runtime,
-        "save",
-        json!({ "relpath": snap.relpath }),
-    )
-    .await
-    .expect_err("save must be rejected on multibuffer");
-    assert!(
-        save_err.to_string().contains("read-only multibuffer"),
-        "expected 'read-only multibuffer' in error, got: {save_err}"
+        err.to_string().contains("multibuffer"),
+        "expected multibuffer-related error, got: {err}"
     );
 
     let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
     assert_eq!(on_disk, original, "source file must be untouched");
+}
+
+/// BL-141 Phase 2 — `UpdateBlockContent` on an Excerpt block updates
+/// the in-memory snapshot AND a subsequent `save` splices the new
+/// content into the source file's line range, preserving the lines
+/// outside the range.
+#[tokio::test]
+async fn open_excerpts_update_block_content_round_trips_to_source_on_save() {
+    use nexus_editor::{Operation, Transaction, TransactionMetadata};
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    let original = "header line\nbody line 1\nbody line 2\nfooter line\n";
+    write_note(&root, "doc.md", original);
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 2, "line_end": 3 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    let block_id = snap.tree.root_blocks[0];
+    let snapshot_relpath = snap.relpath.clone();
+    let starting_content = snap.tree.blocks[&block_id].content.clone();
+    assert_eq!(starting_content, "body line 1\nbody line 2");
+
+    // Edit: replace the excerpt's snapshot with a 3-line block.
+    let tx = Transaction::new(
+        vec![Operation::UpdateBlockContent {
+            id: block_id,
+            old_content: starting_content,
+            new_content: "edited line A\nedited line B\nedited line C".into(),
+            old_annotations: Vec::new(),
+            new_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        json!({ "relpath": snapshot_relpath, "transaction": tx }),
+    )
+    .await
+    .expect("apply_transaction (UpdateBlockContent) must succeed");
+
+    call(
+        &runtime,
+        "save",
+        json!({ "relpath": snapshot_relpath }),
+    )
+    .await
+    .expect("save must succeed for synthetic session in Phase 2");
+
+    let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
+    assert_eq!(
+        on_disk, "header line\nedited line A\nedited line B\nedited line C\nfooter line\n",
+        "header + footer preserved; excerpt range replaced with edited content"
+    );
+}
+
+/// BL-141 Phase 2 — two non-overlapping excerpts from the same
+/// source file both round-trip on save. Reverse-line-order
+/// processing inside `splice_excerpts` keeps the later range valid
+/// even when the earlier splice shifts line counts.
+#[tokio::test]
+async fn open_excerpts_multi_excerpt_same_file_save_handles_shifts() {
+    use nexus_editor::{Operation, Transaction, TransactionMetadata};
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    // 10 lines so the two excerpts are clearly non-overlapping.
+    let original = "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\n";
+    write_note(&root, "big.md", original);
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "big.md", "line_start": 2, "line_end": 3 },
+                    { "relpath": "big.md", "line_start": 7, "line_end": 8 },
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    assert_eq!(snap.tree.root_blocks.len(), 2);
+    let first_id = snap.tree.root_blocks[0];
+    let second_id = snap.tree.root_blocks[1];
+    let snapshot_relpath = snap.relpath.clone();
+
+    // Edit the first excerpt (lines 2-3) to grow to 4 lines; edit
+    // the second (lines 7-8) to shrink to 1 line. Both saves must
+    // land correctly even though the first changes the line count
+    // before the second.
+    let tx1 = Transaction::new(
+        vec![Operation::UpdateBlockContent {
+            id: first_id,
+            old_content: "L2\nL3".into(),
+            new_content: "L2-A\nL2-B\nL2-C\nL2-D".into(),
+            old_annotations: Vec::new(),
+            new_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        json!({ "relpath": snapshot_relpath, "transaction": tx1 }),
+    )
+    .await
+    .expect("first UpdateBlockContent");
+
+    let tx2 = Transaction::new(
+        vec![Operation::UpdateBlockContent {
+            id: second_id,
+            old_content: "L7\nL8".into(),
+            new_content: "L7+L8".into(),
+            old_annotations: Vec::new(),
+            new_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        json!({ "relpath": snapshot_relpath, "transaction": tx2 }),
+    )
+    .await
+    .expect("second UpdateBlockContent");
+
+    call(
+        &runtime,
+        "save",
+        json!({ "relpath": snapshot_relpath }),
+    )
+    .await
+    .expect("save");
+
+    let on_disk = fs::read_to_string(root.join("big.md")).unwrap();
+    assert_eq!(
+        on_disk,
+        "L1\nL2-A\nL2-B\nL2-C\nL2-D\nL4\nL5\nL6\nL7+L8\nL9\nL10\n",
+        "both splices land correctly with line-range shifting; unedited lines preserved"
+    );
+}
+
+/// BL-141 Phase 2 — save against a multibuffer with no edits is a
+/// no-op writeback (each source file is rewritten with its own
+/// content, since the splice content equals the original captured
+/// snapshot). Verifies the splice path doesn't corrupt the file
+/// even when nothing changed.
+#[tokio::test]
+async fn open_excerpts_save_with_no_edits_preserves_source_file() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    let original = "one\ntwo\nthree\nfour\nfive\n";
+    write_note(&root, "doc.md", original);
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 2, "line_end": 4 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    let snapshot_relpath = snap.relpath.clone();
+
+    call(
+        &runtime,
+        "save",
+        json!({ "relpath": snapshot_relpath }),
+    )
+    .await
+    .expect("save no-op must succeed");
+
+    let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
+    assert_eq!(on_disk, original, "source file must be byte-identical");
 }
 
 /// 6) Excerpt metadata — each rendered block carries the
