@@ -99,7 +99,12 @@ export interface ParsedDatabaseViewError {
   message: string
 }
 
-const BLOCK_RE = /\[\[\{db:([^}]*)\}\]\]/g
+// `[^}\n]` (not just `[^}]`) so a stray `[[{db:` on one line with a
+// matching `}]]` later in the doc can't produce a range that spans a
+// newline — `Decoration.replace({ block: true, … })` over a line
+// break throws "Decorations that replace line breaks may not be
+// specified via plugins".
+const BLOCK_RE = /\[\[\{db:([^}\n]*)\}\]\]/g
 
 /** Pure parser — scans `text` for `[[{db:<spec>}]]` occurrences,
  *  returning every match (even malformed ones, surfaced via
@@ -511,16 +516,19 @@ export function databaseViewExt(deps: DatabaseViewExtDeps): Extension {
     viewRef.current = view
     const handle = makeBasesChangeWatcher(view, deps)
     // Trigger a rebuild so the freshly-installed view reference flows
-    // into the widgets' `onUpdateConfig` closures. Deferred via
-    // queueMicrotask so we don't dispatch during CM's construction
-    // update (dispatching while CM's updateState != 0 throws).
-    queueMicrotask(() => {
-      if (viewRef.current === view) {
-        view.dispatch({ effects: databaseViewInvalidate.of(null) })
-      }
-    })
+    // into the widgets' `onUpdateConfig` closures. `setTimeout` (not
+    // `queueMicrotask`) so the dispatch lands on a fresh task —
+    // microtasks can drain while CM is still inside its construction
+    // update, which would throw "Calls to EditorView.update are not
+    // allowed while an update is in progress".
+    let disposed = false
+    setTimeout(() => {
+      if (disposed || viewRef.current !== view) return
+      view.dispatch({ effects: databaseViewInvalidate.of(null) })
+    }, 0)
     return {
       destroy() {
+        disposed = true
         if (viewRef.current === view) viewRef.current = null
         handle.destroy()
       },
