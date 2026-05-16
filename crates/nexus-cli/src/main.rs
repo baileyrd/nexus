@@ -123,6 +123,11 @@ enum Commands {
     /// expose Nexus's agent IPC surface to external clients over a
     /// stdio JSON-RPC 2.0 server.
     Acp(AcpArgs),
+    /// Remote-forge server (BL-140 Phase 1) — expose the whole kernel
+    /// IPC + event-bus surface over a stdio JSON-RPC 2.0 stream so a
+    /// local frontend can drive this headless instance. Phase 2 (SSH
+    /// transport + `ssh://` forge URIs) lands separately.
+    Serve(ServeArgs),
     /// Sync operations (coming soon)
     Sync(StubArgs),
     /// Git operations (read-only)
@@ -797,6 +802,19 @@ enum AcpCommand {
     /// process. Pure proxy — every method dispatches through the
     /// kernel's `ipc_call` boundary.
     Serve,
+}
+
+// ---------------------------------------------------------------------------
+// Remote-forge server (BL-140)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct ServeArgs {
+    /// Read JSON-RPC frames from stdin and write responses to stdout.
+    /// Required in Phase 1; future phases add `--port` for WebSocket /
+    /// `--unix-socket` for a local UDS transport.
+    #[arg(long)]
+    stdio: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -2060,6 +2078,15 @@ fn main() {
         Commands::Acp(args) => match args.command {
             AcpCommand::Serve => commands::acp::serve(&app),
         },
+        Commands::Serve(args) => {
+            if args.stdio {
+                commands::serve::serve(&app)
+            } else {
+                Err(anyhow::anyhow!(
+                    "nexus serve requires a transport flag; use --stdio (Phase 1 only supports stdio)"
+                ))
+            }
+        }
         Commands::Sync(_) => stubs::not_implemented("sync"),
         Commands::Git(args) => match args.command {
             GitCommand::Info => commands::git::info(&app),

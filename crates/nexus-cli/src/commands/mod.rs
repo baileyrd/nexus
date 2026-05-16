@@ -19,6 +19,7 @@ pub mod migrate;
 pub mod notify;
 pub mod plugin;
 pub mod proc;
+pub mod serve;
 pub mod skill;
 pub mod tags;
 pub mod template;

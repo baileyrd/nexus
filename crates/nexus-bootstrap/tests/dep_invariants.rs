@@ -41,6 +41,13 @@ const FORBIDDEN: &[(&str, &str)] = &[
     ("nexus-acp", "nexus-agent"),
     ("nexus-acp", "nexus-ai"),
     ("nexus-acp", "nexus-storage"),
+    // BL-140 — the remote-forge server is a pure JSON-RPC proxy over
+    // the full kernel IPC + event-bus surface. Linking any subsystem
+    // engine directly would let it bypass kernel mediation; route
+    // through `context.ipc_call(...)` instead. Same posture as ACP.
+    ("nexus-remote", "nexus-agent"),
+    ("nexus-remote", "nexus-ai"),
+    ("nexus-remote", "nexus-storage"),
     // Kernel is backend-agnostic: the KV trait lives here, but the SQLite
     // impl is in `nexus-kv` and must be injected via `Kernel::new`.
     ("nexus-kernel", "rusqlite"),

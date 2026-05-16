@@ -1,0 +1,23 @@
+[package]
+name = "nexus-remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus remote-forge JSON-RPC server (BL-140 Phase 1) — exposes the kernel IPC surface and event bus over stdio so a local frontend can drive a headless Nexus instance"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugin-api = { path = "../nexus-plugin-api" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }
+nexus-bootstrap = { path = "../nexus-bootstrap" }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "io-util"] }
