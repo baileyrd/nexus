@@ -15,7 +15,7 @@ use nexus_bootstrap::lsp_contribution_wiring::{
 use nexus_bootstrap::mcp_contribution_wiring::{
     unwire_mcp_contributions_for_plugin, wire_mcp_contributions, McpWireOutcome,
 };
-use nexus_bootstrap::remote::{build_remote_runtime_ssh, RemoteRuntime};
+use nexus_bootstrap::reconnect::{ReconnectingRuntime, SshConnectionFactory};
 use nexus_bootstrap::{build_cli_runtime, Runtime};
 use nexus_kernel::EventBus;
 use nexus_plugins::{PluginManager, PluginManagerConfig, PluginManifest};
@@ -66,9 +66,9 @@ pub struct App {
     /// Bootstrap-assembled local runtime (lazy). `None` for remote
     /// forges.
     runtime: Option<Runtime>,
-    /// Bootstrap-assembled remote runtime (lazy). `None` for local
-    /// forges.
-    remote: Option<RemoteRuntime>,
+    /// Bootstrap-assembled reconnecting remote runtime (lazy).
+    /// `None` for local forges.
+    remote: Option<ReconnectingRuntime>,
     /// Tokio runtime used to block on async `ipc_call`s.
     rt: Option<TokioRuntime>,
 }
@@ -204,11 +204,13 @@ impl App {
                     ForgeLocation::Remote(u) => u.clone(),
                     ForgeLocation::Local(_) => unreachable!("is_remote() said remote"),
                 };
-                let rt = self.rt.as_ref().expect("ensure_tokio");
-                let runtime = rt
-                    .block_on(async { build_remote_runtime_ssh(&uri) })
-                    .with_context(|| format!("failed to build remote runtime for {uri}"))?;
-                self.remote = Some(runtime);
+                // BL-140 Phase 2c — wrap the SSH transport in a
+                // ReconnectingRuntime so a dropped connection
+                // transparently rebuilds the SSH child on the next
+                // ipc_call. The actual SSH spawn is deferred until
+                // first dispatch.
+                let factory = Arc::new(SshConnectionFactory::new(uri));
+                self.remote = Some(ReconnectingRuntime::new(factory));
             }
             let invoker = self.remote.as_ref().expect("just initialised").invoker();
             Ok((invoker, self.rt.as_ref().expect("just initialised")))

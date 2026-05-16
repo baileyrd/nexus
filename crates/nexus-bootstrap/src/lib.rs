@@ -44,6 +44,9 @@ pub mod invoker;
 /// BL-140 Phase 2b — `RemoteRuntime` factory + SSH child-process
 /// transport for `--forge-path ssh://...` URIs.
 pub mod remote;
+/// BL-140 Phase 2c — reconnect-on-drop wrapper layered over
+/// [`remote::RemoteRuntime`].
+pub mod reconnect;
 /// BL-138 — TOML-driven per-handler capability matrix loader. See
 /// [`cap_matrix::apply`] and the companion `cap_matrix.toml`.
 pub mod cap_matrix;
