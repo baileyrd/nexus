@@ -26,7 +26,7 @@ Each BL-* item lives in its own file under [`backlog/`](backlog/). The table bel
 | [BL-143](backlog/BL-143.md) | open |  | Live collaboration network transport |
 | [BL-142](backlog/BL-142.md) | open |  | REPL / in-buffer evaluation |
 | [BL-141](backlog/BL-141.md) | open |  | Multibuffer / multi-excerpt view |
-| [BL-140](backlog/BL-140.md) | open |  | SSH remote forge |
+| [BL-140](backlog/BL-140.md) | closed | 2026-05-16 | SSH remote forge |
 | [BL-145](backlog/BL-145.md) | closed | 2026-05-15 | `nexus-acp` server — inbound ACP surface for external clients (Hermes Feature 7) |
 | [BL-144](backlog/BL-144.md) | closed | 2026-05-15 | `nexus-acp` host — outbound ACP adapter integration (BL-113 Phase 4) |
 | [BL-139](backlog/BL-139.md) | closed | 2026-05-16 | Per-keystroke edit prediction |
