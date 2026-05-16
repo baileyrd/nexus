@@ -4,8 +4,12 @@
 //!   - **Ollama** (default): uses `/api/generate` with the `suffix`
 //!     field so a FIM-trained code model (qwen2.5-coder, codellama,
 //!     deepseek-coder, starcoder2, …) fills the cursor split natively.
-//!     Non-FIM models gracefully ignore `suffix` and emit a normal
-//!     continuation of `prefix`, which is still useful as ghost text.
+//!     Models that don't support FIM (most non-coder models, plus
+//!     several coder models like `qwen3-coder-next`) return `400
+//!     does not support insert` on the first call; `fim_generate`
+//!     catches that and retries without the suffix, producing a
+//!     plain continuation of `prefix` — still useful as ghost text,
+//!     just without the suffix-aware fill.
 //!   - **OpenAI / Anthropic**: chat-shaped FIM prompt — both providers
 //!     ship code-model variants without a dedicated FIM endpoint, so
 //!     we describe the task in the system prompt and put the

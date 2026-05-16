@@ -153,17 +153,45 @@ impl OllamaProvider {
     /// returned string is the model's raw output, untrimmed — the
     /// caller is responsible for stripping any prompt echo or
     /// trailing whitespace that would clash with the existing buffer.
+    ///
+    /// **Non-FIM fallback.** Ollama returns `400 ... does not support
+    /// insert` when the configured model isn't FIM-trained (most
+    /// non-coder models, plus several coder models like
+    /// `qwen3-coder-next`). On that specific error this helper retries
+    /// the request without the `suffix` field, producing a normal
+    /// continuation of `prefix`. The ghost-text rendering still works
+    /// — the user just loses the suffix-aware completion that FIM
+    /// models do best.
     pub async fn fim_generate(
         &self,
         prefix: &str,
         suffix: &str,
         max_tokens: u32,
     ) -> Result<OllamaFimOutput, AiError> {
+        match self.run_generate(prefix, Some(suffix), max_tokens).await {
+            Err(AiError::Provider(msg)) if is_unsupported_insert_error(&msg) => {
+                tracing::debug!(
+                    target: "nexus_ai::ollama",
+                    model = %self.chat_model,
+                    "model does not support FIM insert; retrying without suffix"
+                );
+                self.run_generate(prefix, None, max_tokens).await
+            }
+            other => other,
+        }
+    }
+
+    async fn run_generate(
+        &self,
+        prefix: &str,
+        suffix: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<OllamaFimOutput, AiError> {
         let url = format!("{}/api/generate", self.base_url);
         let body = OllamaGenerateRequest {
             model: &self.chat_model,
             prompt: prefix,
-            suffix: Some(suffix),
+            suffix,
             stream: false,
             options: Some(OllamaGenerateOptions {
                 num_predict: max_tokens,
@@ -198,6 +226,31 @@ impl OllamaProvider {
         Ok(OllamaFimOutput {
             completion: parsed.response,
         })
+    }
+}
+
+/// True when an Ollama 400 error payload indicates the model can't
+/// service the FIM `insert` op. Substring match against the canonical
+/// error text — Ollama uses the phrase verbatim across versions.
+fn is_unsupported_insert_error(msg: &str) -> bool {
+    msg.contains("does not support insert")
+}
+
+#[cfg(test)]
+mod fim_fallback_tests {
+    use super::is_unsupported_insert_error;
+
+    #[test]
+    fn detects_canonical_ollama_400_payload() {
+        let msg = "400 Bad Request: {\"error\":\"registry.ollama.ai/library/qwen3.5:4b does not support insert\"}";
+        assert!(is_unsupported_insert_error(msg));
+    }
+
+    #[test]
+    fn ignores_unrelated_400_payloads() {
+        assert!(!is_unsupported_insert_error("400 Bad Request: {\"error\":\"model not found\"}"));
+        assert!(!is_unsupported_insert_error("500 Internal Server Error"));
+        assert!(!is_unsupported_insert_error(""));
     }
 }
 
