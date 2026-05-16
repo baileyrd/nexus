@@ -641,6 +641,39 @@ fn finish_open_with_undo(
     snapshot_to_value(&snapshot_of(s), "open")
 }
 
+/// BL-141 — synthetic multibuffer relpaths use the `multibuffer://`
+/// scheme. They're only ever created by `open_excerpts`; subsequent
+/// `open` calls (typically from the shell's session-manager
+/// acquire path) must NOT try to read from disk — the URI doesn't
+/// resolve to a file. Instead, return the existing snapshot
+/// idempotently, or error if no synthetic session is registered
+/// under this id.
+pub(crate) const MULTIBUFFER_RELPATH_PREFIX: &str = "multibuffer://";
+
+/// Return the existing snapshot for a `multibuffer://` relpath, or
+/// an error if no synthetic session has been created via
+/// `open_excerpts` for this id. Used by both `handle_open_sync`
+/// and `handle_open_async` before they try to hit the disk.
+fn try_open_existing_synthetic(
+    sessions: &Mutex<HashMap<String, Session>>,
+    relpath: &str,
+) -> Option<Result<Value, PluginError>> {
+    if !relpath.starts_with(MULTIBUFFER_RELPATH_PREFIX) {
+        return None;
+    }
+    let guard = match sessions.lock() {
+        Ok(g) => g,
+        Err(_) => return Some(Err(sessions_poisoned())),
+    };
+    Some(match guard.get(relpath) {
+        Some(s) => snapshot_to_value(&snapshot_of(s), "open"),
+        None => Err(exec_err(format!(
+            "open: synthetic session '{relpath}' not found — \
+             multibuffer relpaths are only created by `open_excerpts`"
+        ))),
+    })
+}
+
 fn handle_open_sync(
     forge_root: &Path,
     sessions: &Mutex<HashMap<String, Session>>,
@@ -648,6 +681,9 @@ fn handle_open_sync(
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "open")?;
+    if let Some(res) = try_open_existing_synthetic(sessions, &relpath) {
+        return res;
+    }
     let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
     let source = fs::read_to_string(&abs)
         .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?;
@@ -662,6 +698,9 @@ async fn handle_open_async(
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "open")?;
+    if let Some(res) = try_open_existing_synthetic(&sessions, &relpath) {
+        return res;
+    }
 
     let source_bytes = if let Some(ctx) = ctx.as_deref() {
         // Preferred path: fetch through `com.nexus.storage` so capability
@@ -1533,7 +1572,7 @@ async fn handle_open_excerpts(
             .map_err(|e| exec_err(format!("open_excerpts: tree insert: {e}")))?;
     }
 
-    let synthetic_relpath = format!("multibuffer://{}", Uuid::new_v4());
+    let synthetic_relpath = format!("{MULTIBUFFER_RELPATH_PREFIX}{}", Uuid::new_v4());
     let session = Session {
         tree,
         undo: UndoTree::new(),

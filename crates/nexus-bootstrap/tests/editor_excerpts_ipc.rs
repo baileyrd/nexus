@@ -429,6 +429,73 @@ async fn open_excerpts_multi_excerpt_same_file_save_handles_shifts() {
     );
 }
 
+/// BL-141 Phase 3 — `open` against a `multibuffer://` relpath is
+/// idempotent: returns the existing synthetic snapshot. Required
+/// so the shell's `sessionManager.acquire(relpath)` path works for
+/// multibuffer tabs without trying to read a non-existent file
+/// from disk.
+#[tokio::test]
+async fn open_against_multibuffer_relpath_returns_existing_snapshot() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "doc.md", "alpha\nbeta\ngamma\n");
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 1, "line_end": 3 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts"),
+    )
+    .unwrap();
+    let synthetic_relpath = snap.relpath.clone();
+    let first_block_id = snap.tree.root_blocks[0];
+
+    // Re-open against the synthetic relpath — must return the
+    // same session (same root block id), not try to read
+    // `multibuffer://...` from disk.
+    let reopened: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            json!({ "relpath": synthetic_relpath }),
+        )
+        .await
+        .expect("re-open synthetic"),
+    )
+    .unwrap();
+    assert_eq!(reopened.tree.root_blocks[0], first_block_id);
+}
+
+/// BL-141 Phase 3 — `open` against a `multibuffer://` relpath
+/// that was never created surfaces a clear error rather than
+/// trying to resolve it as a path.
+#[tokio::test]
+async fn open_against_unknown_multibuffer_relpath_errors() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+
+    let err = call(
+        &runtime,
+        "open",
+        json!({ "relpath": "multibuffer://never-existed" }),
+    )
+    .await
+    .expect_err("open of unknown synthetic relpath must error");
+    assert!(
+        err.to_string().contains("synthetic session"),
+        "expected 'synthetic session' in error, got: {err}"
+    );
+}
+
 /// BL-141 Phase 2 — save against a multibuffer with no edits is a
 /// no-op writeback (each source file is rewritten with its own
 /// content, since the splice content equals the original captured

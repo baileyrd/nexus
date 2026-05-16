@@ -29,6 +29,12 @@ import { installInlineToolbarStyles } from './cm/inlineToolbar'
 import { installMarginSuggestStyles } from './cm/marginSuggestions'
 import { runSaveFormatHook } from './cm/saveFormatHooks'
 import { LspIpc } from './cm/lspIpc'
+// BL-141 Phase 3 — LSP → multibuffer converters.
+import {
+  locationsToExcerptRequests,
+  workspaceEditToExcerptRequests,
+  type LspLocation,
+} from './cm/lspToExcerpts'
 import {
   applyWorkspaceEdit,
   type LspWorkspaceEdit,
@@ -72,6 +78,13 @@ const COMMAND_TOGGLE_BLAME = 'nexus.editor.toggleBlame'
 // BL-079 — open the modal diff viewer for the active tab. Reads
 // `com.nexus.git::diff_file` and renders the hunks unified.
 const COMMAND_OPEN_DIFF = 'nexus.editor.openDiff'
+// BL-141 Phase 3 — LSP find-references → multibuffer + LSP rename
+// preview → multibuffer. Both surface LSP results in the new
+// excerpt view shipped in BL-141 Phase 1/2 so the user can
+// browse / preview before deciding to apply.
+const COMMAND_LSP_FIND_REFERENCES = 'nexus.editor.lsp.findReferences'
+const COMMAND_LSP_RENAME_PREVIEW = 'nexus.editor.lsp.renamePreview'
+
 // BL-077 follow-up — LSP rename. Cursor-position rename across every
 // file the symbol appears in; multi-file `WorkspaceEdit` applies via
 // `applyWorkspaceEdit` (active tab through the live CM view, every
@@ -238,6 +251,17 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
         { id: COMMAND_LSP_RENAME, title: 'Rename Symbol (LSP)', category: 'Editor' },
         { id: COMMAND_LSP_CODE_ACTIONS, title: 'Code Actions (LSP)', category: 'Editor' },
+        // BL-141 Phase 3 — LSP results in the multibuffer view.
+        {
+          id: COMMAND_LSP_FIND_REFERENCES,
+          title: 'Find All References (LSP)',
+          category: 'Editor',
+        },
+        {
+          id: COMMAND_LSP_RENAME_PREVIEW,
+          title: 'Rename Symbol — Preview (LSP)',
+          category: 'Editor',
+        },
         ...STUB_COMMANDS.map((s) => ({ id: s.id, title: s.title, category: 'Editor' })),
       ],
       keybindings: [
@@ -266,6 +290,13 @@ export const editorPlugin: Plugin = {
           command: COMMAND_LSP_CODE_ACTIONS,
           key: 'ctrl+.',
           mac: 'cmd+.',
+          when: CONTEXT_KEY_HAS_ACTIVE_TAB,
+        },
+        // BL-141 Phase 3 — Shift-F12 matches VS Code's
+        // "Find All References" binding.
+        {
+          command: COMMAND_LSP_FIND_REFERENCES,
+          key: 'shift+F12',
           when: CONTEXT_KEY_HAS_ACTIVE_TAB,
         },
       ],
@@ -938,6 +969,157 @@ export const editorPlugin: Plugin = {
         api.notifications.show({
           type: 'error',
           message: `Rename apply failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    // BL-141 Phase 3 — find-all-references → multibuffer. Reads
+    // the cursor position, calls `lspIpc.references`, converts the
+    // `Location[]` response into excerpts (with 3 lines of context
+    // around each match), opens a synthetic session via
+    // `editorClient.openExcerpts`, and routes the resulting
+    // `multibuffer://<uuid>` relpath into the standard `files:open`
+    // pipeline so the new tab mounts. Re-opening that relpath from
+    // the editor's session-acquire path lands on the idempotent
+    // synthetic-open codepath (no disk read).
+    api.commands.register(COMMAND_LSP_FIND_REFERENCES, async () => {
+      const view = getActiveCmView()
+      const relpath = activeTabRelpath()
+      if (!view || !relpath) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Find references requires a code-mode editor tab.',
+        })
+        return
+      }
+      const forgeRoot = useWorkspaceStore.getState().rootPath
+      if (!forgeRoot) {
+        api.notifications.show({
+          type: 'error',
+          message: 'Find references failed: no workspace open.',
+        })
+        return
+      }
+      const sel = view.state.selection.main
+      const lineInfo = view.state.doc.lineAt(sel.head)
+      const line = lineInfo.number - 1
+      const character = sel.head - lineInfo.from
+
+      let raw: unknown
+      try {
+        raw = await lspIpc.references({
+          path: relpath,
+          line,
+          character,
+          include_declaration: true,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Find references failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      const locations = (raw ?? []) as LspLocation[]
+      const items = locationsToExcerptRequests(locations, { forgeRoot })
+      if (items.length === 0) {
+        api.notifications.show({
+          type: 'info',
+          message: 'No references found in the forge.',
+        })
+        return
+      }
+      try {
+        const snap = await editorClient.openExcerpts(items)
+        api.events.emit('files:open', {
+          relpath: snap.relpath,
+          name: `References (${items.length})`,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Open references view failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    // BL-141 Phase 3 — rename preview → multibuffer. Same prompt
+    // as `COMMAND_LSP_RENAME`, but instead of applying the
+    // WorkspaceEdit immediately, opens the affected ranges in a
+    // multibuffer so the user can scan / edit the proposed changes
+    // before committing. The user can dispatch the apply path
+    // (`COMMAND_LSP_RENAME`) separately, or save the multibuffer
+    // (Phase 2 Approach A wires multibuffer save to per-source
+    // splice writes).
+    api.commands.register(COMMAND_LSP_RENAME_PREVIEW, async () => {
+      const view = getActiveCmView()
+      const relpath = activeTabRelpath()
+      if (!view || !relpath) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Rename preview requires a code-mode editor tab.',
+        })
+        return
+      }
+      const forgeRoot = useWorkspaceStore.getState().rootPath
+      if (!forgeRoot) {
+        api.notifications.show({
+          type: 'error',
+          message: 'Rename preview failed: no workspace open.',
+        })
+        return
+      }
+      const sel = view.state.selection.main
+      const lineInfo = view.state.doc.lineAt(sel.head)
+      const line = lineInfo.number - 1
+      const character = sel.head - lineInfo.from
+
+      const newName = await api.input.prompt('Preview rename to:', '')
+      if (!newName) return
+
+      let raw: unknown
+      try {
+        raw = await lspIpc.rename({
+          path: relpath,
+          line,
+          character,
+          new_name: newName,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Rename preview failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      if (!raw) {
+        api.notifications.show({
+          type: 'info',
+          message: 'No rename available at this position.',
+        })
+        return
+      }
+      const items = workspaceEditToExcerptRequests(
+        raw as LspWorkspaceEdit,
+        { forgeRoot },
+      )
+      if (items.length === 0) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Rename returned no in-forge edits to preview.',
+        })
+        return
+      }
+      try {
+        const snap = await editorClient.openExcerpts(items)
+        api.events.emit('files:open', {
+          relpath: snap.relpath,
+          name: `Rename preview → "${newName}" (${items.length})`,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Open rename preview failed: ${err instanceof Error ? err.message : String(err)}`,
         })
       }
     })
