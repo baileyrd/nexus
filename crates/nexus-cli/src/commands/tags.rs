@@ -16,10 +16,11 @@ use crate::output::print_list;
 /// MCP tool (kernel IPC `storage::query_tags`).
 pub fn list(app: &mut App, name: Option<&str>) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
 
     let query_name = name.unwrap_or("");
-    let tags = ipc::query_tags(runtime, rt, query_name)
+    let tags = rt
+        .block_on(ipc::query_tags(&*invoker, query_name))
         .map_err(|e| anyhow::anyhow!("failed to query tags: {e}"))?;
 
     if tags.is_empty() {

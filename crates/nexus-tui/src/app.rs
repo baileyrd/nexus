@@ -796,7 +796,10 @@ impl TuiApp {
     ///
     /// Returns an error if the storage query fails.
     pub fn refresh_tree(&mut self) -> Result<()> {
-        let records = ipc::query_files(&self.runtime, &self.rt)
+        let invoker = self.runtime.invoker();
+        let records = self
+            .rt
+            .block_on(ipc::query_files(&*invoker))
             .context("failed to query files for tree")?;
 
         // Collect all directory paths implied by the file paths.
@@ -917,7 +920,10 @@ impl TuiApp {
             return Ok(());
         }
         let path = entry.path.clone();
-        let bytes = ipc::read_file(&self.runtime, &self.rt, &path)
+        let invoker = self.runtime.invoker();
+        let bytes = self
+            .rt
+            .block_on(ipc::read_file(&*invoker, &path))
             .with_context(|| format!("failed to read file '{path}'"))?;
         let text = String::from_utf8_lossy(&bytes).into_owned();
         self.viewer.load_content(path, text);
@@ -940,7 +946,8 @@ impl TuiApp {
                 return;
             }
         };
-        match ipc::backlinks(&self.runtime, &self.rt, &path) {
+        let invoker = self.runtime.invoker();
+        match self.rt.block_on(ipc::backlinks(&*invoker, &path)) {
             Ok(results) => self.backlinks.load(results),
             Err(_) => self.backlinks.load(Vec::new()),
         }
@@ -977,7 +984,11 @@ impl TuiApp {
 
     /// Load all tasks into the task view state.
     pub fn load_tasks(&mut self) {
-        match ipc::query_tasks(&self.runtime, &self.rt, &TaskFilter::default()) {
+        let invoker = self.runtime.invoker();
+        match self
+            .rt
+            .block_on(ipc::query_tasks(&*invoker, &TaskFilter::default()))
+        {
             Ok(records) => self.task_view.load(records),
             Err(_) => self.task_view.load(Vec::new()),
         }
@@ -996,7 +1007,8 @@ impl TuiApp {
                 working_dir: Some(self.forge_root.display().to_string()),
                 ..Default::default()
             };
-            match term_ipc::create_session(&self.runtime, &self.rt, args) {
+            let invoker = self.runtime.invoker();
+            match self.rt.block_on(term_ipc::create_session(&*invoker, args)) {
                 Ok(id) => {
                     self.terminal.session_id = Some(id);
                     self.terminal.lines.clear();
@@ -1022,7 +1034,8 @@ impl TuiApp {
     /// Ctrl+D in the terminal panel or quits the app.
     pub fn kill_terminal(&mut self) {
         if let Some(id) = self.terminal.session_id.take() {
-            if let Err(e) = term_ipc::close_session(&self.runtime, &self.rt, &id) {
+            let invoker = self.runtime.invoker();
+            if let Err(e) = self.rt.block_on(term_ipc::close_session(&*invoker, &id)) {
                 tracing::debug!(error = %e, "terminal close_session returned error (child may already be gone)");
             }
         }
@@ -1040,11 +1053,15 @@ impl TuiApp {
             return;
         };
         // Short timeout: we want to return to input handling quickly.
-        if let Err(e) = term_ipc::pump(&self.runtime, &self.rt, &id, 50) {
+        let invoker = self.runtime.invoker();
+        if let Err(e) = self.rt.block_on(term_ipc::pump(&*invoker, &id, 50)) {
             tracing::debug!(error = %e, "terminal pump failed");
             return;
         }
-        match term_ipc::read_output(&self.runtime, &self.rt, &id, None, None) {
+        match self
+            .rt
+            .block_on(term_ipc::read_output(&*invoker, &id, None, None))
+        {
             Ok(lines) => {
                 if lines.len() != self.terminal.last_line_count {
                     self.terminal.last_line_count = lines.len();
@@ -1064,7 +1081,8 @@ impl TuiApp {
             return;
         };
         let line = std::mem::take(&mut self.terminal.input);
-        if let Err(e) = term_ipc::send_input(&self.runtime, &self.rt, &id, &line) {
+        let invoker = self.runtime.invoker();
+        if let Err(e) = self.rt.block_on(term_ipc::send_input(&*invoker, &id, &line)) {
             tracing::warn!(error = %e, "terminal send_input failed");
         }
     }
@@ -1075,7 +1093,8 @@ impl TuiApp {
         let Some(id) = self.terminal.session_id.clone() else {
             return;
         };
-        if let Err(e) = term_ipc::send_raw_input(&self.runtime, &self.rt, &id, data) {
+        let invoker = self.runtime.invoker();
+        if let Err(e) = self.rt.block_on(term_ipc::send_raw_input(&*invoker, &id, data)) {
             tracing::warn!(error = %e, "terminal send_raw_input failed");
         }
     }
@@ -1089,20 +1108,24 @@ impl TuiApp {
             .filter(|e| !e.is_dir)
             .count();
 
-        let link_count = ipc::graph_stats(&self.runtime, &self.rt)
+        let invoker = self.runtime.invoker();
+        let link_count = self
+            .rt
+            .block_on(ipc::graph_stats(&*invoker))
             .map(|s| s.edge_count)
             .unwrap_or(0);
 
-        let pending_task_count = ipc::query_tasks(
-            &self.runtime,
-            &self.rt,
-            &TaskFilter {
-                completed: Some(false),
-                file_path: None,
-            },
-        )
-        .map(|tasks| tasks.len())
-        .unwrap_or(0);
+        let pending_task_count = self
+            .rt
+            .block_on(ipc::query_tasks(
+                &*invoker,
+                &TaskFilter {
+                    completed: Some(false),
+                    file_path: None,
+                },
+            ))
+            .map(|tasks| tasks.len())
+            .unwrap_or(0);
 
         let git_branch = nexus_git::GitEngine::open(&self.forge_root)
             .ok()

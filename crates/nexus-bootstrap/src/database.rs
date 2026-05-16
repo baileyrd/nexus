@@ -5,16 +5,18 @@
 //! need a direct `nexus-database` dependency (invariant #3). Each helper:
 //!
 //! 1. Serializes arguments to JSON.
-//! 2. `block_on`s the async `ipc_call` on the provided Tokio runtime.
+//! 2. `await`s the async [`IpcInvoker::ipc_call`] on the provided invoker.
 //! 3. Deserializes the response into a typed DTO.
+//!
+//! BL-147 — helpers take `&dyn IpcInvoker` rather than `&Runtime`, so the
+//! same surface works against both local and remote (`ssh://`) forges. Each
+//! helper is `async`; sync callers wrap with `rt.block_on(...)`.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
-use tokio::runtime::Runtime as TokioRuntime;
 
-use crate::Runtime;
+use crate::invoker::IpcInvoker;
 
 /// Re-export of the CSV import response DTO defined alongside the plugin.
 pub use nexus_database::core_plugin::{CsvExportResponse, CsvImportResponse, FormulaEvalResponse};
@@ -22,18 +24,14 @@ pub use nexus_database::core_plugin::{CsvExportResponse, CsvImportResponse, Form
 const DATABASE_PLUGIN: &str = "com.nexus.database";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn call<T: serde::de::DeserializeOwned>(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+async fn call<T: serde::de::DeserializeOwned>(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     command: &str,
     args: serde_json::Value,
 ) -> Result<T> {
-    let value = rt
-        .block_on(
-            runtime
-                .context
-                .ipc_call(DATABASE_PLUGIN, command, args, IPC_TIMEOUT),
-        )
+    let value = invoker
+        .ipc_call(DATABASE_PLUGIN, command, args, IPC_TIMEOUT)
+        .await
         .with_context(|| format!("database ipc call '{command}' failed"))?;
     serde_json::from_value(value)
         .with_context(|| format!("database ipc response '{command}' decode failed"))
@@ -44,17 +42,15 @@ fn call<T: serde::de::DeserializeOwned>(
 /// When `column_mapping` is `None`, the plugin derives one — matching header
 /// names to `field_names` when `has_header = true`, or using positional
 /// indices `0..N` when `has_header = false`.
-pub fn csv_import(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn csv_import(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     csv_bytes: &[u8],
     field_names: &[String],
     has_header: bool,
     column_mapping: Option<&[(usize, String)]>,
 ) -> Result<CsvImportResponse> {
     call(
-        runtime,
-        rt,
+        invoker,
         "csv_import",
         serde_json::json!({
             "csv_bytes": csv_bytes,
@@ -63,40 +59,39 @@ pub fn csv_import(
             "column_mapping": column_mapping,
         }),
     )
+    .await
 }
 
 /// Serialize `records` to CSV bytes using `field_names` for column ordering.
-pub fn csv_export(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn csv_export(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     records: &[nexus_types::bases::BaseRecord],
     field_names: &[String],
 ) -> Result<CsvExportResponse> {
     call(
-        runtime,
-        rt,
+        invoker,
         "csv_export",
         serde_json::json!({
             "records": records,
             "field_names": field_names,
         }),
     )
+    .await
 }
 
 /// Evaluate a formula `expression` against a record's `fields`.
-pub fn formula_eval(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn formula_eval(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     expression: &str,
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<FormulaEvalResponse> {
     call(
-        runtime,
-        rt,
+        invoker,
         "formula_eval",
         serde_json::json!({
             "expression": expression,
             "fields": fields,
         }),
     )
+    .await
 }

@@ -7,21 +7,23 @@
 //! Each helper:
 //!
 //! 1. Serializes arguments to JSON.
-//! 2. `block_on`s the async `ipc_call` on the provided Tokio runtime.
+//! 2. `await`s the async [`IpcInvoker::ipc_call`] on the provided invoker.
 //! 3. Deserializes the response into a typed DTO.
 //!
 //! DTOs mirror the corresponding structs in `nexus_terminal` but contain
 //! only the fields callers read. Extra fields in the response are ignored
 //! by serde.
+//!
+//! BL-147 — helpers take `&dyn IpcInvoker` rather than `&Runtime`, so the
+//! same surface works against both local and remote (`ssh://`) forges. Each
+//! helper is `async`; sync callers wrap with `rt.block_on(...)`.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Runtime as TokioRuntime;
 
-use crate::Runtime;
+use crate::invoker::IpcInvoker;
 
 const TERMINAL_PLUGIN: &str = "com.nexus.terminal";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -103,18 +105,14 @@ struct PumpResponse {
 
 // ── Internal helper ──────────────────────────────────────────────────────────
 
-fn call<T: serde::de::DeserializeOwned>(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+async fn call<T: serde::de::DeserializeOwned>(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     command: &str,
     args: serde_json::Value,
 ) -> Result<T> {
-    let value = rt
-        .block_on(
-            runtime
-                .context
-                .ipc_call(TERMINAL_PLUGIN, command, args, IPC_TIMEOUT),
-        )
+    let value = invoker
+        .ipc_call(TERMINAL_PLUGIN, command, args, IPC_TIMEOUT)
+        .await
         .with_context(|| format!("terminal ipc call '{command}' failed"))?;
     serde_json::from_value(value)
         .with_context(|| format!("terminal ipc response '{command}' decode failed"))
@@ -126,13 +124,12 @@ fn call<T: serde::de::DeserializeOwned>(
 ///
 /// # Errors
 /// Propagates any IPC / shell-spawn failure surfaced by the core plugin.
-pub fn create_session(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn create_session(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     args: CreateSessionArgs,
 ) -> Result<String> {
     let resp: CreateSessionResponse =
-        call(runtime, rt, "create_session", serde_json::to_value(args)?)?;
+        call(invoker, "create_session", serde_json::to_value(args)?).await?;
     Ok(resp.id)
 }
 
@@ -141,13 +138,13 @@ pub fn create_session(
 ///
 /// # Errors
 /// Propagates any IPC / signal-delivery failure.
-pub fn close_session(runtime: &Runtime, rt: &TokioRuntime, id: &str) -> Result<()> {
+pub async fn close_session(invoker: &(dyn IpcInvoker + Send + Sync), id: &str) -> Result<()> {
     let _: serde_json::Value = call(
-        runtime,
-        rt,
+        invoker,
         "close_session",
         serde_json::json!({ "id": id }),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -155,18 +152,17 @@ pub fn close_session(runtime: &Runtime, rt: &TokioRuntime, id: &str) -> Result<(
 ///
 /// # Errors
 /// Propagates any IPC / write failure.
-pub fn send_input(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn send_input(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
     input: &str,
 ) -> Result<()> {
     let _: serde_json::Value = call(
-        runtime,
-        rt,
+        invoker,
         "send_input",
         serde_json::json!({ "id": id, "input": input }),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -174,18 +170,17 @@ pub fn send_input(
 ///
 /// # Errors
 /// Propagates any IPC / write failure.
-pub fn send_raw_input(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn send_raw_input(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
     data: &[u8],
 ) -> Result<()> {
     let _: serde_json::Value = call(
-        runtime,
-        rt,
+        invoker,
         "send_raw_input",
         serde_json::json!({ "id": id, "data": data }),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -194,18 +189,17 @@ pub fn send_raw_input(
 ///
 /// # Errors
 /// Propagates any IPC / read failure.
-pub fn pump(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn pump(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
     timeout_ms: u64,
 ) -> Result<usize> {
     let resp: PumpResponse = call(
-        runtime,
-        rt,
+        invoker,
         "pump",
         serde_json::json!({ "id": id, "timeout_ms": timeout_ms }),
-    )?;
+    )
+    .await?;
     Ok(resp.bytes)
 }
 
@@ -213,9 +207,8 @@ pub fn pump(
 ///
 /// # Errors
 /// Propagates any IPC failure.
-pub fn read_output(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn read_output(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
     start: Option<usize>,
     count: Option<usize>,
@@ -227,15 +220,17 @@ pub fn read_output(
     if let Some(c) = count {
         args["count"] = c.into();
     }
-    call(runtime, rt, "read_output", args)
+    call(invoker, "read_output", args).await
 }
 
 /// List every session the server knows about.
 ///
 /// # Errors
 /// Propagates any IPC failure.
-pub fn list_sessions(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<SessionInfo>> {
-    call(runtime, rt, "list_sessions", serde_json::json!({}))
+pub async fn list_sessions(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+) -> Result<Vec<SessionInfo>> {
+    call(invoker, "list_sessions", serde_json::json!({})).await
 }
 
 /// Look up metadata for one session.
@@ -243,15 +238,14 @@ pub fn list_sessions(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<Session
 /// # Errors
 /// Propagates any IPC failure; returns a hard error (not `None`) for
 /// unknown ids so callers can distinguish "gone" from "empty buffer".
-pub fn get_session_info(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn get_session_info(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
 ) -> Result<SessionInfo> {
     call(
-        runtime,
-        rt,
+        invoker,
         "get_session_info",
         serde_json::json!({ "id": id }),
     )
+    .await
 }

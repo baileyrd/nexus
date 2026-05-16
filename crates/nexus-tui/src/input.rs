@@ -213,14 +213,20 @@ fn handle_search_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             // Execute the search.
             let query = app.search.query.clone();
             if !query.is_empty() {
-                match nexus_bootstrap::storage::search(&app.runtime, &app.rt, &query, 50) {
+                let invoker = app.runtime.invoker();
+                match app
+                    .rt
+                    .block_on(nexus_bootstrap::storage::search(&*invoker, &query, 50))
+                {
                     Ok(results) => {
                         app.search.results = results;
                         app.search.selected = 0;
                         // If there are results, open the top one in the viewer.
                         if let Some(top) = app.search.results.first() {
                             let path = top.file_path.clone();
-                            let bytes = nexus_bootstrap::storage::read_file(&app.runtime, &app.rt, &path);
+                            let bytes = app
+                                .rt
+                                .block_on(nexus_bootstrap::storage::read_file(&*invoker, &path));
                             if let Ok(bytes) = bytes {
                                 let text = String::from_utf8_lossy(&bytes).into_owned();
                                 app.viewer.load_content(path, text);
@@ -421,7 +427,11 @@ fn open_in_editor(app: &mut TuiApp) -> Result<()> {
     )?;
 
     // Reload file content from storage (it may have changed).
-    if let Ok(bytes) = nexus_bootstrap::storage::read_file(&app.runtime, &app.rt, &path) {
+    let invoker = app.runtime.invoker();
+    if let Ok(bytes) = app
+        .rt
+        .block_on(nexus_bootstrap::storage::read_file(&*invoker, &path))
+    {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         app.viewer.load_content(path, text);
     }

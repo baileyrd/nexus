@@ -44,8 +44,9 @@ pub fn init(app: &App, dir: Option<PathBuf>, template: Option<&str>) -> Result<(
     // Build a runtime anchored at the new forge and reindex any pre-existing
     // files through the plugin boundary.
     let mut staging = App::new(target.clone(), app.format());
-    let (runtime, rt) = staging.runtime()?;
-    let stats = ipc::rebuild_index(runtime, rt)
+    let (invoker, rt) = staging.invoker()?;
+    let stats = rt
+        .block_on(ipc::rebuild_index(&*invoker))
         .map_err(|e| anyhow::anyhow!("failed to index existing files: {e}"))?;
 
     let location = target.display().to_string();
@@ -81,9 +82,10 @@ pub fn init(app: &App, dir: Option<PathBuf>, template: Option<&str>) -> Result<(
 pub fn status(app: &mut App) -> Result<()> {
     let format = app.format();
     let location = app.forge_root().display().to_string();
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
 
-    let records = ipc::query_files(runtime, rt)
+    let records = rt
+        .block_on(ipc::query_files(&*invoker))
         .map_err(|e| anyhow::anyhow!("failed to query files: {e}"))?;
 
     let file_count = records.len();
@@ -207,9 +209,10 @@ pub fn import(
 pub fn doctor(app: &mut App, fix: bool) -> Result<()> {
     let format = app.format();
     let forge_root = app.forge_root().to_path_buf();
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
 
-    let indexed = ipc::query_files(runtime, rt)
+    let indexed = rt
+        .block_on(ipc::query_files(&*invoker))
         .map_err(|e| anyhow::anyhow!("doctor: query_files: {e}"))?;
     let indexed_by_path: std::collections::HashMap<&str, &ipc::FileRecord> = indexed
         .iter()
@@ -299,7 +302,8 @@ pub fn doctor(app: &mut App, fix: bool) -> Result<()> {
     }
 
     if fix && drifted {
-        let stats = ipc::rebuild_index(runtime, rt)
+        let stats = rt
+            .block_on(ipc::rebuild_index(&*invoker))
             .map_err(|e| anyhow::anyhow!("doctor --fix: rebuild_index: {e}"))?;
         match format {
             OutputFormat::Json | OutputFormat::Jsonl => {
@@ -388,8 +392,9 @@ fn walk_markdown_files(forge_root: &std::path::Path) -> Result<Vec<(String, i64)
 /// updating blocks, links, tags, and tasks.
 pub fn reindex(app: &mut App) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let stats = ipc::rebuild_index(runtime, rt)
+    let (invoker, rt) = app.invoker()?;
+    let stats = rt
+        .block_on(ipc::rebuild_index(&*invoker))
         .map_err(|e| anyhow::anyhow!("reindex failed: {e}"))?;
 
     match format {

@@ -16,8 +16,8 @@ pub fn create(app: &mut App, path: &str, schema_json: &str) -> Result<()> {
     let field_count = schema.fields.len();
     bases::init_base(&abs_dir, path, &schema)?;
 
-    let (runtime, rt) = app.runtime()?;
-    storage_ipc::base_index(runtime, rt, path)?;
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(storage_ipc::base_index(&*invoker, path))?;
 
     output::print_success(
         app.format(),
@@ -29,8 +29,8 @@ pub fn create(app: &mut App, path: &str, schema_json: &str) -> Result<()> {
 
 /// List all indexed bases.
 pub fn list(app: &mut App) -> Result<()> {
-    let (runtime, rt) = app.runtime()?;
-    let bases = storage_ipc::base_list(runtime, rt)?;
+    let (invoker, rt) = app.invoker()?;
+    let bases = rt.block_on(storage_ipc::base_list(&*invoker))?;
     if bases.is_empty() {
         println!("No bases found.");
         return Ok(());
@@ -72,8 +72,8 @@ pub fn add_record(app: &mut App, path: &str, data_json: &str) -> Result<()> {
     bases::save_base(&abs_dir, &base)?;
 
     let record_count = base.records.len();
-    let (runtime, rt) = app.runtime()?;
-    storage_ipc::base_index(runtime, rt, path)?;
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(storage_ipc::base_index(&*invoker, path))?;
 
     output::print_success(
         app.format(),
@@ -108,8 +108,9 @@ pub fn query(
 
     // Structured query — delegate to storage plugin (which holds the DB
     // connection) via IPC.
-    let (runtime, rt) = app.runtime()?;
-    let result = storage_ipc::base_query(runtime, rt, path, filters, sorts, limit, offset)?;
+    let (invoker, rt) = app.invoker()?;
+    let result =
+        rt.block_on(storage_ipc::base_query(&*invoker, path, filters, sorts, limit, offset))?;
 
     if result.records.is_empty() {
         println!("No matching records.");
@@ -134,20 +135,19 @@ pub fn import(app: &mut App, path: &str, csv_file: &str, has_header: bool) -> Re
         .map_err(|e| anyhow::anyhow!("Failed to read CSV file: {e}"))?;
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
 
-    let (runtime, rt) = app.runtime()?;
-    let response = database_ipc::csv_import(
-        runtime,
-        rt,
+    let (invoker, rt) = app.invoker()?;
+    let response = rt.block_on(database_ipc::csv_import(
+        &*invoker,
         &csv_bytes,
         &field_names,
         has_header,
         None,
-    )?;
+    ))?;
 
     base.records.extend(response.records);
     bases::save_base(&abs_dir, &base)?;
 
-    storage_ipc::base_index(runtime, rt, path)?;
+    rt.block_on(storage_ipc::base_index(&*invoker, path))?;
 
     println!(
         "Imported {} records ({} skipped)",
@@ -166,8 +166,8 @@ pub fn export(app: &mut App, path: &str, csv_file: &str) -> Result<()> {
 
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
 
-    let (runtime, rt) = app.runtime()?;
-    let response = database_ipc::csv_export(runtime, rt, &base.records, &field_names)?;
+    let (invoker, rt) = app.invoker()?;
+    let response = rt.block_on(database_ipc::csv_export(&*invoker, &base.records, &field_names))?;
 
     std::fs::write(csv_file, &response.csv_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to write CSV file: {e}"))?;
@@ -187,8 +187,8 @@ pub fn formula(app: &mut App, path: &str, record_id: &str, expr: &str) -> Result
         .find(|r| r.id == record_id)
         .ok_or_else(|| anyhow::anyhow!("Record not found: {record_id}"))?;
 
-    let (runtime, rt) = app.runtime()?;
-    let response = database_ipc::formula_eval(runtime, rt, expr, &record.fields)?;
+    let (invoker, rt) = app.invoker()?;
+    let response = rt.block_on(database_ipc::formula_eval(&*invoker, expr, &record.fields))?;
     println!("{}", response.display);
     Ok(())
 }

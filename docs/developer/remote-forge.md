@@ -83,6 +83,10 @@ transport transparently. That covers the bulk of Nexus's surface:
 | `com.nexus.terminal` | ✅ saved-command + ad-hoc surfaces |
 | `com.nexus.mcp.host` | ✅ host-side MCP ops |
 | `com.nexus.storage::import_forge` | ✅ |
+| `nexus graph status` / `unresolved` / `neighbors` / `entity *` / `dream-cycle run` | ✅ — BL-147 |
+| `nexus forge status` / `reindex` / `doctor` | ✅ — BL-147 |
+| `nexus content *` / `nexus tags list` / `nexus config show|reset` / `nexus canvas *` / `nexus bases *` | ✅ — BL-147 |
+| `nexus crdt enable-transport` | ✅ — BL-147 (gitignore step; merge-driver registration is still a local-tree op) |
 
 Local-only by design — these need the local kernel handle, event bus
 subscription, or stdio that the remote shape can't tunnel:
@@ -90,11 +94,9 @@ subscription, or stdio that the remote shape can't tunnel:
 | Subcommand | Why local-only |
 |---|---|
 | `nexus forge init` | Creates a local `.forge/` directory; no IPC analogue. |
-| `nexus forge status` / `reindex` / `doctor` | Use the local kernel handle, not just IPC. |
 | `nexus serve` / `nexus acp serve` / `nexus mcp serve` | Spawn local servers. Spinning one up against a remote forge is nonsensical. |
 | `nexus agent run --interactive` | Subscribes to the local kernel bus for approval prompts. The non-interactive path works fine over remote. |
 | `nexus ai chat` (streaming) | Subscribes to `com.nexus.ai.stream_*` events; pump needs a bus the CLI can read. |
-| `nexus graph entity *` | Uses typed helpers in `nexus_bootstrap::storage` that take `&Runtime` rather than the trait. Refactoring those for remote is a filed follow-up. |
 
 Running a local-only subcommand against an `ssh://` URI exits with:
 
@@ -303,9 +305,6 @@ built via `build_remote_runtime_over_pipes(reader, writer, guard)`.
 - **No `event_subscribe` consumer in the CLI yet.** The wire shape is
   there, but no in-tree subcommand currently uses it over remote. Once
   one does, reconnect needs subscription replay.
-- **Graph subcommands** (`nexus graph entity *`) don't work over remote
-  yet — the underlying helpers haven't been refactored to take the
-  `IpcInvoker` trait. Filed as a follow-up.
 - **Plugin scaffolding** (`nexus plugin scaffold`, `nexus plugin
   install`) is local-only by design — community plugins live on the
   remote machine, alongside their `nexus serve`.

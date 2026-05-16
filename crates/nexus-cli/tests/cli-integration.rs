@@ -58,15 +58,20 @@ fn content_update_overwrites_existing_file() {
         .build()
         .unwrap();
     let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
+    let invoker = runtime.invoker();
 
     // Create then update — mirrors `nexus content create` followed by
     // `nexus content update`.
-    nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/a.md", b"first").unwrap();
-    let meta =
-        nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/a.md", b"second").unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/a.md", b"first"))
+        .unwrap();
+    let meta = rt
+        .block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/a.md", b"second"))
+        .unwrap();
     assert_eq!(meta.path, "notes/a.md");
 
-    let bytes = nexus_bootstrap::storage::read_file(&runtime, &rt, "notes/a.md").unwrap();
+    let bytes = rt
+        .block_on(nexus_bootstrap::storage::read_file(&*invoker, "notes/a.md"))
+        .unwrap();
     assert_eq!(bytes, b"second");
 }
 
@@ -80,16 +85,20 @@ fn content_list_with_prefix_filters() {
         .build()
         .unwrap();
     let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
+    let invoker = runtime.invoker();
 
-    nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/one.md", b"1").unwrap();
-    nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/two.md", b"2").unwrap();
-    nexus_bootstrap::storage::write_file(&runtime, &rt, "other/three.md", b"3").unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/one.md", b"1")).unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/two.md", b"2")).unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "other/three.md", b"3")).unwrap();
 
-    let all = nexus_bootstrap::storage::query_files_with_prefix(&runtime, &rt, "").unwrap();
+    let all = rt
+        .block_on(nexus_bootstrap::storage::query_files_with_prefix(&*invoker, ""))
+        .unwrap();
     assert!(all.len() >= 3);
 
-    let filtered =
-        nexus_bootstrap::storage::query_files_with_prefix(&runtime, &rt, "notes/").unwrap();
+    let filtered = rt
+        .block_on(nexus_bootstrap::storage::query_files_with_prefix(&*invoker, "notes/"))
+        .unwrap();
     let paths: Vec<&str> = filtered.iter().map(|r| r.path.as_str()).collect();
     assert!(paths.iter().all(|p| p.starts_with("notes/")));
     assert!(paths.contains(&"notes/one.md"));
@@ -107,24 +116,25 @@ fn tags_list_returns_tag_occurrences() {
         .build()
         .unwrap();
     let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
+    let invoker = runtime.invoker();
 
     // An inline-tagged note and a frontmatter-tagged note.
-    nexus_bootstrap::storage::write_file(
-        &runtime,
-        &rt,
+    rt.block_on(nexus_bootstrap::storage::write_file(
+        &*invoker,
         "notes/inline.md",
         b"# Inline\n\nA #project tagged line.\n",
-    )
+    ))
     .unwrap();
-    nexus_bootstrap::storage::write_file(
-        &runtime,
-        &rt,
+    rt.block_on(nexus_bootstrap::storage::write_file(
+        &*invoker,
         "notes/front.md",
         b"---\ntags: [project]\n---\n# Front\n",
-    )
+    ))
     .unwrap();
 
-    let hits = nexus_bootstrap::storage::query_tags(&runtime, &rt, "project").unwrap();
+    let hits = rt
+        .block_on(nexus_bootstrap::storage::query_tags(&*invoker, "project"))
+        .unwrap();
     assert!(
         !hits.is_empty(),
         "expected at least one occurrence of #project"

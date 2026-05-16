@@ -64,8 +64,8 @@ pub fn embed(app: &mut App, file: Option<&str>) -> Result<()> {
         println!("Embedded {count} chunks from {path}");
     } else {
         let files = {
-            let (runtime, rt) = app.runtime()?;
-            storage_ipc::query_files(runtime, rt)?
+            let (invoker, rt) = app.invoker()?;
+            rt.block_on(storage_ipc::query_files(&*invoker))?
         };
 
         let mut total = 0usize;
@@ -83,8 +83,8 @@ pub fn embed(app: &mut App, file: Option<&str>) -> Result<()> {
 
 #[allow(clippy::type_complexity)]
 fn fetch_blocks(app: &mut App, path: &str) -> Result<Vec<(u64, String, String, Option<i32>)>> {
-    let (runtime, rt) = app.runtime()?;
-    let blocks = storage_ipc::query_blocks(runtime, rt, path)?;
+    let (invoker, rt) = app.invoker()?;
+    let blocks = rt.block_on(storage_ipc::query_blocks(&*invoker, path))?;
     Ok(blocks
         .into_iter()
         .map(|b| (b.id, b.block_type, b.content, b.level))
@@ -271,8 +271,8 @@ pub fn chat(
 
     if let Some(path) = context {
         let bytes = {
-            let (runtime, rt) = app.runtime()?;
-            storage_ipc::read_file(runtime, rt, path)?
+            let (invoker, rt) = app.invoker()?;
+            rt.block_on(storage_ipc::read_file(&*invoker, path))?
         };
         let text = String::from_utf8_lossy(&bytes).into_owned();
         // The seeded turn is a user message so the assistant has the
@@ -406,8 +406,8 @@ fn handle_slash(
                 return Ok(SlashOutcome::Continue);
             }
             let bytes = {
-                let (runtime, rt) = app.runtime()?;
-                storage_ipc::read_file(runtime, rt, rest)?
+                let (invoker, rt) = app.invoker()?;
+                rt.block_on(storage_ipc::read_file(&*invoker, rest))?
             };
             let text = String::from_utf8_lossy(&bytes).into_owned();
             history.push(Message::user(format!("File `{rest}`:\n```\n{text}\n```")));
@@ -453,8 +453,8 @@ pub fn complete(
     context_lines: Option<usize>,
 ) -> Result<()> {
     let bytes = {
-        let (runtime, rt) = app.runtime()?;
-        storage_ipc::read_file(runtime, rt, file)?
+        let (invoker, rt) = app.invoker()?;
+        rt.block_on(storage_ipc::read_file(&*invoker, file))?
     };
     let text = String::from_utf8_lossy(&bytes);
 

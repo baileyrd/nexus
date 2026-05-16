@@ -202,8 +202,9 @@ pub fn enable_transport(app: &mut App) -> Result<()> {
     println!("BL-007 git-CRDT transport — enabling on {}", forge_root.display());
     println!();
 
-    let (runtime, rt) = app.runtime()?;
-    let wrote = nexus_bootstrap::storage::write_default_gitignore(runtime, rt)
+    let (invoker, rt) = app.invoker()?;
+    let wrote = rt
+        .block_on(nexus_bootstrap::storage::write_default_gitignore(&*invoker))
         .map_err(|e| anyhow!("write .forge/.gitignore: {e}"))?;
     if wrote {
         println!(

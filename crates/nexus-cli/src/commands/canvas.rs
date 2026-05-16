@@ -12,8 +12,8 @@ use crate::output;
 
 /// Read a canvas file through storage IPC and parse it into a [`CanvasFile`].
 fn load_canvas(app: &mut App, path: &str) -> Result<CanvasFile> {
-    let (runtime, rt) = app.runtime()?;
-    let bytes = ipc::read_file(runtime, rt, path)?;
+    let (invoker, rt) = app.invoker()?;
+    let bytes = rt.block_on(ipc::read_file(&*invoker, path))?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|e| anyhow::anyhow!("canvas '{path}' is not valid UTF-8: {e}"))?;
     Ok(parse_canvas(text)?)
@@ -22,8 +22,8 @@ fn load_canvas(app: &mut App, path: &str) -> Result<CanvasFile> {
 /// Serialize `canvas` and write it back to `path` through storage IPC.
 fn save_canvas(app: &mut App, path: &str, canvas: &CanvasFile) -> Result<()> {
     let json = serialize_canvas(canvas)?;
-    let (runtime, rt) = app.runtime()?;
-    ipc::write_file(runtime, rt, path, json.as_bytes())?;
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(ipc::write_file(&*invoker, path, json.as_bytes()))?;
     Ok(())
 }
 

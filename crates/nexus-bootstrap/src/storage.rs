@@ -4,31 +4,31 @@
 //! direct `nexus-storage` dependency needed. Each helper:
 //!
 //! 1. Serializes arguments to JSON.
-//! 2. `block_on`s the async `ipc_call` on the provided Tokio runtime.
+//! 2. `await`s the async [`IpcInvoker::ipc_call`] on the provided invoker.
 //! 3. Deserializes the response into a typed DTO.
 //!
 //! DTO field sets are intentionally minimal — only what the current callers
 //! read. Extra JSON fields in the response are ignored by serde, so adding
 //! fields upstream does not break callers here.
+//!
+//! BL-147 — helpers take `&dyn IpcInvoker` rather than `&Runtime`, so the
+//! same surface works against both local and remote (`ssh://`) forges. Each
+//! helper is `async`; sync callers wrap with `rt.block_on(...)`.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Runtime as TokioRuntime;
 
-use crate::Runtime;
+use crate::invoker::IpcInvoker;
 
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
 
-/// Default per-call timeout for the synchronous storage IPC helpers
-/// in this module. Issue #83 flagged this as un-overridable; for
-/// now callers that need a different timeout build their own
-/// `runtime.context.ipc_call(...)` invocation directly. Exposed as
-/// `pub` so callers can mirror the default rather than re-deriving
-/// it. Adding a `_with_timeout` overload to every helper is
-/// tracked under #83.
+/// Default per-call timeout for the storage IPC helpers in this
+/// module. Issue #83 flagged this as un-overridable; for now callers
+/// that need a different timeout build their own
+/// `invoker.ipc_call(...)` invocation directly. Exposed as `pub` so
+/// callers can mirror the default rather than re-deriving it.
 pub const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -183,18 +183,14 @@ pub struct TaskFilter {
 
 // ── Internal helper ──────────────────────────────────────────────────────────
 
-fn call<T: serde::de::DeserializeOwned>(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+async fn call<T: serde::de::DeserializeOwned>(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     command: &str,
     args: serde_json::Value,
 ) -> Result<T> {
-    let value = rt
-        .block_on(
-            runtime
-                .context
-                .ipc_call(STORAGE_PLUGIN, command, args, IPC_TIMEOUT),
-        )
+    let value = invoker
+        .ipc_call(STORAGE_PLUGIN, command, args, IPC_TIMEOUT)
+        .await
         .with_context(|| format!("storage ipc call '{command}' failed"))?;
     serde_json::from_value(value)
         .with_context(|| format!("storage ipc response '{command}' decode failed"))
@@ -203,14 +199,13 @@ fn call<T: serde::de::DeserializeOwned>(
 // ── Public helpers ───────────────────────────────────────────────────────────
 
 /// List every file in the forge index.
-pub fn query_files(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<FileRecord>> {
-    call(runtime, rt, "query_files", serde_json::json!({}))
+pub async fn query_files(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<Vec<FileRecord>> {
+    call(invoker, "query_files", serde_json::json!({})).await
 }
 
 /// List files whose path starts with `prefix`. Empty prefix matches all.
-pub fn query_files_with_prefix(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn query_files_with_prefix(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     prefix: &str,
 ) -> Result<Vec<FileRecord>> {
     let args = if prefix.is_empty() {
@@ -218,44 +213,43 @@ pub fn query_files_with_prefix(
     } else {
         serde_json::json!({ "prefix": prefix })
     };
-    call(runtime, rt, "query_files", args)
+    call(invoker, "query_files", args).await
 }
 
 /// Return every block belonging to the file at `path`. Empty when the path is
 /// unknown to the index.
-pub fn query_blocks(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<BlockRecord>> {
-    call(
-        runtime,
-        rt,
-        "query_blocks",
-        serde_json::json!({ "path": path }),
-    )
+pub async fn query_blocks(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    path: &str,
+) -> Result<Vec<BlockRecord>> {
+    call(invoker, "query_blocks", serde_json::json!({ "path": path })).await
 }
 
 /// Query all occurrences of the tag named `name` across the forge.
-pub fn query_tags(runtime: &Runtime, rt: &TokioRuntime, name: &str) -> Result<Vec<TagResult>> {
-    call(
-        runtime,
-        rt,
-        "query_tags",
-        serde_json::json!({ "name": name }),
-    )
+pub async fn query_tags(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    name: &str,
+) -> Result<Vec<TagResult>> {
+    call(invoker, "query_tags", serde_json::json!({ "name": name })).await
 }
 
 /// Read a file's bytes by forge-relative path. Returns an error when the
 /// file does not exist — callers that want a typed "missing" signal should
 /// use [`read_file_optional`].
-pub fn read_file(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<u8>> {
-    read_file_optional(runtime, rt, path)?
+pub async fn read_file(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    path: &str,
+) -> Result<Vec<u8>> {
+    read_file_optional(invoker, path)
+        .await?
         .with_context(|| format!("read_file: file not found: {path}"))
 }
 
 /// Read a file's bytes by forge-relative path. Returns `Ok(None)` when the
 /// file does not exist (storage returns `{ "bytes": null }` for missing),
 /// `Err` for any other failure.
-pub fn read_file_optional(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn read_file_optional(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     path: &str,
 ) -> Result<Option<Vec<u8>>> {
     #[derive(Deserialize)]
@@ -263,134 +257,132 @@ pub fn read_file_optional(
         #[serde(default)]
         bytes: Option<Vec<u8>>,
     }
-    let resp: Resp = call(
-        runtime,
-        rt,
-        "read_file",
-        serde_json::json!({ "path": path }),
-    )?;
+    let resp: Resp = call(invoker, "read_file", serde_json::json!({ "path": path })).await?;
     Ok(resp.bytes)
 }
 
 /// Return every file that links TO `path`.
-pub fn backlinks(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<BacklinkResult>> {
-    call(
-        runtime,
-        rt,
-        "backlinks",
-        serde_json::json!({ "path": path }),
-    )
+pub async fn backlinks(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    path: &str,
+) -> Result<Vec<BacklinkResult>> {
+    call(invoker, "backlinks", serde_json::json!({ "path": path })).await
 }
 
 /// Query tasks matching `filter`.
-pub fn query_tasks(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn query_tasks(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     filter: &TaskFilter,
 ) -> Result<Vec<TaskRecord>> {
     let args = serde_json::to_value(filter).context("serialize TaskFilter")?;
-    call(runtime, rt, "query_tasks", args)
+    call(invoker, "query_tasks", args).await
 }
 
 /// Return knowledge-graph summary statistics.
-pub fn graph_stats(runtime: &Runtime, rt: &TokioRuntime) -> Result<GraphStats> {
-    call(runtime, rt, "graph_stats", serde_json::json!({}))
+pub async fn graph_stats(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<GraphStats> {
+    call(invoker, "graph_stats", serde_json::json!({})).await
 }
 
 /// Full-text search across block content.
-pub fn search(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn search(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     query: &str,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
     call(
-        runtime,
-        rt,
+        invoker,
         "search",
         serde_json::json!({ "query": query, "limit": limit }),
     )
+    .await
 }
 
 /// Rebuild the forge index from files on disk.
-pub fn rebuild_index(runtime: &Runtime, rt: &TokioRuntime) -> Result<RebuildStats> {
-    call(runtime, rt, "rebuild_index", serde_json::json!({}))
+pub async fn rebuild_index(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<RebuildStats> {
+    call(invoker, "rebuild_index", serde_json::json!({})).await
 }
 
 /// Write `bytes` to `path` (forge-relative) atomically and update the index.
-pub fn write_file(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn write_file(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     path: &str,
     bytes: &[u8],
 ) -> Result<FileMetadata> {
     call(
-        runtime,
-        rt,
+        invoker,
         "write_file",
         serde_json::json!({ "path": path, "bytes": bytes }),
     )
+    .await
 }
 
 /// Delete the file at `path`.
-pub fn delete_file(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<()> {
+pub async fn delete_file(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -> Result<()> {
     let _: serde_json::Value = call(
-        runtime,
-        rt,
+        invoker,
         "delete_file",
         serde_json::json!({ "path": path }),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
 /// Check whether a file at `path` exists in the forge.
-pub fn file_exists(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<bool> {
+pub async fn file_exists(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    path: &str,
+) -> Result<bool> {
     #[derive(Deserialize)]
     struct Resp {
         exists: bool,
     }
     let resp: Resp = call(
-        runtime,
-        rt,
+        invoker,
         "file_exists",
         serde_json::json!({ "path": path }),
-    )?;
+    )
+    .await?;
     Ok(resp.exists)
 }
 
 /// Rebuild the full-text search index from the current file set.
-pub fn rebuild_search_index(runtime: &Runtime, rt: &TokioRuntime) -> Result<()> {
-    let _: serde_json::Value = call(runtime, rt, "rebuild_search_index", serde_json::json!({}))?;
+pub async fn rebuild_search_index(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<()> {
+    let _: serde_json::Value =
+        call(invoker, "rebuild_search_index", serde_json::json!({})).await?;
     Ok(())
 }
 
 /// Toggle a task's completed state, returning the updated record.
-pub fn toggle_task(runtime: &Runtime, rt: &TokioRuntime, task_id: u64) -> Result<TaskRecord> {
+pub async fn toggle_task(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    task_id: u64,
+) -> Result<TaskRecord> {
     call(
-        runtime,
-        rt,
+        invoker,
         "toggle_task",
         serde_json::json!({ "task_id": task_id }),
     )
+    .await
 }
 
 /// Return every link FROM `path` to another file.
-pub fn outgoing_links(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn outgoing_links(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     path: &str,
 ) -> Result<Vec<OutgoingLink>> {
     call(
-        runtime,
-        rt,
+        invoker,
         "outgoing_links",
         serde_json::json!({ "path": path }),
     )
+    .await
 }
 
 /// Return every link target that has no corresponding file.
-pub fn unresolved_links(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<UnresolvedLink>> {
-    call(runtime, rt, "unresolved_links", serde_json::json!({}))
+pub async fn unresolved_links(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+) -> Result<Vec<UnresolvedLink>> {
+    call(invoker, "unresolved_links", serde_json::json!({})).await
 }
 
 /// Re-export of [`nexus_types::bases::BaseSummary`] so CLI/TUI callers don't
@@ -420,31 +412,30 @@ pub use nexus_storage::bases::query::QueryResult as BaseQueryResult;
 /// Reindex a `.bases` directory from disk into the `SQLite` index.
 ///
 /// `path` is forge-relative.
-pub fn base_index(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<i64> {
+pub async fn base_index(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -> Result<i64> {
     #[derive(Deserialize)]
     struct Resp {
         base_id: i64,
     }
     let resp: Resp = call(
-        runtime,
-        rt,
+        invoker,
         "base_index",
         serde_json::json!({ "path": path }),
-    )?;
+    )
+    .await?;
     Ok(resp.base_id)
 }
 
 /// List every indexed base.
-pub fn base_list(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<BaseSummary>> {
-    call(runtime, rt, "base_list", serde_json::json!({}))
+pub async fn base_list(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<Vec<BaseSummary>> {
+    call(invoker, "base_list", serde_json::json!({})).await
 }
 
 /// Run a structured query against the base at `path`. Filters/sorts are
 /// parsed server-side using `nexus_storage::bases::query::parse_filter` /
 /// `parse_sort`.
-pub fn base_query(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn base_query(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     path: &str,
     filters: &[String],
     sorts: &[String],
@@ -452,8 +443,7 @@ pub fn base_query(
     offset: Option<u32>,
 ) -> Result<BaseQueryResult> {
     call(
-        runtime,
-        rt,
+        invoker,
         "base_query",
         serde_json::json!({
             "path": path,
@@ -463,6 +453,7 @@ pub fn base_query(
             "offset": offset,
         }),
     )
+    .await
 }
 
 /// Serialized `.forge/<file>` config payload returned by [`config_read`].
@@ -477,25 +468,28 @@ pub struct ConfigPayload {
 /// Read one of the four forge config files as pretty-printed text.
 ///
 /// `kind` must be `"app"`, `"workspace"`, `"mcp"`, or `"ai"`.
-pub fn config_read(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<ConfigPayload> {
+pub async fn config_read(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    kind: &str,
+) -> Result<ConfigPayload> {
     call(
-        runtime,
-        rt,
+        invoker,
         "config_read",
         serde_json::json!({ "kind": kind }),
     )
+    .await
 }
 
 /// Reset one of the four forge config files to its defaults.
 ///
 /// `kind` must be `"app"`, `"workspace"`, `"mcp"`, or `"ai"`.
-pub fn config_reset(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<()> {
+pub async fn config_reset(invoker: &(dyn IpcInvoker + Send + Sync), kind: &str) -> Result<()> {
     let _: serde_json::Value = call(
-        runtime,
-        rt,
+        invoker,
         "config_reset",
         serde_json::json!({ "kind": kind }),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -508,33 +502,34 @@ pub fn config_reset(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<
 /// BL-007 shipped get the gitignore policy that lets the CRDT state
 /// files at `.forge/.editor/crdt/*.json` ride through to peers via
 /// git while rebuildable / per-machine state stays excluded.
-pub fn write_default_gitignore(runtime: &Runtime, rt: &TokioRuntime) -> Result<bool> {
+pub async fn write_default_gitignore(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+) -> Result<bool> {
     #[derive(Deserialize)]
     struct Resp {
         wrote: bool,
     }
     let resp: Resp = call(
-        runtime,
-        rt,
+        invoker,
         "write_default_gitignore",
         serde_json::json!({}),
-    )?;
+    )
+    .await?;
     Ok(resp.wrote)
 }
 
 /// Return paths of files within `depth` link hops of `path`.
-pub fn graph_neighbors(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn graph_neighbors(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     path: &str,
     depth: usize,
 ) -> Result<Vec<String>> {
     call(
-        runtime,
-        rt,
+        invoker,
         "graph_neighbors",
         serde_json::json!({ "path": path, "depth": depth }),
     )
+    .await
 }
 
 // ── BL-128 entity-graph helpers ───────────────────────────────────────────────
@@ -650,9 +645,8 @@ pub struct EntityDuplicatePair {
 }
 
 /// Substring-rank search over the file-backed `entities/` index.
-pub fn entity_search(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn entity_search(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     query: &str,
     entity_type: Option<&str>,
     limit: Option<u32>,
@@ -668,32 +662,29 @@ pub fn entity_search(
     if let Some(l) = limit {
         args["limit"] = serde_json::Value::from(l);
     }
-    let resp: Resp = call(runtime, rt, "entity_search", args)?;
+    let resp: Resp = call(invoker, "entity_search", args).await?;
     Ok(resp.results)
 }
 
 /// Look up one entity by canonical id or alias.
-pub fn entity_get(runtime: &Runtime, rt: &TokioRuntime, id: &str) -> Result<Option<EntityRecord>> {
+pub async fn entity_get(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    id: &str,
+) -> Result<Option<EntityRecord>> {
     #[derive(Deserialize)]
     struct Resp {
         #[serde(default)]
         entity: Option<EntityRecord>,
     }
-    let resp: Resp = call(
-        runtime,
-        rt,
-        "entity_get",
-        serde_json::json!({ "id": id }),
-    )?;
+    let resp: Resp = call(invoker, "entity_get", serde_json::json!({ "id": id })).await?;
     Ok(resp.entity)
 }
 
 /// Outgoing / incoming / both relations for an entity. `direction`
 /// is one of `"outgoing"`, `"incoming"`, `"both"`; unknown values
 /// map to `"both"` server-side.
-pub fn entity_relations(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn entity_relations(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
     direction: Option<&str>,
 ) -> Result<Vec<EntityRelationEdge>> {
@@ -705,26 +696,24 @@ pub fn entity_relations(
     if let Some(d) = direction {
         args["direction"] = serde_json::Value::String(d.to_string());
     }
-    let resp: Resp = call(runtime, rt, "entity_relations", args)?;
+    let resp: Resp = call(invoker, "entity_relations", args).await?;
     Ok(resp.relations)
 }
 
 /// File-as-truth write-through. Creates or replaces
 /// `<forge>/entities/<id>.md` via the atomic temp-fsync-rename path.
-pub fn entity_upsert(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn entity_upsert(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     payload: &EntityUpsert,
 ) -> Result<EntityUpsertOutcome> {
     let args = serde_json::to_value(payload).context("serialize EntityUpsert")?;
-    call(runtime, rt, "entity_upsert", args)
+    call(invoker, "entity_upsert", args).await
 }
 
 /// Find pairs of same-type entities whose token sets overlap by at
 /// least `threshold` (defaults to `0.92` server-side when `None`).
-pub fn entity_find_duplicates(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn entity_find_duplicates(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     threshold: Option<f32>,
 ) -> Result<Vec<EntityDuplicatePair>> {
     #[derive(Deserialize)]
@@ -735,7 +724,7 @@ pub fn entity_find_duplicates(
     if let Some(t) = threshold {
         args["threshold"] = serde_json::Value::from(t);
     }
-    let resp: Resp = call(runtime, rt, "entity_find_duplicates", args)?;
+    let resp: Resp = call(invoker, "entity_find_duplicates", args).await?;
     Ok(resp.pairs)
 }
 
@@ -754,18 +743,17 @@ pub struct EntityMergeOutcome {
 
 /// BL-129 — merge `drop` into `keep`. Caller picks the surviving id;
 /// the convention is the lexicographically-smaller of the pair.
-pub fn entity_merge(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn entity_merge(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     keep: &str,
     drop: &str,
 ) -> Result<EntityMergeOutcome> {
     call(
-        runtime,
-        rt,
+        invoker,
         "entity_merge",
         serde_json::json!({ "keep": keep, "drop": drop }),
     )
+    .await
 }
 
 /// BL-129 — multiplicative confidence decay across every entity
@@ -789,9 +777,8 @@ pub struct EntityDecayRelationsOutcome {
 
 /// BL-129 — multiplicative confidence decay across every entity
 /// relation in the forge's `entities/` directory.
-pub fn entity_decay_relations(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
+pub async fn entity_decay_relations(
+    invoker: &(dyn IpcInvoker + Send + Sync),
     factor: Option<f32>,
     floor: Option<f32>,
     dry_run: bool,
@@ -806,5 +793,5 @@ pub fn entity_decay_relations(
     if dry_run {
         args["dry_run"] = serde_json::Value::Bool(true);
     }
-    call(runtime, rt, "entity_decay_relations", args)
+    call(invoker, "entity_decay_relations", args).await
 }

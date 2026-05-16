@@ -1,6 +1,7 @@
 use anyhow::Result;
+use nexus_bootstrap::invoker::IpcInvoker;
 use nexus_bootstrap::storage as ipc;
-use nexus_kernel::PluginContext;
+use tokio::runtime::Runtime as TokioRuntime;
 
 use crate::app::App;
 use crate::output::{print_list, OutputFormat};
@@ -8,8 +9,9 @@ use crate::output::{print_list, OutputFormat};
 /// Show knowledge graph statistics.
 pub fn status(app: &mut App) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let stats = ipc::graph_stats(runtime, rt)
+    let (invoker, rt) = app.invoker()?;
+    let stats = rt
+        .block_on(ipc::graph_stats(&*invoker))
         .map_err(|e| anyhow::anyhow!("failed to get graph stats: {e}"))?;
 
     match format {
@@ -36,8 +38,9 @@ pub fn status(app: &mut App) -> Result<()> {
 /// List all unresolved (broken) links.
 pub fn unresolved(app: &mut App) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let links = ipc::unresolved_links(runtime, rt)
+    let (invoker, rt) = app.invoker()?;
+    let links = rt
+        .block_on(ipc::unresolved_links(&*invoker))
         .map_err(|e| anyhow::anyhow!("failed to get unresolved links: {e}"))?;
 
     if links.is_empty() {
@@ -64,8 +67,9 @@ pub fn unresolved(app: &mut App) -> Result<()> {
 /// Show neighbors of a file within N hops.
 pub fn neighbors(app: &mut App, path: &str, depth: usize) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let paths = ipc::graph_neighbors(runtime, rt, path, depth)
+    let (invoker, rt) = app.invoker()?;
+    let paths = rt
+        .block_on(ipc::graph_neighbors(&*invoker, path, depth))
         .map_err(|e| anyhow::anyhow!("failed to get neighbors: {e}"))?;
 
     if paths.is_empty() {
@@ -88,8 +92,9 @@ pub fn entity_list(app: &mut App, entity_type: Option<&str>, limit: u32) -> Resu
     // The `entity_search` IPC treats an empty query as "everything",
     // ordered by ascending id — reuse it for `list`.
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let hits = ipc::entity_search(runtime, rt, "", entity_type, Some(limit))
+    let (invoker, rt) = app.invoker()?;
+    let hits = rt
+        .block_on(ipc::entity_search(&*invoker, "", entity_type, Some(limit)))
         .map_err(|e| anyhow::anyhow!("entity_search failed: {e}"))?;
 
     if hits.is_empty() {
@@ -132,8 +137,9 @@ pub fn entity_list(app: &mut App, entity_type: Option<&str>, limit: u32) -> Resu
 /// `nexus graph entity show <id>` — full payload + relations.
 pub fn entity_show(app: &mut App, id: &str) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let entity = ipc::entity_get(runtime, rt, id)
+    let (invoker, rt) = app.invoker()?;
+    let entity = rt
+        .block_on(ipc::entity_get(&*invoker, id))
         .map_err(|e| anyhow::anyhow!("entity_get failed: {e}"))?;
     let Some(entity) = entity else {
         return Err(anyhow::anyhow!("no entity for id or alias '{id}'"));
@@ -189,8 +195,9 @@ pub fn entity_search(
     limit: u32,
 ) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let hits = ipc::entity_search(runtime, rt, query, entity_type, Some(limit))
+    let (invoker, rt) = app.invoker()?;
+    let hits = rt
+        .block_on(ipc::entity_search(&*invoker, query, entity_type, Some(limit)))
         .map_err(|e| anyhow::anyhow!("entity_search failed: {e}"))?;
 
     if hits.is_empty() {
@@ -235,8 +242,9 @@ pub fn entity_search(
 /// `nexus graph entity related` — outgoing / incoming / both edges.
 pub fn entity_related(app: &mut App, id: &str, direction: &str) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let edges = ipc::entity_relations(runtime, rt, id, Some(direction))
+    let (invoker, rt) = app.invoker()?;
+    let edges = rt
+        .block_on(ipc::entity_relations(&*invoker, id, Some(direction)))
         .map_err(|e| anyhow::anyhow!("entity_relations failed: {e}"))?;
 
     if edges.is_empty() {
@@ -301,7 +309,7 @@ pub fn dream_cycle_run(
     let run_infer = phase.is_none_or(|p| p == "infer");
 
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
 
     if run_dedup {
         let merge_thr = merge_threshold.unwrap_or(0.97);
@@ -311,7 +319,8 @@ pub fn dream_cycle_run(
         let scan_floor = review_threshold
             .unwrap_or(0.92)
             .min(merge_thr);
-        let pairs = ipc::entity_find_duplicates(runtime, rt, Some(scan_floor))
+        let pairs = rt
+            .block_on(ipc::entity_find_duplicates(&*invoker, Some(scan_floor)))
             .map_err(|e| anyhow::anyhow!("dream-cycle dedup failed: {e}"))?;
 
         // Partition into auto-merge vs review tiers. Within each tier,
@@ -334,9 +343,11 @@ pub fn dream_cycle_run(
                     consumed.insert(p.b.clone());
                     continue;
                 }
-                let outcome = ipc::entity_merge(runtime, rt, &p.a, &p.b).map_err(|e| {
-                    anyhow::anyhow!("dream-cycle dedup: merge {} ← {} failed: {e}", p.a, p.b)
-                })?;
+                let outcome = rt
+                    .block_on(ipc::entity_merge(&*invoker, &p.a, &p.b))
+                    .map_err(|e| {
+                        anyhow::anyhow!("dream-cycle dedup: merge {} ← {} failed: {e}", p.a, p.b)
+                    })?;
                 consumed.insert(outcome.dropped.clone());
                 merged.push((
                     outcome.kept,
@@ -394,14 +405,14 @@ pub fn dream_cycle_run(
     }
 
     if run_decay {
-        let outcome = ipc::entity_decay_relations(
-            runtime,
-            rt,
-            decay_factor,
-            decay_floor,
-            dry_run,
-        )
-        .map_err(|e| anyhow::anyhow!("dream-cycle decay failed: {e}"))?;
+        let outcome = rt
+            .block_on(ipc::entity_decay_relations(
+                &*invoker,
+                decay_factor,
+                decay_floor,
+                dry_run,
+            ))
+            .map_err(|e| anyhow::anyhow!("dream-cycle decay failed: {e}"))?;
         match format {
             OutputFormat::Json | OutputFormat::Jsonl => {
                 println!(
@@ -431,7 +442,7 @@ pub fn dream_cycle_run(
 
     if run_enrich || run_infer {
         // Both phases iterate over every entity, so list once.
-        let entity_ids = list_entity_ids(runtime, rt)?;
+        let entity_ids = list_entity_ids(&*invoker, rt)?;
 
         if run_enrich {
             let mut enriched = 0u32;
@@ -442,7 +453,7 @@ pub fn dream_cycle_run(
                     "entity_id": id,
                     "dry_run": dry_run,
                 });
-                match ai_ipc_call(runtime, rt, "enrich_entity", args) {
+                match ai_ipc_call(&*invoker, rt, "enrich_entity", args) {
                     Ok(reply) => {
                         if reply.get("skipped").and_then(serde_json::Value::as_bool).unwrap_or(false) {
                             skipped += 1;
@@ -490,7 +501,7 @@ pub fn dream_cycle_run(
                     "entity_id": id,
                     "dry_run":   dry_run,
                 });
-                match ai_ipc_call(runtime, rt, "infer_entity_relations", args) {
+                match ai_ipc_call(&*invoker, rt, "infer_entity_relations", args) {
                     Ok(reply) => {
                         let n = reply
                             .get("proposals")
@@ -540,10 +551,11 @@ pub fn dream_cycle_run(
 /// up to `limit`). The 5000 cap is a defensive ceiling — the dream
 /// cycle is intended for personal forges with O(hundreds) of entities.
 fn list_entity_ids(
-    runtime: &nexus_bootstrap::Runtime,
-    rt: &tokio::runtime::Runtime,
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    rt: &TokioRuntime,
 ) -> Result<Vec<String>> {
-    let hits = ipc::entity_search(runtime, rt, "", None, Some(5000))
+    let hits = rt
+        .block_on(ipc::entity_search(invoker, "", None, Some(5000)))
         .map_err(|e| anyhow::anyhow!("dream-cycle: list entities failed: {e}"))?;
     Ok(hits.into_iter().map(|h| h.id).collect())
 }
@@ -552,12 +564,12 @@ fn list_entity_ids(
 /// typed helpers for storage but not for AI, so this is the narrowest
 /// adapter we need for the dream-cycle CLI.
 fn ai_ipc_call(
-    runtime: &nexus_bootstrap::Runtime,
-    rt: &tokio::runtime::Runtime,
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    rt: &TokioRuntime,
     command: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value> {
-    rt.block_on(runtime.context.ipc_call(
+    rt.block_on(invoker.ipc_call(
         "com.nexus.ai",
         command,
         args,
@@ -569,8 +581,9 @@ fn ai_ipc_call(
 /// `nexus graph entity duplicates` — Jaccard-similar entity pairs.
 pub fn entity_duplicates(app: &mut App, threshold: f32) -> Result<()> {
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    let pairs = ipc::entity_find_duplicates(runtime, rt, Some(threshold))
+    let (invoker, rt) = app.invoker()?;
+    let pairs = rt
+        .block_on(ipc::entity_find_duplicates(&*invoker, Some(threshold)))
         .map_err(|e| anyhow::anyhow!("entity_find_duplicates failed: {e}"))?;
 
     if pairs.is_empty() {

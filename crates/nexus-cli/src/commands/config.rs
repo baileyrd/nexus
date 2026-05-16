@@ -40,13 +40,13 @@ pub fn reset(app: &mut App, file: &str) -> Result<()> {
         _ => anyhow::bail!("Unknown config file: {file}. Valid: app, workspace, mcp, ai"),
     };
     let format = app.format();
-    let (runtime, rt) = app.runtime()?;
-    storage_ipc::config_reset(runtime, rt, file)?;
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(storage_ipc::config_reset(&*invoker, file))?;
     output::print_success(format, label, &serde_json::json!(null));
     Ok(())
 }
 
 fn read_kind(app: &mut App, kind: &str) -> Result<storage_ipc::ConfigPayload> {
-    let (runtime, rt) = app.runtime()?;
-    storage_ipc::config_read(runtime, rt, kind)
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(storage_ipc::config_read(&*invoker, kind))
 }
