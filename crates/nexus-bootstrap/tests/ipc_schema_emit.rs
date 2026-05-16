@@ -140,6 +140,7 @@ use nexus_workflow::core_plugin::{
 };
 use nexus_terminal::{
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
+    ReplEvalArgs, ReplInfo, ReplStartArgs, ReplStartResponse,
     ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
     SendInputArgs, SendRawInputArgs, SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
 };
@@ -559,6 +560,11 @@ fn emit_all_schemas_impl() {
     write_schema::<SearchOutputArgs>("com_nexus_terminal__search_output", "args");
     write_schema::<WaitForPatternArgs>("com_nexus_terminal__wait_for_pattern", "args");
     write_schema::<WaitForPatternResponse>("com_nexus_terminal__wait_for_pattern", "response");
+    // BL-142 — REPL surface.
+    write_schema::<ReplStartArgs>("com_nexus_terminal__repl_start", "args");
+    write_schema::<ReplStartResponse>("com_nexus_terminal__repl_start", "response");
+    write_schema::<ReplEvalArgs>("com_nexus_terminal__repl_eval", "args");
+    write_schema::<ReplInfo>("com_nexus_terminal__repl_list", "info");
 
     // ── com.nexus.database (P1-3 #113) ───────────────────────────────────
     // Only the 4 types that don't reference BaseRecord (which uses

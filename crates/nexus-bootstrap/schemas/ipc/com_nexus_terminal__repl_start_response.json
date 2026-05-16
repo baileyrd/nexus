@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplStartResponse",
+  "description": "BL-142 Phase 1 — response from `repl_start`. `id` is the session\nid (same shape as `create_session`'s response); `lang` echoes\nthe caller-supplied tag.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Fresh session id (same shape as\n[`CreateSessionResponse::id`]).",
+      "type": "string"
+    },
+    "lang": {
+      "description": "Caller-supplied language tag, echoed back.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "lang"
+  ]
+}

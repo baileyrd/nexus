@@ -229,6 +229,50 @@ pub const HANDLER_SUGGEST: u32 = 24;
 /// rather than silently returning an empty list.
 pub const HANDLER_CROSS_SESSION_SEARCH: u32 = 25;
 
+/// BL-142 Phase 1 — `repl_start` handler id. Args: [`ReplStartArgs`].
+/// Spawns a language kernel as a regular terminal session (so the
+/// existing PTY, scrollback, output-bus, and memory infrastructure
+/// all apply unchanged) and registers it in the plugin's REPL map
+/// so subsequent `repl_eval` / `repl_stop` calls can validate the
+/// target id is actually a REPL. Returns
+/// [`ReplStartResponse`] — the same session id `create_session`
+/// would return, plus the resolved `lang` tag.
+///
+/// The kernel command is supplied by the caller as `(program, args)`
+/// rather than a single string so the plugin doesn't have to make
+/// shell-tokenizing decisions (the shell-side `nexus.editor.replKernels`
+/// config string is parsed by the frontend).
+pub const HANDLER_REPL_START: u32 = 26;
+
+/// BL-142 Phase 1 — `repl_eval` handler id. Args: [`ReplEvalArgs`].
+/// Writes `code` to the REPL session's PTY stdin (newline appended
+/// automatically if absent, matching `send_input`'s contract).
+/// Returns `Null` — output streams asynchronously on the existing
+/// `com.nexus.terminal.output.<session_id>` event topic.
+///
+/// Rejects the call with a clear error if `id` is unknown OR is a
+/// regular (non-REPL) terminal session; that guard exists so a
+/// keybinding mis-fire can't accidentally drop code into a user's
+/// shell.
+///
+/// Multi-line code blocks for Python-style REPLs need a trailing
+/// blank line (`\n\n`) to terminate the block — Phase 1 leaves
+/// that to the caller; Phase 2 may add a `repl_eval_block` helper.
+pub const HANDLER_REPL_EVAL: u32 = 27;
+
+/// BL-142 Phase 1 — `repl_stop` handler id. Args: [`SessionIdArgs`].
+/// Closes the REPL session (same effect as `close_session`) and
+/// removes it from the REPL map. Rejects with a clear error if the
+/// id is unknown or refers to a non-REPL session.
+pub const HANDLER_REPL_STOP: u32 = 28;
+
+/// BL-142 Phase 1 — `repl_list` handler id. Args: `{}`. Returns a
+/// `Vec<ReplInfo>` snapshot of every currently-registered REPL
+/// session — useful for shell-side discovery (e.g. "what REPL is
+/// already running for this tab?") and for the integration tests
+/// here.
+pub const HANDLER_REPL_LIST: u32 = 29;
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Arguments for `create_session`.
@@ -739,6 +783,106 @@ pub struct CrossSessionSearchArgs {
     pub limit: Option<u32>,
 }
 
+/// BL-142 Phase 1 — arguments for `repl_start`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReplStartArgs {
+    /// Caller-supplied language tag (`"python"`, `"node"`, …).
+    /// Surfaced verbatim in [`ReplInfo::lang`] for shell discovery.
+    /// The plugin doesn't constrain the string — it's the caller's
+    /// label, not a kernel-side enum.
+    pub lang: String,
+    /// Absolute path or `$PATH`-resolvable program name for the
+    /// language kernel (e.g. `"python3"`).
+    pub program: String,
+    /// Args appended after `program` (e.g. `["-i"]` for an
+    /// interactive Python kernel).
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Working directory for the spawned kernel. Defaults to the
+    /// session's normal cwd resolution if `None`.
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    /// Env overrides merged on top of the inherited environment.
+    #[serde(default)]
+    pub env: Vec<(String, String)>,
+}
+
+/// BL-142 Phase 1 — response from `repl_start`. `id` is the session
+/// id (same shape as `create_session`'s response); `lang` echoes
+/// the caller-supplied tag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReplStartResponse {
+    /// Fresh session id (same shape as
+    /// [`CreateSessionResponse::id`]).
+    pub id: String,
+    /// Caller-supplied language tag, echoed back.
+    pub lang: String,
+}
+
+/// BL-142 Phase 1 — arguments for `repl_eval`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReplEvalArgs {
+    /// Target REPL session id.
+    pub id: String,
+    /// Code to send to the REPL's stdin. A trailing `\n` is
+    /// appended automatically if absent (matching `send_input`).
+    /// Multi-line Python blocks need an explicit blank line
+    /// terminator (`\n\n`) — Phase 1 leaves that to the caller.
+    pub code: String,
+}
+
+/// BL-142 Phase 1 — entry returned by `repl_list`. Mirrors what
+/// the shell needs to render a "running REPLs" picker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReplInfo {
+    /// Session id (matches [`ReplStartResponse::id`]).
+    pub id: String,
+    /// Caller-supplied language tag from `repl_start`.
+    pub lang: String,
+    /// Program path the kernel was spawned with.
+    pub program: String,
+    /// Args the kernel was spawned with.
+    pub args: Vec<String>,
+    /// Unix epoch milliseconds at `repl_start` time.
+    pub started_at_ms: i64,
+}
+
 // ── The plugin ───────────────────────────────────────────────────────────────
 
 /// Core plugin instance. Holds the server behind an [`Arc<Mutex<_>>`]
@@ -824,6 +968,11 @@ pub struct TerminalCorePlugin {
     /// with the eviction persister, so a scrollback that the
     /// persister wrote is immediately searchable.
     session_store: Option<Arc<Mutex<SqliteSessionStore>>>,
+    /// BL-142 Phase 1 — tracks which sessions were spawned via
+    /// `repl_start`. `repl_eval` + `repl_stop` consult this map to
+    /// reject calls against regular terminal sessions, and
+    /// `repl_list` snapshots the values for shell discovery.
+    repls: Arc<Mutex<HashMap<SessionId, ReplInfo>>>,
 }
 
 /// BL-061 — shared memory state held behind a single `Mutex` so the
@@ -975,6 +1124,7 @@ impl TerminalCorePlugin {
             context: None,
             suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
             session_store: None,
+            repls: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -997,6 +1147,7 @@ impl TerminalCorePlugin {
             context: None,
             suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
             session_store: None,
+            repls: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1859,6 +2010,10 @@ impl CorePlugin for TerminalCorePlugin {
                 ),
             )),
             HANDLER_CROSS_SESSION_SEARCH => self.dispatch_cross_session_search(args),
+            HANDLER_REPL_START => self.dispatch_repl_start(args),
+            HANDLER_REPL_EVAL => self.dispatch_repl_eval(args),
+            HANDLER_REPL_STOP => self.dispatch_repl_stop(args),
+            HANDLER_REPL_LIST => self.dispatch_repl_list(),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1964,6 +2119,122 @@ impl TerminalCorePlugin {
             .send_raw_input(&id, &a.data)
             .map_err(crate_err)?;
         Ok(serde_json::Value::Null)
+    }
+
+    /// BL-142 Phase 1 — spawn a language kernel and register it as
+    /// a REPL session. Reuses the existing `create_session` /
+    /// `ShellSpec` machinery so PTY, scrollback, output bus, memory
+    /// monitor all apply unchanged; the only delta is bookkeeping
+    /// in `self.repls` so `repl_eval` / `repl_stop` can validate the
+    /// target id.
+    fn dispatch_repl_start(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ReplStartArgs = parse_args(args, "repl_start")?;
+        let cfg = ServerSpawnConfig {
+            // Surface the lang in the human-readable session name so
+            // tools that list sessions (terminal sidebar, etc.) can
+            // tell REPL sessions apart from regular shells without
+            // needing to query the REPL map.
+            name: Some(format!("repl:{}", a.lang)),
+            shell: Some(ShellSpec {
+                program: PathBuf::from(&a.program),
+                args: a.args.clone(),
+            }),
+            working_dir: a.working_dir.map(PathBuf::from),
+            env: a.env,
+        };
+        let id = self
+            .server
+            .lock()
+            .map_err(poisoned)?
+            .create_session(cfg)
+            .map_err(crate_err)?;
+        let info = ReplInfo {
+            id: id.as_str().to_string(),
+            lang: a.lang.clone(),
+            program: a.program,
+            args: a.args,
+            started_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        self.repls
+            .lock()
+            .map_err(poisoned)?
+            .insert(id.clone(), info);
+        to_value(
+            &ReplStartResponse {
+                id: id.as_str().to_string(),
+                lang: a.lang,
+            },
+            "repl_start",
+        )
+    }
+
+    /// BL-142 Phase 1 — send `code` to a registered REPL session's
+    /// stdin. Output streams asynchronously on the existing
+    /// `com.nexus.terminal.output.<session_id>` event topic; this
+    /// dispatch returns as soon as the bytes are queued. Rejects
+    /// when the id is unknown or refers to a non-REPL session.
+    fn dispatch_repl_eval(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ReplEvalArgs = parse_args(args, "repl_eval")?;
+        let id = SessionId::from_string(a.id);
+        if !self.repls.lock().map_err(poisoned)?.contains_key(&id) {
+            return Err(exec_err(format!(
+                "repl_eval: session '{id}' is not a registered REPL \
+                 (use repl_start to spawn one, or send_input to write \
+                 to a regular terminal session)",
+                id = id.as_str(),
+            )));
+        }
+        self.server
+            .lock()
+            .map_err(poisoned)?
+            .send_input(&id, &a.code)
+            .map_err(crate_err)?;
+        Ok(serde_json::Value::Null)
+    }
+
+    /// BL-142 Phase 1 — close a registered REPL session. Same effect
+    /// as `close_session` but enforces the REPL identity (so a buggy
+    /// shell binding can't accidentally close a regular terminal
+    /// tab) and removes the REPL bookkeeping entry.
+    fn dispatch_repl_stop(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: SessionIdArgs = parse_args(args, "repl_stop")?;
+        let id = SessionId::from_string(a.id);
+        if self.repls.lock().map_err(poisoned)?.remove(&id).is_none() {
+            return Err(exec_err(format!(
+                "repl_stop: session '{id}' is not a registered REPL",
+                id = id.as_str(),
+            )));
+        }
+        self.server
+            .lock()
+            .map_err(poisoned)?
+            .close_session(&id)
+            .map_err(crate_err)?;
+        if let Ok(mut em) = self.emitters.lock() {
+            em.remove(&id);
+        }
+        Ok(serde_json::Value::Null)
+    }
+
+    /// BL-142 Phase 1 — snapshot every currently-registered REPL
+    /// session for shell discovery / tests. Sorted by `started_at_ms`
+    /// ascending so the output is stable across calls when nothing
+    /// changes.
+    fn dispatch_repl_list(&self) -> Result<serde_json::Value, PluginError> {
+        let map = self.repls.lock().map_err(poisoned)?;
+        let mut infos: Vec<ReplInfo> = map.values().cloned().collect();
+        drop(map);
+        infos.sort_by_key(|i| i.started_at_ms);
+        to_value(&infos, "repl_list")
     }
 
     fn dispatch_pump(

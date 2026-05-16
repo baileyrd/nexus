@@ -46,6 +46,12 @@ command = "create_session"
 caps = ["process.spawn"]
 note = "spawns arbitrary processes with guest-supplied shell/working_dir/env"
 
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "repl_start"
+caps = ["process.spawn"]
+note = "BL-142 — spawns a language kernel; same posture as create_session"
+
 # ─── com.nexus.mcp.host — process-spawning surfaces (issue #77) ──────
 
 [[handler]]
@@ -1414,6 +1420,23 @@ unrestricted = "runs a saved command in a session — AUDIT: candidate for proce
 plugin = "com.nexus.terminal"
 command = "adhoc_promote"
 unrestricted = "converts an ad-hoc command to a saved command and runs it — AUDIT: candidate for process.spawn elevation in a follow-up"
+
+# AUDIT: same posture as send_input — writes code into a REPL kernel
+# spawned via the process.spawn-gated `repl_start`.
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "repl_eval"
+unrestricted = "BL-142 — writes code into a live REPL kernel PTY — AUDIT: candidate for process.spawn elevation alongside send_input"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "repl_stop"
+unrestricted = "BL-142 — tears down a REPL session previously spawned via repl_start (which is process.spawn gated)"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "repl_list"
+unrestricted = "BL-142 — read-only enumeration of registered REPL sessions"
 
 [[handler]]
 plugin = "com.nexus.terminal"

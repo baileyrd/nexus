@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplInfo",
+  "description": "BL-142 Phase 1 — entry returned by `repl_list`. Mirrors what\nthe shell needs to render a \"running REPLs\" picker.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Args the kernel was spawned with.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "id": {
+      "description": "Session id (matches [`ReplStartResponse::id`]).",
+      "type": "string"
+    },
+    "lang": {
+      "description": "Caller-supplied language tag from `repl_start`.",
+      "type": "string"
+    },
+    "program": {
+      "description": "Program path the kernel was spawned with.",
+      "type": "string"
+    },
+    "started_at_ms": {
+      "description": "Unix epoch milliseconds at `repl_start` time.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "lang",
+    "program",
+    "args",
+    "started_at_ms"
+  ]
+}

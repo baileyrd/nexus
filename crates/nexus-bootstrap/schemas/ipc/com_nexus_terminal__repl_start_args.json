@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplStartArgs",
+  "description": "BL-142 Phase 1 — arguments for `repl_start`.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Args appended after `program` (e.g. `[\"-i\"]` for an\ninteractive Python kernel).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "env": {
+      "description": "Env overrides merged on top of the inherited environment.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "array",
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "lang": {
+      "description": "Caller-supplied language tag (`\"python\"`, `\"node\"`, …).\nSurfaced verbatim in [`ReplInfo::lang`] for shell discovery.\nThe plugin doesn't constrain the string — it's the caller's\nlabel, not a kernel-side enum.",
+      "type": "string"
+    },
+    "program": {
+      "description": "Absolute path or `$PATH`-resolvable program name for the\nlanguage kernel (e.g. `\"python3\"`).",
+      "type": "string"
+    },
+    "working_dir": {
+      "description": "Working directory for the spawned kernel. Defaults to the\nsession's normal cwd resolution if `None`.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "lang",
+    "program"
+  ]
+}

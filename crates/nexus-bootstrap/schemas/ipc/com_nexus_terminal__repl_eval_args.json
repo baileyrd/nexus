@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplEvalArgs",
+  "description": "BL-142 Phase 1 — arguments for `repl_eval`.",
+  "type": "object",
+  "properties": {
+    "code": {
+      "description": "Code to send to the REPL's stdin. A trailing `\\n` is\nappended automatically if absent (matching `send_input`).\nMulti-line Python blocks need an explicit blank line\nterminator (`\\n\\n`) — Phase 1 leaves that to the caller.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Target REPL session id.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "code"
+  ]
+}
