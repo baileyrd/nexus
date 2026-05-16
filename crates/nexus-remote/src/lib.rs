@@ -30,11 +30,15 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod client;
 pub mod server;
 pub mod transport;
+pub mod uri;
 
+pub use client::{EventDelivery, RemoteClient, RemoteClientError, DEFAULT_CALL_TIMEOUT};
 pub use server::{RemoteServer, RemoteServerError};
 pub use transport::{
     JsonRpcError, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     TransportError, MAX_LINE_BYTES,
 };
+pub use uri::{ForgeUri, ParseError as ForgeUriParseError, SshForgeUri};
