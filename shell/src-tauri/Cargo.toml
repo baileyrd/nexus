@@ -48,6 +48,8 @@ nexus-bootstrap  = { path = "../../crates/nexus-bootstrap" }
 nexus-plugin-api = { path = "../../crates/nexus-plugin-api" }
 nexus-plugins    = { path = "../../crates/nexus-plugins" }
 nexus-panic-log  = { path = "../../crates/nexus-panic-log" }
+# BL-140 Phase 3 — `boot_remote` / `kernel_invoke` over `ssh://` URIs.
+nexus-remote     = { path = "../../crates/nexus-remote" }
 
 [dev-dependencies]
 tempfile            = "3"

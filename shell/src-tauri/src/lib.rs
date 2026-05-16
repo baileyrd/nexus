@@ -680,6 +680,7 @@ pub fn run() {
             persistence::forget_forge_path,
             bridge::init_forge,
             bridge::boot_kernel,
+            bridge::boot_remote,
             bridge::shutdown_kernel,
             bridge::revoke_plugin_capability,
             bridge::kernel_invoke,

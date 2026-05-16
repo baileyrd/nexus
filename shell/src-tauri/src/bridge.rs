@@ -35,16 +35,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use nexus_bootstrap::invoker::{IpcInvoker, IpcInvokerError};
+use nexus_bootstrap::reconnect::{ReconnectingRuntime, SshConnectionFactory};
 use nexus_bootstrap::Runtime;
 use nexus_kernel::{
     EventFilter, IpcErrorEnvelope, IpcErrorKind, Kernel, KernelPluginContext, NexusEvent,
     PluginContext, RecvError,
 };
 use nexus_plugins::SharedPluginLoader;
+use nexus_remote::ForgeUri;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, WebviewWindow};
 use tauri::async_runtime::JoinHandle;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 // Invoker plugin id note: we currently call
 // `nexus_bootstrap::build_cli_runtime`, which registers the invoker as
@@ -69,13 +72,41 @@ struct KernelEventEnvelope {
     payload: serde_json::Value,
 }
 
-/// Booted runtime pieces, destructured out of `nexus_bootstrap::Runtime` so
-/// the plugin context can be shared (Arc) across concurrent Tauri command
-/// tasks without holding the outer `Mutex` across await points.
-struct BootedRuntime {
-    kernel: Kernel,
-    context: Arc<KernelPluginContext>,
-    loader: Arc<SharedPluginLoader>,
+/// Booted runtime — either a local kernel + plugin loader, or a remote
+/// SSH-backed proxy. The discriminant decides which path
+/// [`kernel_invoke`] + [`kernel_subscribe`] follow.
+///
+/// BL-140 Phase 3 — the `Remote` variant carries a [`ReconnectingRuntime`]
+/// so a dropped SSH connection rebuilds transparently on the next
+/// `kernel_invoke`. Subscription replay across reconnect is filed as a
+/// separate follow-up (today a transport drop silently kills all
+/// active subscriptions — the frontend has to re-subscribe).
+enum BootedRuntime {
+    Local {
+        kernel: Kernel,
+        context: Arc<KernelPluginContext>,
+        loader: Arc<SharedPluginLoader>,
+    },
+    Remote {
+        runtime: Arc<ReconnectingRuntime>,
+        invoker: Arc<dyn IpcInvoker + Send + Sync>,
+    },
+}
+
+impl BootedRuntime {
+    fn invoker(&self) -> Arc<dyn IpcInvoker + Send + Sync> {
+        match self {
+            Self::Local { context, .. } => Arc::new(
+                nexus_bootstrap::invoker::LocalIpcInvoker::new((**context).clone()),
+            ),
+            Self::Remote { invoker, .. } => Arc::clone(invoker),
+        }
+    }
+
+    #[allow(dead_code)] // Phase 3b consumer in the workspace plugin path.
+    fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote { .. })
+    }
 }
 
 /// Tauri-managed holder for the (optionally-booted) kernel runtime.
@@ -132,11 +163,33 @@ impl KernelRuntime {
             loader,
         } = nexus_bootstrap::build_cli_runtime(path.to_path_buf())
             .map_err(|e| format!("{e:#}"))?;
-        *guard = Some(BootedRuntime {
+        *guard = Some(BootedRuntime::Local {
             kernel,
             context: Arc::new(context),
             loader,
         });
+        self.booted.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// BL-140 Phase 3 — boot a remote-forge runtime against the
+    /// supplied `ssh://` URI. The SSH child isn't spawned eagerly —
+    /// the first `kernel_invoke` triggers
+    /// [`SshConnectionFactory::build`].
+    ///
+    /// Rejects when a runtime is already booted, same posture as
+    /// [`Self::boot_at`].
+    pub async fn boot_remote_at(&self, uri_str: &str) -> Result<(), String> {
+        let uri = ForgeUri::parse(uri_str)
+            .map_err(|e| format!("invalid forge URI '{uri_str}': {e}"))?;
+        let mut guard = self.inner.lock().await;
+        if guard.is_some() {
+            return Err("kernel already booted".to_string());
+        }
+        let factory = Arc::new(SshConnectionFactory::new(uri));
+        let runtime = Arc::new(ReconnectingRuntime::new(factory));
+        let invoker = runtime.invoker();
+        *guard = Some(BootedRuntime::Remote { runtime, invoker });
         self.booted.store(true, Ordering::Release);
         Ok(())
     }
@@ -174,10 +227,16 @@ impl KernelRuntime {
         })?;
         let loader = {
             let guard = self.inner.lock().await;
-            let Some(booted) = guard.as_ref() else {
-                return Err("kernel not booted".to_string());
-            };
-            Arc::clone(&booted.loader)
+            match guard.as_ref() {
+                Some(BootedRuntime::Local { loader, .. }) => Arc::clone(loader),
+                Some(BootedRuntime::Remote { .. }) => {
+                    return Err(
+                        "revoke_plugin_capability is local-only — community plugins live on the remote host"
+                            .to_string(),
+                    );
+                }
+                None => return Err("kernel not booted".to_string()),
+            }
         };
         // `SharedPluginLoader::revoke_capability` takes `&self` and
         // does its own internal locking; we drop the runtime guard
@@ -222,23 +281,37 @@ impl KernelRuntime {
 
         let mut errors: Vec<String> = Vec::new();
 
-        if let Err(e) = runtime.kernel.shutdown().await {
-            errors.push(format!("kernel shutdown: {e:#}"));
-        }
-
-        // `PluginLoader` has no `shutdown` — only `PluginManager::shutdown`
-        // does, and nexus-bootstrap does not wrap its loader in a manager.
-        // Replicate the manager's drain-in-reverse-registration-order logic
-        // here so every plugin's `on_stop` hook fires and a failing plugin
-        // doesn't prevent its siblings from unloading.
-        {
-            let mut loader_guard = runtime.loader.lock();
-            let mut ids = loader_guard.registration_order();
-            ids.reverse();
-            for id in ids {
-                if let Err(e) = loader_guard.unload(&id) {
-                    errors.push(format!("unload {id}: {e}"));
+        match runtime {
+            BootedRuntime::Local {
+                kernel, loader, ..
+            } => {
+                if let Err(e) = kernel.shutdown().await {
+                    errors.push(format!("kernel shutdown: {e:#}"));
                 }
+
+                // `PluginLoader` has no `shutdown` — only
+                // `PluginManager::shutdown` does, and nexus-bootstrap
+                // does not wrap its loader in a manager. Replicate
+                // the manager's drain-in-reverse-registration-order
+                // logic here so every plugin's `on_stop` hook fires
+                // and a failing plugin doesn't prevent its siblings
+                // from unloading.
+                let mut loader_guard = loader.lock();
+                let mut ids = loader_guard.registration_order();
+                ids.reverse();
+                for id in ids {
+                    if let Err(e) = loader_guard.unload(&id) {
+                        errors.push(format!("unload {id}: {e}"));
+                    }
+                }
+            }
+            BootedRuntime::Remote { runtime, .. } => {
+                // The remote kernel + plugins live on the server side
+                // and shut themselves down when the SSH transport
+                // closes. Locally we only need to reset the
+                // reconnecting wrapper (drops the current client +
+                // router).
+                runtime.reset().await;
             }
         }
 
@@ -313,6 +386,23 @@ pub async fn boot_kernel(
     runtime.boot_at(&PathBuf::from(&path)).await
 }
 
+/// BL-140 Phase 3 — boot a remote-forge runtime against an `ssh://`
+/// URI. The SSH child is spawned lazily on the first `kernel_invoke`,
+/// not at boot time, so a transient network blip doesn't block the
+/// shell's startup. Subsequent transport failures are retried by the
+/// [`ReconnectingRuntime`] wrapper per BL-140 Phase 2c semantics.
+///
+/// Same posture as [`boot_kernel`] otherwise: rejects when a runtime
+/// is already booted. Frontend swaps forges via
+/// `shutdown_kernel` → `boot_*` in the workspace plugin.
+#[tauri::command]
+pub async fn boot_remote(
+    uri: String,
+    runtime: tauri::State<'_, KernelRuntime>,
+) -> Result<(), String> {
+    runtime.boot_remote_at(&uri).await
+}
+
 /// Tear down the kernel runtime if one is booted. Idempotent.
 #[tauri::command]
 pub async fn shutdown_kernel(
@@ -363,7 +453,7 @@ pub async fn kernel_invoke(
     timeout_ms: Option<u64>,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<serde_json::Value, IpcErrorEnvelope> {
-    let context = {
+    let invoker = {
         let guard = runtime.inner.lock().await;
         let Some(booted) = guard.as_ref() else {
             // No `IpcError` variant matches "kernel hasn't been booted yet"
@@ -378,15 +468,59 @@ pub async fn kernel_invoke(
                 retryable: false,
             });
         };
-        Arc::clone(&booted.context)
+        booted.invoker()
     };
 
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_INVOKE_TIMEOUT_MS));
 
-    context
+    invoker
         .ipc_call(&plugin_id, &command_id, args, timeout)
         .await
-        .map_err(|e| IpcErrorEnvelope::from_ipc_error_in_context(&e, &plugin_id, &command_id))
+        .map_err(|e| invoker_error_to_envelope(&e, &plugin_id, &command_id))
+}
+
+/// BL-140 Phase 3 — map [`IpcInvokerError`] (covers local + remote
+/// shapes) to the IPC envelope the frontend already knows how to
+/// decode. Remote-only variants degrade to existing kinds:
+/// `Remote { code }` → `DispatchFailed` (server error), `Transport` →
+/// `DispatchFailed` with `retryable=true` (transient connection blip),
+/// `Timeout` → `Timeout` with the carried fields, `Local` →
+/// unwraps to the existing path.
+fn invoker_error_to_envelope(
+    e: &IpcInvokerError,
+    plugin_id: &str,
+    command_id: &str,
+) -> IpcErrorEnvelope {
+    match e {
+        IpcInvokerError::Local(inner) => {
+            IpcErrorEnvelope::from_ipc_error_in_context(inner, plugin_id, command_id)
+        }
+        IpcInvokerError::Remote { code, message } => IpcErrorEnvelope {
+            kind: IpcErrorKind::DispatchFailed,
+            plugin_id: plugin_id.to_string(),
+            command: command_id.to_string(),
+            message: format!("remote server error (code {code}): {message}"),
+            retryable: false,
+        },
+        IpcInvokerError::Transport(msg) => IpcErrorEnvelope {
+            kind: IpcErrorKind::DispatchFailed,
+            plugin_id: plugin_id.to_string(),
+            command: command_id.to_string(),
+            message: format!("transport error: {msg}"),
+            retryable: true,
+        },
+        IpcInvokerError::Timeout {
+            plugin_id: pid,
+            command,
+            timeout_ms,
+        } => IpcErrorEnvelope {
+            kind: IpcErrorKind::Timeout,
+            plugin_id: pid.clone(),
+            command: command.clone(),
+            message: format!("IPC call to '{pid}'.'{command}' timed out after {timeout_ms}ms"),
+            retryable: true,
+        },
+    }
 }
 
 /// Subscribe to kernel custom events whose `type_id` starts with
@@ -422,70 +556,60 @@ pub async fn kernel_subscribe(
     webview: WebviewWindow,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<String, String> {
-    let mut subscription = {
+    let subscription_id = uuid::Uuid::new_v4().to_string();
+    let subscription_id_for_task = subscription_id.clone();
+    let subscriptions_for_task = Arc::clone(&runtime.subscriptions);
+    let window_label = webview.label().to_string();
+
+    let handle = {
         let guard = runtime.inner.lock().await;
         let Some(booted) = guard.as_ref() else {
             return Err("kernel not booted".to_string());
         };
-        booted
-            .context
-            .subscribe(EventFilter::CustomPrefix(topic_prefix.clone()))
-    };
 
-    let subscription_id = uuid::Uuid::new_v4().to_string();
-    let subscription_id_for_task = subscription_id.clone();
-    let subscriptions_for_task = Arc::clone(&runtime.subscriptions);
-    // Capture the calling window's label and route emits to that
-    // label only; this binds the subscription's lifetime to the
-    // window that requested it. If the window closes, `app.emit_to`
-    // is a no-op, and the subscription's natural-exit cleanup takes
-    // over when the bus closes.
-    let window_label = webview.label().to_string();
+        match booted {
+            BootedRuntime::Local { context, .. } => {
+                let subscription = context
+                    .subscribe(EventFilter::CustomPrefix(topic_prefix.clone()));
+                spawn_local_forwarder(
+                    subscription_id_for_task,
+                    window_label,
+                    app,
+                    subscriptions_for_task,
+                    subscription,
+                )
+            }
+            BootedRuntime::Remote { runtime, .. } => {
+                // Pull a live `RemoteClient` out of the reconnecting
+                // wrapper (spawns the SSH child if it isn't already
+                // running). The subscription is installed against
+                // the current connection; if it dies, the subscriber
+                // task ends and the frontend must re-subscribe.
+                let client = runtime
+                    .ensure_client()
+                    .await
+                    .map_err(|e| format!("remote subscribe failed: {e}"))?;
+                let (tx, rx) =
+                    mpsc::unbounded_channel::<nexus_remote::EventDelivery>();
+                let filter_json = serde_json::json!({
+                    "kind": "custom_prefix",
+                    "prefix": topic_prefix,
+                });
+                client
+                    .subscribe(&subscription_id, filter_json, tx)
+                    .await
+                    .map_err(|e| format!("remote subscribe failed: {e}"))?;
 
-    let handle = tauri::async_runtime::spawn(async move {
-        loop {
-            match subscription.recv().await {
-                Ok(published) => {
-                    if let NexusEvent::Custom {
-                        type_id, payload, ..
-                    } = &published.event
-                    {
-                        let envelope = KernelEventEnvelope {
-                            subscription_id: subscription_id_for_task.clone(),
-                            topic: type_id.clone(),
-                            payload: payload.clone(),
-                        };
-                        if let Err(e) = app.emit_to(
-                            tauri::EventTarget::webview_window(&window_label),
-                            KERNEL_EVENT_CHANNEL,
-                            envelope,
-                        ) {
-                            eprintln!(
-                                "[kernel_subscribe] emit failed for sub \
-                                 {subscription_id_for_task} → window \
-                                 '{window_label}': {e}"
-                            );
-                        }
-                    }
-                    // Non-Custom events don't match a CustomPrefix filter, so
-                    // we shouldn't normally see them — but skip defensively.
-                }
-                Err(RecvError::Lagged(n)) => {
-                    eprintln!(
-                        "[kernel_subscribe] sub {subscription_id_for_task} lagged \
-                         ({n} events dropped)"
-                    );
-                    // Keep looping — the broadcast receiver recovers after a lag.
-                }
-                Err(RecvError::Closed) => break,
+                spawn_remote_forwarder(
+                    subscription_id_for_task,
+                    window_label,
+                    app,
+                    subscriptions_for_task,
+                    rx,
+                )
             }
         }
-        // Clean the entry on natural exit so stale JoinHandles don't pile up
-        // if the bus closes before an explicit unsubscribe.
-        if let Ok(mut subs) = subscriptions_for_task.lock() {
-            subs.remove(&subscription_id_for_task);
-        }
-    });
+    };
 
     {
         let mut subs = runtime
@@ -496,6 +620,113 @@ pub async fn kernel_subscribe(
     }
 
     Ok(subscription_id)
+}
+
+/// Spawn the local-side forwarder task that drains an
+/// [`nexus_kernel::EventSubscription`] and pushes each
+/// `NexusEvent::Custom` onto the Tauri event channel scoped to one
+/// window.
+fn spawn_local_forwarder(
+    subscription_id: String,
+    window_label: String,
+    app: AppHandle,
+    subscriptions: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
+    mut subscription: nexus_kernel::EventSubscription,
+) -> JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match subscription.recv().await {
+                Ok(published) => {
+                    if let NexusEvent::Custom {
+                        type_id, payload, ..
+                    } = &published.event
+                    {
+                        emit_kernel_event(
+                            &app,
+                            &window_label,
+                            &subscription_id,
+                            type_id.clone(),
+                            payload.clone(),
+                        );
+                    }
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!(
+                        "[kernel_subscribe] sub {subscription_id} lagged ({n} events dropped)"
+                    );
+                }
+                Err(RecvError::Closed) => break,
+            }
+        }
+        if let Ok(mut subs) = subscriptions.lock() {
+            subs.remove(&subscription_id);
+        }
+    })
+}
+
+/// Spawn the remote-side forwarder task that drains the
+/// `mpsc::UnboundedReceiver<EventDelivery>` returned by
+/// `RemoteClient::subscribe` and emits to the Tauri event channel.
+fn spawn_remote_forwarder(
+    subscription_id: String,
+    window_label: String,
+    app: AppHandle,
+    subscriptions: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
+    mut rx: mpsc::UnboundedReceiver<nexus_remote::EventDelivery>,
+) -> JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        while let Some(delivery) = rx.recv().await {
+            // The remote wraps the `PublishedEvent` JSON whole; extract
+            // `type_id` + `payload` from inside its serde shape so the
+            // frontend envelope stays identical to the local path.
+            let event = delivery.event;
+            let custom = event.get("Custom").or_else(|| event.get("custom"));
+            let Some(custom) = custom else {
+                // Non-Custom variants don't match CustomPrefix filters,
+                // so the server shouldn't emit them here. Skip
+                // defensively.
+                continue;
+            };
+            let type_id = custom
+                .get("type_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_default();
+            let payload = custom
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            emit_kernel_event(&app, &window_label, &subscription_id, type_id, payload);
+        }
+        if let Ok(mut subs) = subscriptions.lock() {
+            subs.remove(&subscription_id);
+        }
+    })
+}
+
+/// Shared emit + window-scoping helper. Errors are logged but not
+/// surfaced — the calling window may already be closed.
+fn emit_kernel_event(
+    app: &AppHandle,
+    window_label: &str,
+    subscription_id: &str,
+    topic: String,
+    payload: serde_json::Value,
+) {
+    let envelope = KernelEventEnvelope {
+        subscription_id: subscription_id.to_string(),
+        topic,
+        payload,
+    };
+    if let Err(e) = app.emit_to(
+        tauri::EventTarget::webview_window(window_label),
+        KERNEL_EVENT_CHANNEL,
+        envelope,
+    ) {
+        eprintln!(
+            "[kernel_subscribe] emit failed for sub {subscription_id} → window '{window_label}': {e}"
+        );
+    }
 }
 
 /// Cancel a subscription created by [`kernel_subscribe`]. Idempotent: an

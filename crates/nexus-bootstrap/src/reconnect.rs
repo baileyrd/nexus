@@ -146,6 +146,42 @@ impl ReconnectingRuntime {
             runtime.shutdown().await;
         }
     }
+
+    /// Ensure a connection exists, building one through the factory
+    /// if not, and return the underlying [`nexus_remote::RemoteClient`].
+    ///
+    /// BL-140 Phase 3 — needed by callers that want to drive
+    /// [`nexus_remote::RemoteClient::subscribe`] directly (the
+    /// `IpcInvoker` trait only covers `ipc_call`). The Tauri bridge
+    /// uses this to wire `kernel_subscribe` over remote.
+    ///
+    /// The returned `Arc` clones the underlying client; the caller's
+    /// reference outlives subsequent reconnects, but subscriptions
+    /// installed against it are NOT replayed — when the current
+    /// connection is reset, the old client's router stops and
+    /// subscriptions silently drop. The frontend is expected to
+    /// re-subscribe after reconnect; we'll add automatic replay when
+    /// a use case actually demands it.
+    ///
+    /// # Errors
+    /// Same shape as the first attempt of `ipc_call` — a build failure
+    /// surfaces as `Transport("initial connection: ...")`.
+    pub async fn ensure_client(
+        &self,
+    ) -> Result<Arc<nexus_remote::RemoteClient>, IpcInvokerError> {
+        let mut slot = self.current.lock().await;
+        if slot.is_none() {
+            match self.factory.build().await {
+                Ok(rt) => *slot = Some(rt),
+                Err(e) => {
+                    return Err(IpcInvokerError::Transport(format!(
+                        "initial connection: {e}"
+                    )));
+                }
+            }
+        }
+        Ok(Arc::clone(&slot.as_ref().expect("just set").client))
+    }
 }
 
 struct ReconnectingInvoker {
