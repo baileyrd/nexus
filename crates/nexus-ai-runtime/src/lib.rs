@@ -125,14 +125,30 @@ pub enum AgentTaskKind {
         /// Args passed to `com.nexus.ai::stream_chat`.
         args: serde_json::Value,
     },
-    /// Reserved for Phase 3 — async workflow step.
+    /// BL-134 Phase 3 — async workflow step. The workflow executor
+    /// packages the underlying IPC dispatch (e.g.
+    /// `("com.nexus.ai", "ask", …)` for `ai_prompt`;
+    /// `("com.nexus.notifications", "send", …)` for `notify`) and
+    /// hands it to the runtime so the step doesn't block the
+    /// workflow's per-step await loop. The runtime worker fires the
+    /// `ipc_call` exactly as the workflow would have, and the
+    /// run's terminal `Finished` event carries the reply verbatim
+    /// (no kind-specific shaping). `workflow` + `step` are recorded
+    /// for observability — the run-history panel can group async
+    /// steps under their parent workflow run.
     WorkflowAiStep {
-        /// Workflow id.
-        workflow: String,
-        /// Step index within the workflow.
-        step: u32,
-        /// Step args (workflow-defined).
+        /// Reverse-DNS plugin id to dispatch into — e.g.
+        /// `"com.nexus.ai"` for `ai_prompt` / `ai_decision`,
+        /// `"com.nexus.notifications"` for `notify`.
+        target_plugin: String,
+        /// Command name on the target plugin (e.g. `"ask"`).
+        command: String,
+        /// Args passed to the underlying IPC handler.
         args: serde_json::Value,
+        /// Workflow id (observability — runtime stores it on the run).
+        workflow: String,
+        /// Step index within the workflow (also observability-only).
+        step: u32,
     },
 }
 
@@ -574,9 +590,11 @@ mod tests {
         );
         assert_eq!(
             AgentTaskKind::WorkflowAiStep {
+                target_plugin: "com.nexus.ai".into(),
+                command: "ask".into(),
+                args: serde_json::Value::Null,
                 workflow: "x".into(),
                 step: 0,
-                args: serde_json::Value::Null
             }
             .label(),
             "workflow_ai_step"

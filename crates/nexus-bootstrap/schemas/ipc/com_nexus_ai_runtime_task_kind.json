@@ -40,33 +40,43 @@
       ]
     },
     {
-      "description": "Reserved for Phase 3 — async workflow step.",
+      "description": "BL-134 Phase 3 — async workflow step. The workflow executor\npackages the underlying IPC dispatch (e.g.\n`(\"com.nexus.ai\", \"ask\", …)` for `ai_prompt`;\n`(\"com.nexus.notifications\", \"send\", …)` for `notify`) and\nhands it to the runtime so the step doesn't block the\nworkflow's per-step await loop. The runtime worker fires the\n`ipc_call` exactly as the workflow would have, and the\nrun's terminal `Finished` event carries the reply verbatim\n(no kind-specific shaping). `workflow` + `step` are recorded\nfor observability — the run-history panel can group async\nsteps under their parent workflow run.",
       "type": "object",
       "properties": {
         "args": {
-          "description": "Step args (workflow-defined)."
+          "description": "Args passed to the underlying IPC handler."
+        },
+        "command": {
+          "description": "Command name on the target plugin (e.g. `\"ask\"`).",
+          "type": "string"
         },
         "kind": {
           "type": "string",
           "const": "workflow_ai_step"
         },
         "step": {
-          "description": "Step index within the workflow.",
+          "description": "Step index within the workflow (also observability-only).",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
+        "target_plugin": {
+          "description": "Reverse-DNS plugin id to dispatch into — e.g.\n`\"com.nexus.ai\"` for `ai_prompt` / `ai_decision`,\n`\"com.nexus.notifications\"` for `notify`.",
+          "type": "string"
+        },
         "workflow": {
-          "description": "Workflow id.",
+          "description": "Workflow id (observability — runtime stores it on the run).",
           "type": "string"
         }
       },
       "additionalProperties": false,
       "required": [
         "kind",
+        "target_plugin",
+        "command",
+        "args",
         "workflow",
-        "step",
-        "args"
+        "step"
       ]
     }
   ]

@@ -63,6 +63,12 @@ const DEFAULT_CALLER_PLUGIN_ID: &str = "com.nexus.unknown";
 /// runtime we've observed in the wild.
 const SESSION_RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2 * 3600);
 
+/// Per-call IPC timeout for `WorkflowAiStep` dispatches. Workflow
+/// steps are bounded by `nexus_workflow::DEFAULT_STEP_TIMEOUT` (5 min)
+/// — we mirror that ceiling here so the runtime doesn't outlast the
+/// step the workflow would otherwise have awaited inline.
+const WORKFLOW_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
 /// Core plugin state. The pool is built lazily in `wire_context` so
 /// `cargo test -p nexus-ai-runtime` doesn't pay the cost when only
 /// the type tests run.
@@ -244,13 +250,24 @@ fn handle_submit(
         let outcome: Result<serde_json::Value, String> = match task_kind {
             AgentTaskKind::Session { args } => run_session(&ctx_for_worker, args).await,
             AgentTaskKind::AiStream { .. } => Err(
-                "ai_stream is reserved for BL-134 Phase 2 (only `session` kind is wired today)"
+                "ai_stream is reserved for BL-134 Phase 2b-ii (typed event correlation)"
                     .into(),
             ),
-            AgentTaskKind::WorkflowAiStep { .. } => Err(
-                "workflow_ai_step is reserved for BL-134 Phase 3 (only `session` kind is wired today)"
-                    .into(),
-            ),
+            AgentTaskKind::WorkflowAiStep {
+                target_plugin,
+                command,
+                args,
+                workflow,
+                step,
+            } => run_workflow_ai_step(
+                &ctx_for_worker,
+                &target_plugin,
+                &command,
+                args,
+                &workflow,
+                step,
+            )
+            .await,
         };
 
         let event = match outcome {
@@ -285,6 +302,37 @@ async fn run_session(
     )
     .await
     .map_err(|e| format!("session_run: {e}"))
+}
+
+/// BL-134 Phase 3 — drive a single workflow AI step. The workflow
+/// executor packages the underlying IPC dispatch (e.g.
+/// `("com.nexus.ai", "ask", …)` for `ai_prompt`) into a
+/// `WorkflowAiStep` task; the runtime fires the call here and the
+/// terminal `Finished` event carries the reply verbatim. `workflow`
+/// + `step` ride along on the tracing span for observability so a
+/// long-running async `ai_prompt` step appears in the worker logs
+/// with its parent run id.
+async fn run_workflow_ai_step(
+    ctx: &KernelPluginContext,
+    target_plugin: &str,
+    command: &str,
+    args: serde_json::Value,
+    workflow: &str,
+    step: u32,
+) -> Result<serde_json::Value, String> {
+    use nexus_kernel::PluginContext;
+
+    let span = tracing::info_span!(
+        "workflow_ai_step",
+        target_plugin,
+        command,
+        workflow,
+        step
+    );
+    let _enter = span.enter();
+    ctx.ipc_call(target_plugin, command, args, WORKFLOW_STEP_TIMEOUT)
+        .await
+        .map_err(|e| format!("workflow_ai_step ({target_plugin}::{command}): {e}"))
 }
 
 fn handle_get(store: &Store, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {

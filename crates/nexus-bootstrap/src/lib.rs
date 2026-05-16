@@ -626,9 +626,21 @@ pub fn workflow_capabilities() -> CapabilitySet {
     // `ipc_call`, which now requires `ai.chat`. No write/config/activity
     // ai.* caps so a user-authored workflow step can't rotate
     // credentials or wipe the audit log.
-    [Capability::IpcCall, Capability::AiChat]
-        .into_iter()
-        .collect()
+    //
+    // BL-134 Phase 3: `async = true` steps route through
+    // `com.nexus.ai.runtime::submit` so they don't block the
+    // workflow's per-step await loop. `ai.runtime.observe` is NOT
+    // granted — the workflow records the returned `task_id` and a
+    // follow-up step (sync) can `wait_for` it if needed; the
+    // observe gate is checked at *that* step rather than at submit
+    // time.
+    [
+        Capability::IpcCall,
+        Capability::AiChat,
+        Capability::AiRuntimeSubmit,
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// BL-133 — pull `[notifications.discord].webhook_url` out of

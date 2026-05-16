@@ -16,14 +16,24 @@ args: JsonValue, } | { "kind": "ai_stream",
  */
 args: JsonValue, } | { "kind": "workflow_ai_step", 
 /**
- * Workflow id.
+ * Reverse-DNS plugin id to dispatch into — e.g.
+ * `"com.nexus.ai"` for `ai_prompt` / `ai_decision`,
+ * `"com.nexus.notifications"` for `notify`.
+ */
+target_plugin: string, 
+/**
+ * Command name on the target plugin (e.g. `"ask"`).
+ */
+command: string, 
+/**
+ * Args passed to the underlying IPC handler.
+ */
+args: JsonValue, 
+/**
+ * Workflow id (observability — runtime stores it on the run).
  */
 workflow: string, 
 /**
- * Step index within the workflow.
+ * Step index within the workflow (also observability-only).
  */
-step: number, 
-/**
- * Step args (workflow-defined).
- */
-args: JsonValue, };
+step: number, };

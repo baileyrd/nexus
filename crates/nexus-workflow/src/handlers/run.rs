@@ -501,6 +501,16 @@ impl ActionDispatcher for KernelActionDispatcher {
                 if let Some(limit) = args.limit {
                     ipc_args["limit"] = serde_json::Value::Number(limit.into());
                 }
+                if step.async_submit {
+                    return submit_async_step(
+                        &self.ctx,
+                        step,
+                        "com.nexus.ai",
+                        "ask",
+                        ipc_args,
+                    )
+                    .await;
+                }
                 self.ctx
                     .ipc_call("com.nexus.ai", "ask", ipc_args, DEFAULT_STEP_TIMEOUT)
                     .await
@@ -515,6 +525,22 @@ impl ActionDispatcher for KernelActionDispatcher {
             "ai_decision" => {
                 let args = ai_steps::AiDecisionArgs::from_step(step)?;
                 let composed = ai_steps::build_decision_prompt(&args.prompt, &args.choices);
+                if step.async_submit {
+                    // Async ai_decision drops the choice-matching
+                    // post-processing — the workflow author who opts
+                    // in is responsible for parsing the returned
+                    // `answer` themselves (or chaining a follow-up
+                    // sync step that reads `${ThisStep.task_id}` and
+                    // calls `runtime::wait_for`).
+                    return submit_async_step(
+                        &self.ctx,
+                        step,
+                        "com.nexus.ai",
+                        "ask",
+                        serde_json::json!({ "question": composed, "limit": 0 }),
+                    )
+                    .await;
+                }
                 let resp = self
                     .ctx
                     .ipc_call(
@@ -593,6 +619,16 @@ impl ActionDispatcher for KernelActionDispatcher {
                 if let Some(t) = parsed.title {
                     obj.insert("title".into(), serde_json::Value::String(t));
                 }
+                if step.async_submit {
+                    return submit_async_step(
+                        &self.ctx,
+                        step,
+                        "com.nexus.notifications",
+                        "send",
+                        ipc_args,
+                    )
+                    .await;
+                }
                 self.ctx
                     .ipc_call(
                         "com.nexus.notifications",
@@ -617,6 +653,59 @@ impl ActionDispatcher for KernelActionDispatcher {
             }
         }
     }
+}
+
+/// BL-134 Phase 3 — submit a workflow step to the AI runtime instead
+/// of awaiting its underlying IPC inline.
+///
+/// Packs the target plugin + command + args into an
+/// `AgentTaskKind::WorkflowAiStep`, calls
+/// `com.nexus.ai.runtime::submit`, and returns the runtime's
+/// `{ task_id }` reply as the step's output. The workflow's run
+/// record stores `task_id` so a follow-up step can `wait_for` it.
+///
+/// Failures (e.g. runtime not registered, caps denied) surface as
+/// step errors with `submit_async:` prefix so the on_error policy
+/// path is the same as for any other IPC failure.
+/// Pure builder for the `com.nexus.ai.runtime::submit` envelope a
+/// workflow async step emits. Factored out so the wire shape can be
+/// tested without spinning up a kernel context.
+fn build_async_submit_args(
+    step: &crate::Step,
+    target_plugin: &str,
+    command: &str,
+    ipc_args: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "task": {
+            "kind": "workflow_ai_step",
+            "target_plugin": target_plugin,
+            "command": command,
+            "args": ipc_args,
+            "workflow": step.name.clone().unwrap_or_default(),
+            "step": 0,
+        },
+        "priority": "background",
+    })
+}
+
+async fn submit_async_step(
+    ctx: &std::sync::Arc<nexus_kernel::KernelPluginContext>,
+    step: &crate::Step,
+    target_plugin: &str,
+    command: &str,
+    ipc_args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    use nexus_kernel::PluginContext;
+    let submit_args = build_async_submit_args(step, target_plugin, command, ipc_args);
+    ctx.ipc_call(
+        "com.nexus.ai.runtime",
+        "submit",
+        submit_args,
+        DEFAULT_STEP_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("submit_async ({target_plugin}::{command}): {e}"))
 }
 
 // ── BL-056 — terminal-step parsing tests ────────────────────────────
@@ -903,6 +992,135 @@ message = "x""#,
         );
         let parsed = NotifyStepArgs::from_step(&step).unwrap();
         assert_eq!(parsed.channel.as_deref(), Some("carrier-pigeon"));
+    }
+}
+
+#[cfg(test)]
+mod async_step_tests {
+    //! BL-134 Phase 3 — `async = true` workflow steps.
+
+    use super::*;
+    use crate::{parse_workflow_text, Step};
+
+    fn step_from_toml(src: &str) -> Step {
+        let wf = parse_workflow_text(src).expect("parse");
+        wf.steps.into_iter().next().expect("one step")
+    }
+
+    #[test]
+    fn step_parses_async_true_from_toml() {
+        let step = step_from_toml(
+            r#"
+[workflow]
+name = "W"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "AskNow"
+type = "ai_prompt"
+async = true
+prompt = "What time is it?"
+"#,
+        );
+        assert!(step.async_submit, "async = true must set async_submit");
+    }
+
+    #[test]
+    fn step_defaults_async_to_false_when_field_omitted() {
+        let step = step_from_toml(
+            r#"
+[workflow]
+name = "W"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "AskInline"
+type = "ai_prompt"
+prompt = "What time is it?"
+"#,
+        );
+        assert!(!step.async_submit);
+    }
+
+    #[test]
+    fn build_async_submit_args_packs_workflow_ai_step_envelope() {
+        let step = Step {
+            name: Some("AskNow".into()),
+            step_type: "ai_prompt".into(),
+            parallel: false,
+            async_submit: true,
+            on_error: None,
+            max_retries: None,
+            retry_backoff: None,
+            retry_initial_delay_ms: None,
+            retry_max_delay_ms: None,
+            retry_jitter: None,
+            extra: Default::default(),
+        };
+        let ipc_args = serde_json::json!({ "question": "What time is it?" });
+        let submit = build_async_submit_args(&step, "com.nexus.ai", "ask", ipc_args.clone());
+        // Top-level shape.
+        assert_eq!(
+            submit.get("priority").and_then(serde_json::Value::as_str),
+            Some("background"),
+            "async steps default to background priority so they don't \
+             preempt interactive agent runs"
+        );
+        // Nested task envelope.
+        let task = submit.get("task").expect("task object");
+        assert_eq!(
+            task.get("kind").and_then(serde_json::Value::as_str),
+            Some("workflow_ai_step")
+        );
+        assert_eq!(
+            task.get("target_plugin").and_then(serde_json::Value::as_str),
+            Some("com.nexus.ai")
+        );
+        assert_eq!(
+            task.get("command").and_then(serde_json::Value::as_str),
+            Some("ask")
+        );
+        assert_eq!(task.get("args"), Some(&ipc_args));
+        assert_eq!(
+            task.get("workflow").and_then(serde_json::Value::as_str),
+            Some("AskNow"),
+            "step name surfaces as the runtime's `workflow` field"
+        );
+    }
+
+    #[test]
+    fn build_async_submit_args_omits_workflow_field_for_unnamed_steps() {
+        let step = Step {
+            name: None,
+            step_type: "notify".into(),
+            parallel: false,
+            async_submit: true,
+            on_error: None,
+            max_retries: None,
+            retry_backoff: None,
+            retry_initial_delay_ms: None,
+            retry_max_delay_ms: None,
+            retry_jitter: None,
+            extra: Default::default(),
+        };
+        let submit = build_async_submit_args(
+            &step,
+            "com.nexus.notifications",
+            "send",
+            serde_json::json!({ "channel": "desktop", "message": "x" }),
+        );
+        assert_eq!(
+            submit
+                .get("task")
+                .and_then(|t| t.get("workflow"))
+                .and_then(serde_json::Value::as_str),
+            Some(""),
+            "unnamed step yields an empty workflow tag; runtime treats as opaque"
+        );
     }
 }
 

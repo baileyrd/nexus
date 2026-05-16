@@ -180,6 +180,15 @@ pub struct Step {
     /// Whether this step runs concurrently with its siblings.
     #[serde(default)]
     pub parallel: bool,
+    /// BL-134 Phase 3 — when `true`, the executor submits this step
+    /// to `com.nexus.ai.runtime::submit` instead of awaiting its
+    /// underlying IPC inline. The workflow run records the returned
+    /// `task_id` as the step's output (`{"task_id": "<uuid>"}`); the
+    /// run completes the step immediately without blocking the next.
+    /// Currently supported by `ai_prompt`, `ai_decision`, and
+    /// `notify` step types; other step types ignore the flag.
+    #[serde(default, rename = "async")]
+    pub async_submit: bool,
     /// On-error policy for this step — `stop` / `continue` /
     /// `log_warn` / `branch_to_recovery`.
     #[serde(default)]

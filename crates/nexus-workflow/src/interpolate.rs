@@ -235,6 +235,7 @@ mod tests {
             name: Some("S".into()),
             step_type: "ipc".into(),
             parallel: false,
+            async_submit: false,
             on_error: None,
             max_retries: None,
             retry_backoff: None,
