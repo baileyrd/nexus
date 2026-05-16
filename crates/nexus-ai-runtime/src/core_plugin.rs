@@ -154,8 +154,14 @@ impl CorePlugin for AiRuntimeCorePlugin {
                     let metrics = pool_metrics.ok_or_else(pool_unwired)?;
                     Ok(handle_pool_stats(&store, metrics))
                 }
-                HANDLER_CANCEL | HANDLER_PAUSE | HANDLER_RESUME => Err(exec_err(format!(
-                    "handler {handler_id}: cancel/pause/resume reserved for BL-134 Phase 5"
+                HANDLER_CANCEL => {
+                    let ctx = ctx.ok_or_else(ctx_unwired)?;
+                    handle_cancel(&store, ctx.as_ref(), &args)
+                }
+                HANDLER_PAUSE | HANDLER_RESUME => Err(exec_err(format!(
+                    "handler {handler_id}: pause/resume are not supported in BL-134 Phase 5 — \
+                     a Session task is a single ipc_call with no resumable midpoint; \
+                     use `cancel` and resubmit a fresh task instead"
                 ))),
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
@@ -238,54 +244,127 @@ fn handle_submit(
     };
     record_and_publish(store, ctx.as_ref(), &ring, &submitted);
 
-    // Dispatch the actual work onto the dedicated pool. Phase 1 only
-    // handles `Session`; the other kinds emit a `Failed` immediately.
+    // Dispatch the actual work onto the dedicated pool. The worker
+    // races the inner ipc_call against the cancel gate so a `cancel`
+    // IPC call (BL-134 Phase 5) suppresses the underlying
+    // Finished/Failed event and emits `Cancelled` instead.
     let store_for_worker = store.clone();
     let ctx_for_worker = Arc::clone(ctx);
     let task_kind = parsed.task;
+    let cancel = store
+        .cancel_gate(task_id)
+        .expect("cancel gate present after insert");
     pool_handle.spawn(async move {
+        // Cancel-before-start race: handler can flip the gate between
+        // the submit reply and worker scheduling. Catch it pre-Started
+        // so we don't emit a misleading Started → Cancelled pair.
+        if cancel.is_cancelled() {
+            let by = cancel.take_reason().unwrap_or_else(|| "caller".into());
+            record_and_publish(
+                &store_for_worker,
+                ctx_for_worker.as_ref(),
+                &ring,
+                &AiEvent::Cancelled { task_id, by },
+            );
+            return;
+        }
+
         let started = AiEvent::Started { task_id, attempt: 1 };
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &started);
 
-        let outcome: Result<serde_json::Value, String> = match task_kind {
-            AgentTaskKind::Session { args } => run_session(&ctx_for_worker, args).await,
-            AgentTaskKind::AiStream { .. } => Err(
-                "ai_stream is reserved for BL-134 Phase 2b-ii (typed event correlation)"
-                    .into(),
-            ),
-            AgentTaskKind::WorkflowAiStep {
-                target_plugin,
-                command,
-                args,
-                workflow,
-                step,
-            } => run_workflow_ai_step(
-                &ctx_for_worker,
-                &target_plugin,
-                &command,
-                args,
-                &workflow,
-                step,
-            )
-            .await,
+        let inner = async {
+            match task_kind {
+                AgentTaskKind::Session { args } => run_session(&ctx_for_worker, args).await,
+                AgentTaskKind::AiStream { .. } => Err(
+                    "ai_stream is reserved for BL-134 Phase 2b-ii (typed event correlation)"
+                        .into(),
+                ),
+                AgentTaskKind::WorkflowAiStep {
+                    target_plugin,
+                    command,
+                    args,
+                    workflow,
+                    step,
+                } => run_workflow_ai_step(
+                    &ctx_for_worker,
+                    &target_plugin,
+                    &command,
+                    args,
+                    &workflow,
+                    step,
+                )
+                .await,
+            }
         };
 
-        let event = match outcome {
-            Ok(reply) => AiEvent::Finished {
-                task_id,
-                outcome: reply,
-            },
-            Err(error) => AiEvent::Failed {
-                task_id,
-                error,
-                retriable: false,
-            },
+        let event = tokio::select! {
+            // Bias toward the cancel arm so a cancel signalled mid-
+            // execution wins against a same-tick reply.
+            biased;
+            () = cancel.cancelled() => {
+                let by = cancel.take_reason().unwrap_or_else(|| "caller".into());
+                AiEvent::Cancelled { task_id, by }
+            }
+            outcome = inner => match outcome {
+                Ok(reply) => AiEvent::Finished { task_id, outcome: reply },
+                Err(error) => AiEvent::Failed { task_id, error, retriable: false },
+            }
         };
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &event);
     });
 
     let reply = AiRuntimeSubmitReply { task_id };
     serde_json::to_value(&reply).map_err(|e| exec_err(format!("submit: serialize: {e}")))
+}
+
+/// BL-134 Phase 5 — request cooperative cancellation of a queued or
+/// running task. Idempotent: a second `cancel` against the same
+/// `task_id` returns `{ cancelled: false }` to surface that the run
+/// was already signalled. Tasks already in a terminal state are
+/// rejected with a clear error so the caller can fall back to
+/// re-reading status via `get`.
+///
+/// The worker observes the signal in its `select!` arm and emits
+/// `Cancelled { by }` instead of the underlying Finished/Failed —
+/// the cancel arm is `biased` so it wins a same-tick race against
+/// the in-flight ipc_call's reply.
+fn handle_cancel(
+    store: &Store,
+    ctx: &KernelPluginContext,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::AiRuntimeControlArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("cancel: invalid args: {e}")))?;
+    if store.is_terminal(parsed.task_id) == Some(true) {
+        return Err(exec_err(format!(
+            "cancel: task_id {} already in a terminal state",
+            parsed.task_id
+        )));
+    }
+    let gate = store
+        .cancel_gate(parsed.task_id)
+        .ok_or_else(|| exec_err(format!("cancel: task_id {} not found", parsed.task_id)))?;
+    let reason = parsed.reason.clone().or_else(|| Some("caller".into()));
+    let first_signal = gate.request(reason);
+    if first_signal {
+        // Publish a synchronous Cancelled-requested breadcrumb so
+        // observers see the signal even before the worker's
+        // select! arm fires. The worker's eventual Cancelled event
+        // is the canonical terminal record; this one is a hint.
+        // (Phase 5 deliberately does NOT split this into its own
+        // AiEvent variant — the variant set stays closed.)
+        tracing::info!(
+            plugin_id = PLUGIN_ID,
+            task_id = %parsed.task_id,
+            reason = ?parsed.reason,
+            "cancel requested"
+        );
+        // Touch ctx to keep the borrow alive for future Phase-5
+        // additions (e.g. emitting a richer bus event); for now the
+        // tracing line is the only side-effect.
+        let _ = ctx;
+    }
+    Ok(serde_json::json!({ "cancelled": first_signal }))
 }
 
 async fn run_session(
@@ -621,13 +700,104 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reserved_handlers_return_phase5_error() {
+    async fn pause_and_resume_return_unsupported_error() {
+        // BL-134 Phase 5 — cancel is wired (see cancel_*  tests
+        // below); pause/resume stay unsupported because a Session is
+        // a single ipc_call with no resumable midpoint.
         let mut plugin = AiRuntimeCorePlugin::new();
-        for id in [HANDLER_CANCEL, HANDLER_PAUSE, HANDLER_RESUME] {
+        for id in [HANDLER_PAUSE, HANDLER_RESUME] {
             let fut = plugin.dispatch_async(id, &empty_args()).unwrap();
             let err = fut.await.unwrap_err();
-            assert!(format!("{err}").contains("Phase 5"));
+            let msg = format!("{err}");
+            assert!(msg.contains("not supported"), "actual: {msg}");
+            assert!(msg.contains("Phase 5"), "actual: {msg}");
         }
+    }
+
+    /// Build a minimal `KernelPluginContext` for the cancel-handler
+    /// tests. Caller-supplied because the cancel handler reaches it
+    /// only as a `&KernelPluginContext` reference (for future bus
+    /// emit), not through the plugin's stored context.
+    fn test_ctx() -> nexus_kernel::KernelPluginContext {
+        let dir = tempfile::tempdir().unwrap();
+        let kv: std::sync::Arc<dyn nexus_kernel::KvStore> =
+            std::sync::Arc::new(nexus_kernel::InMemoryKvStore::new());
+        let bus = std::sync::Arc::new(nexus_kernel::EventBus::new(8));
+        nexus_kernel::KernelPluginContext::new(
+            crate::PLUGIN_ID,
+            "0.0.1",
+            nexus_kernel::CapabilitySet::default(),
+            kv,
+            bus,
+            dir.path(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn cancel_unknown_task_id_errors() {
+        let plugin = AiRuntimeCorePlugin::new();
+        let ctx = test_ctx();
+        let err = handle_cancel(
+            &plugin.store,
+            &ctx,
+            &serde_json::json!({ "task_id": uuid::Uuid::new_v4() }),
+        )
+        .unwrap_err();
+        assert!(format!("{err}").contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn cancel_known_task_signals_gate_and_returns_first_signal() {
+        let plugin = AiRuntimeCorePlugin::new();
+        let id = uuid::Uuid::new_v4();
+        plugin
+            .store
+            .insert(id, "session", TaskPriority::Interactive, None, "x");
+        let gate = plugin.store.cancel_gate(id).unwrap();
+        assert!(!gate.is_cancelled(), "starts un-cancelled");
+
+        let ctx = test_ctx();
+        let value = handle_cancel(
+            &plugin.store,
+            &ctx,
+            &serde_json::json!({ "task_id": id, "reason": "test-shutdown" }),
+        )
+        .unwrap();
+        assert_eq!(value, serde_json::json!({ "cancelled": true }));
+        assert!(gate.is_cancelled());
+
+        // Second cancel is a no-op and reports cancelled = false.
+        let value2 = handle_cancel(
+            &plugin.store,
+            &ctx,
+            &serde_json::json!({ "task_id": id }),
+        )
+        .unwrap();
+        assert_eq!(value2, serde_json::json!({ "cancelled": false }));
+    }
+
+    #[tokio::test]
+    async fn cancel_after_terminal_state_errors() {
+        let plugin = AiRuntimeCorePlugin::new();
+        let id = uuid::Uuid::new_v4();
+        plugin
+            .store
+            .insert(id, "session", TaskPriority::Interactive, None, "x");
+        plugin.store.observe_status(&AiEvent::Finished {
+            task_id: id,
+            outcome: serde_json::Value::Null,
+        });
+
+        let ctx = test_ctx();
+        let err = handle_cancel(
+            &plugin.store,
+            &ctx,
+            &serde_json::json!({ "task_id": id }),
+        )
+        .unwrap_err();
+        assert!(format!("{err}").contains("terminal state"));
     }
 
     #[tokio::test]

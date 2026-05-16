@@ -28,3 +28,4 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tempfile = { workspace = true }

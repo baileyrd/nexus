@@ -185,19 +185,19 @@ caps = ["ai.runtime.submit"]
 plugin = "com.nexus.ai.runtime"
 command = "cancel"
 caps = ["ai.runtime.control"]
-note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+note = "BL-134 Phase 5 — wired; signals the per-task CancelGate so the worker emits Cancelled instead of the underlying Finished/Failed"
 
 [[handler]]
 plugin = "com.nexus.ai.runtime"
 command = "pause"
 caps = ["ai.runtime.control"]
-note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+note = "BL-134 Phase 5 — pause/resume are unsupported for Session tasks (single ipc_call has no resumable midpoint); handler returns a typed error. Cap-gated regardless so the verb stays reserved if a later phase adds pause-able task kinds"
 
 [[handler]]
 plugin = "com.nexus.ai.runtime"
 command = "resume"
 caps = ["ai.runtime.control"]
-note = "Phase 5 — handler returns 'not wired' today; gate pinned to avoid a future privilege gap"
+note = "BL-134 Phase 5 — same as pause above"
 
 [[handler]]
 plugin = "com.nexus.ai.runtime"

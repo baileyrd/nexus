@@ -12,6 +12,7 @@
 //! is dropped on plugin shutdown.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
@@ -46,6 +47,79 @@ pub(crate) struct RunRow {
     /// `is_terminal` first, then build `notified()`, then re-check
     /// status before awaiting).
     pub terminal: Arc<Notify>,
+    /// BL-134 Phase 5 — cooperative cancellation gate. The
+    /// `handle_cancel` IPC handler flips the flag and notifies; the
+    /// worker observes via `tokio::select!` and emits `Cancelled`
+    /// before the inner ipc_call's result, suppressing the
+    /// underlying `Finished`/`Failed` event the call would otherwise
+    /// produce. The token is checked once before the select arm
+    /// (cancel-before-spawn race) and once inside the arm (cancel-
+    /// during-execution).
+    pub cancel: Arc<CancelGate>,
+}
+
+/// BL-134 Phase 5 — atomic cancel flag paired with a Notify so the
+/// worker can park on `notified()` and the handler can fire-and-
+/// forget. The flag is what distinguishes a genuine cancellation
+/// from a spurious wakeup; the Notify is the wake mechanism.
+#[derive(Debug)]
+pub(crate) struct CancelGate {
+    flag: AtomicBool,
+    /// Free-form reason captured at cancel time — surfaced in the
+    /// emitted `AiEvent::Cancelled.by` field.
+    reason: Mutex<Option<String>>,
+    notify: Notify,
+}
+
+impl CancelGate {
+    pub(crate) fn new() -> Self {
+        Self {
+            flag: AtomicBool::new(false),
+            reason: Mutex::new(None),
+            notify: Notify::new(),
+        }
+    }
+
+    /// Signal cancellation. Returns `true` if this was the first
+    /// signal; subsequent `request` calls are no-ops so idempotent
+    /// `handle_cancel` IPC behaviour falls out for free.
+    pub(crate) fn request(&self, reason: Option<String>) -> bool {
+        if self.flag.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        if let Ok(mut g) = self.reason.lock() {
+            *g = reason;
+        }
+        self.notify.notify_waiters();
+        true
+    }
+
+    /// `true` if cancel has been signalled. Cheap atomic load.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
+
+    /// Reason captured at cancel time; cleared on read so the next
+    /// observer sees `None`. Used by the worker once when emitting
+    /// `Cancelled.by`.
+    pub(crate) fn take_reason(&self) -> Option<String> {
+        self.reason.lock().ok().and_then(|mut g| g.take())
+    }
+
+    /// Build the future the worker awaits in its select arm.
+    /// `notified()` parks until the next `notify_waiters()`. The
+    /// caller is responsible for the pre-check / post-check pattern
+    /// so that a cancel signalled before the future is constructed
+    /// isn't lost.
+    pub(crate) async fn cancelled(&self) {
+        self.notify.notified().await;
+    }
+}
+
+impl Default for CancelGate {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Returns true for statuses that mean the worker has finished and
@@ -94,10 +168,19 @@ impl Store {
             finished_at: None,
             events: Arc::clone(&ring),
             terminal: Arc::new(Notify::new()),
+            cancel: Arc::new(CancelGate::new()),
         };
         let mut g = self.inner.lock().expect("store poisoned");
         g.insert(task_id, row);
         ring
+    }
+
+    /// Grab the cancel gate for a run. Used by the worker (which
+    /// awaits `cancel.cancelled()` in its select arm) and by the
+    /// `handle_cancel` IPC handler (which calls `gate.request(...)`).
+    pub(crate) fn cancel_gate(&self, task_id: Uuid) -> Option<Arc<CancelGate>> {
+        let g = self.inner.lock().expect("store poisoned");
+        g.get(&task_id).map(|row| Arc::clone(&row.cancel))
     }
 
     /// Grab the terminal-state notifier for a run. Used by the

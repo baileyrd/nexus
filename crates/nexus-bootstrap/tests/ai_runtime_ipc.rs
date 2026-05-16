@@ -69,10 +69,16 @@ async fn get_unknown_task_id_surfaces_a_typed_error() {
 }
 
 #[tokio::test]
-async fn reserved_handlers_return_phase5_error() {
+async fn pause_and_resume_return_unsupported_error() {
+    // BL-134 Phase 5 — cancel is wired (see cancel-flow tests
+    // below); pause/resume return a typed "not supported on Session
+    // tasks" error because a single ipc_call has no resumable
+    // midpoint. The cap-matrix entry keeps both verbs gated so the
+    // privilege boundary stays consistent if a future phase adds
+    // pause-able task kinds.
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
-    for cmd in ["cancel", "pause", "resume"] {
+    for cmd in ["pause", "resume"] {
         let err = call(
             &runtime,
             cmd,
@@ -82,10 +88,25 @@ async fn reserved_handlers_return_phase5_error() {
         .unwrap_err();
         let msg = format!("{err:?}");
         assert!(
-            msg.contains("Phase 5"),
-            "{cmd}: expected Phase 5 placeholder, got {err:?}"
+            msg.contains("not supported"),
+            "{cmd}: expected unsupported-message, got {err:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn cancel_unknown_task_id_errors_clearly() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+    let err = call(
+        &runtime,
+        "cancel",
+        serde_json::json!({ "task_id": "00000000-0000-0000-0000-000000000000" }),
+    )
+    .await
+    .unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(msg.contains("not found"), "got {err:?}");
 }
 
 #[tokio::test]
