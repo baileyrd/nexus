@@ -124,12 +124,14 @@ pub enum AgentTaskKind {
     /// is forwarded verbatim to the agent plugin.
     Session {
         /// Args passed to `com.nexus.agent::session_run`.
+        #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
         args: serde_json::Value,
     },
     /// Reserved for Phase 2+ — single AI streaming turn.
     #[serde(rename = "ai_stream")]
     AiStream {
         /// Args passed to `com.nexus.ai::stream_chat`.
+        #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
         args: serde_json::Value,
     },
     /// BL-134 Phase 3 — async workflow step. The workflow executor
@@ -151,6 +153,7 @@ pub enum AgentTaskKind {
         /// Command name on the target plugin (e.g. `"ask"`).
         command: String,
         /// Args passed to the underlying IPC handler.
+        #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
         args: serde_json::Value,
         /// Workflow id (observability — runtime stores it on the run).
         workflow: String,

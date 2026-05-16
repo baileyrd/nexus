@@ -158,6 +158,7 @@ pub enum AiEvent {
         /// Task id this event belongs to.
         task_id: uuid::Uuid,
         /// Reply body from the underlying IPC dispatch.
+        #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
         outcome: serde_json::Value,
     },
     /// Worker finished with an error. `error` is the serialized
