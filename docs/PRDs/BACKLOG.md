@@ -521,6 +521,86 @@ BL-074 shipped the CRDT primitives and the in-process ops bus (`com.nexus.editor
 
 ---
 
+### BL-146: Subscription replay on remote-forge reconnect (BL-140 follow-up)
+
+**Source**: BL-140 Phase 2c + 3c deferral. Filed 2026-05-16.
+**Effort**: Medium. Touches `ReconnectingRuntime` + the Tauri bridge's subscribe path.
+**Crates**: `nexus-bootstrap` (`reconnect.rs`), `shell/src-tauri/src/bridge.rs`, possibly `nexus-remote` (if the registry lifts there).
+**Related**: BL-140 (shipped — this is the gap explicitly called out in `docs/developer/remote-forge.md` "Limitations").
+
+Today the BL-140 reconnect path drops every active remote subscription on the floor. When the SSH transport drops, the underlying `RemoteClient`'s router task shuts down — every `event_subscribe` installed against that client dies, and the new connection that gets rebuilt has no record of those subscriptions server-side. The Tauri bridge's forwarder tasks similarly terminate.
+
+User-visible symptom: shell plugins that watch kernel events (activity timeline, editor file-change events, BL-074 CRDT ops bus, notifications inbox, etc.) silently stop receiving events after a remote reconnect and stay stopped until the plugin is re-activated. For local forges this is a non-issue (the kernel + bus are in-process).
+
+Subscriptions are currently invisible to the reconnecting layer — they're installed directly on the underlying `RemoteClient` via `runtime.ensure_client().await?.subscribe(...)`. To replay, the reconnecting wrapper has to track every subscription that flowed through it.
+
+**Scope:**
+
+1. Add a `SubscriptionRegistry` on `ReconnectingRuntime` storing `(subscription_id, filter, mpsc::UnboundedSender<EventDelivery>)` triples. Expose a `subscribe(id, filter, sink)` method that records the triple AND issues the underlying client subscribe.
+2. On successful reconnect (Connected transition after Reconnecting), iterate the registry and re-install every subscription against the new client.
+3. Update the Tauri bridge's `kernel_subscribe` Remote arm to route through the new method instead of `ensure_client().subscribe`.
+4. Emit a `com.nexus.kernel.remote_subscriptions_replayed` event (or surface via the existing `ConnectionState` channel as a `Connected{replayed: N}` variant) so frontend can tell the difference between "first connect" and "reconnected".
+
+**Definition of done:**
+- Two-runtime test fixture: subscribe to a CustomPrefix filter, force a transport drop, the next publish on the topic reaches the subscriber's sink without manual re-subscription.
+- Edge case: subscribe issued during the Reconnecting window queues + applies on the next successful connect.
+- Edge case: unsubscribe during Reconnecting removes from the registry so it doesn't get replayed.
+- Tauri bridge's `kernel_subscribe` Remote forwarder survives a transport drop without the frontend re-subscribing.
+
+---
+
+### BL-147: Bootstrap storage helpers — `IpcInvoker` trait surface (BL-140 follow-up)
+
+**Source**: BL-140 Phase 2b deferral. Filed 2026-05-16.
+**Effort**: Small. Mechanical pass converting `&Runtime` parameters to `&dyn IpcInvoker`.
+**Crates**: `nexus-bootstrap` (`storage.rs` + sibling helper modules), `nexus-cli` (call sites in `commands/graph.rs`).
+**Related**: BL-140 Phase 2b (the trait + abstraction this consumes was introduced there).
+
+`crates/nexus-bootstrap/src/storage.rs` exposes typed wrappers around storage IPC verbs (`entity_search`, `entity_get`, `entity_relations`, `entity_find_duplicates`, `entity_merge`, `entity_decay_relations`, etc.) that take `runtime: &Runtime` + `rt: &tokio::runtime::Runtime` and call `runtime.context.ipc_call(...)` internally. The CLI's `nexus graph entity *` subcommands route through these helpers — and since they need `&Runtime` directly (a local-only concrete type), they don't work against the BL-140 remote-forge `IpcInvoker` abstraction.
+
+Running `nexus --forge-path ssh://... graph entity list` today fails with the BL-140 Phase 2b local-only error: `"this operation requires a local forge; remote (ssh://) forges only support IPC-based subcommands"`. The fix is a mechanical signature change — every helper that's a thin `ipc_call` wrapper should take the trait object instead.
+
+**Scope:**
+
+1. Replace `runtime: &Runtime` parameters in `nexus_bootstrap::storage::*` with `invoker: &(dyn IpcInvoker + Send + Sync)`. Drop the `rt: &Runtime` parameter — invoker calls await directly, callers can do their own `block_on` if needed.
+2. Audit sibling helper modules (`agent.rs`, `database.rs`, `terminal.rs`, `dream_cycle.rs`) for the same pattern; refactor any matching ones.
+3. Update CLI call sites — `crates/nexus-cli/src/commands/graph.rs` is the primary consumer; check whether any other subcommand uses these helpers.
+4. The inline `ai_ipc_call` helper in `graph.rs:560` can either get the same treatment or be inlined now that the surrounding helpers route through invoker.
+
+**Definition of done:**
+- `nexus --forge-path ssh://user@host/path graph entity list` works end-to-end against a remote forge.
+- No regression on local-forge graph commands.
+- `cargo test -p nexus-cli` + `cargo test -p nexus-bootstrap` stay green.
+- No new direct `&Runtime` parameters on storage/agent/database helpers — surface uses the trait.
+
+---
+
+### BL-148: Launcher modal for `ssh://` URI entry (BL-140 follow-up)
+
+**Source**: BL-140 Phase 3b deferral. Filed 2026-05-16.
+**Effort**: Small–Medium. Shell-side UI only; backend already exposes the surface it needs.
+**Crates**: `shell/src/plugins/nexus/launcher/`, `shell/src/plugins/nexus/workspace/` (saved-connections store).
+**Related**: BL-140 Phase 3b (shipped the `window.prompt` MVP this replaces).
+
+Today the launcher's "Open remote forge…" action calls `window.prompt` to collect the SSH URI. Functional but ugly: no client-side validation feedback, no remembered-connection list, no SSH identity-file picker, no test-connection affordance, browser-native UX that clashes with the rest of the launcher's Modal-based aesthetic.
+
+**Scope:**
+
+1. Replace `window.prompt` in `nexus.launcher`'s `onOpenRemote` with a proper React modal (mirrors the existing `Modal` component used by the launcher itself).
+2. Form fields: username (optional), host (required), port (optional, defaults to 22), forge path (required, absolute). Compose into the `ssh://` URI client-side; show the composed URI in a read-only field so the user can verify before submitting.
+3. Saved-connections list stored under a new `launcher.remoteRecents` bucket distinct from local-path recents. Optional friendly name per connection so the launcher list can show "alice@devbox" rather than the full URI.
+4. **Stretch:** identity-file picker — file dialog scoped to `~/.ssh/`, with a "use SSH agent default" radio. (SSH config + agent already work for the MVP; this is for users who want explicit identity selection in the UI.)
+5. **Stretch:** test-connection button — spawn the SSH child + issue a no-op IPC call (e.g. `kernel_is_booted` or a cheap storage verb) + disconnect, surface success/failure inline before committing the URI to recents.
+
+**Definition of done:**
+- Clicking "Connect" in the launcher opens the new modal instead of the browser prompt.
+- Client-side validation catches common mistakes (missing `/path`, empty host, non-`ssh://` scheme) before dispatching `nexus.workspace.openRemote`.
+- Saved remote connections survive launcher restarts (persisted via the same `LauncherStore` mechanism as local recents).
+- Saved connections render in the existing recents list alongside local paths; activating one boots the workspace identically to clicking a local recent.
+- Existing `nexus.workspace.openRemote` command keeps working from the command palette (programmatic callers still pass a URI string verbatim).
+
+---
+
 _BL-144 closed 2026-05-15 — `nexus-acp` host crate shipped alongside BL-145 (open question resolved: one crate, two roles). Line-delimited JSON-RPC framing, no `acp.toml`, `capabilities: Vec<String>` spec field; IPC surface on `com.nexus.acp`; bootstrap wiring + CLI lifecycle hooks mirroring DAP/LSP/MCP; first-party `plugins/first-party-acp-echo/` reference plugin; 30+ tests. See [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 3 shell-side agent picker deferred until at least one community ACP plugin exists._
 
 ---
