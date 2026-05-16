@@ -315,6 +315,7 @@ function visit(
   }
   if (name === 'SetextHeading1' || name === 'SetextHeading2') {
     handleSetextHeading(node.node, reveal, doc, items)
+    handleSetextHeadingBlock(node.node, state, active, doc, items)
     return
   }
   if (name === 'HorizontalRule') {
@@ -384,6 +385,36 @@ function visitBlock(
     handleFencedCodeBlockOnly(node.node, doc, active, state, items)
     return
   }
+  if (name === 'SetextHeading1' || name === 'SetextHeading2') {
+    handleSetextHeadingBlock(node.node, state, active, doc, items)
+    return
+  }
+}
+
+// The cross-line replace that hides the `===` / `---` underline row
+// crosses a `\n` and therefore must live in the StateField source
+// (CM6: "Decorations that replace line breaks may not be specified
+// via plugins"). The matching inline path emits only the
+// per-line `cm-md-h{n}` line decorations and never the replace.
+function handleSetextHeadingBlock(
+  node: SyntaxNode,
+  state: EditorState,
+  active: Set<number>,
+  doc: EditorState['doc'],
+  items: DecorationItem[],
+): void {
+  const reveal = nodeIntersectsActiveLines(state, node.from, node.to, active)
+  if (reveal) return
+  const startLine = doc.lineAt(node.from)
+  const endLine = doc.lineAt(node.to)
+  if (endLine.number <= startLine.number) return
+  const underline = endLine
+  const hideFrom = underline.from > 0 ? underline.from - 1 : underline.from
+  items.push({
+    from: hideFrom,
+    to: underline.to,
+    deco: Decoration.replace({ block: true, inclusive: false }),
+  })
 }
 
 /**
@@ -641,15 +672,12 @@ function handleSetextHeading(
   for (let l = startLine.number; l < endLine.number; l++) {
     pushLine(items, doc.line(l).from, `cm-md-h${level}`)
   }
-  if (!reveal && endLine.number > startLine.number) {
-    // Hide the underline line entirely (its content + its trailing
-    // newline, if any, so the row collapses).
-    const underline = endLine
-    const hideFrom = underline.from > 0 ? underline.from - 1 : underline.from
-    pushReplace(items, hideFrom, underline.to)
-  } else {
-    // Still apply heading line decoration to the underline row when
-    // revealed so the visible row keeps the heading scale.
+  if (reveal || endLine.number === startLine.number) {
+    // Apply the heading line decoration to the underline row when
+    // revealed (or absent — single-line edge case) so the visible row
+    // keeps the heading scale. The off-cursor underline-row hide
+    // happens in `handleSetextHeadingBlock` (StateField source) since
+    // its replace range crosses a newline.
     pushLine(items, endLine.from, `cm-md-h${level}`)
   }
 }
