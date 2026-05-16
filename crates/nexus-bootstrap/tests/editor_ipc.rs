@@ -8,7 +8,7 @@ use std::fs;
 use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
-use nexus_editor::{EditorSnapshot, EDITOR_PLUGIN_ID};
+use nexus_editor::{ApplyTransactionResponse, EditorSnapshot, EDITOR_PLUGIN_ID};
 use nexus_kernel::{EventFilter, IpcError, NexusEvent, PluginContext};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -74,7 +74,9 @@ async fn open_apply_transaction_get_tree_save_roundtrip() {
         }],
         TransactionMetadata::default(),
     );
-    let snap: EditorSnapshot = serde_json::from_value(
+    // Text-only ops return a Slim response (BL-123) — just the post-apply
+    // revision counter. Tree assertions go through `get_tree` below.
+    let resp: ApplyTransactionResponse = serde_json::from_value(
         call(
             &runtime,
             "apply_transaction",
@@ -87,9 +89,8 @@ async fn open_apply_transaction_get_tree_save_roundtrip() {
         .expect("apply_transaction ok"),
     )
     .unwrap();
-    assert_eq!(snap.tree.blocks[&para_id].content, "Hello world");
-    assert_eq!(snap.undo_len, 1);
-    assert!(snap.can_undo);
+    assert_eq!(resp.revision(), 1);
+    assert!(matches!(resp, ApplyTransactionResponse::Slim { .. }));
 
     // get_tree returns the same state
     let snap: EditorSnapshot = serde_json::from_value(
@@ -103,6 +104,8 @@ async fn open_apply_transaction_get_tree_save_roundtrip() {
     )
     .unwrap();
     assert_eq!(snap.tree.blocks[&para_id].content, "Hello world");
+    assert_eq!(snap.undo_len, 1);
+    assert!(snap.can_undo);
 
     // save writes back to disk
     call(
@@ -446,7 +449,7 @@ async fn apply_transaction_emits_changed_event_on_kernel_bus() {
         TransactionMetadata::default(),
     );
     let tx_id = tx.id;
-    let snap: EditorSnapshot = serde_json::from_value(
+    let resp: ApplyTransactionResponse = serde_json::from_value(
         call(
             &runtime,
             "apply_transaction",
@@ -459,7 +462,7 @@ async fn apply_transaction_emits_changed_event_on_kernel_bus() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(snap.revision, 1, "mutation bumps revision to 1");
+    assert_eq!(resp.revision(), 1, "mutation bumps revision to 1");
 
     // Give the broadcast channel a tick to deliver.
     tokio::time::sleep(Duration::from_millis(25)).await;
