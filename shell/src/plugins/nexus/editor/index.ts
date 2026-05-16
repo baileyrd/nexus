@@ -160,6 +160,10 @@ import {
 // BL-142 Phase 2b.1 — tab-close teardown for REPL sessions.
 import { makeReplClient } from './replClient.ts'
 import { useReplStore } from './replStore.ts'
+// BL-142 Phase 2b.2 — bus pump that routes
+// `com.nexus.terminal.output.<sessionId>` events into the per-cell
+// output buffer.
+import { startReplOutputPump } from './replOutputPump.ts'
 // Visual settings — applied live via CSS custom properties on :root
 // (see applyEditorCssVars below) and via prop flow to CodeMirrorHost.
 const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
@@ -1916,6 +1920,20 @@ export const editorPlugin: Plugin = {
           void sessionManager.release(prevTab.relpath)
         }
       }
+    })
+
+    // BL-142 Phase 2b.2 — single bus subscriber that routes
+    // `com.nexus.terminal.output.<sessionId>` events into the
+    // per-cell `useReplOutputStore`. The widget below each REPL
+    // cell subscribes to the store directly; this pump is the
+    // single bridge between the bus and the store, started once
+    // at activation. The returned `stop` is kept in module scope
+    // so a future plugin-deactivate hook (when one lands) can
+    // call it; for now the subscription lives for the plugin's
+    // lifetime, which matches every other long-lived `api.on`
+    // subscription in this file.
+    void startReplOutputPump(api.kernel).catch((err) => {
+      clientLogger.warn(`[editor.repl] output pump failed to start: ${err}`)
     })
   },
 }

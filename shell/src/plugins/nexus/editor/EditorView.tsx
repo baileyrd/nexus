@@ -23,6 +23,15 @@ import { useEditorBlameStore } from './blameStore'
 import { configStore, useConfigValue } from '../../../stores/configStore'
 import './cm/gitGutter.css'
 import './cm/breakpointGutter.css'
+// BL-142 Phase 2b.2 — REPL Run gutter + Shift-Enter + inline output.
+import { replGutterExt } from './cm/replGutter'
+import { replKeymapExt } from './cm/replKeymap'
+import { replOutputExt } from './cm/replOutput'
+import { useReplStore } from './replStore'
+import { useReplOutputStore } from './replOutputStore'
+import { makeReplClient } from './replClient'
+import { CONFIG_REPL_KERNELS, REPL_KERNELS_DEFAULT_JSON } from './replKernels'
+import './cm/replGutter.css'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
 import { multiCursorPromoteExt } from './cm/multiCursorPromote'
@@ -1080,6 +1089,57 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             },
           })
         : null
+    // BL-142 Phase 2b.2 — REPL Run gutter, Shift-Enter keymap,
+    // and inline output widget. All three only attach when there's
+    // a kernel handle (the underlying IPC needs it). Untitled tabs
+    // are fine — the gutter just renders no markers if the doc
+    // has no `repl` fences. The kernel-config is read live via
+    // `api.configuration.getValue`, but EditorView doesn't hold
+    // `api`; instead we pull from the `configStore` snapshot which
+    // mirrors the same key.
+    const buildReplExt = () => {
+      const api = runtime?.kernel
+      if (!api) return [] as import('@codemirror/state').Extension[]
+      const replClient = makeReplClient(api)
+      const kernelsJson = configStore.get<string>(
+        CONFIG_REPL_KERNELS,
+        REPL_KERNELS_DEFAULT_JSON,
+      )
+      const runCell = (block: import('./cm/replFence').ReplFenceBlock, code: string) => {
+        if (!block.language) return
+        // Clear any prior output so the cell shows just this eval.
+        // The session id is resolved lazily — clear is keyed by
+        // sessionId, so we have to read the store first.
+        void (async () => {
+          const id = await useReplStore
+            .getState()
+            .ensureSession(replClient, kernelsJson, tab.relpath, block.language)
+          if (id !== null) useReplOutputStore.getState().clear(id)
+          await useReplStore
+            .getState()
+            .evalCode(
+              replClient,
+              kernelsJson,
+              tab.relpath,
+              block.language,
+              code,
+            )
+        })()
+      }
+      return [
+        replGutterExt({ onRun: runCell }),
+        replKeymapExt({ onRun: runCell }),
+        replOutputExt({
+          resolveSessionId: (block) => {
+            if (!block.language) return null
+            const entryKey = `${tab.relpath}::${block.language}`
+            const entry = useReplStore.getState().sessions[entryKey]
+            return entry?.sessionId ?? null
+          },
+        }),
+      ]
+    }
+    const replExtensions = buildReplExt()
     // BL-079 — inline blame, controlled by `useEditorBlameStore`.
     // The toggle command flips the boolean; this read happens at
     // render time so a flip + remount picks up the new value.
@@ -1139,6 +1199,11 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       if (languageExtension !== null) base.push(languageExtension)
       else if (isMarkdown(tab.name)) base.push(markdownLang({ extensions: [Table] }))
       if (breakpointGutterExtension !== null) base.push(breakpointGutterExtension)
+      // BL-142 Phase 2b.2 — Run gutter / Shift-Enter / inline
+      // output. Always added (empty array when no kernel); cells
+      // without a `repl` token in the fence info string render
+      // no markers and no widgets.
+      for (const ext of replExtensions) base.push(ext)
       if (gitGutterExtension !== null) base.push(gitGutterExtension)
       if (gitBlameExtension !== null) base.push(gitBlameExtension)
       if (lspClientExtension !== null) base.push(lspClientExtension)

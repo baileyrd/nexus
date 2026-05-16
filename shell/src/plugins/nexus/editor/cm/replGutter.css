@@ -1,0 +1,49 @@
+/* BL-142 Phase 2b.2 — REPL Run gutter styling. Minimal: a 16px
+ * column with a centered ▶ marker. Hover state is a subtle
+ * background change so the cursor → click affordance is visible
+ * without competing with the breakpoint gutter's red dot. */
+
+.cm-editor .nexus-repl-gutter {
+  width: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cm-editor .nexus-repl-gutter-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 100%;
+  font-size: 0.75em;
+  color: var(--nexus-text-faint, #888);
+  user-select: none;
+  transition: color 0.1s ease-in-out;
+}
+
+.cm-editor .nexus-repl-gutter:hover .nexus-repl-gutter-marker {
+  color: var(--nexus-accent, #4a9eff);
+}
+
+/* Initial spacer is rendered with the same marker class but should
+ * be invisible — only real fence-open lines should look interactive. */
+.cm-editor .nexus-repl-gutter .cm-gutterElement:not(:has(> .nexus-repl-gutter-marker))
+  .nexus-repl-gutter-marker {
+  opacity: 0;
+}
+
+/* BL-142 Phase 2b.2 — REPL output widget rendered below each
+ * REPL-flagged cell. Preserves whitespace so multi-line output
+ * (tracebacks, table-formatted prints) reads correctly. */
+.cm-editor .nexus-repl-output {
+  display: block;
+  padding: 0.5em 1em;
+  margin: 0;
+  font-family: var(--nexus-font-mono, monospace);
+  font-size: 0.85em;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  background: var(--nexus-bg-faint, rgba(127, 127, 127, 0.07));
+  border-left: 3px solid var(--nexus-accent, #4a9eff);
+  color: var(--nexus-text, inherit);
+}
