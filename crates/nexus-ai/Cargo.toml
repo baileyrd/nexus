@@ -13,6 +13,10 @@ nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
 # BL-102: TLS pinning verifier for outbound provider HTTPS.
 nexus-security = { path = "../nexus-security" }
+# BL-134 Phase 4: shared tokio runtime handle for the BL-041 indexing
+# daemon so it doesn't have to build its own. Read-only access via the
+# `nexus_ai_runtime::shared_pool_handle()` free function; no IPC reach.
+nexus-ai-runtime = { path = "../nexus-ai-runtime" }
 async-trait = { workspace = true }
 futures = "0.3"
 regex-lite = { workspace = true }

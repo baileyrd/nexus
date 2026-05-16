@@ -367,27 +367,58 @@ impl IndexingDaemon {
         let handle = std::thread::Builder::new()
             .name("nexus-ai-indexing-daemon".to_string())
             .spawn(move || {
-                let rt = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        tracing::error!(?e, "indexing daemon: failed to build runtime");
-                        if let Ok(mut g) = status_for_thread.write() {
-                            g.running = false;
-                            g.last_error = Some(format!("runtime build failed: {e}"));
+                // BL-134 Phase 4 — prefer the `nexus-ai-runtime` shared
+                // pool handle when available so the daemon dispatches
+                // its async work onto the runtime's multi-thread
+                // executor instead of building its own current-thread
+                // runtime. Falls back when the runtime plugin isn't
+                // registered (e.g. test harnesses that boot
+                // `nexus-ai` without the full bootstrap) or hasn't
+                // wired its context yet — the per-bootstrap ordering
+                // pins ai-runtime BEFORE ai so the typical-path is
+                // the shared-handle branch.
+                if let Some(shared) = nexus_ai_runtime::shared_pool_handle() {
+                    tracing::info!(
+                        thread = "nexus-ai-indexing-daemon",
+                        "BL-134 Phase 4: dispatching indexing loop onto the shared ai-runtime pool",
+                    );
+                    shared.block_on(worker_loop(
+                        ctx,
+                        msg_rx,
+                        shutdown_for_thread,
+                        status_for_thread.clone(),
+                        embedder_factory,
+                    ));
+                } else {
+                    tracing::warn!(
+                        thread = "nexus-ai-indexing-daemon",
+                        "BL-134 Phase 4: ai-runtime shared pool handle not available; \
+                         falling back to a dedicated current-thread runtime. \
+                         This path indicates the ai-runtime plugin isn't wired \
+                         (e.g. unit-test bootstrap, or a regression in plugin order).",
+                    );
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            tracing::error!(?e, "indexing daemon: failed to build runtime");
+                            if let Ok(mut g) = status_for_thread.write() {
+                                g.running = false;
+                                g.last_error = Some(format!("runtime build failed: {e}"));
+                            }
+                            return;
                         }
-                        return;
-                    }
-                };
-                rt.block_on(worker_loop(
-                    ctx,
-                    msg_rx,
-                    shutdown_for_thread,
-                    status_for_thread.clone(),
-                    embedder_factory,
-                ));
+                    };
+                    rt.block_on(worker_loop(
+                        ctx,
+                        msg_rx,
+                        shutdown_for_thread,
+                        status_for_thread.clone(),
+                        embedder_factory,
+                    ));
+                }
                 if let Ok(mut g) = status_for_thread.write() {
                     g.running = false;
                 }

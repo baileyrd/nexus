@@ -7,9 +7,38 @@
 //! without needing to introspect tokio internals (tokio doesn't
 //! expose a stable "active task count" API).
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::{Builder, Handle, Runtime};
+
+/// Process-wide cell holding the runtime's pool handle once the
+/// `com.nexus.ai.runtime` plugin has been wired. Filled exactly once
+/// by [`WorkerPool::publish_shared_handle`] inside the plugin's
+/// `wire_context`; consulted by sibling subsystems (notably
+/// `nexus-ai::indexing_daemon`) via [`shared_pool_handle`] so they
+/// can avoid building a second tokio runtime per ADR 0028.
+///
+/// `OnceLock` rather than `OnceCell` because the read-side
+/// (`shared_pool_handle`) is hit from a worker thread that needs
+/// `Sync`. Module-private so the only path to set is via
+/// `publish_shared_handle`, which the plugin's `wire_context` owns.
+static SHARED_POOL_HANDLE: OnceLock<Handle> = OnceLock::new();
+
+/// Read the runtime's shared tokio runtime handle, if the
+/// `com.nexus.ai.runtime` plugin has been wired in this process.
+///
+/// Returns `None` when (a) the plugin isn't registered (e.g.
+/// `nexus-cli` running without bootstrap) or (b) the plugin is
+/// registered but `wire_context` hasn't run yet. Callers that take
+/// the `None` path should fall back to a process-local Runtime and
+/// log so the misordering is observable; see
+/// `nexus-ai::indexing_daemon` for the canonical consumer.
+///
+/// The handle is `Clone` and cheap to copy across worker tasks.
+#[must_use]
+pub fn shared_pool_handle() -> Option<Handle> {
+    SHARED_POOL_HANDLE.get().cloned()
+}
 
 /// How many worker threads the pool spawns. Mirrors ADR 0028's
 /// `worker_threads = max(2, num_cpus() / 2)` rule of thumb. We use
@@ -80,11 +109,54 @@ impl WorkerPool {
     pub fn metrics(&self) -> PoolMetrics {
         self.metrics
     }
+
+    /// BL-134 Phase 4 — publish this pool's handle into the process-
+    /// wide [`SHARED_POOL_HANDLE`] so other in-tree subsystems (e.g.
+    /// `nexus-ai::indexing_daemon`) can dispatch background work
+    /// onto the shared executor without spinning up a second tokio
+    /// runtime per ADR 0028's "the runtime is the only consumer that
+    /// constructs a dedicated tokio Runtime" rule.
+    ///
+    /// Idempotent: subsequent calls are no-ops because `OnceLock`
+    /// rejects re-sets. Returns `true` when this call installed the
+    /// handle, `false` when a previous call already won — useful for
+    /// the plugin to log a warn if the lifecycle gets confused.
+    pub fn publish_shared_handle(&self) -> bool {
+        SHARED_POOL_HANDLE.set(self.handle()).is_ok()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publish_shared_handle_installs_a_runtime_handle() {
+        // The OnceLock is process-global and shared across the whole
+        // test binary — we can't run two `publish_shared_handle`-
+        // exercising tests in the same process without contaminating
+        // each other. So this test claims the cell; subsequent calls
+        // to `publish_shared_handle` (from other tests, or from the
+        // plugin's wire_context if it runs in the same process) are
+        // expected to be no-ops, which is the documented contract.
+        // The test asserts both branches: the installed branch
+        // returns true, and `shared_pool_handle()` returns Some after
+        // the install.
+        let pool = WorkerPool::start(Some(2)).expect("pool starts");
+        let installed_first_time = pool.publish_shared_handle();
+        // If the OnceLock was already filled by a previously-run test
+        // in this binary, `installed_first_time` is false — that's
+        // still a valid "shared handle is reachable" outcome.
+        assert!(super::shared_pool_handle().is_some());
+        if installed_first_time {
+            // A subsequent publish must be rejected; the OnceLock
+            // can only be set once.
+            assert!(
+                !pool.publish_shared_handle(),
+                "second publish must be a no-op",
+            );
+        }
+    }
 
     #[test]
     fn pool_starts_with_at_least_two_workers() {

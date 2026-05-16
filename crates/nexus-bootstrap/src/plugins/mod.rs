@@ -50,6 +50,13 @@ pub(crate) fn register_all(
     database::register(loader, forge_root, event_bus)?;
     editor::register(loader, forge_root, event_bus)?;
     theme::register(loader, forge_root, event_bus)?;
+    // BL-134 Phase 4 — ai-runtime registers BEFORE ai so the runtime's
+    // pool handle is already published (via `WorkerPool::publish_shared_handle`
+    // in the runtime's `wire_context`) by the time ai's `wire_context` fires
+    // and starts the BL-041 indexing daemon. The daemon picks up the shared
+    // handle in lieu of building its own tokio runtime; a `None` fallback
+    // preserves boot in environments where the runtime plugin isn't registered.
+    ai_runtime::register(loader, forge_root, event_bus)?;
     ai::register(loader, forge_root, event_bus)?;
     skills::register(loader, forge_root, event_bus)?;
     templates::register(loader, forge_root, event_bus)?;
@@ -57,7 +64,6 @@ pub(crate) fn register_all(
     workflow::register(loader, forge_root, event_bus)?;
     linkpreview::register(loader, forge_root, event_bus)?;
     notifications::register(loader, forge_root, event_bus)?;
-    ai_runtime::register(loader, forge_root, event_bus)?;
     audio::register(loader, forge_root, event_bus)?;
     comments::register(loader, forge_root, event_bus)?;
     agent::register(loader, forge_root, event_bus)?;

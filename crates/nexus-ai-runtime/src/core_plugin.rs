@@ -179,10 +179,19 @@ impl CorePlugin for AiRuntimeCorePlugin {
         if self.pool.get().is_none() {
             match WorkerPool::start(None) {
                 Ok(pool) => {
+                    // BL-134 Phase 4 — publish the pool handle to the
+                    // process-wide accessor so sibling subsystems
+                    // (today: nexus-ai::indexing_daemon) can avoid
+                    // building a second tokio runtime. Logged at info
+                    // so a misordering on a future bootstrap reorder
+                    // is observable; the daemon falls back to its own
+                    // runtime if the handle isn't published yet.
+                    let installed = pool.publish_shared_handle();
                     let _ = self.pool.set(pool);
                     tracing::info!(
                         plugin_id = PLUGIN_ID,
-                        "BL-134 Phase 1: ai-runtime worker pool started",
+                        shared_handle_installed = installed,
+                        "BL-134 Phase 1+4: ai-runtime worker pool started",
                     );
                 }
                 Err(e) => {

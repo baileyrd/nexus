@@ -566,19 +566,7 @@ Cleanest path (selected at design time): the runtime pre-allocates a UUID at `su
 
 ---
 
-### Follow-up: BL-134 Phase 4 — indexing-daemon migration to the shared pool
-
-**Source**: BL-134 Phase 4 deferral. Filed 2026-05-15.
-**Effort**: Medium. ~2–3 days once the cross-plugin pool-handle question is decided.
-**Crates**: `nexus-ai` (daemon), `nexus-ai-runtime` (handle accessor), `nexus-bootstrap` (wiring).
-
-`nexus-ai::indexing_daemon` (BL-041) currently spawns its own `tokio::runtime::Builder::new_current_thread()` on a dedicated OS thread to drive embedding work without blocking the kernel runtime. ADR 0028 calls out this daemon as the "prototype pool" the unified runtime is meant to subsume — but the concrete migration needs a decision on how the daemon gets access to the runtime's worker pool. Three viable patterns:
-
-1. **Pool-handle injection via bootstrap** — `nexus-ai-runtime` exposes a `pool_handle() -> Option<Handle>` accessor; `nexus-bootstrap` plumbs the handle between the two plugins after both are wired. Daemon uses `handle.block_on(worker_loop(...))` instead of building its own Runtime. Smallest code delta, requires bootstrap-side cross-plugin coordination + careful ordering (today ai is wired before ai-runtime).
-2. **IPC-based work submission** — daemon submits each batch to `com.nexus.ai.runtime::submit` as an `AgentTaskKind::WorkflowAiStep` (or new variant). Runtime worker fires the actual embedding IPC. Cleanest dep direction, but requires the daemon to express its work in terms of single-IPC tasks rather than a long-running loop.
-3. **Process-global pool handle** — `nexus-ai-runtime` exposes a `static OnceLock<Handle>` accessor; daemon fetches at startup. Simplest plumbing, but creates a process-global side channel that bypasses the microkernel's "IPC over direct calls" invariant.
-
-The decision is meaningful enough that this lives as a standalone follow-up rather than getting bolted onto BL-134's umbrella.
+_BL-134 Phase 4 closed 2026-05-15 — indexing-daemon migration via Pattern 1 (encapsulated pool-handle injection). New `nexus_ai_runtime::shared_pool_handle()` reads from a module-private `OnceLock<Handle>` filled in the runtime's `wire_context` after `WorkerPool::start`; bootstrap reorders so `ai-runtime` registers BEFORE `ai`. `nexus-ai::indexing_daemon::start` now prefers the shared handle (`handle.block_on(worker_loop(...))`) and only falls back to a bespoke `tokio::runtime::Builder::new_current_thread()` build when the runtime plugin isn't wired (e.g. unit-test bootstrap), logging the fallback at warn. New bootstrap integration test (`bootstrap_publishes_shared_pool_handle_for_indexing_daemon`) plus runtime-side `publish_shared_handle` unit test pin the wiring contract. `nexus-ai` gains a direct dep on `nexus-ai-runtime` — allowed by `dep_invariants` since the rule only forbids frontend crates (CLI/TUI/MCP) from depending on the runtime, not sibling service plugins. See [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md) for the close note._
 
 ---
 

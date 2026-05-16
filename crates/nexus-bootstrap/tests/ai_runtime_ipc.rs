@@ -170,3 +170,24 @@ async fn submit_returns_a_task_id_and_records_the_run_in_list() {
         "unexpected status {status}"
     );
 }
+
+#[tokio::test]
+async fn bootstrap_publishes_shared_pool_handle_for_indexing_daemon() {
+    // BL-134 Phase 4 — booting the CLI runtime registers the
+    // `com.nexus.ai.runtime` plugin BEFORE `com.nexus.ai`. The runtime's
+    // `wire_context` calls `WorkerPool::publish_shared_handle`, which
+    // makes the pool's tokio runtime handle available via
+    // `nexus_ai_runtime::shared_pool_handle()` for the indexing daemon
+    // (and any other sibling subsystem). This test exercises that
+    // wiring: after boot, the handle must be `Some`.
+    let _forge = scratch_forge();
+    let _runtime = build_cli_runtime(_forge.path().to_path_buf()).expect("runtime");
+    // OnceLock-backed accessor — the runtime plugin's wire_context
+    // installs the handle synchronously, so a single check after
+    // build_cli_runtime returns is sufficient.
+    assert!(
+        nexus_ai_runtime::shared_pool_handle().is_some(),
+        "ai-runtime must publish a shared pool handle once wired; without it the \
+         indexing daemon falls back to a bespoke tokio runtime per BL-134 Phase 4"
+    );
+}

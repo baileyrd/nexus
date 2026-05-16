@@ -56,6 +56,12 @@ pub mod events;
 pub mod pool;
 pub mod scheduler;
 
+/// BL-134 Phase 4 — process-wide shared tokio handle accessor.
+/// Re-exported from [`pool::shared_pool_handle`] for ergonomic
+/// `nexus_ai_runtime::shared_pool_handle()` calls from sibling
+/// subsystems (today: `nexus-ai::indexing_daemon`).
+pub use pool::shared_pool_handle;
+
 /// Reverse-DNS plugin id — also the bus-topic prefix the republisher
 /// owns (`com.nexus.ai.runtime.*`).
 pub const PLUGIN_ID: &str = "com.nexus.ai.runtime";
