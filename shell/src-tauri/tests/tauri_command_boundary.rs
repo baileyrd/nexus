@@ -7,7 +7,7 @@
 //! must route through `kernel_invoke` → `ipc_call` and live in a service
 //! crate, not as a new bespoke command here.
 //!
-//! This test pins the current 26-command set. If you add or remove a command
+//! This test pins the current 28-command set. If you add or remove a command
 //! and this test fails, that's the system asking: **is this a host concern,
 //! or did this belong behind an IPC handler?** If it really is a host
 //! concern, update both the [`EXPECTED`] list below and add an ADR (or
@@ -25,6 +25,11 @@
 //!   verb would require a kernel-side plugin that doesn't exist (and
 //!   doesn't make sense — state is shell-side, observed from the
 //!   reconnecting wrapper).
+//! - `persistence::write_remote_recent` / `persistence::forget_remote_recent`
+//!   (BL-148) — saved-recents list for `ssh://` launcher entries. Host
+//!   concern because shell-state persistence already lives here; the
+//!   remote-recents list extends the same on-disk shell-state file
+//!   handled by `write_last_forge_path` / `forget_forge_path`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -50,6 +55,8 @@ const EXPECTED: &[&str] = &[
     "persistence::save_shell_state",
     "persistence::write_last_forge_path",
     "persistence::forget_forge_path",
+    "persistence::write_remote_recent",
+    "persistence::forget_remote_recent",
     "bridge::init_forge",
     "bridge::boot_kernel",
     "bridge::boot_remote",

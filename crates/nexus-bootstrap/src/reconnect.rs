@@ -22,17 +22,23 @@
 //! `Transport(_)` to the caller. The schedule is configurable via
 //! [`ReconnectingRuntime::with_backoff`].
 //!
-//! # Subscription replay
+//! # Subscription replay (BL-146)
 //!
-//! Today the reconnect path drops every active subscription on the
-//! floor — the new connection is empty server-side until the caller
-//! re-issues `subscribe`. This is fine because no CLI subcommand
-//! currently subscribes through the remote path; subscriptions are
-//! reserved for the local kernel event bus. When a remote subscriber
-//! lands (Phase 3 shell, or a future CLI verb that watches events
-//! over SSH) the wrapper will need to replay every active
-//! subscription server-side on reconnect. Filed as a follow-up.
+//! Callers that subscribe through [`ReconnectingRuntime::subscribe`]
+//! have their `(subscription_id, filter, sink)` triples recorded in an
+//! internal registry. A watchdog spawned per fresh client awaits
+//! [`nexus_remote::RemoteClient::wait_for_disconnect`]; on a drop it
+//! walks the reconnect schedule, builds a new client, and re-installs
+//! every registered subscription against it before announcing the
+//! new connection. The replay count is published on
+//! [`ReconnectingRuntime::subscribe_replays`] so the Tauri bridge can
+//! tell first-connect from reconnect-with-replay.
+//!
+//! Subscriptions installed by reaching past this wrapper (e.g. directly
+//! through `ensure_client().subscribe(...)`) are NOT tracked — they die
+//! with the transport. Always use the runtime-level methods.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -40,11 +46,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::Value;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::task::JoinHandle;
 
 use crate::invoker::{IpcInvoker, IpcInvokerError};
 use crate::remote::{build_remote_runtime_ssh, RemoteRuntime};
-use nexus_remote::ForgeUri;
+use nexus_remote::{EventDelivery, ForgeUri, RemoteClient};
 
 /// Lifecycle state of the remote-forge connection, surfaced by
 /// [`ReconnectingRuntime::subscribe_state`] so the Tauri bridge can
@@ -133,6 +140,21 @@ impl ConnectionFactory for SshConnectionFactory {
     }
 }
 
+/// One row in [`ReconnectingRuntime`]'s subscription registry — a
+/// triple of `(filter, sink)` keyed by the externally-supplied
+/// subscription id. The sink is cloneable (`mpsc::UnboundedSender`),
+/// so each replay against a fresh client clones it rather than moving.
+#[derive(Clone)]
+struct SubscriptionEntry {
+    filter: Value,
+    sink: mpsc::UnboundedSender<EventDelivery>,
+}
+
+/// Registry of subscriptions installed through
+/// [`ReconnectingRuntime::subscribe`]. The reconnect path iterates this
+/// map to replay each subscription against a freshly-built client.
+type SubscriptionRegistry = Arc<Mutex<HashMap<String, SubscriptionEntry>>>;
+
 /// A self-reconnecting wrapper over a [`RemoteRuntime`]. Holds the
 /// current connection behind a `Mutex` and lazily builds + rebuilds it
 /// via a [`ConnectionFactory`].
@@ -144,6 +166,17 @@ pub struct ReconnectingRuntime {
     /// inside an `Arc` so the invoker (which lives independently of
     /// the runtime) can share it.
     state_tx: Arc<broadcast::Sender<ConnectionState>>,
+    /// BL-146 — every active subscription installed through
+    /// [`Self::subscribe`]. Replayed against each freshly-built
+    /// `RemoteClient` after a reconnect.
+    subscriptions: SubscriptionRegistry,
+    /// BL-146 — fires with the count of subscriptions replayed every
+    /// time the watchdog (or `ipc_call`'s reconnect path) installs a
+    /// new client. Held in an `Arc` for the same reason as `state_tx`.
+    replay_tx: Arc<broadcast::Sender<usize>>,
+    /// Watchdog task handle for the currently-installed client. Aborted
+    /// when a new client is installed; spawned by `install_client`.
+    watchdog: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl ReconnectingRuntime {
@@ -155,12 +188,16 @@ impl ReconnectingRuntime {
         // Bounded channel — late subscribers can `Lagged` if a flurry
         // of reconnects fires before they catch up; we don't care
         // about per-event ordering for a UI badge, only the latest.
-        let (tx, _rx) = broadcast::channel(16);
+        let (state_tx, _state_rx) = broadcast::channel(16);
+        let (replay_tx, _replay_rx) = broadcast::channel(16);
         Self {
             factory,
             current: Arc::new(Mutex::new(None)),
             backoff: DEFAULT_BACKOFF.to_vec(),
-            state_tx: Arc::new(tx),
+            state_tx: Arc::new(state_tx),
+            subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            replay_tx: Arc::new(replay_tx),
+            watchdog: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -183,6 +220,9 @@ impl ReconnectingRuntime {
             current: Arc::clone(&self.current),
             backoff: self.backoff.clone(),
             state_tx: Arc::clone(&self.state_tx),
+            subscriptions: Arc::clone(&self.subscriptions),
+            replay_tx: Arc::clone(&self.replay_tx),
+            watchdog: Arc::clone(&self.watchdog),
         })
     }
 
@@ -199,9 +239,124 @@ impl ReconnectingRuntime {
         self.state_tx.subscribe()
     }
 
+    /// BL-146 — subscribe to subscription-replay counts. Fires once
+    /// per successful client install (initial connect + every
+    /// reconnect) with the count of subscriptions that were re-
+    /// installed. The first connect typically fires with `0` (registry
+    /// empty); reconnects with N>0 distinguish "fresh connection" from
+    /// "reconnected and replayed".
+    #[must_use]
+    pub fn subscribe_replays(&self) -> broadcast::Receiver<usize> {
+        self.replay_tx.subscribe()
+    }
+
+    /// BL-146 — register a remote subscription with the reconnect
+    /// wrapper. Records `(subscription_id, filter, sink)` in the
+    /// internal registry AND installs the subscription against the
+    /// current client. If no client is currently connected the
+    /// registration is queued and the watchdog will install it on the
+    /// next successful build.
+    ///
+    /// Same shape as [`nexus_remote::RemoteClient::subscribe`] but
+    /// transparently survives reconnects. Callers who reach past this
+    /// method via [`Self::ensure_client`] are not tracked.
+    ///
+    /// # Errors
+    /// - [`IpcInvokerError::Transport`] if the underlying
+    ///   `RemoteClient::subscribe` call fails. The registration is
+    ///   rolled back so a failed first install doesn't get replayed
+    ///   later. (If the client is offline, the call returns `Ok` — the
+    ///   sub is queued for replay.)
+    pub async fn subscribe(
+        &self,
+        subscription_id: &str,
+        filter: Value,
+        sink: mpsc::UnboundedSender<EventDelivery>,
+    ) -> Result<(), IpcInvokerError> {
+        // Record first so a fresh-client replay that races with this
+        // call still picks up the entry.
+        {
+            let mut reg = self.subscriptions.lock().await;
+            reg.insert(
+                subscription_id.to_string(),
+                SubscriptionEntry {
+                    filter: filter.clone(),
+                    sink: sink.clone(),
+                },
+            );
+        }
+        // Snapshot the current client (without holding the slot lock
+        // across the await) and try to install. If there's no current
+        // client, just leave the entry in the registry — the watchdog
+        // /reconnect path will replay it.
+        let maybe_client = {
+            let slot = self.current.lock().await;
+            slot.as_ref().map(|rt| Arc::clone(&rt.client))
+        };
+        let Some(client) = maybe_client else {
+            return Ok(());
+        };
+        if let Err(e) = client.subscribe(subscription_id, filter, sink).await {
+            // Roll back so a permanently-doomed sub (e.g. duplicate id
+            // server-side) doesn't haunt every future reconnect.
+            self.subscriptions.lock().await.remove(subscription_id);
+            return Err(IpcInvokerError::Transport(format!(
+                "remote subscribe failed: {e}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// BL-146 — cancel a subscription installed through
+    /// [`Self::subscribe`]. Removes it from the registry so it doesn't
+    /// get replayed on the next reconnect AND issues
+    /// `event_unsubscribe` against the current client (if any).
+    ///
+    /// Returns `true` if the server acknowledged the unsubscribe;
+    /// `false` if the registry knew the id but the server didn't, or
+    /// no client is connected. Safe to call twice — second call returns
+    /// `Ok(false)` instead of erroring on an unknown id.
+    pub async fn unsubscribe(
+        &self,
+        subscription_id: &str,
+    ) -> Result<bool, IpcInvokerError> {
+        let removed = {
+            let mut reg = self.subscriptions.lock().await;
+            reg.remove(subscription_id).is_some()
+        };
+        let maybe_client = {
+            let slot = self.current.lock().await;
+            slot.as_ref().map(|rt| Arc::clone(&rt.client))
+        };
+        let Some(client) = maybe_client else {
+            return Ok(false);
+        };
+        match client.unsubscribe(subscription_id).await {
+            Ok(ok) => Ok(ok),
+            Err(e) => {
+                // Registry has already been cleared, so a second call
+                // will be a no-op. The error itself surfaces — the
+                // caller cares about whether the server saw it.
+                let _ = removed;
+                Err(IpcInvokerError::Transport(format!(
+                    "remote unsubscribe failed: {e}"
+                )))
+            }
+        }
+    }
+
     /// Tear down the current connection (if any). Subsequent dispatches
     /// will rebuild on demand.
+    ///
+    /// BL-146 — also aborts the watchdog task so we don't race a
+    /// caller-driven reset against an auto-reconnect; the next
+    /// `ensure_connected` rebuilds + spawns a fresh watchdog. Existing
+    /// subscriptions in the registry are preserved, so the rebuild
+    /// will replay them.
     pub async fn reset(&self) {
+        if let Some(handle) = self.watchdog.lock().await.take() {
+            handle.abort();
+        }
         let mut slot = self.current.lock().await;
         if let Some(runtime) = slot.take() {
             runtime.shutdown().await;
@@ -218,22 +373,39 @@ impl ReconnectingRuntime {
     ///
     /// The returned `Arc` clones the underlying client; the caller's
     /// reference outlives subsequent reconnects, but subscriptions
-    /// installed against it are NOT replayed — when the current
-    /// connection is reset, the old client's router stops and
-    /// subscriptions silently drop. The frontend is expected to
-    /// re-subscribe after reconnect; we'll add automatic replay when
-    /// a use case actually demands it.
+    /// installed *directly* against it are NOT replayed when the
+    /// transport drops. Use [`Self::subscribe`] (which tracks the
+    /// subscription in the registry + replays on reconnect) for any
+    /// subscription that should survive a connection drop.
     ///
     /// # Errors
     /// Same shape as the first attempt of `ipc_call` — a build failure
     /// surfaces as `Transport("initial connection: ...")`.
+    ///
+    /// # Panics
+    /// Panics if a successful build doesn't end up populating the
+    /// slot (would indicate an internal logic bug, not a runtime
+    /// condition).
     pub async fn ensure_client(
         &self,
     ) -> Result<Arc<nexus_remote::RemoteClient>, IpcInvokerError> {
         let mut slot = self.current.lock().await;
         if slot.is_none() {
             match self.factory.build().await {
-                Ok(rt) => *slot = Some(rt),
+                Ok(rt) => {
+                    install_runtime_under_lock(
+                        &mut slot,
+                        rt,
+                        &self.subscriptions,
+                        &self.replay_tx,
+                        &self.watchdog,
+                        &self.factory,
+                        &self.current,
+                        &self.backoff,
+                        &self.state_tx,
+                    )
+                    .await;
+                }
                 Err(e) => {
                     return Err(IpcInvokerError::Transport(format!(
                         "initial connection: {e}"
@@ -250,6 +422,9 @@ struct ReconnectingInvoker {
     current: Arc<Mutex<Option<RemoteRuntime>>>,
     backoff: Vec<Duration>,
     state_tx: Arc<broadcast::Sender<ConnectionState>>,
+    subscriptions: SubscriptionRegistry,
+    replay_tx: Arc<broadcast::Sender<usize>>,
+    watchdog: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl ReconnectingInvoker {
@@ -273,7 +448,18 @@ impl ReconnectingInvoker {
         }
         match self.factory.build().await {
             Ok(rt) => {
-                *slot = Some(rt);
+                install_runtime_under_lock(
+                    &mut slot,
+                    rt,
+                    &self.subscriptions,
+                    &self.replay_tx,
+                    &self.watchdog,
+                    &self.factory,
+                    &self.current,
+                    &self.backoff,
+                    &self.state_tx,
+                )
+                .await;
                 Ok(())
             }
             Err(e) => {
@@ -374,11 +560,23 @@ impl IpcInvoker for ReconnectingInvoker {
                     continue;
                 }
             };
-            // Take the lock, install the new runtime, snapshot its
-            // invoker, drop the lock before awaiting the retry call.
+            // Take the lock, install the new runtime + spawn watchdog
+            // + replay subscriptions, snapshot its invoker, drop the
+            // lock before awaiting the retry call.
             let inv = {
                 let mut slot = self.current.lock().await;
-                *slot = Some(rt);
+                install_runtime_under_lock(
+                    &mut slot,
+                    rt,
+                    &self.subscriptions,
+                    &self.replay_tx,
+                    &self.watchdog,
+                    &self.factory,
+                    &self.current,
+                    &self.backoff,
+                    &self.state_tx,
+                )
+                .await;
                 slot.as_ref().expect("just set").invoker()
             };
             match inv
@@ -413,6 +611,183 @@ impl IpcInvoker for ReconnectingInvoker {
             "reconnect schedule exhausted: {last_err}"
         )))
     }
+}
+
+/// Install `rt` into the supplied current-slot guard, replay every
+/// registered subscription against its client, publish the replay
+/// count, and spawn a fresh watchdog. Aborts any prior watchdog first
+/// so we don't end up with two competing reconnect loops.
+///
+/// Called from every code path that installs a `RemoteRuntime` into
+/// `current` — initial build (`ensure_connected` / `ensure_client`) +
+/// every iteration of the `ipc_call` reconnect loop — so subscription
+/// replay + watchdog spawn are guaranteed to follow each install
+/// exactly once.
+///
+/// The slot guard is borrowed mutably (so the caller stays in the
+/// critical section) but the replay + watchdog setup itself doesn't
+/// touch the slot.
+#[allow(clippy::too_many_arguments)]
+async fn install_runtime_under_lock(
+    slot: &mut Option<RemoteRuntime>,
+    rt: RemoteRuntime,
+    subscriptions: &SubscriptionRegistry,
+    replay_tx: &Arc<broadcast::Sender<usize>>,
+    watchdog: &Arc<Mutex<Option<JoinHandle<()>>>>,
+    factory: &Arc<dyn ConnectionFactory>,
+    current: &Arc<Mutex<Option<RemoteRuntime>>>,
+    backoff: &[Duration],
+    state_tx: &Arc<broadcast::Sender<ConnectionState>>,
+) {
+    let client_for_replay = Arc::clone(&rt.client);
+    *slot = Some(rt);
+    let replayed = replay_subscriptions(subscriptions, &client_for_replay).await;
+    let _ = replay_tx.send(replayed);
+    spawn_watchdog(
+        Arc::clone(&client_for_replay),
+        Arc::clone(subscriptions),
+        Arc::clone(replay_tx),
+        Arc::clone(watchdog),
+        Arc::clone(factory),
+        Arc::clone(current),
+        backoff.to_vec(),
+        Arc::clone(state_tx),
+    )
+    .await;
+}
+
+/// Iterate the subscription registry and install each entry against
+/// the freshly-built client. Returns the count of subscriptions
+/// installed. Errors per-subscription are logged but don't abort the
+/// loop — one bad sub shouldn't take down the others.
+///
+/// The registry snapshot is taken under-lock + cloned so the
+/// individual subscribe awaits don't hold the registry lock (a
+/// concurrent `subscribe()` / `unsubscribe()` would otherwise block).
+async fn replay_subscriptions(
+    subscriptions: &SubscriptionRegistry,
+    client: &RemoteClient,
+) -> usize {
+    let entries: Vec<(String, SubscriptionEntry)> = {
+        let reg = subscriptions.lock().await;
+        reg.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    };
+    let mut replayed = 0_usize;
+    for (id, entry) in entries {
+        match client.subscribe(&id, entry.filter, entry.sink).await {
+            Ok(_) => replayed += 1,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    subscription_id = %id,
+                    "subscription replay failed"
+                );
+            }
+        }
+    }
+    replayed
+}
+
+/// Spawn a watchdog task that loops on
+/// `client.wait_for_disconnect()` → reconnect-with-replay → repeat.
+/// Aborts any prior watchdog first so we don't end up with two
+/// competing loops if `install_runtime_under_lock` is called twice in
+/// rapid succession.
+///
+/// The loop continues until either the backoff schedule exhausts (the
+/// task ends, emitting `Disconnected`) or the task is explicitly
+/// aborted (typically by `install_runtime_under_lock` spawning a
+/// successor watchdog).
+#[allow(clippy::too_many_arguments)]
+async fn spawn_watchdog(
+    client: Arc<RemoteClient>,
+    subscriptions: SubscriptionRegistry,
+    replay_tx: Arc<broadcast::Sender<usize>>,
+    watchdog: Arc<Mutex<Option<JoinHandle<()>>>>,
+    factory: Arc<dyn ConnectionFactory>,
+    current: Arc<Mutex<Option<RemoteRuntime>>>,
+    backoff: Vec<Duration>,
+    state_tx: Arc<broadcast::Sender<ConnectionState>>,
+) {
+    {
+        let mut guard = watchdog.lock().await;
+        if let Some(prev) = guard.take() {
+            prev.abort();
+        }
+    }
+    let handle = tokio::spawn(async move {
+        let mut watched = client;
+        loop {
+            watched.wait_for_disconnect().await;
+            // Possible race: ipc_call (or another install path) might
+            // have already replaced `current` with a fresh runtime.
+            // Pivot to watching the new client instead of rebuilding.
+            {
+                let slot = current.lock().await;
+                if let Some(rt) = slot.as_ref() {
+                    if !Arc::ptr_eq(&rt.client, &watched) {
+                        watched = Arc::clone(&rt.client);
+                        continue;
+                    }
+                }
+            }
+            tracing::warn!("remote watchdog: connection lost; reconnecting");
+            let _ = state_tx.send(ConnectionState::Reconnecting);
+            if let Some(new_rt) = watchdog_rebuild(&factory, &current, &backoff).await {
+                let new_client = Arc::clone(&new_rt.client);
+                {
+                    let mut slot = current.lock().await;
+                    if let Some(old) = slot.take() {
+                        old.shutdown().await;
+                    }
+                    *slot = Some(new_rt);
+                }
+                let replayed = replay_subscriptions(&subscriptions, &new_client).await;
+                let _ = replay_tx.send(replayed);
+                let _ = state_tx.send(ConnectionState::Connected);
+                tracing::info!(replayed, "remote watchdog: reconnect succeeded");
+                watched = new_client;
+            } else {
+                let _ = state_tx.send(ConnectionState::Disconnected);
+                tracing::warn!("remote watchdog: backoff exhausted");
+                break;
+            }
+        }
+    });
+    *watchdog.lock().await = Some(handle);
+}
+
+/// Walk the backoff schedule, asking the factory for a new runtime on
+/// each tick. Returns `Some(runtime)` on first success, `None` if the
+/// schedule exhausted without one succeeding.
+///
+/// Doesn't touch `current` itself — the caller is responsible for
+/// installing the returned runtime under the slot lock (so the
+/// install + replay + watchdog-spawn happen as one atomic step).
+async fn watchdog_rebuild(
+    factory: &Arc<dyn ConnectionFactory>,
+    current: &Arc<Mutex<Option<RemoteRuntime>>>,
+    backoff: &[Duration],
+) -> Option<RemoteRuntime> {
+    // Tear down whatever stale runtime is sitting in the slot so the
+    // next slot.lock observer sees the right state.
+    if let Some(stale) = current.lock().await.take() {
+        stale.shutdown().await;
+    }
+    for (idx, delay) in backoff.iter().enumerate() {
+        tokio::time::sleep(*delay).await;
+        match factory.build().await {
+            Ok(rt) => return Some(rt),
+            Err(e) => {
+                tracing::warn!(
+                    attempt = idx + 1,
+                    error = %e,
+                    "remote watchdog: rebuild attempt failed"
+                );
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

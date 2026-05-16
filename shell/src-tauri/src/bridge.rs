@@ -71,6 +71,13 @@ const KERNEL_EVENT_CHANNEL: &str = "kernel:event";
 /// subscribes to render the badge.
 const CONNECTION_STATE_CHANNEL: &str = "kernel:connection-state";
 
+/// BL-146 — channel name for subscription-replay notifications. Fires
+/// after the reconnect wrapper re-installs N subscriptions against a
+/// freshly-built client so the frontend can render a "reconnected, N
+/// subscriptions restored" toast (or distinguish first-connect from
+/// reconnect on the status badge).
+const SUBSCRIPTIONS_REPLAYED_CHANNEL: &str = "kernel:subscriptions-replayed";
+
 /// Payload shape emitted to the webview for every bridged kernel event.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +93,15 @@ struct KernelEventEnvelope {
 #[derive(Serialize, Clone)]
 struct ConnectionStateEnvelope {
     state: &'static str,
+}
+
+/// Payload shape for `kernel:subscriptions-replayed` events (BL-146).
+/// `replayed` is the number of subscriptions re-installed against the
+/// freshly-built client. `0` for the initial connect; >0 for
+/// reconnect-with-replay.
+#[derive(Serialize, Clone)]
+struct SubscriptionsReplayedEnvelope {
+    replayed: usize,
 }
 
 /// Booted runtime — either a local kernel + plugin loader, or a remote
@@ -111,6 +127,11 @@ enum BootedRuntime {
         /// `kernel:connection-state` Tauri channel. Aborted on
         /// shutdown.
         state_forwarder: JoinHandle<()>,
+        /// BL-146 — background task forwarding subscription-replay
+        /// counts from the reconnecting runtime onto the
+        /// `kernel:subscriptions-replayed` Tauri channel. Aborted on
+        /// shutdown.
+        replay_forwarder: JoinHandle<()>,
         /// Latest [`ConnectionState`] observed. Read by the
         /// `kernel_connection_state` Tauri command so the frontend
         /// can render the badge before any transition has fired.
@@ -229,7 +250,9 @@ impl KernelRuntime {
         // Subscribe BEFORE storing the runtime so we don't miss any
         // emit fired by a racy first dispatch.
         let mut state_rx = runtime.subscribe_state();
+        let mut replay_rx = runtime.subscribe_replays();
         let state_for_task = Arc::clone(&current_state);
+        let app_for_state = app.clone();
         let state_forwarder = tauri::async_runtime::spawn(async move {
             loop {
                 match state_rx.recv().await {
@@ -244,7 +267,7 @@ impl KernelRuntime {
                             state: state.as_str(),
                         };
                         if let Err(e) =
-                            app.emit(CONNECTION_STATE_CHANNEL, envelope)
+                            app_for_state.emit(CONNECTION_STATE_CHANNEL, envelope)
                         {
                             eprintln!(
                                 "[boot_remote] connection-state emit failed: {e}"
@@ -255,11 +278,22 @@ impl KernelRuntime {
                 }
             }
         });
+        let replay_forwarder = tauri::async_runtime::spawn(async move {
+            while let Ok(replayed) = replay_rx.recv().await {
+                let envelope = SubscriptionsReplayedEnvelope { replayed };
+                if let Err(e) = app.emit(SUBSCRIPTIONS_REPLAYED_CHANNEL, envelope) {
+                    eprintln!(
+                        "[boot_remote] subscriptions-replayed emit failed: {e}"
+                    );
+                }
+            }
+        });
 
         *guard = Some(BootedRuntime::Remote {
             runtime,
             invoker,
             state_forwarder,
+            replay_forwarder,
             current_state,
         });
         self.booted.store(true, Ordering::Release);
@@ -394,14 +428,16 @@ impl KernelRuntime {
             BootedRuntime::Remote {
                 runtime,
                 state_forwarder,
+                replay_forwarder,
                 ..
             } => {
                 // The remote kernel + plugins live on the server side
                 // and shut themselves down when the SSH transport
                 // closes. Locally we only need to reset the
                 // reconnecting wrapper (drops the current client +
-                // router) and abort the state forwarder.
+                // router) and abort the state + replay forwarders.
                 state_forwarder.abort();
+                replay_forwarder.abort();
                 runtime.reset().await;
             }
         }
@@ -683,22 +719,20 @@ pub async fn kernel_subscribe(
                 )
             }
             BootedRuntime::Remote { runtime, .. } => {
-                // Pull a live `RemoteClient` out of the reconnecting
-                // wrapper (spawns the SSH child if it isn't already
-                // running). The subscription is installed against
-                // the current connection; if it dies, the subscriber
-                // task ends and the frontend must re-subscribe.
-                let client = runtime
-                    .ensure_client()
-                    .await
-                    .map_err(|e| format!("remote subscribe failed: {e}"))?;
+                // BL-146 — route through `runtime.subscribe`, which
+                // records the `(id, filter, sink)` triple in the
+                // reconnect wrapper's registry. When the transport
+                // drops, the runtime's watchdog rebuilds + replays
+                // the subscription against the new client, so the
+                // forwarder's `rx` keeps receiving events without
+                // the frontend re-subscribing.
                 let (tx, rx) =
                     mpsc::unbounded_channel::<nexus_remote::EventDelivery>();
                 let filter_json = serde_json::json!({
                     "kind": "custom_prefix",
                     "prefix": topic_prefix,
                 });
-                client
+                runtime
                     .subscribe(&subscription_id, filter_json, tx)
                     .await
                     .map_err(|e| format!("remote subscribe failed: {e}"))?;
@@ -835,11 +869,28 @@ fn emit_kernel_event(
 /// Cancel a subscription created by [`kernel_subscribe`]. Idempotent: an
 /// unknown id is a silent no-op so races between a natural task exit (bus
 /// closed) and an explicit unsubscribe don't surface as errors.
+///
+/// For remote subscriptions, also calls `ReconnectingRuntime::unsubscribe`
+/// to clear the registry entry — otherwise the subscription would be
+/// replayed against every future reconnect (BL-146).
 #[tauri::command]
 pub async fn kernel_unsubscribe(
     subscription_id: String,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<(), String> {
+    // Tell the remote runtime to drop the registry entry + issue
+    // event_unsubscribe against the current client. Best-effort: a
+    // transport error during teardown shouldn't fail the unsubscribe.
+    {
+        let guard = runtime.inner.lock().await;
+        if let Some(BootedRuntime::Remote { runtime, .. }) = guard.as_ref() {
+            if let Err(e) = runtime.unsubscribe(&subscription_id).await {
+                eprintln!(
+                    "[kernel_unsubscribe] remote unsubscribe {subscription_id} failed: {e}"
+                );
+            }
+        }
+    }
     let handle = {
         let mut subs = runtime
             .subscriptions

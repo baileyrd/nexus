@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
 
 use crate::transport::{
@@ -79,6 +79,12 @@ pub struct RemoteClient {
     next_id: AtomicU64,
     router: Mutex<Option<JoinHandle<()>>>,
     default_timeout: Duration,
+    /// Fires once when the inbound router task exits (transport EOF /
+    /// read error / explicit shutdown). Subscribed to by
+    /// [`Self::wait_for_disconnect`] so callers above the client (the
+    /// reconnecting runtime, in particular) can react to a dead
+    /// connection without polling.
+    disconnect_notify: Arc<Notify>,
 }
 
 impl RemoteClient {
@@ -102,9 +108,14 @@ impl RemoteClient {
         > = Arc::new(Mutex::new(HashMap::new()));
         let pending_for_task = Arc::clone(&pending);
         let subscribers_for_task = Arc::clone(&subscribers);
+        let disconnect_notify = Arc::new(Notify::new());
+        let disconnect_for_task = Arc::clone(&disconnect_notify);
 
         let router = tokio::spawn(async move {
             run_router(reader, pending_for_task, subscribers_for_task).await;
+            // Router exited (EOF / read error / abort) — wake every
+            // waiter on the disconnect notify so callers above can react.
+            disconnect_for_task.notify_waiters();
         });
 
         Self {
@@ -114,7 +125,19 @@ impl RemoteClient {
             next_id: AtomicU64::new(1),
             router: Mutex::new(Some(router)),
             default_timeout: DEFAULT_CALL_TIMEOUT,
+            disconnect_notify,
         }
+    }
+
+    /// Resolves the next time the inbound router task exits (transport
+    /// EOF, read error, or explicit [`Self::shutdown`]). Callers that
+    /// have already observed a disconnect must not re-await this future
+    /// — the notify is `notify_waiters`, not `notify_one`, so it fires
+    /// exactly once when the router stops. Use it to drive a watchdog
+    /// task above the client (BL-146).
+    pub fn wait_for_disconnect(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let notify = Arc::clone(&self.disconnect_notify);
+        async move { notify.notified().await }
     }
 
     /// Override the default per-call timeout. Per-call `timeout` args
@@ -261,6 +284,10 @@ impl RemoteClient {
         subs.clear();
         let mut w = self.writer.lock().await;
         let _ = w.flush().await;
+        // `abort()` cancels mid-task before the router can fire the
+        // notify itself, so fire it here so a watchdog blocked on
+        // `wait_for_disconnect` wakes up promptly.
+        self.disconnect_notify.notify_waiters();
     }
 
     async fn request_with_timeout(

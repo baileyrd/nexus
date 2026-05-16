@@ -193,11 +193,15 @@ connection rebuilds on the next call.
 - **Schedule**: `[100ms, 500ms, 2s, 10s, 30s]`. After the last delay
   the next failure surfaces as `Transport("reconnect schedule
   exhausted: ...")`.
-- **State carried across reconnect**: none. Active subscriptions are
-  dropped on the floor today. No CLI subcommand currently subscribes
-  through the remote path, so this is fine; when one lands, the
-  wrapper will need a subscription registry + replay step (filed as a
-  follow-up).
+- **State carried across reconnect**: subscriptions are replayed
+  (BL-146). Every subscription installed via
+  `ReconnectingRuntime::subscribe(id, filter, sink)` is recorded in an
+  internal `SubscriptionRegistry`. A per-client watchdog awaits
+  `RemoteClient::wait_for_disconnect`; on a drop it walks the backoff
+  schedule, builds a fresh client, and re-installs every registered
+  subscription against it. Subscribers see uninterrupted event flow.
+  Use `ReconnectingRuntime::subscribe_replays` to observe per-replay
+  counts.
 
 ---
 
@@ -303,23 +307,14 @@ built via `build_remote_runtime_over_pipes(reader, writer, guard)`.
 ## Limitations
 
 - **No `event_subscribe` consumer in the CLI yet.** The wire shape is
-  there, but no in-tree subcommand currently uses it over remote. Once
-  one does, reconnect needs subscription replay.
+  there, but no in-tree subcommand currently uses it over remote. The
+  shell (`kernel_subscribe`) is the one in-tree consumer today.
 - **Plugin scaffolding** (`nexus plugin scaffold`, `nexus plugin
   install`) is local-only by design — community plugins live on the
   remote machine, alongside their `nexus serve`.
 - **No connection pooling across CLI invocations.** Each `nexus
   --forge-path ssh://...` invocation spawns a fresh SSH child. Use
   SSH `ControlMaster` to amortise.
-- **Subscription replay on reconnect** isn't wired. When the SSH
-  connection drops and the `ReconnectingRuntime` rebuilds, every
-  remote subscription dies — the shell has to re-subscribe. In
-  practice this means plugins that watch kernel events (editor file
-  changes, activity timeline, the BL-074 ops bus) silently stop
-  receiving events after a remote reconnect until the plugin is
-  re-activated. Fix is a subscription registry on
-  `ReconnectingRuntime` that replays every active subscription
-  against the new client.
 
 ---
 
