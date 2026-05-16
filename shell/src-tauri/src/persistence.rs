@@ -27,6 +27,21 @@ const FILE_NAME: &str = "shell-state.json";
 const CURRENT_VERSION: u32 = 1;
 /// Cap on the recents list. Older entries drop off the end.
 const MAX_RECENT_FORGES: usize = 8;
+/// Cap on the remote-connections recents list. Matches `MAX_RECENT_FORGES`
+/// but kept as a separate constant so the two limits can drift if needed.
+const MAX_REMOTE_RECENTS: usize = 8;
+
+/// A saved remote forge connection. `uri` is the canonical
+/// `ssh://user@host:port/path` string that gets handed to
+/// `nexus.workspace.openRemote`. `label` is an optional friendly name
+/// the launcher surfaces in place of the URI (e.g. "alice@devbox").
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteForgeRecent {
+    pub uri: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
 
 /// Root of the persisted state. `#[serde(default)]` on every field so
 /// older files that predate later additions still load.
@@ -42,6 +57,11 @@ pub struct ShellState {
     /// `MAX_RECENT_FORGES`. Updated alongside `last_forge_path`.
     #[serde(default)]
     pub recent_forge_paths: Vec<String>,
+    /// BL-148 — newest-first list of saved remote (`ssh://...`)
+    /// connections, separate from `recent_forge_paths` so the launcher
+    /// can render them with their friendly labels.
+    #[serde(default)]
+    pub remote_forge_recents: Vec<RemoteForgeRecent>,
 }
 
 impl Default for ShellState {
@@ -50,6 +70,7 @@ impl Default for ShellState {
             version: CURRENT_VERSION,
             last_forge_path: None,
             recent_forge_paths: Vec::new(),
+            remote_forge_recents: Vec::new(),
         }
     }
 }
@@ -136,6 +157,52 @@ pub fn forget_forge_path(app: AppHandle, forge_path: String) -> Result<ShellStat
     Ok(state)
 }
 
+/// BL-148 — promote a remote forge connection to the front of
+/// `remote_forge_recents`. Dedupes on `uri` (an existing entry with the
+/// same URI is removed before reinserting at the head, so the most
+/// recently supplied `label` wins). Caps at `MAX_REMOTE_RECENTS`.
+/// `last_forge_path` is also updated so "restore last forge" works for
+/// remote URIs.
+#[tauri::command]
+pub fn write_remote_recent(
+    app: AppHandle,
+    uri: String,
+    label: Option<String>,
+) -> Result<ShellState, String> {
+    let path = resolve_path(&app)?;
+    let mut state = load_from(&path);
+    let normalized_label = label.and_then(|l| {
+        let trimmed = l.trim().to_string();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    });
+    state.remote_forge_recents.retain(|r| r.uri != uri);
+    state.remote_forge_recents.insert(
+        0,
+        RemoteForgeRecent {
+            uri: uri.clone(),
+            label: normalized_label,
+        },
+    );
+    state.remote_forge_recents.truncate(MAX_REMOTE_RECENTS);
+    state.last_forge_path = Some(uri);
+    save_to(&path, &state)?;
+    Ok(state)
+}
+
+/// BL-148 — remove a remote connection from `remote_forge_recents` and
+/// clear `last_forge_path` if it matches.
+#[tauri::command]
+pub fn forget_remote_recent(app: AppHandle, uri: String) -> Result<ShellState, String> {
+    let path = resolve_path(&app)?;
+    let mut state = load_from(&path);
+    state.remote_forge_recents.retain(|r| r.uri != uri);
+    if state.last_forge_path.as_deref() == Some(uri.as_str()) {
+        state.last_forge_path = None;
+    }
+    save_to(&path, &state)?;
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +234,37 @@ mod tests {
         fs::write(tmp.path(), b"{ not json").unwrap();
         let loaded = load_from(tmp.path());
         assert!(loaded.recent_forge_paths.is_empty());
+    }
+
+    #[test]
+    fn remote_recents_round_trip() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut state = ShellState::default();
+        state.remote_forge_recents = vec![
+            RemoteForgeRecent {
+                uri: "ssh://alice@devbox/srv/forge".into(),
+                label: Some("devbox".into()),
+            },
+            RemoteForgeRecent {
+                uri: "ssh://bob@build:2222/var/forge".into(),
+                label: None,
+            },
+        ];
+        save_to(tmp.path(), &state).unwrap();
+        let loaded = load_from(tmp.path());
+        assert_eq!(loaded.remote_forge_recents, state.remote_forge_recents);
+    }
+
+    #[test]
+    fn older_state_files_load_without_remote_recents() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            tmp.path(),
+            br#"{"version":1,"lastForgePath":"/forge","recentForgePaths":["/forge"]}"#,
+        )
+        .unwrap();
+        let loaded = load_from(tmp.path());
+        assert_eq!(loaded.last_forge_path.as_deref(), Some("/forge"));
+        assert!(loaded.remote_forge_recents.is_empty());
     }
 }

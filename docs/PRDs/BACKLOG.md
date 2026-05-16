@@ -20,8 +20,8 @@ Each BL-* item lives in its own file under [`backlog/`](backlog/). The table bel
 
 | ID | Status | Date | Title |
 |---|---|---|---|
-| [BL-148](backlog/BL-148.md) | open |  | Launcher modal for `ssh://` URI entry (BL-140 follow-up) |
-| [BL-147](backlog/BL-147.md) | open |  | Bootstrap storage helpers — `IpcInvoker` trait surface (BL-140 follow-up) |
+| [BL-148](backlog/BL-148.md) | closed | 2026-05-16 | Launcher modal for `ssh://` URI entry (BL-140 follow-up) |
+| [BL-147](backlog/BL-147.md) | closed | 2026-05-16 | Bootstrap storage helpers — `IpcInvoker` trait surface (BL-140 follow-up) |
 | [BL-146](backlog/BL-146.md) | open |  | Subscription replay on remote-forge reconnect (BL-140 follow-up) |
 | [BL-143](backlog/BL-143.md) | open |  | Live collaboration network transport |
 | [BL-142](backlog/BL-142.md) | open |  | REPL / in-buffer evaluation |

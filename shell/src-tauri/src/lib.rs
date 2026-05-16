@@ -678,6 +678,8 @@ pub fn run() {
             persistence::save_shell_state,
             persistence::write_last_forge_path,
             persistence::forget_forge_path,
+            persistence::write_remote_recent,
+            persistence::forget_remote_recent,
             bridge::init_forge,
             bridge::boot_kernel,
             bridge::boot_remote,

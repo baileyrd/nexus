@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
-import { useLauncherStore } from './launcherState'
+import { useLauncherStore, type RemoteForgeRecent } from './launcherState'
 import { Modal } from '../../../shell/Modal'
 import { zIndex } from '../../../shell/zIndex'
 
@@ -22,10 +22,17 @@ interface LauncherViewProps {
   /** BL-054 Phase 1 follow-up: pick a folder + scaffold the OS layout
    *  before booting. Surfaced as the "Create OS workspace" action. */
   onOpenWithOsTemplate: () => void
-  /** BL-140 Phase 3b: prompt for an `ssh://...` URI and dispatch
-   *  `nexus.workspace.openRemote`. */
+  /** BL-148: open the remote-connection dialog. */
   onOpenRemote: () => void
   onActivatePath: (path: string) => void
+  onActivateRemote: (entry: RemoteForgeRecent) => void
+}
+
+interface RecentRowEntry {
+  key: string
+  primary: string
+  secondary: string
+  isRemote: boolean
 }
 
 function basename(path: string): string {
@@ -35,12 +42,35 @@ function basename(path: string): string {
   return lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed
 }
 
-function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
+function RecentsList({
+  onActivate,
+  onActivateRemote,
+}: {
+  onActivate: (path: string) => void
+  onActivateRemote: (entry: RemoteForgeRecent) => void
+}) {
   const recents = useLauncherStore((s) => s.recents)
+  const remoteRecents = useLauncherStore((s) => s.remoteRecents)
   const forget = useLauncherStore((s) => s.forgetPath)
-  const [menuForPath, setMenuForPath] = useState<string | null>(null)
+  const forgetRemote = useLauncherStore((s) => s.forgetRemote)
+  const [menuForKey, setMenuForKey] = useState<string | null>(null)
 
-  if (recents.length === 0) {
+  const entries: RecentRowEntry[] = [
+    ...recents.map((p) => ({
+      key: `local:${p}`,
+      primary: basename(p),
+      secondary: p,
+      isRemote: false,
+    })),
+    ...remoteRecents.map((r) => ({
+      key: `remote:${r.uri}`,
+      primary: r.label?.trim() ? r.label : r.uri.replace(/^ssh:\/\//, ''),
+      secondary: r.uri,
+      isRemote: true,
+    })),
+  ]
+
+  if (entries.length === 0) {
     return (
       <div
         style={{
@@ -58,6 +88,23 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
     )
   }
 
+  const activate = (entry: RecentRowEntry) => {
+    if (entry.isRemote) {
+      const match = remoteRecents.find((r) => r.uri === entry.secondary)
+      if (match) onActivateRemote(match)
+    } else {
+      onActivate(entry.secondary)
+    }
+  }
+
+  const forgetEntry = (entry: RecentRowEntry) => {
+    if (entry.isRemote) {
+      void forgetRemote(entry.secondary)
+    } else {
+      void forget(entry.secondary)
+    }
+  }
+
   return (
     <div
       style={{
@@ -66,10 +113,10 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
         height: '100%',
       }}
     >
-      {recents.map((path) => (
+      {entries.map((entry) => (
         <div
-          key={path}
-          onClick={() => onActivate(path)}
+          key={entry.key}
+          onClick={() => activate(entry)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -95,9 +142,32 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
               }}
             >
-              {basename(path)}
+              {entry.isRemote && (
+                <span
+                  aria-label="remote"
+                  title="Remote forge"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    background: 'var(--background-modifier-hover)',
+                    color: 'var(--text-muted)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  ssh
+                </span>
+              )}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {entry.primary}
+              </span>
             </div>
             <div
               style={{
@@ -109,14 +179,14 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
                 marginTop: 2,
               }}
             >
-              {path}
+              {entry.secondary}
             </div>
           </div>
 
           <button
             onClick={(e) => {
               e.stopPropagation()
-              setMenuForPath(menuForPath === path ? null : path)
+              setMenuForKey(menuForKey === entry.key ? null : entry.key)
             }}
             style={{
               background: 'transparent',
@@ -133,7 +203,7 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
             ⋯
           </button>
 
-          {menuForPath === path && (
+          {menuForKey === entry.key && (
             <div
               style={{
                 position: 'absolute',
@@ -151,8 +221,8 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  setMenuForPath(null)
-                  void forget(path)
+                  setMenuForKey(null)
+                  forgetEntry(entry)
                 }}
                 style={{
                   display: 'block',
@@ -268,7 +338,13 @@ function ActionRow({
   )
 }
 
-export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onOpenRemote, onActivatePath }: LauncherViewProps) {
+export function LauncherView({
+  onOpenFolder,
+  onOpenWithOsTemplate,
+  onOpenRemote,
+  onActivatePath,
+  onActivateRemote,
+}: LauncherViewProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const manageReturnTo = useLauncherStore((s) => s.manageReturnTo)
   const clearReturnTo = useLauncherStore((s) => s.setManageReturnTo)
@@ -297,6 +373,10 @@ export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onOpenRemote,
   const onActivate = (path: string) => {
     if (manageReturnTo) clearReturnTo(null)
     onActivatePath(path)
+  }
+  const onActivateRemoteEntry = (entry: RemoteForgeRecent) => {
+    if (manageReturnTo) clearReturnTo(null)
+    onActivateRemote(entry)
   }
   const onCreate = () => {
     if (manageReturnTo) clearReturnTo(null)
@@ -408,7 +488,7 @@ export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onOpenRemote,
               Recent
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <RecentsList onActivate={onActivate} />
+              <RecentsList onActivate={onActivate} onActivateRemote={onActivateRemoteEntry} />
             </div>
           </div>
 

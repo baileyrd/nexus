@@ -10,13 +10,17 @@
 //     On success the chosen path is written to recents.
 //   - Recents-row click → nexus.workspace.setRoot (new command, accepts
 //     a path argument) so we skip the dialog.
+//   - "Open remote forge…" → opens an in-shell modal (BL-148) that
+//     composes an `ssh://` URI and dispatches
+//     `nexus.workspace.openRemote`.
 // Both code paths converge on the same state-setting dance inside
 // nexus.workspace, keeping the source of truth in one place.
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLauncherStore } from './launcherState'
+import { useLauncherStore, type RemoteForgeRecent } from './launcherState'
 import { LauncherView } from './LauncherView'
+import { RemoteConnectionDialog } from './RemoteConnectionDialog'
 import { clientLogger } from '../../../clientLogger'
 
 const EVENT_OPENED = 'workspace:opened'
@@ -39,11 +43,8 @@ export const launcherPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
-    // Populate recents before the view renders
     await useLauncherStore.getState().load()
 
-    // Re-load on open/close so the list reflects reality the next time
-    // the user returns to the launcher
     api.events.on(EVENT_OPENED, () => {
       void useLauncherStore.getState().load()
     })
@@ -54,9 +55,6 @@ export const launcherPlugin: Plugin = {
     const reportBootFailure = (path: string | null, err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
       clientLogger.warn('[nexus.launcher] workspace command failed', path, err)
-      // api.notifications.show is always defined (PluginAPI contract); if
-      // the notification service hasn't loaded yet it silently falls back
-      // to a console line, which is fine.
       try {
         api.notifications.show({
           type: 'warning',
@@ -73,9 +71,6 @@ export const launcherPlugin: Plugin = {
       try {
         const picked = await api.commands.execute(COMMAND_OPEN)
         if (typeof picked === 'string' && picked.length > 0) {
-          // nexus.workspace only resolves the command after boot_kernel
-          // succeeded — so recording to recents here is safe. On failure
-          // the command throws and we land in the catch below instead.
           await useLauncherStore.getState().openPath(picked)
         }
       } catch (err) {
@@ -100,51 +95,63 @@ export const launcherPlugin: Plugin = {
     const onActivatePath = async (path: string) => {
       try {
         await api.commands.execute(COMMAND_SET_ROOT, path)
-        // Only promote to recents after the kernel has booted cleanly —
-        // otherwise a broken path would get promoted to the top of the
-        // list and the user would hit the same failure next launch.
         await useLauncherStore.getState().openPath(path)
       } catch (err) {
         reportBootFailure(path, err)
       }
     }
 
-    // BL-140 Phase 3b — collect an `ssh://...` URI from a prompt and
-    // dispatch the workspace command. Same recents promotion semantics
-    // as local opens — the URI string is stored verbatim. A richer
-    // modal (saved-connections list, password manager integration)
-    // could replace this `prompt` later; the MVP keeps the surface
-    // tiny.
-    const onOpenRemote = async () => {
-      const uri = window.prompt(
-        'Open remote forge — enter an SSH URI:',
-        'ssh://user@host/abs/path',
-      )
-      if (!uri || uri.length === 0) return
+    const activateRemote = async (entry: RemoteForgeRecent) => {
       try {
-        await api.commands.execute(COMMAND_OPEN_REMOTE, uri)
-        await useLauncherStore.getState().openPath(uri)
+        await api.commands.execute(COMMAND_OPEN_REMOTE, entry.uri)
+        await useLauncherStore.getState().openRemote(entry)
       } catch (err) {
-        reportBootFailure(uri, err)
+        reportBootFailure(entry.uri, err)
       }
     }
 
-    // Wrap the view so it can close over the callbacks without other
-    // plugins having to reach into the launcher's store. Written as
-    // createElement since this is a .ts file (not .tsx); the child
-    // component itself owns the JSX.
+    // BL-148 — open the in-shell remote-connection modal. Submitting it
+    // dispatches `nexus.workspace.openRemote` with the composed URI;
+    // the connection is then persisted to `remoteForgeRecents` so
+    // future launches can resume it from the recents list.
+    const onOpenRemote = () => {
+      useLauncherStore.getState().setRemoteModalOpen(true)
+    }
+
     const LauncherSlot = () =>
       createElement(LauncherView, {
         onOpenFolder,
         onOpenWithOsTemplate,
         onOpenRemote,
         onActivatePath,
+        onActivateRemote: (entry) => {
+          void activateRemote(entry)
+        },
       })
+
+    const RemoteDialogSlot = () => {
+      const open = useLauncherStore((s) => s.remoteModalOpen)
+      const setOpen = useLauncherStore((s) => s.setRemoteModalOpen)
+      return createElement(RemoteConnectionDialog, {
+        open,
+        onCancel: () => setOpen(false),
+        onSubmit: async (submission) => {
+          setOpen(false)
+          await activateRemote({ uri: submission.uri, label: submission.label })
+        },
+      })
+    }
 
     api.views.register('nexus.launcher.view', {
       slot: 'overlay',
       component: LauncherSlot,
       priority: 10,
+    })
+
+    api.views.register('nexus.launcher.remoteDialog', {
+      slot: 'overlay',
+      component: RemoteDialogSlot,
+      priority: 11,
     })
   },
 }
