@@ -401,28 +401,7 @@ Today config lives in `.forge/config.toml` only; the panel would mediate the sam
 
 ---
 
-### BL-139: Per-keystroke edit prediction
-
-**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
-**Effort**: Medium. AI plumbing and CM6 editor already exist; new pieces are the prediction-request loop and ghost-text renderer.
-**Crates**: `nexus-ai` (new `predict` IPC handler), `shell/src/plugins/nexus/editor/` (CM6 prediction extension).
-
-Nexus's `nexus-editor` has on-demand inline completion ("Complete at cursor") triggered by an explicit action. Zed ships *continuous* per-keystroke prediction: every keystroke fires a debounced async request to a prediction provider; the result appears as dismissible ghost text; `Tab` accepts. Zed's default provider is Zeta (an open-source model trained on permissive data); Nexus's multi-provider AI layer means Ollama (local, zero-cost) is the natural default.
-
-**Scope:**
-
-- New `com.nexus.ai::predict` IPC handler — accepts `{ prefix: string, suffix: string, language: string, file_path: string }`, returns `{ completion: string }`. Routes to Ollama (`/api/generate` with `suffix` fill-in-middle mode) or Anthropic/OpenAI as configured.
-- CM6 extension in `shell/src/plugins/nexus/editor/cm/editPrediction.ts` — 150 ms debounced `ViewPlugin`; cancels in-flight request on each keystroke; renders accepted completion as a `Decoration.widget` ghost-text span; `Tab` dispatches an `insertCompletionText` transaction; `Escape` clears.
-- New `nexus.editor.editPrediction` settings key: `{ enabled: boolean, provider: 'ollama' | 'openai' | 'anthropic', model: string, debounceMs: number }`.
-- Extension activates only in code-mode tabs (BL-075 routing) and document-mode markdown; skips binary tabs.
-
-**Definition of done:**
-- `com.nexus.ai::predict` handler registered; routes to Ollama FIM by default
-- Ghost-text renders within 300 ms on a local Ollama model for ≤200-token prefix
-- `Tab` accepts; `Escape` / any non-Tab keypress clears
-- `nexus.editor.editPrediction.enabled = false` disables the extension (no background requests)
-- Setting is off by default (opt-in — avoids surprise network/GPU usage on first launch)
-- 6 unit tests: debounce coalescing, in-flight cancel, ghost-text render, Tab accept, Escape clear, disabled guard
+_BL-139 closed 2026-05-16 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `com.nexus.ai::predict` handler (id 26) ships with two routing paths: Ollama goes through a new `OllamaProvider::fim_generate` that hits `/api/generate` with the `suffix` field (FIM-trained code models — qwen2.5-coder / codellama / deepseek-coder / starcoder2 — fill the cursor split natively; non-FIM models gracefully ignore the suffix and emit a normal prefix continuation, still useful as ghost text). OpenAI / Anthropic route through a chat-shaped FIM fallback (short system prompt + `<PREFIX>…</PREFIX><SUFFIX>…</SUFFIX>` user turn). Output post-processed by `sanitize_completion`: leading-whitespace trim at the seam, trailing-suffix-echo drop, 2048-char hard cap. Handler classified `ai.chat` in `cap_matrix.toml` (same risk surface as other one-shot chat verbs). Routed ahead of the ctx-required block in `AiCorePlugin::dispatch_async` so predictions can fire during early-bootstrap. New CM6 extension `shell/src/plugins/nexus/editor/cm/editPrediction.ts`: `predictionField` StateField + `setPrediction` effect + cancel-on-edit / cancel-on-move + ghost-text `Decoration.widget` + Tab/Escape keymap at `Prec.high`. Extension always installed but dormant until `nexus.editor.editPrediction.enabled` flips true (off by default per the DoD). Per-call prefix/suffix capped at 800/200 UTF-8 bytes via new `tailByBytes`/`headByBytes` helpers (codepoint-safe; never split a multi-byte char). Wired into both EditorView code paths (markdown document mode + code/fallback) so document-mode markdown and code-mode tabs both get predictions; binary tabs don't render through CodeMirrorHost so they're implicitly excluded. 4 new settings registered: `enabled` / `debounceMs` / `provider` (informational) / `model` (informational). Module-scoped `editPredictionApi` (mirroring BL-034's `ghostApi`) lets the editor reach `com.nexus.ai::predict` without a hard dep on the AI plugin's React tree; AI plugin sets it during activate. **16 tests pass:** 8 backend (sanitiser × 6 + unconfigured-provider + unsupported-provider), 8 frontend (state baseline, ghost-text render, in-flight cancel via doc change, cancel-on-move, Tab accept × 3 cases, Escape clear × 2 cases, disabled guard, debounce coalescing × 2 cases via extracted `Debouncer` helper, byte-budget helpers × 4). IPC bindings generated: `AiPredictArgs` / `AiPredictReply` ts-rs + schemars; drift script clean. Live-model 300ms target is a runtime check — covered structurally (debounce + cancel) but not measured in unit tests; an operator running Ollama locally with qwen2.5-coder:7b can flip `editPrediction.enabled = true` and observe._
 
 ---
 

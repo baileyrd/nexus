@@ -20,11 +20,11 @@ use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
     AiActivityListArgs, AiActivityListResult, AiGenerateDocsArgs, AiGenerateDocsReply,
-    AiProposeArgs, AiProposeReply, AiProposedToolCall, AiStreamAskArgs, AiStreamAskMessage,
-    AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
-    AiToolPolicy, AiUnmappedToolCall, EnrichEntityArgs, EnrichEntityResult, EntityRecallArgs,
-    EntityRecallHitRow, EntityRecallResult, InferEntityRelationsArgs,
-    InferEntityRelationsResult, InferredRelationRow,
+    AiPredictArgs, AiPredictReply, AiProposeArgs, AiProposeReply, AiProposedToolCall,
+    AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
+    AiStreamChatArgs, AiStreamChatMode, AiToolPolicy, AiUnmappedToolCall, EnrichEntityArgs,
+    EnrichEntityResult, EntityRecallArgs, EntityRecallHitRow, EntityRecallResult,
+    InferEntityRelationsArgs, InferEntityRelationsResult, InferredRelationRow,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
@@ -314,6 +314,12 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.ai::generate_docs (BL-116) ─────────────────────────────
     write_schema::<AiGenerateDocsArgs>("com_nexus_ai__generate_docs", "args");
     write_schema::<AiGenerateDocsReply>("com_nexus_ai__generate_docs", "reply");
+
+    // ── com.nexus.ai::predict (BL-139) ──────────────────────────────────
+    // Per-keystroke FIM edit prediction; consumed by the CM6
+    // editPrediction extension in the shell.
+    write_schema::<AiPredictArgs>("com_nexus_ai__predict", "args");
+    write_schema::<AiPredictReply>("com_nexus_ai__predict", "reply");
 
     // ── com.nexus.ai::entity_recall (BL-128 close) ──────────────────────
     write_schema::<EntityRecallArgs>("com_nexus_ai__entity_recall", "args");

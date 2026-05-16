@@ -143,6 +143,13 @@ const CONFIG_KEYBINDINGS = 'nexus.editor.keybindings'
 // mode (raw CM6 with a language extension) rather than document mode
 // (markdown block tree). Read at file-open time.
 const CONFIG_CODE_FILE_EXTENSIONS = 'nexus.editor.codeFileExtensions'
+// BL-139 — per-keystroke FIM edit prediction. Off by default per the
+// BL DoD; the provider/model fields are informational (the actual
+// route is decided by `com.nexus.ai`'s configured provider).
+const CONFIG_EDIT_PREDICTION_ENABLED = 'nexus.editor.editPrediction.enabled'
+const CONFIG_EDIT_PREDICTION_DEBOUNCE_MS = 'nexus.editor.editPrediction.debounceMs'
+const CONFIG_EDIT_PREDICTION_PROVIDER = 'nexus.editor.editPrediction.provider'
+const CONFIG_EDIT_PREDICTION_MODEL = 'nexus.editor.editPrediction.model'
 // Visual settings — applied live via CSS custom properties on :root
 // (see applyEditorCssVars below) and via prop flow to CodeMirrorHost.
 const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
@@ -583,6 +590,39 @@ export const editorPlugin: Plugin = {
           description: 'Show a gutter with line numbers in source and code modes. Applied live to open tabs.',
           type: 'boolean',
           default: false,
+        },
+        {
+          key: CONFIG_EDIT_PREDICTION_ENABLED,
+          title: 'Edit prediction (continuous ghost text)',
+          description:
+            "BL-139 — show inline AI-suggested completions as ghost text as you type. Off by default to avoid surprise GPU / network usage. Routes through com.nexus.ai::predict; the actual provider is whatever's configured in Settings → AI.",
+          type: 'boolean',
+          default: false,
+        },
+        {
+          key: CONFIG_EDIT_PREDICTION_DEBOUNCE_MS,
+          title: 'Edit prediction debounce (ms)',
+          description:
+            'Quiet period after a keystroke before firing a prediction request. Lower = more responsive, more requests. Default 150ms matches the BL-139 DoD.',
+          type: 'number',
+          default: 150,
+        },
+        {
+          key: CONFIG_EDIT_PREDICTION_PROVIDER,
+          title: 'Edit prediction provider (informational)',
+          description:
+            "The AI plugin's configured provider drives routing. Set this only as a label for documentation/UI — changing it does not change the actual provider.",
+          type: 'select',
+          default: 'ollama',
+          options: ['ollama', 'openai', 'anthropic'],
+        },
+        {
+          key: CONFIG_EDIT_PREDICTION_MODEL,
+          title: 'Edit prediction model (informational)',
+          description:
+            'Model identifier the AI plugin should use for predictions. Same routing caveat as the provider field — informational only.',
+          type: 'string',
+          default: 'qwen2.5-coder:7b',
         },
       ],
     })

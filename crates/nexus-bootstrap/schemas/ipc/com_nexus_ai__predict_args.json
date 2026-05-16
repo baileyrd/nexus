@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiPredictArgs",
+  "description": "Args for `com.nexus.ai::predict` (handler id `26`).",
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "description": "Forge-relative path the prediction is happening in. Logged but\nnot otherwise used today — included so the handler can emit\nper-file activity entries if a future revision wants them.",
+      "type": "string"
+    },
+    "language": {
+      "description": "Source language hint (`rust`, `typescript`, `python`, `markdown`,\n…). The Ollama FIM path ignores this (the model uses the\nsurrounding tokens); the chat-fallback path includes it in the\nsystem prompt so the model frames the completion correctly.",
+      "type": "string"
+    },
+    "max_tokens": {
+      "description": "Maximum tokens the model may generate. Defaults to 64 when\nunset.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "prefix": {
+      "description": "Text BEFORE the cursor. Trimmed to a per-call budget upstream\n(the BL-139 editor extension caps at ~200 tokens worth).",
+      "type": "string"
+    },
+    "suffix": {
+      "description": "Text AFTER the cursor. Smaller than the prefix budget — most\nmodels weight prefix more heavily in FIM mode.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "prefix",
+    "suffix",
+    "language",
+    "file_path"
+  ]
+}

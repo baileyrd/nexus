@@ -708,6 +708,71 @@ pub struct InferEntityRelationsResult {
     pub applied: bool,
 }
 
+// ─── com.nexus.ai::predict (BL-139) ─────────────────────────────────────────
+//
+// Per-keystroke edit prediction. Caller supplies the cursor split
+// (`prefix` / `suffix`), the file's language, and the on-disk path
+// for the audit trail. The handler routes to the configured AI
+// provider — Ollama in fill-in-middle mode by default, OpenAI /
+// Anthropic via a chat-shaped FIM prompt as a fallback.
+//
+// The returned `completion` is plain text ready to insert at the
+// cursor. The handler trims leading whitespace at the seam; the
+// editor is responsible for any further normalisation (e.g. ignoring
+// a completion that exactly matches the next characters of the
+// suffix).
+
+/// Args for `com.nexus.ai::predict` (handler id `26`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiPredictArgs {
+    /// Text BEFORE the cursor. Trimmed to a per-call budget upstream
+    /// (the BL-139 editor extension caps at ~200 tokens worth).
+    pub prefix: String,
+    /// Text AFTER the cursor. Smaller than the prefix budget — most
+    /// models weight prefix more heavily in FIM mode.
+    pub suffix: String,
+    /// Source language hint (`rust`, `typescript`, `python`, `markdown`,
+    /// …). The Ollama FIM path ignores this (the model uses the
+    /// surrounding tokens); the chat-fallback path includes it in the
+    /// system prompt so the model frames the completion correctly.
+    pub language: String,
+    /// Forge-relative path the prediction is happening in. Logged but
+    /// not otherwise used today — included so the handler can emit
+    /// per-file activity entries if a future revision wants them.
+    pub file_path: String,
+    /// Maximum tokens the model may generate. Defaults to 64 when
+    /// unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+/// Reply for `com.nexus.ai::predict`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiPredictReply {
+    /// The suggested continuation. Empty string when no useful
+    /// completion was produced (rather than `None` — callers branch
+    /// on length, not nullity).
+    pub completion: String,
+}
+
 #[cfg(test)]
 mod stream_chat_serde_tests {
     use super::*;

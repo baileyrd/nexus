@@ -12,7 +12,7 @@ import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
 import { markdown as markdownLang } from '@codemirror/lang-markdown'
 import { Table } from '@lezer/markdown'
-import { getEditorMode, pickLanguageExtension } from './codeMode'
+import { getEditorMode, languageHintFor, pickLanguageExtension } from './codeMode'
 import { gitGutterExt } from './cm/gitGutter'
 import { gitBlameExt } from './cm/gitBlame'
 import { lspExtension } from './cm/lspClient'
@@ -20,7 +20,7 @@ import { LspIpc } from './cm/lspIpc'
 import { breakpointGutterExt } from './cm/breakpointGutter'
 import { useDebuggerStore } from '../debugger/debuggerStore'
 import { useEditorBlameStore } from './blameStore'
-import { useConfigValue } from '../../../stores/configStore'
+import { configStore, useConfigValue } from '../../../stores/configStore'
 import './cm/gitGutter.css'
 import './cm/breakpointGutter.css'
 import { slashCommandExt } from './cm/slashCommand'
@@ -33,6 +33,7 @@ import { livePreviewExt } from './cm/livePreview'
 import { databaseViewExt } from './cm/databaseViewDecorations'
 import { blockLinkNavExt } from './cm/blockLinkNav'
 import { ghostCompletionExt } from './cm/ghostCompletion'
+import { editPredictionExt, type EditPredictionSettings } from './cm/editPrediction'
 import { linkSuggestExt } from './cm/linkSuggest'
 import { marginSuggestionsExt } from './cm/marginSuggestions'
 import { marginSuggestTriggerExt } from './cm/marginSuggestTrigger'
@@ -136,6 +137,16 @@ function useTabPosition(leafId: string): { tabsId: string; index: number; total:
     return workspace.on('layout-change', compute)
   }, [leafId])
   return pos
+}
+
+/** BL-139 — read the edit-prediction settings lazily from the
+ *  configStore. Re-evaluated on every keystroke so a Settings-panel
+ *  flip takes effect without remounting the editor. */
+function readEditPredictionSettings(): EditPredictionSettings {
+  return {
+    enabled: configStore.get<boolean>('nexus.editor.editPrediction.enabled', false),
+    debounceMs: configStore.get<number>('nexus.editor.editPrediction.debounceMs', 150),
+  }
 }
 
 function isMarkdown(name: string): boolean {
@@ -988,6 +999,11 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               inputRulesExt(),
               inlineToolbarExt(),
               ghostCompletionExt(),
+              editPredictionExt({
+                relpath: tab.relpath,
+                language: languageHintFor(tab.name),
+                readSettings: readEditPredictionSettings,
+              }),
               linkSuggestExt(),
               marginSuggestionsExt({ relpath: tab.relpath }),
               marginSuggestTriggerExt({ relpath: tab.relpath }),
@@ -1129,6 +1145,17 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       if (tab.mode === 'live' && languageExtension === null) {
         base.push(livePreviewExt())
       }
+      // BL-139 — per-keystroke FIM prediction in code-mode (and the
+      // markdown fallback above). The extension is always installed
+      // but dormant until `nexus.editor.editPrediction.enabled`
+      // flips true.
+      base.push(
+        editPredictionExt({
+          relpath: tab.relpath,
+          language: languageHintFor(tab.name),
+          readSettings: readEditPredictionSettings,
+        }),
+      )
       return base.length > 0 ? () => base : undefined
     })()
 

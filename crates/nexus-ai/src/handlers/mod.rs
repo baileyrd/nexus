@@ -12,6 +12,7 @@ pub(crate) mod config;
 pub(crate) mod enrich;
 pub(crate) mod entity;
 pub(crate) mod index;
+pub(crate) mod predict;
 pub(crate) mod propose;
 pub(crate) mod search;
 pub(crate) mod session;

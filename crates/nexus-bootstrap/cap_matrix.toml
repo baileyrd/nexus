@@ -106,6 +106,13 @@ plugin = "com.nexus.ai"
 command = "generate_docs"
 caps = ["ai.chat"]
 
+# BL-139 — per-keystroke FIM edit prediction. Same risk surface as the
+# other ai.chat verbs (one provider round-trip per call, no tool use).
+[[handler]]
+plugin = "com.nexus.ai"
+command = "predict"
+caps = ["ai.chat"]
+
 [[handler]]
 plugin = "com.nexus.ai"
 command = "index_file"

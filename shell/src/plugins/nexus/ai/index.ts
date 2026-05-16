@@ -31,6 +31,7 @@ import { useAiStore } from './aiStore'
 import { useCmdIStore } from './cmdIStore'
 import { setCmdIApi } from './cmdIApi'
 import { setGhostApi } from './ghostApi'
+import { setEditPredictionApi } from '../editor/cm/editPredictionApi'
 import { setMarginApi } from './marginApi'
 import { openCmdI, routeStreamEvent } from './cmdIRuntime'
 import { registerEditorContextAdapter } from './editorContextAdapter'
@@ -483,6 +484,11 @@ export const aiPlugin: Plugin = {
     // calls `requestPass(api, …)` which routes through
     // `com.nexus.ai::stream_chat`.
     setMarginApi(api)
+    // BL-139 — per-keystroke FIM edit prediction. Hands the editor's
+    // CM extension the same kernel handle so it can reach
+    // `com.nexus.ai::predict` without taking a hard dep on the AI
+    // plugin's React tree.
+    setEditPredictionApi(api)
 
     // Subscribe a SECOND time to the stream prefix specifically for the
     // overlay router. The chat-side `subscribeStream` already runs and

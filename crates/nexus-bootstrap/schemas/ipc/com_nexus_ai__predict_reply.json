@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiPredictReply",
+  "description": "Reply for `com.nexus.ai::predict`.",
+  "type": "object",
+  "properties": {
+    "completion": {
+      "description": "The suggested continuation. Empty string when no useful\ncompletion was produced (rather than `None` — callers branch\non length, not nullity).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "completion"
+  ]
+}

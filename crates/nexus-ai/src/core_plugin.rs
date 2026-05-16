@@ -40,6 +40,7 @@ use crate::handlers::entity::{handle_enrich_entity, handle_infer_entity_relation
 use crate::handlers::index::{
     handle_index_file, handle_index_trigger, handle_status, handle_vectorstore_count,
 };
+use crate::handlers::predict::handle_predict;
 use crate::handlers::propose::handle_propose_tool_calls;
 use crate::handlers::search::{handle_entity_recall, handle_semantic_search};
 use crate::handlers::session::{
@@ -223,6 +224,13 @@ pub const HANDLER_ENRICH_ENTITY: u32 = 24;
 /// [`crate::ipc::InferEntityRelationsArgs`]. Returns
 /// [`crate::ipc::InferEntityRelationsResult`].
 pub const HANDLER_INFER_ENTITY_RELATIONS: u32 = 25;
+
+/// BL-139 — `predict`: per-keystroke fill-in-middle code completion.
+/// Args: [`crate::ipc::AiPredictArgs`]. Returns
+/// [`crate::ipc::AiPredictReply`]. Routes to Ollama's `/api/generate`
+/// (with `suffix`) when the configured provider is `ollama`, falls
+/// back to a chat-shaped FIM prompt for OpenAI / Anthropic.
+pub const HANDLER_PREDICT: u32 = 26;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
@@ -429,6 +437,18 @@ impl CorePlugin for AiCorePlugin {
             let activity = self.activity.clone();
             return Some(Box::pin(async move {
                 handle_activity_clear(activity).await
+            }));
+        }
+
+        // BL-139 — `predict` doesn't need the kernel context (no tool
+        // loop, no recorder, no event publish) so we route it ahead
+        // of the ctx-required block. Lets ghost-text predictions fire
+        // even if the editor mounts during early-bootstrap.
+        if handler_id == HANDLER_PREDICT {
+            let ai_cfg = self.ai_config.read().ok().and_then(|g| g.clone());
+            let args = args.clone();
+            return Some(Box::pin(async move {
+                handle_predict(ai_cfg, &args).await
             }));
         }
 

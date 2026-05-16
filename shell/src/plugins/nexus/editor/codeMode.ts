@@ -123,6 +123,47 @@ export function getEditorMode(
  *   in mid-2024; we depend on a recent enough version that it's
  *   stable.
  */
+/**
+ * BL-139 — language hint passed to the AI predict handler. Distinct
+ * from `pickLanguageExtension` because the AI side wants a stable
+ * name regardless of which CM language extension we mounted (so
+ * `.tsx` reports `"typescript"`, not `"javascript-jsx"`). Markdown
+ * is intentionally included — predictions in document-mode markdown
+ * tabs are part of the BL-139 scope.
+ */
+export function languageHintFor(name: string): string {
+  const ext = getExtension(name)
+  switch (ext) {
+    case 'rs':
+      return 'rust'
+    case 'ts':
+    case 'tsx':
+      return 'typescript'
+    case 'js':
+    case 'jsx':
+    case 'mjs':
+    case 'cjs':
+      return 'javascript'
+    case 'py':
+      return 'python'
+    case 'go':
+      return 'go'
+    case 'json':
+    case 'jsonc':
+      return 'json'
+    case 'yaml':
+    case 'yml':
+      return 'yaml'
+    case 'toml':
+      return 'toml'
+    case 'md':
+    case 'markdown':
+      return 'markdown'
+    default:
+      return ext || 'plaintext'
+  }
+}
+
 export function pickLanguageExtension(name: string): Extension | null {
   const ext = getExtension(name)
   switch (ext) {

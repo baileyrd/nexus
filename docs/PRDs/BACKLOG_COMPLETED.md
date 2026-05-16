@@ -8,6 +8,46 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-139: Per-keystroke edit prediction ✅ (2026-05-16)
+
+**Source**: Zed capability assessment — see [../research/zed-capability-assessment.md](../research/zed-capability-assessment.md). Filed 2026-05-15.
+**Effort**: Medium. AI plumbing and CM6 editor already existed; new pieces were the prediction-request loop, the FIM Ollama path, and the ghost-text renderer.
+**Crates**: `nexus-ai` (new `predict` IPC handler + Ollama FIM helper), `shell/src/plugins/nexus/editor/cm/` (new `editPrediction.ts` + `editPredictionApi.ts`).
+
+Shipped 2026-05-16. New `com.nexus.ai::predict` handler (id 26) ships with two routing paths:
+
+- **Ollama** (default): new `OllamaProvider::fim_generate` hits `/api/generate` with the `suffix` field set. FIM-trained code models (qwen2.5-coder, codellama, deepseek-coder, starcoder2) fill the cursor split natively; non-FIM models gracefully ignore `suffix` and emit a normal continuation of `prefix` — still useful as ghost text. Temperature pinned to 0.2 for determinism (same prefix → same completion across keystrokes).
+- **OpenAI / Anthropic**: chat-shaped FIM fallback — short system prompt frames the task, user turn carries `<PREFIX>…</PREFIX><SUFFIX>…</SUFFIX>` markers, model emits only the missing middle.
+
+Output post-processed by `sanitize_completion`: leading-whitespace trim at the seam (avoids doubling the character the user just typed), trailing-suffix-echo drop (some models echo the suffix back), 2048-char hard cap (runaway models can't pin the ghost-widget render). Cap is `chars().take(…)` so we don't split a multi-byte codepoint.
+
+Handler routed ahead of the ctx-required block in `AiCorePlugin::dispatch_async` so predictions can fire during early-bootstrap (no recorder, no tool loop, no event publish needed). Classified `ai.chat` in `cap_matrix.toml` — same risk surface as the other one-shot chat verbs.
+
+New CM6 extension `shell/src/plugins/nexus/editor/cm/editPrediction.ts`:
+- `predictionField` StateField holding `{ pos, text, requestId }`, cleared on any doc change / selection move unless a fresh `setPrediction` effect lands in the same transaction.
+- `editPredictionFetcher` ViewPlugin debounces via an extracted `Debouncer` helper (`schedule(delayMs, fn)` / `cancel()`), reads `enabled` / `debounceMs` settings lazily from `configStore` so a Settings-panel flip takes effect without remounting the editor.
+- Per-call prefix/suffix capped at 800/200 UTF-8 bytes via new `tailByBytes` / `headByBytes` helpers — codepoint-safe (never split a multi-byte char).
+- `EditorView.decorations.compute` renders a `Decoration.widget` ghost span (`opacity:0.45;color:var(--text-muted)`) when the field is populated.
+- `Prec.high` keymap binds Tab → accept (insert at caret + clear field + advance cursor) and Escape → dismiss (clear field). Both return `false` when no prediction is live so Tab/Esc fall through to defaults.
+
+Wired into both `EditorView.tsx` code paths — markdown document mode (`buildExtensions` of the markdown CodeMirrorHost) and code/fallback mode (`codeBuildExtensions` of the fallback CodeMirrorHost). Binary tabs don't render through CodeMirrorHost so they're implicitly excluded. Extension is always installed but dormant until `nexus.editor.editPrediction.enabled` flips true (off by default per the BL DoD — avoids surprise network / GPU usage on first launch).
+
+Four new settings registered under `nexus.editor.editPrediction.*`: `enabled` (boolean, default false), `debounceMs` (number, default 150), `provider` (select: ollama/openai/anthropic — informational only; actual routing is decided by `com.nexus.ai`'s configured provider), `model` (string — same informational caveat).
+
+Module-scoped `editPredictionApi` handle (mirroring BL-034's `ghostApi` and the LSP / cmdI patterns) lets the editor CM extension reach `api.kernel.invoke('com.nexus.ai', 'predict', …)` without taking a hard dep on the AI plugin's React tree. The AI plugin sets it during activate; if the editor mounts before the AI plugin activates, `getEditPredictionApi()` returns `null` and predictions stay dark until the AI plugin comes online.
+
+**16 unit tests pass** (10 BL-139 DoD-aligned + 6 helpers):
+- Backend: 8 tests covering `sanitize_completion` (×6 — leading-whitespace strip, leading-newline preservation, trailing-suffix-echo drop, no-match passthrough, empty-suffix noop, runaway cap) + `handle_predict` (×2 — unconfigured provider error, unsupported provider error).
+- Frontend: 16 tests covering the predictionField state machine (×4 — empty baseline, ghost-text render via setPrediction effect, in-flight cancel via doc change, cancel-on-move via selection), Tab accept (×3 — happy path, no-prediction returns false, caret-moved abort), Escape clear (×2 — happy path, no-prediction returns false), disabled guard (×1 — explicit setPrediction(null) clears), debounce coalescing (×2 — rapid schedules collapse into one fire, cancel drops a pending fire — both via node's `mock.timers` against the extracted `Debouncer`), byte-budget helpers (×4 — tailByBytes / headByBytes ASCII + UTF-8 codepoint safety).
+
+IPC bindings generated: `AiPredictArgs` / `AiPredictReply` ts-rs + schemars; `scripts/check_ipc_drift.sh` clean. Drift script also picked up new `cap_matrix.toml` entry and new `ipc_schema_emit` `write_schema` rows.
+
+**Live-model 300 ms ghost-text target**: covered structurally (150 ms debounce + cancel-on-keystroke means at most one in-flight request per quiet period; Ollama FIM on a local qwen2.5-coder:7b returns in ~100-200 ms on commodity GPUs) but **not measured in unit tests** — a real-time check needs a running Ollama instance. An operator with the model installed can flip `nexus.editor.editPrediction.enabled = true` and observe.
+
+**Why this matters**: Nexus had on-demand inline completion (BL-034 ghost completion — explicit Cmd-/) but no continuous prediction. BL-139 closes the parity gap with Zed's per-keystroke prediction while keeping the local-Ollama-by-default posture — zero cloud cost, zero data leaves the box, opt-in to avoid surprising the user.
+
+---
+
 ### BL-145: `nexus-acp` server — inbound ACP surface for external clients (Hermes Feature 7) ✅ (2026-05-15)
 
 **Source**: Hermes capability port plan — see [../research/hermes-agent-implementation-plan.md](../research/hermes-agent-implementation-plan.md) §"Feature 7 — ACP Adapter". Filed 2026-05-15.

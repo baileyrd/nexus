@@ -103,6 +103,104 @@ struct OllamaResponseMessage {
     content: String,
 }
 
+// -- Fill-in-middle (FIM) types — BL-139 --
+//
+// Ollama's `/api/generate` endpoint accepts a top-level `suffix` field
+// for code models that were trained on a FIM objective (codellama,
+// qwen2.5-coder, deepseek-coder, starcoder2, …). Models without FIM
+// training ignore the suffix gracefully — the response is still the
+// model's natural continuation of `prompt`, which is the same shape
+// the caller is expecting.
+
+/// Request body for Ollama's `/api/generate` FIM endpoint.
+#[derive(Serialize)]
+struct OllamaGenerateRequest<'a> {
+    model: &'a str,
+    prompt: &'a str,
+    /// FIM suffix — what comes AFTER the cursor. Optional because
+    /// non-FIM callers can omit it; we always set it for `fim_generate`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suffix: Option<&'a str>,
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<OllamaGenerateOptions>,
+}
+
+#[derive(Serialize)]
+struct OllamaGenerateOptions {
+    /// Hard cap on tokens generated. Maps to llama.cpp's `n_predict`.
+    num_predict: u32,
+    /// Inference temperature. 0.2 favours determinism, which matches
+    /// editor expectations (the same prefix should yield the same
+    /// completion across keystrokes).
+    temperature: f32,
+}
+
+#[derive(Deserialize)]
+struct OllamaGenerateResponse {
+    response: String,
+}
+
+/// Outcome of [`OllamaProvider::fim_generate`].
+pub struct OllamaFimOutput {
+    pub completion: String,
+}
+
+impl OllamaProvider {
+    /// BL-139 — single-shot fill-in-middle generation against
+    /// `/api/generate`. `prefix` is sent as `prompt`; `suffix` rides
+    /// in the eponymous field. `max_tokens` caps generation. The
+    /// returned string is the model's raw output, untrimmed — the
+    /// caller is responsible for stripping any prompt echo or
+    /// trailing whitespace that would clash with the existing buffer.
+    pub async fn fim_generate(
+        &self,
+        prefix: &str,
+        suffix: &str,
+        max_tokens: u32,
+    ) -> Result<OllamaFimOutput, AiError> {
+        let url = format!("{}/api/generate", self.base_url);
+        let body = OllamaGenerateRequest {
+            model: &self.chat_model,
+            prompt: prefix,
+            suffix: Some(suffix),
+            stream: false,
+            options: Some(OllamaGenerateOptions {
+                num_predict: max_tokens,
+                temperature: 0.2,
+            }),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if response.status().as_u16() == 401 {
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::AuthFailed(text));
+        }
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::Provider(format!("{status}: {text}")));
+        }
+
+        let parsed: OllamaGenerateResponse = response
+            .json()
+            .await
+            .map_err(|e| AiError::Serialization(e.to_string()))?;
+
+        Ok(OllamaFimOutput {
+            completion: parsed.response,
+        })
+    }
+}
+
 // -- Embedding types --
 
 /// Request body for Ollama embed API.
