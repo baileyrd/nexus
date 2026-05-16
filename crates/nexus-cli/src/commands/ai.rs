@@ -197,13 +197,9 @@ pub fn config(app: &mut App) -> Result<()> {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(AI_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("AI ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(AI_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("AI ipc call '{command}' failed"))
 }
 
 fn index_one(

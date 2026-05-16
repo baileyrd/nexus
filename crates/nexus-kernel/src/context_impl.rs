@@ -27,6 +27,7 @@ use crate::log::LogLevel;
 ///
 /// Constructed by the plugin loader when a plugin is instantiated. Holds
 /// shared handles to kernel services; cheap to clone as Arc-backed.
+#[derive(Clone)]
 pub struct KernelPluginContext {
     plugin_id: String,
     plugin_version: String,

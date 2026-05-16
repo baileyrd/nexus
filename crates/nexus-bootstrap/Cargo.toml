@@ -56,6 +56,7 @@ nexus-mcp = { path = "../nexus-mcp" }
 nexus-lsp = { path = "../nexus-lsp" }
 nexus-dap = { path = "../nexus-dap" }
 nexus-acp = { path = "../nexus-acp" }
+nexus-remote = { path = "../nexus-remote" }
 nexus-types = { path = "../nexus-types" }
 nexus-agent = { path = "../nexus-agent" }
 nexus-skills = { path = "../nexus-skills" }

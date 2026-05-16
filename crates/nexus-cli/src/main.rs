@@ -1715,8 +1715,25 @@ fn main() {
         .with_ansi(output::use_color(cli.no_color))
         .init();
 
-    let forge_root = default_forge_path(cli.forge_path);
-    let mut app = app::App::new(forge_root, format);
+    // BL-140 Phase 2b — detect ssh:// forge URIs (via --forge-path or
+    // NEXUS_FORGE_PATH) and route through App::new_remote. Anything
+    // that contains "://" is parsed as a URI; everything else falls
+    // through to local-path handling.
+    let resolved_forge_str = cli
+        .forge_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .or_else(|| std::env::var("NEXUS_FORGE_PATH").ok());
+    let mut app = match resolved_forge_str {
+        Some(s) if s.contains("://") => match nexus_remote::ForgeUri::parse(&s) {
+            Ok(uri) => app::App::new_remote(uri, format),
+            Err(e) => {
+                eprintln!("Error: invalid forge URI '{s}': {e}");
+                std::process::exit(2);
+            }
+        },
+        _ => app::App::new(default_forge_path(cli.forge_path), format),
+    };
     app.set_safe_mode(cli.safe_mode);
     if cli.safe_mode {
         tracing::warn!(audit = true, "safe mode: community plugins will be skipped");

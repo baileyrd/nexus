@@ -37,6 +37,13 @@ pub mod agent;
 pub mod forge_template;
 mod audit_sqlite;
 mod plugins;
+/// BL-140 Phase 2b — `IpcInvoker` trait abstracting local vs remote
+/// IPC dispatch. The CLI consumes this trait so the same subcommand
+/// body works against both shapes.
+pub mod invoker;
+/// BL-140 Phase 2b — `RemoteRuntime` factory + SSH child-process
+/// transport for `--forge-path ssh://...` URIs.
+pub mod remote;
 /// BL-138 — TOML-driven per-handler capability matrix loader. See
 /// [`cap_matrix::apply`] and the companion `cap_matrix.toml`.
 pub mod cap_matrix;
@@ -130,6 +137,21 @@ pub struct Runtime {
     /// host-internal lifecycle plumbing, not for ergonomic
     /// shortcuts past the IPC layer.
     pub loader: Arc<SharedPluginLoader>,
+}
+
+impl Runtime {
+    /// Return an [`IpcInvoker`](invoker::IpcInvoker) trait object
+    /// backed by this runtime's [`KernelPluginContext`]. BL-140
+    /// Phase 2b — exposed so CLI subcommands can be transport-agnostic
+    /// (local kernel vs. remote SSH proxy).
+    ///
+    /// The returned `Arc` clones the underlying context internally;
+    /// the original `Runtime` keeps full access to `context`,
+    /// `kernel`, and `loader`.
+    #[must_use]
+    pub fn invoker(&self) -> Arc<dyn invoker::IpcInvoker + Send + Sync> {
+        Arc::new(invoker::LocalIpcInvoker::new(self.context.clone()))
+    }
 }
 
 /// Build a runtime with the CLI registered as the invoker plugin.

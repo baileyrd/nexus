@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde_json::Value;
 
 use crate::app::App;
@@ -32,18 +31,14 @@ pub fn show(app: &mut App, name: &str) -> Result<()> {
 
 /// `nexus workflow run <name>` — execute a loaded workflow end-to-end.
 pub fn run(app: &mut App, name: &str) -> Result<()> {
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
     let response = rt
-        .block_on(
-            runtime
-                .context
-                .ipc_call(
-                    WORKFLOW_PLUGIN,
-                    "run",
-                    serde_json::json!({ "name": name }),
-                    RUN_TIMEOUT,
-                ),
-        )
+        .block_on(invoker.ipc_call(
+            WORKFLOW_PLUGIN,
+            "run",
+            serde_json::json!({ "name": name }),
+            RUN_TIMEOUT,
+        ))
         .with_context(|| format!("workflow run '{name}' failed"))?;
     print_run(&response);
     Ok(())
@@ -277,11 +272,7 @@ pub fn template_init(
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(WORKFLOW_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("workflow ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(WORKFLOW_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("workflow ipc call '{command}' failed"))
 }

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde_json::{json, Value};
 
 use crate::app::App;
@@ -88,13 +87,9 @@ pub fn path(app: &App) -> Result<()> {
 // IPC handlers added in BL-094 / BL-100.
 
 fn call_security(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(SECURITY_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("audit ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(SECURITY_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("audit ipc call '{command}' failed"))
 }
 
 /// Parse an ISO date (YYYY-MM-DD) or RFC3339 datetime into Unix-millis (UTC).

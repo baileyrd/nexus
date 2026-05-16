@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use nexus_kernel::PluginContext;
 use serde_json::Value;
 
 use crate::app::App;
@@ -235,13 +234,9 @@ fn resolve_inline_or_file(s: &str) -> std::io::Result<String> {
 }
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(DATABASE_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("database ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(DATABASE_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("database ipc call '{command}' failed"))
 }
 
 /// Extract `csv_bytes` from a `csv_export` response. The handler

@@ -8,7 +8,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde_json::Value;
 
 use crate::app::App;
@@ -276,11 +275,7 @@ fn slugify(name: &str) -> String {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(TERMINAL_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("terminal ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(TERMINAL_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("terminal ipc call '{command}' failed"))
 }

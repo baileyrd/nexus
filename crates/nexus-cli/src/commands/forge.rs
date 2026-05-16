@@ -119,13 +119,12 @@ pub fn import(
     on_conflict: &str,
 ) -> Result<()> {
     use std::time::Duration;
-    use nexus_kernel::PluginContext;
     let abs = source
         .canonicalize()
         .map_err(|e| anyhow::anyhow!("import source '{}': {e}", source.display()))?;
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
     let resp = rt
-        .block_on(runtime.context.ipc_call(
+        .block_on(invoker.ipc_call(
             "com.nexus.storage",
             "import_forge",
             serde_json::json!({

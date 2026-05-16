@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde_json::Value;
 
 use crate::app::App;
@@ -117,11 +116,7 @@ pub fn list(app: &mut App, capabilities: &[String]) -> Result<()> {
 }
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(AGENT_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("tool ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(AGENT_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("tool ipc call '{command}' failed"))
 }

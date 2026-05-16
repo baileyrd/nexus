@@ -8,49 +8,125 @@ use nexus_bootstrap::acp_contribution_wiring::{
 use nexus_bootstrap::dap_contribution_wiring::{
     unwire_dap_contributions_for_plugin, wire_dap_contributions, DapWireOutcome,
 };
+use nexus_bootstrap::invoker::IpcInvoker;
 use nexus_bootstrap::lsp_contribution_wiring::{
     unwire_lsp_contributions_for_plugin, wire_lsp_contributions, LspWireOutcome,
 };
 use nexus_bootstrap::mcp_contribution_wiring::{
     unwire_mcp_contributions_for_plugin, wire_mcp_contributions, McpWireOutcome,
 };
-use nexus_bootstrap::{Runtime, build_cli_runtime};
+use nexus_bootstrap::remote::{build_remote_runtime_ssh, RemoteRuntime};
+use nexus_bootstrap::{build_cli_runtime, Runtime};
 use nexus_kernel::EventBus;
 use nexus_plugins::{PluginManager, PluginManagerConfig, PluginManifest};
+use nexus_remote::ForgeUri;
 use tokio::runtime::Runtime as TokioRuntime;
 
 use crate::output::OutputFormat;
 
+/// BL-140 Phase 2b — forge location. Either a local filesystem path
+/// or an `ssh://...` URI. Determines which runtime [`App`] builds at
+/// lazy-init time.
+///
+/// The `Local(PathBuf)` field duplicates `App::forge_root` today —
+/// kept for forward compatibility once Phase 3 collapses the two.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum ForgeLocation {
+    /// Local filesystem forge root.
+    Local(PathBuf),
+    /// Remote forge accessed over a transport URI (`ssh://...`
+    /// today).
+    Remote(ForgeUri),
+}
+
+impl ForgeLocation {
+    /// True if this is a remote forge.
+    #[must_use]
+    pub fn is_remote(&self) -> bool {
+        matches!(self, ForgeLocation::Remote(_))
+    }
+}
+
 /// Central application state, owning all subsystems with lazy initialisation.
 pub struct App {
+    forge_location: ForgeLocation,
+    /// Convenience copy of the local forge root. For remote forges
+    /// this is a placeholder (`.forge/remote/`) that satisfies
+    /// callers that need *some* local path. Most code should reach
+    /// for `forge_location()` instead.
     forge_root: PathBuf,
     format: OutputFormat,
     /// Safe mode — skip every community plugin at load (F-8.2.2).
     safe_mode: bool,
     /// Kernel event bus handle retained for the community plugin manager.
     event_bus: Arc<EventBus>,
-    /// Community-plugin manager (lazy).
+    /// Community-plugin manager (lazy). Local-only.
     plugins: Option<PluginManager>,
-    /// Bootstrap-assembled runtime (lazy).
+    /// Bootstrap-assembled local runtime (lazy). `None` for remote
+    /// forges.
     runtime: Option<Runtime>,
+    /// Bootstrap-assembled remote runtime (lazy). `None` for local
+    /// forges.
+    remote: Option<RemoteRuntime>,
     /// Tokio runtime used to block on async `ipc_call`s.
     rt: Option<TokioRuntime>,
 }
 
 impl App {
-    /// Create a new `App` with the given forge root and output format.
+    /// Create a new `App` for a local forge.
     ///
     /// Subsystems are not opened until first use.
     pub fn new(forge_root: PathBuf, format: OutputFormat) -> Self {
         Self {
+            forge_location: ForgeLocation::Local(forge_root.clone()),
             forge_root,
             format,
             safe_mode: false,
             event_bus: Arc::new(EventBus::new(256)),
             plugins: None,
             runtime: None,
+            remote: None,
             rt: None,
         }
+    }
+
+    /// Create a new `App` for a remote forge (BL-140 Phase 2b).
+    ///
+    /// The SSH child isn't spawned until first `invoker()` call.
+    pub fn new_remote(uri: ForgeUri, format: OutputFormat) -> Self {
+        // Synthesise a placeholder forge_root that satisfies callers
+        // expecting some `&Path`. Community plugin scanning, forge
+        // init, etc. are local-only and should check
+        // `forge_location().is_remote()` before reaching here.
+        let forge_root = PathBuf::from("<remote>");
+        Self {
+            forge_location: ForgeLocation::Remote(uri),
+            forge_root,
+            format,
+            safe_mode: false,
+            event_bus: Arc::new(EventBus::new(256)),
+            plugins: None,
+            runtime: None,
+            remote: None,
+            rt: None,
+        }
+    }
+
+    /// The configured forge location (local path or remote URI).
+    ///
+    /// Currently used only via [`Self::is_remote`]; exposed for
+    /// Phase 3 callers that need to discriminate.
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn forge_location(&self) -> &ForgeLocation {
+        &self.forge_location
+    }
+
+    /// True when this app is bound to a remote forge.
+    #[must_use]
+    pub fn is_remote(&self) -> bool {
+        self.forge_location.is_remote()
     }
 
     /// Enable safe mode so the plugin manager skips community plugins
@@ -59,19 +135,30 @@ impl App {
         self.safe_mode = enabled;
     }
 
-    /// Lazily build the Nexus runtime (kernel + all core plugins + CLI as a
-    /// Core plugin) and return a reference plus a Tokio runtime for blocking
-    /// on async `ipc_call`s.
+    /// Lazily build the local Nexus runtime + return it alongside the
+    /// Tokio runtime used to block on async `ipc_call`s.
     ///
-    /// First-use opens the storage engine inside the plugin, so the forge
-    /// directory must already exist. Subcommands that run *before* forge
-    /// init (e.g. `forge init`) must not call this — they use
-    /// [`nexus_bootstrap::init_forge`] first.
+    /// **Local-only.** For remote forges (`--forge-path ssh://...`)
+    /// this errors with a clear message — most subcommands should use
+    /// [`Self::invoker`] instead, which works for both modes. Reach
+    /// for `runtime()` only when the kernel handle / plugin loader /
+    /// event bus is needed directly (e.g. `nexus serve`, `nexus acp
+    /// serve`, the agent interactive bus subscription).
+    ///
+    /// First-use opens the storage engine inside the plugin, so the
+    /// forge directory must already exist.
     ///
     /// # Errors
     ///
-    /// Returns an error if the runtime or Tokio runtime cannot be built.
+    /// - If `self.is_remote()` — local-only operations don't make
+    ///   sense against a remote forge.
+    /// - If the runtime or Tokio runtime cannot be built.
     pub fn runtime(&mut self) -> Result<(&Runtime, &TokioRuntime)> {
+        if self.is_remote() {
+            anyhow::bail!(
+                "this operation requires a local forge; remote (ssh://) forges only support IPC-based subcommands"
+            );
+        }
         if self.runtime.is_none() {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
@@ -87,6 +174,61 @@ impl App {
             self.runtime.as_ref().expect("just initialised"),
             self.rt.as_ref().expect("just initialised"),
         ))
+    }
+
+    /// BL-140 Phase 2b — lazily build an [`IpcInvoker`] trait object
+    /// + return it alongside the Tokio runtime.
+    ///
+    /// Works for both local and remote forges; subcommands that only
+    /// need `ipc_call` should use this in preference to
+    /// [`Self::runtime`].
+    ///
+    /// For local forges, this routes through the same
+    /// `build_cli_runtime` machinery as `runtime()` — the local
+    /// `Runtime` is held internally and shared with subsequent
+    /// `runtime()` calls. For remote forges, it spawns the SSH child
+    /// (once) on first call.
+    ///
+    /// # Errors
+    /// - Local runtime build failure (forge missing, kernel config
+    ///   broken, etc.).
+    /// - Remote SSH spawn failure (binary not on `$PATH`, connection
+    ///   refused, etc.).
+    pub fn invoker(
+        &mut self,
+    ) -> Result<(Arc<dyn IpcInvoker + Send + Sync>, &TokioRuntime)> {
+        if self.is_remote() {
+            self.ensure_tokio()?;
+            if self.remote.is_none() {
+                let uri = match &self.forge_location {
+                    ForgeLocation::Remote(u) => u.clone(),
+                    ForgeLocation::Local(_) => unreachable!("is_remote() said remote"),
+                };
+                let rt = self.rt.as_ref().expect("ensure_tokio");
+                let runtime = rt
+                    .block_on(async { build_remote_runtime_ssh(&uri) })
+                    .with_context(|| format!("failed to build remote runtime for {uri}"))?;
+                self.remote = Some(runtime);
+            }
+            let invoker = self.remote.as_ref().expect("just initialised").invoker();
+            Ok((invoker, self.rt.as_ref().expect("just initialised")))
+        } else {
+            let (runtime, rt) = self.runtime()?;
+            let invoker = runtime.invoker();
+            Ok((invoker, rt))
+        }
+    }
+
+    fn ensure_tokio(&mut self) -> Result<()> {
+        if self.rt.is_none() {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .context("failed to start tokio runtime")?;
+            self.rt = Some(rt);
+        }
+        Ok(())
     }
 
     /// Return the forge root directory.

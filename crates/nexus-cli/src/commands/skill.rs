@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde_json::Value;
 
 use crate::app::App;
@@ -189,11 +188,7 @@ fn print_full(skill: &Value) {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(SKILLS_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("skills ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(SKILLS_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("skills ipc call '{command}' failed"))
 }

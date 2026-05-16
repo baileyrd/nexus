@@ -17,7 +17,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_kernel::PluginContext;
 use serde_json::Value;
 
 use crate::app::App;
@@ -61,13 +60,9 @@ pub fn send(
     if let Some(t) = title {
         obj.insert("title".into(), Value::String(t.to_string()));
     }
-    let (runtime, rt) = app.runtime()?;
+    let (invoker, rt) = app.invoker()?;
     let response = rt
-        .block_on(
-            runtime
-                .context
-                .ipc_call(NOTIFICATIONS_PLUGIN, "send", args, IPC_TIMEOUT),
-        )
+        .block_on(invoker.ipc_call(NOTIFICATIONS_PLUGIN, "send", args, IPC_TIMEOUT))
         .with_context(|| "notifications ipc call 'send' failed")?;
     print_outcome(&response);
     Ok(())

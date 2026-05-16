@@ -103,13 +103,9 @@ fn dispatch_completion_notification(
         "title": "Agent session",
         "message": summary,
     });
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(NOTIFICATIONS_PLUGIN, "send", args, IPC_TIMEOUT),
-    )
-    .with_context(|| "notifications ipc call 'send' failed")?;
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(NOTIFICATIONS_PLUGIN, "send", args, IPC_TIMEOUT))
+        .with_context(|| "notifications ipc call 'send' failed")?;
     Ok(())
 }
 
@@ -508,13 +504,9 @@ fn preview_json(v: &Value, max: usize) -> String {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
-    let (runtime, rt) = app.runtime()?;
-    rt.block_on(
-        runtime
-            .context
-            .ipc_call(AGENT_PLUGIN, command, args, IPC_TIMEOUT),
-    )
-    .with_context(|| format!("agent ipc call '{command}' failed"))
+    let (invoker, rt) = app.invoker()?;
+    rt.block_on(invoker.ipc_call(AGENT_PLUGIN, command, args, IPC_TIMEOUT))
+        .with_context(|| format!("agent ipc call '{command}' failed"))
 }
 
 #[cfg(test)]
