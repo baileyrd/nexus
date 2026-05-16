@@ -96,7 +96,7 @@ function decodeMatches(raw: unknown): RecallMatch[] {
  * the same single file). If the user has no inbox configured, OR the
  * filter would empty a non-empty list (so the user sees nothing
  * useful for an in-scope query), we surface the unfiltered set with
- * a console warning. The BACKLOG_COMPLETED entry calls this out as a
+ * a console warning. The closed-backlog entry calls this out as a
  * known v1 limitation tracked under BL-046 (code-aware capture adds
  * the "from project" filter primitives needed for richer scoping).
  */

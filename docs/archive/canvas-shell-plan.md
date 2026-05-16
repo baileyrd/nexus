@@ -14,7 +14,7 @@ References:
 - **Storage evidence**: `crates/nexus-storage/src/canvas.rs` —
   `parse_canvas`, `serialize_canvas`, `insert_canvas`, `query_canvas_nodes`,
   `query_canvas_edges`, `delete_canvas`, `extract_file_links`.
-- **Backlog note**: `docs/PRDs/BACKLOG_COMPLETED.md` line 84 —
+- **Backlog note**: `docs/PRDs/backlog/` line 84 —
   opening a `.canvas` file currently falls through to CodeMirror and
   displays raw JSON. File-handler registration is live, just unused
   for `.canvas`.

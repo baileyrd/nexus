@@ -3,7 +3,7 @@
 //! These establish performance baselines for the event bus paths
 //! that every plugin lifecycle and IPC path eventually crosses.
 //! Benchmarks print throughput; SLO assertions are intentionally
-//! omitted at this stage (see BACKLOG_COMPLETED notes for BL-092).
+//! omitted at this stage (see `docs/PRDs/backlog/BL-092.md` for the closure notes).
 
 use std::hint::black_box;
 

@@ -477,5 +477,5 @@ trivial once Phase 1 lands.
 | BL-126 | 4 — size-cap + lock tightening | unassigned | proposed |
 | BL-127 | 5 — runtime perf scenarios | unassigned | proposed (gated) |
 
-When each phase ships, file under `docs/PRDs/BACKLOG_COMPLETED.md` with
+When each phase ships, file under `docs/PRDs/backlog/` with
 a one-paragraph close note linking back here and to the perf delta.

@@ -16,7 +16,7 @@ References:
   `crates/nexus-storage/src/bases/`.
 - **Current UI**: `shell/src/plugins/nexus/bases/BasesView.tsx`
   (ported from the legacy shell's `BaseView.tsx` monolith under Phase 4 WI-37, 2026-04-24).
-- **Backlog note**: `docs/PRDs/BACKLOG_COMPLETED.md` line 84 (file-handler
+- **Backlog note**: `docs/PRDs/backlog/` line 84 (file-handler
   registration contract — already implemented for markdown; we'll reuse
   it to register `.bases`).
 

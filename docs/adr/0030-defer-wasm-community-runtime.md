@@ -8,7 +8,7 @@
 
 [ADR 0016](0016-microkernel-native-vs-wasm-plugin-split.md) (2026-04-24) declared two community-plugin runtimes: an iframe sandbox (per [ADR 0015](0015-iframe-sandbox-plugin-runtime.md)) and a wasmtime-backed `WasmSandbox`. The iframe path shipped and is the active community-plugin authoring surface today. The WASM path shipped as scaffolding — `WasmSandbox` works, has integration tests, and is referenced by `PluginLoader::load`, but no production community plugin uses it.
 
-The [BL-137](../PRDs/BACKLOG.md#bl-137-architectural-review-2026-05-14-follow-ups) architectural review (2026-05-14) called out the divergence as a maintenance cost:
+The [BL-137](../PRDs/backlog/BL-137.md) architectural review (2026-05-14) called out the divergence as a maintenance cost:
 
 > "**Decide WASM commitment.** ADR 0016 is 'native vs WASM' but no production WASM plugin exists today; the iframe runtime (ADR 0015) is the actual community-plugin surface. Either commit (ship one real WASM community plugin) or document iframe-only and move WASM to 'deferred experiment.' Large if committing, trivial if deferring. Low priority — costs are small today, will rise."
 
@@ -79,7 +79,7 @@ Until then, treat the iframe runtime as the community-plugin surface.
 
 - [ADR 0015](0015-iframe-sandbox-plugin-runtime.md) — iframe sandbox; the canonical community surface.
 - [ADR 0016](0016-microkernel-native-vs-wasm-plugin-split.md) — native vs WASM split; the native half stands, the WASM half is deferred by this ADR.
-- [BL-137](../PRDs/BACKLOG.md#bl-137-architectural-review-2026-05-14-follow-ups) — architectural review surfacing the call.
+- [BL-137](../PRDs/backlog/BL-137.md) — architectural review surfacing the call.
 - `crates/nexus-plugins/src/sandbox.rs` — `WasmSandbox` (scaffolding-only going forward).
 - `crates/nexus-plugins/src/loader.rs::PluginLoader::load` — dispatch site to `WasmSandbox`.
 - `docs/shell/writing-a-plugin.md` — the canonical authoring walkthrough (iframe).

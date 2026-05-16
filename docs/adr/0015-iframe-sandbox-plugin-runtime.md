@@ -128,6 +128,6 @@ extra compile step on top.
 - `shell/src/plugins/community/hello-world/plugin.json` — fixture.
 - `crates/nexus-plugin-api/src/capability.rs` — the 14-variant capability
   enum the sandbox speaks.
-- `docs/PRDs/BACKLOG_COMPLETED.md` entries **UI F-5.1.1** (drop
+- `docs/PRDs/backlog/` entries **UI F-5.1.1** (drop
   `allow-same-origin` from plugin panel iframes) and **UI F-8.1.1**
   (iframe sandbox as precondition for community script plugins).

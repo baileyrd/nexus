@@ -5,7 +5,7 @@
 //! into its dep graph, every kernel refactor silently becomes a plugin-ABI
 //! break — exactly what the F-2.1.1 extraction was meant to prevent.
 //!
-//! See `docs/PRDs/BACKLOG_COMPLETED.md` (F-2.1.1 close, 2026-04-22) for context.
+//! See `docs/PRDs/backlog/` (F-2.1.1 close, 2026-04-22) for context.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -80,7 +80,7 @@ fn cargo_toml_has_no_kernel_internal_dependencies() {
          forbidden kernel-internal dependencies: {violations:?}.\n\n\
          This crate is the stable contract community plugins compile against. \
          Adding a kernel-internal dep means every kernel refactor silently \
-         becomes a plugin-ABI break — see docs/PRDs/BACKLOG_COMPLETED.md \
+         becomes a plugin-ABI break — see docs/PRDs/backlog/ \
          (F-2.1.1) for the full rationale.\n\n\
          If you genuinely need a type from one of these crates, move the type \
          into nexus-plugin-api (or a new shared crate) instead of pulling the \

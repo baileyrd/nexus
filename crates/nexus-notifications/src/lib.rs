@@ -28,7 +28,7 @@
 //!
 //! Shell-settings UI, workflow `notify` step, and the agent
 //! run-completion auto-notify subscriber are filed as follow-ups
-//! (BL-133 closure note in `BACKLOG_COMPLETED.md`).
+//! (BL-133 closure note in `backlog/`).
 //!
 //! ## Wire shape
 //!

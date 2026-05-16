@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-13 (proposed), 2026-05-14 (Phase 0a accepted), 2026-05-15 (Phases 1–3 merged on `main` via PR #163), 2026-05-15 (Phase 4 shipped — BL-144 + BL-145)
 **Status:** Accepted — every phase shipped. Phases 0a / 1a–1e (DAP) / 2a + 2b (LSP) / 3a + 3b (MCP) landed via PR #163 (2026-05-15). Phase 4 (ACP) shipped same day as the new `nexus-acp` crate — outbound host (BL-144) and inbound server (BL-145) live in one crate, two roles. Tracks as **BL-113** in the backlog; per-phase close notes under the BL entries.
-**Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/BACKLOG_COMPLETED.md) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host — merged on `main` via PR #163, 2026-05-15), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet implemented; named here so the future crate lands on the contribution model from day one).
+**Related:** [ADR 0011](0011-active-shell-target.md) (plugin-first shell), [BL-076](../PRDs/backlog/) (nexus-lsp host), [BL-081](../PRDs/BL-081-dap-debugger.md) (nexus-dap host — merged on `main` via PR #163, 2026-05-15), [Hermes Agent port plan](../research/hermes-agent-implementation-plan.md) Feature 7 (ACP adapter — not yet implemented; named here so the future crate lands on the contribution model from day one).
 
 ## Context
 

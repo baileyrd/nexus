@@ -8,7 +8,7 @@ under [BL-134](../PRDs/BACKLOG.md) Phase 1's runtime consolidation), the rule
 of thumb is: **frontends own a runtime; subsystems must use the ambient one
 via `Handle::try_current()` and degrade gracefully when it's absent**.
 
-Filed under [BL-137](../PRDs/BACKLOG.md#bl-137-architectural-review-2026-05-14-follow-ups)
+Filed under [BL-137](../PRDs/backlog/BL-137.md)
 ("Document tokio runtime ownership").
 
 ## Frontend-owned runtimes

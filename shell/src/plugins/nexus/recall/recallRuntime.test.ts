@@ -95,7 +95,7 @@ test('filterToInboxScope: null/empty inbox path → passthrough', () => {
 })
 
 test('filterToInboxScope: empty filtered set degrades to unfiltered (v1 limitation)', () => {
-  // Captured in the BACKLOG_COMPLETED entry: when the inbox filter
+  // Captured in the closed-backlog entry: when the inbox filter
   // would zero out a non-empty result list, we surface everything
   // rather than show "no results" for a query that did hit the index.
   const matches = [M('Other.md'), M('AnotherNote.md')]

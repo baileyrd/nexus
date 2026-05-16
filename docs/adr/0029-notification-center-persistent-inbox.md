@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-15 (proposed).
 **Status:** Accepted — Phase 1 (backend) lands on this branch; Phase 2 (shell plugin) follows in a sibling branch.
-**Related:** [ADR 0028](0028-ai-agent-event-loop.md) (AI/agent runtime — sibling), BL-133 (`nexus-notifications` dispatcher), BL-135 (router + `notifications.toml`), [BL-134](../PRDs/BACKLOG_COMPLETED.md#bl-134) (AI runtime + `AiEvent` stream).
+**Related:** [ADR 0028](0028-ai-agent-event-loop.md) (AI/agent runtime — sibling), BL-133 (`nexus-notifications` dispatcher), BL-135 (router + `notifications.toml`), [BL-134](../PRDs/backlog/BL-134.md) (AI runtime + `AiEvent` stream).
 
 ## Context
 

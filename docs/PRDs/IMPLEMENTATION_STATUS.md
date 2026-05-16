@@ -6,7 +6,7 @@
 > **Scope:** PRDs 01–17 in this directory, audited against `crates/**` and `shell/src/**`.
 > **Update cadence:** refresh when a PRD's status tier changes, or at minimum at every minor release.
 >
-> This is a rolling tracking doc. Per-item acceptance detail lives in the individual PRDs and in [BACKLOG.md](BACKLOG.md) / [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Use this doc to see *where we are across the whole roadmap* at a glance.
+> This is a rolling tracking doc. Per-item acceptance detail lives in the individual PRDs and in [BACKLOG.md](BACKLOG.md) / [backlog/](backlog/). Use this doc to see *where we are across the whole roadmap* at a glance.
 
 ## Legend
 
@@ -45,12 +45,12 @@
 
 ### PRD-01 — Kernel & Event System ✅
 **Shipped:** `NexusEvent` enum, `EventBus`, `EventFilter`, `Kernel` lifecycle, `KernelPluginContext`, KV store.
-**Gaps:** None material. Kernel `start`/`shutdown` docstrings updated to match reality (BACKLOG_COMPLETED F-1.1.1).
+**Gaps:** None material. Kernel `start`/`shutdown` docstrings updated to match reality (closed under F-1.1.1).
 **Evidence:** [crates/nexus-kernel/src/{event,event_bus,kernel,context}.rs](crates/nexus-kernel/src/).
 
 ### PRD-02 — Security Model ✅
 **Shipped:** `Capability` + risk classification, capability gating on IPC / fs / net / events / notify, path-traversal + TOCTOU fixes, audit log helpers, install-time HIGH-risk consent via `granted_caps.json` (F-5.1.1), epoch-deadline execution timeout, fuel-per-call reset. **`com.nexus.security` IPC handlers (BL-098, 2026-05-06)** — `get_secret` (1), `set_secret` (2), `delete_secret` (3), `list_secret_names` (4), namespaced by `"{plugin_id}:{name}"` so plugins can't read each other's secrets; in-memory `known_names` index for current-session enumeration (OS keyring doesn't support listing). **Audit event persistence (BL-094, 2026-05-06)** — `nexus_kernel::audit_store` exposes `AuditStore` trait + global accessor; `audit::log_*` helpers append in parallel to tracing; SQLite backend at `<forge>/.forge/.kernel/audit.db` lives in `nexus-bootstrap` (kernel is backend-agnostic per `dep_invariants`); 90-day retention; queryable via `com.nexus.security::query_audit_log` (handler 5).
-**Gaps:** F-8.1.1 sub-tasks 1–5, F-8.1.1-fo1 (precompiled runtime bundle + hello-world migration), and F-8.1.2 (boundary-bound `pluginId` — orchestrator builds a per-plugin `PluginAPI` from the handshake-set id, `assertValidPluginId` rejects empty / colon-bearing ids) all shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). All red-tier UI-audit items closed.
+**Gaps:** F-8.1.1 sub-tasks 1–5, F-8.1.1-fo1 (precompiled runtime bundle + hello-world migration), and F-8.1.2 (boundary-bound `pluginId` — orchestrator builds a per-plugin `PluginAPI` from the handshake-set id, `assertValidPluginId` rejects empty / colon-bearing ids) all shipped 2026-04-28 — see [backlog/](backlog/). All red-tier UI-audit items closed.
 **Evidence:** [crates/nexus-security/src/](crates/nexus-security/src/), [crates/nexus-plugins/src/loader.rs](crates/nexus-plugins/src/loader.rs) (`build_capabilities`, grant/revoke).
 
 ### PRD-03 — Storage Engine ✅
@@ -195,7 +195,7 @@
 
 ## Cross-cutting observations
 
-1. **Microkernel + plugin system is the strongest pillar.** PRDs 01/02/04 all ✅ with extensive BACKLOG_COMPLETED.md evidence. The contribution registry pattern scales across every UI extension point.
+1. **Microkernel + plugin system is the strongest pillar.** PRDs 01/02/04 all ✅ with extensive backlog/ evidence. The contribution registry pattern scales across every UI extension point.
 2. **Knowledge-graph stack is shipping-grade.** PRDs 03/06/07 complete; users can read, write, search, link, and theme notes end-to-end.
 3. **Editor (08) is now 🟢 with no functional gaps.** Inline AI completion, self-closing + block-form MDX components, nested-markdown rendering inside MDX blocks, and the CM6 surface all ship. Remaining item (database-query blocks `[[{db:query}]]`) depends on the PRD-10b roadmap.
 4. **AI (12) 🟢 end-to-end.** Streaming chat, streaming RAG with source-chip citations, and inline editor completion all share the `com.nexus.ai.stream_*` event plumbing. Microkernel boundary held — provider dispatch, retrieval, and prompt assembly all stay inside `com.nexus.ai`; shell contributes only Tauri bridges and UI.
@@ -213,7 +213,7 @@
 |------|----------------|------------|
 | MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | ✅ Addressed: `com.nexus.mcp.host` core plugin (7 handlers) plus `nexus mcp servers/tools/call` CLI. Agent planner auto-discovers tools at plan time and emits them as `call_tool` steps. |
 | Git `!Send` constraint | UI-driven git ops will block the main thread | ✅ Addressed: `GitWorker` + `GitWorkerHandle` in `nexus-git` moves the `git2::Repository` to a dedicated OS thread behind a request/response channel. |
-| F-8.1.1 iframe sandbox | Cannot ship community JS plugin marketplace safely | ✅ Addressed: `shell/src/host/sandbox/` ships the null-origin iframe + postMessage protocol + capability-gated method catalog; `manifest.sandboxed === true` routes a plugin through `SandboxOrchestrator`. F-8.1.1-fo1 added `shell/vite.sandbox-runtime-plugin.ts` so production iframes load a real `bootstrapSandboxedPlugin`. F-8.1.2 closed the trust gap: the orchestrator builds a per-plugin `PluginAPI` from the handshake-set id (no more shared `'community-sandbox'` bucket), and `assertValidPluginId` rejects colon-bearing ids that could escape the `plugin:<id>:<key>` namespace. All BACKLOG_COMPLETED 2026-04-28. Marketplace launch still gated on **WI-44** marketplace UI + **OI-15** manifest signing. |
+| F-8.1.1 iframe sandbox | Cannot ship community JS plugin marketplace safely | ✅ Addressed: `shell/src/host/sandbox/` ships the null-origin iframe + postMessage protocol + capability-gated method catalog; `manifest.sandboxed === true` routes a plugin through `SandboxOrchestrator`. F-8.1.1-fo1 added `shell/vite.sandbox-runtime-plugin.ts` so production iframes load a real `bootstrapSandboxedPlugin`. F-8.1.2 closed the trust gap: the orchestrator builds a per-plugin `PluginAPI` from the handshake-set id (no more shared `'community-sandbox'` bucket), and `assertValidPluginId` rejects colon-bearing ids that could escape the `plugin:<id>:<key>` namespace. All closed 2026-04-28. Marketplace launch still gated on **WI-44** marketplace UI + **OI-15** manifest signing. |
 | Database views absent | `.bases` files load but render nothing useful | ✅ Addressed: Table/Kanban/Calendar-month-grid/Gallery renderers all live in [BasesView.tsx](../../shell/src/plugins/nexus/bases/BasesView.tsx); engine returns the right shape and the UI consumes it end-to-end. |
 | Agent plans auto-approve by default | Any agent-mode chat in the GUI will run tool calls without explicit opt-in | ✅ Addressed: "Preview" chip routes through `agent_plan` + `agent_run_plan` with an Approve / Cancel card; the **Step →** button on the PendingPlanCard runs one step at a time via `agent_execute_step`, closing the loop on per-step gating. |
 | Agent memory absent | Plans + observations vanish when the run returns, so the user can't audit what happened | ✅ Addressed: every `run` / `run_plan` writes `{ goal, plan, observation, created_at }` to `<forge>/.forge/agent/history/*.json`; `AgentHistoryPanel` browses + deletes entries via `com.nexus.agent::history_*` handlers. |
@@ -221,7 +221,7 @@
 
 ## How to keep this doc honest
 
-- When a BACKLOG.md item moves to BACKLOG_COMPLETED.md, check whether its PRD's status tier should bump.
+- When a BACKLOG.md item moves to backlog/, check whether its PRD's status tier should bump.
 - When a PRD's gaps list shrinks to zero, mark ✅ and note the commit that closed the last gap.
 - When a new audit (`docs/archive/planning/UI-AUDIT.md`, `docs/archive/planning/MICROKERNEL-AUDIT.md`) discovers a finding, add it to the affected PRD's Gaps line with the finding id.
 - Avoid re-describing the PRD here — link to it. This doc is the state-of-the-build, not a second copy of the spec.
