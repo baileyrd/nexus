@@ -32,11 +32,12 @@ use futures_util::{
 use nexus_kernel::{EventBus, EventFilter, NexusEvent, RecvError};
 use serde_json::Value;
 use tokio::net::TcpStream;
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
+use crate::presence::{COLLAB_TOPIC_PREFIX, PEER_JOINED_TOPIC, PEER_LEFT_TOPIC};
 use crate::protocol::{ClientMessage, PeerInfo, ServerMessage};
 
 /// Kernel-bus plugin id used when republishing inbound editor-ops
@@ -45,6 +46,21 @@ use crate::protocol::{ClientMessage, PeerInfo, ServerMessage};
 /// trust model is identical to the existing in-bootstrap
 /// `CrdtPublisher`, which also publishes on the editor's behalf.
 pub const EDITOR_PLUGIN_ID: &str = "com.nexus.editor";
+
+/// Kernel-bus plugin id used for collab-authored events (presence,
+/// peer join/leave). Topics in this namespace originate at the
+/// relay or the local presence publisher, not the editor.
+pub const COLLAB_PLUGIN_ID: &str = "com.nexus.collab";
+
+/// Kernel-bus plugin id stamped on every event the inbound bridge
+/// republishes. Distinct from [`COLLAB_PLUGIN_ID`] so the outbound
+/// subscriber can distinguish bridge-republished events (skip — they
+/// came in over the wire) from locally-authored collab events (forward
+/// to the relay). The kernel's `publish_core` path is used for these
+/// publishes since it bypasses the namespace anti-spoof check, letting
+/// the bridge stamp the editor's `com.nexus.editor.ops.*` topic with
+/// this bridge-internal plugin id.
+pub const COLLAB_BRIDGE_PLUGIN_ID: &str = "com.nexus.collab.bridge";
 
 /// Prefix the outbound subscription matches. Mirrors
 /// `nexus_crdt::wire::OPS_TOPIC_PREFIX`; duplicated here to avoid the
@@ -128,11 +144,19 @@ pub struct ConnectParams {
 pub struct CollabClientConfig {
     /// Per-handshake timeout. Defaults to [`DEFAULT_HANDSHAKE_TIMEOUT`].
     pub handshake_timeout: Duration,
-    /// Subscription filter for the outbound bridge. Defaults to
-    /// `EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.to_string())` —
-    /// every editor-ops event flies to the relay. Tests narrow this
-    /// to limit chatter.
-    pub outbound_filter: EventFilter,
+    /// Subscription filters for the outbound bridge. One outbound
+    /// task is spawned per filter and they share the WebSocket sink;
+    /// each event matching any filter is forwarded as
+    /// [`crate::protocol::ClientMessage::Envelope`].
+    ///
+    /// Defaults to two filters: `OPS_TOPIC_PREFIX` (CRDT op
+    /// envelopes shipped by the editor's `CrdtPublisher`) and
+    /// [`COLLAB_TOPIC_PREFIX`] (presence events; the relay-authored
+    /// peer-join/leave bus topics also share this prefix but are
+    /// authored by the *receiving* client's bridge — see
+    /// [`run_inbound`] — so a peer publishing them locally is a
+    /// degenerate case the relay's echo suppression already drops).
+    pub outbound_filters: Vec<EventFilter>,
     /// `op.id.site` value to drop inbound envelopes from. `None`
     /// disables site-based dedup (useful in unit tests where the
     /// bridge runs without a local CRDT site identity).
@@ -143,7 +167,10 @@ impl Default for CollabClientConfig {
     fn default() -> Self {
         Self {
             handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
-            outbound_filter: EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.to_string()),
+            outbound_filters: vec![
+                EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.to_string()),
+                EventFilter::CustomPrefix(COLLAB_TOPIC_PREFIX.to_string()),
+            ],
             local_site_id: None,
         }
     }
@@ -161,8 +188,14 @@ pub struct CollabClient {
     own_peer_id: String,
     initial_peers: Vec<PeerInfo>,
     reader_task: Option<JoinHandle<()>>,
-    writer_task: Option<JoinHandle<()>>,
-    shutdown: Option<oneshot::Sender<()>>,
+    writer_tasks: Vec<JoinHandle<()>>,
+    /// Broadcast sender; sending `()` once signals every outbound
+    /// task to exit. Dropped from `shutdown` / `Drop`.
+    shutdown: Option<broadcast::Sender<()>>,
+    /// Shared WebSocket sink. `shutdown_inner` calls `close` on it
+    /// once outbound tasks have released their guards, so the relay
+    /// sees a proper WS close frame.
+    sink: WsSinkMutex,
 }
 
 impl CollabClient {
@@ -248,14 +281,18 @@ impl CollabClient {
 
         // Spawn bridge tasks.
         let sink = Arc::new(AsyncMutex::new(sink));
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
-        let writer_task = tokio::spawn(run_outbound(
-            Arc::clone(&bus),
-            config.outbound_filter,
-            Arc::clone(&sink),
-            shutdown_rx,
-        ));
+        let writer_tasks: Vec<JoinHandle<()>> = config
+            .outbound_filters
+            .into_iter()
+            .map(|filter| {
+                let bus_clone = Arc::clone(&bus);
+                let sink_clone = Arc::clone(&sink);
+                let shutdown_rx = shutdown_tx.subscribe();
+                tokio::spawn(run_outbound(bus_clone, filter, sink_clone, shutdown_rx))
+            })
+            .collect();
         let reader_task = tokio::spawn(run_inbound(
             stream,
             bus,
@@ -267,8 +304,9 @@ impl CollabClient {
             own_peer_id,
             initial_peers,
             reader_task: Some(reader_task),
-            writer_task: Some(writer_task),
+            writer_tasks,
             shutdown: Some(shutdown_tx),
+            sink,
         })
     }
 
@@ -298,8 +336,16 @@ impl CollabClient {
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
-        if let Some(handle) = self.writer_task.take() {
+        for handle in self.writer_tasks.drain(..) {
             let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        }
+        // Send a clean WS close frame now that no outbound task is
+        // contending for the sink lock. The reader task wakes on the
+        // peer's close-frame echo and exits naturally; we still
+        // `abort()` below as a belt-and-braces guard.
+        {
+            let mut s = self.sink.lock().await;
+            let _ = s.close().await;
         }
         if let Some(handle) = self.reader_task.take() {
             handle.abort();
@@ -310,7 +356,7 @@ impl CollabClient {
 impl Drop for CollabClient {
     fn drop(&mut self) {
         // Drop signals shutdown but does not await — the tasks observe
-        // either the oneshot or the socket close + exit on their own
+        // either the broadcast or the socket close + exit on their own
         // schedule.
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
@@ -318,7 +364,7 @@ impl Drop for CollabClient {
         if let Some(handle) = self.reader_task.take() {
             handle.abort();
         }
-        if let Some(handle) = self.writer_task.take() {
+        for handle in self.writer_tasks.drain(..) {
             handle.abort();
         }
     }
@@ -335,23 +381,34 @@ async fn run_outbound(
     bus: Arc<EventBus>,
     filter: EventFilter,
     sink: WsSinkMutex,
-    mut shutdown: oneshot::Receiver<()>,
+    mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut sub = bus.subscribe(filter);
     loop {
         tokio::select! {
             biased;
-            _ = &mut shutdown => {
+            _ = shutdown.recv() => {
                 tracing::debug!("nexus-collab: outbound shutdown");
-                let mut s = sink.lock().await;
-                let _ = s.close().await;
                 return;
             }
             recv = sub.recv() => {
                 match recv {
                     Ok(event) => {
                         let (topic, payload) = match &event.event {
-                            NexusEvent::Custom { type_id, payload, .. } => {
+                            NexusEvent::Custom { type_id, emitting_plugin, payload } => {
+                                // Anti-loop: skip events the inbound
+                                // bridge republished. Inbound uses
+                                // `publish_core(COLLAB_PLUGIN_ID, …)`
+                                // and stamps `emitting_plugin =
+                                // COLLAB_PLUGIN_ID` for every payload
+                                // it forwards back onto the bus, so
+                                // this single check breaks the cycle
+                                // for ops, presence, and peer events
+                                // uniformly without per-topic special
+                                // casing.
+                                if emitting_plugin == COLLAB_BRIDGE_PLUGIN_ID {
+                                    continue;
+                                }
                                 (type_id.clone(), payload.clone())
                             }
                             // The subscription filter pins us to Custom
@@ -422,18 +479,23 @@ async fn run_inbound(
                     tracing::trace!(topic = %topic, "nexus-collab: dropping self-echoed op");
                     continue;
                 }
-                let plugin_id = republish_plugin_id(&topic);
-                if let Err(e) = bus.publish_plugin(plugin_id, &topic, payload) {
-                    tracing::warn!(error = %e, topic = %topic, "nexus-collab: inbound republish failed");
-                }
+                bridge_republish(&bus, &topic, payload);
             }
-            ServerMessage::PeerJoined { .. }
-            | ServerMessage::PeerLeft { .. }
-            | ServerMessage::Hello { .. } => {
-                // Presence surfacing arrives under BL-143 Phase 1.3 (a
-                // dedicated subscriber + `com.nexus.collab.presence`
-                // bus topic). Until then, just trace.
-                tracing::trace!(?msg, "nexus-collab: presence frame ignored");
+            ServerMessage::PeerJoined { peer } => {
+                bridge_republish(&bus, PEER_JOINED_TOPIC, peer_info_payload(&peer));
+            }
+            ServerMessage::PeerLeft { peer_id } => {
+                bridge_republish(
+                    &bus,
+                    PEER_LEFT_TOPIC,
+                    serde_json::json!({ "peer_id": peer_id }),
+                );
+            }
+            ServerMessage::Hello { .. } => {
+                // A second Hello on a live connection is a protocol
+                // bug — the relay only sends one in response to the
+                // client's own Hello. Trace and ignore.
+                tracing::trace!("nexus-collab: unexpected mid-stream Hello, ignoring");
             }
             ServerMessage::Error { code, message } => {
                 tracing::warn!(%code, %message, "nexus-collab: relay error frame");
@@ -463,17 +525,31 @@ fn drop_for_self_echo(payload: &Value, local_site_id: Option<&str>) -> bool {
     matches!(site, Some(s) if s == local)
 }
 
-/// Pick the kernel `source_plugin_id` to publish an inbound envelope
-/// under. The kernel's namespace-anti-spoof check requires the topic
-/// to live under `<source_plugin_id>.…`, so we route by topic prefix.
-fn republish_plugin_id(topic: &str) -> &'static str {
-    if topic.starts_with(OPS_TOPIC_PREFIX) {
-        EDITOR_PLUGIN_ID
-    } else {
-        // Fall back to the editor namespace for now — Phase 1.3 adds
-        // `com.nexus.collab.*` once presence ships, and the table
-        // grows then.
-        EDITOR_PLUGIN_ID
+/// Encode a [`PeerInfo`] as the JSON object the [`PEER_JOINED_TOPIC`]
+/// payload exposes. Inlined because `PeerInfo` already derives
+/// `Serialize` and the field layout is exactly what we want.
+fn peer_info_payload(peer: &PeerInfo) -> Value {
+    serde_json::to_value(peer).unwrap_or(Value::Null)
+}
+
+/// Republish an inbound payload on the local bus, tagging the event's
+/// `emitting_plugin` as [`COLLAB_PLUGIN_ID`]. This serves two roles:
+///
+/// * Bypasses the kernel's namespace anti-spoof check (the collab
+///   bridge legitimately republishes events on the editor's topics —
+///   `com.nexus.editor.ops.*` — and `publish_core` is the kernel's
+///   trusted-core-plugin escape hatch).
+/// * Lets the outbound subscriber detect "bridge-authored" events by
+///   inspecting `emitting_plugin` and skip them, breaking the
+///   relay-loop without per-topic special casing.
+fn bridge_republish(bus: &EventBus, topic: &str, payload: Value) {
+    let event = NexusEvent::Custom {
+        type_id: topic.to_string(),
+        emitting_plugin: COLLAB_BRIDGE_PLUGIN_ID.to_string(),
+        payload,
+    };
+    if let Err(e) = bus.publish_core(COLLAB_BRIDGE_PLUGIN_ID, event) {
+        tracing::warn!(error = %e, %topic, "nexus-collab: bridge republish failed");
     }
 }
 
@@ -509,10 +585,13 @@ mod tests {
     }
 
     #[test]
-    fn republish_plugin_id_routes_ops_topics_to_editor() {
-        assert_eq!(
-            republish_plugin_id("com.nexus.editor.ops.notes/today.md"),
-            EDITOR_PLUGIN_ID
-        );
+    fn peer_info_payload_round_trips() {
+        let peer = PeerInfo {
+            peer_id: "alice".into(),
+            display_name: "Alice".into(),
+        };
+        let v = peer_info_payload(&peer);
+        assert_eq!(v["peer_id"], "alice");
+        assert_eq!(v["display_name"], "Alice");
     }
 }

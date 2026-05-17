@@ -33,13 +33,18 @@
 
 pub mod auth;
 pub mod client;
+pub mod presence;
 pub mod protocol;
 pub mod server;
 
 pub use auth::{Token, TokenError};
 pub use client::{
-    CollabClient, CollabClientConfig, ConnectError, ConnectParams, DEFAULT_HANDSHAKE_TIMEOUT,
-    EDITOR_PLUGIN_ID, OPS_TOPIC_PREFIX,
+    CollabClient, CollabClientConfig, ConnectError, ConnectParams, COLLAB_BRIDGE_PLUGIN_ID,
+    COLLAB_PLUGIN_ID, DEFAULT_HANDSHAKE_TIMEOUT, EDITOR_PLUGIN_ID, OPS_TOPIC_PREFIX,
+};
+pub use presence::{
+    PresenceCursor, PresenceEvent, COLLAB_TOPIC_PREFIX, PEER_JOINED_TOPIC, PEER_LEFT_TOPIC,
+    PRESENCE_TOPIC,
 };
 pub use protocol::{
     ClientMessage, PeerInfo, ServerMessage, ERR_AUTH, ERR_BAD_FRAME, ERR_HANDSHAKE,
