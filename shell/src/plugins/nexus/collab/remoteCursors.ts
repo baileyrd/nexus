@@ -238,14 +238,24 @@ export function remoteCursorsExt(cfg: RemoteCursorsConfig): Extension {
     ViewPlugin.fromClass(
       class {
         private unsubscribe: () => void
+        private destroyed = false
         constructor(view: EditorView) {
+          // Defer dispatches so we don't call `view.dispatch` while
+          // CM6 is still inside an update — both the initial apply
+          // (constructor runs during the view's first update) and any
+          // store notification that lands mid-transaction would
+          // otherwise throw "Calls to EditorView.update are not
+          // allowed while an update is in progress".
           const apply = (peers: Record<string, CollabPeer>) => {
-            const ranges = buildRemoteCursorRanges(
-              cfg.relpath,
-              peers,
-              view.state.doc.length,
-            )
-            view.dispatch({ effects: setRemoteCursors.of(ranges) })
+            queueMicrotask(() => {
+              if (this.destroyed) return
+              const ranges = buildRemoteCursorRanges(
+                cfg.relpath,
+                peers,
+                view.state.doc.length,
+              )
+              view.dispatch({ effects: setRemoteCursors.of(ranges) })
+            })
           }
           this.unsubscribe = useCollabStore.subscribe((s, prev) => {
             if (s.peers !== prev.peers) apply(s.peers)
@@ -257,6 +267,7 @@ export function remoteCursorsExt(cfg: RemoteCursorsConfig): Extension {
           // in the field's update; no per-keystroke re-fetch needed.
         }
         destroy(): void {
+          this.destroyed = true
           this.unsubscribe()
         }
       },
