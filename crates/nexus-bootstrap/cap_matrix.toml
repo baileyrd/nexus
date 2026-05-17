@@ -1103,6 +1103,11 @@ unrestricted = "read-only duplicate detection over the entity index"
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "list_draft_relations"
+unrestricted = "read-only enumeration of low-confidence entity relations (Dream Cycle inbox)"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "vector_query"
 unrestricted = "read-only nearest-neighbour vector query"
 

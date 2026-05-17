@@ -215,9 +215,13 @@ BL-127 Phase A's editor-engine measurements capture the CM6 → StateField / Vie
 
 ### Follow-up: shell subscriber for Dream Cycle relation proposals (from BL-129)
 
-**Status**: Toast surface shipped 2026-05-17. Per-row approve/skip inbox remains open — gated on a `list_draft_relations` IPC handler that does not yet exist.
+**Status**: Shipped 2026-05-17. Toast surface + per-row approve/skip inbox both live.
 
-Toast subscriber lives in `shell/src/plugins/nexus/dreamCycle/index.ts` and registers as `nexus.dreamCycle` in the catalog. Pure-helper unit tests cover singular/plural/zero-suppression in `shell/tests/dream-cycle-plugin.test.ts`. Bumping `confidence` to a confirmed value via `entity_upsert` (and the inbox UI that surfaces individual proposals for approve/skip) is the remaining piece — it needs an enumeration handler so the shell can fetch the per-relation rows without iterating every entity.
+Toast subscriber + inbox plugin live in `shell/src/plugins/nexus/dreamCycle/`. New `com.nexus.storage::list_draft_relations` (handler id 71) enumerates outgoing relations at-or-below a confidence threshold (default 0.5 — matches the value `infer_entity_relations` writes for new proposals) and is the enumeration backbone the BL DoD called for. Pure helper [`EntityIndex::list_draft_relations`] sorts ascending by `(confidence, from, target, kind)` and reports a `total` distinct from the page size so the inbox can render a "showing N of M" hint. Cap matrix entry: `unrestricted = "read-only enumeration of low-confidence entity relations (Dream Cycle inbox)"`. IPC drift regenerated `ListDraftRelationsArgs` / `DraftRelationRow` / `ListDraftRelationsResult` TS + JSON Schema; bootstrap helper `nexus_bootstrap::storage::list_draft_relations` mirrors the shape for in-process callers.
+
+Inbox surface: `nexus.dreamCycle` now contributes a `paneMode` view, a `moon`-iconed activity-bar item (priority 58), and `nexus.dreamCycle.show` / `nexus.dreamCycle.refresh` commands. Each row renders `<from> · <type> · <target>` with a `confidence` chip and Approve / Skip buttons. Approve bumps confidence to `1.0` via `entity_get` → `entity_upsert`; Skip drops the `(target, type)` row the same way. Optimistic store removal + per-row `pending` flag keeps the UI responsive; a failed upsert re-hydrates from `list_draft_relations`. The existing toast subscriber stays — and now also triggers a hydrate so a panel left open updates the moment a cycle completes. Pure-helper coverage in `shell/tests/dream-cycle-plugin.test.ts` extends with eight new tests across `findRelationIndex` (locate, miss, target+type composite) and `buildUpsertPayload` (verbatim id/type/aliases/description round-trip, wire-shape relations list, drop-row transform).
+
+Backend coverage: six new tests in `crates/nexus-storage/src/entity_index.rs` pin the sort/threshold/limit/relpath/empty-index behaviour of `list_draft_relations`; `cargo test -p nexus-storage` → 411 passing.
 
 ---
 

@@ -775,6 +775,52 @@ pub struct EntityDecayRelationsOutcome {
     pub dry_run: bool,
 }
 
+/// BL-129 follow-up — one draft relation row surfaced by the inbox.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DraftRelation {
+    /// Canonical id of the source entity that declares the relation.
+    pub from: String,
+    /// Target as it appears in the source file (may be an alias).
+    pub target: String,
+    /// Relation kind (canonical).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+    /// Forge-relative path of the source entity's markdown file.
+    pub relpath: String,
+}
+
+/// BL-129 follow-up — return of [`list_draft_relations`].
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct DraftRelationsPage {
+    /// Draft relations sorted by ascending confidence.
+    pub relations: Vec<DraftRelation>,
+    /// Total qualifying relations across the forge.
+    pub total: u32,
+    /// `true` when `relations.len() < total`.
+    pub truncated: bool,
+}
+
+/// BL-129 follow-up — list every outgoing relation at-or-below the
+/// confidence `threshold` (defaults server-side to `0.5`, matching
+/// the value the Dream-Cycle `infer_entity_relations` handler writes
+/// for new proposals). Read-only; never mutates entity files.
+pub async fn list_draft_relations(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    threshold: Option<f32>,
+    limit: Option<u32>,
+) -> Result<DraftRelationsPage> {
+    let mut args = serde_json::json!({});
+    if let Some(t) = threshold {
+        args["threshold"] = serde_json::Value::from(t);
+    }
+    if let Some(l) = limit {
+        args["limit"] = serde_json::Value::from(l);
+    }
+    call(invoker, "list_draft_relations", args).await
+}
+
 /// BL-129 — multiplicative confidence decay across every entity
 /// relation in the forge's `entities/` directory.
 pub async fn entity_decay_relations(

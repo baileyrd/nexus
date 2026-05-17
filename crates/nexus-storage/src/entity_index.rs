@@ -395,6 +395,72 @@ impl EntityIndex {
         });
         candidates
     }
+
+    /// Collect every outgoing relation across the index whose
+    /// `confidence` is at or below `threshold`, then take at most
+    /// `limit` rows ordered by ascending confidence then ascending
+    /// `(from, target, kind)`.
+    ///
+    /// Drives the BL-129 Dream-Cycle inbox: the LLM
+    /// `infer_entity_relations` handler writes proposals at
+    /// `confidence: 0.5`, so the inbox passes that as the threshold to
+    /// surface exactly the unconfirmed drafts.
+    ///
+    /// Returns `(rows, total)` where `total` counts every qualifying
+    /// relation across the index regardless of `limit`, so callers can
+    /// surface a "showing N of M" hint.
+    #[must_use]
+    pub fn list_draft_relations(
+        &self,
+        threshold: f32,
+        limit: usize,
+    ) -> (Vec<DraftRelationCandidate>, u32) {
+        let threshold = threshold.clamp(0.0, 1.0);
+        let mut all: Vec<DraftRelationCandidate> = Vec::new();
+        for record in self.by_id.values() {
+            for rel in &record.relations {
+                if rel.confidence <= threshold + f32::EPSILON {
+                    all.push(DraftRelationCandidate {
+                        from:       record.id.clone(),
+                        target:     rel.target.clone(),
+                        kind:       rel.kind.clone(),
+                        confidence: rel.confidence,
+                        relpath:    record.relpath.clone(),
+                    });
+                }
+            }
+        }
+        all.sort_by(|x, y| {
+            x.confidence
+                .partial_cmp(&y.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| x.from.cmp(&y.from))
+                .then_with(|| x.target.cmp(&y.target))
+                .then_with(|| x.kind.cmp(&y.kind))
+        });
+        let total = u32::try_from(all.len()).unwrap_or(u32::MAX);
+        all.truncate(limit);
+        (all, total)
+    }
+}
+
+/// One row returned by [`EntityIndex::list_draft_relations`]. Wire
+/// shape lives in [`crate::ipc::DraftRelationRow`]; this struct is the
+/// internal projection so the IPC dispatch is the only place that
+/// maps between them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DraftRelationCandidate {
+    /// Canonical id of the source entity that declares the relation.
+    pub from: String,
+    /// Target as it appears in the source file (may be an alias).
+    pub target: String,
+    /// Relation kind (canonical — write-time normalisation has
+    /// already happened by the time the index sees it).
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+    /// Forge-relative path of the source entity's markdown file.
+    pub relpath: String,
 }
 
 /// One pair returned by [`EntityIndex::find_duplicates`].
@@ -1635,6 +1701,107 @@ mod tests {
             .find(|r| r.target == "z")
             .unwrap();
         assert!((z.confidence.unwrap() - 0.5).abs() < 1e-5);
+    }
+
+    // ── BL-129 follow-up list_draft_relations ──────────────────────────────
+
+    #[test]
+    fn list_draft_relations_returns_low_confidence_rows_sorted_ascending() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\nrelations:\n  - target: nexus\n    type: works_on\n    confidence: 0.5\n  - target: bob\n    type: knows\n    confidence: 1.0\n",
+            "",
+        );
+        write_entity(
+            dir.path(),
+            "bob",
+            "entity_type: person\nrelations:\n  - target: alice\n    type: knows\n    confidence: 0.2\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let (rows, total) = index.list_draft_relations(0.5, 10);
+        assert_eq!(total, 2);
+        assert_eq!(rows.len(), 2);
+        // bob → alice (0.2) sorts before alice → nexus (0.5)
+        assert_eq!(rows[0].from, "bob");
+        assert_eq!(rows[0].target, "alice");
+        assert!((rows[0].confidence - 0.2).abs() < 1e-5);
+        assert_eq!(rows[1].from, "alice");
+        assert_eq!(rows[1].target, "nexus");
+        assert!((rows[1].confidence - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn list_draft_relations_excludes_confirmed_relations() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\nrelations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let (rows, total) = index.list_draft_relations(0.5, 10);
+        assert!(rows.is_empty());
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn list_draft_relations_threshold_is_inclusive() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\nrelations:\n  - target: nexus\n    type: works_on\n    confidence: 0.5\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let (rows, total) = index.list_draft_relations(0.5, 10);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn list_draft_relations_respects_limit_and_reports_total() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\nrelations:\n  - target: a\n    type: knows\n    confidence: 0.1\n  - target: b\n    type: knows\n    confidence: 0.2\n  - target: c\n    type: knows\n    confidence: 0.3\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let (rows, total) = index.list_draft_relations(0.5, 2);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(total, 3);
+        // sorted ascending — first two are the lowest-confidence rows
+        assert_eq!(rows[0].target, "a");
+        assert_eq!(rows[1].target, "b");
+    }
+
+    #[test]
+    fn list_draft_relations_carries_source_relpath() {
+        let dir = tempdir();
+        write_entity(
+            dir.path(),
+            "alice",
+            "entity_type: person\nrelations:\n  - target: bob\n    type: knows\n    confidence: 0.5\n",
+            "",
+        );
+        let index = EntityIndex::load(dir.path());
+        let (rows, _) = index.list_draft_relations(0.5, 10);
+        assert_eq!(rows[0].relpath, "entities/alice.md");
+    }
+
+    #[test]
+    fn list_draft_relations_empty_index_returns_zero() {
+        let dir = tempdir();
+        let index = EntityIndex::load(dir.path());
+        let (rows, total) = index.list_draft_relations(0.5, 10);
+        assert!(rows.is_empty());
+        assert_eq!(total, 0);
     }
 
     #[test]

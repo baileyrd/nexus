@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ListDraftRelationsArgs",
+  "description": "Args for `com.nexus.storage::list_draft_relations` (handler 71).\n\nEnumerates every outgoing relation across `<forge>/entities/*.md`\nwhose `confidence` is at or below `threshold`. Drives the\nDream-Cycle inbox: the LLM `infer_entity_relations` handler writes\nproposals at `confidence: 0.5`, so callers default `threshold` to\n`0.5` to capture exactly that set.\n\nThe handler is read-only — it never mutates entity files. Approve\nor skip actions flow through the existing `entity_get` +\n`entity_upsert` handlers.",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Maximum rows to return. Defaults to `200` when absent. The\nhandler emits a `truncated: true` flag so the inbox UI can hint\nthat more proposals exist.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "threshold": {
+      "description": "Inclusive upper bound for relation confidence in `[0.0, 1.0]`.\nDefaults to `0.5` (Dream-Cycle proposal value) when absent.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    }
+  },
+  "additionalProperties": false
+}

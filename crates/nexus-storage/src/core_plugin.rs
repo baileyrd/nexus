@@ -348,6 +348,13 @@ pub const HANDLER_ENTITY_FIND_DUPLICATES: u32 = 68;
 /// and deletes `drop`'s file. The atomic-write path is used for the
 /// `keep` rewrite; the delete runs after the rewrite succeeds.
 pub const HANDLER_ENTITY_MERGE: u32 = 70;
+/// BL-129 follow-up — `list_draft_relations`. Args:
+/// [`crate::ipc::ListDraftRelationsArgs`]. Returns
+/// [`crate::ipc::ListDraftRelationsResult`]. Read-only enumeration of
+/// every outgoing relation at-or-below the confidence threshold
+/// (default `0.5` — Dream-Cycle proposal value). Drives the shell
+/// inbox; approve/skip flow through `entity_get` + `entity_upsert`.
+pub const HANDLER_LIST_DRAFT_RELATIONS: u32 = 71;
 
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
@@ -563,6 +570,9 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_ENTITY_MERGE => {
                 return dispatch_entity_merge(&self.forge_root, args);
+            }
+            HANDLER_LIST_DRAFT_RELATIONS => {
+                return dispatch_list_draft_relations(&self.forge_root, args);
             }
             _ => {}
         }
@@ -1681,6 +1691,38 @@ fn dispatch_entity_merge(
         relations_added: merged.relations_added,
     };
     to_value(&result, "entity_merge")
+}
+
+fn dispatch_list_draft_relations(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::ipc::ListDraftRelationsArgs =
+        parse_args(args, "list_draft_relations")?;
+    let threshold = parsed.threshold.unwrap_or(0.5);
+    let limit = parsed
+        .limit
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(200)
+        .max(1);
+    let index = crate::entity_index::EntityIndex::load(forge_root);
+    let (rows, total) = index.list_draft_relations(threshold, limit);
+    let truncated = (rows.len() as u32) < total;
+    let result = crate::ipc::ListDraftRelationsResult {
+        relations: rows
+            .into_iter()
+            .map(|r| crate::ipc::DraftRelationRow {
+                from:       r.from,
+                target:     r.target,
+                kind:       r.kind,
+                confidence: r.confidence,
+                relpath:    r.relpath,
+            })
+            .collect(),
+        total,
+        truncated,
+    };
+    to_value(&result, "list_draft_relations")
 }
 
 fn dispatch_entity_decay_relations(

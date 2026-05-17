@@ -796,6 +796,83 @@ pub struct EntityMergeResult {
     pub relations_added: u32,
 }
 
+// ── BL-129 follow-up — list_draft_relations ─────────────────────────────────
+
+/// Args for `com.nexus.storage::list_draft_relations` (handler 71).
+///
+/// Enumerates every outgoing relation across `<forge>/entities/*.md`
+/// whose `confidence` is at or below `threshold`. Drives the
+/// Dream-Cycle inbox: the LLM `infer_entity_relations` handler writes
+/// proposals at `confidence: 0.5`, so callers default `threshold` to
+/// `0.5` to capture exactly that set.
+///
+/// The handler is read-only — it never mutates entity files. Approve
+/// or skip actions flow through the existing `entity_get` +
+/// `entity_upsert` handlers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct ListDraftRelationsArgs {
+    /// Inclusive upper bound for relation confidence in `[0.0, 1.0]`.
+    /// Defaults to `0.5` (Dream-Cycle proposal value) when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f32>,
+    /// Maximum rows to return. Defaults to `200` when absent. The
+    /// handler emits a `truncated: true` flag so the inbox UI can hint
+    /// that more proposals exist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One row in [`ListDraftRelationsResult::relations`]. The
+/// `(from, target, type)` triple is sufficient for the inbox to
+/// re-fetch the source entity via `entity_get` and resubmit the
+/// mutated relation list to `entity_upsert`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct DraftRelationRow {
+    /// Canonical id of the source entity that declares the relation.
+    pub from: String,
+    /// Target as it appears in the source file (may be an alias).
+    pub target: String,
+    /// Relation kind (canonical — `render_entity_markdown` normalises
+    /// at write time, so values reflected here are the canonical form).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+    /// Forge-relative path of the source entity's markdown file.
+    pub relpath: String,
+}
+
+/// Return type for `com.nexus.storage::list_draft_relations`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct ListDraftRelationsResult {
+    /// Draft relations sorted by ascending confidence, then
+    /// ascending `(from, target, kind)` for stable display.
+    pub relations: Vec<DraftRelationRow>,
+    /// Total number of relations at-or-below threshold across the
+    /// entire forge, even when the response is capped by `limit`.
+    pub total: u32,
+    /// `true` when `relations.len() < total`.
+    pub truncated: bool,
+}
+
 // ── BL-129 — entity_decay_relations ──────────────────────────────────────────
 
 /// Args for `com.nexus.storage::entity_decay_relations` (handler 69).

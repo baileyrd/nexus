@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ListDraftRelationsResult",
+  "description": "Return type for `com.nexus.storage::list_draft_relations`.",
+  "type": "object",
+  "properties": {
+    "relations": {
+      "description": "Draft relations sorted by ascending confidence, then\nascending `(from, target, kind)` for stable display.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DraftRelationRow"
+      }
+    },
+    "total": {
+      "description": "Total number of relations at-or-below threshold across the\nentire forge, even when the response is capped by `limit`.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "truncated": {
+      "description": "`true` when `relations.len() < total`.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relations",
+    "total",
+    "truncated"
+  ],
+  "$defs": {
+    "DraftRelationRow": {
+      "description": "One row in [`ListDraftRelationsResult::relations`]. The\n`(from, target, type)` triple is sufficient for the inbox to\nre-fetch the source entity via `entity_get` and resubmit the\nmutated relation list to `entity_upsert`.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "description": "Confidence in `[0.0, 1.0]`.",
+          "type": "number",
+          "format": "float"
+        },
+        "from": {
+          "description": "Canonical id of the source entity that declares the relation.",
+          "type": "string"
+        },
+        "relpath": {
+          "description": "Forge-relative path of the source entity's markdown file.",
+          "type": "string"
+        },
+        "target": {
+          "description": "Target as it appears in the source file (may be an alias).",
+          "type": "string"
+        },
+        "type": {
+          "description": "Relation kind (canonical — `render_entity_markdown` normalises\nat write time, so values reflected here are the canonical form).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "target",
+        "type",
+        "confidence",
+        "relpath"
+      ]
+    }
+  }
+}

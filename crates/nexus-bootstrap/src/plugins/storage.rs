@@ -181,6 +181,10 @@ pub(super) fn register(
                         "entity_merge",
                         nexus_storage::core_plugin::HANDLER_ENTITY_MERGE,
                     ),
+                    (
+                        "list_draft_relations",
+                        nexus_storage::core_plugin::HANDLER_LIST_DRAFT_RELATIONS,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),

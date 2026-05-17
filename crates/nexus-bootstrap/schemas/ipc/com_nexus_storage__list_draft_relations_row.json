@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DraftRelationRow",
+  "description": "One row in [`ListDraftRelationsResult::relations`]. The\n`(from, target, type)` triple is sufficient for the inbox to\nre-fetch the source entity via `entity_get` and resubmit the\nmutated relation list to `entity_upsert`.",
+  "type": "object",
+  "properties": {
+    "confidence": {
+      "description": "Confidence in `[0.0, 1.0]`.",
+      "type": "number",
+      "format": "float"
+    },
+    "from": {
+      "description": "Canonical id of the source entity that declares the relation.",
+      "type": "string"
+    },
+    "relpath": {
+      "description": "Forge-relative path of the source entity's markdown file.",
+      "type": "string"
+    },
+    "target": {
+      "description": "Target as it appears in the source file (may be an alias).",
+      "type": "string"
+    },
+    "type": {
+      "description": "Relation kind (canonical — `render_entity_markdown` normalises\nat write time, so values reflected here are the canonical form).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "from",
+    "target",
+    "type",
+    "confidence",
+    "relpath"
+  ]
+}

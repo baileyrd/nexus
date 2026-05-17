@@ -39,6 +39,7 @@ use nexus_storage::ipc::{
     EntityGetResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
+    DraftRelationRow, ListDraftRelationsArgs, ListDraftRelationsResult,
     ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
     StorageNoteAppendArgs, StorageNoteAppendResult, StorageQuerySymbolArgs,
     StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
@@ -267,6 +268,18 @@ fn emit_all_schemas_impl() {
     );
     write_schema::<EntityMergeArgs>("com_nexus_storage__entity_merge", "args");
     write_schema::<EntityMergeResult>("com_nexus_storage__entity_merge", "result");
+    write_schema::<ListDraftRelationsArgs>(
+        "com_nexus_storage__list_draft_relations",
+        "args",
+    );
+    write_schema::<DraftRelationRow>(
+        "com_nexus_storage__list_draft_relations",
+        "row",
+    );
+    write_schema::<ListDraftRelationsResult>(
+        "com_nexus_storage__list_draft_relations",
+        "result",
+    );
     write_schema::<EnrichEntityArgs>("com_nexus_ai__enrich_entity", "args");
     write_schema::<EnrichEntityResult>("com_nexus_ai__enrich_entity", "result");
     write_schema::<InferEntityRelationsArgs>(
