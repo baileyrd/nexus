@@ -36,6 +36,7 @@ members = [
     "crates/nexus-crdt",
     "crates/nexus-fuzz",
     "crates/nexus-audio",
+    "crates/nexus-collab",
 ]
 
 [workspace.package]
@@ -208,6 +209,13 @@ tauri-plugin-dialog = "2"
 
 # TypeScript type generation for IPC boundary
 ts-rs = { version = "11", features = ["serde-compat"] }
+
+# WebSocket relay transport (BL-143 nexus-collab). Phase 1 MVP is plain
+# ws:// only — TLS is deferred to a later phase along with hosted-relay
+# deployment, so we keep tokio-tungstenite's default features (just
+# `handshake`) and skip the `connect-*` / TLS features.
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
 # ---------------------------------------------------------------------------
 # Build profiles
