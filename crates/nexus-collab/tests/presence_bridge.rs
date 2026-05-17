@@ -87,6 +87,8 @@ async fn presence_event_round_trips_between_peers() {
         cursor: Some(PresenceCursor {
             relpath: "notes/today.md".into(),
             block_id: Some("b-7".into()),
+            offset: Some(42),
+            selection_end: None,
         }),
     };
     let payload = serde_json::to_value(&ev).unwrap();

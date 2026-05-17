@@ -33,6 +33,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod core_plugin;
 pub mod presence;
 pub mod protocol;
 pub mod reconnect_client;

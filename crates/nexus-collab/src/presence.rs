@@ -19,11 +19,14 @@
 //!   as bus events so the shell's peers panel can subscribe without
 //!   reaching into the wire protocol.
 //!
-//! Cursor coordinates are kept abstract (`relpath` + optional
-//! `block_id`) on purpose: BL-143 Phase 2 wires the CM6 caret offset
-//! into a richer cursor type, but the relay should not need to evolve
-//! for that — Phase 2 lands an additive enum branch / optional field
-//! here and the wire payload stays compatible via `#[serde(default)]`.
+//! Cursor coordinates carry the relpath plus optional `block_id`,
+//! character `offset`, and `selection_end`. BL-143 Phase 1.3 shipped
+//! only `relpath` + `block_id`; Phase 2.2 added the two character-level
+//! fields as `#[serde(default)]` so Phase 1.3 peers keep decoding
+//! Phase 2.2 frames (`offset` / `selection_end` silently drop to
+//! `None`) and Phase 1.3 frames keep decoding on Phase 2.2 receivers
+//! (the missing fields default to `None`). The relay is topic-agnostic
+//! and doesn't decode the cursor at all.
 
 use serde::{Deserialize, Serialize};
 
@@ -50,11 +53,13 @@ pub const COLLAB_TOPIC_PREFIX: &str = "com.nexus.collab.";
 
 /// Cursor / focus location carried inside a [`PresenceEvent`].
 ///
-/// Phase 1.3 keeps this abstract — just a relpath plus an optional
-/// block id (using the BL-117 block-id convention). Phase 2 will
-/// extend with character-level offsets and selection range without
-/// breaking this struct (the new fields ride alongside as
-/// `#[serde(default)]`).
+/// Phase 1.3 shipped `relpath` + `block_id`. Phase 2.2 added `offset`
+/// + `selection_end` so the CM6 caret position rides on the wire.
+/// All three optional fields are `#[serde(default,
+/// skip_serializing_if = "Option::is_none")]` so the wire stays
+/// compatible in both directions — Phase 1.3 peers see Phase 2.2
+/// frames with the new fields silently dropped, and Phase 2.2 peers
+/// see Phase 1.3 frames with the new fields defaulted to `None`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresenceCursor {
     /// Forge-relative path of the file the peer is focused on.
@@ -64,6 +69,18 @@ pub struct PresenceCursor {
     /// scrolling, navigating).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_id: Option<String>,
+    /// Caret position as a character offset into the file
+    /// (CodeMirror `EditorSelection.main.head`). `None` when the
+    /// publisher only knows the file (Phase 1.3 peers, idle focus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// When the peer has a non-empty selection, this is the *other*
+    /// end of the range (anchor end). `None` for a caret-only
+    /// position. Receivers should render the selection as a coloured
+    /// background between `offset` and `selection_end` and a caret
+    /// at `offset`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_end: Option<u32>,
 }
 
 /// Peer-authored presence frame. Wire payload of [`PRESENCE_TOPIC`].
@@ -93,6 +110,8 @@ mod tests {
             cursor: Some(PresenceCursor {
                 relpath: "notes/today.md".into(),
                 block_id: Some("b-7".into()),
+                offset: None,
+                selection_end: None,
             }),
         };
         let v = serde_json::to_value(&ev).unwrap();
@@ -121,6 +140,37 @@ mod tests {
         let cur: PresenceCursor = serde_json::from_value(v).unwrap();
         assert_eq!(cur.relpath, "x.md");
         assert_eq!(cur.block_id, None);
+        assert_eq!(cur.offset, None);
+        assert_eq!(cur.selection_end, None);
+    }
+
+    #[test]
+    fn presence_cursor_round_trips_offset_and_selection() {
+        let cur = PresenceCursor {
+            relpath: "x.md".into(),
+            block_id: None,
+            offset: Some(42),
+            selection_end: Some(57),
+        };
+        let v = serde_json::to_value(&cur).unwrap();
+        assert_eq!(v["offset"], 42);
+        assert_eq!(v["selection_end"], 57);
+        assert!(v.get("block_id").is_none(), "block_id=None is omitted");
+        let back: PresenceCursor = serde_json::from_value(v).unwrap();
+        assert_eq!(back, cur);
+    }
+
+    #[test]
+    fn phase_1_3_cursor_decodes_without_offset_fields() {
+        // BL-143 Phase 2.2 compat: a Phase 1.3 peer's cursor frame
+        // has neither `offset` nor `selection_end`; receivers must
+        // accept that and surface `None` for both.
+        let v = json!({"relpath": "x.md", "block_id": "b-1"});
+        let cur: PresenceCursor = serde_json::from_value(v).unwrap();
+        assert_eq!(cur.relpath, "x.md");
+        assert_eq!(cur.block_id.as_deref(), Some("b-1"));
+        assert_eq!(cur.offset, None);
+        assert_eq!(cur.selection_end, None);
     }
 
     #[test]

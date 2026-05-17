@@ -872,6 +872,13 @@ plugin = "com.nexus.notifications"
 command = "send"
 unrestricted = "intentional surface for any plugin to surface a notification — ui.notify gates the toast transport downstream"
 
+# ─── com.nexus.collab — BL-143 cursor presence publish surface ───────
+
+[[handler]]
+plugin = "com.nexus.collab"
+command = "publish_presence"
+unrestricted = "intentional surface for the editor (and future presence sources) to publish caret/selection updates. Stamps the local peer identity from [collab] config so a caller can't spoof. Short-circuits when [collab] is absent, so no events leak in unconfigured forges."
+
 # ─── com.nexus.security — keyring + audit log surface ────────────────
 
 [[handler]]

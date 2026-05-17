@@ -17,6 +17,7 @@ mod agent;
 mod ai;
 mod ai_runtime;
 mod audio;
+mod collab;
 mod comments;
 mod dap;
 mod database;
@@ -73,6 +74,12 @@ pub(crate) fn register_all(
     acp::register(loader, forge_root, event_bus)?;
     git::register(loader, forge_root, event_bus)?;
     terminal::register(loader, forge_root, event_bus)?;
+    // BL-143 Phase 2.2 — collab core plugin: exposes the
+    // `publish_presence` IPC handler used by the shell's CM6 cursor
+    // publisher. Registered last so every preceding plugin's events
+    // are available to the relay bridge spawned by
+    // `collab::start_if_enabled` later in boot.
+    collab::register(loader, forge_root, event_bus)?;
     Ok(())
 }
 

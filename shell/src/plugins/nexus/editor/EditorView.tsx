@@ -46,6 +46,8 @@ import { editPredictionExt, type EditPredictionSettings } from './cm/editPredict
 import { linkSuggestExt } from './cm/linkSuggest'
 import { marginSuggestionsExt } from './cm/marginSuggestions'
 import { marginSuggestTriggerExt } from './cm/marginSuggestTrigger'
+import { cursorPublisherExt } from '../collab/cursorPublisher'
+import { remoteCursorsExt } from '../collab/remoteCursors'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
@@ -1016,6 +1018,22 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               linkSuggestExt(),
               marginSuggestionsExt({ relpath: tab.relpath }),
               marginSuggestTriggerExt({ relpath: tab.relpath }),
+              // BL-143 Phase 2.2 — publish local caret moves to peers
+              // and decorate remote peers' carets in this view. The
+              // publisher is a no-op for untitled buffers (per
+              // `createCursorPublisherCore`) and short-circuits once
+              // the handler reports "collab not configured", so the
+              // extension is safe to attach unconditionally.
+              ...(runtime?.kernel
+                ? [
+                    cursorPublisherExt({
+                      relpath: tab.relpath,
+                      invoke: (plugin, cmd, args) =>
+                        runtime.kernel!.invoke(plugin, cmd, args),
+                    }),
+                  ]
+                : []),
+              remoteCursorsExt({ relpath: tab.relpath }),
             ]
             return tab.mode === 'live'
               ? [
@@ -1221,6 +1239,20 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           readSettings: readEditPredictionSettings,
         }),
       )
+      // BL-143 Phase 2.2 — collab cursor publisher + remote-cursor
+      // decoration. Same conditions as the markdown branch: publisher
+      // attached when we have a kernel handle, decorator attached
+      // unconditionally (it's a pure subscriber).
+      if (runtime?.kernel) {
+        base.push(
+          cursorPublisherExt({
+            relpath: tab.relpath,
+            invoke: (plugin, cmd, args) =>
+              runtime.kernel!.invoke(plugin, cmd, args),
+          }),
+        )
+      }
+      base.push(remoteCursorsExt({ relpath: tab.relpath }))
       return base.length > 0 ? () => base : undefined
     })()
 

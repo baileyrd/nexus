@@ -21,6 +21,10 @@ import { create } from 'zustand'
 export interface PresenceCursor {
   relpath: string
   block_id?: string
+  /** Character offset of the caret (CodeMirror `EditorSelection.main.head`). */
+  offset?: number
+  /** Other end of the selection range when not a caret. */
+  selection_end?: number
 }
 
 export interface PresenceEvent {

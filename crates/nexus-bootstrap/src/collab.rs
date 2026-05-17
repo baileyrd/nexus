@@ -92,7 +92,12 @@ impl CollabConfig {
 /// Read `<forge>/.forge/config.toml` and return the `[collab]` block.
 /// Missing file / missing block / parse errors all collapse to
 /// `CollabConfig::default()` (disabled).
-fn load_config(forge_root: &Path) -> CollabConfig {
+///
+/// Public to the crate so [`crate::plugins::collab`] can read the same
+/// block when stamping the local peer identity onto the
+/// `publish_presence` IPC handler — we need exactly one source of
+/// truth for "what is my peer id and display name".
+pub(crate) fn load_config(forge_root: &Path) -> CollabConfig {
     #[derive(Deserialize)]
     struct Wrapper {
         #[serde(default)]
