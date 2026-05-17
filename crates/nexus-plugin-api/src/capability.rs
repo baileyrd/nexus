@@ -106,6 +106,17 @@ pub enum Capability {
     /// on `com.nexus.notifications` (BL-136, ADR 0029). Granted to
     /// the shell only — there is no CLI/TUI surface for these today.
     NotificationsInboxWrite,
+    /// Call the protocol-host contribution lifecycle verbs
+    /// (`com.nexus.{dap,lsp,mcp.host,acp}::{register,unregister}_*`).
+    /// Per ADR 0027 these verbs are an internal pipeline driven by
+    /// `nexus-bootstrap`'s `*_contribution_wiring` modules; community
+    /// plugins must not invoke them directly or `contributed_by`
+    /// provenance and marketplace install records desynchronise. Core
+    /// plugins (the CLI / TUI / shell invokers) hold the cap via the
+    /// `TrustLevel::Core => Capability::ALL` grant — community plugins
+    /// trigger the standard install-time approval prompt because the
+    /// cap is HIGH risk.
+    ProtocolHostContribute,
 }
 
 /// Error parsing a capability string.
@@ -150,6 +161,7 @@ impl Capability {
         Capability::AiRuntimeObserve,
         Capability::NotificationsInboxRead,
         Capability::NotificationsInboxWrite,
+        Capability::ProtocolHostContribute,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -166,6 +178,7 @@ impl Capability {
                 | Capability::IpcCall
                 | Capability::AiConfigWrite
                 | Capability::AudioRecord
+                | Capability::ProtocolHostContribute
         )
     }
 
@@ -202,6 +215,7 @@ impl Capability {
             Capability::AiRuntimeObserve => "ai.runtime.observe",
             Capability::NotificationsInboxRead  => "notifications.inbox.read",
             Capability::NotificationsInboxWrite => "notifications.inbox.write",
+            Capability::ProtocolHostContribute  => "protocol.host.contribute",
         }
     }
 
@@ -242,6 +256,7 @@ impl Capability {
             "ai.runtime.observe" => Ok(Capability::AiRuntimeObserve),
             "notifications.inbox.read"  => Ok(Capability::NotificationsInboxRead),
             "notifications.inbox.write" => Ok(Capability::NotificationsInboxWrite),
+            "protocol.host.contribute"  => Ok(Capability::ProtocolHostContribute),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -346,8 +361,9 @@ mod tests {
     fn all_slice_covers_all_discriminants() {
         // 14 base + 6 ai.* (ADR 0022 Phase 1) + 2 ai.tools.* (Phase 2)
         // + 2 audio.* (BL-117) + 3 ai.runtime.* (BL-134) + 2
-        // notifications.inbox.* (BL-136).
-        assert_eq!(Capability::ALL.len(), 29);
+        // notifications.inbox.* (BL-136) + 1 protocol.host.* (BL-113
+        // follow-up).
+        assert_eq!(Capability::ALL.len(), 30);
     }
 
     #[test]

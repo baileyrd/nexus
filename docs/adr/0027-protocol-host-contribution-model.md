@@ -157,12 +157,23 @@ The launch-config / variable-renderer / hover-renderer keys reference shell-side
    and the resulting adapter still couldn't *spawn* anything its
    contributing plugin didn't already hold `process.spawn` /
    `net.connect` for, because spawn capabilities are checked at the
-   `launch` / `attach` boundary not at registration. Hard enforcement
-   ("refuse `register_adapter` unless the invoker is core") would
-   require the kernel IPC dispatch to expose caller identity to
-   handlers, which is a separate concern filed as a future hardening
-   item — flagged here so the option stays on the table without
-   blocking BL-113 closure.
+   `launch` / `attach` boundary not at registration.
+
+   **Hardened 2026-05-17 (BL-113 follow-up).** The eight register /
+   unregister verbs (DAP × 2, LSP × 2, MCP host × 2, ACP × 2) now
+   require `Capability::ProtocolHostContribute` in
+   [`cap_matrix.toml`](../../crates/nexus-bootstrap/cap_matrix.toml).
+   The cap is HIGH-risk and held automatically by Core-trust plugins
+   (the CLI / TUI / shell invoker via `TrustLevel::Core =>
+   Capability::ALL`); a community plugin holding only `ipc.call` now
+   gets `IpcError::CapabilityDenied` at the kernel entry, before the
+   call reaches the host handler. The original follow-up proposed
+   threading caller-identity through `IpcDispatcher::dispatch` and
+   every handler signature — that path was abandoned in favour of the
+   cap-matrix gate because BL-138 had already shipped the cleaner
+   seam and the cap version matches the kernel's
+   "capabilities-gate-everything" invariant. Regression test:
+   [`tests/protocol_host_contribute_cap.rs`](../../crates/nexus-bootstrap/tests/protocol_host_contribute_cap.rs).
 4. **Schema validation timing.** Resolved: **both sides validate,
    host-side is authoritative.** The shell renders the launch-config
    form against the JSON Schema referenced in

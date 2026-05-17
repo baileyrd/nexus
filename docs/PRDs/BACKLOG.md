@@ -176,13 +176,9 @@ Each BL-* item lives in its own file under [`backlog/`](backlog/). The table bel
 
 ### Follow-up: kernel-side caller-identity threading for register_adapter verb hardening (from BL-113)
 
-**Source**: BL-113 capability-surface resolution (ADR 0027 §Open Question #3). Filed 2026-05-15.
-**Effort**: Medium. Touches the kernel IPC dispatcher + every handler signature.
-**Crates**: `nexus-kernel`, every service crate that registers a handler.
+**Status**: Shipped 2026-05-17 via `cap_matrix.toml` (not via the originally-proposed handler-signature threading). The eight protocol-host contribution-lifecycle verbs (DAP `{register,unregister}_adapter`, LSP/MCP-host/ACP `{register,unregister}_server`) now require new `Capability::ProtocolHostContribute` (HIGH risk, string `"protocol.host.contribute"`). Core-trust plugins — the CLI / TUI / shell invokers — hold it automatically through `TrustLevel::Core => Capability::ALL`; a community plugin holding only `ipc.call` gets `IpcError::CapabilityDenied` at the kernel's `required_caller_caps_for_args` check in `ipc_call_inner`, before dispatch reaches the host handler. Regression coverage in `crates/nexus-bootstrap/tests/protocol_host_contribute_cap.rs` pins both the deny-community-caller and admit-invoker-caller halves of the gate across all eight verbs.
 
-ADR 0027 resolves the capability question by treating contribution wiring as a declarative manifest pipeline (no verb-level gate). The trust model is **"plugins author manifests; bootstrap calls IPC."** Today there's no kernel-side enforcement preventing a plugin with `ipc.call` from invoking `com.nexus.dap::register_adapter` (or LSP / MCP equivalents) directly — bypassing the contribution pipeline. That can't escalate spawn privileges (those are checked at `launch` / `attach` / `connect`), but it does corrupt `contributed_by` provenance and skip marketplace install records.
-
-Hardening: thread the calling plugin's id through `IpcDispatch::call(...)` into the handler. Handlers that want it (`register_adapter`, `register_server`) can then refuse the call when the caller isn't the trusted bootstrap context. Touches every handler signature in tree — defer until the corruption becomes a real problem or until another concern (audit logs, per-caller rate limits) wants the same plumbing.
+The originally-filed approach — thread caller id through `IpcDispatcher::dispatch` + every `CorePlugin::dispatch` impl — was abandoned because BL-138 had already shipped the `cap_matrix.toml` seam, which lets a per-handler capability requirement land in 5 files instead of ~30 and matches the kernel's "capabilities gate everything" invariant. ADR 0027 §Open Question #3 records the supersession.
 
 ---
 

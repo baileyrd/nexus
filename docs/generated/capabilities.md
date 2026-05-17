@@ -39,5 +39,6 @@ mirror.
 | `ai.runtime.observe` | `AiRuntimeObserve` | Low |
 | `notifications.inbox.read` | `NotificationsInboxRead` | Low |
 | `notifications.inbox.write` | `NotificationsInboxWrite` | Low |
+| `protocol.host.contribute` | `ProtocolHostContribute` | **High** |
 
-_Total: 29 capabilities._
+_Total: 30 capabilities._

@@ -115,6 +115,15 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // user-state columns (`read_at` / `dismissed_at`). Both Low
         // by analogy with kv.read / kv.write.
         Capability::NotificationsInboxRead | Capability::NotificationsInboxWrite => RiskLevel::Low,
+
+        // BL-113 follow-up — protocol-host contribution lifecycle cap.
+        // High by analogy with process.spawn: the verbs it gates inject
+        // adapter / server records that drive downstream `launch` /
+        // `attach` / `connect` (which themselves spawn child
+        // processes). Restricting the cap to the bootstrap invokers
+        // keeps `contributed_by` provenance and marketplace install
+        // records coherent with the contribution pipeline.
+        Capability::ProtocolHostContribute => RiskLevel::High,
     }
 }
 
