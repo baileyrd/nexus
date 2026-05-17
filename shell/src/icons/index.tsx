@@ -49,6 +49,7 @@ import {
   Tag,
   Terminal,
   Trash2,
+  Users,
   Waypoints,
   X,
   Zap,
@@ -118,6 +119,7 @@ const ICON_MAP = {
   book:        { component: BookOpen },
   list:        { component: List },
   comment:     { component: MessageSquare },
+  users:       { component: Users },
 
   // Tools
   search:      { component: Search },

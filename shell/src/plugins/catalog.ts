@@ -152,6 +152,15 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description: 'Source control sidebar — staged/unstaged files, commit UI, branch picker, and commit log.',
     load: () => import('./nexus/gitPanel').then(m => m.gitPanelPlugin),
   },
+  {
+    id: 'nexus.collab', name: 'Collaboration',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
+    description:
+      'BL-143 — peers panel showing live collaborators, their current file and cursor block, and the relay connection state. Wired to com.nexus.collab.* bus events; only meaningful when [collab] is enabled in .forge/config.toml.',
+    load: () => import('./nexus/collab').then(m => m.collabPlugin),
+  },
   // ── Chrome ─────────────────────────────────────────────────────────────────
   {
     id: 'nexus.activityBar', name: 'Activity Bar',
