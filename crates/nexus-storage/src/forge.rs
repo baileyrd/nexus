@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use fs4::fs_std::FileExt;
+use fs4::{FileExt, TryLockError};
 
 use crate::StorageError;
 
@@ -251,14 +251,12 @@ impl Forge {
         // Cross-platform non-blocking exclusive lock — `flock(2)` on Unix,
         // `LockFileEx` on Windows (via the `fs4` crate). Released on drop
         // because the underlying `File` is closed.
-        match FileExt::try_lock_exclusive(&file) {
+        match FileExt::try_lock(&file) {
             Ok(()) => Ok(ForgeLock { _file: file }),
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                Err(StorageError::LockHeld(
-                    "another process holds the forge lock".to_string(),
-                ))
-            }
-            Err(e) => Err(StorageError::Io(e)),
+            Err(TryLockError::WouldBlock) => Err(StorageError::LockHeld(
+                "another process holds the forge lock".to_string(),
+            )),
+            Err(TryLockError::Error(e)) => Err(StorageError::Io(e)),
         }
     }
 }

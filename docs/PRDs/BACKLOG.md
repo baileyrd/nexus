@@ -288,7 +288,7 @@ Capabilities described in legacy `app/` documentation that were not carried over
 
 ### Open
 
-- [ ] **OI-05: Rust dep duplication** — Blocked on upstream. 34 crates with duplicated versions all trace through `wasmtime 42` (toml/sha2/digest/rand_core/reqwest/rustix/nix/hashbrown) or `portable-pty → filedescriptor` (`thiserror 1`). Revisit after the next wasmtime major release.
+- [ ] **OI-05: Rust dep duplication** — Partially drained 2026-05-17. Workspace bumps `wasmtime 42 → 44`, `fs4 0.9 → 1`, `rustyline 14 → 18`, `criterion 0.7 → 0.8` collapsed five duplicate-version pairs (`foldhash`, `hashbrown 0.15`, `rustix`, `linux-raw-sys`, `unicode-width`). Down from 34 → ~25 pairs. Remaining residue is upstream-bound on `wasmtime 44` (`toml 0.9` + `winnow 0.7` + `hashbrown 0.16` + `wasm-encoder 0.246`), `portable-pty 0.9` (`thiserror 1` + `nix 0.28` + `cfg_aliases 0.1` + `downcast-rs 1`), `ed25519-dalek 2.x` (RustCrypto v0.10 stack — `sha2 0.10` + `digest 0.10` + `block-buffer 0.10` + `crypto-common 0.1` + `rand_core 0.6` + `getrandom 0.2` + `cpufeatures 0.2`), `chacha20poly1305 0.10.1` (`chacha20 0.9`), `tantivy 0.26` (`nom 7` + `fs4 0.13` + `downcast-rs 2`), and `jsonschema 0.46` (`reqwest 0.13` + `getrandom 0.3` via ahash). Full per-pair classification in [../roadmap/OPEN-ITEMS.md](../roadmap/OPEN-ITEMS.md#oi-05--rust-dependency-duplication). Revisit when `wasmtime` next ships, `ed25519-dalek 3.0` / `chacha20poly1305 0.11` go stable, or `portable-pty` releases.
 
 ### Resolved (preserved here for cross-reference; full notes in [../archive/OPEN-ITEMS-resolved-2026-04-26.md](../archive/OPEN-ITEMS-resolved-2026-04-26.md))
 
