@@ -1186,6 +1186,64 @@ enum SavePlan {
     },
 }
 
+/// BL-141 Approach B step 4A — after a synthetic session's save
+/// lands, walk its Excerpt blocks and update each
+/// `(line_start, line_end)` to reflect the post-splice positions
+/// computed by [`reflow_excerpt_ranges_for_source`]. Keeps the
+/// invariant `slice_lines(source, line_start, line_end) ==
+/// block.content` true after a save that grew or shrank the content
+/// — so the next `refresh_excerpts` is a no-op for unchanged
+/// blocks, and so the next save's splices target the right lines.
+fn apply_reflow_after_save(sessions: &SessionMap, relpath: &str) -> Result<(), PluginError> {
+    let entry = acquire_session_entry(sessions, relpath, "save:reflow")?;
+    let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+    if !guard.is_synthetic {
+        return Ok(());
+    }
+    // Group block ids by source relpath, capturing input order so we
+    // can map the reflow result back.
+    let mut groups: HashMap<String, Vec<(usize, uuid::Uuid, u32, u32, u32)>> = HashMap::new();
+    for (input_idx, block_id) in guard.tree.root_blocks.clone().into_iter().enumerate() {
+        let Some(block) = guard.tree.blocks.get(&block_id) else {
+            continue;
+        };
+        let BlockType::Excerpt {
+            source_relpath,
+            line_start,
+            line_end,
+            ..
+        } = &block.ty
+        else {
+            continue;
+        };
+        let new_count = u32::try_from(block.content.lines().count()).unwrap_or(u32::MAX);
+        groups
+            .entry(source_relpath.clone())
+            .or_default()
+            .push((input_idx, block_id, *line_start, *line_end, new_count));
+    }
+    for entries in groups.into_values() {
+        let inputs: Vec<(u32, u32, u32)> = entries
+            .iter()
+            .map(|(_, _, start, end, count)| (*start, *end, *count))
+            .collect();
+        let outs = reflow_excerpt_ranges_for_source(&inputs);
+        for ((_, block_id, _, _, _), (new_start, new_end)) in entries.iter().zip(outs) {
+            let Some(block) = guard.tree.blocks.get_mut(block_id) else {
+                continue;
+            };
+            if let BlockType::Excerpt {
+                line_start, line_end, ..
+            } = &mut block.ty
+            {
+                *line_start = new_start;
+                *line_end = new_end;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Plan the save under the session lock (so the IPC handler holds
 /// the lock for the minimum time + the actual I/O can happen
 /// without contending with concurrent dispatches).
@@ -1235,6 +1293,57 @@ fn plan_save(
     Ok(SavePlan::Splice { sources })
 }
 
+/// BL-141 Approach B step 4A — compute the post-save `(line_start,
+/// line_end)` positions for every Excerpt in a single source file.
+///
+/// Inputs carry the original range + the post-edit line count of the
+/// excerpt's content (typically `content.lines().count()`). Outputs
+/// land in INPUT ORDER so callers can zip them back against their
+/// own list. Internally the function sorts by `line_start` ascending
+/// so the running delta accumulates the same way `splice_excerpts`
+/// shifts source lines — earlier (smaller-line-start) excerpts grow
+/// or shrink the source, and later excerpts' positions move by the
+/// running net delta.
+///
+/// Empty post-edit content (the user deleted everything inside the
+/// excerpt) collapses to a degenerate range `(start, start - 1)` —
+/// `slice_lines` returns empty for `start > end`, so a subsequent
+/// `refresh_excerpts` reads back as empty without crashing.
+///
+/// Pure (no I/O, no session lock). Exposed crate-internally so the
+/// post-save hook can wire it up; exercised by `reflow_tests`.
+pub(crate) fn reflow_excerpt_ranges_for_source(
+    excerpts: &[(u32, u32, u32)],
+) -> Vec<(u32, u32)> {
+    // Pair each excerpt with its input index so we can restore the
+    // caller's ordering at the end.
+    let mut by_start: Vec<(usize, u32, u32, u32)> = excerpts
+        .iter()
+        .enumerate()
+        .map(|(i, &(start, end, new_count))| (i, start, end, new_count))
+        .collect();
+    by_start.sort_by_key(|t| t.1);
+
+    let mut out: Vec<(u32, u32)> = vec![(0, 0); excerpts.len()];
+    let mut delta: i64 = 0;
+    for (idx, original_start, original_end, new_count) in by_start {
+        // Shift the start by the running delta from earlier excerpts.
+        let shifted_start = i64::from(original_start) + delta;
+        let new_start = u32::try_from(shifted_start.max(1)).unwrap_or(u32::MAX);
+        let new_end = if new_count == 0 {
+            new_start.saturating_sub(1)
+        } else {
+            new_start.saturating_add(new_count.saturating_sub(1))
+        };
+        out[idx] = (new_start, new_end);
+
+        // Accumulate the delta this excerpt contributed.
+        let old_span = i64::from(original_end) - i64::from(original_start) + 1;
+        delta += i64::from(new_count) - old_span;
+    }
+    out
+}
+
 /// Splice every entry in `splices` into `old`. Splices are applied
 /// in reverse-line-order so earlier splices don't shift the line
 /// numbers of later ones. Out-of-range entries (line_start past
@@ -1277,7 +1386,9 @@ fn handle_save_sync(
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "save")?;
-    match plan_save(sessions, &relpath)? {
+    let plan = plan_save(sessions, &relpath)?;
+    let is_splice = matches!(plan, SavePlan::Splice { .. });
+    match plan {
         SavePlan::Regular { markdown } => {
             let abs = resolve_within(forge_root, &relpath)
                 .map_err(|e| exec_err(format!("save: {e}")))?;
@@ -1304,6 +1415,9 @@ fn handle_save_sync(
             }
         }
     }
+    if is_splice {
+        apply_reflow_after_save(sessions, &relpath)?;
+    }
     Ok(serde_json::json!({}))
 }
 
@@ -1315,6 +1429,7 @@ async fn handle_save_async(
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "save")?;
     let plan = plan_save(&sessions, &relpath)?;
+    let is_splice = matches!(plan, SavePlan::Splice { .. });
 
     if let Some(ctx) = ctx.as_deref() {
         // Canonical path: storage's `write_file` does temp + fsync +
@@ -1354,6 +1469,9 @@ async fn handle_save_async(
                 }
             }
         }
+        if is_splice {
+            apply_reflow_after_save(&sessions, &relpath)?;
+        }
         Ok(serde_json::json!({}))
     } else {
         // Fallback for context-less unit tests — mirror the sync path
@@ -1384,6 +1502,9 @@ async fn handle_save_async(
                     })?;
                 }
             }
+        }
+        if is_splice {
+            apply_reflow_after_save(&sessions, &relpath)?;
         }
         Ok(serde_json::json!({}))
     }
@@ -2682,6 +2803,58 @@ mod splice_tests {
         let old = "A\nB\nC\n";
         let got = splice_excerpts(old, vec![sp(2, 99, "X")]);
         assert_eq!(got, "A\nX\n");
+    }
+}
+
+#[cfg(test)]
+mod reflow_tests {
+    use super::reflow_excerpt_ranges_for_source;
+
+    #[test]
+    fn reflow_unchanged_excerpts_yields_identity() {
+        // (line_start, line_end, new_count). Same line counts as
+        // before → no drift.
+        let got = reflow_excerpt_ranges_for_source(&[(2, 4, 3), (8, 10, 3)]);
+        assert_eq!(got, vec![(2, 4), (8, 10)]);
+    }
+
+    #[test]
+    fn reflow_growing_earlier_excerpt_shifts_later_ones() {
+        // E1 was 3 lines (2..=4), now 5 lines.
+        // E2 was 3 lines (8..=10), unchanged in count → shifts by +2.
+        let got = reflow_excerpt_ranges_for_source(&[(2, 4, 5), (8, 10, 3)]);
+        assert_eq!(got, vec![(2, 6), (10, 12)]);
+    }
+
+    #[test]
+    fn reflow_shrinking_earlier_excerpt_shifts_later_ones_negative() {
+        // E1 was 3 lines (2..=4), now 1 line. Delta -2.
+        // E2 was 1 line (8..=8), unchanged in count → shifts by -2.
+        let got = reflow_excerpt_ranges_for_source(&[(2, 4, 1), (8, 8, 1)]);
+        assert_eq!(got, vec![(2, 2), (6, 6)]);
+    }
+
+    #[test]
+    fn reflow_preserves_input_order_when_inputs_are_unsorted() {
+        // Same physical positions as test 2 but inputs out of order.
+        let got = reflow_excerpt_ranges_for_source(&[(8, 10, 3), (2, 4, 5)]);
+        assert_eq!(got, vec![(10, 12), (2, 6)]);
+    }
+
+    #[test]
+    fn reflow_empty_content_yields_degenerate_range() {
+        // Empty content (0 lines) ⇒ (start, start-1).
+        let got = reflow_excerpt_ranges_for_source(&[(5, 7, 0)]);
+        assert_eq!(got, vec![(5, 4)]);
+    }
+
+    #[test]
+    fn reflow_handles_three_excerpts_with_mixed_deltas() {
+        // E1 (2..=4): 3 → 5  (delta +2)
+        // E2 (8..=10): 3 → 3 (delta 0; shifted by +2)
+        // E3 (15..=15): 1 → 0 (delta -1; shifted by +2)
+        let got = reflow_excerpt_ranges_for_source(&[(2, 4, 5), (8, 10, 3), (15, 15, 0)]);
+        assert_eq!(got, vec![(2, 6), (10, 12), (17, 16)]);
     }
 }
 

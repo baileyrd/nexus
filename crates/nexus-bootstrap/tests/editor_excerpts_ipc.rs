@@ -815,6 +815,108 @@ async fn refresh_excerpts_rejects_non_synthetic_session() {
     );
 }
 
+/// BL-141 Approach B step 4A — after a save splices a grown
+/// excerpt into the source, the synthetic session's stored
+/// `(line_start, line_end)` updates to reflect the new line range.
+/// A subsequent `refresh_excerpts` is then a no-op (slice at the
+/// new range == current content), so the multibuffer doesn't show
+/// stale lines.
+#[tokio::test]
+async fn save_reflows_excerpt_ranges_to_match_post_splice_positions() {
+    use nexus_editor::{Operation, Transaction, TransactionMetadata};
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "doc.md", "L1\nL2\nL3\nL4\nL5\n");
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    // Two excerpts in the same file: lines 2..=2 and lines 4..=4.
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 2, "line_end": 2 },
+                    { "relpath": "doc.md", "line_start": 4, "line_end": 4 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    let first = snap.tree.root_blocks[0];
+    let second = snap.tree.root_blocks[1];
+    assert_eq!(snap.tree.blocks[&first].content, "L2");
+    assert_eq!(snap.tree.blocks[&second].content, "L4");
+
+    // Grow the first excerpt: "L2" → "L2\nL2.5" (1 → 2 lines).
+    let tx = Transaction::new(
+        vec![Operation::UpdateBlockContent {
+            id: first,
+            old_content: "L2".into(),
+            new_content: "L2\nL2.5".into(),
+            old_annotations: Vec::new(),
+            new_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        json!({ "relpath": snap.relpath, "transaction": tx }),
+    )
+    .await
+    .expect("apply_transaction ok");
+
+    // Save splices both excerpts back into the source. After save:
+    // source should be "L1\nL2\nL2.5\nL3\nL4\nL5\n" (6 lines) and
+    // the second excerpt's stored line should shift from 4 → 5.
+    call(&runtime, "save", json!({ "relpath": snap.relpath }))
+        .await
+        .expect("save ok");
+
+    let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
+    assert_eq!(on_disk, "L1\nL2\nL2.5\nL3\nL4\nL5\n");
+
+    // get_tree after save: the second excerpt's stored line should
+    // now point at the post-splice position (line 5 in the new
+    // source, which still contains "L4").
+    let after: EditorSnapshot = serde_json::from_value(
+        call(&runtime, "get_tree", json!({ "relpath": snap.relpath }))
+            .await
+            .expect("get_tree ok"),
+    )
+    .unwrap();
+    let second_ty =
+        serde_json::to_value(&after.tree.blocks[&second].ty).unwrap();
+    assert_eq!(second_ty["line_start"], 5);
+    assert_eq!(second_ty["line_end"], 5);
+    // The first excerpt's range grew from 1 line to 2.
+    let first_ty = serde_json::to_value(&after.tree.blocks[&first].ty).unwrap();
+    assert_eq!(first_ty["line_start"], 2);
+    assert_eq!(first_ty["line_end"], 3);
+
+    // Refresh is now a no-op for the second excerpt's content (the
+    // slice at the updated range still matches the snapshot).
+    let refreshed: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "refresh_excerpts",
+            json!({ "relpath": snap.relpath }),
+        )
+        .await
+        .expect("refresh_excerpts ok"),
+    )
+    .unwrap();
+    assert_eq!(refreshed.tree.blocks[&second].content, "L4");
+    // The first excerpt is also unchanged: its new range (2..=3)
+    // reads "L2\nL2.5" from the new source — same as the snapshot.
+    assert_eq!(refreshed.tree.blocks[&first].content, "L2\nL2.5");
+}
+
 /// Unknown relpath surfaces as a session-not-found error.
 #[tokio::test]
 async fn refresh_excerpts_rejects_unknown_session() {
