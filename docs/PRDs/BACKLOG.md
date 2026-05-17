@@ -25,7 +25,7 @@ Each BL-* item lives in its own file under [`backlog/`](backlog/). The table bel
 | [BL-146](backlog/BL-146.md) | closed | 2026-05-16 | Subscription replay on remote-forge reconnect (BL-140 follow-up) |
 | [BL-143](backlog/BL-143.md) | closed | 2026-05-17 | Live collaboration network transport (Phase 1 + 2 shipped; Phase 3 hosted relay / WebRTC deferred as out of scope) |
 | [BL-142](backlog/BL-142.md) | closed | 2026-05-17 | REPL / in-buffer evaluation (Phases 1+2a+2b+3 shipped; Phase 2b CM6 wiring verified via EditorView integration tests, surfaced + fixed two production bugs; Phase 3 Settings → REPL Kernels tab shipped) |
-| [BL-141](backlog/BL-141.md) | Phases 1+2A+3 closed | 2026-05-16 | Multibuffer / multi-excerpt view (diagnostics-panel consumer + Approach B remain open) |
+| [BL-141](backlog/BL-141.md) | Phases 1+2A+3 closed | 2026-05-17 | Multibuffer / multi-excerpt view (diagnostics-panel consumer shipped 2026-05-17; Approach B remains the only open follow-up) |
 | [BL-140](backlog/BL-140.md) | closed | 2026-05-16 | SSH remote forge |
 | [BL-145](backlog/BL-145.md) | closed | 2026-05-15 | `nexus-acp` server — inbound ACP surface for external clients (Hermes Feature 7) |
 | [BL-144](backlog/BL-144.md) | closed | 2026-05-15 | `nexus-acp` host — outbound ACP adapter integration (BL-113 Phase 4) |

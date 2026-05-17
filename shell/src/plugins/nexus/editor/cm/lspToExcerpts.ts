@@ -18,7 +18,7 @@
 //   (`L42` / `L42-L48`) so the multibuffer's per-excerpt header
 //   tells the user where each match came from.
 
-import type { LspRange } from './lspIpc.ts'
+import type { LspDiagnostic, LspRange } from './lspIpc.ts'
 
 /** LSP `Location` shape — minimal subset we use. */
 export interface LspLocation {
@@ -169,4 +169,73 @@ export function workspaceEditToExcerptRequests(
     }
   }
   return out
+}
+
+/** Short-form severity tag for per-excerpt labels. LSP severity codes:
+ *  1 Error, 2 Warning, 3 Info, 4 Hint. Unknown / missing falls back to
+ *  Error per the LSP spec recommendation. Exported for the diagnostics
+ *  panel which uses the same short form in its row rendering. */
+export function severityTag(severity?: number): string {
+  switch (severity) {
+    case 2:
+      return 'warn'
+    case 3:
+      return 'info'
+    case 4:
+      return 'hint'
+    case 1:
+    default:
+      return 'error'
+  }
+}
+
+/**
+ * Convert a URI-keyed diagnostics map (the natural shape of
+ * accumulated `publishDiagnostics` events) into `ExcerptRequest[]`.
+ * One excerpt per diagnostic; URIs outside the forge root drop
+ * silently; per-excerpt label embeds the severity tag + first line
+ * of the diagnostic message (long / multi-line messages are
+ * truncated so the multibuffer's per-excerpt header stays scannable).
+ *
+ * File iteration order follows `Object.entries` (insertion order for
+ * string keys per ECMAScript spec) — the diagnostics panel keys its
+ * map by first-seen URI, so the multibuffer mirrors the panel's
+ * visual order.
+ */
+export function diagnosticsToExcerptRequests(
+  diagnosticsByUri: Record<string, LspDiagnostic[]>,
+  opts: ToExcerptsOptions,
+): ExcerptRequest[] {
+  if (!diagnosticsByUri) return []
+  const contextLines = opts.contextLines ?? DEFAULT_CONTEXT_LINES
+  const out: ExcerptRequest[] = []
+  for (const [uri, diags] of Object.entries(diagnosticsByUri)) {
+    const relpath = uriToRelpath(uri, opts.forgeRoot)
+    if (relpath === null || relpath === '') continue
+    if (!Array.isArray(diags)) continue
+    for (const d of diags) {
+      if (!d?.range) continue
+      const lines = rangeToExcerptLines(d.range, contextLines)
+      out.push({
+        relpath,
+        line_start: lines.line_start,
+        line_end: lines.line_end,
+        label: diagnosticLabel(d),
+      })
+    }
+  }
+  return out
+}
+
+/** Truncate-and-flatten a diagnostic message for use in the
+ *  per-excerpt header. Long messages would push the header past the
+ *  multibuffer's visible width; multi-line messages would break the
+ *  header layout. Exported for tests. */
+export function diagnosticLabel(d: LspDiagnostic): string {
+  const head = rangeLabel(d.range)
+  const tag = severityTag(d.severity)
+  const flat = (d.message ?? '').replace(/\s+/g, ' ').trim()
+  const MAX = 80
+  const msg = flat.length > MAX ? `${flat.slice(0, MAX - 1)}…` : flat
+  return msg ? `${head} ${tag}: ${msg}` : `${head} ${tag}`
 }

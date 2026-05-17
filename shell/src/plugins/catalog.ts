@@ -247,6 +247,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/dreamCycle').then(m => m.dreamCyclePlugin),
   },
   {
+    id: 'nexus.diagnostics', name: 'Diagnostics',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description:
+      'BL-141 follow-up — global LSP diagnostics panel. Subscribes to com.nexus.lsp.textDocument.publishDiagnostics, groups errors / warnings / info / hints by file with click-to-jump, and ships an "Open all in multibuffer" button that funnels every in-forge diagnostic through editor.open_excerpts.',
+    load: () => import('./nexus/diagnostics').then(m => m.diagnosticsPlugin),
+  },
+  {
     id: 'nexus.notificationsSettings', name: 'Notifications Settings',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
