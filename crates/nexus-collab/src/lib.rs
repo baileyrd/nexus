@@ -32,10 +32,15 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod auth;
+pub mod client;
 pub mod protocol;
 pub mod server;
 
 pub use auth::{Token, TokenError};
+pub use client::{
+    CollabClient, CollabClientConfig, ConnectError, ConnectParams, DEFAULT_HANDSHAKE_TIMEOUT,
+    EDITOR_PLUGIN_ID, OPS_TOPIC_PREFIX,
+};
 pub use protocol::{
     ClientMessage, PeerInfo, ServerMessage, ERR_AUTH, ERR_BAD_FRAME, ERR_HANDSHAKE,
 };

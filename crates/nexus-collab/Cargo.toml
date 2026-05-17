@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Nexus live-collaboration network transport (BL-143 Phase 1) — WebSocket relay that ferries CRDT op + presence envelopes between peers"
 
 [dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

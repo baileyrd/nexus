@@ -53,6 +53,7 @@ pub mod cap_matrix;
 /// BL-138 — named args-aware capability policies referenceable from
 /// the cap matrix. See [`cap_policies::resolve`].
 pub mod cap_policies;
+pub mod collab;
 pub mod crdt_publisher;
 pub mod database;
 pub mod dream_cycle;
@@ -412,6 +413,15 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     shared
         .wire_context(nexus_ai_runtime::PLUGIN_ID, Arc::new(ai_runtime_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire ai-runtime plugin context: {e}"))?;
+
+    // BL-143 Phase 1.2 — opt-in WebSocket relay bridge. Reads
+    // `[collab]` from `.forge/config.toml`; spawns a `CollabClient`
+    // bridging `com.nexus.editor.ops.*` events to a remote relay when
+    // an ambient tokio runtime is reachable. Dropping the handle
+    // detaches the task — its lifetime is tied to the tokio runtime
+    // (i.e. the process), which is the right shape until BL-143 Phase
+    // 1.5 wires explicit reconnect / shutdown.
+    let _ = collab::start_if_enabled(forge_root, Arc::clone(&event_bus));
 
     let context = KernelPluginContext::new(
         invoker_id,
