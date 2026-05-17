@@ -20,6 +20,20 @@ export interface DapKernelAPI {
   ): Promise<T>
 }
 
+/** Opaque metadata payload contributed by a plugin's
+ *  `protocol_hosts.dap` entry (BL-113). The shell reads
+ *  `display_name` for the launch picker and `launch_config_schema`
+ *  (relative path inside the plugin directory) to render the launch
+ *  form. The shape is intentionally untyped here — first-party DAP
+ *  plugins can extend it without churning this interface. */
+export interface DapAdapterMetadata {
+  display_name?: string
+  launch_config_schema?: string
+  plugin_id?: string
+  root_markers?: string[]
+  [key: string]: unknown
+}
+
 /** One row from `list_adapters`. */
 export interface DapAdapterEntry {
   name: string
@@ -29,6 +43,10 @@ export interface DapAdapterEntry {
   file_types: string[]
   disabled: boolean
   connected: boolean
+  /** BL-113 follow-up — opaque payload contributed via the plugin
+   *  manifest. Present when the adapter was contributed; missing
+   *  when it was registered directly via `register_adapter`. */
+  metadata?: DapAdapterMetadata | null
 }
 
 export interface DapSourceBreakpoint {

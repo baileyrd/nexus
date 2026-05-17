@@ -239,6 +239,21 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
       'BL-136 — persistent inbox panel for notifications. Reads from com.nexus.notifications::inbox_list and lets the user mark read / dismiss / jump-to-source. Without this plugin notifications are still toasted live by nexus.notifications, but the history is not surfaced.',
     load: () => import('./nexus/notificationsInbox').then(m => m.notificationsInboxPlugin),
   },
+  {
+    id: 'nexus.dreamCycle', name: 'Dream Cycle',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description:
+      'BL-129 follow-up — subscribes to com.nexus.dream_cycle.proposals and toasts "N new relation proposals from Dream Cycle" after a nightly run. The per-row approve/skip inbox is gated on a future list_draft_relations IPC.',
+    load: () => import('./nexus/dreamCycle').then(m => m.dreamCyclePlugin),
+  },
+  {
+    id: 'nexus.notificationsSettings', name: 'Notifications Settings',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    description:
+      'BL-133 follow-up — Settings → Notifications tab. Per-channel credential entry (Discord/Telegram/SMTP) backed by the OS keyring + "Send test" buttons that dispatch com.nexus.notifications::send directly.',
+    load: () => import('./nexus/notificationsSettings').then(m => m.notificationsSettingsPlugin),
+  },
   // ── UX primitives ──────────────────────────────────────────────────────────
   {
     id: 'nexus.commandPalette', name: 'Command Palette',

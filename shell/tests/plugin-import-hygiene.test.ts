@@ -65,6 +65,8 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/workspace/index.ts',                    // shell-internal: boot_kernel + init_forge + shutdown_kernel + plugin-dialog.open
   'shell/src/plugins/nexus/workspace/useConnectionState.ts',       // BL-140 Phase 3c — shell-internal: kernel_connection_state read + kernel:connection-state event. State lives in the bridge layer's managed-state slot, no kernel plugin owns it, so an api.kernel.invoke surface would just be a thin wrapper around the same Tauri command.
   'shell/src/plugins/nexus/notion/index.ts',                       // plugin-dialog.open for source-zip + dest-folder pickers (no PlatformDialog API surface yet — same drain plan as workspace plugin)
+  'shell/src/plugins/nexus/notifications/index.ts',                // BL-133 follow-up: tauri invoke('notify_desktop') for OS-level notifications — no api.notifications.osLevel surface yet
+  'shell/src/plugins/nexus/debugger/LaunchConfig.tsx',             // BL-113 follow-up: tauri invoke('scan_plugin_directory') + plugin-fs.readTextFile to resolve metadata.launch_config_schema — no api.plugins.dir surface yet
   //
   // ─── Partial Tauri retention: missing api.platform surface ────────────────
   // fileSystemService routed read/write/etc through api.platform.fs in WI-25

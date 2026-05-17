@@ -9,9 +9,22 @@
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
+import { invoke } from '@tauri-apps/api/core'
 
 /** Topic the `nexus-notifications` Desktop transport publishes on. */
 const TOPIC = 'com.nexus.notifications.delivered'
+
+/** Fire-and-forget OS-level notification via the `notify_desktop`
+ *  bridge command (BL-133 follow-up). Failure is logged at debug — the
+ *  in-app toast still surfaces the message, so a dev build without the
+ *  Tauri bridge (running under Vite directly) keeps working. */
+async function notifyDesktop(title: string, message: string): Promise<void> {
+  try {
+    await invoke('notify_desktop', { title, message })
+  } catch (err) {
+    clientLogger.debug('[nexus.notifications] notify_desktop unavailable:', err)
+  }
+}
 
 /** Wire shape `DesktopTransport::send` emits — mirrors
  *  `crates/nexus-notifications/src/lib.rs::DesktopTransport`. */
@@ -66,10 +79,17 @@ export const notificationsPlugin: Plugin = {
           TOPIC,
           (_topic, payload) => {
             if (!payload || typeof payload.message !== 'string') return
-            api.notifications.show({
-              message: composeToastMessage(payload),
-              type: toastTypeFor(payload),
-            })
+            const message = composeToastMessage(payload)
+            const type = toastTypeFor(payload)
+            api.notifications.show({ message, type })
+            // BL-133 follow-up — also fire the OS-level notification so
+            // a backgrounded Nexus window still surfaces the alert.
+            // The bridge is best-effort; the in-app toast above is the
+            // authoritative surface.
+            if (!document.hasFocus()) {
+              const title = payload.title?.trim() || 'Nexus'
+              void notifyDesktop(title, message)
+            }
           },
         )
       } catch (err) {

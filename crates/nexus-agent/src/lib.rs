@@ -44,6 +44,8 @@ use thiserror::Error;
 
 mod agents;
 mod archetypes;
+/// BL-133 follow-up — auto-notify subscriber for completed agent sessions.
+pub mod auto_notify;
 pub mod core_plugin;
 pub mod custom_agent;
 mod handlers;

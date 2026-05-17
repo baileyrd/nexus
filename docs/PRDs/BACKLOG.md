@@ -188,17 +188,7 @@ Hardening: thread the calling plugin's id through `IpcDispatch::call(...)` into 
 
 ### Follow-up: shell-side launch-config form renderer (from BL-113 first-party DAP plugin)
 
-**Source**: BL-113 deferral. Filed 2026-05-15.
-**Effort**: Medium. ~200–300 LOC across `shell/src/plugins/nexus/debugger/`.
-**Crates**: shell (`nexus.debugger` plugin).
-
-The first-party `first-party.dap.python` plugin (merged to `main` via PR #163) plumbs the contributed `launch_config_schema` to the shell via the host's opaque `metadata` field on `list_adapters`. What's still missing is the actual form-rendering UX:
-
-1. A `<LaunchPicker>` dropdown in `DebuggerPanel.tsx` listing adapters from `list_adapters`, badged by `metadata.display_name`.
-2. A `<LaunchConfigForm>` component that reads `metadata.launch_config_schema` (relative path), resolves it against the plugin directory, fetches via Tauri fs, and renders a typed form. Minimum coverage: top-level `type: object` with `string` / `boolean` / `array<string>` property kinds (debugpy's launch spec uses only these). Defaults from the schema seed initial values.
-3. Submit calls `useDebuggerStore.startSession(api, { adapter, ...formValues })`.
-
-Gating: the panel has no launch UI today, so this is a net-new feature track rather than a polish pass. The infrastructure to feed it (manifest contribution → host metadata → wire surface) is in place.
+**Status**: Shipped 2026-05-17. New `shell/src/plugins/nexus/debugger/LaunchConfig.tsx` slots into `DebuggerPanel` when no session is active, fetches `list_adapters`, badges entries with `metadata.display_name`, resolves `metadata.launch_config_schema` against the contributing plugin's `dir` (via `scan_plugin_directory` + `readTextFile`), and renders a typed form covering `string` / `boolean` / `array<string>` / `enum` property kinds with schema defaults. Submit routes through `useDebuggerStore.startSession` with a `buildLaunchOpts` helper that hoists known keys into `LaunchOpts` and routes unknown keys into `extra`. A generic fallback form (`program` / `args` / `cwd` / `stop_on_entry`) renders when no schema is contributed. Nine pure-helper unit tests cover `seedDefaults` + `buildLaunchOpts`.
 
 ---
 
@@ -229,17 +219,9 @@ BL-127 Phase A's editor-engine measurements capture the CM6 → StateField / Vie
 
 ### Follow-up: shell subscriber for Dream Cycle relation proposals (from BL-129)
 
-**Source**: BL-129 verification 2026-05-15.
-**Effort**: Small. Shell-side plugin only; backend already publishes the event.
-**Crates**: new `shell/src/plugins/nexus/dreamCycle/`; no Rust changes.
+**Status**: Toast surface shipped 2026-05-17. Per-row approve/skip inbox remains open — gated on a `list_draft_relations` IPC handler that does not yet exist.
 
-`com.nexus.ai::infer_entity_relations` already writes draft relations at `confidence: 0.5` and publishes `com.nexus.dream_cycle.proposals` on the kernel bus when any proposals land. The BL-129 DoD's "shell notification surfaces 'N new relation proposals from Dream Cycle' with an approve/skip action" needs a shell plugin that subscribes to that event and:
-
-1. Counts the proposals in the payload, surfaces a toast through `api.notifications.show` (or routes through the BL-133 `nexus.notifications` plugin) with the `N new relation proposals` text.
-2. Provides an inbox / panel listing the draft relations (entity pair, proposed kind, confidence) with per-row approve / skip actions.
-3. Approve bumps `confidence` to a configurable confirmed value (default `1.0`) via `entity_upsert`; skip removes the draft via the same handler with the relation omitted from the payload.
-
-Mirror the BL-133 shell-subscriber shape (`shell/src/plugins/nexus/notifications/index.ts`) — small plugin, default-on, registered in `shell/src/plugins/catalog.ts`.
+Toast subscriber lives in `shell/src/plugins/nexus/dreamCycle/index.ts` and registers as `nexus.dreamCycle` in the catalog. Pure-helper unit tests cover singular/plural/zero-suppression in `shell/tests/dream-cycle-plugin.test.ts`. Bumping `confidence` to a confirmed value via `entity_upsert` (and the inbox UI that surfaces individual proposals for approve/skip) is the remaining piece — it needs an enumeration handler so the shell can fetch the per-relation rows without iterating every entity.
 
 ---
 
@@ -263,38 +245,19 @@ DG-34 / BL-132 ship the flag at the agent-tool level (`AgentToolSpec.requires_ap
 
 ### Follow-up: Tauri `notification` plugin integration (from BL-133)
 
-**Source**: BL-133 deferral. Filed 2026-05-14. Updated 2026-05-14 after the in-app subscriber landed.
-**Effort**: Small. Shell-side Tauri integration only.
-
-The in-app toast subscriber landed; the next refinement is hooking the bus event into the OS-level notification plugin so notifications fire even when the Nexus window doesn't have focus. Add `tauri-plugin-notification` to `shell/src-tauri/Cargo.toml`, expose a `notify_desktop(title, message)` bridge command, and have `nexus.notifications` call it alongside (or instead of) `api.notifications.show`. The bus contract stays the same; only the renderer changes.
+**Status**: Shipped 2026-05-17. `tauri-plugin-notification = "2"` added to `shell/src-tauri/Cargo.toml`, `notify_desktop(title, message)` Tauri command wired in `shell/src-tauri/src/lib.rs`, and the existing `nexus.notifications` plugin now fires `invoke('notify_desktop', ...)` when `!document.hasFocus()` alongside the in-app toast. Capabilities default file grants `notification:default` + `allow-notify` + `allow-permission-state` + `allow-request-permission`.
 
 ---
 
 ### Follow-up: background agent auto-notify (from BL-133)
 
-**Source**: BL-133 deferral. Filed 2026-05-14. Updated 2026-05-14 after CLI auto-notify + workflow notify-step landed.
-**Effort**: Medium. Needs a new bus event from `nexus-agent` + a subscriber in `nexus-bootstrap`.
-
-CLI agent auto-notify (`nexus agent run --notify-after-secs`) covers human-driven sessions. Workflow `notify` step lets a workflow author surface specific moments. What's still missing is the **automatic background path**: a workflow- or schedule-triggered agent session that exceeds the threshold should notify without the author having to add an explicit `notify` step. Needs:
-
-1. A new `com.nexus.agent.session_completed { session_id, duration_ms, outcome, ... }` event published from `handle_session_run` after the run finishes.
-2. A `nexus-bootstrap` subscriber that watches the event and dispatches `notifications::send` when `duration_ms > threshold`. Threshold lives in `[agent] auto_notify_threshold_s` (default 30s).
-
-The subscriber can be conditional — only fires when at least one notification channel is configured, so a forge with `[notifications]` absent doesn't pay for the subscription.
+**Status**: Shipped 2026-05-17. `handle_session_run` publishes `com.nexus.agent.session_completed` with `{session_id, duration_ms, outcome, archetype, goal}` after persistence. `AgentCorePlugin::on_start` (when a tokio handle is in scope — TUI/shell, not CLI single-shot) spawns the subscriber from `crates/nexus-agent/src/auto_notify.rs`, which reads `[agent].auto_notify_threshold_s` from `<forge>/.forge/config.toml` (default 30s, `0` disables) and dispatches `com.nexus.notifications::send` when the elapsed duration crosses the threshold. Nine pure-helper unit tests cover the threshold loader, RFC 3339 duration math, and message formatter.
 
 ---
 
 ### Follow-up: shell settings panel for notifications (from BL-133)
 
-**Source**: BL-133 deferral. Filed 2026-05-14.
-**Effort**: Small. Shell-side UI.
-
-A dedicated panel under Settings → Notifications would let users:
-- Toggle each channel on/off.
-- Enter the Discord webhook URL / Telegram credentials / SMTP server (stored via the existing `nexus-security` keyring IPC).
-- "Send test" button per channel that dispatches a hello-world notification.
-
-Today config lives in `.forge/config.toml` only; the panel would mediate the same keys behind a UI.
+**Status**: Shipped 2026-05-17. New `shell/src/plugins/nexus/notificationsSettings/` plugin contributes a Settings → Notifications tab with per-channel credential blocks (Discord webhook; Telegram bot token + chat id; SMTP host/port/user/password/recipient) backed by `com.nexus.security::set_secret` / `get_secret` / `delete_secret` / `list_secret_names` under the `nexus.notificationsSettings` keyring namespace. Each block has a "Send test" button that dispatches `com.nexus.notifications::send` with the channel routed directly. Routing config (which producer→which channel) stays a `<forge>/.forge/notifications.toml` concern; the panel only mediates credentials.
 
 ---
 

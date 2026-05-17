@@ -544,6 +544,44 @@ fn append_shell_log(entries: Vec<RendererLogEntry>) {
     }
 }
 
+// ── OS-level desktop notification bridge (BL-133 follow-up) ───────────────────
+
+/// Fire an OS-level desktop notification via `tauri-plugin-notification`.
+///
+/// Called by the shell-side `nexus.notifications` plugin alongside the
+/// in-app toast so the user still sees alerts when the Nexus window is
+/// not focused. Failure is non-fatal: the caller already has the toast
+/// up; this just adds the OS surface when available. Returns a
+/// permission-denied string only when the user has explicitly refused
+/// notifications in OS settings.
+#[tauri::command]
+async fn notify_desktop(
+    app: tauri::AppHandle,
+    title: String,
+    message: String,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    use tauri_plugin_notification::PermissionState;
+    match app.notification().permission_state() {
+        Ok(PermissionState::Granted) => {}
+        Ok(PermissionState::Prompt | PermissionState::PromptWithRationale) => {
+            // First call — request permission. macOS / browser-style
+            // permission prompt; Linux + Windows auto-grant.
+            let _ = app.notification().request_permission();
+        }
+        Ok(PermissionState::Denied) => {
+            return Err("notifications: permission denied by OS settings".into());
+        }
+        Err(e) => return Err(format!("notifications: permission probe failed: {e}")),
+    }
+    app.notification()
+        .builder()
+        .title(title)
+        .body(message)
+        .show()
+        .map_err(|e| format!("notifications: show failed: {e}"))
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -557,6 +595,11 @@ pub fn run() {
         // accelerators at activate/deactivate time; this just wires the
         // plugin into the Builder so the JS bridge can talk to it.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // BL-133 follow-up — OS-level desktop notifications. The
+        // `notify_desktop` bridge command (see below) routes through
+        // this plugin so the shell-side `nexus.notifications` plugin
+        // can fire them alongside the in-app toast.
+        .plugin(tauri_plugin_notification::init())
         // Persist window size + maximize/fullscreen across launches, but
         // intentionally NOT position or decorations:
         //   - POSITION: WSLg/X11 reports unreliable coords across compositor
@@ -674,6 +717,7 @@ pub fn run() {
             set_plugin_granted_capabilities,
             path_exists,
             append_shell_log,
+            notify_desktop,
             persistence::get_shell_state,
             persistence::save_shell_state,
             persistence::write_last_forge_path,

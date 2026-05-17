@@ -290,6 +290,20 @@ impl CorePlugin for AgentCorePlugin {
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         self.context = Some(ctx);
     }
+
+    fn on_start(&mut self) -> Result<(), PluginError> {
+        // BL-133 follow-up — auto-notify subscriber listens for
+        // `com.nexus.agent.session_completed` and dispatches a
+        // `notifications::send` when a session ran longer than
+        // `[agent].auto_notify_threshold_s`. Best-effort: skips
+        // silently on CLI single-shot (no tokio runtime), missing
+        // forge root, or `threshold = 0`.
+        if let (Some(ctx), Some(forge_root)) = (self.context.clone(), self.forge_root.as_ref()) {
+            let threshold = crate::auto_notify::load_threshold_secs(forge_root);
+            crate::auto_notify::spawn(ctx, threshold);
+        }
+        Ok(())
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

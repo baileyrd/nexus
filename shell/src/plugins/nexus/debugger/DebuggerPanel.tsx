@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { KernelAPI } from '../../../types/plugin'
 import { useDebuggerStore } from './debuggerStore'
 import type { DapKernelAPI } from './debuggerIpc'
+import { LaunchConfig } from './LaunchConfig'
 
 interface DebuggerPanelProps {
   kernel: KernelAPI
@@ -71,6 +72,17 @@ export function DebuggerPanel({ kernel }: DebuggerPanelProps) {
 
   const idle = activeAdapter == null
   const stopped = !idle && stoppedReason != null
+
+  if (idle) {
+    // BL-113 follow-up — launch picker + launch-config form takes the
+    // panel until a session starts. Toolbar + status row reappear once
+    // an adapter is active.
+    return (
+      <div className="nx-debugger-panel">
+        <LaunchConfig api={dapKernel} />
+      </div>
+    )
+  }
 
   return (
     <div className="nx-debugger-panel">

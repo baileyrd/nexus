@@ -243,6 +243,30 @@ pub(crate) async fn handle_session_run(
     })?;
     tracing::info!(session_id = %session.id, "session_run: persisted ok");
 
+    // BL-133 follow-up — emit `com.nexus.agent.session_completed` so
+    // the auto-notify subscriber can dispatch a `notifications::send`
+    // when the run exceeded the configured threshold. Best-effort:
+    // failure here must not break the IPC reply.
+    let duration_ms =
+        crate::auto_notify::duration_ms_between(&session.started_at, &session.ended_at)
+            .unwrap_or(0);
+    let outcome_str = match serde_json::to_value(&session.outcome) {
+        Ok(serde_json::Value::String(s)) => s,
+        _ => "completed".to_string(),
+    };
+    if let Err(e) = ctx.publish(
+        crate::auto_notify::SESSION_COMPLETED_TOPIC,
+        serde_json::json!({
+            "session_id": session.id,
+            "duration_ms": duration_ms,
+            "outcome": outcome_str,
+            "archetype": session.archetype,
+            "goal": session.goal,
+        }),
+    ) {
+        tracing::debug!(error = %e, "session_run: publish session_completed failed");
+    }
+
     serde_json::to_value(&session)
         .map_err(|e| exec_err(format!("session_run: encode reply: {e}")))
 }
