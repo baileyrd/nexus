@@ -194,11 +194,7 @@ Hardening: thread the calling plugin's id through `IpcDispatch::call(...)` into 
 
 ### Follow-up: per-session locks for concurrent multi-relpath mutation
 
-**Source**: BL-126 deferral. Filed 2026-05-14.
-**Effort**: Medium. ~22 handler signature changes.
-**Crates**: `nexus-editor`.
-
-BL-126's DoD asked for a "multi-relpath concurrency test [that] exercises two sessions being mutated simultaneously" — currently the `Mutex<HashMap<String, Session>>` map-level lock serialises mutations even when they target different files. To make concurrent edits actually overlap, switch the map to `Mutex<HashMap<String, Arc<Mutex<Session>>>>` so handlers acquire the outer lock briefly to clone the per-session Arc, drop the outer lock, then acquire the inner session lock. Snapshot-clone-outside-the-lock becomes feasible after that change (the inner lock guards a single session, so the tree clone can move outside the outer lock's scope, with the session-Arc clone replacing it). Tracing spans should then show two `apply_transaction` enters overlapping when the two sessions are independent.
+**Status**: Shipped 2026-05-17. The editor's `Arc<Mutex<HashMap<String, Session>>>` is now `Arc<Mutex<HashMap<String, Arc<Mutex<Session>>>>>` via two type aliases (`SessionEntry` / `SessionMap`) and four outer-map helpers (`acquire_session_entry` / `get_session_entry` / `insert_session_entry` / `remove_session_entry`). Every IPC handler in `crates/nexus-editor/src/core_plugin.rs` now acquires the outer lock only long enough to clone the per-relpath `Arc`, drops it, and locks the per-session inner mutex for the actual mutation. Two new tests pin the property: `per_session_locks_allow_concurrent_holds_across_relpaths` holds session A's inner lock on the main thread while a spawned thread locks session B's (a `mpsc::recv_timeout` catches the regression case of a single shared mutex); `concurrent_apply_transaction_against_different_relpaths_does_not_deadlock` drives 100 InsertText dispatches per thread against two open files and asserts both sessions advance to revision 100. `cargo test -p nexus-editor` → 250 passing (was 233 in the BL-126 closure note); `cargo clippy -p nexus-editor --all-targets` introduced no new warnings. Snapshot-clone-outside-the-lock falls out for free — the inner `MutexGuard<Session>` is held only for the apply/serialize/snapshot critical section of a single session, so concurrent dispatches no longer contend on the outer map.
 
 ---
 

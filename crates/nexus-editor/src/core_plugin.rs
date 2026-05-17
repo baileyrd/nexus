@@ -378,6 +378,112 @@ struct Session {
     is_synthetic: bool,
 }
 
+/// BL-126 follow-up: per-session lock. The outer map is acquired
+/// briefly to clone the per-relpath `Arc`, then released so two
+/// concurrent dispatches against different relpaths can hold their
+/// inner locks simultaneously. The inner mutex serialises mutation
+/// of a single session — unchanged from the pre-refactor invariant.
+type SessionEntry = Arc<Mutex<Session>>;
+
+/// BL-126 follow-up: the editor-plugin session map. See
+/// [`SessionEntry`] for the locking discipline; helpers
+/// [`acquire_session_entry`] / [`get_session_entry`] /
+/// [`insert_session_entry`] / [`remove_session_entry`] encapsulate
+/// every outer-lock-and-drop access pattern.
+type SessionMap = Mutex<HashMap<String, SessionEntry>>;
+
+/// BL-126 follow-up: acquire the per-session `Arc` for `relpath`,
+/// holding the outer map lock only long enough to clone it. Returns
+/// `Err` with a uniformly-shaped "no open session for …" message
+/// keyed by the operation name when the session is missing.
+fn acquire_session_entry(
+    sessions: &SessionMap,
+    relpath: &str,
+    op: &str,
+) -> Result<SessionEntry, PluginError> {
+    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    guard
+        .get(relpath)
+        .map(Arc::clone)
+        .ok_or_else(|| exec_err(format!("{op}: no open session for '{relpath}'")))
+}
+
+/// Like [`acquire_session_entry`] but returns `None` rather than an
+/// error when no session is registered for `relpath`. Used by paths
+/// that have a fallback when the session map is empty (the resolve /
+/// synthetic-open code paths).
+fn get_session_entry(
+    sessions: &SessionMap,
+    relpath: &str,
+) -> Result<Option<SessionEntry>, PluginError> {
+    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    Ok(guard.get(relpath).map(Arc::clone))
+}
+
+/// BL-126 follow-up: insert a freshly built [`Session`] into the
+/// map, returning the per-session `Arc` so the caller can lock it
+/// without re-acquiring the outer lock. Replaces any existing
+/// session under the same relpath, mirroring the pre-refactor
+/// `guard.insert(...)` semantics.
+fn insert_session_entry(
+    sessions: &SessionMap,
+    relpath: String,
+    session: Session,
+) -> Result<SessionEntry, PluginError> {
+    let entry: SessionEntry = Arc::new(Mutex::new(session));
+    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    guard.insert(relpath, Arc::clone(&entry));
+    Ok(entry)
+}
+
+/// BL-126 follow-up: remove the session for `relpath` (if any) and
+/// return the inner `Session` value by unwrapping the `Arc<Mutex<…>>`.
+/// Returns `Ok(None)` when no session is registered. The unwrap can
+/// only fail if another caller still holds an `Arc` clone — handlers
+/// drop the outer lock before doing per-session work, so the only
+/// way to keep a clone alive is a long-running mutation; in that
+/// case we fall back to draining the inner `Mutex<Session>` by
+/// temporarily acquiring it and replacing with a synthetic empty
+/// session. In practice handlers never store their entry across
+/// awaits, so the `try_unwrap` path is always taken.
+fn remove_session_entry(
+    sessions: &SessionMap,
+    relpath: &str,
+) -> Result<Option<Session>, PluginError> {
+    let removed = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        guard.remove(relpath)
+    };
+    let Some(entry) = removed else {
+        return Ok(None);
+    };
+    // Common path: no other handler is holding a clone of this Arc,
+    // so we can move the inner `Session` out without acquiring the
+    // inner lock at all.
+    match Arc::try_unwrap(entry) {
+        Ok(mutex) => match mutex.into_inner() {
+            Ok(session) => Ok(Some(session)),
+            Err(_) => Err(sessions_poisoned()),
+        },
+        Err(arc) => {
+            // Fallback: another handler raced us and is still mutating
+            // this session. Wait for its lock, then move the Session
+            // out by `mem::replace` against a synthetic empty body —
+            // the synthetic body is immediately dropped along with the
+            // mutex when this scope ends.
+            let mut guard = arc.lock().map_err(|_| sessions_poisoned())?;
+            let placeholder = Session {
+                tree: BlockTree::default(),
+                undo: UndoTree::new(),
+                relpath: relpath.to_string(),
+                revision: 0,
+                is_synthetic: false,
+            };
+            Ok(Some(std::mem::replace(&mut *guard, placeholder)))
+        }
+    }
+}
+
 /// Editor core plugin.
 ///
 /// Mirrors the structure of
@@ -392,7 +498,7 @@ struct Session {
 /// the plugin without assembling a full runtime.
 pub struct EditorCorePlugin {
     forge_root: PathBuf,
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<SessionMap>,
     /// Plugin-facing kernel context. Installed via
     /// [`CorePlugin::wire_context`] once the bootstrap has the shared
     /// dispatcher assembled; `None` for sync-only test drivers.
@@ -592,7 +698,7 @@ impl CorePlugin for EditorCorePlugin {
 /// Build a new session from already-loaded source text and insert it
 /// into the session map. Shared tail of the sync + async `open` paths.
 fn finish_open(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     observer: Option<&Arc<dyn OpObserver>>,
     relpath: &str,
     source: &str,
@@ -606,7 +712,7 @@ fn finish_open(
 /// way — `revision` is a per-session monotonic mutation counter, not
 /// a serialized cross-session sequence.
 fn finish_open_with_undo(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     observer: Option<&Arc<dyn OpObserver>>,
     relpath: &str,
     source: &str,
@@ -635,10 +741,9 @@ fn finish_open_with_undo(
         revision: 0,
         is_synthetic: false,
     };
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    guard.insert(relpath.to_string(), session);
-    let s = guard.get(relpath).expect("just inserted");
-    snapshot_to_value(&snapshot_of(s), "open")
+    let entry = insert_session_entry(sessions, relpath.to_string(), session)?;
+    let s = entry.lock().map_err(|_| sessions_poisoned())?;
+    snapshot_to_value(&snapshot_of(&s), "open")
 }
 
 /// BL-141 — synthetic multibuffer relpaths use the `multibuffer://`
@@ -655,18 +760,21 @@ pub(crate) const MULTIBUFFER_RELPATH_PREFIX: &str = "multibuffer://";
 /// `open_excerpts` for this id. Used by both `handle_open_sync`
 /// and `handle_open_async` before they try to hit the disk.
 fn try_open_existing_synthetic(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     relpath: &str,
 ) -> Option<Result<Value, PluginError>> {
     if !relpath.starts_with(MULTIBUFFER_RELPATH_PREFIX) {
         return None;
     }
-    let guard = match sessions.lock() {
-        Ok(g) => g,
-        Err(_) => return Some(Err(sessions_poisoned())),
+    let entry = match get_session_entry(sessions, relpath) {
+        Ok(opt) => opt,
+        Err(e) => return Some(Err(e)),
     };
-    Some(match guard.get(relpath) {
-        Some(s) => snapshot_to_value(&snapshot_of(s), "open"),
+    Some(match entry {
+        Some(arc) => match arc.lock() {
+            Ok(s) => snapshot_to_value(&snapshot_of(&s), "open"),
+            Err(_) => Err(sessions_poisoned()),
+        },
         None => Err(exec_err(format!(
             "open: synthetic session '{relpath}' not found — \
              multibuffer relpaths are only created by `open_excerpts`"
@@ -676,7 +784,7 @@ fn try_open_existing_synthetic(
 
 fn handle_open_sync(
     forge_root: &Path,
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
@@ -692,7 +800,7 @@ fn handle_open_sync(
 
 async fn handle_open_async(
     forge_root: &Path,
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<SessionMap>,
     ctx: Option<Arc<KernelPluginContext>>,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
@@ -749,7 +857,7 @@ async fn handle_open_async(
 }
 
 fn handle_close(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
@@ -757,8 +865,7 @@ fn handle_close(
     if let Some(obs) = observer {
         obs.on_session_closed(&relpath);
     }
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    guard.remove(&relpath);
+    remove_session_entry(sessions, &relpath)?;
     Ok(serde_json::json!({}))
 }
 
@@ -967,7 +1074,7 @@ async fn persist_undo(
 }
 
 async fn handle_close_async(
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<SessionMap>,
     ctx: Option<Arc<KernelPluginContext>>,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
@@ -984,10 +1091,7 @@ async fn handle_close_async(
     // Capture the session's tree + undo before removing it so the
     // persistence write happens against a consistent snapshot but the
     // session map is freed for re-open as soon as possible.
-    let captured = {
-        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        guard.remove(&relpath).map(|s| (s.tree, s.undo))
-    };
+    let captured = remove_session_entry(&sessions, &relpath)?.map(|s| (s.tree, s.undo));
 
     if let (Some(ctx), Some((tree, undo))) = (ctx.as_deref(), captured) {
         // Hash the canonical-markdown serialization — that's what
@@ -1002,15 +1106,13 @@ async fn handle_close_async(
 }
 
 fn handle_get_tree(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "get_tree")?;
-    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard
-        .get(&relpath)
-        .ok_or_else(|| exec_err(format!("get_tree: no open session for '{relpath}'")))?;
-    snapshot_to_value(&snapshot_of(s), "get_tree")
+    let entry = acquire_session_entry(sessions, &relpath, "get_tree")?;
+    let s = entry.lock().map_err(|_| sessions_poisoned())?;
+    snapshot_to_value(&snapshot_of(&s), "get_tree")
 }
 
 /// BL-141 Phase 2 — one excerpt to splice back into its source
@@ -1050,13 +1152,11 @@ enum SavePlan {
 /// read+write per source even when multiple excerpts hit the same
 /// file.
 fn plan_save(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     relpath: &str,
 ) -> Result<SavePlan, PluginError> {
-    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard
-        .get(relpath)
-        .ok_or_else(|| exec_err(format!("save: no open session for '{relpath}'")))?;
+    let entry = acquire_session_entry(sessions, relpath, "save")?;
+    let s = entry.lock().map_err(|_| sessions_poisoned())?;
     if !s.is_synthetic {
         return Ok(SavePlan::Regular {
             markdown: MarkdownSerializer::serialize(&s.tree),
@@ -1129,7 +1229,7 @@ fn splice_excerpts(old: &str, mut splices: Vec<ExcerptSplice>) -> String {
 
 fn handle_save_sync(
     forge_root: &Path,
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "save")?;
@@ -1165,7 +1265,7 @@ fn handle_save_sync(
 
 async fn handle_save_async(
     forge_root: &Path,
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<SessionMap>,
     ctx: Option<Arc<KernelPluginContext>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
@@ -1336,14 +1436,14 @@ async fn handle_execute_database_view(
 /// does **not** auto-stamp — silently mutating the on-disk file from a
 /// read-shaped IPC call would be a surprise.
 fn resolve_in_session(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     relpath: &str,
     block_id: uuid::Uuid,
 ) -> Result<Option<(Value, Option<u64>)>, PluginError> {
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let Some(s) = guard.get_mut(relpath) else {
+    let Some(entry) = get_session_entry(sessions, relpath)? else {
         return Ok(None);
     };
+    let mut s = entry.lock().map_err(|_| sessions_poisoned())?;
     let needs_stamp = matches!(
         s.tree.get(block_id),
         Some(block) if block.stable_id.is_none()
@@ -1408,7 +1508,7 @@ fn parse_resolve_args(args: &Value) -> Result<(String, uuid::Uuid), PluginError>
 
 fn handle_resolve_block_link_sync(
     forge_root: &Path,
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let (relpath, block_id) = parse_resolve_args(args)?;
@@ -1439,7 +1539,7 @@ fn handle_resolve_block_link_sync(
 
 async fn handle_resolve_block_link_async(
     forge_root: &Path,
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<SessionMap>,
     ctx: Option<Arc<KernelPluginContext>>,
     event_bus: Option<&Arc<EventBus>>,
     args: &Value,
@@ -1504,7 +1604,7 @@ async fn handle_resolve_block_link_async(
 /// same path.
 async fn handle_open_excerpts(
     forge_root: &Path,
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<SessionMap>,
     ctx: Option<Arc<KernelPluginContext>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
@@ -1581,15 +1681,9 @@ async fn handle_open_excerpts(
         is_synthetic: true,
     };
 
-    {
-        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        guard.insert(synthetic_relpath.clone(), session);
-    }
-    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard
-        .get(&synthetic_relpath)
-        .expect("session was just inserted");
-    snapshot_to_value(&snapshot_of(s), "open_excerpts")
+    let entry = insert_session_entry(&sessions, synthetic_relpath, session)?;
+    let s = entry.lock().map_err(|_| sessions_poisoned())?;
+    snapshot_to_value(&snapshot_of(&s), "open_excerpts")
 }
 
 /// Per-source-file read used by `open_excerpts`. Mirrors the
@@ -1748,7 +1842,7 @@ fn op_payload_size(op: &crate::Operation) -> usize {
 }
 
 fn handle_apply_transaction(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     event_bus: Option<&Arc<EventBus>>,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
@@ -1810,13 +1904,10 @@ fn handle_apply_transaction(
     );
     let _enter = span.enter();
 
+    let entry = acquire_session_entry(sessions, &relpath, "apply_transaction")?;
     let (response, revision, applied_ops) = {
-        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        let s = guard.get_mut(&relpath).ok_or_else(|| {
-            exec_err(format!(
-                "apply_transaction: no open session for '{relpath}'"
-            ))
-        })?;
+        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        let s: &mut Session = &mut guard;
         // BL-141 Phase 2 (Approach A) — multibuffer sessions accept
         // `UpdateBlockContent` ops on Excerpt blocks. The lossy MVP
         // treats each excerpt as opaque text: save-time splices the
@@ -2005,7 +2096,7 @@ fn extract_wikilink_block_uuid(literal: &str) -> Option<uuid::Uuid> {
 }
 
 fn handle_undo(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     event_bus: Option<&Arc<EventBus>>,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
@@ -2014,11 +2105,10 @@ fn handle_undo(
     // Capture the transaction being reversed *before* the undo runs
     // so the observer can author inverse ops against the
     // pre-undo (post-tx) state of its own mirror tree.
+    let entry = acquire_session_entry(sessions, &relpath, "undo")?;
     let (value, revision, captured) = {
-        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        let s = guard
-            .get_mut(&relpath)
-            .ok_or_else(|| exec_err(format!("undo: no open session for '{relpath}'")))?;
+        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        let s: &mut Session = &mut guard;
         let cur_tx = s
             .undo
             .current()
@@ -2040,17 +2130,16 @@ fn handle_undo(
 }
 
 fn handle_redo(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     event_bus: Option<&Arc<EventBus>>,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "redo")?;
+    let entry = acquire_session_entry(sessions, &relpath, "redo")?;
     let (value, revision, captured) = {
-        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        let s = guard
-            .get_mut(&relpath)
-            .ok_or_else(|| exec_err(format!("redo: no open session for '{relpath}'")))?;
+        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        let s: &mut Session = &mut guard;
         s.undo
             .redo(&mut s.tree)
             .map_err(|e| exec_err(format!("redo: {e}")))?;
@@ -2072,7 +2161,7 @@ fn handle_redo(
     Ok(value)
 }
 
-fn handle_list_open(sessions: &Mutex<HashMap<String, Session>>) -> Result<Value, PluginError> {
+fn handle_list_open(sessions: &SessionMap) -> Result<Value, PluginError> {
     let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
     let mut paths: Vec<String> = guard.keys().cloned().collect();
     paths.sort();
@@ -2084,7 +2173,7 @@ fn handle_list_open(sessions: &Mutex<HashMap<String, Session>>) -> Result<Value,
 /// The undo history is left untouched: `sync_content` is a background resync
 /// for read-only consumers (AI, MCP, outline), not a user-visible transaction.
 fn handle_sync_content(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     event_bus: Option<&Arc<EventBus>>,
     observer: Option<&Arc<dyn OpObserver>>,
     args: &Value,
@@ -2110,15 +2199,25 @@ fn handle_sync_content(
         obs.on_session_opened(&relpath, &tree, content.as_bytes());
     }
 
-    let revision = {
+    // BL-126 follow-up: `sync_content` is a create-or-update — we hold
+    // the outer lock just long enough to insert a fresh entry when the
+    // session is missing, then drop it and acquire the per-session
+    // inner lock for the actual mutation. This mirrors the
+    // `acquire_session_entry` discipline used by every other handler.
+    let entry = {
         let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        let session = guard.entry(relpath.clone()).or_insert_with(|| Session {
-            tree: BlockTree::default(),
-            undo: UndoTree::new(),
-            relpath: relpath.clone(),
-            revision: 0,
-            is_synthetic: false,
-        });
+        Arc::clone(guard.entry(relpath.clone()).or_insert_with(|| {
+            Arc::new(Mutex::new(Session {
+                tree: BlockTree::default(),
+                undo: UndoTree::new(),
+                relpath: relpath.clone(),
+                revision: 0,
+                is_synthetic: false,
+            }))
+        }))
+    };
+    let revision = {
+        let mut session = entry.lock().map_err(|_| sessions_poisoned())?;
         session.tree = tree;
         session.revision = session.revision.saturating_add(1);
         session.revision
@@ -2132,14 +2231,12 @@ fn handle_sync_content(
 /// bare JSON string. Matches `serialize_session` but surfaces the
 /// result over IPC rather than routing it to disk.
 fn handle_get_markdown(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "get_markdown")?;
-    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard
-        .get(&relpath)
-        .ok_or_else(|| exec_err(format!("get_markdown: no open session for '{relpath}'")))?;
+    let entry = acquire_session_entry(sessions, &relpath, "get_markdown")?;
+    let s = entry.lock().map_err(|_| sessions_poisoned())?;
     let markdown = MarkdownSerializer::serialize(&s.tree);
     Ok(Value::String(markdown))
 }
@@ -2160,7 +2257,7 @@ fn handle_get_markdown(
 /// still reference it, while `stable_id` carries the new uuid that's
 /// now the canonical key.
 fn handle_stamp_block(
-    sessions: &Mutex<HashMap<String, Session>>,
+    sessions: &SessionMap,
     event_bus: Option<&Arc<EventBus>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
@@ -2172,11 +2269,10 @@ fn handle_stamp_block(
     let block_id = uuid::Uuid::parse_str(block_id_str)
         .map_err(|e| exec_err(format!("stamp_block: invalid 'block_id': {e}")))?;
 
+    let entry = acquire_session_entry(sessions, &relpath, "stamp_block")?;
     let (stable_id, newly_stamped, revision) = {
-        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        let s = guard.get_mut(&relpath).ok_or_else(|| {
-            exec_err(format!("stamp_block: no open session for '{relpath}'"))
-        })?;
+        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        let s: &mut Session = &mut guard;
         let block = s.tree.get(block_id).ok_or_else(|| {
             exec_err(format!(
                 "stamp_block: block '{block_id}' not present in '{relpath}'"
@@ -3664,5 +3760,147 @@ mod tests {
             )
             .unwrap();
         serde_json::from_value(resp).unwrap()
+    }
+
+    /// BL-126 follow-up — proves the per-session-lock invariant: two
+    /// relpaths' inner mutexes can be held simultaneously. Pre-refactor
+    /// the `Mutex<HashMap<String, Session>>` map-level lock serialised
+    /// every access, so a second `acquire_session_entry` would have
+    /// blocked behind the first session's outer-lock acquisition (and
+    /// the inner `Arc<Mutex<Session>>` didn't exist at all). The
+    /// channel-with-timeout assert times out instead of deadlocking
+    /// if a regression re-introduces a single shared mutex.
+    #[test]
+    fn per_session_locks_allow_concurrent_holds_across_relpaths() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "A\n");
+        write_note(&root, "notes/b.md", "B\n");
+        let mut p = new_plugin(root);
+        p.dispatch(
+            HANDLER_OPEN,
+            &serde_json::json!({ "relpath": "notes/a.md" }),
+        )
+        .unwrap();
+        p.dispatch(
+            HANDLER_OPEN,
+            &serde_json::json!({ "relpath": "notes/b.md" }),
+        )
+        .unwrap();
+
+        let sessions = Arc::clone(&p.sessions);
+        let entry_a = acquire_session_entry(&sessions, "notes/a.md", "test").unwrap();
+        let entry_b = acquire_session_entry(&sessions, "notes/b.md", "test").unwrap();
+
+        // Hold A's inner lock on this thread, then spawn a thread that
+        // locks B. If the per-session-lock invariant holds, the spawn
+        // proceeds without waiting on us.
+        let guard_a = entry_a.lock().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let t = std::thread::spawn(move || {
+            let _guard_b = entry_b.lock().unwrap();
+            tx.send(()).unwrap();
+            // Hold B's lock briefly so the two guards overlap on the wall
+            // clock — both inner mutexes are held at once when this
+            // sleep returns.
+            std::thread::sleep(Duration::from_millis(20));
+        });
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("per-session lock for b.md should not block while a.md is held");
+        drop(guard_a);
+        t.join().unwrap();
+    }
+
+    /// BL-126 follow-up — drives `handle_apply_transaction` from two
+    /// threads against two different relpaths. The test fails by
+    /// deadlock (caught by the test runner's wall-clock cap) or by a
+    /// missing revision bump if a regression re-introduces the
+    /// single-map-mutex contention pattern. Each thread fires 100
+    /// inserts; if the inner locks worked the threads run independently
+    /// and both sessions reach revision 100.
+    #[test]
+    fn concurrent_apply_transaction_against_different_relpaths_does_not_deadlock() {
+        use crate::{Operation, Transaction, TransactionMetadata};
+
+        const ROUNDS: usize = 100;
+
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "A\n");
+        write_note(&root, "notes/b.md", "B\n");
+        let mut p = new_plugin(root);
+        let snap_a: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let snap_b: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/b.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let para_a = snap_a.tree.root_blocks[0];
+        let para_b = snap_b.tree.root_blocks[0];
+
+        let make_tx = |block_id: uuid::Uuid, ch: &str| {
+            serde_json::to_value(Transaction::new(
+                vec![Operation::InsertText {
+                    block_id,
+                    pos: 1,
+                    text: ch.into(),
+                    pre_annotations: Vec::new(),
+                }],
+                TransactionMetadata::default(),
+            ))
+            .unwrap()
+        };
+
+        let sessions_a = Arc::clone(&p.sessions);
+        let sessions_b = Arc::clone(&p.sessions);
+        let tx_a = make_tx(para_a, "x");
+        let tx_b = make_tx(para_b, "y");
+
+        let h_a = std::thread::spawn(move || {
+            for _ in 0..ROUNDS {
+                handle_apply_transaction(
+                    &sessions_a,
+                    None,
+                    None,
+                    &serde_json::json!({
+                        "relpath": "notes/a.md",
+                        "transaction": tx_a.clone(),
+                    }),
+                )
+                .unwrap();
+            }
+        });
+        let h_b = std::thread::spawn(move || {
+            for _ in 0..ROUNDS {
+                handle_apply_transaction(
+                    &sessions_b,
+                    None,
+                    None,
+                    &serde_json::json!({
+                        "relpath": "notes/b.md",
+                        "transaction": tx_b.clone(),
+                    }),
+                )
+                .unwrap();
+            }
+        });
+        h_a.join().unwrap();
+        h_b.join().unwrap();
+
+        let snap_a = get_tree_value(&mut p, "notes/a.md");
+        let snap_b = get_tree_value(&mut p, "notes/b.md");
+        assert_eq!(snap_a.revision, ROUNDS as u64);
+        assert_eq!(snap_b.revision, ROUNDS as u64);
     }
 }
