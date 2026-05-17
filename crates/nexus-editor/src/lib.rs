@@ -15,6 +15,7 @@ mod block;
 pub mod core_plugin;
 pub mod database_view;
 mod error;
+pub(crate) mod excerpt_map;
 pub mod markdown;
 mod transaction;
 mod tree;
