@@ -24,6 +24,7 @@ use std::sync::Arc;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex};
+use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
@@ -97,12 +98,17 @@ impl PeerRegistry {
 /// Construct via [`RelayServer::new`], bind a listener with
 /// [`tokio::net::TcpListener::bind`], and hand it to
 /// [`RelayServer::serve_listener`]. The accept loop runs until the
-/// listener is dropped; per-connection tasks are spawned and live as
-/// long as their sockets.
+/// listener errors or [`RelayServer::shutdown`] is called; per-peer
+/// tasks live for the duration of their sockets unless `shutdown`
+/// aborts them.
 pub struct RelayServer {
     token: Token,
     broadcast_tx: broadcast::Sender<Routed>,
     registry: Arc<Mutex<PeerRegistry>>,
+    /// One-shot shutdown signal observed by `serve_listener` and the
+    /// per-peer handler's `Routed` writer. Receivers re-subscribe per
+    /// task; a single `send(())` reaches all of them.
+    shutdown: broadcast::Sender<()>,
 }
 
 impl RelayServer {
@@ -111,34 +117,66 @@ impl RelayServer {
     #[must_use]
     pub fn new(token: Token) -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
+        let (shutdown, _) = broadcast::channel(1);
         Self {
             token,
             broadcast_tx,
             registry: Arc::new(Mutex::new(PeerRegistry::default())),
+            shutdown,
         }
     }
 
-    /// Run the accept loop on `listener` until it errors. Each
-    /// accepted connection is handed off to a per-peer task and the
-    /// loop keeps going. A clean shutdown is achieved by dropping the
-    /// `RelayServer` (which closes the broadcast channel and lets the
-    /// per-peer writer tasks observe `RecvError::Closed`).
+    /// Signal every running task — the accept loop and every live
+    /// per-peer handler — to stop. Safe to call from any task; the
+    /// `serve_listener` future returns shortly after.
+    ///
+    /// Calling `shutdown` more than once is harmless; the broadcast
+    /// channel's `send` failures (no subscribers) are silently
+    /// ignored.
+    pub fn shutdown(&self) {
+        let _ = self.shutdown.send(());
+    }
+
+    /// Run the accept loop on `listener` until either the listener
+    /// errors or [`Self::shutdown`] fires. Per-peer tasks are tracked
+    /// in a [`JoinSet`] owned by this future, so on shutdown every
+    /// live connection is aborted *before* this function returns —
+    /// callers re-binding the same port after `serve_listener` exits
+    /// don't race the previous listener's child sockets.
     ///
     /// # Errors
-    /// Returns [`RelayServerError::Accept`] if the listener fails.
+    /// Returns [`RelayServerError::Accept`] if the listener fails
+    /// outside of an explicit shutdown. Shutdowns return `Ok(())`.
     pub async fn serve_listener(
         self: Arc<Self>,
         listener: TcpListener,
     ) -> Result<(), RelayServerError> {
+        let mut shutdown_rx = self.shutdown.subscribe();
+        let mut peers: JoinSet<()> = JoinSet::new();
         loop {
-            let (stream, addr) = listener.accept().await?;
-            tracing::debug!(peer = %addr, "nexus-collab: accepted TCP");
-            let server = Arc::clone(&self);
-            tokio::spawn(async move {
-                if let Err(e) = server.handle_connection(stream).await {
-                    tracing::warn!(peer = %addr, error = ?e, "nexus-collab: connection ended with error");
+            tokio::select! {
+                biased;
+                _ = shutdown_rx.recv() => {
+                    tracing::debug!("nexus-collab: shutdown signal, aborting peer tasks");
+                    peers.shutdown().await;
+                    return Ok(());
                 }
-            });
+                accept = listener.accept() => {
+                    let (stream, addr) = accept?;
+                    tracing::debug!(peer = %addr, "nexus-collab: accepted TCP");
+                    let server = Arc::clone(&self);
+                    peers.spawn(async move {
+                        if let Err(e) = server.handle_connection(stream).await {
+                            tracing::warn!(peer = %addr, error = ?e, "nexus-collab: connection ended with error");
+                        }
+                    });
+                    // Reap completed tasks opportunistically so the
+                    // JoinSet doesn't accumulate Joinables forever
+                    // even on a busy relay; we don't care about their
+                    // return values.
+                    while peers.try_join_next().is_some() {}
+                }
+            }
         }
     }
 
