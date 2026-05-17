@@ -872,12 +872,34 @@ plugin = "com.nexus.notifications"
 command = "send"
 unrestricted = "intentional surface for any plugin to surface a notification — ui.notify gates the toast transport downstream"
 
-# ─── com.nexus.collab — BL-143 cursor presence publish surface ───────
+# ─── com.nexus.collab — BL-143 cursor presence + relay-host surface ───
 
 [[handler]]
 plugin = "com.nexus.collab"
 command = "publish_presence"
 unrestricted = "intentional surface for the editor (and future presence sources) to publish caret/selection updates. Stamps the local peer identity from [collab] config so a caller can't spoof. Short-circuits when [collab] is absent, so no events leak in unconfigured forges."
+
+# AUDIT: opens a TCP listener on 0.0.0.0 — same posture as the
+# `nexus collab serve` CLI verb (which already operates with the
+# user's full trust). A future cap-registry follow-up could introduce
+# `network.bind` and migrate this row + a matching prompt. For now
+# the Share UI is user-initiated only and the bind fails closed when
+# the OS denies the port, so the marginal risk over the CLI verb is
+# low.
+[[handler]]
+plugin = "com.nexus.collab"
+command = "start_relay"
+unrestricted = "BL-143 Phase 2.3 Share-this-forge surface — binds a WebSocket relay on 0.0.0.0. User-initiated through the collab panel; same trust posture as `nexus collab serve`. AUDIT candidate for a future network.bind cap."
+
+[[handler]]
+plugin = "com.nexus.collab"
+command = "stop_relay"
+unrestricted = "tears down a relay this caller (or a previous start_relay) brought up. No external side effect beyond freeing the local port."
+
+[[handler]]
+plugin = "com.nexus.collab"
+command = "relay_status"
+unrestricted = "read-only snapshot of the local relay state. Already-known information (the caller is the one that started it)."
 
 # ─── com.nexus.security — keyring + audit log surface ────────────────
 

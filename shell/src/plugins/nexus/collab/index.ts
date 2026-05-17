@@ -22,13 +22,17 @@ import {
   type PeerInfo,
   type PeerLeft,
   type PresenceEvent,
+  type RelayStatus,
 } from './collabStore'
 
-const TOPIC_PREFIX   = 'com.nexus.collab.'
-const TOPIC_JOINED   = 'com.nexus.collab.peers.joined'
-const TOPIC_LEFT     = 'com.nexus.collab.peers.left'
-const TOPIC_PRESENCE = 'com.nexus.collab.presence'
-const TOPIC_CONN     = 'com.nexus.collab.connection'
+const COLLAB_PLUGIN_ID = 'com.nexus.collab'
+const TOPIC_PREFIX      = 'com.nexus.collab.'
+const TOPIC_JOINED      = 'com.nexus.collab.peers.joined'
+const TOPIC_LEFT        = 'com.nexus.collab.peers.left'
+const TOPIC_PRESENCE    = 'com.nexus.collab.presence'
+const TOPIC_CONN        = 'com.nexus.collab.connection'
+const TOPIC_RELAY_START = 'com.nexus.collab.relay.started'
+const TOPIC_RELAY_STOP  = 'com.nexus.collab.relay.stopped'
 
 const VIEW_TYPE        = 'collab-panel'
 const VIEW_ID          = 'nexus.collab.view'
@@ -75,10 +79,32 @@ export const collabPlugin: Plugin = {
             case TOPIC_CONN:
               store.onConnection(payload as ConnectionPayload)
               return
+            case TOPIC_RELAY_START:
+            case TOPIC_RELAY_STOP:
+              // BL-143 Phase 2.3 — relay-host state changes flow
+              // through the bus so popout windows + the main shell
+              // stay synced without polling.
+              store.onRelayStatus(payload as RelayStatus)
+              return
             default:
               // Future BL-143 topics under com.nexus.collab.* land here.
           }
         })
+
+        // Hydrate the relay slice at activation — the backend may
+        // already have a relay running (e.g. shell reload) and we
+        // don't want the Share button stuck on "Share this forge"
+        // when one is live.
+        try {
+          const status = await api.kernel.invoke<RelayStatus>(
+            COLLAB_PLUGIN_ID,
+            'relay_status',
+            {},
+          )
+          useCollabStore.getState().onRelayStatus(status)
+        } catch {
+          // No status = panel just doesn't show a Stop button.
+        }
       } catch {
         // No subscription = panel stays in 'idle'; the user sees the
         // "Not configured" empty state. Still better than crashing.

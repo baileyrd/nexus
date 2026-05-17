@@ -93,12 +93,52 @@ test('onConnection cycles through the four states', () => {
   assert.equal(useCollabStore.getState().connection, 'disconnected')
 })
 
-test('reset clears peers and connection back to idle', () => {
+test('reset clears peers, connection, and relay back to idle', () => {
   const s = useCollabStore.getState()
   s.onPeerJoined({ peer_id: 'alice', display_name: 'Alice' })
   s.onConnection({ state: 'connected' })
+  s.onRelayStatus({
+    running: true,
+    url: 'ws://10.0.0.1:7700/?token=abc',
+    host: '10.0.0.1',
+    port: 7700,
+    token: 'abc',
+  })
   s.reset()
   const after = useCollabStore.getState()
   assert.equal(after.connection, 'idle')
   assert.deepEqual(after.peers, {})
+  assert.equal(after.relay, null)
+})
+
+test('onRelayStatus mirrors the backend snapshot', () => {
+  reset()
+  useCollabStore.getState().onRelayStatus({
+    running: true,
+    url: 'ws://10.0.0.1:7700/?token=abc',
+    host: '10.0.0.1',
+    port: 7700,
+    token: 'abc',
+  })
+  const after = useCollabStore.getState().relay
+  assert.equal(after?.running, true)
+  assert.equal(after?.url, 'ws://10.0.0.1:7700/?token=abc')
+  assert.equal(after?.port, 7700)
+})
+
+test('onRelayStatus running:false clears url/host/port/token', () => {
+  reset()
+  const s = useCollabStore.getState()
+  s.onRelayStatus({
+    running: true,
+    url: 'ws://1.2.3.4:9/?token=x',
+    host: '1.2.3.4',
+    port: 9,
+    token: 'x',
+  })
+  s.onRelayStatus({ running: false })
+  const after = useCollabStore.getState().relay
+  assert.equal(after?.running, false)
+  assert.equal(after?.url ?? null, null)
+  assert.equal(after?.port ?? null, null)
 })

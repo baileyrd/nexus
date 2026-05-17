@@ -1,5 +1,13 @@
-import { useMemo, type CSSProperties } from 'react'
-import { useCollabStore, type CollabPeer, type ConnectionState } from './collabStore'
+import { useCallback, useMemo, useState, type CSSProperties } from 'react'
+import {
+  useCollabStore,
+  type CollabPeer,
+  type ConnectionState,
+  type RelayStatus,
+} from './collabStore'
+import { getCollabApi } from './collabRuntime'
+
+const COLLAB_PLUGIN_ID = 'com.nexus.collab'
 
 // ── Connection-state pill ─────────────────────────────────────────────────────
 
@@ -116,7 +124,149 @@ const FOCUS: CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
+// ── Share-this-forge styles ──────────────────────────────────────────────────
+
+const SHARE_BAR: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: '10px 12px',
+  borderBottom: '1px solid var(--background-modifier-border)',
+  flexShrink: 0,
+}
+
+const SHARE_ROW: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+}
+
+const BTN: CSSProperties = {
+  padding: '4px 10px',
+  fontSize: 12,
+  borderRadius: 4,
+  border: '1px solid var(--background-modifier-border)',
+  background: 'var(--background-modifier-form-field)',
+  color: 'var(--text-normal)',
+  cursor: 'pointer',
+}
+
+const BTN_PRIMARY: CSSProperties = {
+  ...BTN,
+  background: 'var(--interactive-accent)',
+  borderColor: 'var(--interactive-accent)',
+  color: 'var(--text-on-accent)',
+}
+
+const URL_PILL: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  fontFamily: 'var(--font-monospace, monospace)',
+  fontSize: 11,
+  padding: '4px 8px',
+  background: 'var(--background-secondary)',
+  borderRadius: 4,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  userSelect: 'all',
+}
+
+const ERROR_TEXT: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--text-error, #c44)',
+}
+
 // ── Components ────────────────────────────────────────────────────────────────
+
+// ── Share-this-forge controls ────────────────────────────────────────────────
+
+function ShareBar({ relay }: { relay: RelayStatus | null }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const start = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const status = await getCollabApi().kernel.invoke<RelayStatus>(
+        COLLAB_PLUGIN_ID,
+        'start_relay',
+        {},
+      )
+      useCollabStore.getState().onRelayStatus(status)
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e))
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
+  const stop = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const status = await getCollabApi().kernel.invoke<RelayStatus>(
+        COLLAB_PLUGIN_ID,
+        'stop_relay',
+        {},
+      )
+      useCollabStore.getState().onRelayStatus(status)
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e))
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
+  const copyUrl = useCallback(async () => {
+    if (!relay?.url) return
+    try {
+      await navigator.clipboard.writeText(relay.url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch (e) {
+      setError(`copy failed: ${String((e as Error)?.message ?? e)}`)
+    }
+  }, [relay?.url])
+
+  if (relay?.running && relay.url) {
+    return (
+      <div style={SHARE_BAR}>
+        <div style={SHARE_ROW}>
+          <span style={URL_PILL} title={relay.url}>{relay.url}</span>
+          <button type="button" style={BTN} disabled={busy} onClick={() => void copyUrl()}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <div style={SHARE_ROW}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
+            Share this URL with peers on your network to let them join the forge.
+          </span>
+          <button type="button" style={BTN} disabled={busy} onClick={() => void stop()}>
+            Stop sharing
+          </button>
+        </div>
+        {error ? <div style={ERROR_TEXT}>{error}</div> : null}
+      </div>
+    )
+  }
+
+  return (
+    <div style={SHARE_BAR}>
+      <div style={SHARE_ROW}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>
+          Start a local relay so peers on your network can join this forge.
+        </span>
+        <button type="button" style={BTN_PRIMARY} disabled={busy} onClick={() => void start()}>
+          {busy ? 'Starting…' : 'Share this forge'}
+        </button>
+      </div>
+      {error ? <div style={ERROR_TEXT}>{error}</div> : null}
+    </div>
+  )
+}
 
 function PeerRow({ peer }: { peer: CollabPeer }) {
   const cursor = peer.cursor
@@ -140,6 +290,7 @@ function PeerRow({ peer }: { peer: CollabPeer }) {
 export function CollabPanel() {
   const connection = useCollabStore((s) => s.connection)
   const peersMap   = useCollabStore((s) => s.peers)
+  const relay      = useCollabStore((s) => s.relay)
 
   const peers = useMemo(
     () => Object.values(peersMap).sort((a, b) => a.display_name.localeCompare(b.display_name)),
@@ -153,6 +304,8 @@ export function CollabPanel() {
         <div style={TITLE}>Collaboration</div>
         <div style={statusStyle(desc)}>{desc.label}</div>
       </header>
+
+      <ShareBar relay={relay} />
 
       {peers.length === 0 ? (
         <div style={EMPTY}>

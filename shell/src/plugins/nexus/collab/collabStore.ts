@@ -48,6 +48,19 @@ export interface ConnectionPayload {
   state: 'connecting' | 'connected' | 'disconnected'
 }
 
+/// BL-143 Phase 2.3 — relay-host status. Mirrors
+/// `crates/nexus-collab/src/core_plugin.rs::RelayStatus`. Carried
+/// on the `com.nexus.collab.relay.started` and `…relay.stopped`
+/// bus events, and returned by the `start_relay` / `stop_relay` /
+/// `relay_status` IPC handlers.
+export interface RelayStatus {
+  running: boolean
+  url?: string | null
+  host?: string | null
+  port?: number | null
+  token?: string | null
+}
+
 // ── Store model ────────────────────────────────────────────────────────────────
 
 export interface CollabPeer {
@@ -63,17 +76,23 @@ interface CollabState {
    *  Distinguishes "collab is disabled / never wired" from "trying to connect". */
   connection: ConnectionState
   peers: Record<string, CollabPeer>
+  /** BL-143 Phase 2.3 — `null` until the first `relay_status` / start /
+   *  stop event lands; thereafter mirrors the backend. `running: false`
+   *  is the steady "no share live" state. */
+  relay: RelayStatus | null
 
   onPeerJoined(info: PeerInfo): void
   onPeerLeft(payload: PeerLeft): void
   onPresence(ev: PresenceEvent): void
   onConnection(payload: ConnectionPayload): void
+  onRelayStatus(status: RelayStatus): void
   reset(): void
 }
 
 export const useCollabStore = create<CollabState>((set) => ({
   connection: 'idle',
   peers: {},
+  relay: null,
 
   onPeerJoined: (info) =>
     set((s) => ({
@@ -111,5 +130,7 @@ export const useCollabStore = create<CollabState>((set) => ({
 
   onConnection: ({ state }) => set({ connection: state }),
 
-  reset: () => set({ connection: 'idle', peers: {} }),
+  onRelayStatus: (status) => set({ relay: status }),
+
+  reset: () => set({ connection: 'idle', peers: {}, relay: null }),
 }))
