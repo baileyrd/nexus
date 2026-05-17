@@ -123,6 +123,10 @@ enum Commands {
     /// expose Nexus's agent IPC surface to external clients over a
     /// stdio JSON-RPC 2.0 server.
     Acp(AcpArgs),
+    /// Live collaboration (BL-143) — relay server, peer client, and
+    /// token management for the in-process WebSocket bridge that
+    /// ferries CRDT ops + presence between peers.
+    Collab(CollabArgs),
     /// Remote-forge server (BL-140 Phase 1) — expose the whole kernel
     /// IPC + event-bus surface over a stdio JSON-RPC 2.0 stream so a
     /// local frontend can drive this headless instance. Phase 2 (SSH
@@ -802,6 +806,70 @@ enum AcpCommand {
     /// process. Pure proxy — every method dispatches through the
     /// kernel's `ipc_call` boundary.
     Serve,
+}
+
+// ---------------------------------------------------------------------------
+// Collab (BL-143)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct CollabArgs {
+    #[command(subcommand)]
+    command: CollabCommand,
+}
+
+#[derive(Subcommand)]
+enum CollabCommand {
+    /// Run a WebSocket relay that ferries CRDT-op + presence envelopes
+    /// between connected peers.
+    Serve {
+        /// TCP port to bind on `0.0.0.0`. Defaults to 7700.
+        #[arg(long, default_value_t = commands::collab::DEFAULT_SERVE_PORT)]
+        port: u16,
+        /// Shared secret. Without this flag, falls back to the
+        /// keyring entry written by `nexus collab token set`.
+        #[arg(long)]
+        token: Option<String>,
+        /// Save the supplied `--token` into the keyring so future
+        /// invocations don't need it.
+        #[arg(long)]
+        save_token: bool,
+    },
+    /// Connect to a relay and bridge the local kernel event bus.
+    Join {
+        /// `ws://host:port[?token=…]` URL announced by `serve`.
+        url: String,
+        /// Override the token in the URL (or the keyring fallback).
+        #[arg(long)]
+        token: Option<String>,
+        /// Peer id to register on the relay. Defaults to `$USER`.
+        #[arg(long)]
+        peer_id: Option<String>,
+        /// Human-readable name shown in the peers panel. Defaults to
+        /// the title-cased peer id.
+        #[arg(long)]
+        display_name: Option<String>,
+        /// Save the resolved token into the keyring so future
+        /// invocations don't need `--token` or `?token=`.
+        #[arg(long)]
+        save_token: bool,
+    },
+    /// Manage the keyring entry that stores the relay's shared secret.
+    Token {
+        #[command(subcommand)]
+        command: CollabTokenCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollabTokenCommand {
+    /// Store `<value>` in the keyring under `nexus.collab.token`.
+    Set {
+        /// The shared secret to remember.
+        value: String,
+    },
+    /// Delete the stored token. A missing entry is not an error.
+    Clear,
 }
 
 // ---------------------------------------------------------------------------
@@ -2094,6 +2162,31 @@ fn main() {
         },
         Commands::Acp(args) => match args.command {
             AcpCommand::Serve => commands::acp::serve(&app),
+        },
+        Commands::Collab(args) => match args.command {
+            CollabCommand::Serve {
+                port,
+                token,
+                save_token,
+            } => commands::collab::serve(port, token, save_token),
+            CollabCommand::Join {
+                url,
+                token,
+                peer_id,
+                display_name,
+                save_token,
+            } => commands::collab::join(
+                &app,
+                &url,
+                token,
+                peer_id,
+                display_name,
+                save_token,
+            ),
+            CollabCommand::Token { command } => match command {
+                CollabTokenCommand::Set { value } => commands::collab::token_set(&value),
+                CollabTokenCommand::Clear => commands::collab::token_clear(),
+            },
         },
         Commands::Serve(args) => {
             if args.stdio {

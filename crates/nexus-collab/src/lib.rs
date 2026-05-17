@@ -36,6 +36,7 @@ pub mod client;
 pub mod presence;
 pub mod protocol;
 pub mod server;
+pub mod url;
 
 pub use auth::{Token, TokenError};
 pub use client::{
@@ -50,3 +51,4 @@ pub use protocol::{
     ClientMessage, PeerInfo, ServerMessage, ERR_AUTH, ERR_BAD_FRAME, ERR_HANDSHAKE,
 };
 pub use server::{RelayServer, RelayServerError};
+pub use url::{parse as parse_ws_url, WsEndpoint};

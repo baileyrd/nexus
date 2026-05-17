@@ -41,7 +41,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use nexus_collab::{CollabClient, CollabClientConfig, ConnectParams};
+use nexus_collab::{parse_ws_url, CollabClient, CollabClientConfig, ConnectParams};
 use nexus_kernel::EventBus;
 use serde::Deserialize;
 use tokio::task::JoinHandle;
@@ -74,24 +74,6 @@ impl CollabConfig {
             && !self.peer_id.is_empty()
             && !self.display_name.is_empty()
     }
-}
-
-/// Parse a `host`, `port`, and `url` from `ws://host:port[/...]`. We
-/// don't pull a full URL parser dep for this one job; the relay-side
-/// requirement is just `Host` header presence, which any string works
-/// for. Returns `None` if the URL doesn't start with `ws://` or the
-/// authority chunk doesn't contain a port — anything else (paths,
-/// queries) is forwarded verbatim as the URL the WS handshake announces.
-fn parse_ws_url(url: &str) -> Option<(String, u16)> {
-    let rest = url.strip_prefix("ws://")?;
-    // Split off path/query — anything after the first `/` or `?`.
-    let authority = rest.split_once(['/', '?']).map_or(rest, |(a, _)| a);
-    let (host, port_str) = authority.rsplit_once(':')?;
-    let port: u16 = port_str.parse().ok()?;
-    if host.is_empty() {
-        return None;
-    }
-    Some((host.to_string(), port))
 }
 
 /// Read `<forge>/.forge/config.toml` and return the `[collab]` block.
@@ -146,7 +128,7 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
         tracing::warn!("config.toml: [collab].enabled but required fields missing; skipping");
         return None;
     }
-    let Some((host, port)) = parse_ws_url(&cfg.relay_url) else {
+    let Some(endpoint) = parse_ws_url(&cfg.relay_url) else {
         tracing::warn!(
             relay_url = %cfg.relay_url,
             "config.toml: [collab].relay_url must be ws://host:port[/...]; skipping"
@@ -161,8 +143,8 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
     };
     let task = handle.spawn(async move {
         let params = ConnectParams {
-            host,
-            port,
+            host: endpoint.host,
+            port: endpoint.port,
             url: cfg.relay_url.clone(),
             token: cfg.token,
             peer_id: cfg.peer_id.clone(),
@@ -200,29 +182,6 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_ws_url_accepts_host_port() {
-        assert_eq!(parse_ws_url("ws://127.0.0.1:7700/"), Some(("127.0.0.1".into(), 7700)));
-        assert_eq!(parse_ws_url("ws://relay.example.com:9000"), Some(("relay.example.com".into(), 9000)));
-        assert_eq!(parse_ws_url("ws://h:1/path?q=1"), Some(("h".into(), 1)));
-    }
-
-    #[test]
-    fn parse_ws_url_rejects_missing_port() {
-        assert!(parse_ws_url("ws://example.com/").is_none());
-    }
-
-    #[test]
-    fn parse_ws_url_rejects_wrong_scheme() {
-        assert!(parse_ws_url("http://example.com:80/").is_none());
-        assert!(parse_ws_url("wss://example.com:443/").is_none());
-    }
-
-    #[test]
-    fn parse_ws_url_rejects_empty_host() {
-        assert!(parse_ws_url("ws://:7700/").is_none());
-    }
 
     #[test]
     fn load_config_returns_default_for_missing_file() {

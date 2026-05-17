@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 nexus-bootstrap = { path = "../nexus-bootstrap" }
+nexus-collab = { path = "../nexus-collab" }
 nexus-crdt = { path = "../nexus-crdt" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-security = { path = "../nexus-security" }
