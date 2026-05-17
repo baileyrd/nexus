@@ -33,6 +33,7 @@ const CMD = {
   executeDatabaseView: 'execute_database_view',
   resolveBlockLink: 'resolve_block_link',
   openExcerpts: 'open_excerpts',
+  refreshExcerpts: 'refresh_excerpts',
 } as const
 
 /** BL-141 — per-item input shape for `open_excerpts`. Mirrors the
@@ -268,6 +269,26 @@ export class EditorKernelClient {
       EDITOR_PLUGIN_ID,
       CMD.openExcerpts,
       { items },
+    )
+  }
+
+  /**
+   * BL-141 Approach B step 3 — re-read every source file behind a
+   * synthetic session's Excerpt blocks and refresh each block's
+   * content snapshot. Block ids stay stable so cursor anchors survive.
+   * Bumps the session's revision and fires the standard
+   * `com.nexus.editor.changed.<relpath>` event so a mirrored UI
+   * re-renders.
+   *
+   * Errors when `relpath` is unknown or refers to a non-synthetic
+   * session — the multibufferSync plugin treats both as "tab closed,
+   * stop watching" and prunes its registry entry.
+   */
+  refreshExcerpts(relpath: string): Promise<EditorSnapshot> {
+    return this.api.invoke<EditorSnapshot>(
+      EDITOR_PLUGIN_ID,
+      CMD.refreshExcerpts,
+      { relpath },
     )
   }
 
