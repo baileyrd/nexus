@@ -1908,35 +1908,45 @@ fn handle_apply_transaction(
     let (response, revision, applied_ops) = {
         let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
         let s: &mut Session = &mut guard;
-        // BL-141 Phase 2 (Approach A) — multibuffer sessions accept
-        // `UpdateBlockContent` ops on Excerpt blocks. The lossy MVP
-        // treats each excerpt as opaque text: save-time splices the
-        // new content into the source file's line range. Structural
-        // ops (InsertBlock / DeleteBlock / ReparentBlock) stay
-        // rejected because they don't translate cleanly to a
-        // line-range splice without per-character position mapping
-        // (Approach B — deferred).
+        // BL-141 Phase 2 — multibuffer sessions accept per-character
+        // text ops (`InsertText` / `DeleteText`) as well as the
+        // Approach-A `UpdateBlockContent` commit op, all targeted at
+        // Excerpt blocks. Structural ops (`InsertBlock` /
+        // `DeleteBlock` / `ReparentBlock` / `UpdateAnnotations`) stay
+        // rejected — they don't have a clean line-range splice mapping,
+        // and they'd also corrupt the synthetic tree's
+        // Excerpt-only invariant.
         //
-        // Text-typing ops (InsertText / DeleteText) also stay
-        // rejected for now: routing them through `UpdateBlockContent`
-        // would require the shell to re-render the full excerpt on
-        // every keystroke, which is exactly the latency hit BL-123
-        // optimized away. The shell-side flow for Approach A is
-        // "edit in a textarea, dispatch one UpdateBlockContent on
-        // commit" — same shape as the bases inline-edit path.
+        // Approach B step 2 (this gate-widening) treats each Excerpt's
+        // `content` as the authoritative text the user is editing.
+        // Save (handle_save) still walks every Excerpt and splices the
+        // current content back into the source file via
+        // `splice_excerpts`, so the on-disk round-trip is unchanged.
+        // The user-visible win is per-keystroke editing instead of
+        // "edit-in-textarea, dispatch one UpdateBlockContent on commit".
+        //
+        // Source-session dispatch (the original Approach B sketch) is
+        // not needed at this layer: external-edit sync (step 3) and
+        // line-range drift (step 4) operate by re-slicing source text,
+        // not by replaying ops on the source `Session`.
         if s.is_synthetic {
             for op in &tx.operations {
-                let crate::Operation::UpdateBlockContent { id, .. } = op else {
-                    return Err(exec_err(format!(
-                        "apply_transaction: session '{relpath}' is a \
-                         multibuffer; only UpdateBlockContent ops on \
-                         Excerpt blocks are accepted in Phase 2 \
-                         Approach A (got a non-content op — InsertText / \
-                         DeleteText / InsertBlock / DeleteBlock / \
-                         ReparentBlock / UpdateAnnotations are routed \
-                         per-keystroke to the source file's session in a \
-                         future Approach B)"
-                    )));
+                let id: &uuid::Uuid = match op {
+                    crate::Operation::InsertText { block_id, .. }
+                    | crate::Operation::DeleteText { block_id, .. } => block_id,
+                    crate::Operation::UpdateBlockContent { id, .. } => id,
+                    _ => {
+                        return Err(exec_err(format!(
+                            "apply_transaction: session '{relpath}' is a \
+                             multibuffer; only InsertText / DeleteText / \
+                             UpdateBlockContent ops on Excerpt blocks are \
+                             accepted in Phase 2 (got a non-content op — \
+                             InsertBlock / DeleteBlock / ReparentBlock / \
+                             UpdateAnnotations have no line-range splice \
+                             mapping and would corrupt the synthetic tree's \
+                             Excerpt-only invariant)"
+                        )));
+                    }
                 };
                 let target = s.tree.blocks.get(id).ok_or_else(|| {
                     exec_err(format!(

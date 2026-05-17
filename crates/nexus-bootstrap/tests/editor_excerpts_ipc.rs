@@ -213,12 +213,13 @@ async fn open_excerpts_merges_overlapping_ranges_within_a_file() {
     assert_eq!(blocks[2].3, "L10");
 }
 
-/// 5) Phase 2 — non-content ops (InsertText / DeleteText / structural)
-///    against the synthetic session still error with the BL-141
-///    Approach A semantics. The source file's bytes stay untouched
-///    when an op is rejected.
+/// 5a) Phase 2 Approach B — `InsertText` and `DeleteText` on Excerpt
+///     blocks succeed and mutate the in-memory snapshot. The source
+///     file's bytes stay untouched until `save` runs (covered by 6).
+///     This replaced the Approach-A rejection assertion: per-keystroke
+///     ops are no longer the "commit-via-UpdateBlockContent" detour.
 #[tokio::test]
-async fn open_excerpts_session_rejects_non_content_ops() {
+async fn open_excerpts_session_accepts_text_ops_on_excerpt_blocks() {
     use nexus_editor::{Operation, Transaction, TransactionMetadata};
 
     let forge = scratch_forge();
@@ -243,7 +244,10 @@ async fn open_excerpts_session_rejects_non_content_ops() {
     )
     .unwrap();
     let block_id = snap.tree.root_blocks[0];
+    let starting = snap.tree.blocks[&block_id].content.clone();
+    assert_eq!(starting, "alpha\nbeta");
 
+    // InsertText at position 0 inserts at the start of the excerpt.
     let tx = Transaction::new(
         vec![Operation::InsertText {
             block_id,
@@ -253,13 +257,101 @@ async fn open_excerpts_session_rejects_non_content_ops() {
         }],
         TransactionMetadata::default(),
     );
+    call(
+        &runtime,
+        "apply_transaction",
+        json!({ "relpath": snap.relpath, "transaction": tx }),
+    )
+    .await
+    .expect("InsertText must succeed on an Excerpt block");
+
+    // Re-read the snapshot to confirm the excerpt content was mutated.
+    let after: EditorSnapshot = serde_json::from_value(
+        call(&runtime, "get_tree", json!({ "relpath": snap.relpath }))
+            .await
+            .expect("get_tree ok"),
+    )
+    .unwrap();
+    assert_eq!(after.tree.blocks[&block_id].content, "Xalpha\nbeta");
+
+    // DeleteText removes the inserted character.
+    let tx = Transaction::new(
+        vec![Operation::DeleteText {
+            block_id,
+            pos: 0,
+            deleted_text: "X".into(),
+            pre_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        json!({ "relpath": snap.relpath, "transaction": tx }),
+    )
+    .await
+    .expect("DeleteText must succeed on an Excerpt block");
+
+    let after: EditorSnapshot = serde_json::from_value(
+        call(&runtime, "get_tree", json!({ "relpath": snap.relpath }))
+            .await
+            .expect("get_tree ok"),
+    )
+    .unwrap();
+    assert_eq!(after.tree.blocks[&block_id].content, "alpha\nbeta");
+
+    // The on-disk source file is untouched until `save` runs.
+    let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
+    assert_eq!(on_disk, original, "source file must be untouched pre-save");
+}
+
+/// 5b) Phase 2 Approach B — structural ops (`InsertBlock` /
+///     `DeleteBlock` / `ReparentBlock` / `UpdateAnnotations`) on the
+///     synthetic session still error: they don't have a line-range
+///     splice mapping and would corrupt the synthetic tree's
+///     Excerpt-only invariant.
+#[tokio::test]
+async fn open_excerpts_session_rejects_structural_ops() {
+    use nexus_editor::{Block, BlockType, Operation, Transaction, TransactionMetadata};
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    let original = "alpha\nbeta\ngamma\n";
+    write_note(&root, "doc.md", original);
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 1, "line_end": 2 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+
+    // InsertBlock — attempt to add a non-Excerpt sibling.
+    let tx = Transaction::new(
+        vec![Operation::InsertBlock {
+            block: Block::new(BlockType::Paragraph).with_content("interloper"),
+            parent_id: None,
+            index_in_parent: 0,
+        }],
+        TransactionMetadata::default(),
+    );
     let err = call(
         &runtime,
         "apply_transaction",
         json!({ "relpath": snap.relpath, "transaction": tx }),
     )
     .await
-    .expect_err("InsertText must be rejected on a multibuffer");
+    .expect_err("InsertBlock must be rejected on a multibuffer");
     assert!(
         err.to_string().contains("multibuffer"),
         "expected multibuffer-related error, got: {err}"
