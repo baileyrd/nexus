@@ -917,6 +917,131 @@ async fn save_reflows_excerpt_ranges_to_match_post_splice_positions() {
     assert_eq!(refreshed.tree.blocks[&first].content, "L2\nL2.5");
 }
 
+/// BL-141 Approach B step 4B — when another tab prepends lines to a
+/// source file, `refresh_excerpts` finds the original snapshot text
+/// as a unique contiguous line sequence in the new source and
+/// updates the Excerpt's stored `(line_start, line_end)`. The
+/// snapshot content is preserved (the user is still looking at the
+/// same lines, just at a new line number).
+#[tokio::test]
+async fn refresh_excerpts_relocates_anchors_on_external_prepend() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    // Unique 2-line excerpt content so the content-search finds
+    // exactly one match in both pre- and post-prepend sources.
+    let original = "header\nORIGINAL LINE A\nORIGINAL LINE B\nfooter\n";
+    write_note(&root, "doc.md", original);
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 2, "line_end": 3 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    let block_id = snap.tree.root_blocks[0];
+    assert_eq!(
+        snap.tree.blocks[&block_id].content,
+        "ORIGINAL LINE A\nORIGINAL LINE B"
+    );
+    // Verify starting anchors.
+    let pre_ty = serde_json::to_value(&snap.tree.blocks[&block_id].ty).unwrap();
+    assert_eq!(pre_ty["line_start"], 2);
+    assert_eq!(pre_ty["line_end"], 3);
+
+    // Another tab prepends 2 new header lines. The original snapshot
+    // text now lives at lines 4..=5 instead of 2..=3.
+    let prepended =
+        "NEW header 1\nNEW header 2\nheader\nORIGINAL LINE A\nORIGINAL LINE B\nfooter\n";
+    write_note(&root, "doc.md", prepended);
+
+    let refreshed: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "refresh_excerpts",
+            json!({ "relpath": snap.relpath }),
+        )
+        .await
+        .expect("refresh_excerpts ok"),
+    )
+    .unwrap();
+
+    // Content preserved — the user is still looking at the same lines.
+    assert_eq!(
+        refreshed.tree.blocks[&block_id].content,
+        "ORIGINAL LINE A\nORIGINAL LINE B"
+    );
+    // Anchors updated to the new line numbers.
+    let post_ty = serde_json::to_value(&refreshed.tree.blocks[&block_id].ty).unwrap();
+    assert_eq!(post_ty["line_start"], 4);
+    assert_eq!(post_ty["line_end"], 5);
+}
+
+/// Step 4B — when the relocation is ambiguous (same content appears
+/// in multiple places in the new source), the refresh falls back to
+/// the baseline slice-and-overwrite behaviour rather than picking a
+/// match arbitrarily.
+#[tokio::test]
+async fn refresh_excerpts_falls_back_to_slice_on_ambiguous_relocation() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    // Excerpt content "REPEAT" — a 1-line snapshot that's trivially
+    // ambiguous if the source has multiple "REPEAT" lines.
+    write_note(&root, "doc.md", "header\nREPEAT\nfooter\n");
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 2, "line_end": 2 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    let block_id = snap.tree.root_blocks[0];
+
+    // Rewrite the source: line 2 becomes "EDITED" but "REPEAT"
+    // appears twice elsewhere. The original "REPEAT" snapshot is now
+    // ambiguous, so the relocation refuses to guess and falls back
+    // to overwriting the content with the new line 2.
+    let edited = "header\nEDITED\nREPEAT\nREPEAT\nfooter\n";
+    write_note(&root, "doc.md", edited);
+
+    let refreshed: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "refresh_excerpts",
+            json!({ "relpath": snap.relpath }),
+        )
+        .await
+        .expect("refresh_excerpts ok"),
+    )
+    .unwrap();
+
+    // Fallback: snapshot now reflects the line-2 content in the new
+    // source (anchors stay at 2..=2 → "EDITED").
+    assert_eq!(refreshed.tree.blocks[&block_id].content, "EDITED");
+    let post_ty = serde_json::to_value(&refreshed.tree.blocks[&block_id].ty).unwrap();
+    assert_eq!(post_ty["line_start"], 2);
+    assert_eq!(post_ty["line_end"], 2);
+}
+
 /// Unknown relpath surfaces as a session-not-found error.
 #[tokio::test]
 async fn refresh_excerpts_rejects_unknown_session() {

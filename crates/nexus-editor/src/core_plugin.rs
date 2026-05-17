@@ -1293,6 +1293,59 @@ fn plan_save(
     Ok(SavePlan::Splice { sources })
 }
 
+/// BL-141 Approach B step 4B — content-anchored relocation.
+///
+/// Find `needle` as a contiguous sequence of source lines in
+/// `source`. Returns `Some((line_start, line_end))` (1-based,
+/// inclusive) only when **exactly one** match exists — ambiguous or
+/// missing matches return `None` so the caller can decide whether
+/// to fall back (typically: overwrite the snapshot with the slice
+/// at the stored line range).
+///
+/// Used by `handle_refresh_excerpts` to recover from external
+/// prepends / inserts above an excerpt's line range. If another
+/// tab inserts lines at the top of the source, the excerpt's
+/// stored `(line_start, line_end)` would otherwise read the wrong
+/// content; content-search finds the same lines at their new
+/// position and updates the anchors.
+///
+/// Uniqueness requirement: a 1-line excerpt with common content
+/// (`}`, `import x`) would match many places; refusing to relocate
+/// on multi-match keeps the heuristic from silently jumping to the
+/// wrong site. Empty `needle` returns `None` — the caller should
+/// short-circuit before reaching this function.
+pub(crate) fn relocate_excerpt_by_content(source: &str, needle: &str) -> Option<(u32, u32)> {
+    if needle.is_empty() {
+        return None;
+    }
+    let needle_lines: Vec<&str> = needle.lines().collect();
+    if needle_lines.is_empty() {
+        return None;
+    }
+    let source_lines: Vec<&str> = source.lines().collect();
+    if source_lines.len() < needle_lines.len() {
+        return None;
+    }
+
+    let mut hits = Vec::new();
+    for (idx, window) in source_lines.windows(needle_lines.len()).enumerate() {
+        if window == needle_lines.as_slice() {
+            hits.push(idx);
+            if hits.len() > 1 {
+                // Bail early — ambiguous.
+                return None;
+            }
+        }
+    }
+    if hits.len() != 1 {
+        return None;
+    }
+    let start_0 = hits[0];
+    let line_start = u32::try_from(start_0).ok()?.checked_add(1)?;
+    let line_end = line_start.checked_add(u32::try_from(needle_lines.len()).ok()?)?.checked_sub(1)?;
+    Some((line_start, line_end))
+}
+
 /// BL-141 Approach B step 4A — compute the post-save `(line_start,
 /// line_end)` positions for every Excerpt in a single source file.
 ///
@@ -1921,7 +1974,38 @@ async fn handle_refresh_excerpts(
                 continue;
             };
             let snippet = slice_lines(source, *line_start, *line_end);
-            if block.content != snippet {
+            if block.content == snippet {
+                // Source at stored range still matches the snapshot —
+                // no edit landed in this excerpt's window. Nothing to
+                // do.
+                continue;
+            }
+            // BL-141 Approach B step 4B — content-anchored relocation.
+            // Try to find the snapshot's current text as a unique
+            // contiguous line sequence in the new source. If found,
+            // update the anchors and keep the snapshot intact (the
+            // user is still looking at the same lines, just at a new
+            // line number). If ambiguous / missing, fall back to
+            // slice-and-overwrite — the user sees the latest source
+            // content at the original line numbers, same as step 3's
+            // baseline behaviour.
+            let relocated = if !block.content.is_empty() {
+                relocate_excerpt_by_content(source, &block.content)
+            } else {
+                None
+            };
+            if let Some((new_start, new_end)) = relocated {
+                if let BlockType::Excerpt {
+                    line_start: ls,
+                    line_end: le,
+                    ..
+                } = &mut block.ty
+                {
+                    *ls = new_start;
+                    *le = new_end;
+                }
+                // content already matches — skip overwrite.
+            } else {
                 block.content = snippet;
             }
         }
@@ -2803,6 +2887,61 @@ mod splice_tests {
         let old = "A\nB\nC\n";
         let got = splice_excerpts(old, vec![sp(2, 99, "X")]);
         assert_eq!(got, "A\nX\n");
+    }
+}
+
+#[cfg(test)]
+mod relocate_tests {
+    use super::relocate_excerpt_by_content;
+
+    #[test]
+    fn relocate_finds_unique_multi_line_match_at_top() {
+        let src = "Original line A\nOriginal line B\nOriginal line C\nother\n";
+        let needle = "Original line A\nOriginal line B\nOriginal line C";
+        assert_eq!(relocate_excerpt_by_content(src, needle), Some((1, 3)));
+    }
+
+    #[test]
+    fn relocate_finds_unique_match_after_external_prepend() {
+        let src = "NEW header 1\nNEW header 2\nOriginal A\nOriginal B\nOriginal C\nfooter\n";
+        let needle = "Original A\nOriginal B\nOriginal C";
+        // Match moves from lines 1..=3 to lines 3..=5.
+        assert_eq!(relocate_excerpt_by_content(src, needle), Some((3, 5)));
+    }
+
+    #[test]
+    fn relocate_returns_none_for_ambiguous_match() {
+        // Same 2-line sequence appears twice — refuse to guess.
+        let src = "X\nY\nzzz\nX\nY\n";
+        let needle = "X\nY";
+        assert_eq!(relocate_excerpt_by_content(src, needle), None);
+    }
+
+    #[test]
+    fn relocate_returns_none_when_needle_missing() {
+        let src = "alpha\nbeta\ngamma\n";
+        let needle = "not present";
+        assert_eq!(relocate_excerpt_by_content(src, needle), None);
+    }
+
+    #[test]
+    fn relocate_returns_none_for_empty_needle() {
+        let src = "anything\n";
+        assert_eq!(relocate_excerpt_by_content(src, ""), None);
+    }
+
+    #[test]
+    fn relocate_handles_single_line_needle_when_unique() {
+        let src = "alpha\nbeta unique line\ngamma\n";
+        let needle = "beta unique line";
+        assert_eq!(relocate_excerpt_by_content(src, needle), Some((2, 2)));
+    }
+
+    #[test]
+    fn relocate_returns_none_when_needle_longer_than_source() {
+        let src = "x\n";
+        let needle = "x\ny\nz";
+        assert_eq!(relocate_excerpt_by_content(src, needle), None);
     }
 }
 
