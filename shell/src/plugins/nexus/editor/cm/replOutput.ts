@@ -10,8 +10,22 @@
 // because the cell↔session mapping lives in `useReplStore` keyed
 // by (relpath, lang), and the gutter/keymap layer already owns
 // that resolution.
+//
+// Why a StateField (not a ViewPlugin) drives the decoration set:
+// CM6 requires `Decoration.widget({ block: true })` to come from a
+// StateField — block-level decorations from a ViewPlugin throw
+// "Block decorations may not be specified via plugins" at construction.
+// A companion ViewPlugin subscribes to `useReplStore` so a freshly-
+// minted session triggers a refresh effect even though the doc
+// hasn't changed.
 
-import { RangeSetBuilder, type Extension } from '@codemirror/state'
+import {
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+  type EditorState,
+  type Extension,
+} from '@codemirror/state'
 import {
   Decoration,
   DecorationSet,
@@ -23,6 +37,7 @@ import {
 
 import { findReplBlocks, type ReplFenceBlock } from './replFence.ts'
 import { useReplOutputStore } from '../replOutputStore.ts'
+import { useReplStore } from '../replStore.ts'
 
 /** Host inputs for the widget. */
 export interface ReplOutputDeps {
@@ -90,17 +105,26 @@ class ReplOutputWidget extends WidgetType {
 }
 
 /**
- * Build a decoration set for `view`. One widget per REPL block,
- * placed just below the closing fence line. Caller-supplied
- * `resolveSessionId` returns `null` for cells that haven't been
- * eval'd yet — those get no widget.
+ * Effect used to nudge the StateField to rebuild when the
+ * underlying session map changes (e.g. `ensureSession` just minted
+ * a sessionId for a cell that previously resolved to `null`). The
+ * payload is unused — the field re-runs `buildDecorations` against
+ * the current state regardless.
+ */
+const refreshReplOutputDecorations = StateEffect.define<void>()
+
+/**
+ * Build a decoration set from a plain `EditorState`. One widget per
+ * REPL block, placed just below the closing fence line. Caller-
+ * supplied `resolveSessionId` returns `null` for cells that haven't
+ * been eval'd yet — those get no widget.
  */
 function buildDecorations(
-  view: EditorView,
+  state: EditorState,
   deps: ReplOutputDeps,
 ): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
-  const blocks = findReplBlocks(view.state.doc.toString())
+  const blocks = findReplBlocks(state.doc.toString())
   for (const block of blocks) {
     const sessionId = deps.resolveSessionId(block)
     if (!sessionId) continue
@@ -108,9 +132,9 @@ function buildDecorations(
     // CM6 renders it on the next line down — visually "below the
     // cell". `Decoration.widget` with `block: true` reserves a
     // full block-level slot.
-    const lineCount = view.state.doc.lines
+    const lineCount = state.doc.lines
     const lineNo = Math.min(block.closeLine, lineCount)
-    const lineEnd = view.state.doc.line(lineNo).to
+    const lineEnd = state.doc.line(lineNo).to
     builder.add(
       lineEnd,
       lineEnd,
@@ -125,28 +149,60 @@ function buildDecorations(
 }
 
 /**
- * Root extension for the REPL output widget set. Re-derives the
- * decoration list whenever the doc changes (a new REPL fence
- * landing or being deleted shifts widget positions). The widget
- * subscribing to `useReplOutputStore` from its own DOM keeps
- * streaming output cheap — that path doesn't go through this
- * extension's decoration-rebuild loop.
+ * Root extension for the REPL output widget set. The StateField is
+ * the source of truth for the decoration set (block decorations
+ * must come from a field, not a plugin). A companion ViewPlugin
+ * subscribes to `useReplStore` so the field rebuilds when a new
+ * session is minted by `ensureSession` even though the doc itself
+ * hasn't changed.
  */
 export function replOutputExt(deps: ReplOutputDeps): Extension {
-  return ViewPlugin.fromClass(
+  const field = StateField.define<DecorationSet>({
+    create: (state) => buildDecorations(state, deps),
+    update(value, tr) {
+      const forced = tr.effects.some((e) =>
+        e.is(refreshReplOutputDecorations),
+      )
+      if (!tr.docChanged && !forced) return value
+      return buildDecorations(tr.state, deps)
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  })
+
+  // Subscribe to the session store so the field can refresh when
+  // `ensureSession` lands a fresh sessionId. Dispatching from a
+  // store-subscription callback is safe — we're outside any
+  // in-progress CM6 update.
+  const sessionWatcher = ViewPlugin.fromClass(
     class {
-      decorations: DecorationSet
+      private readonly view: EditorView
+      private unsub: (() => void) | null = null
+      private destroyed = false
 
       constructor(view: EditorView) {
-        this.decorations = buildDecorations(view, deps)
+        this.view = view
+        this.unsub = useReplStore.subscribe(() => {
+          if (this.destroyed) return
+          this.view.dispatch({
+            effects: refreshReplOutputDecorations.of(),
+          })
+        })
       }
 
-      update(u: ViewUpdate) {
-        if (u.docChanged) {
-          this.decorations = buildDecorations(u.view, deps)
-        }
+      update(_u: ViewUpdate) {
+        // No doc-change-driven dispatch — the StateField's `update`
+        // hook already sees `tr.docChanged` directly.
+      }
+
+      destroy() {
+        this.destroyed = true
+        this.unsub?.()
+        this.unsub = null
       }
     },
-    { decorations: (v) => v.decorations },
   )
+
+  return [field, sessionWatcher]
 }
+
+export { refreshReplOutputDecorations }

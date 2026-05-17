@@ -115,14 +115,28 @@ export function replGutterExt(deps: ReplGutterDeps): Extension {
   const watcher = ViewPlugin.fromClass(
     class {
       private readonly view: EditorView
+      private destroyed = false
       constructor(view: EditorView) {
         this.view = view
         // Defer the initial scan until after the first commit so
         // we don't dispatch from inside the view constructor.
-        queueMicrotask(() => refresh(this.view))
+        queueMicrotask(() => {
+          if (!this.destroyed) refresh(this.view)
+        })
       }
       update(u: ViewUpdate) {
-        if (u.docChanged) refresh(u.view)
+        // CM6 disallows `view.dispatch` from inside a ViewPlugin's
+        // `update` (in-progress update guard). Defer the refresh so
+        // it runs as a follow-up transaction; the `destroyed` guard
+        // keeps a destroyed view from receiving a dispatch.
+        if (u.docChanged) {
+          queueMicrotask(() => {
+            if (!this.destroyed) refresh(this.view)
+          })
+        }
+      }
+      destroy() {
+        this.destroyed = true
       }
     },
   )
