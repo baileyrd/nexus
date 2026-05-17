@@ -177,6 +177,8 @@ import { useReplStore } from './replStore.ts'
 // `com.nexus.terminal.output.<sessionId>` events into the per-cell
 // output buffer.
 import { startReplOutputPump } from './replOutputPump.ts'
+// BL-142 Phase 3 — Settings → REPL Kernels tab.
+import { ReplKernelsTab } from './ReplKernelsTab'
 // Visual settings — applied live via CSS custom properties on :root
 // (see applyEditorCssVars below) and via prop flow to CodeMirrorHost.
 const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
@@ -310,6 +312,15 @@ export const editorPlugin: Plugin = {
           key: CONTEXT_KEY_ACTIVE_TAB_DIRTY,
           description: 'True when the active tab has unsaved changes.',
           type: 'boolean',
+        },
+      ],
+      // BL-142 Phase 3 — REPL Kernels settings tab.
+      settingsTabs: [
+        {
+          id: 'editor.repl-kernels',
+          title: 'REPL Kernels',
+          group: 'options',
+          priority: 55,
         },
       ],
     },
@@ -686,6 +697,15 @@ export const editorPlugin: Plugin = {
           default: REPL_KERNELS_DEFAULT_JSON,
         },
       ],
+    })
+
+    // BL-142 Phase 3 — friendly editor over the JSON-string
+    // `nexus.editor.replKernels` schema entry above. The JSON schema
+    // remains the source of truth; this tab is a polish surface.
+    api.settings.registerTab('editor.repl-kernels', ReplKernelsTab, {
+      title: 'REPL Kernels',
+      group: 'options',
+      priority: 55,
     })
 
     applyEditorCssVars(api)
