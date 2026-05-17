@@ -40,6 +40,10 @@ pub enum Mode {
     /// AIG-07 — AI chat input mode. Keystrokes go to the prompt at
     /// the bottom of the AI panel.
     AiInput,
+    /// BL-132 — agent goal-input mode. Keystrokes go to the goal
+    /// buffer at the bottom of the agent panel; Enter dispatches
+    /// `com.nexus.agent::session_run`.
+    AgentInput,
 }
 
 /// Which pane has keyboard focus.
@@ -680,6 +684,157 @@ impl Default for AiPanelState {
     }
 }
 
+// ── AgentPanelState (BL-132) ──────────────────────────────────────────────────
+
+/// BL-132 — wire shape of one tool call inside a `round_proposed`
+/// event. Built from the bus payload at parse time; carried through
+/// the approval modal verbatim so the renderer can show every badge
+/// the CLI surfaces.
+#[derive(Debug, Clone)]
+pub struct ProposedToolCall {
+    pub name: String,
+    pub target_plugin_id: Option<String>,
+    pub command_id: Option<String>,
+    pub requires_approval: bool,
+    pub registered: bool,
+}
+
+/// BL-132 — pending approval the user has not yet decided on.
+/// Created when [`TuiApp::pump_agent`] sees a `round_proposed`
+/// event whose tool calls include any `requires_approval = true`
+/// entry; cleared when the user answers or the local timer fires
+/// the auto-reject fallback.
+#[derive(Debug, Clone)]
+pub struct PendingApproval {
+    pub session_id: String,
+    pub round: u64,
+    pub text: String,
+    pub calls: Vec<ProposedToolCall>,
+    /// Local instant the modal first opened — drives the
+    /// auto-reject fallback so the modal can't sit forever if the
+    /// user walks away. Matches the server's
+    /// `DEFAULT_APPROVAL_TIMEOUT_SECS` (1800s).
+    pub opened_at: std::time::Instant,
+}
+
+/// One turn rendered in the agent panel transcript. Goal / model
+/// text / per-tool-call lines all share the same row type so the
+/// renderer can lay them out without branching.
+#[derive(Debug, Clone)]
+pub struct AgentLine {
+    pub kind: AgentLineKind,
+    pub text: String,
+}
+
+/// Classification for an [`AgentLine`] — drives the prefix style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentLineKind {
+    /// User goal submitted via the prompt.
+    Goal,
+    /// Model commentary text from a session round.
+    Round,
+    /// Per-tool-call summary line (`✓ name — preview`).
+    ToolCall,
+    /// Final outcome banner (`Outcome: complete` / `failed` / …).
+    Outcome,
+    /// Error surfaced from the IPC call or join handle.
+    Error,
+}
+
+/// In-flight `session_run` IPC call. Held as `Some` between
+/// [`TuiApp::submit_agent`] and the pump observing the task's
+/// completion; mirrors [`StreamingSession`] for the AI panel.
+pub struct AgentSession {
+    /// Subscription to `com.nexus.agent.*` topic prefix opened
+    /// *before* the IPC dispatch so events emitted between the
+    /// spawn and our first pump still reach us.
+    pub subscription: EventSubscription,
+    /// Spawned IPC task driving the call. `is_finished` is polled
+    /// non-blocking; the result is harvested only when `true`.
+    pub join: JoinHandle<Result<serde_json::Value, String>>,
+}
+
+/// State of the right-pane agent panel (BL-132). Mirrors the AI
+/// panel surface — same toggle/input/transcript pattern — plus an
+/// approval-modal slot driven by `com.nexus.agent.round_proposed`
+/// bus events.
+pub struct AgentPanelState {
+    /// True when the panel is visible. Toggled with `g` from
+    /// Normal mode (focus-guarded so the viewer's `g` /
+    /// scroll-to-top still works when focus is on the viewer).
+    pub active: bool,
+    /// Transcript lines, oldest first. Pushed by `submit_agent`
+    /// (the goal) and `pump_agent` (round text + per-call rows +
+    /// final outcome).
+    pub lines: Vec<AgentLine>,
+    /// Current prompt buffer. Submitted to `session_run` on Enter.
+    pub input: String,
+    /// Caret position within `input` (char index, not byte).
+    pub cursor: usize,
+    /// True while a `session_run` IPC call is in flight.
+    pub in_flight: bool,
+    /// Most recent error (IPC transport / parse error / join
+    /// error). Cleared at the start of every new submit.
+    pub last_error: Option<String>,
+    /// Vertical scroll offset for the transcript. Auto-pinned to
+    /// the bottom whenever a new line arrives.
+    pub scroll: u16,
+    /// Active session — `Some` between submit and pump harvest.
+    pub session: Option<AgentSession>,
+    /// Pending approval the user has not yet decided on. `Some`
+    /// drives the modal overlay in `ui::agent_approval`.
+    pub pending: Option<PendingApproval>,
+}
+
+impl AgentPanelState {
+    /// Create a fresh, inactive panel.
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            lines: Vec::new(),
+            input: String::new(),
+            cursor: 0,
+            in_flight: false,
+            last_error: None,
+            scroll: 0,
+            session: None,
+            pending: None,
+        }
+    }
+
+    /// Insert a single character at the caret. Used by
+    /// `Mode::AgentInput`.
+    pub fn insert_char(&mut self, c: char) {
+        let byte = self.char_index_to_byte(self.cursor);
+        self.input.insert(byte, c);
+        self.cursor += 1;
+    }
+
+    /// Backspace: delete the character before the caret.
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let byte_end = self.char_index_to_byte(self.cursor);
+        let byte_start = self.char_index_to_byte(self.cursor - 1);
+        self.input.replace_range(byte_start..byte_end, "");
+        self.cursor -= 1;
+    }
+
+    fn char_index_to_byte(&self, char_idx: usize) -> usize {
+        self.input
+            .char_indices()
+            .nth(char_idx)
+            .map_or(self.input.len(), |(b, _)| b)
+    }
+}
+
+impl Default for AgentPanelState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -704,6 +859,9 @@ pub struct TuiApp {
     pub terminal: TerminalPanelState,
     /// AIG-07 — AI chat panel state.
     pub ai: AiPanelState,
+    /// BL-132 — agent panel state. Hosts `com.nexus.agent::session_run`
+    /// in interactive mode with the `round_proposed` approval modal.
+    pub agent: AgentPanelState,
     /// BL-137 — kernel-stats overlay state.
     pub kernel_stats: KernelStatsState,
     /// Cached status bar statistics.
@@ -773,6 +931,7 @@ impl TuiApp {
             task_view: TaskViewState::new(),
             terminal: TerminalPanelState::new(),
             ai: AiPanelState::new(),
+            agent: AgentPanelState::new(),
             kernel_stats: KernelStatsState::new(),
             status_info: StatusInfo::new(),
             runtime,
@@ -1452,6 +1611,368 @@ impl TuiApp {
             }
         }
     }
+
+    // ── BL-132 — agent panel ────────────────────────────────────────
+
+    /// Toggle the agent panel. First activation focuses the goal
+    /// input so the user can start typing immediately, mirroring
+    /// the AI panel's `a` flow.
+    pub fn toggle_agent_panel(&mut self) {
+        self.agent.active = !self.agent.active;
+        if self.agent.active {
+            self.mode = Mode::AgentInput;
+        } else if self.mode == Mode::AgentInput {
+            self.mode = Mode::Normal;
+        }
+    }
+
+    /// Submit the current goal to `com.nexus.agent::session_run` with
+    /// `auto_approve = false` — engages the kernel's `BusBridgePolicy`
+    /// so destructive rounds emit `com.nexus.agent.round_proposed`
+    /// events for [`Self::pump_agent`] to surface as the approval
+    /// modal.
+    pub fn submit_agent(&mut self) {
+        let goal = self.agent.input.trim().to_string();
+        if goal.is_empty() || self.agent.in_flight {
+            return;
+        }
+        self.agent.lines.push(AgentLine {
+            kind: AgentLineKind::Goal,
+            text: goal.clone(),
+        });
+        self.agent.input.clear();
+        self.agent.cursor = 0;
+        self.agent.last_error = None;
+        self.agent.in_flight = true;
+        self.agent.scroll = u16::MAX;
+
+        // Subscribe BEFORE firing the call: broadcast channels drop
+        // pre-subscription events, and the agent emits `round_proposed`
+        // on its first round potentially before our first pump tick.
+        let subscription = self
+            .runtime
+            .kernel
+            .event_bus()
+            .subscribe(EventFilter::CustomPrefix(AGENT_TOPIC_PREFIX.to_string()));
+
+        let runtime = Arc::clone(&self.runtime);
+        let args = serde_json::json!({
+            "goal": goal,
+            "auto_approve": false,
+        });
+        let join = self.rt.spawn(async move {
+            runtime
+                .context
+                .ipc_call(AGENT_PLUGIN_ID, "session_run", args, AGENT_IPC_TIMEOUT)
+                .await
+                .map_err(|e| e.to_string())
+        });
+
+        self.agent.session = Some(AgentSession { subscription, join });
+    }
+
+    /// BL-132 — drain bus events into the panel state. Sets
+    /// [`AgentPanelState::pending`] on a destructive `round_proposed`;
+    /// auto-skips safe rounds (the server-side bus bridge handles
+    /// those without prompting). Harvests the spawned IPC task when
+    /// it completes and renders the final session into the
+    /// transcript.
+    pub fn pump_agent(&mut self) {
+        // Auto-reject the modal if the local timer has elapsed past
+        // the server's default approval window. Belt-and-braces — the
+        // server-side `BusBridgePolicy` also times out, but if its
+        // event-bus reply never reaches us we'd otherwise sit on a
+        // dead modal forever.
+        if let Some(pending) = self.agent.pending.clone() {
+            if is_modal_expired(
+                pending.opened_at,
+                MODAL_AUTO_REJECT_TIMEOUT,
+                std::time::Instant::now(),
+            ) {
+                self.dispatch_round_decide(&pending.session_id, pending.round, false);
+                self.agent.pending = None;
+                self.agent.last_error = Some("approval modal auto-rejected after timeout".into());
+            }
+        }
+
+        let Some(session) = self.agent.session.as_mut() else {
+            return;
+        };
+
+        // Drain pending bus events. Try-recv until empty so a burst
+        // of events lands in one frame rather than dripping out.
+        loop {
+            match session.subscription.try_recv() {
+                Ok(Some(event)) => {
+                    let NexusEvent::Custom { type_id, payload, .. } = &event.event else {
+                        continue;
+                    };
+                    if type_id != AGENT_ROUND_PROPOSED_TOPIC {
+                        continue;
+                    }
+                    let Some(parsed) = parse_round_proposed(payload) else {
+                        continue;
+                    };
+                    if classify_round(payload) == RoundClassification::AutoApprove {
+                        // Server-side bus bridge auto-approves; we
+                        // just observe and don't surface a modal.
+                        continue;
+                    }
+                    // A new `round_proposed` while one is pending
+                    // overwrites — the agent only emits sequentially
+                    // per session so this can't actually race, but
+                    // overwriting keeps the modal in sync if it did.
+                    self.agent.pending = Some(parsed);
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    tracing::debug!(error = %err, "agent subscription drain error");
+                    break;
+                }
+            }
+        }
+
+        // Harvest the IPC result if the task has completed.
+        if !session.join.is_finished() {
+            return;
+        }
+        let mut session = self.agent.session.take().expect("checked Some above");
+        let join_result = self.rt.block_on(async { (&mut session.join).await });
+        self.agent.in_flight = false;
+        match join_result {
+            Ok(Ok(value)) => render_session_into_transcript(&mut self.agent, &value),
+            Ok(Err(msg)) => {
+                self.agent.lines.push(AgentLine {
+                    kind: AgentLineKind::Error,
+                    text: msg.clone(),
+                });
+                self.agent.last_error = Some(msg);
+            }
+            Err(join_err) => {
+                let msg = format!("agent task join: {join_err}");
+                self.agent.lines.push(AgentLine {
+                    kind: AgentLineKind::Error,
+                    text: msg.clone(),
+                });
+                self.agent.last_error = Some(msg);
+            }
+        }
+        self.agent.scroll = u16::MAX;
+        // Once the call returns, any leftover pending modal is moot.
+        self.agent.pending = None;
+    }
+
+    /// BL-132 — approve the currently pending round. Fires
+    /// `com.nexus.agent::round_decide` on the runtime and clears the
+    /// modal slot.
+    pub fn approve_pending_round(&mut self) {
+        let Some(pending) = self.agent.pending.take() else {
+            return;
+        };
+        self.dispatch_round_decide(&pending.session_id, pending.round, true);
+    }
+
+    /// BL-132 — reject the currently pending round.
+    pub fn reject_pending_round(&mut self) {
+        let Some(pending) = self.agent.pending.take() else {
+            return;
+        };
+        self.dispatch_round_decide(&pending.session_id, pending.round, false);
+    }
+
+    /// Fire `round_decide` on the tokio runtime as a background task.
+    /// Errors are logged at `warn` — they're not actionable from the
+    /// TUI and the in-flight session will surface its own error if
+    /// the policy never receives the reply.
+    fn dispatch_round_decide(&self, session_id: &str, round: u64, approved: bool) {
+        let runtime = Arc::clone(&self.runtime);
+        let args = serde_json::json!({
+            "session_id": session_id,
+            "round": round,
+            "approved": approved,
+        });
+        self.rt.spawn(async move {
+            if let Err(e) = runtime
+                .context
+                .ipc_call(AGENT_PLUGIN_ID, "round_decide", args, AGENT_IPC_TIMEOUT)
+                .await
+            {
+                tracing::warn!(error = %e, "round_decide dispatch failed");
+            }
+        });
+    }
+}
+
+/// BL-132 — `com.nexus.agent` plugin id, lifted to a const so the
+/// kernel-side string can't drift from this side.
+const AGENT_PLUGIN_ID: &str = "com.nexus.agent";
+
+/// BL-132 — topic prefix the panel subscribes to. Mirrors the CLI
+/// interactive driver's filter.
+const AGENT_TOPIC_PREFIX: &str = "com.nexus.agent.";
+
+/// BL-132 — specific `round_proposed` topic. Reads cleaner than
+/// concatenating against the prefix at the match site.
+const AGENT_ROUND_PROPOSED_TOPIC: &str = "com.nexus.agent.round_proposed";
+
+/// Generous upper bound matching the CLI's `IPC_TIMEOUT`. The
+/// session loop can string many tool calls together.
+const AGENT_IPC_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Local-side auto-reject fallback for the approval modal. Matches
+/// the kernel's `DEFAULT_APPROVAL_TIMEOUT_SECS` (1800s / 30 min) so
+/// neither side fires earlier than the other in the steady state.
+const MODAL_AUTO_REJECT_TIMEOUT: Duration = Duration::from_secs(1800);
+
+/// BL-132 — classification of a `round_proposed` payload. Mirrors
+/// the CLI's `PromptOutcome` shape; the agent panel only needs the
+/// auto-approve short-circuit (every other outcome routes to the
+/// user via the modal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoundClassification {
+    /// Every tool call in the round is flagged `requires_approval =
+    /// false` — server-side bus bridge auto-approves on its own.
+    AutoApprove,
+    /// At least one call is destructive (or unregistered, which
+    /// defaults to destructive). Surface the modal.
+    Destructive,
+}
+
+/// Classify a `round_proposed` payload by checking whether any
+/// `tool_calls[*].requires_approval` is `true`. Missing fields
+/// default to `true` — matching the kernel's conservative default
+/// for unregistered tools.
+pub fn classify_round(payload: &serde_json::Value) -> RoundClassification {
+    let Some(calls) = payload.get("tool_calls").and_then(|v| v.as_array()) else {
+        return RoundClassification::AutoApprove;
+    };
+    let any_destructive = calls.iter().any(|c| {
+        c.get("requires_approval")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true)
+    });
+    if any_destructive {
+        RoundClassification::Destructive
+    } else {
+        RoundClassification::AutoApprove
+    }
+}
+
+/// Parse a `round_proposed` payload into a [`PendingApproval`].
+/// Returns `None` when the required `session_id` / `round` fields
+/// are missing or wrong-typed — the pump skips the event silently in
+/// that case rather than surfacing a malformed modal.
+pub fn parse_round_proposed(payload: &serde_json::Value) -> Option<PendingApproval> {
+    let session_id = payload.get("session_id")?.as_str()?.to_string();
+    let round = payload.get("round")?.as_u64()?;
+    let text = payload
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let calls = payload
+        .get("tool_calls")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|c| ProposedToolCall {
+                    name: c
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .to_string(),
+                    target_plugin_id: c
+                        .get("target_plugin_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    command_id: c
+                        .get("command_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    requires_approval: c
+                        .get("requires_approval")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
+                    registered: c
+                        .get("registered")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(PendingApproval {
+        session_id,
+        round,
+        text,
+        calls,
+        opened_at: std::time::Instant::now(),
+    })
+}
+
+/// Pure helper for the modal auto-reject timer. Extracted so tests
+/// can pin the boundary without touching wall-clock time.
+pub fn is_modal_expired(
+    opened_at: std::time::Instant,
+    timeout: Duration,
+    now: std::time::Instant,
+) -> bool {
+    now.saturating_duration_since(opened_at) >= timeout
+}
+
+/// BL-132 — render a completed `session_run` response into the agent
+/// transcript. Pulled out for testability; mirrors the CLI's
+/// `print_session` shape but folds each output line into a typed
+/// `AgentLine` so the renderer can style by kind.
+fn render_session_into_transcript(
+    state: &mut AgentPanelState,
+    session: &serde_json::Value,
+) {
+    let rounds = session
+        .get("rounds")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for round in &rounds {
+        let text = round.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        if !text.is_empty() {
+            state.lines.push(AgentLine {
+                kind: AgentLineKind::Round,
+                text: text.to_string(),
+            });
+        }
+        if let Some(calls) = round.get("tool_calls").and_then(|v| v.as_array()) {
+            for tc in calls {
+                let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let approved = tc.get("approved").and_then(|v| v.as_bool()).unwrap_or(false);
+                let error = tc.get("error").and_then(|v| v.as_str()).unwrap_or("");
+                let marker = if !error.is_empty() {
+                    "✗"
+                } else if approved {
+                    "✓"
+                } else {
+                    "·"
+                };
+                let body = if !error.is_empty() {
+                    format!("{marker} {name} — {error}")
+                } else {
+                    format!("{marker} {name}")
+                };
+                state.lines.push(AgentLine {
+                    kind: AgentLineKind::ToolCall,
+                    text: body,
+                });
+            }
+        }
+    }
+    let outcome = session
+        .get("outcome")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    state.lines.push(AgentLine {
+        kind: AgentLineKind::Outcome,
+        text: format!("outcome: {outcome}"),
+    });
 }
 
 /// AIG-07 follow-up — pull the assistant text out of a
@@ -1587,3 +2108,147 @@ mod aig07_tests {
         assert_eq!(s.cursor, 1);
     }
 }
+
+// ── BL-132 — pure-helper tests ──────────────────────────────────────────────
+
+#[cfg(test)]
+mod bl132_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn classify_round_no_tool_calls_is_auto_approve() {
+        let payload = serde_json::json!({ "session_id": "s", "round": 1 });
+        assert_eq!(classify_round(&payload), RoundClassification::AutoApprove);
+    }
+
+    #[test]
+    fn classify_round_all_safe_tools_is_auto_approve() {
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [
+                { "name": "read_file", "requires_approval": false, "registered": true },
+                { "name": "search_forge", "requires_approval": false, "registered": true },
+            ],
+        });
+        assert_eq!(classify_round(&payload), RoundClassification::AutoApprove);
+    }
+
+    #[test]
+    fn classify_round_any_destructive_call_is_destructive() {
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [
+                { "name": "read_file", "requires_approval": false, "registered": true },
+                { "name": "write_file", "requires_approval": true, "registered": true },
+            ],
+        });
+        assert_eq!(classify_round(&payload), RoundClassification::Destructive);
+    }
+
+    #[test]
+    fn classify_round_unregistered_call_defaults_to_destructive() {
+        // Mirrors the server-side conservative default and the CLI's
+        // `classify_round`: a missing `requires_approval` field
+        // means we surface the modal rather than auto-approve.
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [
+                { "name": "unregistered_thing" },
+            ],
+        });
+        assert_eq!(classify_round(&payload), RoundClassification::Destructive);
+    }
+
+    #[test]
+    fn parse_round_proposed_returns_none_when_session_id_missing() {
+        let payload = serde_json::json!({ "round": 1, "tool_calls": [] });
+        assert!(parse_round_proposed(&payload).is_none());
+    }
+
+    #[test]
+    fn parse_round_proposed_returns_none_when_round_missing() {
+        let payload = serde_json::json!({ "session_id": "s", "tool_calls": [] });
+        assert!(parse_round_proposed(&payload).is_none());
+    }
+
+    #[test]
+    fn parse_round_proposed_extracts_full_payload() {
+        let payload = serde_json::json!({
+            "session_id": "abc",
+            "round": 3,
+            "text": "I will delete the file.\nNext step…",
+            "tool_calls": [
+                {
+                    "name": "delete_file",
+                    "target_plugin_id": "com.nexus.storage",
+                    "command_id": "delete_file",
+                    "requires_approval": true,
+                    "registered": true,
+                },
+                {
+                    "name": "read_file",
+                    "requires_approval": false,
+                    "registered": true,
+                },
+            ],
+        });
+        let parsed = parse_round_proposed(&payload).expect("must parse");
+        assert_eq!(parsed.session_id, "abc");
+        assert_eq!(parsed.round, 3);
+        assert!(parsed.text.starts_with("I will delete"));
+        assert_eq!(parsed.calls.len(), 2);
+        assert_eq!(parsed.calls[0].name, "delete_file");
+        assert_eq!(parsed.calls[0].target_plugin_id.as_deref(), Some("com.nexus.storage"));
+        assert!(parsed.calls[0].requires_approval);
+        assert!(parsed.calls[0].registered);
+        assert!(!parsed.calls[1].requires_approval);
+    }
+
+    #[test]
+    fn parse_round_proposed_defaults_missing_fields_conservatively() {
+        // Missing `requires_approval` defaults to true (destructive);
+        // missing `registered` defaults to false (unregistered).
+        let payload = serde_json::json!({
+            "session_id": "s",
+            "round": 1,
+            "tool_calls": [ { "name": "mystery_op" } ],
+        });
+        let parsed = parse_round_proposed(&payload).expect("must parse");
+        assert!(parsed.calls[0].requires_approval);
+        assert!(!parsed.calls[0].registered);
+        assert!(parsed.calls[0].target_plugin_id.is_none());
+        assert!(parsed.calls[0].command_id.is_none());
+    }
+
+    #[test]
+    fn is_modal_expired_false_before_timeout() {
+        let opened = Instant::now();
+        let now = opened + Duration::from_secs(120);
+        assert!(!is_modal_expired(opened, Duration::from_secs(1800), now));
+    }
+
+    #[test]
+    fn is_modal_expired_true_at_or_past_timeout() {
+        let opened = Instant::now();
+        let now = opened + Duration::from_secs(1800);
+        assert!(is_modal_expired(opened, Duration::from_secs(1800), now));
+        let later = opened + Duration::from_secs(3600);
+        assert!(is_modal_expired(opened, Duration::from_secs(1800), later));
+    }
+
+    #[test]
+    fn is_modal_expired_false_when_now_before_opened() {
+        // Defensive: clocks should be monotonic, but if `now` is
+        // somehow earlier than `opened_at` we don't want to fire
+        // the auto-reject. `saturating_duration_since` returns 0
+        // for that case.
+        let opened = Instant::now();
+        let earlier = opened;
+        assert!(!is_modal_expired(opened, Duration::from_secs(1800), earlier));
+    }
+}
+

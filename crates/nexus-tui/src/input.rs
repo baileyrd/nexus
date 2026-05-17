@@ -38,13 +38,24 @@ pub fn handle_event(app: &mut TuiApp, event: Event) -> Result<()> {
         );
     }
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => match app.mode {
-            Mode::Normal => handle_normal_key(app, key)?,
-            Mode::Search => handle_search_key(app, key)?,
-            Mode::Find => handle_find_key(app, key)?,
-            Mode::Terminal => handle_terminal_key(app, key)?,
-            Mode::AiInput => handle_ai_input_key(app, key)?,
-        },
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            // BL-132 — when the agent approval modal is up, intercept
+            // the decision keys before the mode-based dispatch so the
+            // user can answer without first leaving (e.g.) AgentInput.
+            // Other keys fall through so typing inside Mode::AgentInput
+            // (or any other mode) still functions normally.
+            if app.agent.pending.is_some() && handle_approval_modal_key(app, key)? {
+                return Ok(());
+            }
+            match app.mode {
+                Mode::Normal => handle_normal_key(app, key)?,
+                Mode::Search => handle_search_key(app, key)?,
+                Mode::Find => handle_find_key(app, key)?,
+                Mode::Terminal => handle_terminal_key(app, key)?,
+                Mode::AiInput => handle_ai_input_key(app, key)?,
+                Mode::AgentInput => handle_agent_input_key(app, key)?,
+            }
+        }
         Event::Mouse(mouse) => handle_mouse(app, mouse)?,
         _ => {}
     }
@@ -123,6 +134,14 @@ fn handle_normal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             if app.ai.active {
                 app.mode = Mode::AiInput;
             }
+            return Ok(());
+        }
+        // BL-132 — toggle the agent panel. Focus-guarded so the
+        // viewer's `g` (scroll-to-top) still wins when focus is on
+        // the viewer; tree-focus has no use for `g` so the toggle
+        // claims it there.
+        (KeyModifiers::NONE, KeyCode::Char('g')) if app.focus != Focus::Viewer => {
+            app.toggle_agent_panel();
             return Ok(());
         }
         _ => {}
@@ -441,6 +460,70 @@ fn open_in_editor(app: &mut TuiApp) -> Result<()> {
 
 // ── AIG-07 — AI input mode ───────────────────────────────────────────────────
 
+// ── BL-132 — agent panel ─────────────────────────────────────────────────────
+
+/// Handle a key while [`crate::app::AgentPanelState::pending`] is
+/// `Some`. Returns `true` when the key was consumed (y / n / Enter /
+/// Esc), `false` to let it fall through to the mode-based dispatch.
+fn handle_approval_modal_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
+    if let Some(decision) = key_to_approval_decision(key.modifiers, key.code) {
+        if decision {
+            app.approve_pending_round();
+        } else {
+            app.reject_pending_round();
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Map a key event to an approval decision. `Some(true)` for
+/// approve (y / Y / Enter), `Some(false)` for reject (n / N / Esc),
+/// `None` for anything else. Pure helper so the test suite can pin
+/// the mapping without standing up a `TuiApp`.
+pub fn key_to_approval_decision(mods: KeyModifiers, code: KeyCode) -> Option<bool> {
+    match (mods, code) {
+        (_, KeyCode::Char('y')) | (_, KeyCode::Char('Y')) | (_, KeyCode::Enter) => Some(true),
+        (_, KeyCode::Char('n')) | (_, KeyCode::Char('N')) | (_, KeyCode::Esc) => Some(false),
+        _ => None,
+    }
+}
+
+fn handle_agent_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
+    match (key.modifiers, key.code) {
+        // Esc closes input mode but keeps the panel open. Mirrors
+        // the AI panel: Esc again from Normal hides the panel.
+        (_, KeyCode::Esc) => {
+            app.mode = Mode::Normal;
+            return Ok(());
+        }
+        // BL-132 — non-blocking submit. `submit_agent` spawns the
+        // `session_run` IPC call (with `auto_approve = false`) as a
+        // tokio task; `pump_agent` (in the render loop) drains bus
+        // events and surfaces the approval modal when needed.
+        (KeyModifiers::NONE, KeyCode::Enter) => {
+            app.submit_agent();
+            // Drop back to Normal so the user's hands are free for
+            // the modal interaction without having to leave input
+            // mode first.
+            app.mode = Mode::Normal;
+            return Ok(());
+        }
+        (KeyModifiers::NONE, KeyCode::Backspace)
+        | (KeyModifiers::SHIFT, KeyCode::Backspace) => {
+            app.agent.backspace();
+            return Ok(());
+        }
+        (KeyModifiers::NONE, KeyCode::Char(c))
+        | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.agent.insert_char(c);
+            return Ok(());
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn handle_ai_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
     use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -477,4 +560,36 @@ fn handle_ai_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bl132_key_tests {
+    use super::key_to_approval_decision;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    #[test]
+    fn approve_keys_map_to_true() {
+        for code in [KeyCode::Char('y'), KeyCode::Char('Y'), KeyCode::Enter] {
+            assert_eq!(key_to_approval_decision(KeyModifiers::NONE, code), Some(true));
+        }
+    }
+
+    #[test]
+    fn reject_keys_map_to_false() {
+        for code in [KeyCode::Char('n'), KeyCode::Char('N'), KeyCode::Esc] {
+            assert_eq!(key_to_approval_decision(KeyModifiers::NONE, code), Some(false));
+        }
+    }
+
+    #[test]
+    fn unrelated_keys_return_none() {
+        for code in [
+            KeyCode::Char('z'),
+            KeyCode::Char(' '),
+            KeyCode::Tab,
+            KeyCode::Backspace,
+        ] {
+            assert_eq!(key_to_approval_decision(KeyModifiers::NONE, code), None);
+        }
+    }
 }

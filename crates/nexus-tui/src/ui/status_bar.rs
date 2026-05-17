@@ -22,6 +22,7 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         Mode::Find => (" FIND ", Color::Cyan),
         Mode::Terminal => (" TERM ", Color::Magenta),
         Mode::AiInput => (" ASK ", Color::Blue),
+        Mode::AgentInput => (" AGENT ", Color::LightBlue),
     };
     let mode_span = Span::styled(
         mode_label,

@@ -232,10 +232,13 @@ DG-34 / BL-132 ship the flag at the agent-tool level (`AgentToolSpec.requires_ap
 
 ### Follow-up: TUI modal for agent approval (from BL-132)
 
-**Source**: BL-132 deferral. Filed 2026-05-14.
-**Effort**: Small (after TUI agent surface lands).
+**Status**: Shipped 2026-05-17. The BL-132 follow-up landed with the underlying TUI agent surface bundled into the same PR — `nexus-tui` previously had no `agent run` surface, so this work is "build the surface + add the modal" in one branch. New `Mode::AgentInput` + `AgentPanelState` in `crates/nexus-tui/src/app.rs` mirror the AIG-07 AI panel shape (transcript / status / prompt rows); `g` from Normal mode toggles the panel (focus-guarded so the viewer's `g` / scroll-to-top still wins when focus is on the viewer). `submit_agent` fires `com.nexus.agent::session_run` with `auto_approve = false`, subscribing to the `com.nexus.agent.*` topic prefix *before* dispatch so destructive rounds emit `round_proposed` events the pump can catch. `pump_agent` drains the bus, runs a ported `classify_round` (matches the CLI's conservative-default semantics), and sets `agent.pending: Option<PendingApproval>` on any destructive round. New `ui/agent.rs` renders the panel; new `ui/agent_approval.rs` renders a centered card overlay with per-call `safe` / `DESTRUCTIVE` / `UNREGISTERED` badges + a footer countdown to the local auto-reject fallback (`MODAL_AUTO_REJECT_TIMEOUT = 1800s`, matching the kernel's `DEFAULT_APPROVAL_TIMEOUT_SECS`). The approval keymap intercepts before the mode-based dispatch — `y` / `Y` / Enter approve, `n` / `N` / Esc reject, both fire `com.nexus.agent::round_decide` via a fire-and-forget tokio spawn so the in-flight `session_run` IPC stays clean. 17 new unit tests pin the pure helpers: `classify_round` (4 cases mirroring the CLI's coverage), `parse_round_proposed` (4 cases including conservative defaults for missing fields), `is_modal_expired` (3 cases including the saturating-zero defensive branch), `key_to_approval_decision` (3 cases), and `remaining_secs` (3 cases for the modal countdown). `cargo test -p nexus-tui` → 38/38; `cargo clippy -p nexus-tui --all-targets` clean.
 
-`nexus-tui` has no `agent run` surface today, so the TUI half of BL-132's frontend triad is gated on the underlying agent UI landing first. When that surface ships, a `tui::dialog`-style modal subscribing to `com.nexus.agent.round_proposed` inherits the bus-event shape DG-34 already established.
+**Deferred (filed below if needed)**:
+
+- **Archetype / custom-agent picker** — the TUI panel uses the agent default (same shape as `nexus agent run` without `--archetype`). DG-36's custom-agent slug router could surface via a dropdown in the panel header when the catalog has manifests.
+- **Streaming token feedback during a round** — `session_run` isn't streaming-shaped today (no per-token bus events). When the agent loop gains a `session_chunk` topic the panel would inherit the AIG-07 streaming-pump pattern verbatim.
+- **Multi-session view** — the panel runs one session at a time, mirroring the AI panel's `in_flight` guard. A tab-bar of concurrent sessions is straightforward but no caller has surfaced a need.
 
 ---
 

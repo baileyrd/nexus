@@ -157,6 +157,14 @@ fn run(terminal: &mut DefaultTerminal, app: &mut TuiApp) -> Result<()> {
             app.pump_ai();
         }
 
+        // BL-132 — drain `com.nexus.agent.*` events into the panel
+        // and harvest the `session_run` IPC result when the spawned
+        // task completes. Also fires the local auto-reject fallback
+        // on any pending modal that has aged past the timeout.
+        if app.agent.session.is_some() || app.agent.pending.is_some() {
+            app.pump_agent();
+        }
+
         if app.should_quit {
             return Ok(());
         }

@@ -8,6 +8,8 @@ use ratatui::{
 
 use crate::app::{Mode, TuiApp};
 
+mod agent;
+mod agent_approval;
 mod ai;
 mod backlinks;
 mod file_tree;
@@ -33,12 +35,14 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
 
     file_tree::render(frame, app, tree_area);
 
-    // Right pane priority: AI panel > terminal > tasks > viewer.
-    // The AI panel takes precedence so the user can chat without
-    // the right pane fighting with the file viewer for keystrokes
-    // (the AiInput mode routes them away from the viewer anyway,
-    // but visually the chat surface should dominate when active).
-    if app.ai.active {
+    // Right pane priority: agent panel > AI panel > terminal >
+    // tasks > viewer. The agent panel sits above AI so the
+    // approval-modal flow isn't visually nested under a chat
+    // surface; both are blue but the agent panel's lighter shade +
+    // header label tell them apart.
+    if app.agent.active {
+        agent::render(frame, app, right_area);
+    } else if app.ai.active {
         ai::render(frame, app, right_area);
     } else if app.terminal.active {
         terminal::render(frame, app, right_area);
@@ -88,6 +92,13 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
     // user toggles modes underneath.
     if app.kernel_stats.visible {
         kernel_stats::render(frame, app, frame.area());
+    }
+
+    // BL-132 — approval modal layered above every other overlay.
+    // The user must answer (y / n / Esc) or wait for the auto-reject
+    // timer; until then keystrokes do not reach the panels beneath.
+    if app.agent.pending.is_some() {
+        agent_approval::render(frame, app, frame.area());
     }
 }
 
