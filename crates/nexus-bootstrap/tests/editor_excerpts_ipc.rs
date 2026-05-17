@@ -663,3 +663,173 @@ async fn open_excerpts_preserves_per_excerpt_labels() {
     assert_eq!(ty0["label"], "error: missing semicolon");
     assert_eq!(ty1["label"], "warning: unused variable");
 }
+
+// ─── BL-141 Approach B step 3 — refresh_excerpts ─────────────────────────────
+
+/// Happy path — after a source file is rewritten on disk,
+/// `refresh_excerpts` updates every Excerpt block's snapshot to the
+/// current source slice, preserves block ids, and bumps the
+/// session's revision.
+#[tokio::test]
+async fn refresh_excerpts_updates_snapshots_from_changed_source() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    let original = "alpha\nbeta\ngamma\ndelta\nepsilon\n";
+    write_note(&root, "doc.md", original);
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "doc.md", "line_start": 2, "line_end": 3 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    let block_id = snap.tree.root_blocks[0];
+    assert_eq!(snap.tree.blocks[&block_id].content, "beta\ngamma");
+    let starting_revision = snap.revision;
+
+    // Rewrite the source: lines 2-3 ("beta", "gamma") become
+    // ("BETA", "GAMMA"). Surrounding lines untouched.
+    let updated = "alpha\nBETA\nGAMMA\ndelta\nepsilon\n";
+    write_note(&root, "doc.md", updated);
+
+    let refreshed: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "refresh_excerpts",
+            json!({ "relpath": snap.relpath }),
+        )
+        .await
+        .expect("refresh_excerpts ok"),
+    )
+    .unwrap();
+
+    // Block id stable (cursor anchors survive).
+    assert_eq!(refreshed.tree.root_blocks, vec![block_id]);
+    // Content refreshed.
+    assert_eq!(refreshed.tree.blocks[&block_id].content, "BETA\nGAMMA");
+    // Revision bumped.
+    assert!(
+        refreshed.revision > starting_revision,
+        "refresh_excerpts must bump the synthetic session's revision"
+    );
+}
+
+/// `refresh_excerpts` aggregates reads across multiple source files
+/// (each unique relpath is read once).
+#[tokio::test]
+async fn refresh_excerpts_handles_multiple_source_files() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "a.md", "A1\nA2\nA3\nA4\nA5\n");
+    write_note(&root, "b.md", "B1\nB2\nB3\n");
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    // Non-adjacent ranges on `a.md` so `open_excerpts`'s
+    // overlap-merge keeps them as distinct blocks (lines 1 + 4 with
+    // a gap at lines 2-3).
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open_excerpts",
+            json!({
+                "items": [
+                    { "relpath": "a.md", "line_start": 1, "line_end": 1 },
+                    { "relpath": "b.md", "line_start": 2, "line_end": 3 },
+                    { "relpath": "a.md", "line_start": 4, "line_end": 4 }
+                ]
+            }),
+        )
+        .await
+        .expect("open_excerpts ok"),
+    )
+    .unwrap();
+    assert_eq!(
+        snap.tree.root_blocks.len(),
+        3,
+        "non-adjacent same-file ranges must stay distinct"
+    );
+
+    // Both sources change externally.
+    write_note(&root, "a.md", "A1!\nA2!\nA3!\nA4!\nA5!\n");
+    write_note(&root, "b.md", "B1!\nB2!\nB3!\n");
+
+    let refreshed: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "refresh_excerpts",
+            json!({ "relpath": snap.relpath }),
+        )
+        .await
+        .expect("refresh_excerpts ok"),
+    )
+    .unwrap();
+
+    let contents: Vec<String> = refreshed
+        .tree
+        .root_blocks
+        .iter()
+        .map(|id| refreshed.tree.blocks[id].content.clone())
+        .collect();
+    // Per-excerpt slices match the new source bytes.
+    assert_eq!(contents[0], "A1!");
+    assert_eq!(contents[1], "B2!\nB3!");
+    assert_eq!(contents[2], "A4!");
+}
+
+/// Non-synthetic sessions error — `refresh_excerpts` is a multibuffer
+/// concern.
+#[tokio::test]
+async fn refresh_excerpts_rejects_non_synthetic_session() {
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "doc.md", "hello\n");
+
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    // Open the source file normally (non-synthetic session).
+    call(&runtime, "open", json!({ "relpath": "doc.md" }))
+        .await
+        .expect("open ok");
+
+    let err = call(
+        &runtime,
+        "refresh_excerpts",
+        json!({ "relpath": "doc.md" }),
+    )
+    .await
+    .expect_err("refresh_excerpts must reject a non-synthetic session");
+    assert!(
+        err.to_string().contains("multibuffer"),
+        "expected multibuffer error, got: {err}"
+    );
+}
+
+/// Unknown relpath surfaces as a session-not-found error.
+#[tokio::test]
+async fn refresh_excerpts_rejects_unknown_session() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+    let err = call(
+        &runtime,
+        "refresh_excerpts",
+        json!({ "relpath": "multibuffer://does-not-exist" }),
+    )
+    .await
+    .expect_err("refresh_excerpts must reject an unknown relpath");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not found") || msg.contains("acquire") || msg.contains("session"),
+        "expected session-missing error, got: {msg}"
+    );
+}

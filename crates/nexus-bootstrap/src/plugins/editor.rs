@@ -66,6 +66,10 @@ pub(super) fn register(
                         "open_excerpts",
                         nexus_editor::core_plugin::HANDLER_OPEN_EXCERPTS,
                     ),
+                    (
+                        "refresh_excerpts",
+                        nexus_editor::core_plugin::HANDLER_REFRESH_EXCERPTS,
+                    ),
                 ]),
             ),
             forge_root,

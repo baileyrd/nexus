@@ -248,6 +248,33 @@ pub const HANDLER_RESOLVE_BLOCK_LINK: u32 = 13;
 ///   same lines twice.
 pub const HANDLER_OPEN_EXCERPTS: u32 = 14;
 
+/// Numeric id of the `refresh_excerpts` handler. BL-141 Approach B
+/// step 3 — external-edit subscription.
+///
+/// Re-reads every Excerpt block's source file (through the storage
+/// IPC, same as `open_excerpts`) and replaces each block's content
+/// snapshot with the current source's slice for the recorded
+/// `[line_start..line_end]` range. Lines stay 1-based inclusive;
+/// content past the source's EOF clips silently (matches `slice_lines`).
+///
+/// Caller is expected to subscribe to `com.nexus.editor.changed.<source>`
+/// events on the shell side and call this handler when any source the
+/// multibuffer covers reports a change. Re-reading every source on
+/// each call (rather than only the changed one) keeps the wire shape
+/// trivial and the on-disk read cost amortised — typical multibuffers
+/// touch < 20 files.
+///
+/// Returns the post-refresh [`EditorSnapshot`]. Errors:
+///
+/// - `relpath` doesn't resolve to a session (`SessionNotFound`).
+/// - The session isn't synthetic (`InvalidParams`).
+/// - A source file read fails (`ExecutionFailed`).
+///
+/// Bumps the synthetic session's revision counter and publishes
+/// `com.nexus.editor.changed.<synthetic_relpath>` so any UI mirror
+/// re-renders.
+pub const HANDLER_REFRESH_EXCERPTS: u32 = 15;
+
 // ── Wire types ───────────────────────────────────────────────────────────────
 
 /// Per-item input shape for [`HANDLER_OPEN_EXCERPTS`].
@@ -627,6 +654,12 @@ impl CorePlugin for EditorCorePlugin {
                  kernel runtime"
                     .to_string(),
             )),
+            HANDLER_REFRESH_EXCERPTS => Err(exec_err(
+                "refresh_excerpts requires the async dispatch path \
+                 (storage IPC for source-file reads); call via the \
+                 kernel runtime"
+                    .to_string(),
+            )),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -643,7 +676,8 @@ impl CorePlugin for EditorCorePlugin {
             | HANDLER_SAVE
             | HANDLER_EXECUTE_DATABASE_VIEW
             | HANDLER_RESOLVE_BLOCK_LINK
-            | HANDLER_OPEN_EXCERPTS => {}
+            | HANDLER_OPEN_EXCERPTS
+            | HANDLER_REFRESH_EXCERPTS => {}
             _ => return None,
         }
 
@@ -680,6 +714,16 @@ impl CorePlugin for EditorCorePlugin {
                 }
                 HANDLER_OPEN_EXCERPTS => {
                     handle_open_excerpts(&forge_root, sessions, ctx, &args).await
+                }
+                HANDLER_REFRESH_EXCERPTS => {
+                    handle_refresh_excerpts(
+                        &forge_root,
+                        sessions,
+                        ctx,
+                        event_bus.as_ref(),
+                        &args,
+                    )
+                    .await
                 }
                 _ => Err(exec_err(format!("unknown async handler id {handler_id}"))),
             }
@@ -1686,6 +1730,110 @@ async fn handle_open_excerpts(
     snapshot_to_value(&snapshot_of(&s), "open_excerpts")
 }
 
+/// Implementation of [`HANDLER_REFRESH_EXCERPTS`]. Re-reads every
+/// source file referenced by a synthetic session's Excerpt blocks
+/// and replaces each block's content with the source's current
+/// slice. In-place mutation preserves block ids so any cursor state
+/// the shell is tracking against this multibuffer stays valid.
+///
+/// Errors:
+/// - `relpath` not in the session map.
+/// - Session isn't synthetic (no excerpts to refresh).
+/// - Source read fails.
+async fn handle_refresh_excerpts(
+    forge_root: &Path,
+    sessions: Arc<SessionMap>,
+    ctx: Option<Arc<KernelPluginContext>>,
+    event_bus: Option<&Arc<EventBus>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "refresh_excerpts")?;
+    let entry = acquire_session_entry(&sessions, &relpath, "refresh_excerpts")?;
+
+    // Collect the unique source relpaths without holding the lock
+    // across the awaits. The lock is briefly re-acquired below to
+    // splice the new snippets into the tree.
+    let sources_to_read: Vec<String> = {
+        let guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        if !guard.is_synthetic {
+            return Err(exec_err(format!(
+                "refresh_excerpts: session '{relpath}' is not a multibuffer"
+            )));
+        }
+        excerpt_sources(&guard.tree)
+    };
+    if sources_to_read.is_empty() {
+        // No-op refresh: still bump revision so callers can observe
+        // completion via the event bus.
+        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        guard.revision = guard.revision.saturating_add(1);
+        let rev = guard.revision;
+        let value = snapshot_to_value(&snapshot_of(&guard), "refresh_excerpts")?;
+        drop(guard);
+        publish_changed(event_bus, &relpath, rev, None);
+        return Ok(value);
+    }
+
+    let mut fresh: HashMap<String, String> = HashMap::with_capacity(sources_to_read.len());
+    for src in &sources_to_read {
+        let text = read_source_for_excerpts(forge_root, ctx.as_deref(), src).await?;
+        fresh.insert(src.clone(), text);
+    }
+
+    let (value, revision) = {
+        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
+        let s: &mut Session = &mut guard;
+        for id in s.tree.root_blocks.clone() {
+            let Some(block) = s.tree.get_mut(id) else {
+                continue;
+            };
+            let BlockType::Excerpt {
+                source_relpath,
+                line_start,
+                line_end,
+                ..
+            } = &block.ty
+            else {
+                continue;
+            };
+            let Some(source) = fresh.get(source_relpath) else {
+                continue;
+            };
+            let snippet = slice_lines(source, *line_start, *line_end);
+            if block.content != snippet {
+                block.content = snippet;
+            }
+        }
+        s.revision = s.revision.saturating_add(1);
+        let rev = s.revision;
+        let value = snapshot_to_value(&snapshot_of(s), "refresh_excerpts")?;
+        (value, rev)
+    };
+    publish_changed(event_bus, &relpath, revision, None);
+    Ok(value)
+}
+
+/// Unique source relpaths referenced by every `Excerpt` block in
+/// `tree`, in first-appearance order across `root_blocks`. Pure —
+/// exported (crate-internal) so the shell-side subscriber can ask
+/// "which sources does this multibuffer cover?" without re-walking
+/// the tree itself.
+pub(crate) fn excerpt_sources(tree: &BlockTree) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for id in &tree.root_blocks {
+        let Some(block) = tree.blocks.get(id) else {
+            continue;
+        };
+        if let BlockType::Excerpt { source_relpath, .. } = &block.ty {
+            if seen.insert(source_relpath.as_str()) {
+                out.push(source_relpath.clone());
+            }
+        }
+    }
+    out
+}
+
 /// Per-source-file read used by `open_excerpts`. Mirrors the
 /// `read_file` shape of `handle_open_async` / `handle_resolve_block_link_async`.
 async fn read_source_for_excerpts(
@@ -2534,6 +2682,55 @@ mod splice_tests {
         let old = "A\nB\nC\n";
         let got = splice_excerpts(old, vec![sp(2, 99, "X")]);
         assert_eq!(got, "A\nX\n");
+    }
+}
+
+#[cfg(test)]
+mod excerpt_sources_tests {
+    use super::excerpt_sources;
+    use crate::block::{Block, BlockType};
+    use crate::tree::BlockTree;
+
+    fn excerpt(source_relpath: &str, line_start: u32, line_end: u32) -> Block {
+        Block::new(BlockType::Excerpt {
+            source_relpath: source_relpath.to_string(),
+            line_start,
+            line_end,
+            label: None,
+        })
+    }
+
+    #[test]
+    fn excerpt_sources_empty_tree_returns_empty() {
+        let tree = BlockTree::default();
+        assert!(excerpt_sources(&tree).is_empty());
+    }
+
+    #[test]
+    fn excerpt_sources_dedupes_in_first_appearance_order() {
+        let mut tree = BlockTree::default();
+        for (i, b) in [
+            excerpt("a.md", 1, 5),
+            excerpt("b.md", 1, 5),
+            excerpt("a.md", 10, 15),
+            excerpt("c.md", 1, 5),
+            excerpt("b.md", 20, 30),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            tree.insert(b, None, i).unwrap();
+        }
+        assert_eq!(excerpt_sources(&tree), vec!["a.md", "b.md", "c.md"]);
+    }
+
+    #[test]
+    fn excerpt_sources_skips_non_excerpt_root_blocks() {
+        let mut tree = BlockTree::default();
+        tree.insert(Block::new(BlockType::Paragraph).with_content("nope"), None, 0)
+            .unwrap();
+        tree.insert(excerpt("only.md", 1, 5), None, 1).unwrap();
+        assert_eq!(excerpt_sources(&tree), vec!["only.md"]);
     }
 }
 

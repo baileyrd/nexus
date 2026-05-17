@@ -559,6 +559,11 @@ plugin = "com.nexus.editor"
 command = "open_excerpts"
 unrestricted = "BL-141 — assembles a read-only multibuffer view; source reads route through com.nexus.storage::read_file"
 
+[[handler]]
+plugin = "com.nexus.editor"
+command = "refresh_excerpts"
+unrestricted = "BL-141 Approach B step 3 — re-reads a multibuffer's source files (through com.nexus.storage::read_file) and refreshes each Excerpt's content snapshot in place; no caller-side fs effect"
+
 # ─── com.nexus.formats — pure (de)serialization ──────────────────────
 
 [[handler]]
