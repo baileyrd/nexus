@@ -20,8 +20,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use nexus_bootstrap::{build_cli_runtime, Runtime};
 use nexus_collab::{
-    parse_ws_url, CollabClient, CollabClientConfig, ConnectParams, RelayServer, Token,
+    parse_ws_url, ConnectParams, ReconnectConfig, ReconnectingClient, RelayServer, Token,
+    COLLAB_TOPIC_PREFIX, OPS_TOPIC_PREFIX,
 };
+use nexus_kernel::EventFilter;
 use nexus_security::CredentialVault;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -178,16 +180,19 @@ pub fn join(
 
     let rt = tokio::runtime::Runtime::new().context("build tokio runtime")?;
     rt.block_on(async move {
-        let client = CollabClient::connect(params, bus, CollabClientConfig::default())
-            .await
-            .with_context(|| format!("connect to {}", endpoint.url))?;
-        eprintln!(
-            "nexus collab join: connected as {} ({} peer{} already online)",
-            client.peer_id(),
-            client.initial_peers().len(),
-            if client.initial_peers().len() == 1 { "" } else { "s" },
+        let client = ReconnectingClient::start(
+            params,
+            bus,
+            vec![
+                EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.to_string()),
+                EventFilter::CustomPrefix(COLLAB_TOPIC_PREFIX.to_string()),
+            ],
+            None,
+            ReconnectConfig::default(),
         );
-        eprintln!("nexus collab join: bridging editor + presence events. Ctrl+C to leave.");
+        eprintln!(
+            "nexus collab join: bridge online (auto-reconnect enabled). Ctrl+C to leave."
+        );
         signal::ctrl_c().await.context("wait for ctrl_c")?;
         eprintln!("nexus collab join: SIGINT received, leaving relay");
         client.shutdown().await;

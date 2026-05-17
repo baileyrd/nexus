@@ -35,6 +35,7 @@ pub mod auth;
 pub mod client;
 pub mod presence;
 pub mod protocol;
+pub mod reconnect_client;
 pub mod server;
 pub mod url;
 
@@ -49,6 +50,9 @@ pub use presence::{
 };
 pub use protocol::{
     ClientMessage, PeerInfo, ServerMessage, ERR_AUTH, ERR_BAD_FRAME, ERR_HANDSHAKE,
+};
+pub use reconnect_client::{
+    ConnectionState, ReconnectConfig, ReconnectingClient, CONNECTION_STATE_TOPIC,
 };
 pub use server::{RelayServer, RelayServerError};
 pub use url::{parse as parse_ws_url, WsEndpoint};

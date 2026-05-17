@@ -40,14 +40,18 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
-use nexus_collab::{parse_ws_url, CollabClient, CollabClientConfig, ConnectParams};
-use nexus_kernel::EventBus;
+use nexus_collab::{
+    parse_ws_url, ConnectParams, ReconnectConfig, ReconnectingClient, COLLAB_TOPIC_PREFIX,
+    OPS_TOPIC_PREFIX,
+};
+use nexus_kernel::{EventBus, EventFilter};
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
 /// On-disk shape for `[collab]` in `.forge/config.toml`. Mirrored
-/// from [`CollabClient::connect`]'s argument list plus an `enabled`
+/// from [`ReconnectingClient::start`]'s argument list plus an `enabled`
 /// toggle. All connection fields are optional in the struct so a
 /// partially-filled block doesn't error during parse; the `enabled`
 /// check + per-field empty-string guard surface the actionable warning
@@ -65,6 +69,15 @@ pub struct CollabConfig {
     pub peer_id: String,
     /// Human-readable name for the peers panel.
     pub display_name: String,
+    /// Optional override for [`ReconnectConfig::initial_delay`] (ms).
+    #[serde(default)]
+    pub initial_delay_ms: Option<u64>,
+    /// Optional override for [`ReconnectConfig::max_delay`] (ms).
+    #[serde(default)]
+    pub max_delay_ms: Option<u64>,
+    /// Optional override for [`ReconnectConfig::buffer_capacity`].
+    #[serde(default)]
+    pub buffer_capacity: Option<usize>,
 }
 
 impl CollabConfig {
@@ -141,39 +154,51 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
         );
         return None;
     };
+    let reconnect_cfg = ReconnectConfig {
+        initial_delay: cfg
+            .initial_delay_ms
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| ReconnectConfig::default().initial_delay),
+        max_delay: cfg
+            .max_delay_ms
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| ReconnectConfig::default().max_delay),
+        backoff_factor: ReconnectConfig::default().backoff_factor,
+        buffer_capacity: cfg
+            .buffer_capacity
+            .unwrap_or_else(|| ReconnectConfig::default().buffer_capacity),
+    };
+    let relay_url = cfg.relay_url.clone();
     let task = handle.spawn(async move {
         let params = ConnectParams {
             host: endpoint.host,
             port: endpoint.port,
-            url: cfg.relay_url.clone(),
+            url: cfg.relay_url,
             token: cfg.token,
-            peer_id: cfg.peer_id.clone(),
+            peer_id: cfg.peer_id,
             display_name: cfg.display_name,
         };
-        let client = match CollabClient::connect(params, bus, CollabClientConfig::default()).await
-        {
-            Ok(c) => c,
-            Err(err) => {
-                tracing::warn!(
-                    %err,
-                    relay_url = %cfg.relay_url,
-                    "BL-143 collab connect failed; relay-bridge disabled this session"
-                );
-                return;
-            }
-        };
-        tracing::info!(
-            peer_id = %client.peer_id(),
-            relay_url = %cfg.relay_url,
-            initial_peers = client.initial_peers().len(),
-            "BL-143 collab bridge online"
+        // `ReconnectingClient::start` returns immediately; the
+        // internal supervisor task auto-reconnects with exponential
+        // backoff and replays buffered events on reconnect. Held in
+        // a local that lives until this outer future is dropped —
+        // when bootstrap's caller drops the returned `JoinHandle`,
+        // tokio detaches and the outer future keeps running until
+        // process exit, so the supervisor stays alive.
+        let client = ReconnectingClient::start(
+            params,
+            bus,
+            vec![
+                EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.to_string()),
+                EventFilter::CustomPrefix(COLLAB_TOPIC_PREFIX.to_string()),
+            ],
+            None, // site-based dedup wiring lands when CrdtPublisher::site() is plumbed through
+            reconnect_cfg,
         );
-        // The connect future returns immediately; the bridge tasks run
-        // independently inside the client. We keep this future alive
-        // (without busy-spinning) so the client is dropped only when
-        // the spawned task itself is cancelled — that ties the
-        // bridge's lifetime to the JoinHandle the caller holds.
-        let () = std::future::pending().await;
+        tracing::info!(%relay_url, "BL-143 collab reconnecting bridge online");
+        // Hold the client alive forever — its Drop aborts the
+        // supervisor, so we never let it fall out of scope.
+        std::future::pending::<()>().await;
         drop(client);
     });
     Some(task)
@@ -222,6 +247,9 @@ display_name = "Alice"
             token: "t".into(),
             peer_id: String::new(),
             display_name: "x".into(),
+            initial_delay_ms: None,
+            max_delay_ms: None,
+            buffer_capacity: None,
         };
         assert!(!cfg.fields_complete());
     }

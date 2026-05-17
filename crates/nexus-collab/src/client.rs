@@ -513,7 +513,7 @@ async fn run_inbound(
 ///
 /// Returns `false` whenever the payload doesn't fit the expected shape
 /// — non-CRDT topics (presence, settings) flow through untouched.
-fn drop_for_self_echo(payload: &Value, local_site_id: Option<&str>) -> bool {
+pub(crate) fn drop_for_self_echo(payload: &Value, local_site_id: Option<&str>) -> bool {
     let Some(local) = local_site_id else {
         return false;
     };
@@ -542,7 +542,7 @@ fn peer_info_payload(peer: &PeerInfo) -> Value {
 /// * Lets the outbound subscriber detect "bridge-authored" events by
 ///   inspecting `emitting_plugin` and skip them, breaking the
 ///   relay-loop without per-topic special casing.
-fn bridge_republish(bus: &EventBus, topic: &str, payload: Value) {
+pub(crate) fn bridge_republish(bus: &EventBus, topic: &str, payload: Value) {
     let event = NexusEvent::Custom {
         type_id: topic.to_string(),
         emitting_plugin: COLLAB_BRIDGE_PLUGIN_ID.to_string(),
