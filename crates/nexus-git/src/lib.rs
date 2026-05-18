@@ -14,6 +14,7 @@ mod lfs;
 mod types;
 mod auto_commit;
 mod worker;
+mod handlers;
 /// Core plugin registration and IPC handler constants for `com.nexus.git`.
 pub mod core_plugin;
 /// Wire-mirror IPC arg/reply types — the authoritative contract that

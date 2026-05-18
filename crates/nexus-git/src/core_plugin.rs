@@ -342,6 +342,8 @@ impl CorePlugin for GitCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
+        use crate::handlers::{branches, log, merge, staging, stash, status, tags};
+
         let Some(w) = &self.worker else {
             // Passive mode — forge root is not a git repository. HANDLER_STATUS
             // returns JSON null so the shell-side gitStatus plugin can quietly
@@ -357,337 +359,47 @@ impl CorePlugin for GitCorePlugin {
             });
         };
         let h = w.handle();
+        let root = self.forge_root.as_path();
 
         match handler_id {
-            HANDLER_STATUS => {
-                let state = h.with(|e| e.state()).map_err(map_err)?;
-                Ok(json!({
-                    "branch": state.branch,
-                    "head": state.head_oid,
-                    "is_dirty": state.is_dirty,
-                    "repo_state": format!("{:?}", state.repo_state),
-                }))
-            }
-            HANDLER_LOG => {
-                let limit = args
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| usize::try_from(v).ok())
-                    .unwrap_or(20);
-                let entries = h.with(move |e| e.log(limit)).map_err(map_err)?;
-                let arr: Vec<_> = entries
-                    .iter()
-                    .map(|le| {
-                        json!({
-                            "hash": le.hash,
-                            "author": le.author,
-                            "date": le.date.to_rfc3339(),
-                            "message": le.message,
-                            "parents": le.parents,
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_BRANCHES => {
-                let branches = h.with(|e| e.branches()).map_err(map_err)?;
-                let arr: Vec<_> = branches
-                    .iter()
-                    .map(|b| {
-                        json!({
-                            "name": b.name,
-                            "is_head": b.is_head,
-                            "upstream": b.upstream,
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_FILE_STATUS => {
-                let path = path_arg(args, &self.forge_root)?;
-                let status = h.with(move |e| e.file_status(&path)).map_err(map_err)?;
-                Ok(json!(status.marker()))
-            }
-            HANDLER_DIFF_FILE => {
-                let path = path_arg(args, &self.forge_root)?;
-                let hunks = h.with(move |e| e.diff_file(&path)).map_err(map_err)?;
-                let arr: Vec<_> = hunks
-                    .iter()
-                    .map(|hunk| {
-                        json!({
-                            "old_start": hunk.old_start,
-                            "old_count": hunk.old_count,
-                            "new_start": hunk.new_start,
-                            "new_count": hunk.new_count,
-                            "lines": hunk.lines.iter().map(|l| json!({
-                                "kind": format!("{:?}", l.kind),
-                                "content": l.content,
-                            })).collect::<Vec<_>>(),
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_STAGE_FILE => {
-                let path = path_arg(args, &self.forge_root)?;
-                h.with(move |e| e.stage_file(&path)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_UNSTAGE_FILE => {
-                let path = path_arg(args, &self.forge_root)?;
-                h.with(move |e| e.unstage_file(&path)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_COMMIT => {
-                let msg = args
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| PluginError::ExecutionFailed {
-                        plugin_id: PLUGIN_ID.to_string(),
-                        reason: "missing 'message' argument".to_string(),
-                    })?
-                    .to_string();
-                let hash = h.with(move |e| e.commit(&msg)).map_err(map_err)?;
-                Ok(json!({"hash": hash}))
-            }
-            HANDLER_STAGE_ALL => {
-                h.with(|e| e.stage_all()).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_UNSTAGE_ALL => {
-                h.with(|e| e.unstage_all()).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_FILE_STATUSES => {
-                let statuses = h.with(|e| e.file_statuses()).map_err(map_err)?;
-                let arr: Vec<_> = statuses
-                    .iter()
-                    .map(|s| json!({
-                        "path": s.path.to_string_lossy(),
-                        "status": format!("{:?}", s.status),
-                    }))
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_DIFF_STAGED => {
-                let diffs = h.with(|e| e.diff_staged()).map_err(map_err)?;
-                let arr: Vec<_> = diffs
-                    .iter()
-                    .map(|(path, hunks)| {
-                        json!({
-                            "path": path,
-                            "hunks": hunks.iter().map(|hunk| json!({
-                                "old_start": hunk.old_start,
-                                "old_count": hunk.old_count,
-                                "new_start": hunk.new_start,
-                                "new_count": hunk.new_count,
-                                "lines": hunk.lines.iter().map(|l| json!({
-                                    "kind": format!("{:?}", l.kind),
-                                    "content": l.content,
-                                })).collect::<Vec<_>>(),
-                            })).collect::<Vec<_>>(),
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_SWITCH_BRANCH => {
-                let name = string_arg(args, "name")?;
-                h.with(move |e| e.switch_branch(&name)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_CREATE_BRANCH => {
-                let name = string_arg(args, "name")?;
-                h.with(move |e| e.create_branch(&name)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_DELETE_BRANCH => {
-                let name = string_arg(args, "name")?;
-                h.with(move |e| e.delete_branch(&name)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_PUSH => {
-                let remote = string_arg(args, "remote")?;
-                let branch = string_arg(args, "branch")?;
-                h.with(move |e| e.push(&remote, &branch)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_STAGE_HUNKS => {
-                let path = path_arg(args, &self.forge_root)?;
-                let indices = hunk_indices_arg(args)?;
-                h.with(move |e| e.stage_hunks(&path, &indices)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_UNSTAGE_HUNKS => {
-                let path = path_arg(args, &self.forge_root)?;
-                let indices = hunk_indices_arg(args)?;
-                h.with(move |e| e.unstage_hunks(&path, &indices)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_DISCARD_HUNKS => {
-                let path = path_arg(args, &self.forge_root)?;
-                let indices = hunk_indices_arg(args)?;
-                h.with(move |e| e.discard_hunks(&path, &indices)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_FILE_LOG => {
-                let path = path_arg(args, &self.forge_root)?;
-                let limit = args
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| usize::try_from(v).ok())
-                    .unwrap_or(20);
-                let entries = h
-                    .with(move |e| e.log_file(&path, limit))
-                    .map_err(map_err)?;
-                let arr: Vec<_> = entries
-                    .iter()
-                    .map(|le| {
-                        json!({
-                            "hash": le.hash,
-                            "author": le.author,
-                            "date": le.date.to_rfc3339(),
-                            "message": le.message,
-                            "parents": le.parents,
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_STASH_PUSH => {
-                let message = args.get("message").and_then(|v| v.as_str()).map(str::to_string);
-                let idx = h.with(move |e| e.stash_push(message.as_deref())).map_err(map_err)?;
-                Ok(json!({"ok": true, "index": idx}))
-            }
-            HANDLER_STASH_LIST => {
-                let entries = h.with(|e| e.stash_list()).map_err(map_err)?;
-                let arr: Vec<_> = entries
-                    .iter()
-                    .map(|s| json!({"index": s.index, "message": s.message, "oid": s.oid}))
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_STASH_POP => {
-                let idx = args.get("index").and_then(|v| v.as_u64())
-                    .and_then(|n| usize::try_from(n).ok())
-                    .unwrap_or(0);
-                h.with(move |e| e.stash_pop(idx)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_STASH_DROP => {
-                let idx = args.get("index").and_then(|v| v.as_u64())
-                    .and_then(|n| usize::try_from(n).ok())
-                    .unwrap_or(0);
-                h.with(move |e| e.stash_drop(idx)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_LIST_TAGS => {
-                let tags = h.with(|e| e.list_tags()).map_err(map_err)?;
-                let arr: Vec<_> = tags
-                    .iter()
-                    .map(|t| json!({
-                        "name":         t.name,
-                        "target_hash":  t.target_hash,
-                        "is_annotated": t.is_annotated,
-                        "message":      t.message,
-                    }))
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
-            HANDLER_CREATE_TAG => {
-                let name = string_arg(args, "name")?;
-                let message = args.get("message").and_then(|v| v.as_str()).map(str::to_string);
-                h.with(move |e| e.create_tag(&name, message.as_deref())).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_DELETE_TAG => {
-                let name = string_arg(args, "name")?;
-                h.with(move |e| e.delete_tag(&name)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_PUSH_TAGS => {
-                let remote = string_arg(args, "remote")?;
-                h.with(move |e| e.push_tags(&remote)).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_LFS_STATUS => Ok(lfs_status_snapshot(&self.forge_root)),
-            HANDLER_REBASE => {
-                let onto = string_arg(args, "onto")?;
-                let r = h.with(move |e| e.rebase(&onto)).map_err(map_err)?;
-                Ok(json!({
-                    "commits_rebased": r.commits_rebased,
-                    "conflicts": r.conflicts,
-                }))
-            }
-            HANDLER_ABORT_REBASE => {
-                h.with(|e| e.abort_rebase()).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_CHERRY_PICK => {
-                let commit = string_arg(args, "commit")?;
-                let r = h.with(move |e| e.cherry_pick(&commit)).map_err(map_err)?;
-                Ok(json!({
-                    "commit_hash": r.commit_hash,
-                    "conflicts": r.conflicts,
-                }))
-            }
-            HANDLER_ABORT_CHERRY_PICK => {
-                h.with(|e| e.abort_cherry_pick()).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_CONFLICT_FILES => {
-                let files = h.with(|e| e.conflict_files()).map_err(map_err)?;
-                Ok(json!({"files": files}))
-            }
-            HANDLER_ABORT_MERGE => {
-                h.with(|e| e.abort_merge()).map_err(map_err)?;
-                Ok(json!({"ok": true}))
-            }
-            HANDLER_CONFLICT_VERSIONS => {
-                let path = string_arg(args, "path")?;
-                let v = h
-                    .with(move |e| e.conflict_versions(&path))
-                    .map_err(map_err)?;
-                // Bytes go over the wire as JSON arrays of u8 — the
-                // shell decodes to a Uint8Array, then to text or
-                // binary preview as appropriate.
-                Ok(json!({
-                    "base":   v.base,
-                    "ours":   v.ours,
-                    "theirs": v.theirs,
-                }))
-            }
-            HANDLER_MERGE => {
-                let branch = string_arg(args, "branch")?;
-                let r = h.with(move |e| e.merge(&branch)).map_err(map_err)?;
-                Ok(json!({
-                    "fast_forward": r.fast_forward,
-                    "conflicts":    r.conflicts,
-                    "commit_hash":  r.commit_hash,
-                }))
-            }
-            HANDLER_BLAME => {
-                // BL-079 — wraps `BlameEntry` into the wire-mirror
-                // `GitBlameEntry`. The impl type doesn't derive
-                // `Serialize` and carries a `chrono::DateTime` we
-                // need to render as ISO-8601 for the shell side.
-                let path = path_arg(args, &self.forge_root)?;
-                let entries = h.with(move |e| e.blame(&path)).map_err(map_err)?;
-                let arr: Vec<_> = entries
-                    .iter()
-                    .map(|e| {
-                        json!({
-                            "commit_hash": e.commit_hash,
-                            "author": e.author,
-                            "date": e.date.to_rfc3339(),
-                            "message": e.message,
-                            "start_line": e.start_line,
-                            "end_line": e.end_line,
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::Value::Array(arr))
-            }
+            HANDLER_STATUS => status::status(&h),
+            HANDLER_LOG => log::log(&h, args),
+            HANDLER_BRANCHES => branches::branches(&h),
+            HANDLER_FILE_STATUS => status::file_status(&h, args, root),
+            HANDLER_DIFF_FILE => log::diff_file(&h, args, root),
+            HANDLER_STAGE_FILE => staging::stage_file(&h, args, root),
+            HANDLER_UNSTAGE_FILE => staging::unstage_file(&h, args, root),
+            HANDLER_COMMIT => staging::commit(&h, args),
+            HANDLER_STAGE_ALL => staging::stage_all(&h),
+            HANDLER_UNSTAGE_ALL => staging::unstage_all(&h),
+            HANDLER_FILE_STATUSES => status::file_statuses(&h),
+            HANDLER_DIFF_STAGED => log::diff_staged(&h),
+            HANDLER_SWITCH_BRANCH => branches::switch_branch(&h, args),
+            HANDLER_CREATE_BRANCH => branches::create_branch(&h, args),
+            HANDLER_DELETE_BRANCH => branches::delete_branch(&h, args),
+            HANDLER_PUSH => branches::push(&h, args),
+            HANDLER_STAGE_HUNKS => staging::stage_hunks(&h, args, root),
+            HANDLER_UNSTAGE_HUNKS => staging::unstage_hunks(&h, args, root),
+            HANDLER_DISCARD_HUNKS => staging::discard_hunks(&h, args, root),
+            HANDLER_FILE_LOG => log::file_log(&h, args, root),
+            HANDLER_STASH_PUSH => stash::stash_push(&h, args),
+            HANDLER_STASH_LIST => stash::stash_list(&h),
+            HANDLER_STASH_POP => stash::stash_pop(&h, args),
+            HANDLER_STASH_DROP => stash::stash_drop(&h, args),
+            HANDLER_LIST_TAGS => tags::list_tags(&h),
+            HANDLER_CREATE_TAG => tags::create_tag(&h, args),
+            HANDLER_DELETE_TAG => tags::delete_tag(&h, args),
+            HANDLER_PUSH_TAGS => tags::push_tags(&h, args),
+            HANDLER_LFS_STATUS => Ok(status::lfs_status(root)),
+            HANDLER_REBASE => merge::rebase(&h, args),
+            HANDLER_ABORT_REBASE => merge::abort_rebase(&h),
+            HANDLER_CHERRY_PICK => merge::cherry_pick(&h, args),
+            HANDLER_ABORT_CHERRY_PICK => merge::abort_cherry_pick(&h),
+            HANDLER_CONFLICT_FILES => merge::conflict_files(&h),
+            HANDLER_ABORT_MERGE => merge::abort_merge(&h),
+            HANDLER_CONFLICT_VERSIONS => merge::conflict_versions(&h, args),
+            HANDLER_MERGE => merge::merge(&h, args),
+            HANDLER_BLAME => status::blame(&h, args, root),
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),
@@ -697,187 +409,14 @@ impl CorePlugin for GitCorePlugin {
 }
 
 /// BL-091 — snapshot of Git-LFS state for `lfs_status`.
+///
+/// Public re-export of the LFS snapshot logic now owned by
+/// [`crate::handlers::status::lfs_status`]. Kept here as the
+/// stable nexus-cli entry point — the SD-03 split moved the
+/// implementation but the surface stays at `core_plugin`.
 #[doc(hidden)]
 pub fn lfs_status_for_forge(forge_root: &Path) -> serde_json::Value {
-    lfs_status_snapshot(forge_root)
-}
-
-
-///
-/// Inspects `<forge>/.gitattributes` for `filter=lfs` rules and (if
-/// the `git-lfs` binary is on `PATH`) shells out to `git lfs
-/// ls-files --json`-style output to classify tracked files as
-/// pointer-only vs locally-materialised. Designed to be robust to
-/// `git-lfs` being absent: in that case `git_lfs_installed = false`,
-/// `tracked_patterns` is still populated from `.gitattributes`, and
-/// the file lists are empty (signalling "we know LFS is in use here
-/// but cannot inspect availability").
-fn lfs_status_snapshot(forge_root: &Path) -> serde_json::Value {
-    let tracked_patterns = read_lfs_patterns(forge_root);
-    let git_lfs_installed = std::process::Command::new("git")
-        .args(["lfs", "version"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .current_dir(forge_root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    let (pointer_files, available_files) = if git_lfs_installed {
-        match std::process::Command::new("git")
-            .args(["lfs", "ls-files"])
-            .current_dir(forge_root)
-            .output()
-        {
-            Ok(o) if o.status.success() => parse_lfs_ls_files(&o.stdout),
-            Ok(o) => {
-                tracing::warn!(
-                    stderr = %String::from_utf8_lossy(&o.stderr),
-                    "BL-091: `git lfs ls-files` exited non-zero",
-                );
-                (Vec::new(), Vec::new())
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "BL-091: failed to spawn `git lfs ls-files`");
-                (Vec::new(), Vec::new())
-            }
-        }
-    } else {
-        (Vec::new(), Vec::new())
-    };
-
-    json!({
-        "tracked_patterns": tracked_patterns,
-        "pointer_files": pointer_files,
-        "available_files": available_files,
-        "git_lfs_installed": git_lfs_installed,
-    })
-}
-
-/// Read `<forge>/.gitattributes` and pull out any pattern that
-/// declares `filter=lfs`. Lines without the LFS filter are
-/// skipped. Missing file → empty list.
-fn read_lfs_patterns(forge_root: &Path) -> Vec<String> {
-    let path = forge_root.join(".gitattributes");
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if !line.contains("filter=lfs") {
-            continue;
-        }
-        // Pattern is the first whitespace-delimited token.
-        if let Some(pat) = line.split_whitespace().next() {
-            out.push(pat.to_string());
-        }
-    }
-    out
-}
-
-/// Parse the textual output of `git lfs ls-files`. Each line is
-/// `<oid> <flag> <path>`, where `flag` is `*` for fully-resolved
-/// objects and `-` for pointer-only entries. The format is stable
-/// across recent git-lfs versions; if it changes the helper
-/// degrades to empty output (still safe — caller treats missing
-/// data as "unknown availability").
-fn parse_lfs_ls_files(stdout: &[u8]) -> (Vec<String>, Vec<String>) {
-    let text = String::from_utf8_lossy(stdout);
-    let mut pointers = Vec::new();
-    let mut available = Vec::new();
-    for line in text.lines() {
-        // Split on whitespace into at most three pieces — the path
-        // can contain spaces so we keep it as-is.
-        let mut parts = line.splitn(3, char::is_whitespace);
-        let _oid = parts.next();
-        let flag = parts.next();
-        let path = parts.next();
-        match (flag, path) {
-            (Some("*"), Some(p)) => available.push(p.trim().to_string()),
-            (Some("-"), Some(p)) => pointers.push(p.trim().to_string()),
-            _ => continue,
-        }
-    }
-    (pointers, available)
-}
-
-/// Defense-in-depth path validation for git IPC handlers (issue #85).
-///
-/// libgit2 also rejects `..` and absolute paths inside
-/// `index.add_path` / `status_file`, so the trivial traversal is
-/// blocked at the libgit2 boundary today. Calling
-/// [`resolve_within`](nexus_types::paths::resolve_within) here moves
-/// the rejection to the IPC boundary so:
-/// - the contract is explicit (a future libgit2 update can't
-///   regress this),
-/// - the rejection happens before any libgit2 work runs,
-/// - the error class is a clean `ExecutionFailed` rather than a
-///   generic libgit2 string failure.
-///
-/// libgit2's path-based API takes a path relative to the repo root,
-/// so we discard the joined absolute path and return the validated
-/// raw relpath.
-fn path_arg(args: &serde_json::Value, forge_root: &Path) -> Result<PathBuf, PluginError> {
-    let raw = args
-        .get("path")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: "missing 'path' argument".to_string(),
-        })?;
-    nexus_types::paths::resolve_within(forge_root, raw).map_err(|e| {
-        PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("invalid 'path': {e}"),
-        }
-    })?;
-    Ok(PathBuf::from(raw))
-}
-
-/// Extract the `hunk_indices` array from IPC args as `Vec<usize>`.
-fn hunk_indices_arg(args: &serde_json::Value) -> Result<Vec<usize>, PluginError> {
-    let arr = args
-        .get("hunk_indices")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: "missing 'hunk_indices' array argument".to_string(),
-        })?;
-    arr.iter()
-        .map(|v| {
-            v.as_u64()
-                .and_then(|n| usize::try_from(n).ok())
-                .ok_or_else(|| PluginError::ExecutionFailed {
-                    plugin_id: PLUGIN_ID.to_string(),
-                    reason: "hunk_indices entries must be non-negative integers".to_string(),
-                })
-        })
-        .collect()
-}
-
-/// Extract a plain string argument from the IPC args object.
-fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("missing '{key}' argument"),
-        })
-}
-
-// Passed as a function pointer to `.map_err(map_err)`; wrapping in a
-// closure would re-trip `redundant_closure`.
-#[allow(clippy::needless_pass_by_value)]
-fn map_err(e: GitError) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: e.to_string(),
-    }
+    crate::handlers::status::lfs_status(forge_root)
 }
 
 // `run_poller` is spawned as a thread and takes ownership of handle,
