@@ -602,28 +602,8 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("rebuild_index: {e}")))?;
                 to_value(&stats, "rebuild_index")
             }
-            HANDLER_SEARCH => {
-                let query = args
-                    .get("query")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| exec_err("search: missing 'query' string".to_string()))?;
-                let limit = args
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| usize::try_from(v).ok())
-                    .unwrap_or(50);
-                let results = engine
-                    .search(query, limit)
-                    .map_err(|e| exec_err(format!("search: {e}")))?;
-                to_value(&results, "search")
-            }
-            HANDLER_QUERY_SYMBOL => {
-                let filter: crate::code_index::SymbolFilter = parse_args(args, "query_symbol")?;
-                let symbols = engine
-                    .query_symbols(&filter)
-                    .map_err(|e| exec_err(format!("query_symbol: {e}")))?;
-                Ok(serde_json::json!({ "symbols": symbols }))
-            }
+            HANDLER_SEARCH => crate::handlers::search::search(engine, args),
+            HANDLER_QUERY_SYMBOL => crate::handlers::search::query_symbol(engine, args),
             HANDLER_WRITE_FILE => crate::handlers::files::write_file(engine, args),
             HANDLER_NOTE_APPEND => {
                 let path = path_arg(args, "note_append")?;
@@ -915,65 +895,11 @@ impl CorePlugin for StorageCorePlugin {
                 Ok(serde_json::json!({}))
             }
             HANDLER_GRAPH_NEIGHBORS => crate::handlers::graph::graph_neighbors(engine, args),
-            HANDLER_QUERY_TAGS => {
-                let name = args
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| exec_err("query_tags: missing 'name' string".to_string()))?;
-                let tags = engine
-                    .query_tags(name)
-                    .map_err(|e| exec_err(format!("query_tags: {e}")))?;
-                to_value(&tags, "query_tags")
-            }
-            HANDLER_VECTOR_INSERT => {
-                let file_path = args
-                    .get("file_path")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| exec_err("vector_insert: missing 'file_path' string".to_string()))?
-                    .to_string();
-                let chunks: Vec<crate::vectorstore::ChunkEmbedding> = args
-                    .get("chunks")
-                    .ok_or_else(|| exec_err("vector_insert: missing 'chunks'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone())
-                            .map_err(|e| exec_err(format!("vector_insert: chunks decode: {e}")))
-                    })?;
-                engine
-                    .vector_insert(&file_path, &chunks)
-                    .map_err(|e| exec_err(format!("vector_insert: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_VECTOR_QUERY => {
-                let embedding: Vec<f32> = args
-                    .get("embedding")
-                    .ok_or_else(|| exec_err("vector_query: missing 'embedding'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone())
-                            .map_err(|e| exec_err(format!("vector_query: embedding decode: {e}")))
-                    })?;
-                let limit = args
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| usize::try_from(v).ok())
-                    .unwrap_or(5);
-                let matches = engine
-                    .vector_query(&embedding, limit)
-                    .map_err(|e| exec_err(format!("vector_query: {e}")))?;
-                to_value(&matches, "vector_query")
-            }
-            HANDLER_VECTOR_DELETE_BY_FILE => {
-                let path = path_arg(args, "vector_delete_by_file")?;
-                engine
-                    .vector_delete_by_file(&path)
-                    .map_err(|e| exec_err(format!("vector_delete_by_file: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_VECTORSTORE_COUNT => {
-                let count = engine
-                    .vectorstore_count()
-                    .map_err(|e| exec_err(format!("vectorstore_count: {e}")))?;
-                Ok(serde_json::json!({ "count": count }))
-            }
+            HANDLER_QUERY_TAGS => crate::handlers::search::query_tags(engine, args),
+            HANDLER_VECTOR_INSERT => crate::handlers::vector::insert(engine, args),
+            HANDLER_VECTOR_QUERY => crate::handlers::vector::query(engine, args),
+            HANDLER_VECTOR_DELETE_BY_FILE => crate::handlers::vector::delete_by_file(engine, args),
+            HANDLER_VECTORSTORE_COUNT => crate::handlers::vector::count(engine),
             HANDLER_QUERY_BLOCKS => crate::handlers::tasks::query_blocks(engine, args),
             HANDLER_BASE_INDEX => {
                 let path = path_arg(args, "base_index")?;
@@ -1144,33 +1070,10 @@ impl CorePlugin for StorageCorePlugin {
                 to_value(&report, "import_forge")
             }
             HANDLER_FIND_IN_FILES => {
-                // BL-078 — args go straight through to the
-                // [`crate::find_in_files`] free function. No engine
-                // dependency; the walk uses the forge_root the
-                // plugin was built with.
-                let parsed: crate::FindInFilesArgs =
-                    serde_json::from_value(args.clone()).map_err(|e| {
-                        exec_err(format!("find_in_files: invalid args: {e}"))
-                    })?;
-                let hits = crate::find_in_files(&self.forge_root, &parsed)
-                    .map_err(|e| exec_err(format!("find_in_files: {e}")))?;
-                to_value(&hits, "find_in_files")
+                crate::handlers::search::find_in_files(&self.forge_root, args)
             }
             HANDLER_REPLACE_IN_FILES => {
-                // BL-078 — pass-through to [`crate::replace_in_files`].
-                // After a successful replacement we trigger an
-                // index rebuild so search / graph stay consistent
-                // with the rewritten files.
-                let parsed: crate::ReplaceInFilesArgs =
-                    serde_json::from_value(args.clone()).map_err(|e| {
-                        exec_err(format!("replace_in_files: invalid args: {e}"))
-                    })?;
-                let report = crate::replace_in_files(&self.forge_root, &parsed)
-                    .map_err(|e| exec_err(format!("replace_in_files: {e}")))?;
-                if report.files_changed > 0 {
-                    let _ = engine.rebuild_index();
-                }
-                to_value(&report, "replace_in_files")
+                crate::handlers::search::replace_in_files(engine, &self.forge_root, args)
             }
             HANDLER_READ_FRONTMATTER => {
                 // BL-053 Phase 4 — read a markdown file's YAML

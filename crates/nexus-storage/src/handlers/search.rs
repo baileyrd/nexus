@@ -1,0 +1,76 @@
+//! Search-domain handlers: `search`, `query_symbol`, `query_tags`,
+//! `find_in_files`, `replace_in_files`.
+
+use std::path::Path;
+
+use nexus_plugins::PluginError;
+use serde_json::Value;
+
+use crate::StorageEngine;
+
+use super::shared::{exec_err, to_value};
+
+pub(crate) fn search(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let query = args
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("search: missing 'query' string".to_string()))?;
+    let limit = args
+        .get("limit")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(50);
+    let results = engine
+        .search(query, limit)
+        .map_err(|e| exec_err(format!("search: {e}")))?;
+    to_value(&results, "search")
+}
+
+pub(crate) fn query_symbol(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let filter: crate::code_index::SymbolFilter =
+        super::shared::parse_args(args, "query_symbol")?;
+    let symbols = engine
+        .query_symbols(&filter)
+        .map_err(|e| exec_err(format!("query_symbol: {e}")))?;
+    Ok(serde_json::json!({ "symbols": symbols }))
+}
+
+pub(crate) fn query_tags(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let name = args
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("query_tags: missing 'name' string".to_string()))?;
+    let tags = engine
+        .query_tags(name)
+        .map_err(|e| exec_err(format!("query_tags: {e}")))?;
+    to_value(&tags, "query_tags")
+}
+
+/// BL-078 — args go straight through to the [`crate::find_in_files`]
+/// free function. No engine dependency; the walk uses the `forge_root`
+/// the plugin was built with.
+pub(crate) fn find_in_files(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
+    let parsed: crate::FindInFilesArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("find_in_files: invalid args: {e}")))?;
+    let hits = crate::find_in_files(forge_root, &parsed)
+        .map_err(|e| exec_err(format!("find_in_files: {e}")))?;
+    to_value(&hits, "find_in_files")
+}
+
+/// BL-078 — pass-through to [`crate::replace_in_files`]. After a
+/// successful replacement we trigger an index rebuild so search /
+/// graph stay consistent with the rewritten files.
+pub(crate) fn replace_in_files(
+    engine: &StorageEngine,
+    forge_root: &Path,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let parsed: crate::ReplaceInFilesArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("replace_in_files: invalid args: {e}")))?;
+    let report = crate::replace_in_files(forge_root, &parsed)
+        .map_err(|e| exec_err(format!("replace_in_files: {e}")))?;
+    if report.files_changed > 0 {
+        let _ = engine.rebuild_index();
+    }
+    to_value(&report, "replace_in_files")
+}
