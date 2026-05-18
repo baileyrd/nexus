@@ -823,9 +823,14 @@ enum CollabCommand {
     /// Run a WebSocket relay that ferries CRDT-op + presence envelopes
     /// between connected peers.
     Serve {
-        /// TCP port to bind on `0.0.0.0`. Defaults to 7700.
+        /// TCP port to bind on. Defaults to 7700.
         #[arg(long, default_value_t = commands::collab::DEFAULT_SERVE_PORT)]
         port: u16,
+        /// Interface to bind on. Defaults to `0.0.0.0` (every IPv4
+        /// interface). Use `127.0.0.1` to restrict to loopback or a
+        /// specific IP to constrain access to a chosen interface.
+        #[arg(long, default_value = commands::collab::DEFAULT_BIND_ADDRESS)]
+        bind: String,
         /// Shared secret. Without this flag, falls back to the
         /// keyring entry written by `nexus collab token set`.
         #[arg(long)]
@@ -2166,9 +2171,10 @@ fn main() {
         Commands::Collab(args) => match args.command {
             CollabCommand::Serve {
                 port,
+                bind,
                 token,
                 save_token,
-            } => commands::collab::serve(port, token, save_token),
+            } => commands::collab::serve(port, &bind, token, save_token),
             CollabCommand::Join {
                 url,
                 token,

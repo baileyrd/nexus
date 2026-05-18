@@ -12,28 +12,33 @@ Things that belong in a user-facing settings UI.
 
 ### Network endpoints
 
-| File | Line | Value | Suggested setting key |
-|------|------|-------|----------------------|
-| `crates/nexus-ai/src/ollama.rs` | 15 | `"http://localhost:11434"` | `ai.ollama_base_url` |
-| `crates/nexus-audio/src/local_backend.rs` | 105 | `"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin"` | `audio.whisper_model_url` |
-| `crates/nexus-audio/src/provider_backend.rs` | 43 | `"https://api.openai.com"` | `audio.openai_api_base_url` |
-| `crates/nexus-bootstrap/src/collab.rs` | 233 | `"ws://relay:7700/"` | `collab.relay_url` |
-| `crates/nexus-cli/src/commands/collab.rs` | 104 | `"0.0.0.0:{port}"` | `collab.bind_address` |
-| `crates/nexus-cli/src/main.rs` | 826 | `7700` (default port) | `collab.default_port` |
+P2-05 (2026-05-17). The originally-flagged rows are crossed below with their landed promotions.
+
+~~| `crates/nexus-ai/src/ollama.rs` | 15 | `"http://localhost:11434"` | `ai.ollama_base_url` |~~ → `nexus_formats::AiConfig.ollama_base_url`; runtime falls through to `nexus_ai::ollama::DEFAULT_BASE_URL`.
+~~| `crates/nexus-audio/src/local_backend.rs` | 105 | `"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin"` | `audio.whisper_model_url` |~~ → `[audio] whisper_model_url = "..."` in `config.toml`; default `nexus_audio::config::DEFAULT_WHISPER_MODEL_URL_TEMPLATE`.
+~~| `crates/nexus-audio/src/provider_backend.rs` | 43 | `"https://api.openai.com"` | `audio.openai_api_base_url` |~~ → already overridable via `[audio] provider_base_url`; default now `pub nexus_audio::provider_backend::DEFAULT_BASE_URL`.
+~~| `crates/nexus-bootstrap/src/collab.rs` | 233 | `"ws://relay:7700/"` | `collab.relay_url` |~~ → already per-forge in `[collab] relay_url`; the cited line was a test literal, not a default.
+~~| `crates/nexus-cli/src/commands/collab.rs` | 104 | `"0.0.0.0:{port}"` | `collab.bind_address` |~~ → new `--bind <ip>` flag on `nexus collab serve`; default `DEFAULT_BIND_ADDRESS = "0.0.0.0"`.
+~~| `crates/nexus-cli/src/main.rs` | 826 | `7700` (default port) | `collab.default_port` |~~ → `--port` flag already exists; constant is `commands::collab::DEFAULT_SERVE_PORT`.
 
 ### AI / ML model defaults
 
+P2-04 (2026-05-17) promoted the per-provider model and FIM-temperature defaults to `ai.toml`. The provider-level constants stay as ultimate fallbacks (`nexus_ai::{anthropic,openai,ollama}::DEFAULT_*`) but a forge can now override each via the `[ai]` table — see [`forge-config.md`](forge-config.md#forgeforgeai.toml).
+
+~~| `crates/nexus-ai/src/anthropic.rs` | 13 | `"claude-sonnet-4-20250514"` | `ai.anthropic_model` |~~
+~~| `crates/nexus-ai/src/openai.rs` | 14 | `"gpt-4o"` | `ai.openai_chat_model` |~~
+~~| `crates/nexus-ai/src/openai.rs` | 17 | `"text-embedding-3-small"` | `ai.openai_embedding_model` |~~
+~~| `crates/nexus-ai/src/ollama.rs` | 18 | `"llama3.2"` | `ai.ollama_chat_model` |~~
+~~| `crates/nexus-ai/src/ollama.rs` | 21 | `"nomic-embed-text"` | `ai.ollama_embedding_model` |~~
+~~| `crates/nexus-ai/src/ollama.rs` | 198 | `0.2` (temperature) | `ai.ollama_temperature` |~~
+
+Still open:
+
 | File | Line | Value | Suggested setting key |
 |------|------|-------|----------------------|
-| `crates/nexus-ai/src/anthropic.rs` | 13 | `"claude-sonnet-4-20250514"` | `ai.anthropic_model` |
-| `crates/nexus-ai/src/openai.rs` | 14 | `"gpt-4o"` | `ai.openai_chat_model` |
-| `crates/nexus-ai/src/openai.rs` | 17 | `"text-embedding-3-small"` | `ai.openai_embedding_model` |
-| `crates/nexus-ai/src/ollama.rs` | 18 | `"llama3.2"` | `ai.ollama_chat_model` |
-| `crates/nexus-ai/src/ollama.rs` | 21 | `"nomic-embed-text"` | `ai.ollama_embedding_model` |
-| `crates/nexus-ai/src/ollama.rs` | 198 | `0.2` (temperature) | `ai.ollama_temperature` |
 | `crates/nexus-ai/src/local_embedding.rs` | 44 | `"bge-small-en-v1.5-int8"` | already env-overridable; surface in settings UI |
 
-> `AiConfig.model`/`max_tokens`/`context_window` are already user-tunable in `ai.toml`; the per-provider model strings above are not.
+> `AiConfig.model`/`max_tokens`/`context_window` are already user-tunable in `ai.toml`; the per-provider defaults above were promoted in P2-04.
 
 ### Operation timeouts (user-perceivable)
 
@@ -56,11 +61,11 @@ Things that belong in a user-facing settings UI.
 
 ### Notification limits
 
-| File | Line | Value | Suggested setting key |
-|------|------|-------|----------------------|
-| `crates/nexus-notifications/src/lib.rs` | 378 | `4096` bytes (Telegram message split) | `notifications.telegram_max_bytes` |
-| `crates/nexus-notifications/src/inbox.rs` | 47 | `1000` rows | `notifications.inbox_max_rows` |
-| `crates/nexus-notifications/src/inbox.rs` | 50 | `30` days | `notifications.inbox_max_age_days` |
+All three items below were promoted in P2-07 (2026-05-17). The Telegram cap moved to `[channels.telegram].max_bytes` in `notifications.toml`; the inbox row + age caps were already pluggable under `[inbox]` and are now documented in [`forge-config.md`](forge-config.md#forgeforgnotificationstoml).
+
+~~| `crates/nexus-notifications/src/lib.rs` | 378 | `4096` bytes (Telegram message split) | `notifications.telegram_max_bytes` |~~
+~~| `crates/nexus-notifications/src/inbox.rs` | 47 | `1000` rows | `notifications.inbox_max_rows` |~~
+~~| `crates/nexus-notifications/src/inbox.rs` | 50 | `30` days | `notifications.inbox_max_age_days` |~~
 
 ---
 

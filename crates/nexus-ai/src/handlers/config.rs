@@ -99,12 +99,34 @@ pub(crate) fn parse_config_field(value: &serde_json::Value) -> Result<Option<AiC
     } else {
         None
     };
+    let str_field = |k: &str| {
+        obj.get(k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+    };
+    let anthropic_model = str_field("anthropic_model");
+    let openai_chat_model = str_field("openai_chat_model");
+    let openai_embedding_model = str_field("openai_embedding_model");
+    let ollama_chat_model = str_field("ollama_chat_model");
+    let ollama_embedding_model = str_field("ollama_embedding_model");
+    let ollama_temperature = obj
+        .get("ollama_temperature")
+        .and_then(serde_json::Value::as_f64)
+        .map(|v| v as f32);
     Ok(Some(AiConfig {
         provider,
         model,
         api_key,
         base_url,
         local_embedding_model,
+        anthropic_model,
+        openai_chat_model,
+        openai_embedding_model,
+        ollama_chat_model,
+        ollama_embedding_model,
+        ollama_temperature,
         ..AiConfig::default()
     }))
 }

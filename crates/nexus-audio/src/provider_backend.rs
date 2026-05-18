@@ -40,7 +40,12 @@ use crate::AudioError;
 pub type SharedCtx = Arc<RwLock<Option<Arc<KernelPluginContext>>>>;
 
 const BACKEND_NAME: &str = "provider";
-const DEFAULT_BASE_URL: &str = "https://api.openai.com";
+/// P2-05 — fallback OpenAI base URL used by the provider-routed
+/// audio backend when neither `com.nexus.ai::resolve_credentials` nor
+/// `[audio] provider_base_url` supplies one. Override per-forge via
+/// `[audio] provider_base_url = "..."` in `config.toml` or by exporting
+/// `OPENAI_BASE_URL`.
+pub const DEFAULT_BASE_URL: &str = "https://api.openai.com";
 const CREDS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Credentials resolved at call time. Prefers `com.nexus.ai`'s live

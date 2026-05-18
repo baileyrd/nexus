@@ -10,11 +10,13 @@ use crate::provider::{
 };
 use crate::tools::ToolSchema;
 
-/// Default chat model.
-const DEFAULT_CHAT_MODEL: &str = "gpt-4o";
+/// Default chat model. Override via `ai.toml [ai] openai_chat_model = "..."`
+/// (P2-04).
+pub const DEFAULT_CHAT_MODEL: &str = "gpt-4o";
 
-/// Default embedding model.
-const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
+/// Default embedding model. Override via
+/// `ai.toml [ai] openai_embedding_model = "..."` (P2-04).
+pub const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 
 /// Dimensionality of `text-embedding-3-small` embeddings.
 const EMBEDDING_DIMENSION: usize = 1536;

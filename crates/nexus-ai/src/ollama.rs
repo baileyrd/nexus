@@ -11,14 +11,24 @@ use crate::provider::{
 };
 use crate::tools::ToolSchema;
 
-/// Default base URL for a local Ollama instance.
-const DEFAULT_BASE_URL: &str = "http://localhost:11434";
+/// Default base URL for a local Ollama instance. Override via
+/// `ai.toml [ai] ollama_base_url = "..."` (P2-05).
+pub const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
-/// Default chat model.
-const DEFAULT_CHAT_MODEL: &str = "llama3.2";
+/// Default chat model. Override via `ai.toml [ai] ollama_chat_model = "..."`
+/// (P2-04).
+pub const DEFAULT_CHAT_MODEL: &str = "llama3.2";
 
-/// Default embedding model.
-const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
+/// Default embedding model. Override via
+/// `ai.toml [ai] ollama_embedding_model = "..."` (P2-04).
+pub const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
+
+/// Default sampling temperature for the FIM `/api/generate` path.
+/// Lower values favour deterministic completions (matches editor
+/// expectations — the same prefix should yield the same completion
+/// across keystrokes). Override via
+/// `ai.toml [ai] ollama_temperature = N` (P2-04).
+pub const DEFAULT_FIM_TEMPERATURE: f32 = 0.2;
 
 /// Dimensionality of `nomic-embed-text` embeddings.
 const EMBEDDING_DIMENSION: usize = 768;
@@ -31,19 +41,34 @@ pub struct OllamaProvider {
     base_url: String,
     chat_model: String,
     embedding_model: String,
+    fim_temperature: f32,
 }
 
 impl OllamaProvider {
     /// Create a new Ollama provider.
     ///
-    /// If `base_url` is `None`, defaults to `http://localhost:11434`.
-    /// If `chat_model` is `None`, defaults to `llama3.2`.
-    /// If `embedding_model` is `None`, defaults to `nomic-embed-text`.
+    /// `None` for any argument falls back to the corresponding
+    /// `DEFAULT_*` constant:
+    /// - `base_url`: [`DEFAULT_BASE_URL`]
+    /// - `chat_model`: [`DEFAULT_CHAT_MODEL`]
+    /// - `embedding_model`: [`DEFAULT_EMBEDDING_MODEL`]
     #[must_use]
     pub fn new(
         base_url: Option<String>,
         chat_model: Option<String>,
         embedding_model: Option<String>,
+    ) -> Self {
+        Self::with_fim_temperature(base_url, chat_model, embedding_model, None)
+    }
+
+    /// `new` plus an explicit FIM temperature override. `None` falls
+    /// back to [`DEFAULT_FIM_TEMPERATURE`]. P2-04.
+    #[must_use]
+    pub fn with_fim_temperature(
+        base_url: Option<String>,
+        chat_model: Option<String>,
+        embedding_model: Option<String>,
+        fim_temperature: Option<f32>,
     ) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -51,6 +76,7 @@ impl OllamaProvider {
             chat_model: chat_model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
             embedding_model: embedding_model
                 .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
+            fim_temperature: fim_temperature.unwrap_or(DEFAULT_FIM_TEMPERATURE),
         }
     }
 }
@@ -195,7 +221,7 @@ impl OllamaProvider {
             stream: false,
             options: Some(OllamaGenerateOptions {
                 num_predict: max_tokens,
-                temperature: 0.2,
+                temperature: self.fim_temperature,
             }),
         };
 

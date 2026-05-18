@@ -65,6 +65,32 @@ pub struct AiConfig {
     /// from `[ai] predict_max_tokens = N` in `ai.toml`; defaults to
     /// 64 tokens.
     pub predict_max_tokens: u32,
+    /// P2-04 — per-provider default model override used when
+    /// [`Self::model`] is `None`. When both are unset, each provider
+    /// falls back to its built-in constant
+    /// ([`crate::anthropic::DEFAULT_MODEL`]). Source: `ai.toml`
+    /// `[ai] anthropic_model = "..."`.
+    pub anthropic_model: Option<String>,
+    /// P2-04 — per-provider chat default for `provider = "openai"`.
+    /// Falls back to [`crate::openai::DEFAULT_CHAT_MODEL`].
+    pub openai_chat_model: Option<String>,
+    /// P2-04 — per-provider embedding default for
+    /// `embedding.provider = "openai"`. Falls back to
+    /// [`crate::openai::DEFAULT_EMBEDDING_MODEL`].
+    pub openai_embedding_model: Option<String>,
+    /// P2-04 — per-provider chat default for `provider = "ollama"`.
+    /// Falls back to [`crate::ollama::DEFAULT_CHAT_MODEL`].
+    pub ollama_chat_model: Option<String>,
+    /// P2-04 — per-provider embedding default for
+    /// `embedding.provider = "ollama"`. Falls back to
+    /// [`crate::ollama::DEFAULT_EMBEDDING_MODEL`].
+    pub ollama_embedding_model: Option<String>,
+    /// P2-04 — temperature passed to Ollama's `/api/generate` (FIM
+    /// completions). `None` ⇒ provider default
+    /// ([`crate::ollama::DEFAULT_FIM_TEMPERATURE`] = 0.2). Lower
+    /// values bias toward deterministic completions, which matches
+    /// editor expectations.
+    pub ollama_temperature: Option<f32>,
 }
 
 impl Default for AiConfig {
@@ -82,6 +108,12 @@ impl Default for AiConfig {
             local_embedding_model: None,
             tls_pinning_enabled: false,
             predict_max_tokens: 64,
+            anthropic_model: None,
+            openai_chat_model: None,
+            openai_embedding_model: None,
+            ollama_chat_model: None,
+            ollama_embedding_model: None,
+            ollama_temperature: None,
         }
     }
 }

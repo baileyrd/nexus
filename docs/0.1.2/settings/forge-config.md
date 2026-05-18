@@ -55,6 +55,16 @@ privacy = "off"                    # PrivacyPolicy: Off | RedactPii | LocalOnly
 injection_policy = "off"           # InjectionPolicy: Off | OnDemand | Always
 local_embedding_model = "bge-small-en-v1.5-int8"   # via fastembed
 tls_pinning_enabled = false        # opt-in BL-102
+
+# P2-04 — per-provider defaults used when `model` is unset.
+# Omit any field to fall back to the provider's built-in constant.
+anthropic_model        = "claude-sonnet-4-20250514"   # nexus_ai::anthropic::DEFAULT_MODEL
+openai_chat_model      = "gpt-4o"                     # nexus_ai::openai::DEFAULT_CHAT_MODEL
+openai_embedding_model = "text-embedding-3-small"     # nexus_ai::openai::DEFAULT_EMBEDDING_MODEL
+ollama_chat_model      = "llama3.2"                   # nexus_ai::ollama::DEFAULT_CHAT_MODEL
+ollama_embedding_model = "nomic-embed-text"           # nexus_ai::ollama::DEFAULT_EMBEDDING_MODEL
+ollama_temperature     = 0.2                          # FIM `/api/generate` — nexus_ai::ollama::DEFAULT_FIM_TEMPERATURE
+ollama_base_url        = "http://localhost:11434"     # P2-05 — nexus_ai::ollama::DEFAULT_BASE_URL
 ```
 
 Defaults via `serde(default = …)` helpers in the Config struct. Loader: `load_ai_config(forge_root)` — `config/mod.rs:92`.
@@ -102,6 +112,7 @@ webhook_url = "..."
 [channels.telegram]
 bot_token = "..."
 chat_id = "..."
+max_bytes = 4096                      # optional override — default see nexus-notifications/src/lib.rs::DEFAULT_TELEGRAM_MAX_BYTES
 
 [channels.email]
 smtp_host = "..."
@@ -117,6 +128,33 @@ max_age_days = 30                     # default — line 50
 ```
 
 Loader: `NotificationsConfig::load` — `config.rs:300`.
+
+## `<forge>/.forge/config.toml`
+
+Shared TOML file read by several subsystems for blocks they own. Each block is optional; absent ⇒ defaults.
+
+```toml
+[audio]                                                 # AudioConfig — crates/nexus-audio/src/config.rs:64
+stt_backend = "local"                                   # "local" | "provider" | "platform"
+tts_backend = "local"
+local_model_size = "base.en"
+local_model_dir = "/abs/path"                           # default: <forge>/.forge/.audio/models
+provider_api_key = ""                                   # falls back to OPENAI_API_KEY
+provider_base_url = ""                                  # default: nexus_audio::provider_backend::DEFAULT_BASE_URL
+provider_stt_model = "whisper-1"
+provider_tts_model = "tts-1"
+provider_tts_voice = "alloy"
+whisper_model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin"  # P2-05 — template; {size} substituted at download
+
+[collab]                                                # CollabConfig — crates/nexus-bootstrap/src/collab.rs:61
+enabled = false
+relay_url = "ws://relay.example:7700/"                  # required when enabled = true
+token = "shared-secret"
+peer_id = "alice@laptop"
+display_name = "Alice"
+```
+
+Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::collab::load_config(forge_root)` — `collab.rs:100`. Missing file / missing block ⇒ defaults.
 
 ## `<forge>/.nexus/config.toml`
 

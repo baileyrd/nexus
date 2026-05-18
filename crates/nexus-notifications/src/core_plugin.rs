@@ -306,6 +306,11 @@ impl NotificationsCorePlugin {
             Box::new(TelegramBot::new(
                 config.channels.telegram.bot_token.clone(),
                 config.channels.telegram.chat_id.clone(),
+                config
+                    .channels
+                    .telegram
+                    .max_bytes
+                    .unwrap_or(crate::DEFAULT_TELEGRAM_MAX_BYTES),
             )),
         );
         transports.insert(

@@ -187,6 +187,13 @@ pub struct TelegramChannel {
     /// Authorised chat id.
     #[serde(default)]
     pub chat_id: String,
+    /// Override for the per-message byte cap. Telegram's `sendMessage`
+    /// API caps `text` at 4096 UTF-16 code units; we enforce the
+    /// stricter 4096-byte UTF-8 cap by default. Lower this for chats
+    /// whose clients flake at the limit; raise it at your own risk.
+    /// `None` ⇒ [`crate::DEFAULT_TELEGRAM_MAX_BYTES`].
+    #[serde(default)]
+    pub max_bytes: Option<usize>,
 }
 
 /// `[channels.email]` block. Identical fields to [`SmtpConfig`] but

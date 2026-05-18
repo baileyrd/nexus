@@ -83,6 +83,15 @@ pub use router::{Resolution, Router};
 /// into the plugin constructor; tests use [`Inbox::in_memory`].
 pub const INBOX_DB_RELPATH: &str = ".forge/notifications/inbox.db";
 
+/// Default cap on the byte size of a single Telegram `sendMessage`
+/// request, used when `notifications.toml::[channels.telegram].max_bytes`
+/// is unset. Telegram's documented limit is 4096 UTF-16 code units;
+/// the safer 4096-byte UTF-8 cap is what we enforce — at worst we send
+/// fewer characters than the API permits, which is fine. The
+/// [`TelegramBot`] splitter chunks at character boundaries under this
+/// cap.
+pub const DEFAULT_TELEGRAM_MAX_BYTES: usize = 4096;
+
 /// Bus topic published when a new row lands in the inbox. Payload is
 /// `{ id, source, severity, ts }` — used by the shell to bump its
 /// unread badge without polling [`Inbox::stats`].
@@ -296,22 +305,34 @@ impl Transport for DiscordWebhook {
 pub struct TelegramBot {
     bot_token: String,
     chat_id: String,
+    max_bytes: usize,
     // Lazy — see the same note on `DiscordWebhook::client`.
     client: std::sync::OnceLock<reqwest::blocking::Client>,
 }
 
 impl TelegramBot {
     /// Build a Telegram transport with the bot token + authorised
-    /// chat id from `.forge/config.toml::[notifications.telegram]`.
+    /// chat id from `.forge/notifications.toml::[channels.telegram]`.
     /// Empty `bot_token` OR empty `chat_id` surfaces as
     /// [`SendError::NotConfigured`] at [`Transport::send`] time —
     /// matches the Discord transport's "fail at dispatch, not at
     /// boot" stance so missing config doesn't crash the runtime.
+    ///
+    /// `max_bytes` caps the per-`sendMessage` UTF-8 byte length; pass
+    /// [`crate::DEFAULT_TELEGRAM_MAX_BYTES`] when no override is set.
+    /// A value of `0` is replaced with the default so a misconfigured
+    /// override can't disable splitting entirely.
     #[must_use]
-    pub fn new(bot_token: String, chat_id: String) -> Self {
+    pub fn new(bot_token: String, chat_id: String, max_bytes: usize) -> Self {
+        let max_bytes = if max_bytes == 0 {
+            crate::DEFAULT_TELEGRAM_MAX_BYTES
+        } else {
+            max_bytes
+        };
         Self {
             bot_token,
             chat_id,
+            max_bytes,
             client: std::sync::OnceLock::new(),
         }
     }
@@ -371,16 +392,11 @@ impl Transport for TelegramBot {
                 .unwrap_or_default(),
             notif.message,
         );
-        // Telegram caps sendMessage `text` at 4096 chars (UTF-16
-        // code units in their docs, but the safer 4096-byte cap
-        // post-UTF-8 is what we enforce — at worst we send fewer
-        // characters than the API permits, which is fine).
-        const TELEGRAM_MAX_BYTES: usize = 4096;
         let url = format!(
             "https://api.telegram.org/bot{}/sendMessage",
             self.bot_token
         );
-        for chunk in Self::split_at_byte_limit(&body, TELEGRAM_MAX_BYTES) {
+        for chunk in Self::split_at_byte_limit(&body, self.max_bytes) {
             let resp = self
                 .client
                 .get_or_init(reqwest::blocking::Client::new)
@@ -646,7 +662,7 @@ mod tests {
 
     #[test]
     fn telegram_transport_empty_bot_token_reports_not_configured() {
-        let t = TelegramBot::new(String::new(), "12345".into());
+        let t = TelegramBot::new(String::new(), "12345".into(), crate::DEFAULT_TELEGRAM_MAX_BYTES);
         let err = t
             .send(&Notification {
                 message: "hi".into(),
@@ -658,7 +674,7 @@ mod tests {
 
     #[test]
     fn telegram_transport_empty_chat_id_reports_not_configured() {
-        let t = TelegramBot::new("bot:token".into(), String::new());
+        let t = TelegramBot::new("bot:token".into(), String::new(), crate::DEFAULT_TELEGRAM_MAX_BYTES);
         let err = t
             .send(&Notification {
                 message: "hi".into(),

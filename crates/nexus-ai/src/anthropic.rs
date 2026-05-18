@@ -9,8 +9,9 @@ use crate::provider::{
 };
 use crate::tools::ToolSchema;
 
-/// Default model used by the Anthropic provider.
-const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+/// Default model used by the Anthropic provider. Override via
+/// `ai.toml [ai] anthropic_model = "..."` (P2-04).
+pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 
 /// API endpoint for Anthropic's messages API.
 const API_URL: &str = "https://api.anthropic.com/v1/messages";

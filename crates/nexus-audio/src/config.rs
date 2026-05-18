@@ -99,7 +99,22 @@ pub struct AudioConfig {
     /// Default voice for TTS (`alloy` / `echo` / `fable` / `onyx` /
     /// `nova` / `shimmer`). The provider rejects unknown voices.
     pub provider_tts_voice: String,
+    /// P2-05 — URL template the local Whisper backend downloads from
+    /// when a configured `local_model_size` is missing on disk. Must
+    /// contain `{size}`, which is substituted with the model-size
+    /// label (`tiny.en` / `base.en` / …). Defaults to the canonical
+    /// ggerganov/whisper.cpp HuggingFace mirror — see
+    /// [`DEFAULT_WHISPER_MODEL_URL_TEMPLATE`]. Override via
+    /// `[audio] whisper_model_url = "..."` in `config.toml`.
+    pub whisper_model_url_template: String,
 }
+
+/// P2-05 — default URL template the local-audio backend uses to fetch
+/// the `ggml-{size}.bin` Whisper weights when the configured size is
+/// missing from `local_model_dir`. `{size}` is substituted at download
+/// time. Override via `[audio] whisper_model_url = "..."`.
+pub const DEFAULT_WHISPER_MODEL_URL_TEMPLATE: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin";
 
 impl Default for AudioConfig {
     fn default() -> Self {
@@ -114,6 +129,7 @@ impl Default for AudioConfig {
             provider_stt_model: "whisper-1".to_string(),
             provider_tts_model: "tts-1".to_string(),
             provider_tts_voice: "alloy".to_string(),
+            whisper_model_url_template: DEFAULT_WHISPER_MODEL_URL_TEMPLATE.to_string(),
         }
     }
 }
@@ -135,6 +151,7 @@ struct RawAudio {
     provider_stt_model: Option<String>,
     provider_tts_model: Option<String>,
     provider_tts_voice: Option<String>,
+    whisper_model_url: Option<String>,
 }
 
 impl AudioConfig {
@@ -199,6 +216,11 @@ impl AudioConfig {
         }
         if let Some(v) = raw.provider_tts_voice {
             out.provider_tts_voice = v;
+        }
+        if let Some(v) = raw.whisper_model_url {
+            if !v.is_empty() {
+                out.whisper_model_url_template = v;
+            }
         }
         // Env overrides — matches nexus-ai's detect_provider convention.
         if let Ok(env_key) = std::env::var("OPENAI_API_KEY") {

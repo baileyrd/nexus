@@ -102,9 +102,7 @@ impl LocalWhisperStt {
         }
         let parent = self.model_dir();
         std::fs::create_dir_all(&parent).map_err(AudioError::Io)?;
-        let url = format!(
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin"
-        );
+        let url = self.cfg.whisper_model_url_template.replace("{size}", size);
         tracing::info!(
             %url,
             target = %path.display(),

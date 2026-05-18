@@ -120,23 +120,28 @@ pub(crate) fn exec_err<S: Into<String>>(reason: S) -> PluginError {
 // ─── Provider factories ─────────────────────────────────────────────────────
 
 pub(crate) fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, String> {
+    // P2-04: per-provider default model. cfg.model is the per-request
+    // override; the per-provider field is the forge-level default
+    // (ai.toml). Either falls through to the provider's built-in
+    // constant when both are None.
     match cfg.provider.as_str() {
         "anthropic" => Ok(Box::new(AnthropicProvider::new(
             cfg.api_key.clone().unwrap_or_default(),
-            cfg.model.clone(),
+            cfg.model.clone().or_else(|| cfg.anthropic_model.clone()),
             cfg.max_tokens,
             cfg.tls_pinning_enabled,
         ))),
         "openai" => Ok(Box::new(OpenAiProvider::new(
             cfg.api_key.clone().unwrap_or_default(),
-            cfg.model.clone(),
+            cfg.model.clone().or_else(|| cfg.openai_chat_model.clone()),
             cfg.max_tokens,
             cfg.tls_pinning_enabled,
         ))),
-        "ollama" => Ok(Box::new(OllamaProvider::new(
+        "ollama" => Ok(Box::new(OllamaProvider::with_fim_temperature(
             cfg.base_url.clone(),
-            cfg.model.clone(),
+            cfg.model.clone().or_else(|| cfg.ollama_chat_model.clone()),
             None,
+            cfg.ollama_temperature,
         ))),
         other => Err(format!("unknown AI provider: {other}")),
     }
@@ -146,14 +151,17 @@ pub(crate) fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn Embeddi
     match cfg.provider.as_str() {
         "openai" => Ok(Box::new(OpenAiProvider::new(
             cfg.api_key.clone().unwrap_or_default(),
-            None,
+            cfg.openai_embedding_model.clone(),
             4096,
             cfg.tls_pinning_enabled,
         ))),
-        "ollama" => Ok(Box::new(OllamaProvider::new(
+        "ollama" => Ok(Box::new(OllamaProvider::with_fim_temperature(
             cfg.base_url.clone(),
             None,
-            cfg.model.clone(),
+            cfg.model
+                .clone()
+                .or_else(|| cfg.ollama_embedding_model.clone()),
+            cfg.ollama_temperature,
         ))),
         "local" => build_local_embedding_provider(cfg),
         other => Err(format!("unknown embedding provider: {other}")),

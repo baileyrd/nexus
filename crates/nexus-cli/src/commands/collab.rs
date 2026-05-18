@@ -39,6 +39,12 @@ const KEYRING_TOKEN_NAME: &str = "nexus.collab.token";
 /// the BL-143 spec uses and keeps the verb invokable with no args.
 pub const DEFAULT_SERVE_PORT: u16 = 7700;
 
+/// P2-05 — default interface for `nexus collab serve`. `0.0.0.0`
+/// listens on every IPv4 interface, matching the original BL-143
+/// behaviour. Override with `--bind 127.0.0.1` (loopback only) or
+/// `--bind <ip>` to constrain access.
+pub const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0";
+
 /// Default `peer_id` falls back to `$USER` or `nexus-cli` if the
 /// environment variable is missing.
 fn default_peer_id() -> String {
@@ -90,7 +96,12 @@ fn resolve_token(
 /// # Errors
 /// Returns an error if the listener cannot bind, the token cannot be
 /// resolved, or the relay accept loop fails.
-pub fn serve(port: u16, token: Option<String>, save_token: bool) -> Result<()> {
+pub fn serve(
+    port: u16,
+    bind_address: &str,
+    token: Option<String>,
+    save_token: bool,
+) -> Result<()> {
     let vault = CredentialVault::new();
     let secret = resolve_token(token.as_deref(), None, &vault)?;
     if save_token {
@@ -101,7 +112,7 @@ pub fn serve(port: u16, token: Option<String>, save_token: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("build tokio runtime")?;
     rt.block_on(async move {
         let server = Arc::new(RelayServer::new(token));
-        let bind = format!("0.0.0.0:{port}");
+        let bind = format!("{bind_address}:{port}");
         let listener = TcpListener::bind(&bind)
             .await
             .with_context(|| format!("bind {bind}"))?;
