@@ -31,12 +31,10 @@ pub(crate) fn config_kind(
 /// rather than `string_arg(args, "cmd", "path")`. Keeping the wrappers
 /// preserves call-site clarity while delegating the lookup logic to
 /// the workspace-wide macro-emitted `string_arg`.
-#[allow(dead_code)]
 pub(crate) fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
     string_arg(value, command, "path")
 }
 
-#[allow(dead_code)] // consumed by canvas/bases handlers in a follow-on Phase B commit
 pub(crate) fn relpath_arg(
     value: &serde_json::Value,
     command: &str,
@@ -44,7 +42,6 @@ pub(crate) fn relpath_arg(
     string_arg(value, command, "relpath")
 }
 
-#[allow(dead_code)] // consumed by bases handlers in a follow-on Phase B commit
 pub(crate) fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
     string_arg(value, command, "name")
 }

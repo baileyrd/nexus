@@ -614,202 +614,21 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_CANVAS_PATCH => crate::handlers::canvas::patch(engine, args),
             HANDLER_CANVAS_NODES => crate::handlers::canvas::nodes(engine, args),
             HANDLER_CANVAS_EDGES => crate::handlers::canvas::edges(engine, args),
-            HANDLER_BASE_RECORD_CREATE => {
-                let path = path_arg(args, "base_record_create")?;
-                let record: nexus_types::bases::BaseRecord = args
-                    .get("record")
-                    .ok_or_else(|| exec_err("base_record_create: missing 'record'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone()).map_err(|e| {
-                            exec_err(format!("base_record_create: record decode: {e}"))
-                        })
-                    })?;
-                let stored = engine
-                    .base_record_create(&path, record)
-                    .map_err(|e| exec_err(format!("base_record_create: {e}")))?;
-                to_value(&stored, "base_record_create")
-            }
-            HANDLER_BASE_RECORD_UPDATE => {
-                let path = path_arg(args, "base_record_update")?;
-                let record_id = args
-                    .get("record_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("base_record_update: missing 'record_id' string".to_string())
-                    })?;
-                let fields = args
-                    .get("fields")
-                    .and_then(serde_json::Value::as_object)
-                    .cloned()
-                    .ok_or_else(|| {
-                        exec_err("base_record_update: missing 'fields' object".to_string())
-                    })?;
-                let updated = engine
-                    .base_record_update(&path, record_id, &fields)
-                    .map_err(|e| exec_err(format!("base_record_update: {e}")))?;
-                to_value(&updated, "base_record_update")
-            }
-            HANDLER_BASE_RECORD_DELETE => {
-                let path = path_arg(args, "base_record_delete")?;
-                let record_id = args
-                    .get("record_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("base_record_delete: missing 'record_id' string".to_string())
-                    })?;
-                engine
-                    .base_record_delete(&path, record_id)
-                    .map_err(|e| exec_err(format!("base_record_delete: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_PROPERTY_CREATE => {
-                let path = path_arg(args, "base_property_create")?;
-                let name = name_arg(args, "base_property_create")?;
-                let definition = args
-                    .get("definition")
-                    .cloned()
-                    .ok_or_else(|| {
-                        exec_err("base_property_create: missing 'definition'".to_string())
-                    })?;
-                engine
-                    .base_property_create(&path, &name, definition)
-                    .map_err(|e| exec_err(format!("base_property_create: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_PROPERTY_UPDATE => {
-                let path = path_arg(args, "base_property_update")?;
-                let name = name_arg(args, "base_property_update")?;
-                let definition = args
-                    .get("definition")
-                    .cloned()
-                    .ok_or_else(|| {
-                        exec_err("base_property_update: missing 'definition'".to_string())
-                    })?;
-                let migrate_values = args
-                    .get("migrate_values")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                engine
-                    .base_property_update(&path, &name, &definition, migrate_values)
-                    .map_err(|e| exec_err(format!("base_property_update: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
+            HANDLER_BASE_RECORD_CREATE => crate::handlers::bases::record_create(engine, args),
+            HANDLER_BASE_RECORD_UPDATE => crate::handlers::bases::record_update(engine, args),
+            HANDLER_BASE_RECORD_DELETE => crate::handlers::bases::record_delete(engine, args),
+            HANDLER_BASE_PROPERTY_CREATE => crate::handlers::bases::property_create(engine, args),
+            HANDLER_BASE_PROPERTY_UPDATE => crate::handlers::bases::property_update(engine, args),
             HANDLER_BASE_RECORD_SOFT_DELETE => {
-                let path = path_arg(args, "base_record_soft_delete")?;
-                let record_id = args
-                    .get("record_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("base_record_soft_delete: missing 'record_id' string".to_string())
-                    })?;
-                engine
-                    .base_record_soft_delete(&path, record_id)
-                    .map_err(|e| exec_err(format!("base_record_soft_delete: {e}")))?;
-                Ok(serde_json::json!({}))
+                crate::handlers::bases::record_soft_delete(engine, args)
             }
-            HANDLER_BASE_RECORD_RESTORE => {
-                let path = path_arg(args, "base_record_restore")?;
-                let record_id = args
-                    .get("record_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("base_record_restore: missing 'record_id' string".to_string())
-                    })?;
-                engine
-                    .base_record_restore(&path, record_id)
-                    .map_err(|e| exec_err(format!("base_record_restore: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_PROPERTY_RENAME => {
-                let path = path_arg(args, "base_property_rename")?;
-                let old_name = args
-                    .get("old_name")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("base_property_rename: missing 'old_name' string".to_string())
-                    })?
-                    .to_string();
-                let new_name = args
-                    .get("new_name")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("base_property_rename: missing 'new_name' string".to_string())
-                    })?
-                    .to_string();
-                engine
-                    .base_property_rename(&path, &old_name, &new_name)
-                    .map_err(|e| exec_err(format!("base_property_rename: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_CREATE => {
-                let path = path_arg(args, "base_create")?;
-                let schema: nexus_types::bases::BaseSchema = args
-                    .get("schema")
-                    .ok_or_else(|| exec_err("base_create: missing 'schema'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone())
-                            .map_err(|e| exec_err(format!("base_create: schema decode: {e}")))
-                    })?;
-                let seed_records: Vec<nexus_types::bases::BaseRecord> = args
-                    .get("seed_records")
-                    .cloned()
-                    .map(|v| {
-                        serde_json::from_value(v)
-                            .map_err(|e| exec_err(format!("base_create: seed_records decode: {e}")))
-                    })
-                    .transpose()?
-                    .unwrap_or_default();
-                let base = engine
-                    .base_create(&path, &schema, seed_records)
-                    .map_err(|e| exec_err(format!("base_create: {e}")))?;
-                to_value(&base, "base_create")
-            }
-            HANDLER_BASE_PROPERTY_DELETE => {
-                let path = path_arg(args, "base_property_delete")?;
-                let name = name_arg(args, "base_property_delete")?;
-                engine
-                    .base_property_delete(&path, &name)
-                    .map_err(|e| exec_err(format!("base_property_delete: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_VIEW_CREATE => {
-                let path = path_arg(args, "base_view_create")?;
-                let view: nexus_types::bases::BaseView = args
-                    .get("view")
-                    .ok_or_else(|| exec_err("base_view_create: missing 'view'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone()).map_err(|e| {
-                            exec_err(format!("base_view_create: view decode: {e}"))
-                        })
-                    })?;
-                engine
-                    .base_view_create(&path, view)
-                    .map_err(|e| exec_err(format!("base_view_create: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_VIEW_UPDATE => {
-                let path = path_arg(args, "base_view_update")?;
-                let view: nexus_types::bases::BaseView = args
-                    .get("view")
-                    .ok_or_else(|| exec_err("base_view_update: missing 'view'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone()).map_err(|e| {
-                            exec_err(format!("base_view_update: view decode: {e}"))
-                        })
-                    })?;
-                engine
-                    .base_view_update(&path, view)
-                    .map_err(|e| exec_err(format!("base_view_update: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_BASE_VIEW_DELETE => {
-                let path = path_arg(args, "base_view_delete")?;
-                let name = name_arg(args, "base_view_delete")?;
-                engine
-                    .base_view_delete(&path, &name)
-                    .map_err(|e| exec_err(format!("base_view_delete: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
+            HANDLER_BASE_RECORD_RESTORE => crate::handlers::bases::record_restore(engine, args),
+            HANDLER_BASE_PROPERTY_RENAME => crate::handlers::bases::property_rename(engine, args),
+            HANDLER_BASE_CREATE => crate::handlers::bases::create(engine, args),
+            HANDLER_BASE_PROPERTY_DELETE => crate::handlers::bases::property_delete(engine, args),
+            HANDLER_BASE_VIEW_CREATE => crate::handlers::bases::view_create(engine, args),
+            HANDLER_BASE_VIEW_UPDATE => crate::handlers::bases::view_update(engine, args),
+            HANDLER_BASE_VIEW_DELETE => crate::handlers::bases::view_delete(engine, args),
             HANDLER_GRAPH_NEIGHBORS => crate::handlers::graph::graph_neighbors(engine, args),
             HANDLER_QUERY_TAGS => crate::handlers::search::query_tags(engine, args),
             HANDLER_VECTOR_INSERT => crate::handlers::vector::insert(engine, args),
@@ -817,87 +636,15 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_VECTOR_DELETE_BY_FILE => crate::handlers::vector::delete_by_file(engine, args),
             HANDLER_VECTORSTORE_COUNT => crate::handlers::vector::count(engine),
             HANDLER_QUERY_BLOCKS => crate::handlers::tasks::query_blocks(engine, args),
-            HANDLER_BASE_INDEX => {
-                let path = path_arg(args, "base_index")?;
-                let abs_dir = self.forge_root.join(&path);
-                let base = nexus_types::bases::load_base(&abs_dir)
-                    .map_err(|e| exec_err(format!("base_index: load: {e}")))?;
-                let base_id = engine
-                    .index_base(&path, &base)
-                    .map_err(|e| exec_err(format!("base_index: {e}")))?;
-                Ok(serde_json::json!({ "base_id": base_id }))
-            }
-            HANDLER_BASE_LOAD => {
-                let path = path_arg(args, "base_load")?;
-                let abs_dir = self.forge_root.join(&path);
-                let base = nexus_types::bases::load_base(&abs_dir)
-                    .map_err(|e| exec_err(format!("base_load: {e}")))?;
-                to_value(&base, "base_load")
-            }
-            HANDLER_BASE_LIST => {
-                let bases = engine
-                    .list_bases()
-                    .map_err(|e| exec_err(format!("base_list: {e}")))?;
-                to_value(&bases, "base_list")
-            }
+            HANDLER_BASE_INDEX => crate::handlers::bases::index(engine, &self.forge_root, args),
+            HANDLER_BASE_LOAD => crate::handlers::bases::load(&self.forge_root, args),
+            HANDLER_BASE_LIST => crate::handlers::bases::list(engine),
             HANDLER_LIST_DIR => crate::handlers::tree::list_dir(engine, args),
             HANDLER_CREATE_FILE => crate::handlers::tree::create_file(engine, args),
             HANDLER_CREATE_DIR => crate::handlers::tree::create_dir(engine, args),
             HANDLER_RENAME_ENTRY => crate::handlers::tree::rename_entry(engine, args),
             HANDLER_DELETE_ENTRY => crate::handlers::tree::delete_entry(engine, args),
-            HANDLER_BASE_QUERY => {
-                let path = path_arg(args, "base_query")?;
-                let filters: Vec<String> = args
-                    .get("filters")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
-                let sorts: Vec<String> = args
-                    .get("sorts")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
-                let limit = args
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| u32::try_from(v).ok());
-                let offset = args
-                    .get("offset")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| u32::try_from(v).ok());
-
-                let bases = engine
-                    .list_bases()
-                    .map_err(|e| exec_err(format!("base_query: list_bases: {e}")))?;
-                let base_summary = bases
-                    .iter()
-                    .find(|b| b.path == path)
-                    .ok_or_else(|| exec_err(format!("base_query: base not found: {path}")))?;
-
-                let mut db_query = crate::bases::query::Query {
-                    base_id: base_summary.id,
-                    ..Default::default()
-                };
-                for f in &filters {
-                    db_query.filters.push(
-                        crate::bases::query::parse_filter(f)
-                            .map_err(|e| exec_err(format!("base_query: parse filter '{f}': {e}")))?,
-                    );
-                }
-                for s in &sorts {
-                    db_query.sorts.push(
-                        crate::bases::query::parse_sort(s)
-                            .map_err(|e| exec_err(format!("base_query: parse sort '{s}': {e}")))?,
-                    );
-                }
-                db_query.limit = limit;
-                db_query.offset = offset;
-
-                let conn = engine
-                    .pool_connection()
-                    .map_err(|e| exec_err(format!("base_query: pool: {e}")))?;
-                let result = crate::bases::query::execute(&conn, &db_query)
-                    .map_err(|e| exec_err(format!("base_query: {e}")))?;
-                to_value(&result, "base_query")
-            }
+            HANDLER_BASE_QUERY => crate::handlers::bases::query(engine, args),
             HANDLER_OBSIDIAN_BASE_QUERY => {
                 crate::handlers::index::obsidian_base_query(engine, args)
             }
@@ -923,25 +670,11 @@ impl CorePlugin for StorageCorePlugin {
 
 nexus_plugins::define_dispatch_helpers!();
 
-// SD-03 Phase B partial: `is_forge_metadata_path` and its sole caller
-// (`HANDLER_WRITE_VAULT_FILE`) moved to `crate::handlers::files`. The
-// `path_arg` / `relpath_arg` / `name_arg` helpers below are still
-// referenced by inline arms (canvas, bases, tree, …) that haven't
-// been lifted out yet — those moves happen in follow-on Phase B
-// commits, at which point these locals will join their counterparts
-// in `crate::handlers::shared`.
-
-fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    string_arg(value, command, "path")
-}
-
-fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    string_arg(value, command, "name")
-}
-
-// SD-03 Phase B chunk 4: `build_appended` and `read_frontmatter_for_path`
-// moved to `crate::handlers::notes`. The pub fn `apply_frontmatter_edit`
-// below stays here because the tests further down anchor against it.
+// SD-03 Phase B complete: all helpers (is_forge_metadata_path,
+// path_arg, relpath_arg, name_arg, build_appended,
+// read_frontmatter_for_path) and every inline-arm body now live under
+// `crate::handlers::*`. Only `apply_frontmatter_edit` remains below
+// because its test cluster lives in this file's `#[cfg(test)]` block.
 
 /// P4-07 — splice a top-level scalar frontmatter field into a markdown
 /// source. `value = Some(s)` inserts or replaces the field's line in
