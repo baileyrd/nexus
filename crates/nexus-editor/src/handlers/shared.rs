@@ -16,12 +16,14 @@ use crate::core_plugin::PLUGIN_ID;
 const _: &str = PLUGIN_ID;
 nexus_plugins::define_dispatch_helpers!(pub(crate));
 
-/// Re-exports of session-state helpers still owned by `core_plugin`.
-/// Once the SD-03 split for the editor lands in full, these can move
-/// here outright; during the chunk-by-chunk migration we keep them in
-/// place to minimise churn.
+/// Re-exports of session-state helpers and shared constants still
+/// owned by `core_plugin`. Once the SD-03 split for the editor lands
+/// in full, these can move here outright; during the chunk-by-chunk
+/// migration we keep them in place to minimise churn.
 pub(crate) use crate::core_plugin::{
-    acquire_session_entry, publish_changed, sessions_poisoned, snapshot_of, snapshot_to_value,
+    acquire_session_entry, get_session_entry, insert_session_entry, publish_changed,
+    remove_session_entry, resolve_within, sessions_poisoned, snapshot_of, snapshot_to_value,
+    MULTIBUFFER_RELPATH_PREFIX, STORAGE_IPC_TIMEOUT, STORAGE_PLUGIN_ID,
 };
 
 /// Convenience wrapper — the editor handlers historically used
