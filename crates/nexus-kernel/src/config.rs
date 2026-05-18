@@ -55,6 +55,39 @@ pub struct KernelConfig {
     /// verified even with this flag off, so a malformed signature
     /// fails loud rather than being silently ignored.
     pub require_signatures: bool,
+
+    /// P1-09 — system-wide ceiling clamped against every per-plugin
+    /// `WasmConfig` at load time. Prevents a hostile manifest from
+    /// declaring `fuel = u64::MAX` / `memory_mb = u32::MAX` to
+    /// out-run the metering pass. Defaults are large enough that
+    /// today's plugins (none of which currently set these explicitly)
+    /// keep their existing budgets.
+    pub wasm_caps: WasmCapsCeiling,
+}
+
+/// P1-09 — kernel-wide upper bounds for community-plugin WASM
+/// resource budgets. The plugin loader clamps each per-plugin
+/// `WasmConfig` against this ceiling at load time; values declared
+/// higher than the ceiling are silently lowered and a `tracing::warn!`
+/// records the clamp.
+#[derive(Debug, Clone, Copy)]
+pub struct WasmCapsCeiling {
+    /// Max linear-memory limit in mebibytes. Default 128.
+    pub max_memory_mb: u32,
+    /// Max wasmtime fuel budget per dispatch. Default 100_000_000.
+    pub max_fuel: u64,
+    /// Max wall-clock milliseconds per dispatch call. Default 30_000.
+    pub max_execution_ms: u64,
+}
+
+impl Default for WasmCapsCeiling {
+    fn default() -> Self {
+        Self {
+            max_memory_mb: 128,
+            max_fuel: 100_000_000,
+            max_execution_ms: 30_000,
+        }
+    }
 }
 
 impl KernelConfig {
@@ -105,6 +138,15 @@ impl KernelConfig {
             });
         }
 
+        let wasm_caps = match raw.wasm_caps {
+            Some(c) => WasmCapsCeiling {
+                max_memory_mb: c.max_memory_mb.unwrap_or(128),
+                max_fuel: c.max_fuel.unwrap_or(100_000_000),
+                max_execution_ms: c.max_execution_ms.unwrap_or(30_000),
+            },
+            None => WasmCapsCeiling::default(),
+        };
+
         Ok(Self {
             forge_root: forge_root.to_path_buf(),
             event_bus_capacity: raw.event_bus_capacity.unwrap_or(2048),
@@ -113,6 +155,7 @@ impl KernelConfig {
             lifecycle_timeout_secs: raw.lifecycle_timeout_secs.unwrap_or(30),
             tls_pinning_enabled: raw.tls_pinning_enabled.unwrap_or(false),
             require_signatures: raw.require_signatures.unwrap_or(false),
+            wasm_caps,
         })
     }
 }
@@ -127,6 +170,7 @@ impl Default for KernelConfig {
             lifecycle_timeout_secs: 30,
             tls_pinning_enabled: false,
             require_signatures: false,
+            wasm_caps: WasmCapsCeiling::default(),
         }
     }
 }
@@ -141,6 +185,15 @@ struct RawConfig {
     lifecycle_timeout_secs: Option<u64>,
     tls_pinning_enabled: Option<bool>,
     require_signatures: Option<bool>,
+    wasm_caps: Option<RawWasmCaps>,
+}
+
+/// Raw TOML shape for the `[wasm_caps]` table.
+#[derive(Debug, serde::Deserialize)]
+struct RawWasmCaps {
+    max_memory_mb: Option<u32>,
+    max_fuel: Option<u64>,
+    max_execution_ms: Option<u64>,
 }
 
 #[cfg(test)]

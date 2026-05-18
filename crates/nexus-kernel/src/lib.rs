@@ -45,7 +45,7 @@ pub use nexus_plugin_api::{
 };
 
 // Kernel-internal types
-pub use config::KernelConfig;
+pub use config::{KernelConfig, WasmCapsCeiling};
 pub use context::PluginContext;
 pub use context_impl::KernelPluginContext;
 pub use error::{ConfigError, Error, KvError, PluginError, RecvError, Result};

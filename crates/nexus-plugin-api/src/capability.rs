@@ -117,6 +117,26 @@ pub enum Capability {
     /// trigger the standard install-time approval prompt because the
     /// cap is HIGH risk.
     ProtocolHostContribute,
+    /// Write to the OS keyring via `com.nexus.security::{set_secret,
+    /// delete_secret}` (P1-01). HIGH risk: a hostile plugin could
+    /// stash exfiltration tokens or rotate credentials another caller
+    /// depends on. Distinct from `security.audit.write` so a settings
+    /// surface can manage keyring entries without also being allowed
+    /// to truncate the audit log.
+    SecurityWrite,
+    /// Truncate the security audit log via
+    /// `com.nexus.security::clear_audit_log` (P1-01). HIGH risk: this
+    /// is exactly the surface a hostile caller would target to cover
+    /// its tracks, so it sits in its own cap rather than folding into
+    /// `security.write`.
+    SecurityAuditWrite,
+    /// Bind a network listener (P1-07). Required by
+    /// `com.nexus.collab::start_relay`, which opens a WebSocket
+    /// listener on `0.0.0.0` so other peers can join the in-process
+    /// collaboration relay. HIGH risk by analogy with
+    /// `process.spawn`: a hostile caller binding a listener can
+    /// pivot inbound traffic the user did not invite.
+    NetworkBind,
 }
 
 /// Error parsing a capability string.
@@ -162,6 +182,9 @@ impl Capability {
         Capability::NotificationsInboxRead,
         Capability::NotificationsInboxWrite,
         Capability::ProtocolHostContribute,
+        Capability::SecurityWrite,
+        Capability::SecurityAuditWrite,
+        Capability::NetworkBind,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -179,6 +202,9 @@ impl Capability {
                 | Capability::AiConfigWrite
                 | Capability::AudioRecord
                 | Capability::ProtocolHostContribute
+                | Capability::SecurityWrite
+                | Capability::SecurityAuditWrite
+                | Capability::NetworkBind
         )
     }
 
@@ -216,6 +242,9 @@ impl Capability {
             Capability::NotificationsInboxRead  => "notifications.inbox.read",
             Capability::NotificationsInboxWrite => "notifications.inbox.write",
             Capability::ProtocolHostContribute  => "protocol.host.contribute",
+            Capability::SecurityWrite           => "security.write",
+            Capability::SecurityAuditWrite      => "security.audit.write",
+            Capability::NetworkBind             => "network.bind",
         }
     }
 
@@ -257,6 +286,9 @@ impl Capability {
             "notifications.inbox.read"  => Ok(Capability::NotificationsInboxRead),
             "notifications.inbox.write" => Ok(Capability::NotificationsInboxWrite),
             "protocol.host.contribute"  => Ok(Capability::ProtocolHostContribute),
+            "security.write"            => Ok(Capability::SecurityWrite),
+            "security.audit.write"      => Ok(Capability::SecurityAuditWrite),
+            "network.bind"              => Ok(Capability::NetworkBind),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -362,8 +394,9 @@ mod tests {
         // 14 base + 6 ai.* (ADR 0022 Phase 1) + 2 ai.tools.* (Phase 2)
         // + 2 audio.* (BL-117) + 3 ai.runtime.* (BL-134) + 2
         // notifications.inbox.* (BL-136) + 1 protocol.host.* (BL-113
-        // follow-up).
-        assert_eq!(Capability::ALL.len(), 30);
+        // follow-up) + 3 P1-01/P1-07 follow-ups (security.write,
+        // security.audit.write, network.bind).
+        assert_eq!(Capability::ALL.len(), 33);
     }
 
     #[test]

@@ -51,6 +51,13 @@ struct RawHandler {
     unrestricted: Option<String>,
     #[serde(default)]
     policy: Option<String>,
+    /// P1-02 — when `true`, the kernel rejects calls from contexts
+    /// whose `caller_trust_level != Core` no matter what caps the
+    /// caller holds. Stacks on top of `caps` or `unrestricted` (so
+    /// `internal = true` alongside `caps = [...]` means
+    /// "core-trust caller AND the listed caps").
+    #[serde(default)]
+    internal: Option<bool>,
     // `note` is human audit-trail text; the loader does not consume it
     // but accepting the field lets the matrix carry rationale without
     // tripping serde's deny-unknown-fields.
@@ -156,6 +163,7 @@ pub fn apply(shared: &SharedPluginLoader) -> Result<()> {
             command: row.command,
             classification,
             policy: row.policy,
+            internal_only: row.internal.unwrap_or(false),
         });
     }
 
@@ -196,6 +204,11 @@ pub fn apply(shared: &SharedPluginLoader) -> Result<()> {
                         reason.clone(),
                     );
                 }
+            }
+        }
+        if row.internal_only {
+            for cmd in &aliases {
+                shared.register_handler_internal_only(row.plugin.clone(), cmd.clone());
             }
         }
     }
@@ -251,6 +264,7 @@ struct PreparedRow {
     command: String,
     classification: PreparedClassification,
     policy: Option<String>,
+    internal_only: bool,
 }
 
 enum PreparedClassification {

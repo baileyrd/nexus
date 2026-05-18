@@ -23,6 +23,8 @@ use crate::ipc::IpcDispatcher;
 use crate::kv_store::KvStore;
 use crate::log::LogLevel;
 
+use nexus_plugin_api::plugin::TrustLevel;
+
 /// Concrete kernel implementation of [`PluginContext`].
 ///
 /// Constructed by the plugin loader when a plugin is instantiated. Holds
@@ -48,6 +50,13 @@ pub struct KernelPluginContext {
     /// was built without a plugin loader (e.g. in unit tests) and `ipc_call`
     /// will return [`IpcError::DispatcherUnavailable`].
     ipc_dispatcher: Option<Arc<dyn IpcDispatcher>>,
+    /// P1-02 — the *caller's* trust level. Used to gate handlers
+    /// marked `internal = true` in the cap matrix (which require a
+    /// Core-trust caller regardless of caps held). Defaults to
+    /// [`TrustLevel::Community`] — the more restrictive value — so a
+    /// context constructed without explicit elevation cannot reach
+    /// in-tree-only handlers.
+    caller_trust_level: TrustLevel,
 }
 
 impl KernelPluginContext {
@@ -89,7 +98,19 @@ impl KernelPluginContext {
             forge_root_canonical,
             path_validator,
             ipc_dispatcher,
+            caller_trust_level: TrustLevel::Community,
         })
+    }
+
+    /// P1-02 — builder hook the loader / bootstrap uses to mark this
+    /// context as carrying core trust for the purposes of
+    /// `internal = true` handler gates. Default is
+    /// [`TrustLevel::Community`]; bootstrap upgrades core-plugin
+    /// contexts to [`TrustLevel::Core`] before wiring them.
+    #[must_use]
+    pub fn with_trust_level(mut self, level: TrustLevel) -> Self {
+        self.caller_trust_level = level;
+        self
     }
 
     /// Return a clone of the live capability handle (BL-096).
@@ -147,6 +168,20 @@ impl KernelPluginContext {
                     plugin_id: self.plugin_id.clone(),
                 });
             }
+        }
+
+        // P1-02 — handlers marked `internal = true` in the cap matrix
+        // require a core-trust caller no matter what caps it holds.
+        if dispatcher.is_handler_internal_only(target_plugin_id, command_id)
+            && self.caller_trust_level != TrustLevel::Core
+        {
+            audit::log_capability_denied(
+                &self.plugin_id,
+                &format!("internal-only:{target_plugin_id}::{command_id}"),
+            );
+            return Err(IpcError::CapabilityDenied {
+                plugin_id: self.plugin_id.clone(),
+            });
         }
 
         let target = target_plugin_id.to_string();

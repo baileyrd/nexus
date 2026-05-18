@@ -281,19 +281,17 @@ caps = ["notifications.inbox.write"]
 
 # ─── com.nexus.agent ─────────────────────────────────────────────────
 
-# AUDIT: drives an AI tool-loop under the hood (same machinery as
-# session_run, which now requires ai.chat). Currently implicit per
-# pre-BL-138 behaviour; candidate for ai.chat in a follow-up.
 [[handler]]
 plugin = "com.nexus.agent"
 command = "delegate"
-unrestricted = "agent delegate shim — preserves pre-BL-138 surface; ai.chat elevation tracked as AUDIT follow-up"
+caps = ["ai.chat"]
+note = "P1-06 — drives an AI tool-loop under the hood (same machinery as session_run)"
 
-# AUDIT: same shape as delegate.
 [[handler]]
 plugin = "com.nexus.agent"
 command = "plan"
-unrestricted = "agent planner — drives a chat call internally; ai.chat elevation tracked as AUDIT follow-up"
+caps = ["ai.chat"]
+note = "P1-06 — runs a chat call internally; same posture as delegate"
 
 [[handler]]
 plugin = "com.nexus.agent"
@@ -402,14 +400,12 @@ plugin = "com.nexus.ai"
 command = "enrich_apply"
 unrestricted = "writes proposed enrichments back via storage — gated downstream by storage::write_file's fs.write check"
 
-# AUDIT: returns provider keyring material via the agent/audio call
-# paths. Currently called only from in-tree contexts; an unscoped
-# caller exfiltrating credentials would be a real problem. Candidate
-# for an ai.* cap or an internal-only marker in a follow-up.
 [[handler]]
 plugin = "com.nexus.ai"
 command = "resolve_credentials"
-unrestricted = "internal credential plumbing for the audio/agent contexts; AUDIT — candidate for in-tree-only marker"
+unrestricted = "internal credential plumbing for the audio/agent contexts; in-tree-only gate enforced below"
+internal = true
+note = "P1-02 — returns provider keyring material; reachable only from a Core-trust caller (audio/agent) regardless of cap set"
 
 # ─── com.nexus.audio ─────────────────────────────────────────────────
 
@@ -708,18 +704,17 @@ plugin = "com.nexus.git"
 command = "delete_tag"
 unrestricted = "deletes a tag ref — mutates .git inside forge root"
 
-# AUDIT: outbound network reach to a remote. Currently implicit per
-# pre-BL-138 behaviour; candidate for net.http elevation.
 [[handler]]
 plugin = "com.nexus.git"
 command = "push"
-unrestricted = "publishes commits to a remote — AUDIT: candidate for net.http elevation in a follow-up"
+caps = ["net.http"]
+note = "P1-04 — publishes commits to a remote; outbound network reach"
 
-# AUDIT: same as push.
 [[handler]]
 plugin = "com.nexus.git"
 command = "push_tags"
-unrestricted = "publishes tags to a remote — AUDIT: candidate for net.http elevation in a follow-up"
+caps = ["net.http"]
+note = "P1-04 — publishes tags to a remote; same posture as push"
 
 [[handler]]
 plugin = "com.nexus.git"
@@ -768,13 +763,11 @@ unrestricted = "drops a stash entry — mutates .git inside forge root"
 
 # ─── com.nexus.linkpreview ───────────────────────────────────────────
 
-# AUDIT: outbound HTTP. Handler context holds NetHttp; caller is
-# currently implicit per pre-BL-138 behaviour. Candidate for net.http
-# elevation in a follow-up.
 [[handler]]
 plugin = "com.nexus.linkpreview"
 command = "fetch"
-unrestricted = "fetches link-preview metadata from arbitrary URLs — AUDIT: candidate for net.http elevation in a follow-up"
+caps = ["net.http"]
+note = "P1-05 — fetches link-preview metadata from arbitrary URLs; outbound HTTP"
 
 # ─── com.nexus.lsp — protocol surface over already-launched servers ──
 
@@ -884,17 +877,11 @@ plugin = "com.nexus.collab"
 command = "publish_presence"
 unrestricted = "intentional surface for the editor (and future presence sources) to publish caret/selection updates. Stamps the local peer identity from [collab] config so a caller can't spoof. Short-circuits when [collab] is absent, so no events leak in unconfigured forges."
 
-# AUDIT: opens a TCP listener on 0.0.0.0 — same posture as the
-# `nexus collab serve` CLI verb (which already operates with the
-# user's full trust). A future cap-registry follow-up could introduce
-# `network.bind` and migrate this row + a matching prompt. For now
-# the Share UI is user-initiated only and the bind fails closed when
-# the OS denies the port, so the marginal risk over the CLI verb is
-# low.
 [[handler]]
 plugin = "com.nexus.collab"
 command = "start_relay"
-unrestricted = "BL-143 Phase 2.3 Share-this-forge surface — binds a WebSocket relay on 0.0.0.0. User-initiated through the collab panel; same trust posture as `nexus collab serve`. AUDIT candidate for a future network.bind cap."
+caps = ["network.bind"]
+note = "P1-07 — BL-143 Phase 2.3 Share-this-forge surface; binds a WebSocket relay on 0.0.0.0. Same posture as the `nexus collab serve` CLI verb."
 
 [[handler]]
 plugin = "com.nexus.collab"
@@ -913,21 +900,17 @@ plugin = "com.nexus.security"
 command = "get_secret"
 unrestricted = "reads a keyring entry — caller-identity-scoped lookup; the namespace prefix prevents cross-plugin reads"
 
-# AUDIT: writes/deletes keyring material. Currently implicit
-# per pre-BL-138 behaviour; arguably the highest-severity AUDIT row
-# in the matrix — a hostile community plugin with ipc.call could
-# overwrite stored secrets. Candidate for a dedicated `security.*`
-# cap or an in-tree-only marker in a follow-up.
 [[handler]]
 plugin = "com.nexus.security"
 command = "set_secret"
-unrestricted = "writes a keyring entry — AUDIT: candidate for a security.* cap in a follow-up"
+caps = ["security.write"]
+note = "P1-01 — writes a keyring entry; HIGH-risk surface"
 
-# AUDIT: same as set_secret.
 [[handler]]
 plugin = "com.nexus.security"
 command = "delete_secret"
-unrestricted = "deletes a keyring entry — AUDIT: candidate for a security.* cap in a follow-up"
+caps = ["security.write"]
+note = "P1-01 — deletes a keyring entry; same posture as set_secret"
 
 [[handler]]
 plugin = "com.nexus.security"
@@ -939,13 +922,11 @@ plugin = "com.nexus.security"
 command = "query_audit_log"
 unrestricted = "read-only audit log query"
 
-# AUDIT: destroys audit history — exactly the surface a hostile
-# caller would target to cover its tracks. Candidate for a dedicated
-# `security.audit.write` cap in a follow-up.
 [[handler]]
 plugin = "com.nexus.security"
 command = "clear_audit_log"
-unrestricted = "truncates the audit log — AUDIT: candidate for security.audit.write in a follow-up"
+caps = ["security.audit.write"]
+note = "P1-01 — truncates the audit log; the surface a hostile caller would target to cover its tracks"
 
 [[handler]]
 plugin = "com.nexus.security"
@@ -1432,40 +1413,35 @@ plugin = "com.nexus.terminal"
 command = "suggest"
 unrestricted = "read-only command-suggestion query over history"
 
-# AUDIT: writes arbitrary bytes into a shell PTY. The shell process
-# itself was created by the process.spawn-gated `create_session`, but
-# once attached this is the channel for executing further commands
-# inside it. Candidate for elevation alongside `send_raw_input` and
-# `run_saved`/`adhoc_promote` in a follow-up.
 [[handler]]
 plugin = "com.nexus.terminal"
 command = "send_input"
-unrestricted = "writes a command into a live PTY — AUDIT: candidate for process.spawn elevation in a follow-up"
+caps = ["process.spawn"]
+note = "P1-03 — writes a command into a live PTY; once attached this is the channel for executing further commands"
 
-# AUDIT: same as send_input, byte-level.
 [[handler]]
 plugin = "com.nexus.terminal"
 command = "send_raw_input"
-unrestricted = "writes raw bytes into a live PTY — AUDIT: candidate for process.spawn elevation in a follow-up"
+caps = ["process.spawn"]
+note = "P1-03 — writes raw bytes into a live PTY; byte-level equivalent of send_input"
 
-# AUDIT: replays a saved command into a live PTY.
 [[handler]]
 plugin = "com.nexus.terminal"
 command = "run_saved"
-unrestricted = "runs a saved command in a session — AUDIT: candidate for process.spawn elevation in a follow-up"
+caps = ["process.spawn"]
+note = "P1-03 — replays a saved command into a live PTY"
 
-# AUDIT: same shape; promotes an ad-hoc command and runs it.
 [[handler]]
 plugin = "com.nexus.terminal"
 command = "adhoc_promote"
-unrestricted = "converts an ad-hoc command to a saved command and runs it — AUDIT: candidate for process.spawn elevation in a follow-up"
+caps = ["process.spawn"]
+note = "P1-03 — converts an ad-hoc command to saved and runs it"
 
-# AUDIT: same posture as send_input — writes code into a REPL kernel
-# spawned via the process.spawn-gated `repl_start`.
 [[handler]]
 plugin = "com.nexus.terminal"
 command = "repl_eval"
-unrestricted = "BL-142 — writes code into a live REPL kernel PTY — AUDIT: candidate for process.spawn elevation alongside send_input"
+caps = ["process.spawn"]
+note = "P1-03 — BL-142, writes code into a live REPL kernel PTY (same posture as send_input)"
 
 [[handler]]
 plugin = "com.nexus.terminal"

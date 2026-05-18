@@ -124,6 +124,21 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // keeps `contributed_by` provenance and marketplace install
         // records coherent with the contribution pipeline.
         Capability::ProtocolHostContribute => RiskLevel::High,
+
+        // P1-01 — security.write gates keyring writes (set_secret /
+        // delete_secret). High: a hostile holder can stash exfil
+        // tokens or rotate credentials another caller depends on.
+        // security.audit.write gates clear_audit_log — even higher
+        // intent: it's the exact surface a hostile caller would
+        // target to cover its tracks. Both sit in the High band
+        // alongside `process.spawn` / `net.http`.
+        Capability::SecurityWrite | Capability::SecurityAuditWrite => RiskLevel::High,
+
+        // P1-07 — network.bind gates opening a TCP/WS listener
+        // (currently only `com.nexus.collab::start_relay`). High by
+        // analogy with `process.spawn`: a hostile binder can pivot
+        // inbound traffic the user did not invite.
+        Capability::NetworkBind => RiskLevel::High,
     }
 }
 

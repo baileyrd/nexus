@@ -40,5 +40,8 @@ mirror.
 | `notifications.inbox.read` | `NotificationsInboxRead` | Low |
 | `notifications.inbox.write` | `NotificationsInboxWrite` | Low |
 | `protocol.host.contribute` | `ProtocolHostContribute` | **High** |
+| `security.write` | `SecurityWrite` | **High** |
+| `security.audit.write` | `SecurityAuditWrite` | **High** |
+| `network.bind` | `NetworkBind` | **High** |
 
-_Total: 30 capabilities._
+_Total: 33 capabilities._

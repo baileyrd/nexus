@@ -119,7 +119,8 @@ pub fn spawn(runtime: &Runtime, forge_root: PathBuf) -> Result<DreamCycleSchedul
         &forge_root,
         Some(Arc::clone(&runtime.loader) as Arc<dyn nexus_kernel::IpcDispatcher>),
     )
-    .map_err(|e| anyhow::anyhow!("dream_cycle: build scheduler context: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("dream_cycle: build scheduler context: {e}"))?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     let ctx = Arc::new(ctx);
 
     let (stop_tx, stop_rx) = mpsc::sync_channel::<()>(1);

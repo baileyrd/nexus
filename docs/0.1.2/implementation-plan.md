@@ -19,7 +19,7 @@
 | Phase | Items | Effort estimate | Risk reduction |
 |-------|------:|-----------------|----------------|
 | 0 — Quick wins (done or trivial) | 8 | ~6 h | low (cosmetic) — **all 8 shipped 2026-05-17** |
-| 1 — Security hardening (P0) | 9 | 1–2 weeks | **high** (cap elevation closes hostile-plugin surface) |
+| 1 — Security hardening (P0) | 9 | 1–2 weeks | **high** (cap elevation closes hostile-plugin surface) — **8/9 shipped 2026-05-17; only P1-08 (RFC) deferred** |
 | 2 — Settings infrastructure (P1) | 7 | 2–3 weeks | medium (user UX + future-proofing) |
 | 3 — Architecture hardening (P1) | 5 | 1 week | medium (closes theoretical regression paths) |
 | 4 — Stub completion (P2) | 6 | 2–4 weeks | low (UX surface) |
@@ -49,6 +49,8 @@ Items already shipped during the audit, or trivial enough to bundle into any nea
 
 ## Phase 1 — Security hardening (P0)
 
+> **Phase 1 completed 2026-05-17** (less P1-08, which remains open for an RFC). All cap-elevations, the new caps (`security.write`, `security.audit.write`, `network.bind`), the in-tree-only marker, and the `KernelConfig.wasm_caps` ceiling shipped.
+
 These items close real or potential hostile-plugin surface. Highest priority. Most are AUDIT-flagged handlers in `cap_matrix.toml`.
 
 ### Cap-elevation walk
@@ -63,20 +65,20 @@ Each row promotes a handler from `unrestricted` to a `caps = [...]` requirement.
 
 | ID | Handler | New cap | Effort | Notes |
 |----|---------|---------|:------:|-------|
-| **P1-01** | `com.nexus.security::set_secret`, `delete_secret`, `clear_audit_log` | new `security.write` (covers first two), new `security.audit.write` (covers third) | M | Two new caps — needs `Capability` enum additions + risk.rs `High` classification. Walk every in-tree caller (settings plugin, agent memory). |
-| **P1-02** | `com.nexus.ai::resolve_credentials` | new "in-tree-only" marker (not a cap) — kernel-side check that `manifest.trust_level == Core` | S | Simpler than a cap: just `if !manifest.is_core() return CapabilityDenied`. Document the pattern as a sibling to caps. |
-| **P1-03** | `com.nexus.terminal::send_input`, `send_raw_input`, `run_saved`, `adhoc_promote`, `repl_eval` | existing `process.spawn` | S | Walk current callers — `nexus.terminal` shell plugin probably already requires it; verify. |
-| **P1-04** | `com.nexus.git::push`, `push_tags` | existing `net.http` | XS | Walk callers — `nexus.gitPanel`, `nexus-cli::commands::git`. |
-| **P1-05** | `com.nexus.linkpreview::fetch` | existing `net.http` | XS | Single caller — `nexus.editor`'s link-preview flow. |
-| **P1-06** | `com.nexus.agent::delegate`, `plan` | existing `ai.chat` | S | Walk agent callers. May need to tag with `ai_tools_policy` like `session_run`. |
-| **P1-07** | `com.nexus.collab::start_relay` | new `network.bind` cap | M | New cap; medium effort because of design (does it cover any bind, or just specific ports?). |
-| **P1-08** | `com.nexus.workflow::run`, `run_digest` (issue #77 laundering surface) | **needs design** — workflow runs arbitrary handlers; per-step gating is already in place. The question is whether to add a `workflow.run.requires_<cap>` declarative gate. | L | Open RFC required. May not be solvable cleanly without a new "delegated caller" model. |
+| **P1-01** ✅ | `com.nexus.security::set_secret`, `delete_secret`, `clear_audit_log` | new `security.write` (covers first two), new `security.audit.write` (covers third) | M | Shipped 2026-05-17. Added `SecurityWrite` + `SecurityAuditWrite` to `Capability` enum (HIGH risk), updated `risk.rs`, flipped cap_matrix rows. Cap count 30→33. |
+| **P1-02** ✅ | `com.nexus.ai::resolve_credentials` | new "in-tree-only" marker (not a cap) | S | Shipped 2026-05-17. `internal = true` field added to cap_matrix rows; new `IpcDispatcher::is_handler_internal_only` trait method; `KernelPluginContext` carries `caller_trust_level` (defaults Community, bootstrap upgrades core-plugin + invoker contexts to Core); dispatcher rejects calls when marker is set and trust != Core. |
+| **P1-03** ✅ | `com.nexus.terminal::send_input`, `send_raw_input`, `run_saved`, `adhoc_promote`, `repl_eval` | existing `process.spawn` | S | Shipped 2026-05-17. Pure cap_matrix.toml edits — all 5 rows. |
+| **P1-04** ✅ | `com.nexus.git::push`, `push_tags` | existing `net.http` | XS | Shipped 2026-05-17. Pure cap_matrix.toml edits. |
+| **P1-05** ✅ | `com.nexus.linkpreview::fetch` | existing `net.http` | XS | Shipped 2026-05-17. Pure cap_matrix.toml edit. |
+| **P1-06** ✅ | `com.nexus.agent::delegate`, `plan` | existing `ai.chat` | S | Shipped 2026-05-17. Pure cap_matrix.toml edits. |
+| **P1-07** ✅ | `com.nexus.collab::start_relay` | new `network.bind` cap | M | Shipped 2026-05-17 alongside P1-01. HIGH-risk, registered in `risk.rs`. |
+| **P1-08** | `com.nexus.workflow::run`, `run_digest` (issue #77 laundering surface) | **needs design** — workflow runs arbitrary handlers; per-step gating is already in place. The question is whether to add a `workflow.run.requires_<cap>` declarative gate. | L | Open RFC required. May not be solvable cleanly without a new "delegated caller" model. **Deferred — not shipped in this Phase 1 pass.** |
 
 ### Other P1 items
 
 | ID | Item | Effort | Notes |
 |----|------|:------:|-------|
-| **P1-09** | Add `KernelConfig.wasm_caps: { max_memory_mb, max_fuel, max_execution_ms }` system-wide ceiling that `PluginLoader::load` clamps every per-plugin `WasmConfig` against. Today a hostile plugin can self-declare `fuel = 999_999_999_999`. | M | New config field + loader clamp + tests. Default to large enough values that today's plugins work unchanged. |
+| **P1-09** ✅ | Add `KernelConfig.wasm_caps: { max_memory_mb, max_fuel, max_execution_ms }` system-wide ceiling that `PluginLoader::load` clamps every per-plugin `WasmConfig` against. Today a hostile plugin can self-declare `fuel = 999_999_999_999`. | M | Shipped 2026-05-17. New `nexus_kernel::WasmCapsCeiling` struct + `[wasm_caps]` TOML section; `PluginLoader::set_wasm_caps_ceiling` + `clamp_wasm_cfg` clamp at load with `tracing::warn!` on every clamp. Defaults: 128 MB / 100M fuel / 30 s — large enough that today's plugins are unchanged. 4 unit tests added. |
 
 ### Phase 1 deliverables
 

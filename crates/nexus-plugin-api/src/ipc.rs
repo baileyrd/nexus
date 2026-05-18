@@ -85,4 +85,26 @@ pub trait IpcDispatcher: Send + Sync {
         let _ = args;
         self.required_caller_caps(target_plugin_id, command_id)
     }
+
+    /// P1-02 — `true` if `command_id` on `target_plugin_id` is marked
+    /// "in-tree only" in the cap matrix (i.e. only callable by a
+    /// context whose `trust_level == Core`). Distinct from the
+    /// capability gate: a community plugin that holds every cap
+    /// listed in [`Self::required_caller_caps`] for this handler is
+    /// still rejected if this returns `true`.
+    ///
+    /// Useful for handlers that expose host secrets / mutate
+    /// trust-establishing state and must never be reachable from a
+    /// sandboxed plugin no matter what caps it accumulates
+    /// (`com.nexus.ai::resolve_credentials` is the seed caller).
+    ///
+    /// Default `false` — the historical contract is "cap-gated only".
+    fn is_handler_internal_only(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+    ) -> bool {
+        let _ = (target_plugin_id, command_id);
+        false
+    }
 }

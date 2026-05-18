@@ -246,6 +246,9 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         kernel.config().lifecycle_timeout_secs,
     ));
     loader.set_require_signatures(kernel.config().require_signatures);
+    // P1-09 — clamp every per-plugin WasmConfig against the kernel-wide
+    // ceiling so a hostile manifest can't out-run metering.
+    loader.set_wasm_caps_ceiling(Some(kernel.config().wasm_caps));
 
     // Register every in-tree core plugin. Order matters where lifecycle hooks
     // of later plugins rely on earlier ones publishing events; in practice
@@ -295,7 +298,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(Arc::clone(&dispatcher)),
     )
-    .context("failed to build kernel plugin context for com.nexus.ai")?;
+    .context("failed to build kernel plugin context for com.nexus.ai")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     shared
         .wire_context("com.nexus.ai", Arc::new(ai_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire AI plugin context: {e}"))?;
@@ -326,7 +330,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(Arc::clone(&dispatcher)),
     )
-    .context("failed to build kernel plugin context for com.nexus.agent")?;
+    .context("failed to build kernel plugin context for com.nexus.agent")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     shared
         .wire_context("com.nexus.agent", Arc::new(agent_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire agent plugin context: {e}"))?;
@@ -343,7 +348,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(Arc::clone(&dispatcher)),
     )
-    .context("failed to build kernel plugin context for com.nexus.editor")?;
+    .context("failed to build kernel plugin context for com.nexus.editor")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     shared
         .wire_context("com.nexus.editor", Arc::new(editor_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire editor plugin context: {e}"))?;
@@ -370,7 +376,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(Arc::clone(&dispatcher)),
     )
-    .context("failed to build kernel plugin context for com.nexus.workflow")?;
+    .context("failed to build kernel plugin context for com.nexus.workflow")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     shared
         .wire_context("com.nexus.workflow", Arc::new(workflow_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire workflow plugin context: {e}"))?;
@@ -389,7 +396,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(Arc::clone(&dispatcher)),
     )
-    .context("failed to build kernel plugin context for com.nexus.audio")?;
+    .context("failed to build kernel plugin context for com.nexus.audio")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     shared
         .wire_context("com.nexus.audio", Arc::new(audio_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire audio plugin context: {e}"))?;
@@ -409,7 +417,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(Arc::clone(&dispatcher)),
     )
-    .context("failed to build kernel plugin context for com.nexus.ai.runtime")?;
+    .context("failed to build kernel plugin context for com.nexus.ai.runtime")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
     shared
         .wire_context(nexus_ai_runtime::PLUGIN_ID, Arc::new(ai_runtime_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire ai-runtime plugin context: {e}"))?;
@@ -432,7 +441,8 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         forge_root,
         Some(dispatcher),
     )
-    .context("failed to build kernel plugin context for invoker")?;
+    .context("failed to build kernel plugin context for invoker")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
 
     Ok(Runtime {
         kernel,

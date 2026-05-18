@@ -74,7 +74,7 @@ use nexus_kernel::{
     IpcError, IpcFuture, KernelPluginContext, PluginInfo, PluginStatus, TrustLevel,
 };
 
-use crate::manifest::{self, PluginManifest};
+use crate::manifest::{self, PluginManifest, WasmConfig};
 use crate::sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 use crate::settings::SettingsManager;
 use crate::PluginError;
@@ -410,6 +410,13 @@ pub struct PluginLoader {
     /// Require every community plugin to carry a valid signature
     /// (BL-099). Default `false`.
     require_signatures: bool,
+    /// P1-09 — system-wide ceiling for community plugin WASM
+    /// budgets. Each per-plugin `WasmConfig` is clamped against
+    /// this at load time so a hostile manifest can't out-run the
+    /// metering pass. `None` (the default) preserves pre-P1-09
+    /// behaviour where the manifest declares whatever budget it
+    /// wants. Bootstrap wires this from `KernelConfig::wasm_caps`.
+    wasm_caps_ceiling: Option<nexus_kernel::WasmCapsCeiling>,
 }
 
 impl PluginLoader {
@@ -430,6 +437,64 @@ impl PluginLoader {
             lifecycle_timeout: Duration::from_secs(30),
             signature_verifier: None,
             require_signatures: false,
+            wasm_caps_ceiling: None,
+        }
+    }
+
+    /// P1-09 — install the system-wide ceiling that
+    /// [`Self::load`] clamps every per-plugin `WasmConfig` against.
+    /// `None` disables clamping (the historical behaviour); the
+    /// bootstrap path passes
+    /// [`KernelConfig::wasm_caps`](nexus_kernel::KernelConfig::wasm_caps).
+    pub fn set_wasm_caps_ceiling(
+        &mut self,
+        ceiling: Option<nexus_kernel::WasmCapsCeiling>,
+    ) {
+        self.wasm_caps_ceiling = ceiling;
+    }
+
+    /// P1-09 — return a `WasmConfig` clone with `memory_mb` / `fuel`
+    /// / `max_execution_ms` clamped against `self.wasm_caps_ceiling`
+    /// when one is installed. Logs a `tracing::warn!` on every clamp
+    /// so an operator notices a manifest declaring more than the
+    /// kernel allows.
+    fn clamp_wasm_cfg(&self, declared: &WasmConfig, plugin_id: &str) -> WasmConfig {
+        let Some(ceiling) = self.wasm_caps_ceiling else {
+            return declared.clone();
+        };
+        let clamped_memory = declared.memory_mb.min(ceiling.max_memory_mb);
+        // Treat `fuel == 0` (core "metering disabled") as a community
+        // plugin trying to escape metering — force it up to the
+        // ceiling. Validate elsewhere already rejects this for
+        // community plugins, but defence in depth is cheap.
+        let raw_fuel = if declared.fuel == 0 { u64::MAX } else { declared.fuel };
+        let clamped_fuel = raw_fuel.min(ceiling.max_fuel);
+        let raw_exec = if declared.max_execution_ms == 0 {
+            u64::MAX
+        } else {
+            declared.max_execution_ms
+        };
+        let clamped_exec = raw_exec.min(ceiling.max_execution_ms);
+        if clamped_memory != declared.memory_mb
+            || clamped_fuel != declared.fuel
+            || clamped_exec != declared.max_execution_ms
+        {
+            tracing::warn!(
+                plugin_id = %plugin_id,
+                declared_memory_mb = declared.memory_mb,
+                clamped_memory_mb = clamped_memory,
+                declared_fuel = declared.fuel,
+                clamped_fuel,
+                declared_max_execution_ms = declared.max_execution_ms,
+                clamped_max_execution_ms = clamped_exec,
+                "P1-09: clamped WasmConfig against kernel ceiling",
+            );
+        }
+        WasmConfig {
+            module: declared.module.clone(),
+            memory_mb: clamped_memory,
+            fuel: clamped_fuel,
+            max_execution_ms: clamped_exec,
         }
     }
 
@@ -684,11 +749,17 @@ impl PluginLoader {
             PluginBackend::Script
         } else {
             // WASM community plugin — build sandbox.
-            let wasm_cfg = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestInvalid {
+            let declared_wasm_cfg = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestInvalid {
                 path: manifest_path.display().to_string(),
                 reason: "internal: community plugin passed validation without a [wasm] or [script] section"
                     .to_string(),
             })?;
+            // P1-09 — clamp the declared budget against the kernel-wide
+            // ceiling so a hostile manifest can't out-run metering. Clone
+            // because WasmConfig is the wire-level type and downstream
+            // (WasmSandbox) only sees the clamped values.
+            let wasm_cfg_owned = self.clamp_wasm_cfg(declared_wasm_cfg, &plugin_id);
+            let wasm_cfg = &wasm_cfg_owned;
             let wasm_path = plugin_dir.join(&wasm_cfg.module);
             let wasm_bytes = std::fs::read(&wasm_path)?;
             // Build a ForgePathValidator scoped to the plugin's forge root
@@ -2267,6 +2338,15 @@ pub struct SharedPluginLoader {
     /// production reject.
     classifications:
         std::sync::RwLock<HashMap<(String, String), HandlerClassification>>,
+    /// P1-02 — set of `(target_plugin_id, command_id)` pairs marked
+    /// `internal = true` in `cap_matrix.toml`. The kernel context
+    /// rejects calls into these handlers from callers whose
+    /// `caller_trust_level != Core`, no matter what caps they hold.
+    /// Used to keep credential-resolving handlers
+    /// (`com.nexus.ai::resolve_credentials`) reachable only from
+    /// in-tree audio/agent contexts even if a community plugin
+    /// somehow accumulates the full cap set.
+    internal_only_handlers: std::sync::RwLock<std::collections::HashSet<(String, String)>>,
 }
 
 impl SharedPluginLoader {
@@ -2278,6 +2358,7 @@ impl SharedPluginLoader {
             cap_requirements: std::sync::RwLock::new(HashMap::new()),
             cap_requirement_fns: std::sync::RwLock::new(HashMap::new()),
             classifications: std::sync::RwLock::new(HashMap::new()),
+            internal_only_handlers: std::sync::RwLock::new(std::collections::HashSet::new()),
         }
     }
 
@@ -2405,6 +2486,25 @@ impl SharedPluginLoader {
             .write()
             .expect("handler classifications lock poisoned");
         map.insert((target, command), HandlerClassification::Required(caps));
+    }
+
+    /// P1-02 — mark `(target, command)` as in-tree-only. Calls into
+    /// this handler from a context whose `caller_trust_level != Core`
+    /// are rejected by `KernelPluginContext::ipc_call` regardless of
+    /// caps held. Stacks on top of any caps the row also carries.
+    ///
+    /// # Panics
+    /// Panics if the internal-only lock is poisoned.
+    pub fn register_handler_internal_only(
+        &self,
+        target_plugin_id: impl Into<String>,
+        command_id: impl Into<String>,
+    ) {
+        let mut map = self
+            .internal_only_handlers
+            .write()
+            .expect("internal-only handler lock poisoned");
+        map.insert((target_plugin_id.into(), command_id.into()));
     }
 
     /// BL-138 — record an `Unrestricted` classification for a
@@ -2622,6 +2722,17 @@ impl IpcDispatcher for SharedPluginLoader {
         }
         caps
     }
+
+    fn is_handler_internal_only(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+    ) -> bool {
+        let Ok(map) = self.internal_only_handlers.read() else {
+            return false;
+        };
+        map.contains(&(target_plugin_id.to_string(), command_id.to_string()))
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -2641,6 +2752,78 @@ mod unit_tests {
         assert!(loader.loaded.is_empty());
         assert!(loader.cli_registry.is_empty());
         assert!(loader.list().is_empty());
+    }
+
+    #[test]
+    fn p1_09_clamp_wasm_cfg_caps_oversized_budgets() {
+        let dir = plugins_dir();
+        let mut loader = PluginLoader::new(dir.path());
+        loader.set_wasm_caps_ceiling(Some(nexus_kernel::WasmCapsCeiling {
+            max_memory_mb: 64,
+            max_fuel: 10_000_000,
+            max_execution_ms: 5_000,
+        }));
+        let declared = WasmConfig {
+            module: "plugin.wasm".into(),
+            memory_mb: 999,
+            fuel: 999_999_999_999,
+            max_execution_ms: 999_999,
+        };
+        let clamped = loader.clamp_wasm_cfg(&declared, "com.test.evil");
+        assert_eq!(clamped.memory_mb, 64);
+        assert_eq!(clamped.fuel, 10_000_000);
+        assert_eq!(clamped.max_execution_ms, 5_000);
+    }
+
+    #[test]
+    fn p1_09_clamp_wasm_cfg_preserves_under_ceiling() {
+        let dir = plugins_dir();
+        let mut loader = PluginLoader::new(dir.path());
+        loader.set_wasm_caps_ceiling(Some(nexus_kernel::WasmCapsCeiling::default()));
+        let declared = WasmConfig {
+            module: "plugin.wasm".into(),
+            memory_mb: 16,
+            fuel: 10_000_000,
+            max_execution_ms: 5_000,
+        };
+        let clamped = loader.clamp_wasm_cfg(&declared, "com.test.normal");
+        assert_eq!(clamped.memory_mb, 16);
+        assert_eq!(clamped.fuel, 10_000_000);
+        assert_eq!(clamped.max_execution_ms, 5_000);
+    }
+
+    #[test]
+    fn p1_09_clamp_wasm_cfg_zero_fuel_treated_as_attempt_to_disable() {
+        let dir = plugins_dir();
+        let mut loader = PluginLoader::new(dir.path());
+        let ceiling = nexus_kernel::WasmCapsCeiling::default();
+        loader.set_wasm_caps_ceiling(Some(ceiling));
+        let declared = WasmConfig {
+            module: "plugin.wasm".into(),
+            memory_mb: 16,
+            fuel: 0,
+            max_execution_ms: 0,
+        };
+        let clamped = loader.clamp_wasm_cfg(&declared, "com.test.disable_metering");
+        assert_eq!(clamped.fuel, ceiling.max_fuel);
+        assert_eq!(clamped.max_execution_ms, ceiling.max_execution_ms);
+    }
+
+    #[test]
+    fn p1_09_no_ceiling_passes_declared_through_unchanged() {
+        let dir = plugins_dir();
+        let loader = PluginLoader::new(dir.path());
+        // Default-constructed loader has no ceiling installed.
+        let declared = WasmConfig {
+            module: "plugin.wasm".into(),
+            memory_mb: 999,
+            fuel: 999_999_999_999,
+            max_execution_ms: 999_999,
+        };
+        let clamped = loader.clamp_wasm_cfg(&declared, "com.test.unclamped");
+        assert_eq!(clamped.memory_mb, 999);
+        assert_eq!(clamped.fuel, 999_999_999_999);
+        assert_eq!(clamped.max_execution_ms, 999_999);
     }
 
     #[test]
