@@ -16,10 +16,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use nexus_collab::core_plugin::{
-    CollabCorePlugin, LocalPeer, HANDLER_PUBLISH_PRESENCE, HANDLER_RELAY_STATUS,
-    HANDLER_START_RELAY, HANDLER_STOP_RELAY, PLUGIN_ID,
-};
+use nexus_collab::core_plugin::{CollabCorePlugin, LocalPeer, IPC_HANDLERS, PLUGIN_ID};
 use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 
@@ -51,15 +48,7 @@ pub(super) fn register(
                 PLUGIN_ID,
                 "Collaboration",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    ("publish_presence", HANDLER_PUBLISH_PRESENCE),
-                    // BL-143 Phase 2.3 — Share this forge: relay-host
-                    // IPC surface so the shell can spin up a local
-                    // RelayServer without leaving the editor.
-                    ("start_relay", HANDLER_START_RELAY),
-                    ("stop_relay", HANDLER_STOP_RELAY),
-                    ("relay_status", HANDLER_RELAY_STATUS),
-                ]),
+                &with_v1_aliases(IPC_HANDLERS),
             ),
             forge_root,
             Box::new(plugin),

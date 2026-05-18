@@ -232,6 +232,39 @@ pub const HANDLER_INFER_ENTITY_RELATIONS: u32 = 25;
 /// back to a chat-shaped FIM prompt for OpenAI / Anthropic.
 pub const HANDLER_PREDICT: u32 = 26;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::ai::register`. Order
+/// matches the pre-SD-06 bootstrap registration so the emitted
+/// manifest is byte-identical. `HANDLER_PREDICT` is intentionally not
+/// listed — the predict surface is reached via the streaming endpoints.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("ask", HANDLER_ASK),
+    ("index_file", HANDLER_INDEX_FILE),
+    ("vectorstore_count", HANDLER_VECTORSTORE_COUNT),
+    ("status", HANDLER_STATUS),
+    ("config", HANDLER_CONFIG),
+    ("stream_chat", HANDLER_STREAM_CHAT),
+    ("stream_ask", HANDLER_STREAM_ASK),
+    ("session_load", HANDLER_SESSION_LOAD),
+    ("session_save", HANDLER_SESSION_SAVE),
+    ("session_list", HANDLER_SESSION_LIST),
+    ("session_delete", HANDLER_SESSION_DELETE),
+    ("set_config", HANDLER_SET_CONFIG),
+    ("semantic_search", HANDLER_SEMANTIC_SEARCH),
+    ("index_status", HANDLER_INDEX_STATUS),
+    ("enrich_file", HANDLER_ENRICH_FILE),
+    ("enrich_apply", HANDLER_ENRICH_APPLY),
+    ("index_trigger", HANDLER_INDEX_TRIGGER),
+    ("activity_list", HANDLER_ACTIVITY_LIST),
+    ("activity_clear", HANDLER_ACTIVITY_CLEAR),
+    ("propose_tool_calls", HANDLER_PROPOSE_TOOL_CALLS),
+    ("resolve_credentials", HANDLER_RESOLVE_CREDENTIALS),
+    ("generate_docs", HANDLER_GENERATE_DOCS),
+    ("entity_recall", HANDLER_ENTITY_RECALL),
+    ("enrich_entity", HANDLER_ENRICH_ENTITY),
+    ("infer_entity_relations", HANDLER_INFER_ENTITY_RELATIONS),
+];
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can

@@ -26,33 +26,7 @@ pub(super) fn register(
                 "com.nexus.database",
                 "Database",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    (
-                        "csv_import",
-                        nexus_database::core_plugin::HANDLER_CSV_IMPORT,
-                    ),
-                    (
-                        "csv_export",
-                        nexus_database::core_plugin::HANDLER_CSV_EXPORT,
-                    ),
-                    (
-                        "formula_eval",
-                        nexus_database::core_plugin::HANDLER_FORMULA_EVAL,
-                    ),
-                    (
-                        "apply_view",
-                        nexus_database::core_plugin::HANDLER_APPLY_VIEW,
-                    ),
-                    // DG-41 (PRD-10 §7) — relation resolution + rollup.
-                    (
-                        "resolve_relation",
-                        nexus_database::core_plugin::HANDLER_RESOLVE_RELATION,
-                    ),
-                    (
-                        "compute_rollup",
-                        nexus_database::core_plugin::HANDLER_COMPUTE_ROLLUP,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_database::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(nexus_database::DatabaseCorePlugin::new()),

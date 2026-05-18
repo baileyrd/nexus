@@ -25,21 +25,7 @@ pub(super) fn register(
                 "com.nexus.ai.runtime",
                 "AiRuntime",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    ("submit", nexus_ai_runtime::core_plugin::HANDLER_SUBMIT),
-                    ("cancel", nexus_ai_runtime::core_plugin::HANDLER_CANCEL),
-                    ("pause", nexus_ai_runtime::core_plugin::HANDLER_PAUSE),
-                    ("resume", nexus_ai_runtime::core_plugin::HANDLER_RESUME),
-                    ("get", nexus_ai_runtime::core_plugin::HANDLER_GET),
-                    ("list", nexus_ai_runtime::core_plugin::HANDLER_LIST),
-                    ("events", nexus_ai_runtime::core_plugin::HANDLER_EVENTS),
-                    (
-                        "pool_stats",
-                        nexus_ai_runtime::core_plugin::HANDLER_POOL_STATS,
-                    ),
-                    // BL-134 Phase 2 — sync wait-until-terminal.
-                    ("wait_for", nexus_ai_runtime::core_plugin::HANDLER_WAIT_FOR),
-                ]),
+                &with_v1_aliases(nexus_ai_runtime::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(AiRuntimeCorePlugin::new()),

@@ -31,23 +31,7 @@ pub(super) fn register(
                     on_start: true,
                     on_stop: true,
                 },
-                &with_v1_aliases(&[
-                    ("list_agents", nexus_acp::core_plugin::HANDLER_LIST_AGENTS),
-                    ("initialize", nexus_acp::core_plugin::HANDLER_INITIALIZE),
-                    ("propose", nexus_acp::core_plugin::HANDLER_PROPOSE),
-                    ("accept", nexus_acp::core_plugin::HANDLER_ACCEPT),
-                    ("reject", nexus_acp::core_plugin::HANDLER_REJECT),
-                    ("disconnect", nexus_acp::core_plugin::HANDLER_DISCONNECT),
-                    // BL-113 Phase 4 — plugin contribution lifecycle.
-                    (
-                        "register_server",
-                        nexus_acp::core_plugin::HANDLER_REGISTER_SERVER,
-                    ),
-                    (
-                        "unregister_server",
-                        nexus_acp::core_plugin::HANDLER_UNREGISTER_SERVER,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_acp::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(AcpCorePlugin::new(

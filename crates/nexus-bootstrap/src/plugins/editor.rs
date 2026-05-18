@@ -30,47 +30,7 @@ pub(super) fn register(
                     on_init: true,
                     ..LifecycleFlags::NONE
                 },
-                &with_v1_aliases(&[
-                    ("open", nexus_editor::core_plugin::HANDLER_OPEN),
-                    ("close", nexus_editor::core_plugin::HANDLER_CLOSE),
-                    ("get_tree", nexus_editor::core_plugin::HANDLER_GET_TREE),
-                    ("save", nexus_editor::core_plugin::HANDLER_SAVE),
-                    (
-                        "apply_transaction",
-                        nexus_editor::core_plugin::HANDLER_APPLY_TRANSACTION,
-                    ),
-                    ("undo", nexus_editor::core_plugin::HANDLER_UNDO),
-                    ("redo", nexus_editor::core_plugin::HANDLER_REDO),
-                    ("list_open", nexus_editor::core_plugin::HANDLER_LIST_OPEN),
-                    (
-                        "sync_content",
-                        nexus_editor::core_plugin::HANDLER_SYNC_CONTENT,
-                    ),
-                    (
-                        "get_markdown",
-                        nexus_editor::core_plugin::HANDLER_GET_MARKDOWN,
-                    ),
-                    (
-                        "stamp_block",
-                        nexus_editor::core_plugin::HANDLER_STAMP_BLOCK,
-                    ),
-                    (
-                        "execute_database_view",
-                        nexus_editor::core_plugin::HANDLER_EXECUTE_DATABASE_VIEW,
-                    ),
-                    (
-                        "resolve_block_link",
-                        nexus_editor::core_plugin::HANDLER_RESOLVE_BLOCK_LINK,
-                    ),
-                    (
-                        "open_excerpts",
-                        nexus_editor::core_plugin::HANDLER_OPEN_EXCERPTS,
-                    ),
-                    (
-                        "refresh_excerpts",
-                        nexus_editor::core_plugin::HANDLER_REFRESH_EXCERPTS,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_editor::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             {

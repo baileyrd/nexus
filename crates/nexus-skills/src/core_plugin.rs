@@ -181,6 +181,20 @@ pub const HANDLER_COMPOSE: u32 = 7;
 /// `invoke` handler id (BL-054 Phase 3).
 pub const HANDLER_INVOKE: u32 = 8;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::skills::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list", HANDLER_LIST),
+    ("get", HANDLER_GET),
+    ("list_by_context", HANDLER_LIST_BY_CONTEXT),
+    ("triggered_by", HANDLER_TRIGGERED_BY),
+    ("reload", HANDLER_RELOAD),
+    ("render", HANDLER_RENDER),
+    ("compose", HANDLER_COMPOSE),
+    ("invoke", HANDLER_INVOKE),
+];
+
 /// BL-054 Phase 3 — total budget for the agent invocation. The agent
 /// session itself enforces a finer-grained per-round timeout; this is
 /// the outer cap so the skills handler can't hang indefinitely on a

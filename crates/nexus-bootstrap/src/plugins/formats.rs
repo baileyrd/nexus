@@ -25,10 +25,7 @@ pub(super) fn register(
                 "com.nexus.formats",
                 "Formats",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    ("import_notion", nexus_formats::HANDLER_IMPORT_NOTION),
-                    ("export_notion", nexus_formats::HANDLER_EXPORT_NOTION),
-                ]),
+                &with_v1_aliases(nexus_formats::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(FormatsCorePlugin::open(forge_root.to_path_buf())),

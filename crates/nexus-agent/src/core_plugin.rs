@@ -127,6 +127,30 @@ pub const HANDLER_DELEGATE: u32 = 24;
 /// BL-121 — `search_transcripts`.
 pub const HANDLER_SEARCH_TRANSCRIPTS: u32 = 25;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::agent::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("plan", HANDLER_PLAN),
+    ("history_list", HANDLER_HISTORY_LIST),
+    ("history_get", HANDLER_HISTORY_GET),
+    ("history_delete", HANDLER_HISTORY_DELETE),
+    ("list_archetypes", HANDLER_LIST_ARCHETYPES),
+    ("session_run", HANDLER_SESSION_RUN),
+    ("session_list", HANDLER_SESSION_LIST),
+    ("session_get", HANDLER_SESSION_GET),
+    ("session_delete", HANDLER_SESSION_DELETE),
+    ("round_decide", HANDLER_ROUND_DECIDE),
+    ("list_tools", HANDLER_LIST_TOOLS),
+    ("list_custom", HANDLER_LIST_CUSTOM),
+    ("memory_record", HANDLER_MEMORY_RECORD),
+    ("memory_query", HANDLER_MEMORY_QUERY),
+    ("memory_prune", HANDLER_MEMORY_PRUNE),
+    ("memory_export", HANDLER_MEMORY_EXPORT),
+    ("delegate", HANDLER_DELEGATE),
+    ("search_transcripts", HANDLER_SEARCH_TRANSCRIPTS),
+];
+
 /// Core plugin instance.
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,

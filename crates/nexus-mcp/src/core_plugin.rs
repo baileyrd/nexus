@@ -74,6 +74,25 @@ pub const HANDLER_REGISTER_SERVER: u32 = 11;
 /// plugin-contributed external MCP server.
 pub const HANDLER_UNREGISTER_SERVER: u32 = 12;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::mcp::register`. Order
+/// matches the pre-SD-06 bootstrap registration so the emitted
+/// manifest is byte-identical.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list_servers", HANDLER_LIST_SERVERS),
+    ("list_tools", HANDLER_LIST_TOOLS),
+    ("call_tool", HANDLER_CALL_TOOL),
+    ("list_resources", HANDLER_LIST_RESOURCES),
+    ("list_prompts", HANDLER_LIST_PROMPTS),
+    ("connect", HANDLER_CONNECT),
+    ("disconnect", HANDLER_DISCONNECT),
+    ("register_tool", HANDLER_REGISTER_TOOL),
+    ("unregister_tool", HANDLER_UNREGISTER_TOOL),
+    ("list_dynamic_tools", HANDLER_LIST_DYNAMIC_TOOLS),
+    ("register_server", HANDLER_REGISTER_SERVER),
+    ("unregister_server", HANDLER_UNREGISTER_SERVER),
+];
+
 /// Core plugin that manages connections to external MCP servers.
 ///
 /// The active server set lives behind a [`RwLock`] so the BL-113

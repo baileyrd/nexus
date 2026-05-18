@@ -51,6 +51,21 @@ pub const HANDLER_POOL_STATS: u32 = 8;
 /// `wait_for` handler id — BL-134 Phase 2 sync-wait primitive.
 pub const HANDLER_WAIT_FOR: u32 = 9;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::ai_runtime::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("submit", HANDLER_SUBMIT),
+    ("cancel", HANDLER_CANCEL),
+    ("pause", HANDLER_PAUSE),
+    ("resume", HANDLER_RESUME),
+    ("get", HANDLER_GET),
+    ("list", HANDLER_LIST),
+    ("events", HANDLER_EVENTS),
+    ("pool_stats", HANDLER_POOL_STATS),
+    ("wait_for", HANDLER_WAIT_FOR),
+];
+
 /// Default plugin id used as the `caller_plugin_id` when the
 /// dispatcher hasn't supplied one (Phase 1 always uses the bootstrap-
 /// supplied invoker context — this is a defensive fallback for unit

@@ -85,6 +85,26 @@ pub const HANDLER_REGISTER_SERVER: u32 = 13;
 /// BL-113 Phase 2b plugin-contributed server remove.
 pub const HANDLER_UNREGISTER_SERVER: u32 = 14;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::lsp::register`. Order
+/// matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list_servers", HANDLER_LIST_SERVERS),
+    ("open_file", HANDLER_OPEN_FILE),
+    ("close_file", HANDLER_CLOSE_FILE),
+    ("change_file", HANDLER_CHANGE_FILE),
+    ("completions", HANDLER_COMPLETIONS),
+    ("hover", HANDLER_HOVER),
+    ("definition", HANDLER_DEFINITION),
+    ("references", HANDLER_REFERENCES),
+    ("rename", HANDLER_RENAME),
+    ("code_actions", HANDLER_CODE_ACTIONS),
+    ("format", HANDLER_FORMAT),
+    ("execute_command", HANDLER_EXECUTE_COMMAND),
+    ("register_server", HANDLER_REGISTER_SERVER),
+    ("unregister_server", HANDLER_UNREGISTER_SERVER),
+];
+
 /// Core plugin that manages connections to LSP servers.
 ///
 /// The active server set lives behind a [`RwLock`] so the

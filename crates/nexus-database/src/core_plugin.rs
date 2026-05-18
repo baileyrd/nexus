@@ -49,6 +49,18 @@ pub const HANDLER_RESOLVE_RELATION: u32 = 5;
 /// [`ComputeRollupArgs`].
 pub const HANDLER_COMPUTE_ROLLUP: u32 = 6;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::database::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("csv_import", HANDLER_CSV_IMPORT),
+    ("csv_export", HANDLER_CSV_EXPORT),
+    ("formula_eval", HANDLER_FORMULA_EVAL),
+    ("apply_view", HANDLER_APPLY_VIEW),
+    ("resolve_relation", HANDLER_RESOLVE_RELATION),
+    ("compute_rollup", HANDLER_COMPUTE_ROLLUP),
+];
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Arguments for `csv_import`.

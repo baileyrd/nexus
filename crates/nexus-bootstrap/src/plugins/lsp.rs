@@ -29,32 +29,7 @@ pub(super) fn register(
                     on_start: true,
                     on_stop: true,
                 },
-                &with_v1_aliases(&[
-                    ("list_servers", nexus_lsp::core_plugin::HANDLER_LIST_SERVERS),
-                    ("open_file", nexus_lsp::core_plugin::HANDLER_OPEN_FILE),
-                    ("close_file", nexus_lsp::core_plugin::HANDLER_CLOSE_FILE),
-                    ("change_file", nexus_lsp::core_plugin::HANDLER_CHANGE_FILE),
-                    ("completions", nexus_lsp::core_plugin::HANDLER_COMPLETIONS),
-                    ("hover", nexus_lsp::core_plugin::HANDLER_HOVER),
-                    ("definition", nexus_lsp::core_plugin::HANDLER_DEFINITION),
-                    ("references", nexus_lsp::core_plugin::HANDLER_REFERENCES),
-                    ("rename", nexus_lsp::core_plugin::HANDLER_RENAME),
-                    ("code_actions", nexus_lsp::core_plugin::HANDLER_CODE_ACTIONS),
-                    ("format", nexus_lsp::core_plugin::HANDLER_FORMAT),
-                    (
-                        "execute_command",
-                        nexus_lsp::core_plugin::HANDLER_EXECUTE_COMMAND,
-                    ),
-                    // BL-113 Phase 2b — plugin contribution lifecycle.
-                    (
-                        "register_server",
-                        nexus_lsp::core_plugin::HANDLER_REGISTER_SERVER,
-                    ),
-                    (
-                        "unregister_server",
-                        nexus_lsp::core_plugin::HANDLER_UNREGISTER_SERVER,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_lsp::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(LspCorePlugin::new(

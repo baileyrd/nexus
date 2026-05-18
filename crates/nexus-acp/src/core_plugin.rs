@@ -57,6 +57,20 @@ pub const HANDLER_UNREGISTER_SERVER: u32 = 7;
 /// pool's reconnect path can re-establish next call).
 pub const HANDLER_DISCONNECT: u32 = 8;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::acp::register`. Order
+/// matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list_agents", HANDLER_LIST_AGENTS),
+    ("initialize", HANDLER_INITIALIZE),
+    ("propose", HANDLER_PROPOSE),
+    ("accept", HANDLER_ACCEPT),
+    ("reject", HANDLER_REJECT),
+    ("disconnect", HANDLER_DISCONNECT),
+    ("register_server", HANDLER_REGISTER_SERVER),
+    ("unregister_server", HANDLER_UNREGISTER_SERVER),
+];
+
 /// Core plugin that manages connections to ACP-speaking agents.
 pub struct AcpCorePlugin {
     event_bus: Option<Arc<EventBus>>,

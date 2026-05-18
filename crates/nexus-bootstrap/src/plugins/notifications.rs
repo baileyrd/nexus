@@ -56,25 +56,7 @@ pub(super) fn register(
                     on_start: true,
                     on_stop: false,
                 },
-                &with_v1_aliases(&[
-                    ("send", nexus_notifications::core_plugin::HANDLER_SEND),
-                    (
-                        "inbox_list",
-                        nexus_notifications::core_plugin::HANDLER_INBOX_LIST,
-                    ),
-                    (
-                        "inbox_mark_read",
-                        nexus_notifications::core_plugin::HANDLER_INBOX_MARK_READ,
-                    ),
-                    (
-                        "inbox_dismiss",
-                        nexus_notifications::core_plugin::HANDLER_INBOX_DISMISS,
-                    ),
-                    (
-                        "inbox_stats",
-                        nexus_notifications::core_plugin::HANDLER_INBOX_STATS,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_notifications::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(notifications_plugin),

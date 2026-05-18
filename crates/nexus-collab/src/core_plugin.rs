@@ -52,6 +52,15 @@ pub const HANDLER_STOP_RELAY: u32 = 3;
 /// Handler id for `relay_status` (BL-143 Phase 2.3).
 pub const HANDLER_RELAY_STATUS: u32 = 4;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::collab::register`.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("publish_presence", HANDLER_PUBLISH_PRESENCE),
+    ("start_relay", HANDLER_START_RELAY),
+    ("stop_relay", HANDLER_STOP_RELAY),
+    ("relay_status", HANDLER_RELAY_STATUS),
+];
+
 /// Bus topic emitted by [`HANDLER_START_RELAY`] once a relay has been
 /// bound and the accept loop is running. Payload is [`RelayStatus`]
 /// with `running = true`. The shell uses this to sync the Share UI

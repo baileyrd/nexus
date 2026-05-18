@@ -275,6 +275,28 @@ pub const HANDLER_OPEN_EXCERPTS: u32 = 14;
 /// re-renders.
 pub const HANDLER_REFRESH_EXCERPTS: u32 = 15;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::editor::register`.
+/// Order matches the pre-SD-06 bootstrap registration so the emitted
+/// manifest is byte-identical.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("open", HANDLER_OPEN),
+    ("close", HANDLER_CLOSE),
+    ("get_tree", HANDLER_GET_TREE),
+    ("save", HANDLER_SAVE),
+    ("apply_transaction", HANDLER_APPLY_TRANSACTION),
+    ("undo", HANDLER_UNDO),
+    ("redo", HANDLER_REDO),
+    ("list_open", HANDLER_LIST_OPEN),
+    ("sync_content", HANDLER_SYNC_CONTENT),
+    ("get_markdown", HANDLER_GET_MARKDOWN),
+    ("stamp_block", HANDLER_STAMP_BLOCK),
+    ("execute_database_view", HANDLER_EXECUTE_DATABASE_VIEW),
+    ("resolve_block_link", HANDLER_RESOLVE_BLOCK_LINK),
+    ("open_excerpts", HANDLER_OPEN_EXCERPTS),
+    ("refresh_excerpts", HANDLER_REFRESH_EXCERPTS),
+];
+
 // ── Wire types ───────────────────────────────────────────────────────────────
 
 /// Per-item input shape for [`HANDLER_OPEN_EXCERPTS`].

@@ -31,11 +31,7 @@ pub(super) fn register(
                     on_start: false,
                     on_stop: false,
                 },
-                &with_v1_aliases(&[
-                    ("transcribe", nexus_audio::core_plugin::HANDLER_TRANSCRIBE),
-                    ("synthesize", nexus_audio::core_plugin::HANDLER_SYNTHESIZE),
-                    ("status", nexus_audio::core_plugin::HANDLER_STATUS),
-                ]),
+                &with_v1_aliases(nexus_audio::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(AudioCorePlugin::new(forge_root.to_path_buf())),

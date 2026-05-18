@@ -306,7 +306,7 @@ Roughly ordered by `(impact ÷ effort)`. None are correctness bugs.
 | **SD-03** | Migrate `nexus-storage` / `nexus-editor` / `nexus-terminal` / `nexus-git` to the `handlers/<verb>.rs` + `handlers/shared.rs` layout already used by `nexus-ai` / `nexus-workflow` / `nexus-agent`. | SRP | M | H |
 | **SD-04** | Split `PluginContext` into supertraits (`Identity` + `FileSystem` + `KvAccess` + `Events` + `Ipc` + `Log`) with the current trait kept as auto-impl umbrella. Lets pure-compute plugins depend on `Identity + Log`. | ISP | M | M |
 | **SD-05** | Split `CorePlugin` into `SyncCorePlugin` + `AsyncCorePlugin`, or unify to a single `async fn dispatch`. Removes the "AI command is async; caller should use dispatch_async" sentinel-error pattern. | ISP | M | M |
-| **SD-06** | Drive handler-id ↔ name registration from a single source (derive macro or `inventory` slice) so bootstrap doesn't repeat each name. | DRY | M | L |
+| **SD-06** | ~~Drive handler-id ↔ name registration from a single source (derive macro or `inventory` slice) so bootstrap doesn't repeat each name.~~ **Resolved 2026-05-18.** Each subsystem now exports `pub const IPC_HANDLERS: &[(&str, u32)]` next to its `HANDLER_*` constants; bootstrap registrations are one-liners (`with_v1_aliases(nexus_X::core_plugin::IPC_HANDLERS)`). `crates/nexus-bootstrap/src/plugins/` shrank from 2269 → 1390 LOC. | DRY | M | L |
 | **SD-07** | Add a `#![warn(clippy::too_many_lines)]` or a file-LOC budget to CI for `core_plugin.rs` so the four largest files can't grow further. | SRP guardrail | S | M |
 | **SD-08** | Fix `shell/src/shell/App.tsx:8` — invert the dependency on `plugins/nexus/workspace/workspaceStore`. (Already tracked as AA-04.) | DIP | S | L |
 

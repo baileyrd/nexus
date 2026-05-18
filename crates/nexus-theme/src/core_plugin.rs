@@ -82,6 +82,23 @@ pub const HANDLER_SET_PLUGIN_OVERRIDES: u32 = 10;
 /// Handler id for `reload`.
 pub const HANDLER_RELOAD: u32 = 11;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::theme::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("get_available_themes", HANDLER_GET_AVAILABLE_THEMES),
+    ("apply_theme", HANDLER_APPLY_THEME),
+    ("compute_variables", HANDLER_COMPUTE_VARIABLES),
+    ("get_available_snippets", HANDLER_GET_AVAILABLE_SNIPPETS),
+    ("toggle_snippet", HANDLER_TOGGLE_SNIPPET),
+    ("reorder_snippets", HANDLER_REORDER_SNIPPETS),
+    ("get_theme_config", HANDLER_GET_THEME_CONFIG),
+    ("set_mode", HANDLER_SET_MODE),
+    ("apply_config", HANDLER_APPLY_CONFIG),
+    ("set_plugin_overrides", HANDLER_SET_PLUGIN_OVERRIDES),
+    ("reload", HANDLER_RELOAD),
+];
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Args for `apply_theme`.

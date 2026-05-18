@@ -24,33 +24,7 @@ pub(super) fn register(
                 "com.nexus.comments",
                 "Comments",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    ("list", nexus_comments::core_plugin::HANDLER_LIST),
-                    (
-                        "create_thread",
-                        nexus_comments::core_plugin::HANDLER_CREATE_THREAD,
-                    ),
-                    (
-                        "add_reply",
-                        nexus_comments::core_plugin::HANDLER_ADD_REPLY,
-                    ),
-                    (
-                        "set_resolved",
-                        nexus_comments::core_plugin::HANDLER_SET_RESOLVED,
-                    ),
-                    (
-                        "delete_thread",
-                        nexus_comments::core_plugin::HANDLER_DELETE_THREAD,
-                    ),
-                    (
-                        "delete_comment",
-                        nexus_comments::core_plugin::HANDLER_DELETE_COMMENT,
-                    ),
-                    (
-                        "edit_comment",
-                        nexus_comments::core_plugin::HANDLER_EDIT_COMMENT,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_comments::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(CommentsCorePlugin::new(forge_root)),

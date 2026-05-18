@@ -38,22 +38,7 @@ pub(super) fn register(
                 "com.nexus.skills",
                 "Skills",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    ("list", nexus_skills::HANDLER_LIST),
-                    ("get", nexus_skills::HANDLER_GET),
-                    (
-                        "list_by_context",
-                        nexus_skills::HANDLER_LIST_BY_CONTEXT,
-                    ),
-                    (
-                        "triggered_by",
-                        nexus_skills::HANDLER_TRIGGERED_BY,
-                    ),
-                    ("reload", nexus_skills::HANDLER_RELOAD),
-                    ("render", nexus_skills::HANDLER_RENDER),
-                    ("compose", nexus_skills::HANDLER_COMPOSE),
-                    ("invoke", nexus_skills::HANDLER_INVOKE),
-                ]),
+                &with_v1_aliases(nexus_skills::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(SkillsCorePlugin::open(skills_dir)),

@@ -79,6 +79,13 @@ pub const HANDLER_IMPORT_NOTION: u32 = 1;
 /// `export_notion` handler id.
 pub const HANDLER_EXPORT_NOTION: u32 = 2;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::formats::register`.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("import_notion", HANDLER_IMPORT_NOTION),
+    ("export_notion", HANDLER_EXPORT_NOTION),
+];
+
 // ── Plugin ──────────────────────────────────────────────────────────────────
 
 /// Core plugin holding the forge root for path resolution.

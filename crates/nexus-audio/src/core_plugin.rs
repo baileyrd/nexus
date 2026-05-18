@@ -33,6 +33,14 @@ pub const HANDLER_SYNTHESIZE: u32 = 2;
 /// Handler id for `status`. No args; reply [`AudioStatusResult`].
 pub const HANDLER_STATUS: u32 = 3;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::audio::register`.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("transcribe", HANDLER_TRANSCRIBE),
+    ("synthesize", HANDLER_SYNTHESIZE),
+    ("status", HANDLER_STATUS),
+];
+
 /// Core plugin. Owns the configured backend pair behind a mutex so
 /// IPC dispatches can serialise into the backend without forcing
 /// every backend to be `Sync`. Holds a shared `Arc<RwLock<_>>`

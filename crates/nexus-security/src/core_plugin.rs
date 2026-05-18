@@ -42,6 +42,18 @@ pub const HANDLER_CLEAR_AUDIT_LOG: u32 = 6;
 /// are ignored; returns the full `MetricsSnapshot` JSON.
 pub const HANDLER_METRICS_SNAPSHOT: u32 = 7;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::security::register`.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("get_secret", HANDLER_GET_SECRET),
+    ("set_secret", HANDLER_SET_SECRET),
+    ("delete_secret", HANDLER_DELETE_SECRET),
+    ("list_secret_names", HANDLER_LIST_SECRET_NAMES),
+    ("query_audit_log", HANDLER_QUERY_AUDIT_LOG),
+    ("clear_audit_log", HANDLER_CLEAR_AUDIT_LOG),
+    ("metrics_snapshot", HANDLER_METRICS_SNAPSHOT),
+];
+
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
 /// reachable. The default impl calls `CredentialVault::new().available()`;
 /// tests inject a stub via [`SecurityCorePlugin::with_probe`].

@@ -29,45 +29,7 @@ pub(super) fn register(
                     on_start: true,
                     on_stop: true,
                 },
-                &with_v1_aliases(&[
-                    (
-                        "list_servers",
-                        nexus_mcp::core_plugin::HANDLER_LIST_SERVERS,
-                    ),
-                    ("list_tools", nexus_mcp::core_plugin::HANDLER_LIST_TOOLS),
-                    ("call_tool", nexus_mcp::core_plugin::HANDLER_CALL_TOOL),
-                    (
-                        "list_resources",
-                        nexus_mcp::core_plugin::HANDLER_LIST_RESOURCES,
-                    ),
-                    (
-                        "list_prompts",
-                        nexus_mcp::core_plugin::HANDLER_LIST_PROMPTS,
-                    ),
-                    ("connect", nexus_mcp::core_plugin::HANDLER_CONNECT),
-                    ("disconnect", nexus_mcp::core_plugin::HANDLER_DISCONNECT),
-                    (
-                        "register_tool",
-                        nexus_mcp::core_plugin::HANDLER_REGISTER_TOOL,
-                    ),
-                    (
-                        "unregister_tool",
-                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_TOOL,
-                    ),
-                    (
-                        "list_dynamic_tools",
-                        nexus_mcp::core_plugin::HANDLER_LIST_DYNAMIC_TOOLS,
-                    ),
-                    // BL-113 Phase 3b — plugin contribution lifecycle.
-                    (
-                        "register_server",
-                        nexus_mcp::core_plugin::HANDLER_REGISTER_SERVER,
-                    ),
-                    (
-                        "unregister_server",
-                        nexus_mcp::core_plugin::HANDLER_UNREGISTER_SERVER,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_mcp::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(McpHostPlugin::new(

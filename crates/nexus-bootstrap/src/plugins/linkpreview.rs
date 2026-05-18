@@ -25,7 +25,7 @@ pub(super) fn register(
                 "com.nexus.linkpreview",
                 "Link preview",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[("fetch", nexus_linkpreview::core_plugin::HANDLER_FETCH)]),
+                &with_v1_aliases(nexus_linkpreview::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(LinkPreviewCorePlugin::new()),

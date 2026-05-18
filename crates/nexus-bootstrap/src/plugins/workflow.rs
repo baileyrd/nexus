@@ -26,47 +26,7 @@ pub(super) fn register(
                 "com.nexus.workflow",
                 "Workflow",
                 LifecycleFlags::NONE,
-                &with_v1_aliases(&[
-                    ("list", nexus_workflow::HANDLER_LIST),
-                    ("get", nexus_workflow::HANDLER_GET),
-                    ("reload", nexus_workflow::HANDLER_RELOAD),
-                    ("validate", nexus_workflow::HANDLER_VALIDATE),
-                    ("run", nexus_workflow::HANDLER_RUN),
-                    ("run_digest", nexus_workflow::HANDLER_RUN_DIGEST),
-                    // FU-7 — live config push. Lets the shell flip
-                    // [digests].enabled / cron strings without
-                    // restarting the kernel.
-                    (
-                        "set_digest_config",
-                        nexus_workflow::HANDLER_SET_DIGEST_CONFIG,
-                    ),
-                    // BL-028f — built-in templates library.
-                    (
-                        "templates_list",
-                        nexus_workflow::core_plugin::HANDLER_TEMPLATES_LIST,
-                    ),
-                    (
-                        "templates_get",
-                        nexus_workflow::core_plugin::HANDLER_TEMPLATES_GET,
-                    ),
-                    (
-                        "templates_init",
-                        nexus_workflow::core_plugin::HANDLER_TEMPLATES_INIT,
-                    ),
-                    // BL-054 Phase 4 follow-up — persisted run history
-                    // for the observability "Automation" tab.
-                    (
-                        "run_history",
-                        nexus_workflow::HANDLER_RUN_HISTORY,
-                    ),
-                    // BL-054 Phase 4 follow-up — next-fire timestamp
-                    // for cron-triggered workflows so the Automation
-                    // tab can render an actual schedule preview.
-                    (
-                        "next_fire",
-                        nexus_workflow::core_plugin::HANDLER_NEXT_FIRE,
-                    ),
-                ]),
+                &with_v1_aliases(nexus_workflow::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
             Box::new(WorkflowCorePlugin::open_full(

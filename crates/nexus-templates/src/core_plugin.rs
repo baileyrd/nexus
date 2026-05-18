@@ -111,6 +111,17 @@ pub const HANDLER_APPLY: u32 = 4;
 /// `reload` handler id.
 pub const HANDLER_RELOAD: u32 = 5;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::templates::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list", HANDLER_LIST),
+    ("get", HANDLER_GET),
+    ("render", HANDLER_RENDER),
+    ("apply", HANDLER_APPLY),
+    ("reload", HANDLER_RELOAD),
+];
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 /// Core plugin — holds the forge root + a registry behind a mutex so

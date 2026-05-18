@@ -216,6 +216,51 @@ pub const HANDLER_DISCARD_HUNKS: u32 = 37;
 /// existing `diff_file`/`blame` surfaces.
 pub const HANDLER_FILE_LOG: u32 = 38;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::git::register`. Order
+/// matches the pre-SD-06 bootstrap registration so the emitted
+/// manifest is byte-identical.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("status", HANDLER_STATUS),
+    ("log", HANDLER_LOG),
+    ("branches", HANDLER_BRANCHES),
+    ("file_status", HANDLER_FILE_STATUS),
+    ("diff_file", HANDLER_DIFF_FILE),
+    ("stage_file", HANDLER_STAGE_FILE),
+    ("unstage_file", HANDLER_UNSTAGE_FILE),
+    ("commit", HANDLER_COMMIT),
+    ("stage_all", HANDLER_STAGE_ALL),
+    ("unstage_all", HANDLER_UNSTAGE_ALL),
+    ("file_statuses", HANDLER_FILE_STATUSES),
+    ("diff_staged", HANDLER_DIFF_STAGED),
+    ("switch_branch", HANDLER_SWITCH_BRANCH),
+    ("create_branch", HANDLER_CREATE_BRANCH),
+    ("delete_branch", HANDLER_DELETE_BRANCH),
+    ("push", HANDLER_PUSH),
+    ("stage_hunks", HANDLER_STAGE_HUNKS),
+    ("unstage_hunks", HANDLER_UNSTAGE_HUNKS),
+    ("stash_push", HANDLER_STASH_PUSH),
+    ("stash_list", HANDLER_STASH_LIST),
+    ("stash_pop", HANDLER_STASH_POP),
+    ("stash_drop", HANDLER_STASH_DROP),
+    ("list_tags", HANDLER_LIST_TAGS),
+    ("create_tag", HANDLER_CREATE_TAG),
+    ("delete_tag", HANDLER_DELETE_TAG),
+    ("push_tags", HANDLER_PUSH_TAGS),
+    ("lfs_status", HANDLER_LFS_STATUS),
+    ("rebase", HANDLER_REBASE),
+    ("abort_rebase", HANDLER_ABORT_REBASE),
+    ("cherry_pick", HANDLER_CHERRY_PICK),
+    ("abort_cherry_pick", HANDLER_ABORT_CHERRY_PICK),
+    ("conflict_files", HANDLER_CONFLICT_FILES),
+    ("abort_merge", HANDLER_ABORT_MERGE),
+    ("conflict_versions", HANDLER_CONFLICT_VERSIONS),
+    ("merge", HANDLER_MERGE),
+    ("blame", HANDLER_BLAME),
+    ("discard_hunks", HANDLER_DISCARD_HUNKS),
+    ("file_log", HANDLER_FILE_LOG),
+];
+
 /// P2-06 — interval the background git-state watcher sleeps between
 /// `git status` polls. Override per-forge via
 /// `[git] poll_interval_secs = N` in `app.toml`.

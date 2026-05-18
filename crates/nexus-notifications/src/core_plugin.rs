@@ -67,6 +67,17 @@ pub const HANDLER_INBOX_DISMISS: u32 = 4;
 /// `inbox_stats` handler id (BL-136).
 pub const HANDLER_INBOX_STATS: u32 = 5;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::notifications::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("send", HANDLER_SEND),
+    ("inbox_list", HANDLER_INBOX_LIST),
+    ("inbox_mark_read", HANDLER_INBOX_MARK_READ),
+    ("inbox_dismiss", HANDLER_INBOX_DISMISS),
+    ("inbox_stats", HANDLER_INBOX_STATS),
+];
+
 /// Bus topic prefix the BL-134 runtime publishes typed [`crate`]-
 /// independent AI lifecycle events on. Mirrored here to avoid pulling
 /// in `nexus-ai-runtime` as a dependency (registration order is

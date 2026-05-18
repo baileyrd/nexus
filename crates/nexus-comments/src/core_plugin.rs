@@ -51,6 +51,19 @@ pub const HANDLER_DELETE_COMMENT: u32 = 6;
 /// `edit_comment` handler id.
 pub const HANDLER_EDIT_COMMENT: u32 = 7;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::comments::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list", HANDLER_LIST),
+    ("create_thread", HANDLER_CREATE_THREAD),
+    ("add_reply", HANDLER_ADD_REPLY),
+    ("set_resolved", HANDLER_SET_RESOLVED),
+    ("delete_thread", HANDLER_DELETE_THREAD),
+    ("delete_comment", HANDLER_DELETE_COMMENT),
+    ("edit_comment", HANDLER_EDIT_COMMENT),
+];
+
 /// Stateless wrapper — every dispatch hits the JSON sidecar fresh.
 pub struct CommentsCorePlugin {
     store: CommentStore,

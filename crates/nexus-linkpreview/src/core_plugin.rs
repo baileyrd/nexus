@@ -28,6 +28,10 @@ pub const PLUGIN_ID: &str = "com.nexus.linkpreview";
 /// `fetch` handler id.
 pub const HANDLER_FETCH: u32 = 1;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::linkpreview::register`.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[("fetch", HANDLER_FETCH)];
+
 /// Args for `com.nexus.linkpreview::fetch` (handler id `1`).
 ///
 /// Lifted to a file-scope public type by audit-2026-05-01 P1-3 (#113)

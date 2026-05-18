@@ -273,6 +273,41 @@ pub const HANDLER_REPL_STOP: u32 = 28;
 /// here.
 pub const HANDLER_REPL_LIST: u32 = 29;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::terminal::register`.
+/// Order matches the pre-SD-06 bootstrap registration so the emitted
+/// manifest is byte-identical.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("create_session", HANDLER_CREATE_SESSION),
+    ("close_session", HANDLER_CLOSE_SESSION),
+    ("send_input", HANDLER_SEND_INPUT),
+    ("send_raw_input", HANDLER_SEND_RAW_INPUT),
+    ("pump", HANDLER_PUMP),
+    ("read_output", HANDLER_READ_OUTPUT),
+    ("read_raw_since", HANDLER_READ_RAW_SINCE),
+    ("search_output", HANDLER_SEARCH_OUTPUT),
+    ("wait_for_pattern", HANDLER_WAIT_FOR_PATTERN),
+    ("get_session_info", HANDLER_GET_SESSION_INFO),
+    ("list_sessions", HANDLER_LIST_SESSIONS),
+    ("saved_list", HANDLER_SAVED_LIST),
+    ("saved_create", HANDLER_SAVED_CREATE),
+    ("saved_update", HANDLER_SAVED_UPDATE),
+    ("saved_delete", HANDLER_SAVED_DELETE),
+    ("saved_reorder", HANDLER_SAVED_REORDER),
+    ("open_in_terminal", HANDLER_OPEN_IN_TERMINAL),
+    ("adhoc_list", HANDLER_ADHOC_LIST),
+    ("adhoc_get", HANDLER_ADHOC_GET),
+    ("adhoc_delete", HANDLER_ADHOC_DELETE),
+    ("adhoc_promote", HANDLER_ADHOC_PROMOTE),
+    ("run_saved", HANDLER_RUN_SAVED),
+    ("suggest", HANDLER_SUGGEST),
+    ("cross_session_search", HANDLER_CROSS_SESSION_SEARCH),
+    ("repl_start", HANDLER_REPL_START),
+    ("repl_eval", HANDLER_REPL_EVAL),
+    ("repl_stop", HANDLER_REPL_STOP),
+    ("repl_list", HANDLER_REPL_LIST),
+];
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Arguments for `create_session`.

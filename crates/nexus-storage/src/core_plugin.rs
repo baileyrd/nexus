@@ -377,6 +377,89 @@ pub const HANDLER_WRITE_FRONTMATTER: u32 = 72;
 /// `dry_run` is true the counts are computed but no file is touched.
 pub const HANDLER_ENTITY_DECAY_RELATIONS: u32 = 69;
 
+/// Single source of truth for `(command-name, handler-id)` pairs — see
+/// SD-06 in `docs/0.1.2/audits/solid-dry-assessment-2026-05-18.md`. The
+/// bootstrap manifest builder reads this slice directly so command
+/// names live next to the handler-id constants instead of being
+/// duplicated in `crates/nexus-bootstrap/src/plugins/storage.rs`.
+///
+/// Order matches the historical bootstrap registration order so the
+/// emitted manifest is byte-identical to the pre-SD-06 manifest.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("query_files", HANDLER_QUERY_FILES),
+    ("read_file", HANDLER_READ_FILE),
+    ("backlinks", HANDLER_BACKLINKS),
+    ("backlinks_to_block", HANDLER_BACKLINKS_TO_BLOCK),
+    ("import_forge", HANDLER_IMPORT_FORGE),
+    ("find_in_files", HANDLER_FIND_IN_FILES),
+    ("replace_in_files", HANDLER_REPLACE_IN_FILES),
+    ("read_frontmatter", HANDLER_READ_FRONTMATTER),
+    ("write_frontmatter", HANDLER_WRITE_FRONTMATTER),
+    ("write_default_gitignore", HANDLER_WRITE_DEFAULT_GITIGNORE),
+    ("query_tasks", HANDLER_QUERY_TASKS),
+    ("graph_stats", HANDLER_GRAPH_STATS),
+    ("rebuild_index", HANDLER_REBUILD_INDEX),
+    ("search", HANDLER_SEARCH),
+    ("write_file", HANDLER_WRITE_FILE),
+    ("note_append", HANDLER_NOTE_APPEND),
+    ("write_vault_file", HANDLER_WRITE_VAULT_FILE),
+    ("delete_file", HANDLER_DELETE_FILE),
+    ("file_exists", HANDLER_FILE_EXISTS),
+    ("rebuild_search_index", HANDLER_REBUILD_SEARCH_INDEX),
+    ("toggle_task", HANDLER_TOGGLE_TASK),
+    ("outgoing_links", HANDLER_OUTGOING_LINKS),
+    ("unresolved_links", HANDLER_UNRESOLVED_LINKS),
+    ("graph_neighbors", HANDLER_GRAPH_NEIGHBORS),
+    ("list_all_links", HANDLER_LIST_ALL_LINKS),
+    ("query_tags", HANDLER_QUERY_TAGS),
+    ("vector_insert", HANDLER_VECTOR_INSERT),
+    ("vector_query", HANDLER_VECTOR_QUERY),
+    ("vector_delete_by_file", HANDLER_VECTOR_DELETE_BY_FILE),
+    ("vectorstore_count", HANDLER_VECTORSTORE_COUNT),
+    ("query_blocks", HANDLER_QUERY_BLOCKS),
+    ("config_read", HANDLER_CONFIG_READ),
+    ("config_reset", HANDLER_CONFIG_RESET),
+    ("settings_read", HANDLER_SETTINGS_READ),
+    ("settings_write", HANDLER_SETTINGS_WRITE),
+    ("query_symbol", HANDLER_QUERY_SYMBOL),
+    ("entity_search", HANDLER_ENTITY_SEARCH),
+    ("entity_get", HANDLER_ENTITY_GET),
+    ("entity_relations", HANDLER_ENTITY_RELATIONS),
+    ("entity_upsert", HANDLER_ENTITY_UPSERT),
+    ("entity_find_duplicates", HANDLER_ENTITY_FIND_DUPLICATES),
+    ("entity_decay_relations", HANDLER_ENTITY_DECAY_RELATIONS),
+    ("entity_merge", HANDLER_ENTITY_MERGE),
+    ("list_draft_relations", HANDLER_LIST_DRAFT_RELATIONS),
+    ("base_index", HANDLER_BASE_INDEX),
+    ("base_list", HANDLER_BASE_LIST),
+    ("base_query", HANDLER_BASE_QUERY),
+    ("base_load", HANDLER_BASE_LOAD),
+    ("list_dir", HANDLER_LIST_DIR),
+    ("create_file", HANDLER_CREATE_FILE),
+    ("create_dir", HANDLER_CREATE_DIR),
+    ("rename_entry", HANDLER_RENAME_ENTRY),
+    ("delete_entry", HANDLER_DELETE_ENTRY),
+    ("canvas_read", HANDLER_CANVAS_READ),
+    ("canvas_write", HANDLER_CANVAS_WRITE),
+    ("canvas_patch", HANDLER_CANVAS_PATCH),
+    ("canvas_nodes", HANDLER_CANVAS_NODES),
+    ("canvas_edges", HANDLER_CANVAS_EDGES),
+    ("base_record_create", HANDLER_BASE_RECORD_CREATE),
+    ("base_record_update", HANDLER_BASE_RECORD_UPDATE),
+    ("base_record_delete", HANDLER_BASE_RECORD_DELETE),
+    ("base_property_create", HANDLER_BASE_PROPERTY_CREATE),
+    ("base_property_update", HANDLER_BASE_PROPERTY_UPDATE),
+    ("base_property_delete", HANDLER_BASE_PROPERTY_DELETE),
+    ("base_view_create", HANDLER_BASE_VIEW_CREATE),
+    ("base_view_update", HANDLER_BASE_VIEW_UPDATE),
+    ("base_view_delete", HANDLER_BASE_VIEW_DELETE),
+    ("base_create", HANDLER_BASE_CREATE),
+    ("base_property_rename", HANDLER_BASE_PROPERTY_RENAME),
+    ("base_record_soft_delete", HANDLER_BASE_RECORD_SOFT_DELETE),
+    ("base_record_restore", HANDLER_BASE_RECORD_RESTORE),
+    ("obsidian_base_query", HANDLER_OBSIDIAN_BASE_QUERY),
+];
+
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
 ///

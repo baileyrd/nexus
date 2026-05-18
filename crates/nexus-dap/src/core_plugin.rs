@@ -75,6 +75,33 @@ pub const HANDLER_EVALUATE: u32 = 19;
 pub const HANDLER_REGISTER_ADAPTER: u32 = 20;
 pub const HANDLER_UNREGISTER_ADAPTER: u32 = 21;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::dap::register`. Order
+/// matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list_adapters", HANDLER_LIST_ADAPTERS),
+    ("launch", HANDLER_LAUNCH),
+    ("attach", HANDLER_ATTACH),
+    ("configuration_done", HANDLER_CONFIGURATION_DONE),
+    ("disconnect", HANDLER_DISCONNECT),
+    ("terminate", HANDLER_TERMINATE),
+    ("set_breakpoints", HANDLER_SET_BREAKPOINTS),
+    ("set_function_breakpoints", HANDLER_SET_FUNCTION_BREAKPOINTS),
+    ("set_exception_breakpoints", HANDLER_SET_EXCEPTION_BREAKPOINTS),
+    ("continue", HANDLER_CONTINUE),
+    ("next", HANDLER_NEXT),
+    ("step_in", HANDLER_STEP_IN),
+    ("step_out", HANDLER_STEP_OUT),
+    ("pause", HANDLER_PAUSE),
+    ("threads", HANDLER_THREADS),
+    ("stack_trace", HANDLER_STACK_TRACE),
+    ("scopes", HANDLER_SCOPES),
+    ("variables", HANDLER_VARIABLES),
+    ("evaluate", HANDLER_EVALUATE),
+    ("register_adapter", HANDLER_REGISTER_ADAPTER),
+    ("unregister_adapter", HANDLER_UNREGISTER_ADAPTER),
+];
+
 /// Async IPC verbs require `dispatch_async`. Listed once so the sync
 /// `dispatch` arm can route them with a clear error.
 const ASYNC_HANDLERS: &[u32] = &[

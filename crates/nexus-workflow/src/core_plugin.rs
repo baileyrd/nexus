@@ -112,6 +112,24 @@ pub const HANDLER_TEMPLATES_INIT: u32 = 10;
 /// `[{ name, expression, next_fire_at: RFC3339 | null }]`.
 pub const HANDLER_NEXT_FIRE: u32 = 12;
 
+/// SD-06 — single source of truth for `(command-name, handler-id)`
+/// pairs consumed by `nexus_bootstrap::plugins::workflow::register`.
+/// Order matches the pre-SD-06 bootstrap registration.
+pub const IPC_HANDLERS: &[(&str, u32)] = &[
+    ("list", HANDLER_LIST),
+    ("get", HANDLER_GET),
+    ("reload", HANDLER_RELOAD),
+    ("validate", HANDLER_VALIDATE),
+    ("run", HANDLER_RUN),
+    ("run_digest", HANDLER_RUN_DIGEST),
+    ("set_digest_config", HANDLER_SET_DIGEST_CONFIG),
+    ("templates_list", HANDLER_TEMPLATES_LIST),
+    ("templates_get", HANDLER_TEMPLATES_GET),
+    ("templates_init", HANDLER_TEMPLATES_INIT),
+    ("run_history", HANDLER_RUN_HISTORY),
+    ("next_fire", HANDLER_NEXT_FIRE),
+];
+
 // ── IPC arg types (audit P1-3 #113 — lifted from inline) ─────────────────────
 
 /// Args for `com.nexus.workflow::run` (handler id `5`). Lifted from
