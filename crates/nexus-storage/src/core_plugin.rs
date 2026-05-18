@@ -596,55 +596,15 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_BACKLINKS_TO_BLOCK => crate::handlers::graph::backlinks_to_block(engine, args),
             HANDLER_QUERY_TASKS => crate::handlers::tasks::query_tasks(engine, args),
             HANDLER_GRAPH_STATS => crate::handlers::graph::graph_stats(engine),
-            HANDLER_REBUILD_INDEX => {
-                let stats = engine
-                    .rebuild_index()
-                    .map_err(|e| exec_err(format!("rebuild_index: {e}")))?;
-                to_value(&stats, "rebuild_index")
-            }
+            HANDLER_REBUILD_INDEX => crate::handlers::index::rebuild_index(engine),
             HANDLER_SEARCH => crate::handlers::search::search(engine, args),
             HANDLER_QUERY_SYMBOL => crate::handlers::search::query_symbol(engine, args),
             HANDLER_WRITE_FILE => crate::handlers::files::write_file(engine, args),
-            HANDLER_NOTE_APPEND => {
-                let path = path_arg(args, "note_append")?;
-                let snippet = args
-                    .get("snippet")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("note_append: missing 'snippet' string".to_string())
-                    })?;
-                // Path confinement is enforced by `read_file` and
-                // `write_file` via `resolve_within` — absolute paths and
-                // `..` traversal are rejected at the engine boundary
-                // (see issue #72). The `read_file` call below surfaces
-                // the rejection before any disk I/O happens.
-                //
-                // Read existing content; treat a missing file as empty.
-                let existing = match engine.read_file(&path) {
-                    Ok(bytes) => bytes,
-                    Err(crate::StorageError::FileNotFound(_)) => Vec::new(),
-                    Err(e) => return Err(exec_err(format!("note_append: read: {e}"))),
-                };
-                let existing_text = std::str::from_utf8(&existing).map_err(|e| {
-                    exec_err(format!(
-                        "note_append: existing file is not valid UTF-8: {e}"
-                    ))
-                })?;
-                let combined = build_appended(existing_text, snippet);
-                let meta = engine
-                    .write_file(&path, combined.as_bytes())
-                    .map_err(|e| exec_err(format!("note_append: write: {e}")))?;
-                to_value(&meta, "note_append")
-            }
+            HANDLER_NOTE_APPEND => crate::handlers::notes::note_append(engine, args),
             HANDLER_WRITE_VAULT_FILE => crate::handlers::files::write_vault_file(engine, args),
             HANDLER_DELETE_FILE => crate::handlers::files::delete_file(engine, args),
             HANDLER_FILE_EXISTS => crate::handlers::files::file_exists(engine, args),
-            HANDLER_REBUILD_SEARCH_INDEX => {
-                engine
-                    .rebuild_search_index()
-                    .map_err(|e| exec_err(format!("rebuild_search_index: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
+            HANDLER_REBUILD_SEARCH_INDEX => crate::handlers::index::rebuild_search_index(engine),
             HANDLER_TOGGLE_TASK => crate::handlers::tasks::toggle_task(engine, args),
             HANDLER_OUTGOING_LINKS => crate::handlers::graph::outgoing_links(engine, args),
             HANDLER_UNRESOLVED_LINKS => crate::handlers::graph::unresolved_links(engine),
@@ -939,51 +899,9 @@ impl CorePlugin for StorageCorePlugin {
                 to_value(&result, "base_query")
             }
             HANDLER_OBSIDIAN_BASE_QUERY => {
-                let path = path_arg(args, "obsidian_base_query")?;
-                let result = engine
-                    .obsidian_base_query(&path)
-                    .map_err(|e| exec_err(format!("obsidian_base_query: {e}")))?;
-                to_value(&result, "obsidian_base_query")
+                crate::handlers::index::obsidian_base_query(engine, args)
             }
-            HANDLER_IMPORT_FORGE => {
-                let source = args
-                    .get("source")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| exec_err("import_forge: missing 'source' string argument".to_string()))?
-                    .to_string();
-                let source_path = std::path::Path::new(&source);
-                let dry_run = args
-                    .get("dry_run")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                let on_conflict = match args
-                    .get("on_conflict")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("skip")
-                {
-                    "overwrite" => crate::import::ConflictStrategy::Overwrite,
-                    "rename" => crate::import::ConflictStrategy::Rename,
-                    _ => crate::import::ConflictStrategy::Skip,
-                };
-
-                let plan = engine
-                    .plan_import(source_path)
-                    .map_err(|e| exec_err(format!("import_forge plan: {e}")))?;
-                if dry_run {
-                    return to_value(&plan, "import_forge");
-                }
-                let report = engine
-                    .apply_import(
-                        source_path,
-                        &plan,
-                        &crate::import::ImportOptions { on_conflict },
-                    )
-                    .map_err(|e| exec_err(format!("import_forge apply: {e}")))?;
-                // Rebuild the destination index so the imported
-                // files surface in search / graph.
-                let _ = engine.rebuild_index();
-                to_value(&report, "import_forge")
-            }
+            HANDLER_IMPORT_FORGE => crate::handlers::index::import_forge(engine, args),
             HANDLER_FIND_IN_FILES => {
                 crate::handlers::search::find_in_files(&self.forge_root, args)
             }
@@ -991,45 +909,10 @@ impl CorePlugin for StorageCorePlugin {
                 crate::handlers::search::replace_in_files(engine, &self.forge_root, args)
             }
             HANDLER_READ_FRONTMATTER => {
-                // BL-053 Phase 4 — read a markdown file's YAML
-                // frontmatter and return it as a flat string-valued
-                // map. Lists collapse to comma-joined strings; nested
-                // objects render via debug. Missing files / unreadable
-                // bytes / non-markdown all return `{ status: null,
-                // fields: {} }` so callers can branch on `status`
-                // without a separate existence check.
-                let path = path_arg(args, "read_frontmatter")?;
-                let result = read_frontmatter_for_path(&self.forge_root, &path);
-                to_value(&result, "read_frontmatter")
+                crate::handlers::notes::read_frontmatter(&self.forge_root, args)
             }
             HANDLER_WRITE_FRONTMATTER => {
-                let path = path_arg(args, "write_frontmatter")?;
-                let key = args
-                    .get("key")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err("write_frontmatter: missing 'key' string".to_string())
-                    })?
-                    .to_string();
-                // `value: null` removes the key (no-op when absent).
-                // Any other type is rejected — we only round-trip scalars
-                // through the user-facing add-property flow.
-                let value: Option<String> = match args.get("value") {
-                    None | Some(serde_json::Value::Null) => None,
-                    Some(serde_json::Value::String(s)) => Some(s.clone()),
-                    Some(other) => {
-                        return Err(exec_err(format!(
-                            "write_frontmatter: 'value' must be string or null, got {other:?}"
-                        )))
-                    }
-                };
-                let current = std::fs::read_to_string(self.forge_root.join(&path))
-                    .map_err(|e| exec_err(format!("write_frontmatter: read: {e}")))?;
-                let next = apply_frontmatter_edit(&current, &key, value.as_deref());
-                engine
-                    .write_file(&path, next.as_bytes())
-                    .map_err(|e| exec_err(format!("write_frontmatter: write: {e}")))?;
-                Ok(serde_json::json!({ "ok": true }))
+                crate::handlers::notes::write_frontmatter(engine, &self.forge_root, args)
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
@@ -1056,44 +939,9 @@ fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginEr
     string_arg(value, command, "name")
 }
 
-/// Build the post-append text for [`HANDLER_NOTE_APPEND`]. Centralised so
-/// the unit test can pin the separator + trailing-newline contract without
-/// going through the full dispatch pipeline.
-///
-/// Contract:
-///   * Empty existing → returns `"{snippet}\n"` (no leading blank line).
-///   * Non-empty existing that already ends with a blank-line gap is left
-///     as-is; otherwise exactly one `\n\n` separator is inserted.
-///   * Output always ends with a single `\n` so subsequent appends keep
-///     the same shape.
-fn build_appended(existing: &str, snippet: &str) -> String {
-    let snippet_trimmed_end = snippet.trim_end_matches('\n');
-    if existing.is_empty() {
-        return format!("{snippet_trimmed_end}\n");
-    }
-    // Strip any trailing newlines from the existing buffer; we re-insert
-    // exactly two so the snippet is preceded by one blank line regardless
-    // of how the previous write ended.
-    let base = existing.trim_end_matches('\n');
-    format!("{base}\n\n{snippet_trimmed_end}\n")
-}
-
-// ── BL-053 Phase 4 — read_frontmatter ───────────────────────────────────────
-
-/// Read a markdown file's YAML frontmatter and shape it for the
-/// `read_frontmatter` IPC. Missing files / non-markdown / unreadable
-/// bytes all collapse to the empty result so the shell can branch on
-/// `status` without a separate existence probe.
-fn read_frontmatter_for_path(
-    forge_root: &std::path::Path,
-    path: &str,
-) -> crate::ipc::ReadFrontmatterResult {
-    let abs = forge_root.join(path);
-    let Ok(content) = std::fs::read_to_string(&abs) else {
-        return crate::ipc::ReadFrontmatterResult::default();
-    };
-    crate::ipc::frontmatter_from_source(&content)
-}
+// SD-03 Phase B chunk 4: `build_appended` and `read_frontmatter_for_path`
+// moved to `crate::handlers::notes`. The pub fn `apply_frontmatter_edit`
+// below stays here because the tests further down anchor against it.
 
 /// P4-07 — splice a top-level scalar frontmatter field into a markdown
 /// source. `value = Some(s)` inserts or replaces the field's line in
@@ -1408,6 +1256,7 @@ fn publish_file_activity(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handlers::notes::build_appended;
     use crate::StorageEngine;
 
     /// Issue #84. Handler ids are hand-allocated `u32` constants —
