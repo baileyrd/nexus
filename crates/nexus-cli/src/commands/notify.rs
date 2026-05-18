@@ -14,15 +14,14 @@
 //! `--source cli` so a bare `nexus notify send "msg"` invocation
 //! routes through the canonical `[sources.cli]` block.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
+use nexus_types::constants::IPC_TIMEOUT_SHORT as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const NOTIFICATIONS_PLUGIN: &str = "com.nexus.notifications";
-const IPC_TIMEOUT: Duration = Duration::from_secs(15);
+const NOTIFICATIONS_PLUGIN: &str = plugin_ids::NOTIFICATIONS;
 
 /// Default source tag used when the caller supplies neither
 /// `--channel` nor `--source`. Pinned so the `[sources.cli]` block

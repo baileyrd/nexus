@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use nexus_kernel::audit_store::{AuditEntry, AuditQuery, AuditStore};
 
-const RETENTION_DAYS: i64 = 90;
+const RETENTION_DAYS: i64 = nexus_types::constants::AUDIT_LOG_RETENTION_DAYS as i64;
 const DEFAULT_QUERY_LIMIT: u32 = 1000;
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS audit_events (

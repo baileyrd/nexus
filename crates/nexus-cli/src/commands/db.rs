@@ -10,16 +10,16 @@
 //! `list_bases` handler that does not yet exist; both are deferred.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
+use nexus_types::constants::IPC_TIMEOUT_SHORT as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const DATABASE_PLUGIN: &str = "com.nexus.database";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+const DATABASE_PLUGIN: &str = plugin_ids::DATABASE;
 
 /// `nexus db <subcommand>` — wraps `com.nexus.database` IPC handlers.
 #[derive(Subcommand, Debug)]

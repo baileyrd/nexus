@@ -3,17 +3,14 @@
 //! All dispatch through `com.nexus.workflow` via `ipc_call`; no
 //! direct `nexus-workflow` linkage.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
+use nexus_types::constants::{IPC_TIMEOUT_EXTENDED as RUN_TIMEOUT, IPC_TIMEOUT_SHORT as IPC_TIMEOUT};
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const WORKFLOW_PLUGIN: &str = "com.nexus.workflow";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
-/// Run timeout — workflows chain many plugin calls so give them more headroom.
-const RUN_TIMEOUT: Duration = Duration::from_secs(600);
+const WORKFLOW_PLUGIN: &str = plugin_ids::WORKFLOW;
 
 /// `nexus workflow list` — every loaded workflow.
 pub fn list(app: &mut App) -> Result<()> {

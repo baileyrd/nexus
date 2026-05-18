@@ -4,19 +4,19 @@
 //! does not link against `nexus-ai` directly.
 
 use std::io::{self, Write};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use nexus_bootstrap::storage as storage_ipc;
 use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
+use nexus_types::constants::IPC_TIMEOUT_LONG as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use serde_json::Value;
 
 use crate::app::App;
 
-const AI_PLUGIN: &str = "com.nexus.ai";
-const IPC_TIMEOUT: Duration = Duration::from_secs(120);
+const AI_PLUGIN: &str = plugin_ids::AI;
 /// `com.nexus.ai::stream_chat` (handler id 6) — multi-mode streaming.
 const STREAM_CHAT: &str = "stream_chat";
 /// Bus prefix every `stream_chat` event uses. Subscribers select by

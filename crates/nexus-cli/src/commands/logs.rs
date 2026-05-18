@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
+use nexus_types::constants::IPC_TIMEOUT_SHORT as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::{json, Value};
 
 use crate::app::App;
 
-const SECURITY_PLUGIN: &str = "com.nexus.security";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+const SECURITY_PLUGIN: &str = plugin_ids::SECURITY;
 const MS_PER_DAY: i64 = 86_400_000;
 
 /// Return the path to the logs directory.

@@ -570,10 +570,10 @@ fn ai_ipc_call(
     args: serde_json::Value,
 ) -> Result<serde_json::Value> {
     rt.block_on(invoker.ipc_call(
-        "com.nexus.ai",
+        nexus_types::plugin_ids::AI,
         command,
         args,
-        std::time::Duration::from_secs(120),
+        nexus_types::constants::IPC_TIMEOUT_LONG,
     ))
     .map_err(|e| anyhow::anyhow!("AI ipc call '{command}' failed: {e}"))
 }

@@ -77,19 +77,21 @@ Named-constant candidates. Not user-facing — internal performance / protocol t
 
 Most CLI subcommands declare their own ipc-call timeout as a per-file local. Many subsystems share the same `Duration::from_secs(30)` / `Duration::from_secs(60)` / `Duration::from_secs(120)`. A shared `nexus-config` (or even `nexus-types`) module of standard timeouts would deduplicate ~30 entries.
 
+**Phase 5 P5-01 (2026-05-18):** Shared bucket constants now live at `crates/nexus-types/src/constants.rs` (`IPC_TIMEOUT_SHORT` 30s, `IPC_TIMEOUT_NORMAL` 60s, `IPC_TIMEOUT_LONG` 120s, `IPC_TIMEOUT_EXTENDED` 600s). All `crates/nexus-cli/src/commands/*.rs` per-file `IPC_TIMEOUT` literals now alias the shared bucket. Remaining rows below are subsystem-side timeouts that did not migrate in P5-01.
+
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
-| `crates/nexus-cli/src/commands/ai.rs` | 19 | `Duration::from_secs(120)` | `AI_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/logs.rs` | 11 | `Duration::from_secs(30)` | `LOGS_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/notify.rs` | 25 | `Duration::from_secs(15)` | `NOTIFY_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/db.rs` | 22 | `Duration::from_secs(30)` | `DB_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/tool.rs` | 14 | `Duration::from_secs(10)` | `TOOL_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/agent.rs` | 36 | `Duration::from_secs(600)` | `AGENT_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/proc.rs` | 16 | `Duration::from_secs(30)` | `PROC_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/workflow.rs` | 14 | `Duration::from_secs(30)` | `WORKFLOW_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/workflow.rs` | 16 | `Duration::from_secs(600)` | `WORKFLOW_RUN_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/mcp.rs` | 15 | `Duration::from_secs(60)` | `MCP_IPC_TIMEOUT_SECS` |
-| `crates/nexus-cli/src/commands/skill.rs` | 14 | `Duration::from_secs(30)` | `SKILL_IPC_TIMEOUT_SECS` |
+~~| `crates/nexus-cli/src/commands/ai.rs` | 19 | `Duration::from_secs(120)` | `AI_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_LONG`.
+~~| `crates/nexus-cli/src/commands/logs.rs` | 11 | `Duration::from_secs(30)` | `LOGS_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT`.
+~~| `crates/nexus-cli/src/commands/notify.rs` | 25 | `Duration::from_secs(15)` | `NOTIFY_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT` (relaxed 15s → 30s).
+~~| `crates/nexus-cli/src/commands/db.rs` | 22 | `Duration::from_secs(30)` | `DB_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT`.
+~~| `crates/nexus-cli/src/commands/tool.rs` | 14 | `Duration::from_secs(10)` | `TOOL_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT` (relaxed 10s → 30s).
+~~| `crates/nexus-cli/src/commands/agent.rs` | 36 | `Duration::from_secs(600)` | `AGENT_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_EXTENDED`.
+~~| `crates/nexus-cli/src/commands/proc.rs` | 16 | `Duration::from_secs(30)` | `PROC_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT`.
+~~| `crates/nexus-cli/src/commands/workflow.rs` | 14 | `Duration::from_secs(30)` | `WORKFLOW_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT`.
+~~| `crates/nexus-cli/src/commands/workflow.rs` | 16 | `Duration::from_secs(600)` | `WORKFLOW_RUN_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_EXTENDED`.
+~~| `crates/nexus-cli/src/commands/mcp.rs` | 15 | `Duration::from_secs(60)` | `MCP_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_NORMAL`.
+~~| `crates/nexus-cli/src/commands/skill.rs` | 14 | `Duration::from_secs(30)` | `SKILL_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_SHORT`.
 | `crates/nexus-cli/src/commands/term.rs` | 80 | `Duration::from_millis(200)` | `TTY_READ_TIMEOUT_MS` |
 | `crates/nexus-cli/src/commands/term.rs` | 99 | `Duration::from_millis(100)` | `TTY_READ_SHORT_TIMEOUT_MS` |
 | `crates/nexus-cli/src/commands/term.rs` | 126 | `Duration::from_millis(500)` | `SHUTDOWN_REQUEST_TIMEOUT_MS` |

@@ -14,11 +14,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
+use nexus_types::constants::IPC_TIMEOUT_EXTENDED as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const AGENT_PLUGIN: &str = "com.nexus.agent";
+const AGENT_PLUGIN: &str = plugin_ids::AGENT;
 
 /// BL-132 — bus topic prefix the interactive run subscribes to so it
 /// only sees agent-emitted events.
@@ -28,12 +30,7 @@ const APPROVAL_TOPIC_PREFIX: &str = "com.nexus.agent.";
 /// threshold is sourced from the `--notify-after-secs` flag on
 /// `nexus agent run` (default 30s; 0 disables). See
 /// `AgentCommand::Run` in `main.rs` for the flag definition.
-const NOTIFICATIONS_PLUGIN: &str = "com.nexus.notifications";
-
-/// Planning is usually a single chat round-trip (~30 s tops against
-/// remote providers). Run can string many tool calls together so the
-/// two share the generous upper bound the AI CLI already uses.
-const IPC_TIMEOUT: Duration = Duration::from_secs(600);
+const NOTIFICATIONS_PLUGIN: &str = plugin_ids::NOTIFICATIONS;
 
 /// `nexus agent plan <goal> [--archetype ..]` — produce a plan without executing.
 pub fn plan(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {

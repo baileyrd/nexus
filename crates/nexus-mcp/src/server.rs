@@ -26,28 +26,31 @@ use rmcp::ServiceExt as _;
 use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
-const STORAGE_PLUGIN: &str = "com.nexus.storage";
-const AI_PLUGIN: &str = "com.nexus.ai";
-const SKILLS_PLUGIN: &str = "com.nexus.skills";
+use nexus_types::constants::{IPC_TIMEOUT_LONG, IPC_TIMEOUT_SHORT};
+use nexus_types::plugin_ids;
+
+const STORAGE_PLUGIN: &str = plugin_ids::STORAGE;
+const AI_PLUGIN: &str = plugin_ids::AI;
+const SKILLS_PLUGIN: &str = plugin_ids::SKILLS;
 /// BL-115 — `nexus_detect_changes` reaches into `com.nexus.git` for
 /// the working-tree status, then joins against the BL-114
 /// code-symbol index. Kept as a separate const so the plugin id is
 /// reusable from a future `git_call` helper.
-const GIT_PLUGIN: &str = "com.nexus.git";
+const GIT_PLUGIN: &str = plugin_ids::GIT;
 /// BL-137 — `nexus_kernel_stats` reaches into `com.nexus.security` for
 /// the live [`nexus_kernel::KernelMetrics`] snapshot, since the
 /// security plugin's `metrics_snapshot` handler is the canonical
 /// IPC surface for the global metrics registry. Read-only.
-const SECURITY_PLUGIN: &str = "com.nexus.security";
+const SECURITY_PLUGIN: &str = plugin_ids::SECURITY;
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
 /// Override via a future `[mcp.timeouts] ipc_secs = N` block
 /// (deferred from P2-06).
-pub const DEFAULT_IPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_IPC_TIMEOUT: Duration = IPC_TIMEOUT_SHORT;
 const IPC_TIMEOUT: Duration = DEFAULT_IPC_TIMEOUT;
 /// P2-06 — longer deadline for AI calls — they make outbound HTTP
 /// requests to the chat + embedding providers.
-pub const DEFAULT_AI_IPC_TIMEOUT: Duration = Duration::from_secs(120);
+pub const DEFAULT_AI_IPC_TIMEOUT: Duration = IPC_TIMEOUT_LONG;
 const AI_IPC_TIMEOUT: Duration = DEFAULT_AI_IPC_TIMEOUT;
 
 /// URI prefix for MCP resources representing forge notes (PRD-14 §7.1/§7.2).

@@ -3,16 +3,16 @@
 //! through `com.nexus.mcp.host` over `ipc_call`.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use nexus_bootstrap::{build_cli_runtime, Runtime};
+use nexus_types::constants::IPC_TIMEOUT_NORMAL as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const MCP_HOST_PLUGIN: &str = "com.nexus.mcp.host";
-const IPC_TIMEOUT: Duration = Duration::from_secs(60);
+const MCP_HOST_PLUGIN: &str = plugin_ids::MCP;
 
 /// Start the MCP stdio server, blocking until the client disconnects.
 ///

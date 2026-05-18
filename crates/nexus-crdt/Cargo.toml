@@ -20,6 +20,7 @@ tokio       = { workspace = true, features = ["sync", "rt", "macros"] }
 # (kernel does not depend on either) and is checked by dep_invariants.
 nexus-editor = { path = "../nexus-editor" }
 nexus-kernel = { path = "../nexus-kernel" }
+nexus-types = { path = "../nexus-types" }
 
 [dev-dependencies]
 nexus-formats = { path = "../nexus-formats" }

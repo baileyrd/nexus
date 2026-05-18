@@ -26,6 +26,7 @@
 //! Wrapping the op in an envelope leaves room for future fields
 //! (cursor positions, presence) without breaking subscribers.
 
+use nexus_types::plugin_ids;
 use serde::{Deserialize, Serialize};
 
 use crate::conflict::{Conflict, ConflictDetail};
@@ -42,6 +43,30 @@ pub const OPS_TOPIC_PREFIX: &str = "com.nexus.editor.ops.";
 /// replacement). The shell subscribes to render a resolver UI; the
 /// CRDT layer can't pick a winner on its own.
 pub const CONFLICT_TOPIC_PREFIX: &str = "com.nexus.editor.crdt.conflict.";
+
+const _: () = {
+    let prefix = OPS_TOPIC_PREFIX.as_bytes();
+    let editor = plugin_ids::EDITOR.as_bytes();
+    assert!(prefix.len() > editor.len());
+    let mut i = 0;
+    while i < editor.len() {
+        assert!(prefix[i] == editor[i]);
+        i += 1;
+    }
+    assert!(prefix[editor.len()] == b'.');
+};
+
+const _: () = {
+    let prefix = CONFLICT_TOPIC_PREFIX.as_bytes();
+    let editor = plugin_ids::EDITOR.as_bytes();
+    assert!(prefix.len() > editor.len());
+    let mut i = 0;
+    while i < editor.len() {
+        assert!(prefix[i] == editor[i]);
+        i += 1;
+    }
+    assert!(prefix[editor.len()] == b'.');
+};
 
 /// Compose the per-file topic name.
 #[must_use]

@@ -4,6 +4,7 @@
 // swapping this plugin for a community alternative.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { DEFAULT_MAX_PALETTE_RESULTS } from '../../nexus/commandPalette/match'
 import { CommandPaletteView } from './CommandPaletteView'
 
 export const commandPalettePlugin: Plugin = {
@@ -24,7 +25,7 @@ export const commandPalettePlugin: Plugin = {
             title: 'Max palette results',
             description: 'Maximum number of commands shown in the command palette',
             type: 'number' as const,
-            default: 50,
+            default: DEFAULT_MAX_PALETTE_RESULTS,
           },
         ],
       },

@@ -5,15 +5,14 @@
 //! commands; handler 19 for ad-hoc history per BL-060) via `ipc_call`;
 //! no direct `nexus-terminal` linkage.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
+use nexus_types::constants::IPC_TIMEOUT_SHORT as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const TERMINAL_PLUGIN: &str = "com.nexus.terminal";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+const TERMINAL_PLUGIN: &str = plugin_ids::TERMINAL;
 
 /// `nexus proc list` — summary of every saved command.
 pub fn list(app: &mut App) -> Result<()> {

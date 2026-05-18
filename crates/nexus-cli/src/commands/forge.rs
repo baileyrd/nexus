@@ -120,21 +120,22 @@ pub fn import(
     dry_run: bool,
     on_conflict: &str,
 ) -> Result<()> {
-    use std::time::Duration;
+    use nexus_types::constants::IPC_TIMEOUT_EXTENDED;
+    use nexus_types::plugin_ids;
     let abs = source
         .canonicalize()
         .map_err(|e| anyhow::anyhow!("import source '{}': {e}", source.display()))?;
     let (invoker, rt) = app.invoker()?;
     let resp = rt
         .block_on(invoker.ipc_call(
-            "com.nexus.storage",
+            plugin_ids::STORAGE,
             "import_forge",
             serde_json::json!({
                 "source": abs.to_string_lossy(),
                 "dry_run": dry_run,
                 "on_conflict": on_conflict,
             }),
-            Duration::from_secs(600),
+            IPC_TIMEOUT_EXTENDED,
         ))
         .map_err(|e| anyhow::anyhow!("import_forge ipc: {e}"))?;
 

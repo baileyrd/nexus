@@ -10,6 +10,7 @@ description = "Nexus multi-channel notification dispatcher (BL-133): desktop OS 
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugin-api = { path = "../nexus-plugin-api" }
 nexus-plugins = { path = "../nexus-plugins" }
+nexus-types = { path = "../nexus-types" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

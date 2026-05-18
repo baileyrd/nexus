@@ -3,15 +3,14 @@
 //! Routes to `com.nexus.agent::list_tools`. The CLI never links
 //! `nexus-agent`; the agent core plugin owns the registry.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
+use nexus_types::constants::IPC_TIMEOUT_SHORT as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const AGENT_PLUGIN: &str = "com.nexus.agent";
-const IPC_TIMEOUT: Duration = Duration::from_secs(10);
+const AGENT_PLUGIN: &str = plugin_ids::AGENT;
 
 /// `nexus tool list [--capability …]` — print the agent tool catalogue.
 ///

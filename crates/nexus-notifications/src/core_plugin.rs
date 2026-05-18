@@ -54,7 +54,7 @@ use crate::{
 };
 
 /// Reverse-DNS identifier.
-pub const PLUGIN_ID: &str = "com.nexus.notifications";
+pub const PLUGIN_ID: &str = nexus_types::plugin_ids::NOTIFICATIONS;
 
 /// `send` handler id.
 pub const HANDLER_SEND: u32 = 1;

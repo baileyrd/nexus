@@ -3,15 +3,14 @@
 //! All five dispatch through `com.nexus.skills` via `ipc_call`; no
 //! direct `nexus-skills` linkage.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
+use nexus_types::constants::IPC_TIMEOUT_SHORT as IPC_TIMEOUT;
+use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
 
-const SKILLS_PLUGIN: &str = "com.nexus.skills";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+const SKILLS_PLUGIN: &str = plugin_ids::SKILLS;
 
 /// `nexus skill list` — every loaded skill.
 pub fn list(app: &mut App) -> Result<()> {

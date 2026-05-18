@@ -9,6 +9,7 @@ description = "Nexus MCP server (forge ops → AI clients) + Host client (extern
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+nexus-types = { path = "../nexus-types" }
 # BL-023 — `http` for typed HeaderName/HeaderValue parsing on the
 # Streamable HTTP transport. The HTTP client itself is provided by
 # rmcp's `transport-streamable-http-client-reqwest` feature, which

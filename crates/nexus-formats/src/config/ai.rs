@@ -2,6 +2,26 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Default provider name for new forges.
+pub const DEFAULT_PROVIDER: &str = "anthropic";
+
+/// Default chat model when neither `ai.toml` nor the shell's `ai.model`
+/// setting supplies one. Promoted from a literal so the shell can mirror
+/// it via `shell/src/plugins/nexus/ai/aiDefaults.ts`.
+pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+
+/// Default env-var pulled when `ai.toml` does not bind an `apiKey`.
+pub const DEFAULT_API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
+
+/// Default `max_tokens` ceiling on generation responses. Surfaced to
+/// the shell as `ai.maxTokens` and to provider clients as the
+/// `max_tokens` field on chat requests.
+pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+
+/// Default sampling temperature applied when neither the per-model
+/// override nor the request-time field supplies one.
+pub const DEFAULT_TEMPERATURE: f64 = 0.7;
+
 /// AI provider and model configuration loaded from `.forge/ai.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -71,12 +91,12 @@ pub struct AiConfig {
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            provider:               "anthropic".into(),
-            model:                  "claude-sonnet-4-6".into(),
-            api_key_env:            Some("ANTHROPIC_API_KEY".into()),
+            provider:               DEFAULT_PROVIDER.into(),
+            model:                  DEFAULT_MODEL.into(),
+            api_key_env:            Some(DEFAULT_API_KEY_ENV.into()),
             embedding_model:        None,
-            max_tokens:             4096,
-            temperature:            0.7,
+            max_tokens:             DEFAULT_MAX_TOKENS,
+            temperature:            DEFAULT_TEMPERATURE,
             anthropic_model:        None,
             openai_chat_model:      None,
             openai_embedding_model: None,
@@ -123,5 +143,5 @@ pub struct AiModel {
     pub system_prompt: Option<String>,
 }
 
-fn default_max_tokens() -> u32 { 4096 }
-fn default_temperature() -> f64 { 0.7 }
+fn default_max_tokens() -> u32 { DEFAULT_MAX_TOKENS }
+fn default_temperature() -> f64 { DEFAULT_TEMPERATURE }
