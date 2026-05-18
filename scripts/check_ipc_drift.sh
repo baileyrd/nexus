@@ -86,6 +86,19 @@ cargo test -p nexus-notifications --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (BL-134: ai-runtime) …"
 cargo test -p nexus-ai-runtime --features ts-export --quiet --tests
 
+# AA-07 / P3-04 — security + collab IPC types added to drift coverage.
+# `nexus-security` exposes the credential vault + audit-log wire types
+# (`get_secret`, `set_secret`, `clear_audit_log`, …); `nexus-collab`
+# exposes the presence + relay-host handler types and the
+# `PresenceCursor` / `PresenceEvent` bus payloads. Both crates already
+# carry `ts-export` markers — these lines wire them into the drift
+# guard.
+echo "[drift] regenerating IPC TS bindings (AA-07: security) …"
+cargo test -p nexus-security --features ts-export --quiet --tests
+
+echo "[drift] regenerating IPC TS bindings (AA-07: collab) …"
+cargo test -p nexus-collab --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 

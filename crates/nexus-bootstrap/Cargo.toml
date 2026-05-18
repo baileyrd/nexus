@@ -35,6 +35,10 @@ ts-export = [
     "nexus-types/ts-export",
     # BL-117 — audio subsystem IPC types.
     "nexus-audio/ts-export",
+    # AA-07 / P3-04 — security wire-mirror IPC types (secrets, audit log).
+    "nexus-security/ts-export",
+    # AA-07 / P3-04 — collab IPC types (presence + relay-host handlers).
+    "nexus-collab/ts-export",
 ]
 
 [dependencies]

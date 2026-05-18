@@ -30,6 +30,11 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 /// Bus topic carrying [`PresenceEvent`] payloads. Peer-authored cursor
 /// state — shipped by the local publisher → relay → all peers.
 pub const PRESENCE_TOPIC: &str = "com.nexus.collab.presence";
@@ -61,6 +66,14 @@ pub const COLLAB_TOPIC_PREFIX: &str = "com.nexus.collab.";
 /// frames with the new fields silently dropped, and Phase 2.2 peers
 /// see Phase 1.3 frames with the new fields defaulted to `None`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct PresenceCursor {
     /// Forge-relative path of the file the peer is focused on.
     pub relpath: String,
@@ -85,6 +98,14 @@ pub struct PresenceCursor {
 
 /// Peer-authored presence frame. Wire payload of [`PRESENCE_TOPIC`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct PresenceEvent {
     /// Collab-protocol peer id (matches
     /// [`crate::protocol::PeerInfo::peer_id`]).

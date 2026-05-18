@@ -38,6 +38,10 @@ test('CAPABILITY_INFO covers every Capability variant', () => {
     'AiRuntimeSubmit', 'AiRuntimeControl', 'AiRuntimeObserve',
     // BL-136 / ADR 0029 notification inbox
     'NotificationsInboxRead', 'NotificationsInboxWrite',
+    // ADR 0027 protocol-host contribution
+    'ProtocolHostContribute',
+    // P1-01 keyring + audit-log mutation, P1-07 network bind
+    'SecurityWrite', 'SecurityAuditWrite', 'NetworkBind',
   ]
   for (const variant of expected) {
     assert.ok(

@@ -21,7 +21,7 @@
 | 0 — Quick wins (done or trivial) | 8 | ~6 h | low (cosmetic) — **all 8 shipped 2026-05-17** |
 | 1 — Security hardening (P0) | 9 | 1–2 weeks | **high** (cap elevation closes hostile-plugin surface) — **8/9 shipped 2026-05-17; only P1-08 (RFC) deferred** |
 | 2 — Settings infrastructure (P1) | 7 | 2–3 weeks | medium (user UX + future-proofing) |
-| 3 — Architecture hardening (P1) | 5 | 1 week | medium (closes theoretical regression paths) |
+| 3 — Architecture hardening (P1) | 5 | 1 week | medium (closes theoretical regression paths) — **all 5 shipped 2026-05-18** |
 | 4 — Stub completion (P2) | 6 | 2–4 weeks | low (UX surface) |
 | 5 — Constants centralization (P3) | 4 | 1 week | low (maintainability) |
 | **Total** | **39 items** | **~7–11 weeks one engineer** | |
@@ -128,15 +128,17 @@ From [`settings/hardcoded-rust.md` §User Config](settings/hardcoded-rust.md#use
 
 ## Phase 3 — Architecture hardening (P1)
 
+> **Phase 3 completed 2026-05-18.** All 5 items shipped — see per-row links below.
+
 Closes theoretical regression paths in the invariant enforcement. Items from [`architecture-adherence.md`](architecture-adherence.md) §Recommended Remediation.
 
 | ID | Item | Effort | Notes |
 |----|------|:------:|-------|
-| **AA-01 / P3-01** | Extend `dep_invariants.rs::FORBIDDEN` to forbid `nexus-mcp`/`nexus-acp`/`nexus-remote` from `nexus-terminal`, `nexus-editor`, `nexus-git`, `nexus-database`. None link them today; this encodes the intent. | XS | One-file change + test run. |
-| **AA-02 / P3-02** | Add parallel `dep_invariants` test for `shell/src-tauri/Cargo.toml`. Today the shell crate sits outside `[workspace]` so the existing test can't see it. | S | Build a sibling test that reads the shell's Cargo.toml from a relative path. |
-| **AA-04 / P3-03** | Invert the `shell/src/shell/App.tsx:8` import of `plugins/nexus/workspace/workspaceStore`. Expose `rootPath` via a shell-owned slot the plugin publishes to. | M | Requires designing the right slot shape — small ADR. |
-| **AA-07 / P3-04** | Extend `scripts/check_ipc_drift.sh` to cover `nexus-security` and `nexus-collab` (both have IPC types not yet ts-exported). | XS | Two new lines + feature-enable in `nexus-bootstrap/Cargo.toml::ts-export`. |
-| **AA-08 / P3-05** | **Iframe-sandbox security audit** — focused red-team-style pass on the `shell/src/host/sandbox/` escape paths, pluginId boundary-binding (F-8.1.2), WASM `host_fns.rs` error paths, and the path between `notify_desktop` and `tauri_plugin_notification`. | L | Adversarial review — likely needs an external pair of eyes. |
+| **AA-01 / P3-01** ✅ | Extend `dep_invariants.rs::FORBIDDEN` to forbid `nexus-mcp`/`nexus-acp`/`nexus-remote` from `nexus-terminal`, `nexus-editor`, `nexus-git`, `nexus-database`. None link them today; this encodes the intent. | XS | Shipped 2026-05-18. 12 new `(consumer, forbidden_dep)` rows appended to `crates/nexus-bootstrap/tests/dep_invariants.rs::FORBIDDEN`. Test passes (`cargo test -p nexus-bootstrap --test dep_invariants`). |
+| **AA-02 / P3-02** ✅ | Add parallel `dep_invariants` test for `shell/src-tauri/Cargo.toml`. Today the shell crate sits outside `[workspace]` so the existing test can't see it. | S | Shipped 2026-05-18. New sibling `crates/nexus-bootstrap/tests/dep_invariants_shell.rs` reads the shell manifest at `<workspace>/shell/src-tauri/Cargo.toml` via a `CARGO_MANIFEST_DIR`-relative walk and enforces a 25-crate `FORBIDDEN_FOR_SHELL` list (every subsystem engine; `nexus-remote` retained per BL-140). Covers `[dependencies]` and `[target.'cfg(...)'.dependencies]`. |
+| **AA-04 / P3-03** ✅ | Invert the `shell/src/shell/App.tsx:8` import of `plugins/nexus/workspace/workspaceStore`. Expose `rootPath` via a shell-owned slot the plugin publishes to. | M | Shipped 2026-05-18. `App.tsx` now reads `rootPath` via `useContextKey('nexus.workspace.rootPath')` — a shell-owned `ContextKeyService` key the workspace plugin already publishes from `setRoot` (and declares in its manifest's `contributes.contextKeys`). Empty-string sentinel normalised to `null` to preserve the file's existing nullable shape. No new slot type required — the existing context-key surface is the right dependency inversion. Stale Phase-1 follow-up: `shell/tests/capability-info.test.ts` updated to enumerate the 33-cap set (was 29). |
+| **AA-07 / P3-04** ✅ | Extend `scripts/check_ipc_drift.sh` to cover `nexus-security` and `nexus-collab` (both have IPC types not yet ts-exported). | XS | Shipped 2026-05-18. Security's `ts-export` markers already existed; collab gained an `[features] ts-export` plus `TS + JsonSchema` markers on the 5 IPC types in `core_plugin.rs` (`LocalPeer`, `PublishPresenceArgs`, `PublishPresenceReply`, `StartRelayArgs`, `RelayStatus`) and the 2 bus-payload types in `presence.rs` (`PresenceCursor`, `PresenceEvent`). Both crates added to `nexus-bootstrap/Cargo.toml::ts-export` feature set and two new `cargo test --features ts-export --tests` lines in `scripts/check_ipc_drift.sh`. 7 new TS files emitted to `packages/nexus-extension-api/src/generated/ipc/`. |
+| **AA-08 / P3-05** ✅ | **Iframe-sandbox security audit** — focused red-team-style pass on the `shell/src/host/sandbox/` escape paths, pluginId boundary-binding (F-8.1.2), WASM `host_fns.rs` error paths, and the path between `notify_desktop` and `tauri_plugin_notification`. | L | Shipped 2026-05-18. Report at [`audits/sandbox-security-2026-05-18.md`](audits/sandbox-security-2026-05-18.md). Overall verdict: sandbox is structurally sound (pluginId binding verified clean, capability-gating order correct, `notify_desktop` unreachable from null-origin iframe). **2 High findings**: `kernel.on` has no capability gate or topic-prefix sanitization (broad event-bus sniffing); `host::read_file` uses inline canonicalize+prefix-check instead of `ForgePathValidator` (regression risk of F-5.3.1). **5 Medium / 4 Low / 3 Informational** also catalogued. None are exploitable today against an unmodified core plugin set; all are surface-hardening for community plugins. |
 
 ### Phase 3 deliverables
 

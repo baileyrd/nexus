@@ -25,6 +25,11 @@ use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::auth::Token;
 use crate::client::COLLAB_PLUGIN_ID;
 use crate::presence::{PresenceCursor, PresenceEvent, PRESENCE_TOPIC};
@@ -64,6 +69,14 @@ pub const RELAY_STOPPED_TOPIC: &str = "com.nexus.collab.relay.stopped";
 /// this forge and [`HANDLER_PUBLISH_PRESENCE`] short-circuits with a
 /// known `ExecutionFailed` so the shell can stop calling.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct LocalPeer {
     pub user_id: String,
     pub display_name: String,
@@ -75,6 +88,14 @@ pub struct LocalPeer {
 /// `cursor: None`; the plugin still stamps the identity so peers learn
 /// "<name> is on the forge but not focused on a file".
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct PublishPresenceArgs {
     /// Optional cursor location. `None` is treated as "idle / no focus".
@@ -86,11 +107,27 @@ pub struct PublishPresenceArgs {
 /// has a typed JSON return that can grow additively (e.g. a future
 /// rate-limit signal).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct PublishPresenceReply {}
 
 /// Args for `start_relay`. All fields optional so the caller can
 /// `{ }` for the common case of "pick a port for me".
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields, default)]
 pub struct StartRelayArgs {
     /// Specific port to bind on `0.0.0.0`. `None` / `0` lets the OS
@@ -103,6 +140,14 @@ pub struct StartRelayArgs {
 /// `start_relay`, `relay_status`, and the `RELAY_STARTED_TOPIC` /
 /// `RELAY_STOPPED_TOPIC` bus events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct RelayStatus {
     /// True when an accept loop is running.
     pub running: bool,

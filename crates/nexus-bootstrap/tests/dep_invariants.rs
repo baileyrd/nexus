@@ -59,6 +59,26 @@ const FORBIDDEN: &[(&str, &str)] = &[
     ("nexus-cli", "nexus-ai-runtime"),
     ("nexus-tui", "nexus-ai-runtime"),
     ("nexus-mcp", "nexus-ai-runtime"),
+    // AA-01 / P3-01 — IPC-proxy frontends (`nexus-mcp`, `nexus-acp`,
+    // `nexus-remote`) must never link a subsystem engine directly.
+    // None do today; the rows below encode the intent so a future
+    // tight-coupling regression fails the test instead of silently
+    // bypassing kernel mediation. Same posture as the existing
+    // `nexus-mcp → nexus-ai` and `nexus-acp/remote → nexus-storage`
+    // entries — extended to the remaining subsystems whose IPC
+    // surfaces these proxies forward.
+    ("nexus-mcp", "nexus-terminal"),
+    ("nexus-mcp", "nexus-editor"),
+    ("nexus-mcp", "nexus-git"),
+    ("nexus-mcp", "nexus-database"),
+    ("nexus-acp", "nexus-terminal"),
+    ("nexus-acp", "nexus-editor"),
+    ("nexus-acp", "nexus-git"),
+    ("nexus-acp", "nexus-database"),
+    ("nexus-remote", "nexus-terminal"),
+    ("nexus-remote", "nexus-editor"),
+    ("nexus-remote", "nexus-git"),
+    ("nexus-remote", "nexus-database"),
 ];
 
 #[test]

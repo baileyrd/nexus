@@ -5,7 +5,6 @@ import { usePaneModeStore } from '../stores/paneModeStore'
 import { SlotSurface } from './slots/SlotSurface'
 import { getRegistry } from '../host/shellRegistry'
 import { contextKeyService, useContextKey } from '../host/ContextKeyService'
-import { useWorkspaceStore as useNexusWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
 import { Workspace } from '../workspace/WorkspaceRenderer'
 import { workspace as workspaceStore } from '../workspace/workspaceStore'
 import {
@@ -23,7 +22,18 @@ export default function App() {
 
   const slots = useSlotStore(s => s.slots)
   const paneModeViewId = usePaneModeStore(s => s.activeViewId)
-  const rootPath = useNexusWorkspaceStore(s => s.rootPath)
+  // AA-04 / P3-03 — read `rootPath` from the shell-owned ContextKeyService
+  // instead of importing `plugins/nexus/workspace/workspaceStore`. The
+  // workspace plugin publishes the same value to context key
+  // `nexus.workspace.rootPath` whenever its `setRoot` runs, so this is a
+  // direct dep-inversion: the shell consumes a contract the plugin
+  // already declares (see its `contributes.contextKeys` entry) rather
+  // than reaching into the plugin's internal zustand store. The context
+  // key is `''` (empty string) when no workspace is open; we normalise
+  // to `null` to keep the rest of this file's existing nullable shape.
+  const rootPathCtx = useContextKey('nexus.workspace.rootPath')
+  const rootPath: string | null =
+    typeof rootPathCtx === 'string' && rootPathCtx.length > 0 ? rootPathCtx : null
   // shellReady flips to true in main.tsx boot() AFTER every plugin has
   // activated — guarantees all viewRegistry.register(...) calls have run
   // before we hydrate. Without this gate, workspacePlugin (which publishes

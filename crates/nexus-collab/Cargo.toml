@@ -17,6 +17,15 @@ tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+# AA-07 / P3-04 — emit TypeScript bindings + JSON Schema for the
+# `com.nexus.collab` IPC wire types in `core_plugin.rs` and the
+# presence payloads in `presence.rs`. Off by default; enabled by
+# `scripts/check_ipc_drift.sh`. Same pattern as `nexus-security`.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "io-util"] }
