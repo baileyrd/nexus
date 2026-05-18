@@ -24,7 +24,7 @@ pub(crate) async fn handle_enrich_entity(
         .map_err(|e| exec_err(format!("enrich_entity: parse args: {e}")))?;
     let entity_arg = parsed.entity_id.trim();
     if entity_arg.is_empty() {
-        return Err(exec_err("enrich_entity: 'entity_id' must be non-empty"));
+        return Err(exec_err("enrich_entity: 'entity_id' must be non-empty".to_string()));
     }
     let min_chars = parsed.min_description_chars.unwrap_or(80) as usize;
     let dry_run = parsed.dry_run.unwrap_or(false);
@@ -128,7 +128,7 @@ pub(crate) async fn handle_enrich_entity(
 
     // ── 3. AI call — require a chat provider ─────────────────────────────
     let ai_cfg = ai_cfg.ok_or_else(|| {
-        exec_err("enrich_entity: no AI chat provider configured")
+        exec_err("enrich_entity: no AI chat provider configured".to_string())
     })?;
     let provider = build_ai_provider(&ai_cfg).map_err(exec_err)?;
 
@@ -249,7 +249,7 @@ pub(crate) async fn handle_infer_entity_relations(
     let entity_arg = parsed.entity_id.trim();
     if entity_arg.is_empty() {
         return Err(exec_err(
-            "infer_entity_relations: 'entity_id' must be non-empty",
+            "infer_entity_relations: 'entity_id' must be non-empty".to_string(),
         ));
     }
     let max_proposals = parsed
@@ -421,7 +421,7 @@ pub(crate) async fn handle_infer_entity_relations(
 
     // ── 3. Prompt the model for proposals (JSON-only reply) ──────────────
     let ai_cfg = ai_cfg.ok_or_else(|| {
-        exec_err("infer_entity_relations: no AI chat provider configured")
+        exec_err("infer_entity_relations: no AI chat provider configured".to_string())
     })?;
     let provider = build_ai_provider(&ai_cfg).map_err(exec_err)?;
 

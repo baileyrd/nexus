@@ -121,7 +121,7 @@ impl AudioCorePlugin {
         let mut guard = self.backends.lock().expect("audio backends mutex");
         let backends = guard
             .as_mut()
-            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)"))?;
+            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)".to_string()))?;
         let stt = backends.stt_mut();
         let backend_name = stt.name().to_string();
         let out = stt
@@ -149,7 +149,7 @@ impl AudioCorePlugin {
         let mut guard = self.backends.lock().expect("audio backends mutex");
         let backends = guard
             .as_mut()
-            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)"))?;
+            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)".to_string()))?;
         let tts = backends.tts_mut();
         let backend_name = tts.name().to_string();
         let out = tts
@@ -167,7 +167,7 @@ impl AudioCorePlugin {
         let guard = self.backends.lock().expect("audio backends mutex");
         let backends = guard
             .as_ref()
-            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)"))?;
+            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)".to_string()))?;
         let (stt, tts) = backends.names();
         serde_json::to_value(&AudioStatusResult {
             stt_backend: stt.to_string(),
@@ -177,12 +177,7 @@ impl AudioCorePlugin {
     }
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 // Pass-by-value matches `Result::map_err`'s contract; clippy's
 // needless_pass_by_value would force a closure at every call site.

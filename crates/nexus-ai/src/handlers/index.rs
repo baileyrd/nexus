@@ -32,7 +32,7 @@ pub(crate) async fn handle_index_trigger(
         .read()
         .ok()
         .and_then(|g| g.clone())
-        .ok_or_else(|| exec_err("index_trigger: indexing daemon not running"))?;
+        .ok_or_else(|| exec_err("index_trigger: indexing daemon not running".to_string()))?;
 
     let response = ctx
         .ipc_call(
@@ -46,7 +46,7 @@ pub(crate) async fn handle_index_trigger(
 
     let records = response
         .as_array()
-        .ok_or_else(|| exec_err("index_trigger: query_files returned non-array"))?;
+        .ok_or_else(|| exec_err("index_trigger: query_files returned non-array".to_string()))?;
 
     let mut queued: usize = 0;
     for entry in records {
@@ -77,17 +77,17 @@ pub(crate) async fn handle_index_file(
     let file_path = args
         .get("file_path")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("index_file: missing 'file_path' string"))?;
+        .ok_or_else(|| exec_err("index_file: missing 'file_path' string".to_string()))?;
     let blocks: Vec<(u64, String, String, Option<i32>)> = args
         .get("blocks")
-        .ok_or_else(|| exec_err("index_file: missing 'blocks'"))
+        .ok_or_else(|| exec_err("index_file: missing 'blocks'".to_string()))
         .and_then(|v| {
             serde_json::from_value(v.clone())
                 .map_err(|e| exec_err(format!("index_file: blocks decode: {e}")))
         })?;
 
     let embed_cfg =
-        embed_cfg.ok_or_else(|| exec_err("index_file: no AI embedding provider configured"))?;
+        embed_cfg.ok_or_else(|| exec_err("index_file: no AI embedding provider configured".to_string()))?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
     let count = rag::index_file(ctx, embedder.as_ref(), file_path, &blocks)

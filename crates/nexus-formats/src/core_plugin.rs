@@ -113,7 +113,7 @@ impl FormatsCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        let a: ImportNotionArgs = parse(args, "import_notion")?;
+        let a: ImportNotionArgs = parse_args(args, "import_notion")?;
         if !a.source.exists() {
             return Err(exec_err(format!(
                 "source zip not found: {}",
@@ -140,7 +140,7 @@ impl FormatsCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        let a: ExportNotionArgs = parse(args, "export_notion")?;
+        let a: ExportNotionArgs = parse_args(args, "export_notion")?;
         let source_abs = match a.source {
             Some(s) if s.is_absolute() => s,
             Some(s) => self.forge_root.join(s),
@@ -164,22 +164,9 @@ impl FormatsCorePlugin {
     }
 }
 
-// ── Plumbing ────────────────────────────────────────────────────────────────
+// ── Plumbing — SD-01: helpers emitted by the shared macro ───────────────────
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(
-    args: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
+nexus_plugins::define_dispatch_helpers!();
 
 #[cfg(test)]
 mod tests {

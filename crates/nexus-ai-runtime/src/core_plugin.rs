@@ -722,19 +722,14 @@ fn caller_plugin_id(_ctx: &KernelPluginContext) -> String {
 }
 
 fn ctx_unwired() -> PluginError {
-    exec_err("ai-runtime context not wired (bootstrap incomplete)")
+    exec_err("ai-runtime context not wired (bootstrap incomplete)".to_string())
 }
 
 fn pool_unwired() -> PluginError {
-    exec_err("ai-runtime worker pool not started; cannot submit work")
+    exec_err("ai-runtime worker pool not started; cannot submit work".to_string())
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 #[cfg(test)]
 mod tests {

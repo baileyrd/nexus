@@ -14,7 +14,7 @@ use serde::Deserialize;
 use crate::DEFAULT_SYSTEM_PROMPT;
 
 use super::shared::{
-    compose_memory_preamble, drop_pending, exec_err, now_unix_ms, parse,
+    compose_memory_preamble, drop_pending, exec_err, now_unix_ms, parse_args,
     resolve_archetype_for_run, run_session_optionally_gated, AiChatBridge, BusBridgePolicy,
     KernelToolBridge, PendingApprovals, DEFAULT_APPROVAL_TIMEOUT_SECS, DEFAULT_CHAT_TIMEOUT,
     DEFAULT_TOOL_TIMEOUT, MAX_APPROVAL_TIMEOUT_SECS, PLUGIN_ID,
@@ -118,7 +118,7 @@ pub(crate) async fn handle_session_run(
     pending_approvals: Arc<PendingApprovals>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let parsed: SessionRunArgs = parse(args, "session_run")?;
+    let parsed: SessionRunArgs = parse_args(args, "session_run")?;
 
     let driver = AiChatBridge {
         ctx: Arc::clone(&ctx),
@@ -336,7 +336,7 @@ pub(crate) async fn handle_session_get(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: SessionIdArgs = parse(args, "session_get")?;
+    let a: SessionIdArgs = parse_args(args, "session_get")?;
     let path = session_path(&a.id)
         .ok_or_else(|| exec_err(format!("session_get: invalid id '{}'", a.id)))?;
     let bytes = ctx
@@ -351,7 +351,7 @@ pub(crate) async fn handle_session_delete(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: SessionIdArgs = parse(args, "session_delete")?;
+    let a: SessionIdArgs = parse_args(args, "session_delete")?;
     let path = session_path(&a.id)
         .ok_or_else(|| exec_err(format!("session_delete: invalid id '{}'", a.id)))?;
     ctx.delete_file(&path)

@@ -23,7 +23,7 @@ use crate::{
 };
 
 use super::shared::{
-    exec_err, parse, poisoned, publish_workflow_activity, to_value, DEFAULT_STEP_TIMEOUT,
+    exec_err, parse_args, poisoned, publish_workflow_activity, to_value, DEFAULT_STEP_TIMEOUT,
 };
 
 pub(crate) fn prepare(
@@ -119,7 +119,7 @@ fn lookup_by_args(
     registry: &Mutex<WorkflowRegistry>,
     args: &serde_json::Value,
 ) -> Result<Workflow, PluginError> {
-    let a: RunWorkflowArgs = parse(args, "run")?;
+    let a: RunWorkflowArgs = parse_args(args, "run")?;
     let reg = registry.lock().map_err(poisoned)?;
     reg.get(&a.name)
         .cloned()

@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use super::shared::{exec_err, now_unix_ms, parse, parse_memory_lines};
+use super::shared::{exec_err, now_unix_ms, parse_args, parse_memory_lines};
 
 /// Args for `memory_record` — `{ agent_id, entry }`.
 #[derive(Deserialize, Serialize)]
@@ -93,7 +93,7 @@ pub(crate) async fn handle_memory_record(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: MemoryRecordArgs = parse(args, "memory_record")?;
+    let a: MemoryRecordArgs = parse_args(args, "memory_record")?;
     crate::memory::normalize_agent_id(&a.agent_id)
         .map_err(|e| exec_err(format!("memory_record: {e}")))?;
     let path = crate::memory::history_path(&a.agent_id);
@@ -114,7 +114,7 @@ pub(crate) async fn handle_memory_query(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: MemoryQueryArgs = parse(args, "memory_query")?;
+    let a: MemoryQueryArgs = parse_args(args, "memory_query")?;
     crate::memory::normalize_agent_id(&a.agent_id)
         .map_err(|e| exec_err(format!("memory_query: {e}")))?;
     let path = crate::memory::history_path(&a.agent_id);
@@ -131,7 +131,7 @@ pub(crate) async fn handle_memory_prune(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: MemoryPruneArgs = parse(args, "memory_prune")?;
+    let a: MemoryPruneArgs = parse_args(args, "memory_prune")?;
     crate::memory::normalize_agent_id(&a.agent_id)
         .map_err(|e| exec_err(format!("memory_prune: {e}")))?;
     let path = crate::memory::history_path(&a.agent_id);
@@ -162,7 +162,7 @@ pub(crate) async fn handle_memory_export(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: MemoryExportArgs = parse(args, "memory_export")?;
+    let a: MemoryExportArgs = parse_args(args, "memory_export")?;
     crate::memory::normalize_agent_id(&a.agent_id)
         .map_err(|e| exec_err(format!("memory_export: {e}")))?;
     let path = crate::memory::history_path(&a.agent_id);

@@ -14,7 +14,7 @@ use ts_rs::TS;
 use crate::{build_archetype, Agent, Plan, DEFAULT_SYSTEM_PROMPT};
 
 use super::shared::{
-    agent_err, parse, resolve_archetype_for_run, system_prompt_with_skills, to_value,
+    agent_err, parse_args, resolve_archetype_for_run, system_prompt_with_skills, to_value,
     AiChatBridge, ArchetypeSource, ResolvedArchetype, DEFAULT_CHAT_TIMEOUT, PLUGIN_ID,
 };
 
@@ -54,7 +54,7 @@ pub(crate) async fn handle_plan(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: GoalArgs = parse(args, "plan")?;
+    let a: GoalArgs = parse_args(args, "plan")?;
     let skills_prompt =
         system_prompt_with_skills(&ctx, &a.goal, a.archetype.as_deref()).await;
     let extra = skills_prompt

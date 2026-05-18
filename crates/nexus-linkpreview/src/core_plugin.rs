@@ -101,9 +101,4 @@ fn dispatch_fetch(args: &serde_json::Value) -> Result<serde_json::Value, PluginE
     }
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!();

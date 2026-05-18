@@ -46,7 +46,7 @@ pub(crate) async fn handle_predict(
         .map_err(|e| exec_err(format!("predict: args decode: {e}")))?;
 
     let ai_cfg =
-        ai_cfg.ok_or_else(|| exec_err("predict: no AI chat provider configured"))?;
+        ai_cfg.ok_or_else(|| exec_err("predict: no AI chat provider configured".to_string()))?;
 
     let max_tokens = parsed
         .max_tokens

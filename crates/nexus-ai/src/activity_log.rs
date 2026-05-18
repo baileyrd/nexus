@@ -214,12 +214,7 @@ fn head_trim_bytes(bytes: Vec<u8>, cap: usize) -> Vec<u8> {
     }
 }
 
-fn exec_err<S: Into<String>>(reason: S) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: super::core_plugin::PLUGIN_ID.to_string(),
-        reason: reason.into(),
-    }
-}
+use crate::handlers::shared::exec_err;
 
 #[cfg(test)]
 mod tests {

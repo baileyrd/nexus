@@ -11,30 +11,10 @@ use nexus_plugins::PluginError;
 
 use crate::core_plugin::PLUGIN_ID;
 
-pub(crate) fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
+nexus_plugins::define_dispatch_helpers!(pub(crate));
 
 pub(crate) fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
-    exec_err("workflow registry mutex poisoned — prior handler panicked".into())
-}
-
-pub(crate) fn parse<T: serde::de::DeserializeOwned>(
-    args: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-pub(crate) fn to_value<T: serde::Serialize>(
-    v: &T,
-    command: &str,
-) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+    exec_err("workflow registry mutex poisoned — prior handler panicked".to_string())
 }
 
 /// BL-052 — emit a workflow start / end activity entry. `started=true`

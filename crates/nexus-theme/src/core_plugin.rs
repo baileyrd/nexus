@@ -360,27 +360,10 @@ impl CorePlugin for ThemeCorePlugin {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 fn engine_poisoned() -> PluginError {
     exec_err("theme engine mutex poisoned".to_string())
-}
-
-fn parse_args<T: serde::de::DeserializeOwned>(
-    value: &Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(value.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-fn to_value<T: serde::Serialize>(v: &T, command: &str) -> Result<Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
 }
 
 #[cfg(test)]

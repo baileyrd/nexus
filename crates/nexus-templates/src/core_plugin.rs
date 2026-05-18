@@ -187,7 +187,7 @@ impl TemplatesCorePlugin {
     }
 
     fn dispatch_get(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        let a: GetPageTemplateArgs = parse(args, "get")?;
+        let a: GetPageTemplateArgs = parse_args(args, "get")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let tpl = reg
             .get(&a.name)
@@ -196,7 +196,7 @@ impl TemplatesCorePlugin {
     }
 
     fn dispatch_render(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        let a: RenderTemplateArgs = parse(args, "render")?;
+        let a: RenderTemplateArgs = parse_args(args, "render")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let tpl = reg
             .get(&a.name)
@@ -215,7 +215,7 @@ impl TemplatesCorePlugin {
     }
 
     fn dispatch_apply(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        let a: ApplyTemplateArgs = parse(args, "apply")?;
+        let a: ApplyTemplateArgs = parse_args(args, "apply")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let tpl = reg
             .get(&a.name)
@@ -261,27 +261,10 @@ impl TemplatesCorePlugin {
 
 // ── Plumbing ───────────────────────────────────────────────────────────────
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
-    exec_err("templates registry mutex poisoned — prior handler panicked".into())
-}
-
-fn parse<T: serde::de::DeserializeOwned>(
-    args: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-fn to_value<T: serde::Serialize>(v: &T, command: &str) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+    exec_err("templates registry mutex poisoned — prior handler panicked".to_string())
 }
 
 // `TemplateRegistryError` is exposed transitively for callers building

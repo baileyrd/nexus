@@ -347,12 +347,7 @@ fn map_store_err(err: &CommentStoreError) -> PluginError {
     exec_err(err.to_string())
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 #[cfg(test)]
 mod tests {

@@ -34,20 +34,20 @@ pub(crate) fn handle_set_config(
 ) -> Result<serde_json::Value, PluginError> {
     let obj = args
         .as_object()
-        .ok_or_else(|| exec_err("set_config: expected JSON object"))?;
+        .ok_or_else(|| exec_err("set_config: expected JSON object".to_string()))?;
 
     if obj.contains_key("ai") {
         let next = parse_config_field(obj.get("ai").unwrap_or(&serde_json::Value::Null))?;
         let mut g = ai_handle
             .write()
-            .map_err(|_| exec_err("set_config: ai config lock poisoned"))?;
+            .map_err(|_| exec_err("set_config: ai config lock poisoned".to_string()))?;
         *g = next;
     }
     if obj.contains_key("embedding") {
         let next = parse_config_field(obj.get("embedding").unwrap_or(&serde_json::Value::Null))?;
         let mut g = embed_handle
             .write()
-            .map_err(|_| exec_err("set_config: embedding config lock poisoned"))?;
+            .map_err(|_| exec_err("set_config: embedding config lock poisoned".to_string()))?;
         *g = next;
     }
 
@@ -66,7 +66,7 @@ pub(crate) fn parse_config_field(value: &serde_json::Value) -> Result<Option<AiC
     }
     let obj = value
         .as_object()
-        .ok_or_else(|| exec_err("set_config: provider config must be object or null"))?;
+        .ok_or_else(|| exec_err("set_config: provider config must be object or null".to_string()))?;
     let provider = obj
         .get("provider")
         .and_then(serde_json::Value::as_str)

@@ -34,7 +34,7 @@ pub(crate) async fn handle_propose_tool_calls(
         .map_err(|e| exec_err(format!("propose_tool_calls: args decode: {e}")))?;
 
     let ai_cfg = ai_cfg
-        .ok_or_else(|| exec_err("propose_tool_calls: no AI chat provider configured"))?;
+        .ok_or_else(|| exec_err("propose_tool_calls: no AI chat provider configured".to_string()))?;
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
 
     let policy = parsed.tools.unwrap_or_default();

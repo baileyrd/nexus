@@ -9,6 +9,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod composite;
+pub mod dispatch;
 mod error;
 mod host_fns;
 pub mod manifest;
@@ -25,6 +26,70 @@ use std::sync::{Arc, Mutex};
 
 pub use composite::{CompositeIpcDispatcher, FallbackCell};
 pub use error::PluginError;
+
+/// Generate per-crate dispatch helper wrappers
+/// (`exec_err`, `parse_args`, `to_value`, `string_arg`) closed over the
+/// caller's `PLUGIN_ID` constant. See [`crate::dispatch`] for the
+/// underlying free functions.
+///
+/// Invoke once in a `CorePlugin` impl's module — the surrounding scope
+/// must already declare `const PLUGIN_ID: &str = "…";`:
+///
+/// ```ignore
+/// pub const PLUGIN_ID: &str = "com.example.foo";
+/// nexus_plugins::define_dispatch_helpers!();
+///
+/// // Then write per-arm code as:
+/// //   let args: MyArgs = parse_args(args, "my_command")?;
+/// //   …
+/// //   to_value(&result, "my_command")
+/// ```
+///
+/// The generated fns delegate to [`crate::dispatch`] so error
+/// formatting stays uniform across the workspace. Replaces the
+/// historical pattern of 19 hand-rolled redefinitions across service
+/// crates — see `docs/0.1.2/audits/solid-dry-assessment-2026-05-18.md`
+/// SD-01.
+#[macro_export]
+macro_rules! define_dispatch_helpers {
+    () => {
+        $crate::define_dispatch_helpers!(@vis);
+    };
+    (pub(crate)) => {
+        $crate::define_dispatch_helpers!(@vis pub(crate));
+    };
+    (@vis $($vis:tt)*) => {
+        #[allow(dead_code)]
+        $($vis)* fn exec_err(reason: String) -> $crate::PluginError {
+            $crate::dispatch::exec_err(PLUGIN_ID, reason)
+        }
+
+        #[allow(dead_code)]
+        $($vis)* fn parse_args<T: ::serde::de::DeserializeOwned>(
+            value: &::serde_json::Value,
+            command: &str,
+        ) -> ::std::result::Result<T, $crate::PluginError> {
+            $crate::dispatch::parse_args(PLUGIN_ID, command, value)
+        }
+
+        #[allow(dead_code)]
+        $($vis)* fn to_value<T: ::serde::Serialize>(
+            v: &T,
+            command: &str,
+        ) -> ::std::result::Result<::serde_json::Value, $crate::PluginError> {
+            $crate::dispatch::to_value(PLUGIN_ID, command, v)
+        }
+
+        #[allow(dead_code)]
+        $($vis)* fn string_arg(
+            value: &::serde_json::Value,
+            command: &str,
+            field: &str,
+        ) -> ::std::result::Result<String, $crate::PluginError> {
+            $crate::dispatch::string_arg(PLUGIN_ID, command, value, field)
+        }
+    };
+}
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{
     CapRequirementFn, CorePlugin, CorePluginFuture, HandlerClassification, PluginBackend,

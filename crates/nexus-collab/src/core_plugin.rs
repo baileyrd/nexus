@@ -268,12 +268,12 @@ impl CollabCorePlugin {
             // Surface a stable message so the shell can detect this
             // condition without a wire-format match. Same shape as
             // every other "<crate>: <reason>" PluginError message.
-            return Err(exec_err("publish_presence: collab not configured"));
+            return Err(exec_err("publish_presence: collab not configured".to_string()));
         };
         let bus = self
             .bus
             .as_ref()
-            .ok_or_else(|| exec_err("publish_presence: no event bus wired"))?;
+            .ok_or_else(|| exec_err("publish_presence: no event bus wired".to_string()))?;
         let event = PresenceEvent {
             user_id: identity.user_id,
             display_name: identity.display_name,
@@ -332,7 +332,7 @@ impl CollabCorePlugin {
             .map_err(|e| exec_err(format!("start_relay: local_addr: {e}")))?;
 
         let handle = tokio::runtime::Handle::try_current()
-            .map_err(|_| exec_err("start_relay: no ambient tokio runtime"))?;
+            .map_err(|_| exec_err("start_relay: no ambient tokio runtime".to_string()))?;
         // `from_std` is sync — it just wraps the descriptor in tokio's
         // async listener. Must be called from inside a runtime, but
         // doesn't need its own task.
@@ -433,12 +433,7 @@ fn ok_reply<T: Serialize>(value: &T) -> Result<serde_json::Value, PluginError> {
         .map_err(|e| exec_err(format!("serialize reply: {e}")))
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 #[cfg(test)]
 mod tests {

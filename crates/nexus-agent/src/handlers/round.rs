@@ -8,7 +8,7 @@ use std::sync::Arc;
 use nexus_plugins::PluginError;
 use serde::Deserialize;
 
-use super::shared::{exec_err, parse, PendingApprovals};
+use super::shared::{exec_err, parse_args, PendingApprovals};
 
 /// Wire shape of `com.nexus.agent::round_decide` args.
 #[derive(Debug, Deserialize)]
@@ -45,7 +45,7 @@ pub(crate) async fn handle_round_decide(
     pending: Arc<PendingApprovals>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let parsed: RoundDecideArgs = parse(args, "round_decide")?;
+    let parsed: RoundDecideArgs = parse_args(args, "round_decide")?;
     let entry = {
         let mut map = pending
             .lock()

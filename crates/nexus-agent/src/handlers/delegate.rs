@@ -34,7 +34,7 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use super::shared::{exec_err, parse};
+use super::shared::{exec_err, parse_args};
 
 /// Args for `com.nexus.agent::delegate` (handler id 24).
 #[derive(Debug, Deserialize, Serialize)]
@@ -91,7 +91,7 @@ pub(crate) async fn handle_delegate(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: DelegateArgs = parse(args, "delegate")?;
+    let a: DelegateArgs = parse_args(args, "delegate")?;
     if a.archetype.trim().is_empty() {
         return Err(exec_err("delegate: `archetype` must be non-empty".into()));
     }

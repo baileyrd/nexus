@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use super::shared::{exec_err, parse};
+use super::shared::{exec_err, parse_args};
 
 pub(crate) const HISTORY_DIR: &str = ".forge/agent/history";
 
@@ -102,7 +102,7 @@ pub(crate) async fn handle_history_get(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: PlanIdArgs = parse(args, "history_get")?;
+    let a: PlanIdArgs = parse_args(args, "history_get")?;
     let path = history_path(&a.plan_id)
         .ok_or_else(|| exec_err(format!("history_get: invalid plan_id '{}'", a.plan_id)))?;
     let bytes = ctx
@@ -117,7 +117,7 @@ pub(crate) async fn handle_history_delete(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: PlanIdArgs = parse(args, "history_delete")?;
+    let a: PlanIdArgs = parse_args(args, "history_delete")?;
     let path = history_path(&a.plan_id).ok_or_else(|| {
         exec_err(format!("history_delete: invalid plan_id '{}'", a.plan_id))
     })?;

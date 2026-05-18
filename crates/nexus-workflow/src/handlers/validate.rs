@@ -14,12 +14,12 @@ use nexus_plugins::PluginError;
 use crate::core_plugin::ValidateWorkflowArgs;
 use crate::parse_workflow_text;
 
-use super::shared::{exec_err, parse, to_value, DEFAULT_STEP_TIMEOUT};
+use super::shared::{exec_err, parse_args, to_value, DEFAULT_STEP_TIMEOUT};
 
 pub(crate) fn handle_sync(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: ValidateWorkflowArgs = parse(args, "validate")?;
+    let a: ValidateWorkflowArgs = parse_args(args, "validate")?;
     match parse_workflow_text(&a.text) {
         Ok(w) => to_value(&w, "validate"),
         Err(err) => Err(exec_err(format!("invalid workflow: {err}"))),
@@ -42,7 +42,7 @@ pub(crate) async fn handle_async(
     ctx: Option<&Arc<KernelPluginContext>>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: ValidateWorkflowArgs = parse(args, "validate")?;
+    let a: ValidateWorkflowArgs = parse_args(args, "validate")?;
     let workflow = parse_workflow_text(&a.text)
         .map_err(|err| exec_err(format!("invalid workflow: {err}")))?;
 

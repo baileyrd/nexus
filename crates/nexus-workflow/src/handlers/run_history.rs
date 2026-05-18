@@ -9,13 +9,13 @@ use nexus_plugins::PluginError;
 use crate::core_plugin::RunHistoryArgs;
 use crate::run_history::RunHistoryStore;
 
-use super::shared::{parse, to_value};
+use super::shared::{parse_args, to_value};
 
 pub(crate) fn handle(
     store: &Arc<RunHistoryStore>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: RunHistoryArgs = parse(args, "run_history")?;
+    let a: RunHistoryArgs = parse_args(args, "run_history")?;
     let limit = a.limit.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     let rows = store.list(a.name.as_deref(), limit);
     to_value(&rows, "run_history")

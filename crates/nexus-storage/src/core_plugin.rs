@@ -1370,43 +1370,9 @@ impl CorePlugin for StorageCorePlugin {
     }
 }
 
-// ── Dispatch helpers ─────────────────────────────────────────────────────────
+// ── Dispatch helpers — SD-01: emitted by the shared macro ───────────────────
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
-
-/// IPC arg parser for storage handlers.
-///
-/// **Wire-shape contract** (issue #84): both JSON `null` and an empty
-/// object `{}` are accepted as "no args provided" — the parser
-/// substitutes an empty-object payload before delegating to
-/// `serde_json::from_value`. This is intentional convenience for
-/// callers (CLI, TUI, shell) that pass `null` from a default-flag
-/// path; it does **not** allow `null` to round-trip past serde for
-/// arg structs that have non-`Option` required fields. If a future
-/// `T` introduces a required field, both shapes will fail at the
-/// `from_value` step with the same `default args invalid: missing
-/// field …` message.
-///
-/// Treating the two shapes distinguishably (e.g. error on `null`,
-/// only accept `{}`) was considered and rejected — pre-existing
-/// callers send both, and the contract here is "empty args" rather
-/// than "no field for an `Option<>`-shaped form".
-fn parse_args<T: serde::de::DeserializeOwned>(
-    value: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    if value.is_null() || matches!(value.as_object(), Some(o) if o.is_empty()) {
-        return serde_json::from_value(serde_json::json!({}))
-            .map_err(|e| exec_err(format!("{command}: default args invalid: {e}")));
-    }
-    serde_json::from_value(value.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
+nexus_plugins::define_dispatch_helpers!();
 
 /// True iff `path` is a forge-relative path inside the `.forge/`
 /// metadata directory (the namespace `HANDLER_WRITE_VAULT_FILE` is
@@ -1421,34 +1387,15 @@ fn is_forge_metadata_path(path: &str) -> bool {
 }
 
 fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    value
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| exec_err(format!("{command}: missing 'path' string argument")))
+    string_arg(value, command, "path")
 }
 
 fn relpath_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    value
-        .get("relpath")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| exec_err(format!("{command}: missing 'relpath' string argument")))
+    string_arg(value, command, "relpath")
 }
 
 fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    value
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| exec_err(format!("{command}: missing 'name' string argument")))
-}
-
-fn to_value<T: serde::Serialize>(
-    v: &T,
-    command: &str,
-) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
+    string_arg(value, command, "name")
 }
 
 /// Build the post-append text for [`HANDLER_NOTE_APPEND`]. Centralised so

@@ -26,7 +26,7 @@ pub(crate) async fn handle_stream_ask(
     let started_at = std::time::Instant::now();
     let messages: Vec<crate::provider::ChatMessage> = args
         .get("messages")
-        .ok_or_else(|| exec_err("stream_ask: missing 'messages'"))
+        .ok_or_else(|| exec_err("stream_ask: missing 'messages'".to_string()))
         .and_then(|v| {
             serde_json::from_value(v.clone())
                 .map_err(|e| exec_err(format!("stream_ask: messages decode: {e}")))
@@ -45,7 +45,7 @@ pub(crate) async fn handle_stream_ask(
         .rev()
         .find(|m| matches!(m.role, crate::provider::Role::User))
         .map(|m| m.content.clone())
-        .ok_or_else(|| exec_err("stream_ask: no user message in 'messages'"))?;
+        .ok_or_else(|| exec_err("stream_ask: no user message in 'messages'".to_string()))?;
 
     let provider_label = ai_cfg.as_ref().map(|c| c.provider.clone());
     let model_label = ai_cfg.as_ref().and_then(|c| c.model.clone());
@@ -73,11 +73,11 @@ pub(crate) async fn handle_stream_ask(
 
     let Some(ai_cfg) = ai_cfg else {
         record_err("stream_ask: no AI chat provider configured".into()).await;
-        return Err(exec_err("stream_ask: no AI chat provider configured"));
+        return Err(exec_err("stream_ask: no AI chat provider configured".to_string()));
     };
     let Some(embed_cfg) = embed_cfg else {
         record_err("stream_ask: no embedding provider configured".into()).await;
-        return Err(exec_err("stream_ask: no embedding provider configured"));
+        return Err(exec_err("stream_ask: no embedding provider configured".to_string()));
     };
     let ai = match build_ai_provider(&ai_cfg) {
         Ok(p) => p,

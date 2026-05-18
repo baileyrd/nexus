@@ -2723,18 +2723,10 @@ fn snapshot_to_value(snapshot: &EditorSnapshot, command: &str) -> Result<Value, 
         .map_err(|e| exec_err(format!("{command}: serialize snapshot: {e}")))
 }
 
-fn relpath_arg(args: &Value, command: &str) -> Result<String, PluginError> {
-    args.get("relpath")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| exec_err(format!("{command}: missing 'relpath' string")))
-}
+nexus_plugins::define_dispatch_helpers!();
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
+fn relpath_arg(args: &Value, command: &str) -> Result<String, PluginError> {
+    string_arg(args, command, "relpath")
 }
 
 fn sessions_poisoned() -> PluginError {

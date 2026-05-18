@@ -415,7 +415,7 @@ impl CorePlugin for AiCorePlugin {
             let ctx_clone = self.context.clone();
             return Some(Box::pin(async move {
                 let ctx = ctx_clone.ok_or_else(|| {
-                    exec_err("AI plugin context not wired (bootstrap incomplete)")
+                    exec_err("AI plugin context not wired (bootstrap incomplete)".to_string())
                 })?;
                 handle_index_trigger(&ctx, &tx_handle).await
             }));
@@ -461,7 +461,7 @@ impl CorePlugin for AiCorePlugin {
 
         Some(Box::pin(async move {
             let ctx =
-                ctx.ok_or_else(|| exec_err("AI plugin context not wired (bootstrap incomplete)"))?;
+                ctx.ok_or_else(|| exec_err("AI plugin context not wired (bootstrap incomplete)".to_string()))?;
             match handler_id {
                 HANDLER_ASK => handle_ask(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,

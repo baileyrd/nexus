@@ -9,13 +9,13 @@ use nexus_plugins::PluginError;
 use crate::core_plugin::GetWorkflowArgs;
 use crate::WorkflowRegistry;
 
-use super::shared::{exec_err, parse, poisoned, to_value};
+use super::shared::{exec_err, parse_args, poisoned, to_value};
 
 pub(crate) fn handle(
     registry: &Mutex<WorkflowRegistry>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: GetWorkflowArgs = parse(args, "get")?;
+    let a: GetWorkflowArgs = parse_args(args, "get")?;
     let reg = registry.lock().map_err(poisoned)?;
     match reg.get(&a.name) {
         Some(w) => to_value(w, "get"),

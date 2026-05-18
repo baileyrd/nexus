@@ -324,7 +324,7 @@ impl SkillsCorePlugin {
     }
 
     fn dispatch_get(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        let a: GetSkillArgs = parse(args, "get")?;
+        let a: GetSkillArgs = parse_args(args, "get")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         match reg.get(&a.id) {
             Some(skill) => {
@@ -345,7 +345,7 @@ impl SkillsCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        let a: ListByContextArgs = parse(args, "list_by_context")?;
+        let a: ListByContextArgs = parse_args(args, "list_by_context")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let skills: Vec<_> = reg.by_context(&a.context).cloned().collect();
         to_value(&skills, "list_by_context")
@@ -355,14 +355,14 @@ impl SkillsCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        let a: TriggeredByArgs = parse(args, "triggered_by")?;
+        let a: TriggeredByArgs = parse_args(args, "triggered_by")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let skills: Vec<_> = reg.triggered_by(&a.text).cloned().collect();
         to_value(&skills, "triggered_by")
     }
 
     fn dispatch_render(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        let a: RenderSkillArgs = parse(args, "render")?;
+        let a: RenderSkillArgs = parse_args(args, "render")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let skill = reg
             .get(&a.id)
@@ -391,7 +391,7 @@ impl SkillsCorePlugin {
     /// conflict warnings. Cycle / missing-dependency are surfaced as
     /// `ExecutionFailed` so the planner can fall back to the raw body.
     fn dispatch_compose(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        let a: ComposeSkillArgs = parse(args, "compose")?;
+        let a: ComposeSkillArgs = parse_args(args, "compose")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         match crate::compose::compose(&reg, &a.id) {
             Ok(composed) => to_value(&composed, "compose"),
@@ -405,9 +405,9 @@ impl SkillsCorePlugin {
     /// on `&self` so the locked registry guard never crosses an
     /// `.await` (which would make the future `!Send`).
     fn compose_for_invoke(&self, args: &serde_json::Value) -> Result<String, PluginError> {
-        let parsed: InvokeSkillArgs = parse(args, "invoke")?;
+        let parsed: InvokeSkillArgs = parse_args(args, "invoke")?;
         if parsed.skill_id.is_empty() {
-            return Err(exec_err("invoke: skill_id must not be empty".into()));
+            return Err(exec_err("invoke: skill_id must not be empty".to_string()));
         }
         let reg = self.registry.lock().map_err(poisoned)?;
         if reg.get(&parsed.skill_id).is_none() {
@@ -478,27 +478,10 @@ fn relpath_for(skills_root: &std::path::Path, abs: &std::path::Path) -> Option<S
     Some(parts.join("/"))
 }
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
-    exec_err("skills registry mutex poisoned — prior handler panicked".into())
-}
-
-fn parse<T: serde::de::DeserializeOwned>(
-    args: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-fn to_value<T: serde::Serialize>(v: &T, command: &str) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+    exec_err("skills registry mutex poisoned — prior handler panicked".to_string())
 }
 
 /// BL-054 Phase 3 — async handler for `com.nexus.skills::invoke`.
@@ -516,7 +499,7 @@ async fn handle_invoke(
     let parsed: InvokeSkillArgs = serde_json::from_value(args)
         .map_err(|e| exec_err(format!("invoke: invalid args: {e}")))?;
     let ctx = ctx.ok_or_else(|| {
-        exec_err("invoke: no kernel context wired (bootstrap did not call wire_context)".into())
+        exec_err("invoke: no kernel context wired (bootstrap did not call wire_context)".to_string())
     })?;
     let archetype = parsed
         .archetype

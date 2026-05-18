@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use nexus_kernel::{KernelPluginContext, PluginContext};
-use nexus_plugins::PluginError;
 use serde::Serialize;
 
 use crate::activity_log::ActivityRecorder;
@@ -110,12 +109,7 @@ pub(crate) fn compose_chat_system(caller: Option<&str>) -> String {
     }
 }
 
-pub(crate) fn exec_err<S: Into<String>>(reason: S) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: reason.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!(pub(crate));
 
 // ─── Provider factories ─────────────────────────────────────────────────────
 

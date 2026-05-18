@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use super::shared::{exec_err, parse, to_value};
+use super::shared::{exec_err, parse_args, to_value};
 
 /// Args for `com.nexus.agent::list_tools` (handler id 18).
 #[derive(Deserialize, Serialize)]
@@ -34,7 +34,7 @@ pub(crate) fn handle_list_tools(
     let a: ListToolsArgs = if args.is_null() {
         ListToolsArgs { capabilities: None }
     } else {
-        parse(args, "list_tools")?
+        parse_args(args, "list_tools")?
     };
     let registry = crate::AgentToolRegistry::global();
     let specs = match a.capabilities {

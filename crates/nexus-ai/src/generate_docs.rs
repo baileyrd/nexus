@@ -117,7 +117,7 @@ pub(crate) async fn handle_generate_docs(
         .map_err(|e| exec_err(format!("generate_docs: args decode: {e}")))?;
 
     let ai_cfg = ai_cfg
-        .ok_or_else(|| exec_err("generate_docs: no AI chat provider configured"))?;
+        .ok_or_else(|| exec_err("generate_docs: no AI chat provider configured".to_string()))?;
     let ai = crate::core_plugin::build_ai_provider(&ai_cfg).map_err(exec_err)?;
 
     let symbol = resolve_symbol(&ctx, &parsed).await?;
@@ -178,7 +178,7 @@ async fn resolve_symbol(
     }
     if !have_filter && args.symbol_id.is_none() {
         return Err(exec_err(
-            "generate_docs: provide either `symbol_id`, or `path` + `name`",
+            "generate_docs: provide either `symbol_id`, or `path` + `name`".to_string(),
         ));
     }
     let raw = ctx
@@ -412,12 +412,7 @@ pub(crate) fn format_as_doc_comment(prose: &str, style: DocStyle) -> String {
     out
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: crate::core_plugin::PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+use crate::handlers::shared::exec_err;
 
 #[cfg(test)]
 mod tests {

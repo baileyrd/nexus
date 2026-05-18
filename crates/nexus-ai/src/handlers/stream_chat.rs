@@ -61,7 +61,7 @@ pub(crate) async fn handle_stream_chat(
             err,
         )
         .await;
-        return Err(exec_err(err));
+        return Err(exec_err(err.to_string()));
     };
 
     // mode=complete forces tools=none regardless of the caller's value

@@ -203,29 +203,9 @@ impl CorePlugin for DatabaseCorePlugin {
     }
 }
 
-// ── Dispatch helpers ─────────────────────────────────────────────────────────
+// ── Dispatch helpers — SD-01: emitted by the shared macro ───────────────────
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
-
-fn parse_args<T: serde::de::DeserializeOwned>(
-    value: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(value.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-fn to_value<T: serde::Serialize>(
-    v: &T,
-    command: &str,
-) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
-}
+nexus_plugins::define_dispatch_helpers!();
 
 /// Maximum byte size accepted by the `csv_import` IPC handler. The
 /// reader is fully in-memory; an unbounded `csv_bytes` reaching this

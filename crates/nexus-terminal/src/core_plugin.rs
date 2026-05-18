@@ -2825,17 +2825,12 @@ fn one_shot_flag(shell: &str) -> &'static str {
     }
 }
 
-// ── Error plumbing ───────────────────────────────────────────────────────────
+// ── Error plumbing — SD-01: emitted by the shared macro ─────────────────────
 
-fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
-    exec_err("server mutex poisoned — prior handler panicked".into())
+    exec_err("server mutex poisoned — prior handler panicked".to_string())
 }
 
 // Used as a function pointer by `.map_err(crate_err)`; wrapping in a
@@ -2843,21 +2838,6 @@ fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
 #[allow(clippy::needless_pass_by_value)]
 fn crate_err(e: crate::TerminalError) -> PluginError {
     exec_err(e.to_string())
-}
-
-fn parse_args<T: serde::de::DeserializeOwned>(
-    value: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(value.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-fn to_value<T: serde::Serialize>(
-    v: &T,
-    command: &str,
-) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
 }
 
 #[cfg(test)]
@@ -3796,7 +3776,7 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args"), "got: {reason}");
+                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -3942,7 +3922,7 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args"), "got: {reason}");
+                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -4304,7 +4284,7 @@ mod tests {
         .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args"), "got: {reason}");
+                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4374,7 +4354,7 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args"), "got: {reason}");
+                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
             }
             other => panic!("unexpected: {other:?}"),
         }

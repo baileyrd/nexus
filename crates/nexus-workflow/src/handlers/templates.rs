@@ -9,7 +9,7 @@ use nexus_plugins::PluginError;
 use crate::core_plugin::{GetTemplateArgs, InitTemplateArgs};
 use crate::templates;
 
-use super::shared::{exec_err, parse};
+use super::shared::{exec_err, parse_args};
 
 #[allow(clippy::unnecessary_wraps)] // dispatcher contract returns Result
 pub(crate) fn handle_list() -> Result<serde_json::Value, PluginError> {
@@ -30,7 +30,7 @@ pub(crate) fn handle_list() -> Result<serde_json::Value, PluginError> {
 pub(crate) fn handle_get(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: GetTemplateArgs = parse(args, "templates_get")?;
+    let a: GetTemplateArgs = parse_args(args, "templates_get")?;
     let t = templates::find(&a.slug)
         .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
     Ok(serde_json::json!({
@@ -46,7 +46,7 @@ pub(crate) fn handle_init(
     root: &Path,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: InitTemplateArgs = parse(args, "templates_init")?;
+    let a: InitTemplateArgs = parse_args(args, "templates_init")?;
     let t = templates::find(&a.slug)
         .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
     let filename = a

@@ -707,7 +707,7 @@ impl NotificationsCorePlugin {
             .map_err(|e| exec_err(format!("send: invalid args: {e}")))?;
         if parsed.channel.is_none() && parsed.source.is_none() {
             return Err(exec_err(
-                "send: one of `channel` or `source` must be supplied",
+                "send: one of `channel` or `source` must be supplied".to_string(),
             ));
         }
         let notif = Notification {
@@ -786,7 +786,7 @@ impl NotificationsCorePlugin {
         let inbox = self
             .inbox
             .as_ref()
-            .ok_or_else(|| exec_err("inbox_list: inbox not wired"))?;
+            .ok_or_else(|| exec_err("inbox_list: inbox not wired".to_string()))?;
         let status = match parsed.status.as_deref() {
             None | Some("all") => StatusFilter::All,
             Some("unread") => StatusFilter::Unread,
@@ -813,7 +813,7 @@ impl NotificationsCorePlugin {
         let inbox = self
             .inbox
             .as_ref()
-            .ok_or_else(|| exec_err("inbox_mark_read: inbox not wired"))?;
+            .ok_or_else(|| exec_err("inbox_mark_read: inbox not wired".to_string()))?;
         let updated = inbox
             .mark_read(&parsed.ids)
             .map_err(|e| exec_err(format!("inbox_mark_read: {e}")))?;
@@ -830,7 +830,7 @@ impl NotificationsCorePlugin {
         let inbox = self
             .inbox
             .as_ref()
-            .ok_or_else(|| exec_err("inbox_dismiss: inbox not wired"))?;
+            .ok_or_else(|| exec_err("inbox_dismiss: inbox not wired".to_string()))?;
         let updated = inbox
             .dismiss(&parsed.ids)
             .map_err(|e| exec_err(format!("inbox_dismiss: {e}")))?;
@@ -845,7 +845,7 @@ impl NotificationsCorePlugin {
         let inbox = self
             .inbox
             .as_ref()
-            .ok_or_else(|| exec_err("inbox_stats: inbox not wired"))?;
+            .ok_or_else(|| exec_err("inbox_stats: inbox not wired".to_string()))?;
         let stats: InboxStats = inbox
             .stats()
             .map_err(|e| exec_err(format!("inbox_stats: {e}")))?;
@@ -1001,12 +1001,7 @@ fn spawn_config_watcher(
     }
 }
 
-fn exec_err(msg: impl Into<String>) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: msg.into(),
-    }
-}
+nexus_plugins::define_dispatch_helpers!();
 
 #[cfg(test)]
 mod tests {

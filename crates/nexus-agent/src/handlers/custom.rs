@@ -1,7 +1,7 @@
 //! `com.nexus.agent::list_custom` (HANDLER_LIST_CUSTOM).
 //!
 //! Scans `<forge>/.forge/agents/*/agent.toml` and returns parsed
-//! manifests + per-file parse errors.
+//! manifests + per-file parse_args errors.
 
 use std::sync::Arc;
 

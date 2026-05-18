@@ -18,11 +18,11 @@ pub(crate) async fn handle_enrich_file(
     let path = args
         .get("path")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("enrich_file: missing 'path' string"))?;
+        .ok_or_else(|| exec_err("enrich_file: missing 'path' string".to_string()))?;
 
-    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("enrich_file: no AI chat provider configured"))?;
+    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("enrich_file: no AI chat provider configured".to_string()))?;
     let embed_cfg =
-        embed_cfg.ok_or_else(|| exec_err("enrich_file: no AI embedding provider configured"))?;
+        embed_cfg.ok_or_else(|| exec_err("enrich_file: no AI embedding provider configured".to_string()))?;
 
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
@@ -43,7 +43,7 @@ pub(crate) async fn handle_enrich_apply(
 ) -> Result<serde_json::Value, PluginError> {
     let raw_proposal = args
         .get("proposal")
-        .ok_or_else(|| exec_err("enrich_apply: missing 'proposal'"))?;
+        .ok_or_else(|| exec_err("enrich_apply: missing 'proposal'".to_string()))?;
     let proposal: crate::enrichment::EnrichmentProposal =
         serde_json::from_value(raw_proposal.clone())
             .map_err(|e| exec_err(format!("enrich_apply: proposal decode: {e}")))?;

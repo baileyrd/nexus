@@ -101,32 +101,12 @@ pub(crate) fn insert_pending_bounded(
     evicted
 }
 
-// ── Error / serde plumbing ──────────────────────────────────────────────────
+// ── Error / serde plumbing — SD-01 ───────────────────────────────────────────
 
-pub(crate) fn exec_err(reason: String) -> PluginError {
-    PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason,
-    }
-}
+nexus_plugins::define_dispatch_helpers!(pub(crate));
 
 pub(crate) fn agent_err(e: &AgentError) -> PluginError {
     exec_err(e.to_string())
-}
-
-pub(crate) fn parse<T: serde::de::DeserializeOwned>(
-    args: &serde_json::Value,
-    command: &str,
-) -> Result<T, PluginError> {
-    serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
-}
-
-pub(crate) fn to_value<T: serde::Serialize>(
-    v: &T,
-    command: &str,
-) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
 }
 
 // ── DG-36 follow-up: custom-archetype routing ──────────────────────────────

@@ -16,13 +16,13 @@ use nexus_plugins::PluginError;
 use crate::core_plugin::NextFireArgs;
 use crate::WorkflowRegistry;
 
-use super::shared::{parse, poisoned};
+use super::shared::{parse_args, poisoned};
 
 pub(crate) fn handle(
     registry: &Mutex<WorkflowRegistry>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: NextFireArgs = parse(args, "next_fire")?;
+    let a: NextFireArgs = parse_args(args, "next_fire")?;
     let now = chrono::Utc::now();
     let reg = registry.lock().map_err(poisoned)?;
     let rows: Vec<serde_json::Value> = reg
