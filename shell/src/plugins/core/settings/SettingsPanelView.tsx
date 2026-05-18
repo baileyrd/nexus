@@ -665,19 +665,10 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
 
 // ─── Stub-page primitives ─────────────────────────────────────────────────────
 //
-// Shared pieces for the "Coming soon" pages (General, Editor, Files and
-// links, Keychain, Community plugins). Each control fires an info toast
-// via `api.notifications` so users get feedback when they poke at a row
-// instead of an unresponsive control.
-
-function useComingSoon(api?: PluginAPI) {
-  return (label: string) => () => {
-    api?.notifications.show({
-      type: 'info',
-      message: `${label} — coming soon.`,
-    })
-  }
-}
+// Shared pieces for the settings pages. Every control that had a real
+// value to persist has been migrated to the `Wired*` primitives below;
+// the few remaining bespoke buttons (Sync sign-up, Help, Custom app icon,
+// etc.) call into Tauri/configStore directly inline.
 
 function StubToggle({
   on,
@@ -982,7 +973,6 @@ function ComingSoonTab({ title, description }: { title: string; description: str
 
 function GeneralTab({ api }: { api?: PluginAPI }) {
   const version = (import.meta.env?.VITE_APP_VERSION as string | undefined) ?? '0.1.0'
-  const comingSoon = useComingSoon(api)
 
   return (
     <div className="settings-section">
@@ -1104,7 +1094,6 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
 // them into a single Obsidian-style page.
 
 function EditorOptionsTab({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
   return (
     <div className="settings-section">
       <StubRow
@@ -1263,23 +1252,6 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
         description="Turn on the spellchecker."
         control={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              type="button"
-              onClick={comingSoon('Spellcheck options')}
-              title="Coming soon"
-              aria-label="Spellcheck options"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                padding: 2,
-                fontSize: 14,
-                lineHeight: 1,
-              }}
-            >
-              ⚙
-            </button>
             <WiredToggle
               settingKey="nexus.settings.editor.spellcheck"
               defaultValue={true}
@@ -1397,7 +1369,6 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
 // updated to forge/Nexus where applicable.
 
 function FilesLinksTab({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
   return (
     <div className="settings-section">
       <StubRow
@@ -1551,24 +1522,14 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
 
       <StubRow
         title="Excluded files"
-        description="Excluded files will be hidden in Search, Graph view, and Unlinked Mentions, less noticeable in Quick Switcher and link suggestions."
+        description="Excluded files will be hidden in Search, Graph view, and Unlinked Mentions, less noticeable in Quick Switcher and link suggestions. Comma-separated globs."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Excluded files')}
-            title="Coming soon"
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Manage
-          </button>
+          <WiredText
+            settingKey="nexus.settings.files.excludedPatterns"
+            defaultValue=""
+            placeholder=".obsidian/*, node_modules/*, *.tmp"
+            label="Excluded files"
+          />
         }
       />
       <StubRow
@@ -1645,7 +1606,6 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
 // platform keyring is tracked separately.
 
 function KeychainTab({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
   return (
     <div className="settings-section">
       <div
@@ -1989,7 +1949,6 @@ function StubDailyNotesPage(_: { api?: PluginAPI }) {
 }
 
 function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
   return (
     <div className="settings-section">
       <StubRow
@@ -2018,12 +1977,16 @@ function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
       />
       <StubRow
         title="Snapshots"
-        description="View and restore saved snapshots."
+        description="View and restore saved snapshots. Until the file-recovery subsystem ships, the list is always empty — the values above are persisted so they take effect the moment snapshots come online."
         control={
           <button
             type="button"
-            onClick={comingSoon('View snapshots')}
-            title="Coming soon"
+            onClick={() =>
+              api?.notifications.show({
+                type: 'info',
+                message: 'No snapshots — the file-recovery daemon is not yet built.',
+              })
+            }
             style={{
               background: 'var(--interactive-accent)',
               color: 'var(--interactive-accent-ink)',
@@ -2044,8 +2007,12 @@ function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
         control={
           <button
             type="button"
-            onClick={comingSoon('Clear file recovery history')}
-            title="Coming soon"
+            onClick={() =>
+              api?.notifications.show({
+                type: 'info',
+                message: 'Snapshot history is empty — nothing to clear.',
+              })
+            }
             style={{
               background: 'transparent',
               color: 'var(--text-error, #e06c75)',
@@ -2174,7 +2141,6 @@ function StubQuickSwitcherPage(_: { api?: PluginAPI }) {
 }
 
 function StubSyncPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
   return (
     <div className="settings-section">
       <p style={{ marginBottom: 12 }}>
@@ -2438,7 +2404,6 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
   const scheme: 'light' | 'dark' =
     activeCategory === 'light' ? 'light' : 'dark'
 
-  const comingSoon = useComingSoon(api)
 
   return (
     <div className="settings-section">
@@ -2491,8 +2456,12 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
             </select>
             <button
               type="button"
-              onClick={comingSoon('Manage themes')}
-              title="Coming soon"
+              onClick={() =>
+                window.open(
+                  'https://github.com/baileyrd/nexus#community-themes',
+                  '_blank',
+                )
+              }
               style={{
                 background: 'var(--interactive-accent)',
                 color: 'var(--interactive-accent-ink)',
@@ -2551,24 +2520,14 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
       />
       <StubRow
         title="Ribbon menu configuration"
-        description="Configure what commands appear in the ribbon menu."
+        description="Comma-separated command ids the ribbon should expose. Honored once a ribbon renderer ships."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Ribbon menu configuration')}
-            title="Coming soon"
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Manage
-          </button>
+          <WiredText
+            settingKey="nexus.settings.appearance.ribbonCommands"
+            defaultValue=""
+            placeholder="nexus.commandPalette.toggle, nexus.editor.toggleMode"
+            label="Ribbon commands"
+          />
         }
       />
 

@@ -1439,6 +1439,7 @@ export const editorPlugin: Plugin = {
       'nexus.editor.stub.splitRight',
       'nexus.editor.stub.splitDown',
       'nexus.editor.stub.exportPdf',
+      'nexus.editor.stub.mergeFile',
     ])
     for (const stub of STUB_COMMANDS) {
       if (WIRED.has(stub.id)) continue
@@ -1565,6 +1566,45 @@ export const editorPlugin: Plugin = {
 
     api.commands.register('nexus.editor.stub.splitDown', async () => {
       await performSplit('vertical')
+    })
+
+    api.commands.register('nexus.editor.stub.mergeFile', async () => {
+      let raw: unknown
+      try {
+        raw = await api.kernel.invoke<unknown>('com.nexus.git', 'conflict_files', {})
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Conflict lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      const paths = Array.isArray(raw)
+        ? (raw as unknown[]).filter((p): p is string => typeof p === 'string')
+        : []
+      if (paths.length === 0) {
+        api.notifications.show({
+          type: 'info',
+          message: 'No merge conflicts to resolve.',
+        })
+        return
+      }
+      const items = paths.map((p) => {
+        const base = p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p
+        return { label: base, description: p, value: p }
+      })
+      const picked = await api.input.pick<string>(items, {
+        title: `Merge conflicts (${paths.length})`,
+        placeholder: 'Open conflicted file',
+      })
+      if (!picked) return
+      const base = picked.includes('/') ? picked.slice(picked.lastIndexOf('/') + 1) : picked
+      // The editor renders the `<<<<<<<`/`=======`/`>>>>>>>` markers
+      // inline. Users resolve manually then stage + commit via the
+      // existing git pane. A dedicated 3-pane merge view is the
+      // follow-up surface (would mount a CodeMirror merge extension
+      // wired to conflict_versions for theirs/ours/resolved).
+      api.events.emit('files:open', { relpath: picked, name: base })
     })
 
     api.commands.register('nexus.editor.stub.exportPdf', async () => {
