@@ -105,6 +105,74 @@ pub fn string_arg(
         })
 }
 
+/// Execute the canonical IPC-handler shape: **decode args → call domain →
+/// wrap error → encode reply** in one call.
+///
+/// This collapses the per-arm boilerplate that previously occupied 5+
+/// lines per dispatch handler (`let a: T = parse_args(...)?;`
+/// `let r = f(...).map_err(|e| exec_err(format!("name: {e}")))?;`
+/// `to_value(&r, "name")`) into a single line:
+///
+/// ```ignore
+/// HANDLER_CSV_EXPORT => typed_call(PLUGIN_ID, "csv_export", args, |a: CsvExportArgs| {
+///     // domain logic returning Result<R, E: Display>
+/// })
+/// ```
+///
+/// The closure may return any `Result<R, E>` where `E: Display`; the
+/// error is reformatted as `"{command}: {e}"` and attributed to
+/// `plugin_id`. For infallible bodies, annotate the closure's return
+/// as `Result<R, std::convert::Infallible>`.
+///
+/// See `docs/0.1.2/audits/solid-dry-assessment-2026-05-18.md` SD-02.
+///
+/// # Errors
+///
+/// - [`PluginError::ExecutionFailed`] if `args` cannot decode into `A`.
+/// - [`PluginError::ExecutionFailed`] (wrapping `e`) if `f` fails.
+/// - [`PluginError::ExecutionFailed`] if the reply cannot serialize.
+pub fn typed_call<A, R, F, E>(
+    plugin_id: &str,
+    command: &str,
+    args: &serde_json::Value,
+    f: F,
+) -> Result<serde_json::Value, PluginError>
+where
+    A: DeserializeOwned,
+    R: Serialize,
+    E: std::fmt::Display,
+    F: FnOnce(A) -> Result<R, E>,
+{
+    let a: A = parse_args(plugin_id, command, args)?;
+    let r = f(a).map_err(|e| exec_err(plugin_id, format!("{command}: {e}")))?;
+    to_value(plugin_id, command, &r)
+}
+
+/// Infallible companion to [`typed_call`] for handlers whose domain
+/// call cannot fail (pure transformations, lookups returning an
+/// `Option` already serialized to JSON, etc.). Skips the
+/// `Result<_, Infallible>` ceremony at the call site.
+///
+/// # Errors
+///
+/// - [`PluginError::ExecutionFailed`] if `args` cannot decode into `A`.
+/// - [`PluginError::ExecutionFailed`] if the reply cannot serialize.
+pub fn typed_call_pure<A, R, F>(
+    plugin_id: &str,
+    command: &str,
+    args: &serde_json::Value,
+    f: F,
+) -> Result<serde_json::Value, PluginError>
+where
+    A: DeserializeOwned,
+    R: Serialize,
+    F: FnOnce(A) -> R,
+{
+    let a: A = parse_args(plugin_id, command, args)?;
+    let r = f(a);
+    to_value(plugin_id, command, &r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +263,43 @@ mod tests {
         let err = string_arg(TEST_ID, "read", &v, "path").unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("'path'"), "got: {msg}");
+    }
+
+    #[test]
+    fn typed_call_decodes_calls_and_encodes() {
+        let v = serde_json::json!({"name": "x", "count": 3});
+        let out: serde_json::Value = typed_call(
+            TEST_ID,
+            "cmd",
+            &v,
+            |a: Args| -> Result<u32, std::convert::Infallible> {
+                Ok(a.count + 1)
+            },
+        )
+        .unwrap();
+        assert_eq!(out, serde_json::json!(4));
+    }
+
+    #[test]
+    fn typed_call_wraps_domain_error_with_command_prefix() {
+        let v = serde_json::json!({});
+        let err = typed_call(TEST_ID, "cmd", &v, |_: Args| Err::<(), _>("boom"))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("cmd: boom"), "got: {msg}");
+    }
+
+    #[test]
+    fn typed_call_propagates_arg_decode_failure() {
+        let v = serde_json::Value::Null;
+        let err = typed_call::<Required, (), _, std::convert::Infallible>(
+            TEST_ID,
+            "cmd",
+            &v,
+            |_| unreachable!("closure must not run when decode fails"),
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("default args invalid"), "got: {msg}");
     }
 }

@@ -88,6 +88,35 @@ macro_rules! define_dispatch_helpers {
         ) -> ::std::result::Result<String, $crate::PluginError> {
             $crate::dispatch::string_arg(PLUGIN_ID, command, value, field)
         }
+
+        #[allow(dead_code)]
+        $($vis)* fn typed_call<A, R, F, E>(
+            command: &str,
+            args: &::serde_json::Value,
+            f: F,
+        ) -> ::std::result::Result<::serde_json::Value, $crate::PluginError>
+        where
+            A: ::serde::de::DeserializeOwned,
+            R: ::serde::Serialize,
+            E: ::std::fmt::Display,
+            F: ::std::ops::FnOnce(A) -> ::std::result::Result<R, E>,
+        {
+            $crate::dispatch::typed_call(PLUGIN_ID, command, args, f)
+        }
+
+        #[allow(dead_code)]
+        $($vis)* fn typed_call_pure<A, R, F>(
+            command: &str,
+            args: &::serde_json::Value,
+            f: F,
+        ) -> ::std::result::Result<::serde_json::Value, $crate::PluginError>
+        where
+            A: ::serde::de::DeserializeOwned,
+            R: ::serde::Serialize,
+            F: ::std::ops::FnOnce(A) -> R,
+        {
+            $crate::dispatch::typed_call_pure(PLUGIN_ID, command, args, f)
+        }
     };
 }
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};

@@ -261,35 +261,35 @@ fn dispatch_csv_import(args: &serde_json::Value) -> Result<serde_json::Value, Pl
 }
 
 fn dispatch_csv_export(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-    let a: CsvExportArgs = parse_args(args, "csv_export")?;
-    let mut buf: Vec<u8> = Vec::new();
-    let count = export_csv(&mut buf, &a.records, &a.field_names)
-        .map_err(|e| exec_err(format!("csv_export: {e}")))?;
-    to_value(
-        &CsvExportResponse {
-            csv_bytes: buf,
-            count,
-        },
+    typed_call(
         "csv_export",
+        args,
+        |a: CsvExportArgs| -> Result<CsvExportResponse, String> {
+            let mut buf: Vec<u8> = Vec::new();
+            let count =
+                export_csv(&mut buf, &a.records, &a.field_names).map_err(|e| e.to_string())?;
+            Ok(CsvExportResponse { csv_bytes: buf, count })
+        },
     )
 }
 
 fn dispatch_formula_eval(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-    let a: FormulaEvalArgs = parse_args(args, "formula_eval")?;
-    let value = formula::evaluate(&a.expression, &a.fields)
-        .map_err(|e| exec_err(format!("formula_eval: {e}")))?;
-    to_value(
-        &FormulaEvalResponse {
-            display: value.to_display_string(),
-        },
+    typed_call(
         "formula_eval",
+        args,
+        |a: FormulaEvalArgs| -> Result<FormulaEvalResponse, String> {
+            let value = formula::evaluate(&a.expression, &a.fields).map_err(|e| e.to_string())?;
+            Ok(FormulaEvalResponse {
+                display: value.to_display_string(),
+            })
+        },
     )
 }
 
 fn dispatch_apply_view(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-    let a: ApplyViewArgs = parse_args(args, "apply_view")?;
-    let applied = crate::views::apply_view(&a.records, &a.schema, &a.view);
-    to_value(&applied, "apply_view")
+    typed_call_pure("apply_view", args, |a: ApplyViewArgs| {
+        crate::views::apply_view(&a.records, &a.schema, &a.view)
+    })
 }
 
 /// Args for `resolve_relation`. The caller passes the parent record,
@@ -332,13 +332,18 @@ pub struct ComputeRollupArgs {
 fn dispatch_resolve_relation(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: ResolveRelationArgs = parse_args(args, "resolve_relation")?;
-    let related = crate::relations::resolve_relation(&a.source, &a.relation, &a.target_records)
-        .map_err(|e| exec_err(format!("resolve_relation: {e}")))?;
-    // Clone out of the borrow so the JSON serialiser doesn't have to
-    // serialize references — keeps the wire shape simple.
-    let owned: Vec<_> = related.into_iter().cloned().collect();
-    to_value(&owned, "resolve_relation")
+    typed_call(
+        "resolve_relation",
+        args,
+        |a: ResolveRelationArgs| -> Result<Vec<_>, String> {
+            let related =
+                crate::relations::resolve_relation(&a.source, &a.relation, &a.target_records)
+                    .map_err(|e| e.to_string())?;
+            // Clone out of the borrow so the JSON serialiser doesn't have to
+            // serialize references — keeps the wire shape simple.
+            Ok(related.into_iter().cloned().collect())
+        },
+    )
 }
 
 fn dispatch_compute_rollup(
