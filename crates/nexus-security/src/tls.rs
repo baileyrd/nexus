@@ -169,6 +169,42 @@ pub fn pinned_client_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
+/// Build an outbound `reqwest::Client`, optionally with TLS pinning
+/// enabled via [`pinned_client_config`].
+///
+/// `NEXUS_TLS_PINNING=1` in the environment also enables pinning
+/// regardless of the flag — useful when operators want to opt in
+/// without editing every per-subsystem config.
+///
+/// A construction failure (e.g. the rustls graph missing a crypto
+/// provider) falls back to a stock client with a `tracing::warn!`
+/// so a misconfigured pin pipeline never leaves the caller without
+/// an HTTP client at all. Shared by `nexus-ai` and `nexus-audio`
+/// so chat + audio funnel through one pin policy.
+#[must_use]
+pub fn build_pinned_client(tls_pinning_enabled: bool) -> reqwest::Client {
+    let env_opt_in = std::env::var("NEXUS_TLS_PINNING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if !tls_pinning_enabled && !env_opt_in {
+        return reqwest::Client::new();
+    }
+    let cfg = pinned_client_config();
+    match reqwest::ClientBuilder::new()
+        .use_preconfigured_tls(cfg)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "BL-102: failed to build TLS-pinned reqwest client; falling back to stock client",
+            );
+            reqwest::Client::new()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

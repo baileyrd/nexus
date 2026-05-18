@@ -9,6 +9,9 @@ description = "Nexus audio subsystem: STT + TTS provider traits with local / pro
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+# BL-102: shared TLS-pinning HTTP client builder so the audio
+# provider backend funnels through the same pin policy as nexus-ai.
+nexus-security = { path = "../nexus-security" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

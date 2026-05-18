@@ -13,6 +13,11 @@ uuid        = { workspace = true }
 thiserror   = { workspace = true }
 tracing     = { workspace = true }
 tokio       = { workspace = true, features = ["sync", "rt", "macros"] }
+# nexus-crdt wraps `nexus_editor::Operation` / `BlockId` / `BlockTree` —
+# the CRDT envelope is a thin layer over the editor's op type, so the
+# crate sits at the layer above editor by design. This is the one
+# cross-service dep in the workspace; it's not a microkernel violation
+# (kernel does not depend on either) and is checked by dep_invariants.
 nexus-editor = { path = "../nexus-editor" }
 nexus-kernel = { path = "../nexus-kernel" }
 

@@ -52,6 +52,7 @@ later revised, write a new ADR that supersedes the old one.
 | [0028](0028-ai-agent-event-loop.md) | AI agent event loop (BL-134) | Accepted |
 | [0029](0029-notification-center-persistent-inbox.md) | Notification Center persistent inbox (BL-136) | Accepted |
 | [0030](0030-defer-wasm-community-runtime.md) | Defer WASM community runtime; iframe is the surface (BL-137) | Accepted (partial supersede of 0016) |
+| [0031](0031-cli-scope-exceptions-to-ipc-only.md) | CLI-scope exceptions to IPC-only (AA-03) | Accepted |
 
 ## How ADRs relate to PRDs and BACKLOG
 

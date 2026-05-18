@@ -58,6 +58,13 @@ pub struct AiConfig {
     /// network access seeds it). Sourced from
     /// `KernelConfig::tls_pinning_enabled` at boot.
     pub tls_pinning_enabled: bool,
+    /// BL-139 — token cap for the per-keystroke `predict` handler
+    /// when the caller omits `max_tokens`. Smaller than
+    /// [`Self::max_tokens`] because FIM completions are streamed at
+    /// keystroke rate and a runaway response stalls the editor. Set
+    /// from `[ai] predict_max_tokens = N` in `ai.toml`; defaults to
+    /// 64 tokens.
+    pub predict_max_tokens: u32,
 }
 
 impl Default for AiConfig {
@@ -74,6 +81,7 @@ impl Default for AiConfig {
             injection_policy: InjectionPolicy::Off,
             local_embedding_model: None,
             tls_pinning_enabled: false,
+            predict_max_tokens: 64,
         }
     }
 }

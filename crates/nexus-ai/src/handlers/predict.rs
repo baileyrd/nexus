@@ -30,13 +30,12 @@ use crate::ipc::{AiPredictArgs, AiPredictReply};
 use crate::ollama::OllamaProvider;
 use crate::provider::{AiProvider, ChatMessage, Role};
 
-/// Default token cap when the caller omits `max_tokens`.
-pub(crate) const DEFAULT_MAX_TOKENS: u32 = 64;
-
 /// Absolute character ceiling on the returned completion. Even with
-/// `max_tokens = 64`, a tokeniser quirk or a runaway code model can
-/// surface a long blob — capping in characters keeps the ghost-widget
-/// render bounded.
+/// a small `max_tokens`, a tokeniser quirk or a runaway code model
+/// can surface a long blob — capping in characters keeps the
+/// ghost-widget render bounded. The token-count cap lives on
+/// [`AiConfig::predict_max_tokens`] (default 64) — operators retune
+/// via `[ai] predict_max_tokens = N` in `ai.toml`.
 pub(crate) const COMPLETION_CHAR_CAP: usize = 2048;
 
 pub(crate) async fn handle_predict(
@@ -49,7 +48,9 @@ pub(crate) async fn handle_predict(
     let ai_cfg =
         ai_cfg.ok_or_else(|| exec_err("predict: no AI chat provider configured"))?;
 
-    let max_tokens = parsed.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+    let max_tokens = parsed
+        .max_tokens
+        .unwrap_or(ai_cfg.predict_max_tokens.max(1));
 
     let raw = match ai_cfg.provider.as_str() {
         "ollama" => {

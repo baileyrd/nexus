@@ -18,7 +18,7 @@
 
 | Phase | Items | Effort estimate | Risk reduction |
 |-------|------:|-----------------|----------------|
-| 0 — Quick wins (done or trivial) | 8 | ~6 h | low (cosmetic) |
+| 0 — Quick wins (done or trivial) | 8 | ~6 h | low (cosmetic) — **all 8 shipped 2026-05-17** |
 | 1 — Security hardening (P0) | 9 | 1–2 weeks | **high** (cap elevation closes hostile-plugin surface) |
 | 2 — Settings infrastructure (P1) | 7 | 2–3 weeks | medium (user UX + future-proofing) |
 | 3 — Architecture hardening (P1) | 5 | 1 week | medium (closes theoretical regression paths) |
@@ -30,18 +30,20 @@
 
 ## Phase 0 — Quick wins
 
+> **Phase 0 completed 2026-05-17.** All 8 items shipped — see per-row links below.
+
 Items already shipped during the audit, or trivial enough to bundle into any nearby PR.
 
 | ID | Item | Status | Effort |
 |----|------|--------|--------|
 | **AA-05** | Document "host-platform primitive" pattern in `shell.md` | ✅ shipped 2026-05-17 | XS |
 | **AA-09** | Patch shell.md + CLAUDE.md 25→29 Tauri command count | ✅ shipped 2026-05-17 | XS |
-| **P0-01** | Rationale comment on `nexus-crdt → nexus-editor` dep in Cargo.toml (AA-06) | open | XS |
-| **P0-02** | Open ADR formalizing the 3 CLI-scope IPC bypasses (AA-03 — `nexus-terminal`/`nexus-collab`/`nexus-security` in CLI) | open | XS |
-| **P0-03** | Fix `crates/nexus-audio/src/local_backend.rs:86` — thread `forge_root` through `AudioConfig::local_model_dir` (kills the chdir requirement) | open | S |
-| **P0-04** | Fix `crates/nexus-audio/src/local_backend.rs:29` — bare AIFF passthrough on macOS `say` (drop the WAV-wrap) | open | S |
-| **P0-05** | Fix `crates/nexus-audio/src/provider_backend.rs:316` — route audio reqwest through the `nexus-ai::http_client::build_client` TLS-pinning gate (TODO(BL-102 follow-up)) | open | S |
-| **P0-06** | Promote `crates/nexus-ai/src/handlers/predict.rs:33-37` `DEFAULT_MAX_TOKENS = 64` to `ai.predict_max_tokens` setting (FIM completions) | open | XS |
+| **P0-01** | Rationale comment on `nexus-crdt → nexus-editor` dep in Cargo.toml (AA-06) | ✅ shipped 2026-05-17 | XS |
+| **P0-02** | Open ADR formalizing the 3 CLI-scope IPC bypasses (AA-03 — `nexus-terminal`/`nexus-collab`/`nexus-security` in CLI) — [ADR 0031](../archive/pre-0.1.2/adr/0031-cli-scope-exceptions-to-ipc-only.md) | ✅ shipped 2026-05-17 | XS |
+| **P0-03** | Fix `crates/nexus-audio/src/local_backend.rs:86` — thread `forge_root` through `AudioConfig::local_model_dir` (kills the chdir requirement) | ✅ shipped 2026-05-17 | S |
+| **P0-04** | Fix `crates/nexus-audio/src/local_backend.rs:29` — bare AIFF passthrough on macOS `say` (drop the WAV-wrap) — resolved by aligning the stale doc-comment with the actual `--data-format=LEF32@22050` WAV path; no AIFF/hound wrap exists in code. | ✅ shipped 2026-05-17 | S |
+| **P0-05** | Fix `crates/nexus-audio/src/provider_backend.rs:316` — route audio reqwest through the `nexus-ai::http_client::build_client` TLS-pinning gate (TODO(BL-102 follow-up)). Shared `build_pinned_client` moved into `nexus-security::tls`; `nexus-ai` re-exports it, `nexus-audio` calls it directly. | ✅ shipped 2026-05-17 | S |
+| **P0-06** | Promote `crates/nexus-ai/src/handlers/predict.rs:33-37` `DEFAULT_MAX_TOKENS = 64` to `ai.predict_max_tokens` setting (FIM completions) — field added to `AiConfig`; handler reads it (defaults to 64). | ✅ shipped 2026-05-17 | XS |
 
 ---
 

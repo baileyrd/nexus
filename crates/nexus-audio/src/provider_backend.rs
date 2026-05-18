@@ -149,7 +149,7 @@ impl SttProvider for ProviderRoutedStt {
 
         run_async(async move {
             let ResolvedCreds { api_key, base_url } = resolve_creds(&cfg, &ctx).await?;
-            let client = build_http_client();
+            let client = build_http_client(cfg.tls_pinning_enabled);
             let url = format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'));
             let filename = format!("audio.{}", format.extension());
             let mut form = multipart::Form::new()
@@ -246,7 +246,7 @@ impl TtsProvider for ProviderRoutedTts {
 
         run_async(async move {
             let ResolvedCreds { api_key, base_url } = resolve_creds(&cfg, &ctx).await?;
-            let client = build_http_client();
+            let client = build_http_client(cfg.tls_pinning_enabled);
             let url = format!("{}/v1/audio/speech", base_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "model": model,
@@ -312,13 +312,12 @@ where
     }
 }
 
-fn build_http_client() -> reqwest::Client {
-    // TODO(BL-102 follow-up): route through the same TLS-pinning gate
-    // `nexus-ai::http_client::build_client` uses so audio + chat
-    // share one pin policy. For now stock client; pins default off
-    // workspace-wide anyway, so behaviour matches `nexus-ai`'s
-    // shipping default.
-    reqwest::Client::new()
+fn build_http_client(tls_pinning_enabled: bool) -> reqwest::Client {
+    // BL-102: same TLS-pinning gate `nexus-ai` uses, sourced from
+    // `AudioConfig::tls_pinning_enabled` (bootstrapped from
+    // `KernelConfig::tls_pinning_enabled`). With pinning off this is a
+    // stock client — no behaviour change vs. pre-BL-102 audio calls.
+    nexus_security::tls::build_pinned_client(tls_pinning_enabled)
 }
 
 /// Base64 codec used by the IPC boundary. Exported so the core

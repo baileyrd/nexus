@@ -4,10 +4,12 @@
 //! ## STT
 //!
 //! Wraps `whisper-rs` against a GGML model file kept under
-//! `<forge>/.forge/.audio/models/ggml-<size>.bin`. The model is
-//! downloaded from the ggerganov HuggingFace repo on first use; the
-//! download is gated by the storage subsystem's network capability
-//! (audio plugin already declares `NetHttp` in
+//! `<forge>/.forge/.audio/models/ggml-<size>.bin` (the directory is
+//! resolved from `AudioConfig::local_model_dir`, which
+//! [`crate::AudioConfig::load`] anchors to the forge root). The
+//! model is downloaded from the ggerganov HuggingFace repo on first
+//! use; the download is gated by the storage subsystem's network
+//! capability (audio plugin already declares `NetHttp` in
 //! `audio_capabilities`). The default size is `base.en` (~140 MB)
 //! per BL-117; the user can pick `tiny.en` (~75 MB) or `small.en`
 //! (~466 MB) via `[audio] local_model_size = "tiny.en" | "base.en"
@@ -22,16 +24,19 @@
 //!
 //! ## TTS
 //!
-//! Cross-platform shell-out:
+//! Cross-platform shell-out, each path produces a WAV file the
+//! handler reads back as bytes:
 //!
 //! - Linux: `espeak-ng -w <out.wav> -s 160 -- <text>`
-//! - macOS: `say -o <out.aiff>` (returned as AIFF wrapped in WAV
-//!   via hound — TODO: bare AIFF passthrough)
-//! - Windows: PowerShell SAPI script
+//! - macOS: `say -o <out.wav> --data-format=LEF32@22050 -- <text>`
+//!   — `say` writes a 32-bit little-endian-float PCM WAV directly
+//!   when handed an explicit `--data-format`, so no AIFF→WAV
+//!   transcoding is needed.
+//! - Windows: PowerShell SAPI script writing a wave file.
 //!
-//! Each path returns WAV bytes. If the platform binary isn't on
-//! PATH the backend reports [`AudioError::BackendNotEnabled`] with
-//! a hint at install commands.
+//! If the platform binary isn't on PATH the backend reports
+//! [`AudioError::BackendNotEnabled`] with a hint at install
+//! commands.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -78,15 +83,11 @@ struct LocalWhisperStt {
 
 impl LocalWhisperStt {
     fn model_dir(&self) -> PathBuf {
-        // The audio plugin's runtime forge_root isn't carried in
-        // AudioConfig — we store the model relative to the current
-        // working directory's `.forge` so the test + the CLI both
-        // resolve the same path. AudioCorePlugin's on_init writes
-        // the model dir into AudioConfig::local_model_dir at boot
-        // (TODO: thread forge_root through cleanly; for now we
-        // accept that local-audio runs require the kernel to chdir
-        // into the forge root first).
-        PathBuf::from(".forge/.audio/models")
+        // Anchored to the forge root by AudioConfig::load — no chdir
+        // required. AudioConfig::default falls back to a relative
+        // `.forge/.audio/models` so unit tests that construct a default
+        // config still resolve a deterministic path.
+        self.cfg.local_model_dir.clone()
     }
 
     fn model_filename(size: &str) -> String {

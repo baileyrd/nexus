@@ -1,7 +1,7 @@
 //! `[audio]` config loaded from `<forge>/.forge/config.toml`. See
 //! BL-117 for the field semantics.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -70,6 +70,21 @@ pub struct AudioConfig {
     /// Honoured by the `local-whisper`-gated backend; ignored by the
     /// other two.
     pub local_model_size: String,
+    /// Directory the local Whisper backend looks in for `ggml-*.bin`
+    /// model files. Populated by [`Self::load`] from the forge root
+    /// (`<forge>/.forge/.audio/models`); operators can override it
+    /// via `[audio] local_model_dir = "/abs/path"` in `config.toml`
+    /// — useful when several forges should share one downloaded
+    /// model. [`Self::default`] uses a relative `".forge/.audio/models"`
+    /// so unit tests that build a default config still resolve a
+    /// predictable path.
+    pub local_model_dir: PathBuf,
+    /// BL-102 — pin TLS connections to the provider-backend HTTPS
+    /// endpoints. Sourced from `KernelConfig::tls_pinning_enabled` at
+    /// boot; matches the `nexus-ai` posture so audio + chat share
+    /// one pin policy. Defaults to `false` while the shipped pin
+    /// table is empty.
+    pub tls_pinning_enabled: bool,
     /// OpenAI API key for the provider-routed backend. When `None`
     /// the backend reports [`AudioError::Misconfigured`] on first
     /// dispatch rather than failing at boot.
@@ -92,6 +107,8 @@ impl Default for AudioConfig {
             stt_backend: AudioBackendName::Local,
             tts_backend: AudioBackendName::Local,
             local_model_size: "base.en".to_string(),
+            local_model_dir: PathBuf::from(".forge/.audio/models"),
+            tls_pinning_enabled: false,
             provider_api_key: None,
             provider_base_url: None,
             provider_stt_model: "whisper-1".to_string(),
@@ -111,6 +128,8 @@ struct RawAudio {
     stt_backend: Option<String>,
     tts_backend: Option<String>,
     local_model_size: Option<String>,
+    local_model_dir: Option<PathBuf>,
+    tls_pinning_enabled: Option<bool>,
     provider_api_key: Option<String>,
     provider_base_url: Option<String>,
     provider_stt_model: Option<String>,
@@ -144,6 +163,9 @@ impl AudioConfig {
         };
         let raw = raw.audio.unwrap_or_default();
         let mut out = Self::default();
+        // Anchor the default model dir to the forge root so local-audio
+        // works regardless of cwd. TOML can still override (next block).
+        out.local_model_dir = forge_root.join(".forge").join(".audio").join("models");
         if let Some(name) = raw.stt_backend {
             out.stt_backend = name.parse()?;
         }
@@ -152,6 +174,12 @@ impl AudioConfig {
         }
         if let Some(v) = raw.local_model_size {
             out.local_model_size = v;
+        }
+        if let Some(v) = raw.local_model_dir {
+            out.local_model_dir = v;
+        }
+        if let Some(v) = raw.tls_pinning_enabled {
+            out.tls_pinning_enabled = v;
         }
         if let Some(v) = raw.provider_api_key {
             if !v.is_empty() {
