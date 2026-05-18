@@ -18,7 +18,7 @@ use std::time::Duration;
 use nexus_kernel::{EventBus, EventFilter};
 use nexus_plugins::{CorePlugin, PluginError};
 
-use crate::{FileFilter, StorageConfig, StorageEngine, TaskFilter};
+use crate::{StorageConfig, StorageEngine};
 use crate::watcher::{StorageEvent, Watcher};
 
 /// Topic the git plugin emits on every HEAD change; the storage
@@ -590,62 +590,12 @@ impl CorePlugin for StorageCorePlugin {
         })?;
 
         match handler_id {
-            HANDLER_QUERY_FILES => {
-                let filter: FileFilter = parse_args(args, "query_files")?;
-                let records = engine
-                    .query_files(&filter)
-                    .map_err(|e| exec_err(format!("query_files: {e}")))?;
-                to_value(&records, "query_files")
-            }
-            HANDLER_READ_FILE => {
-                let path = path_arg(args, "read_file")?;
-                match engine.read_file(&path) {
-                    Ok(bytes) => Ok(serde_json::json!({ "bytes": bytes })),
-                    // Missing files are an expected outcome for callers probing
-                    // `.forge/workspace.json` on first boot, etc. Return a typed
-                    // null rather than an error so the IPC bridge doesn't
-                    // surface it as `PluginCrashedDuringCall`.
-                    Err(crate::StorageError::FileNotFound(_)) => {
-                        Ok(serde_json::json!({ "bytes": null }))
-                    }
-                    Err(e) => Err(exec_err(format!("read_file: {e}"))),
-                }
-            }
-            HANDLER_BACKLINKS => {
-                let path = path_arg(args, "backlinks")?;
-                let results = engine
-                    .backlinks(&path)
-                    .map_err(|e| exec_err(format!("backlinks: {e}")))?;
-                to_value(&results, "backlinks")
-            }
-            HANDLER_BACKLINKS_TO_BLOCK => {
-                let path = path_arg(args, "backlinks_to_block")?;
-                let block_id = args
-                    .get("block_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        exec_err(
-                            "backlinks_to_block: missing 'block_id' string".to_string(),
-                        )
-                    })?;
-                let results = engine
-                    .backlinks_to_block(&path, block_id)
-                    .map_err(|e| exec_err(format!("backlinks_to_block: {e}")))?;
-                to_value(&results, "backlinks_to_block")
-            }
-            HANDLER_QUERY_TASKS => {
-                let filter: TaskFilter = parse_args(args, "query_tasks")?;
-                let records = engine
-                    .query_tasks(&filter)
-                    .map_err(|e| exec_err(format!("query_tasks: {e}")))?;
-                to_value(&records, "query_tasks")
-            }
-            HANDLER_GRAPH_STATS => {
-                let stats = engine
-                    .graph_stats()
-                    .map_err(|e| exec_err(format!("graph_stats: {e}")))?;
-                to_value(&stats, "graph_stats")
-            }
+            HANDLER_QUERY_FILES => crate::handlers::files::query_files(engine, args),
+            HANDLER_READ_FILE => crate::handlers::files::read_file(engine, args),
+            HANDLER_BACKLINKS => crate::handlers::graph::backlinks(engine, args),
+            HANDLER_BACKLINKS_TO_BLOCK => crate::handlers::graph::backlinks_to_block(engine, args),
+            HANDLER_QUERY_TASKS => crate::handlers::tasks::query_tasks(engine, args),
+            HANDLER_GRAPH_STATS => crate::handlers::graph::graph_stats(engine),
             HANDLER_REBUILD_INDEX => {
                 let stats = engine
                     .rebuild_index()
@@ -674,20 +624,7 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("query_symbol: {e}")))?;
                 Ok(serde_json::json!({ "symbols": symbols }))
             }
-            HANDLER_WRITE_FILE => {
-                let path = path_arg(args, "write_file")?;
-                let bytes: Vec<u8> = args
-                    .get("bytes")
-                    .ok_or_else(|| exec_err("write_file: missing 'bytes'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone())
-                            .map_err(|e| exec_err(format!("write_file: bytes decode: {e}")))
-                    })?;
-                let meta = engine
-                    .write_file(&path, &bytes)
-                    .map_err(|e| exec_err(format!("write_file: {e}")))?;
-                to_value(&meta, "write_file")
-            }
+            HANDLER_WRITE_FILE => crate::handlers::files::write_file(engine, args),
             HANDLER_NOTE_APPEND => {
                 let path = path_arg(args, "note_append")?;
                 let snippet = args
@@ -719,83 +656,19 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("note_append: write: {e}")))?;
                 to_value(&meta, "note_append")
             }
-            HANDLER_WRITE_VAULT_FILE => {
-                let path = path_arg(args, "write_vault_file")?;
-                // The handler is documented as ".forge/-prefixed
-                // shell metadata only" — `write_raw` skips FTS,
-                // graph, and watcher updates, so a vault path
-                // (e.g. `notes/foo.md`) written here would silently
-                // diverge from the index. Confine to the `.forge/`
-                // subdirectory; user-facing writes must go through
-                // `HANDLER_WRITE_FILE`. See issue #80.
-                if !is_forge_metadata_path(&path) {
-                    return Err(exec_err(format!(
-                        "write_vault_file: '{path}' is outside the .forge/ \
-                         metadata namespace; vault writes must go through write_file"
-                    )));
-                }
-                let bytes: Vec<u8> = args
-                    .get("bytes")
-                    .ok_or_else(|| exec_err("write_vault_file: missing 'bytes'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone()).map_err(|e| {
-                            exec_err(format!("write_vault_file: bytes decode: {e}"))
-                        })
-                    })?;
-                engine
-                    .write_raw(&path, &bytes)
-                    .map_err(|e| exec_err(format!("write_vault_file: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_DELETE_FILE => {
-                let path = path_arg(args, "delete_file")?;
-                engine
-                    .delete_file(&path)
-                    .map_err(|e| exec_err(format!("delete_file: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_FILE_EXISTS => {
-                let path = path_arg(args, "file_exists")?;
-                let exists = engine
-                    .file_exists(&path)
-                    .map_err(|e| exec_err(format!("file_exists: {e}")))?;
-                Ok(serde_json::json!({ "exists": exists }))
-            }
+            HANDLER_WRITE_VAULT_FILE => crate::handlers::files::write_vault_file(engine, args),
+            HANDLER_DELETE_FILE => crate::handlers::files::delete_file(engine, args),
+            HANDLER_FILE_EXISTS => crate::handlers::files::file_exists(engine, args),
             HANDLER_REBUILD_SEARCH_INDEX => {
                 engine
                     .rebuild_search_index()
                     .map_err(|e| exec_err(format!("rebuild_search_index: {e}")))?;
                 Ok(serde_json::json!({}))
             }
-            HANDLER_TOGGLE_TASK => {
-                let task_id = args
-                    .get("task_id")
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or_else(|| exec_err("toggle_task: missing 'task_id' (u64)".to_string()))?;
-                let record = engine
-                    .toggle_task(task_id)
-                    .map_err(|e| exec_err(format!("toggle_task: {e}")))?;
-                to_value(&record, "toggle_task")
-            }
-            HANDLER_OUTGOING_LINKS => {
-                let path = path_arg(args, "outgoing_links")?;
-                let links = engine
-                    .outgoing_links(&path)
-                    .map_err(|e| exec_err(format!("outgoing_links: {e}")))?;
-                to_value(&links, "outgoing_links")
-            }
-            HANDLER_UNRESOLVED_LINKS => {
-                let links = engine
-                    .unresolved_links()
-                    .map_err(|e| exec_err(format!("unresolved_links: {e}")))?;
-                to_value(&links, "unresolved_links")
-            }
-            HANDLER_LIST_ALL_LINKS => {
-                let snapshot = engine
-                    .list_all_links()
-                    .map_err(|e| exec_err(format!("list_all_links: {e}")))?;
-                to_value(&snapshot, "list_all_links")
-            }
+            HANDLER_TOGGLE_TASK => crate::handlers::tasks::toggle_task(engine, args),
+            HANDLER_OUTGOING_LINKS => crate::handlers::graph::outgoing_links(engine, args),
+            HANDLER_UNRESOLVED_LINKS => crate::handlers::graph::unresolved_links(engine),
+            HANDLER_LIST_ALL_LINKS => crate::handlers::graph::list_all_links(engine),
             HANDLER_CANVAS_READ => {
                 let path = path_arg(args, "canvas_read")?;
                 let canvas_file = engine
@@ -1041,18 +914,7 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("base_view_delete: {e}")))?;
                 Ok(serde_json::json!({}))
             }
-            HANDLER_GRAPH_NEIGHBORS => {
-                let path = path_arg(args, "graph_neighbors")?;
-                let depth = args
-                    .get("depth")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|v| usize::try_from(v).ok())
-                    .ok_or_else(|| exec_err("graph_neighbors: missing 'depth' (u64)".to_string()))?;
-                let paths = engine
-                    .graph_neighbors(&path, depth)
-                    .map_err(|e| exec_err(format!("graph_neighbors: {e}")))?;
-                to_value(&paths, "graph_neighbors")
-            }
+            HANDLER_GRAPH_NEIGHBORS => crate::handlers::graph::graph_neighbors(engine, args),
             HANDLER_QUERY_TAGS => {
                 let name = args
                     .get("name")
@@ -1112,13 +974,7 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("vectorstore_count: {e}")))?;
                 Ok(serde_json::json!({ "count": count }))
             }
-            HANDLER_QUERY_BLOCKS => {
-                let path = path_arg(args, "query_blocks")?;
-                let blocks = engine
-                    .query_blocks_by_path(&path)
-                    .map_err(|e| exec_err(format!("query_blocks: {e}")))?;
-                to_value(&blocks, "query_blocks")
-            }
+            HANDLER_QUERY_BLOCKS => crate::handlers::tasks::query_blocks(engine, args),
             HANDLER_BASE_INDEX => {
                 let path = path_arg(args, "base_index")?;
                 let abs_dir = self.forge_root.join(&path);
@@ -1366,17 +1222,13 @@ impl CorePlugin for StorageCorePlugin {
 
 nexus_plugins::define_dispatch_helpers!();
 
-/// True iff `path` is a forge-relative path inside the `.forge/`
-/// metadata directory (the namespace `HANDLER_WRITE_VAULT_FILE` is
-/// documented to own — workspace.json, kv.sqlite3 sidecars, plugin
-/// state, etc.). Accepts both `/`-separated POSIX paths and
-/// `\`-separated Windows-style paths so the check does the right
-/// thing regardless of the platform-native separator the caller
-/// happens to send.
-fn is_forge_metadata_path(path: &str) -> bool {
-    let normalized = path.replace('\\', "/");
-    normalized == ".forge" || normalized.starts_with(".forge/")
-}
+// SD-03 Phase B partial: `is_forge_metadata_path` and its sole caller
+// (`HANDLER_WRITE_VAULT_FILE`) moved to `crate::handlers::files`. The
+// `path_arg` / `relpath_arg` / `name_arg` helpers below are still
+// referenced by inline arms (canvas, bases, tree, …) that haven't
+// been lifted out yet — those moves happen in follow-on Phase B
+// commits, at which point these locals will join their counterparts
+// in `crate::handlers::shared`.
 
 fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
     string_arg(value, command, "path")

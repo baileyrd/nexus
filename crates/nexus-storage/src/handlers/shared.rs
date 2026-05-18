@@ -24,3 +24,39 @@ pub(crate) fn config_kind(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| exec_err("config: missing 'kind' string argument".to_string()))
 }
+
+/// Convenience wrappers — the storage handlers historically named the
+/// three common string-arg fields (`path`, `relpath`, `name`) via
+/// dedicated helpers so call sites read as `path_arg(args, "cmd")`
+/// rather than `string_arg(args, "cmd", "path")`. Keeping the wrappers
+/// preserves call-site clarity while delegating the lookup logic to
+/// the workspace-wide macro-emitted `string_arg`.
+#[allow(dead_code)]
+pub(crate) fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
+    string_arg(value, command, "path")
+}
+
+#[allow(dead_code)] // consumed by canvas/bases handlers in a follow-on Phase B commit
+pub(crate) fn relpath_arg(
+    value: &serde_json::Value,
+    command: &str,
+) -> Result<String, PluginError> {
+    string_arg(value, command, "relpath")
+}
+
+#[allow(dead_code)] // consumed by bases handlers in a follow-on Phase B commit
+pub(crate) fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
+    string_arg(value, command, "name")
+}
+
+/// True iff `path` is a forge-relative path inside the `.forge/`
+/// metadata directory (the namespace `HANDLER_WRITE_VAULT_FILE` is
+/// documented to own — workspace.json, kv.sqlite3 sidecars, plugin
+/// state, etc.). Accepts both `/`-separated POSIX paths and
+/// `\`-separated Windows-style paths so the check does the right
+/// thing regardless of the platform-native separator the caller
+/// happens to send.
+pub(crate) fn is_forge_metadata_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    normalized == ".forge" || normalized.starts_with(".forge/")
+}
