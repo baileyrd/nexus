@@ -166,6 +166,15 @@ pub struct GitSettings {
     pub auto_commit_on_save: bool,
     /// Debounce window in seconds for rapid saves. Default: 5.
     pub auto_commit_debounce_secs: u64,
+    /// P2-06 — interval between `git status` polls (background state
+    /// watcher). `None` ⇒ `nexus_git::core_plugin::DEFAULT_POLL_INTERVAL`
+    /// (2 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll_interval_secs: Option<u64>,
+    /// P2-06 — wake-up cadence inside the auto-commit idle loop.
+    /// `None` ⇒ `nexus_git::core_plugin::DEFAULT_AUTO_COMMIT_TICK` (30 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_commit_tick_secs: Option<u64>,
 }
 
 impl Default for GitSettings {
@@ -176,6 +185,8 @@ impl Default for GitSettings {
             auto_commit_interval_secs: 1800,
             auto_commit_on_save:       false,
             auto_commit_debounce_secs: 5,
+            poll_interval_secs:        None,
+            auto_commit_tick_secs:     None,
         }
     }
 }

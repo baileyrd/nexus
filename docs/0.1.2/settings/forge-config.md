@@ -12,7 +12,7 @@
 [preview]           # PreviewSettings
 [search]            # SearchSettings
 [plugins]           # PluginSettings
-[git]               # GitSettings
+[git]               # GitSettings — adds (P2-06) poll_interval_secs + auto_commit_tick_secs overrides
 [dream_cycle]       # DreamCycleSettings
 
 [settings]          # BTreeMap<String, toml::Value> — flat key→value bag
@@ -77,6 +77,7 @@ ollama_chat_model      = "llama3.2"                   # nexus_ai::ollama::DEFAUL
 ollama_embedding_model = "nomic-embed-text"           # nexus_ai::ollama::DEFAULT_EMBEDDING_MODEL
 ollama_temperature     = 0.2                          # FIM `/api/generate` — nexus_ai::ollama::DEFAULT_FIM_TEMPERATURE
 ollama_base_url        = "http://localhost:11434"     # P2-05 — nexus_ai::ollama::DEFAULT_BASE_URL
+indexing_debounce_secs = 2                            # P2-06 — IndexingDaemon debounce window; nexus_ai::indexing_daemon::DEFAULT_DEBOUNCE
 ```
 
 Defaults via `serde(default = …)` helpers in the Config struct. Loader: `load_ai_config(forge_root)` — `config/mod.rs:92`.
@@ -92,6 +93,13 @@ args = ["--option", "value"]
 env = { KEY = "value" }
 working_dir = "/optional"
 transport = "stdio"                 # also "streamable-http" with `url = "..."`
+
+[timeouts]                          # P2-06 — optional per-field overrides; each falls back to nexus_mcp::{client,server,auth}::DEFAULT_*
+connect_secs  = 15                  # rmcp initialize handshake
+shutdown_secs = 5                   # graceful close before child SIGKILL
+ipc_secs      = 30                  # inbound IPC into kernel-side plugins
+ai_ipc_secs   = 120                 # inbound IPC into ai/* handlers
+oauth_secs    = 30                  # OAuth token POST
 
 [contributed_by]                    # HashMap<server_name, plugin_id> — runtime-only
 "some.server" = "com.example.plugin"

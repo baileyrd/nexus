@@ -91,6 +91,12 @@ pub struct AiConfig {
     /// values bias toward deterministic completions, which matches
     /// editor expectations.
     pub ollama_temperature: Option<f32>,
+    /// P2-06 — debounce window for the indexing daemon. Bursts of
+    /// `com.nexus.storage.file_*` events within this window collapse
+    /// into a single batch. `None` ⇒
+    /// [`crate::indexing_daemon::DEFAULT_DEBOUNCE`] (2 s). Lower for
+    /// snappier reindex; raise for fewer wakeups on a noisy filesystem.
+    pub indexing_debounce_secs: Option<u64>,
 }
 
 impl Default for AiConfig {
@@ -114,7 +120,20 @@ impl Default for AiConfig {
             ollama_chat_model: None,
             ollama_embedding_model: None,
             ollama_temperature: None,
+            indexing_debounce_secs: None,
         }
+    }
+}
+
+impl AiConfig {
+    /// P2-06 — resolved indexing-daemon debounce window. Returns
+    /// [`crate::indexing_daemon::DEFAULT_DEBOUNCE`] when no override
+    /// is configured.
+    #[must_use]
+    pub fn indexing_debounce(&self) -> std::time::Duration {
+        self.indexing_debounce_secs
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(crate::indexing_daemon::DEFAULT_DEBOUNCE)
     }
 }
 

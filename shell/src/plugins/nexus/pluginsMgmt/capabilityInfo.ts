@@ -95,6 +95,16 @@ export const CAPABILITY_INFO: Record<Capability, CapabilityMeta> = {
   // ── notifications.inbox.* — BL-136 / ADR 0029 ───────────────────
   NotificationsInboxRead:  { risk: 'low', description: 'Read the persistent notification inbox' },
   NotificationsInboxWrite: { risk: 'low', description: 'Mark notifications read or dismiss them' },
+
+  // ── ADR 0027 — protocol-host contribution surface ───────────────
+  ProtocolHostContribute: { risk: 'high', description: 'Contribute MCP/LSP/DAP/ACP servers to the protocol host' },
+
+  // ── P1-01 — keyring + audit-log mutation ────────────────────────
+  SecurityWrite:      { risk: 'high', description: 'Write/delete OS keyring entries (passwords, API tokens)' },
+  SecurityAuditWrite: { risk: 'high', description: 'Truncate the security audit log' },
+
+  // ── P1-07 — network listener ───────────────────────────────────
+  NetworkBind: { risk: 'high', description: 'Bind a network listener (collab relay, etc.)' },
 }
 
 /** All capability variants known to the shell, in stable display order. */

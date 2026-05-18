@@ -55,6 +55,13 @@ export const CAPABILITY_TO_KERNEL_STRING: Record<Capability, string> = {
   // BL-136 / ADR 0029 — notification inbox caps.
   NotificationsInboxRead:  'notifications.inbox.read',
   NotificationsInboxWrite: 'notifications.inbox.write',
+  // ADR 0027 — protocol-host contribution surface.
+  ProtocolHostContribute:  'protocol.host.contribute',
+  // P1-01 — keyring + audit-log mutation.
+  SecurityWrite:           'security.write',
+  SecurityAuditWrite:      'security.audit.write',
+  // P1-07 — bind a network listener.
+  NetworkBind:             'network.bind',
 }
 
 /** Dotted → PascalCase; inverse of the above. */

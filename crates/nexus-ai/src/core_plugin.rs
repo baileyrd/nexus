@@ -533,7 +533,23 @@ impl CorePlugin for AiCorePlugin {
             build_embedding_provider(&cfg).ok()
         });
 
-        match IndexingDaemon::start(Arc::clone(&ctx), Arc::clone(&self.index_status), factory) {
+        // P2-06 — pull the debounce window from the current AiConfig
+        // (per-forge) instead of the static DEFAULT_DEBOUNCE so an
+        // `[ai] indexing_debounce_secs = N` override actually takes
+        // effect. `ai_config` is the `set_config`-mutated handle the
+        // daemon also consults for its embedder factory.
+        let debounce = self
+            .ai_config
+            .read()
+            .ok()
+            .and_then(|g| g.as_ref().map(crate::AiConfig::indexing_debounce))
+            .unwrap_or(crate::indexing_daemon::DEFAULT_DEBOUNCE);
+        match IndexingDaemon::start_with_debounce(
+            Arc::clone(&ctx),
+            Arc::clone(&self.index_status),
+            factory,
+            debounce,
+        ) {
             Ok(daemon) => {
                 if let Ok(mut g) = self.daemon_tx.write() {
                     *g = daemon.sender_handle();

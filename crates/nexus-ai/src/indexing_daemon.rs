@@ -352,6 +352,21 @@ impl IndexingDaemon {
         status: SharedStatus,
         embedder_factory: EmbedderFactory,
     ) -> std::io::Result<Self> {
+        Self::start_with_debounce(ctx, status, embedder_factory, DEFAULT_DEBOUNCE)
+    }
+
+    /// P2-06 — same as [`Self::start`] plus an explicit debounce
+    /// window. Use when the AiConfig override is in play; otherwise
+    /// the no-arg form falls through to [`DEFAULT_DEBOUNCE`].
+    ///
+    /// # Errors
+    /// Same as [`Self::start`].
+    pub fn start_with_debounce(
+        ctx: Arc<KernelPluginContext>,
+        status: SharedStatus,
+        embedder_factory: EmbedderFactory,
+        debounce: Duration,
+    ) -> std::io::Result<Self> {
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<DaemonMsg>();
         let shutdown = Arc::new(AtomicBool::new(false));
 
@@ -388,6 +403,7 @@ impl IndexingDaemon {
                         shutdown_for_thread,
                         status_for_thread.clone(),
                         embedder_factory,
+                        debounce,
                     ));
                 } else {
                     tracing::warn!(
@@ -417,6 +433,7 @@ impl IndexingDaemon {
                         shutdown_for_thread,
                         status_for_thread.clone(),
                         embedder_factory,
+                        debounce,
                     ));
                 }
                 if let Ok(mut g) = status_for_thread.write() {
@@ -485,9 +502,10 @@ async fn worker_loop(
     shutdown: Arc<AtomicBool>,
     status: SharedStatus,
     embedder_factory: EmbedderFactory,
+    debounce: Duration,
 ) {
     let mut sub = ctx.subscribe(EventFilter::CustomPrefix(STORAGE_EVENT_PREFIX.to_string()));
-    let mut debouncer = Debouncer::new(DEFAULT_DEBOUNCE, DEFAULT_MAX_BATCH);
+    let mut debouncer = Debouncer::new(debounce, DEFAULT_MAX_BATCH);
 
     loop {
         if shutdown.load(Ordering::SeqCst) {

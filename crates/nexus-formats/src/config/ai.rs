@@ -54,6 +54,12 @@ pub struct AiConfig {
     /// favour deterministic completions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ollama_temperature: Option<f32>,
+    /// P2-06 — debounce window for the indexing daemon. Bursts of
+    /// `com.nexus.storage.file_*` events within this window collapse
+    /// into a single batch. Falls back to
+    /// `nexus_ai::indexing_daemon::DEFAULT_DEBOUNCE` (2 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexing_debounce_secs: Option<u64>,
     /// Named provider entries from `[providers.<name>]`.
     #[serde(default)]
     pub providers: std::collections::BTreeMap<String, AiProvider>,
@@ -78,6 +84,7 @@ impl Default for AiConfig {
             ollama_base_url:        None,
             ollama_embedding_model: None,
             ollama_temperature:     None,
+            indexing_debounce_secs: None,
             providers:              std::collections::BTreeMap::new(),
             models:                 Vec::new(),
         }

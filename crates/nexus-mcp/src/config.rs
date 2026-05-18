@@ -147,6 +147,14 @@ pub struct McpHostConfig {
     /// preserved by using [`BTreeMap`] rather than a hash map.
     #[serde(default)]
     pub servers: BTreeMap<String, McpServerSpec>,
+    /// P2-06 — per-forge timeout overrides for the MCP client +
+    /// server. Each field falls back to the corresponding
+    /// `nexus_mcp::{client,server,auth}::DEFAULT_*` constant when
+    /// unset. The schema is parsed today; runtime thread-through is
+    /// a follow-up — the consts remain the operational defaults
+    /// until the call sites are refactored to consult this struct.
+    #[serde(default, skip_serializing_if = "McpTimeouts::is_empty")]
+    pub timeouts: McpTimeouts,
     /// BL-113 Phase 3b — maps server `name` to the contributing plugin's
     /// reverse-DNS id for servers that came through
     /// [`merge_contributed`] / [`register_contributed`]. TOML-loaded
@@ -158,6 +166,37 @@ pub struct McpHostConfig {
     /// [`register_contributed`]: Self::register_contributed
     #[serde(default, skip)]
     pub contributed_by: std::collections::HashMap<String, String>,
+}
+
+/// P2-06 — `[timeouts]` block of `mcp.toml`. Every field is an
+/// optional seconds override; a `None` falls through to the matching
+/// `nexus_mcp::{client,server,auth}::DEFAULT_*` constant.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct McpTimeouts {
+    /// Override for `nexus_mcp::client::DEFAULT_CONNECT_TIMEOUT` (15 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_secs: Option<u64>,
+    /// Override for `nexus_mcp::client::DEFAULT_SHUTDOWN_TIMEOUT` (5 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shutdown_secs: Option<u64>,
+    /// Override for `nexus_mcp::server::DEFAULT_IPC_TIMEOUT` (30 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipc_secs: Option<u64>,
+    /// Override for `nexus_mcp::server::DEFAULT_AI_IPC_TIMEOUT` (120 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_ipc_secs: Option<u64>,
+    /// Override for `nexus_mcp::auth::DEFAULT_OAUTH_TIMEOUT` (30 s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_secs: Option<u64>,
+}
+
+impl McpTimeouts {
+    /// Used by `serde(skip_serializing_if)` so an empty `[timeouts]`
+    /// block doesn't show up in serialised TOML round-trips.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 /// Error parsing `mcp.toml`.

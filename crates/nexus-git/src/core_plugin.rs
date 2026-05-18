@@ -43,24 +43,58 @@ struct AutoCommitGitSettings {
     auto_commit: bool,
     #[serde(default = "default_interval")]
     auto_commit_interval_secs: u64,
+    /// P2-06 — interval between `git status` polls (background poller).
+    /// `None` ⇒ [`DEFAULT_POLL_INTERVAL`].
+    #[serde(default)]
+    poll_interval_secs: Option<u64>,
+    /// P2-06 — wake-up cadence inside the auto-commit idle loop.
+    /// `None` ⇒ [`DEFAULT_AUTO_COMMIT_TICK`].
+    #[serde(default)]
+    auto_commit_tick_secs: Option<u64>,
 }
 
 fn default_interval() -> u64 { 1800 }
 
 impl Default for AutoCommitGitSettings {
     fn default() -> Self {
-        Self { auto_commit: false, auto_commit_interval_secs: default_interval() }
+        Self {
+            auto_commit: false,
+            auto_commit_interval_secs: default_interval(),
+            poll_interval_secs: None,
+            auto_commit_tick_secs: None,
+        }
     }
 }
 
-fn read_auto_commit_settings(forge_root: &Path) -> (bool, u64) {
+/// P2-06 — resolved git timing knobs, sourced from `[git]` in
+/// `app.toml`. `poll_interval` falls back to [`DEFAULT_POLL_INTERVAL`]
+/// (2 s); `auto_commit_tick` falls back to
+/// [`DEFAULT_AUTO_COMMIT_TICK`] (30 s).
+struct GitTiming {
+    auto_commit: bool,
+    auto_commit_interval_secs: u64,
+    poll_interval: Duration,
+    auto_commit_tick: Duration,
+}
+
+fn read_git_settings(forge_root: &Path) -> GitTiming {
     let path = forge_root.join(".forge").join("app.toml");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => return (false, default_interval()),
-    };
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
     let cfg: AutoCommitAppConfig = toml::from_str(&text).unwrap_or_default();
-    (cfg.git.auto_commit, cfg.git.auto_commit_interval_secs)
+    GitTiming {
+        auto_commit: cfg.git.auto_commit,
+        auto_commit_interval_secs: cfg.git.auto_commit_interval_secs,
+        poll_interval: cfg
+            .git
+            .poll_interval_secs
+            .map(Duration::from_secs)
+            .unwrap_or(DEFAULT_POLL_INTERVAL),
+        auto_commit_tick: cfg
+            .git
+            .auto_commit_tick_secs
+            .map(Duration::from_secs)
+            .unwrap_or(DEFAULT_AUTO_COMMIT_TICK),
+    }
 }
 
 
@@ -176,11 +210,9 @@ pub const HANDLER_BLAME: u32 = 36;
 pub const HANDLER_DISCARD_HUNKS: u32 = 37;
 
 /// P2-06 — interval the background git-state watcher sleeps between
-/// `git status` polls. Override via the runtime
-/// [`crate::GitWorker`] constructor once GitSettings exposes a
-/// `poll_interval_secs` field; today the const is the only source.
+/// `git status` polls. Override per-forge via
+/// `[git] poll_interval_secs = N` in `app.toml`.
 pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const POLL_INTERVAL: Duration = DEFAULT_POLL_INTERVAL;
 const POLL_TICK: Duration = Duration::from_millis(200);
 
 /// Core plugin that exposes git operations over IPC and publishes state-change
@@ -241,9 +273,11 @@ impl CorePlugin for GitCorePlugin {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
 
+        let timing = read_git_settings(&self.forge_root);
+        let poll_interval = timing.poll_interval;
         let thread = thread::Builder::new()
             .name("nexus-git-poller".to_string())
-            .spawn(move || run_poller(handle, bus, stop_clone))
+            .spawn(move || run_poller(handle, bus, stop_clone, poll_interval))
             .map_err(|e| PluginError::LifecycleError {
                 plugin_id: PLUGIN_ID.to_string(),
                 hook: "on_start".to_string(),
@@ -255,15 +289,16 @@ impl CorePlugin for GitCorePlugin {
         tracing::info!(plugin_id = PLUGIN_ID, "git state poller started");
 
         // Spawn background auto-commit thread if enabled in forge config.
-        let (ac_enabled, ac_interval) = read_auto_commit_settings(&self.forge_root);
-        if ac_enabled {
+        if timing.auto_commit {
+            let ac_interval = timing.auto_commit_interval_secs;
+            let ac_tick = timing.auto_commit_tick;
             let ac_root  = self.forge_root.clone();
             let ac_bus   = self.event_bus.clone();
             let ac_stop  = Arc::new(AtomicBool::new(false));
             let ac_clone = Arc::clone(&ac_stop);
             let ac_thread = thread::Builder::new()
                 .name("nexus-git-auto-commit".to_string())
-                .spawn(move || run_auto_committer(ac_root, ac_interval, ac_bus, ac_clone))
+                .spawn(move || run_auto_committer(ac_root, ac_interval, ac_tick, ac_bus, ac_clone))
                 .map_err(|e| PluginError::LifecycleError {
                     plugin_id: PLUGIN_ID.to_string(),
                     hook: "on_start".to_string(),
@@ -819,7 +854,12 @@ fn map_err(e: GitError) -> PluginError {
 // body only needs &handle / &bus / &stop, but hoisting the moves into
 // the caller would duplicate the thread::spawn boilerplate.
 #[allow(clippy::needless_pass_by_value)]
-fn run_poller(handle: GitWorkerHandle, bus: Option<Arc<EventBus>>, stop: Arc<AtomicBool>) {
+fn run_poller(
+    handle: GitWorkerHandle,
+    bus: Option<Arc<EventBus>>,
+    stop: Arc<AtomicBool>,
+    poll_interval: Duration,
+) {
     let mut prev: Option<GitState> = None;
 
     loop {
@@ -840,7 +880,7 @@ fn run_poller(handle: GitWorkerHandle, bus: Option<Arc<EventBus>>, stop: Arc<Ato
         }
 
         let mut waited = Duration::ZERO;
-        while waited < POLL_INTERVAL {
+        while waited < poll_interval {
             if stop.load(Ordering::Relaxed) {
                 return;
             }
@@ -985,15 +1025,15 @@ fn publish_git_activity(bus: &EventBus, kind: &str, head: &str, branch: Option<&
 /// P2-06 — interval the auto-commit background loop wakes on to
 /// re-check the idle window. Distinct from the user-facing
 /// `[git] auto_commit_interval_secs` (= the idle window itself);
-/// this is the polling cadence within that window. Override via a
-/// future GitSettings field; today the const is the only source.
+/// this is the polling cadence within that window. Override per-forge
+/// via `[git] auto_commit_tick_secs = N` in `app.toml`.
 pub const DEFAULT_AUTO_COMMIT_TICK: Duration = Duration::from_secs(30);
-const AC_TICK: Duration = DEFAULT_AUTO_COMMIT_TICK;
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_auto_committer(
     forge_root: PathBuf,
     idle_secs: u64,
+    tick: Duration,
     bus: Option<Arc<EventBus>>,
     stop: Arc<AtomicBool>,
 ) {
@@ -1083,7 +1123,7 @@ fn run_auto_committer(
 
         // Sleep in small ticks so the stop flag is checked promptly.
         let mut waited = Duration::ZERO;
-        while waited < AC_TICK {
+        while waited < tick {
             if stop.load(Ordering::Relaxed) { return; }
             thread::sleep(POLL_TICK);
             waited += POLL_TICK;
