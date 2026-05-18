@@ -23,7 +23,7 @@ nexus_plugins::define_dispatch_helpers!(pub(crate));
 pub(crate) use crate::core_plugin::{
     acquire_session_entry, get_session_entry, insert_session_entry, publish_changed,
     remove_session_entry, resolve_within, sessions_poisoned, snapshot_of, snapshot_to_value,
-    MULTIBUFFER_RELPATH_PREFIX, STORAGE_IPC_TIMEOUT, STORAGE_PLUGIN_ID,
+    DATABASE_PLUGIN_ID, MULTIBUFFER_RELPATH_PREFIX, STORAGE_IPC_TIMEOUT, STORAGE_PLUGIN_ID,
 };
 
 /// Convenience wrapper — the editor handlers historically used

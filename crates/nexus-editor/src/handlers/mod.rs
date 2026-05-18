@@ -14,3 +14,4 @@ pub(crate) mod session;
 pub(crate) mod shared;
 pub(crate) mod transaction;
 pub(crate) mod tree;
+pub(crate) mod views;
