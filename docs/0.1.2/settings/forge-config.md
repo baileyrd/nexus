@@ -21,6 +21,18 @@
 
 Loader: `load_app_config(forge_root)` — `nexus-formats/src/config/mod.rs:38`. Missing file ⇒ `AppConfig::default()` (line 113).
 
+### `[settings]` cascade keys (P2 cascades)
+
+The shell's `configStore` mirrors the `[settings]` table verbatim into a per-forge in-memory store. These keys are produced/consumed by Phase 2 cascades:
+
+| Key | Value | Owner | Notes |
+|-----|-------|-------|-------|
+| `nexus.keybindings.overrides` | `{ [commandId]: chord }` | shell `KeybindingRegistry` | P2-01 — runtime keybinding overrides; localStorage cache mirrors per-machine, app.toml is portable. |
+| `nexus.priority.<scope>.<entryId>` | `number` | shell registries | P2-02 — scope ∈ `slot` / `activityBar` / `panelArea` / `statusBar`. Lower = earlier in the sort. Live re-sort on change. |
+| `nexus.bases.fileExtensions` | `string[]` | `nexus.bases` plugin | P2-03 — bare extensions (no leading dot). |
+| `nexus.canvas.fileExtensions` | `string[]` | `nexus.canvas` plugin | P2-03 |
+| `nexus.editor.fileExtensions` | `string[]` | `nexus.editor` plugin | P2-03 |
+
 ## `<forge>/.forge/workspace.json`
 
 `WorkspaceState` — `crates/nexus-formats/src/config/workspace.rs:8`.

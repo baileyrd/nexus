@@ -109,7 +109,9 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
  * drain plan as HOST_INTERNALS_ALLOWLIST.
  */
 const REGISTRY_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
+  'shell/src/plugins/core/activityBar/activityBarStore.ts',        // P2-02: registry/priorityOverrides — this file IS the activity-bar registry; the helper lives in registry/ alongside the other sort registries it sibling-serves
   'shell/src/plugins/core/configurationService/index.ts',          // registry/ConfigurationRegistry
+  'shell/src/plugins/core/panelArea/panelAreaStore.ts',            // P2-02: registry/priorityOverrides — same rationale as activityBarStore
   'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // registry/KeybindingRegistry — overrides UI (WI-04)
   'shell/src/plugins/core/statusBar/StatusBarView.tsx',            // registry/StatusBarRegistry
   'shell/src/plugins/nexus/viewBuilder/ViewBuilderView.tsx',       // BL-067: introspection tool — reads SlotRegistry to surface chrome contributions in its inventory pane. Same rationale as the HOST_INTERNALS allowlist entry.

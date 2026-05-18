@@ -59,7 +59,10 @@ import {
   buildLegacyIdAliases,
 } from './plugins/catalog'
 import { useConfigStore } from './stores/configStore'
-import { keybindingOverrideStorage } from './registry/keybindingOverrideStorage'
+import {
+  keybindingOverrideStorage,
+  KEYBINDING_OVERRIDES_SETTING_KEY,
+} from './registry/keybindingOverrideStorage'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -91,6 +94,14 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   // overrides are hydrated before the first key dispatch.
   reg.keybindings.bindStorage(keybindingOverrideStorage)
   void reg.keybindings.loadOverrides()
+  // P2-01 — once configStore hydrates from `<forge>/.forge/app.toml
+  // [settings]`, the forge-portable override entry may differ from the
+  // localStorage cache the registry started with. Re-load so a per-forge
+  // override takes effect on the first keypress in this session
+  // without requiring the user to touch anything.
+  eventBus.on(`config:changed:${KEYBINDING_OVERRIDES_SETTING_KEY}`, () => {
+    void reg.keybindings.loadOverrides()
+  })
 
   // Expose via singletons — no circular import
   setRegistry(reg)

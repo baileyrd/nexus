@@ -11,6 +11,10 @@
 import type { ComponentType } from 'react'
 import { create } from 'zustand'
 import type { SlotId } from '@nexus/extension-api'
+import {
+  resolveEffectivePriority,
+  subscribePriorityChanges,
+} from './priorityOverrides'
 
 // OI-04 — `SlotId` is declared in `@nexus/extension-api` so native and
 // community plugins see identical slot names at the contract boundary.
@@ -29,12 +33,21 @@ export interface SlotEntry {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   component: ComponentType<any>
   priority: number
+  /** P2-02 — the plugin's declared priority. `priority` above may
+   *  have been overridden by `nexus.priority.slot.<id>`; this field
+   *  preserves the contributed default so live overrides can be
+   *  recomputed against the same baseline. */
+  originalPriority?: number
 }
 
 interface SlotStore {
   slots: Record<SlotId, SlotEntry[]>
   register: (slotId: SlotId, entry: SlotEntry) => void
   unregister: (entryId: string) => void
+  /** P2-02 — re-resolve every entry's effective priority against the
+   *  current configStore and re-sort. Called by the priority-override
+   *  subscriber when `nexus.priority.slot.*` changes. */
+  refreshPriorities: () => void
 }
 
 export const useSlotStore = create<SlotStore>((set) => ({
@@ -47,14 +60,21 @@ export const useSlotStore = create<SlotStore>((set) => ({
     paneMode: [],
   },
 
-  register: (slotId, entry) =>
+  register: (slotId, entry) => {
+    // P2-02 — let `nexus.priority.slot.<entryId>` override the
+    // contributed priority. Keep the declared value on
+    // `originalPriority` so live overrides can recompute against it.
+    const original = entry.originalPriority ?? entry.priority
+    const effective = resolveEffectivePriority('slot', entry.id, original)
+    const next: SlotEntry = { ...entry, priority: effective, originalPriority: original }
     set(s => ({
       slots: {
         ...s.slots,
-        [slotId]: [...s.slots[slotId], entry]
+        [slotId]: [...s.slots[slotId], next]
           .sort((a, b) => a.priority - b.priority),
       },
-    })),
+    }))
+  },
 
   unregister: (entryId) =>
     set(s => ({
@@ -65,7 +85,31 @@ export const useSlotStore = create<SlotStore>((set) => ({
         ])
       ) as Record<SlotId, SlotEntry[]>,
     })),
+
+  refreshPriorities: () =>
+    set(s => ({
+      slots: Object.fromEntries(
+        Object.entries(s.slots).map(([k, entries]) => {
+          const rebuilt = (entries as SlotEntry[])
+            .map(e => {
+              const original = e.originalPriority ?? e.priority
+              const effective = resolveEffectivePriority('slot', e.id, original)
+              return effective === e.priority ? e : { ...e, priority: effective }
+            })
+            .sort((a, b) => a.priority - b.priority)
+          return [k, rebuilt]
+        }),
+      ) as Record<SlotId, SlotEntry[]>,
+    })),
 }))
+
+// P2-02 — refresh slot ordering whenever any `nexus.priority.slot.*`
+// changes. Tear-down isn't tied to React lifecycle because the slot
+// registry is a module singleton; the subscription lives for the
+// process lifetime.
+subscribePriorityChanges('slot', () => {
+  useSlotStore.getState().refreshPriorities()
+})
 
 /**
  * BL-067 Phase 0 — JSON-safe snapshot of a [`SlotEntry`].

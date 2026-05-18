@@ -7,6 +7,10 @@
 
 import type { ReactNode } from 'react'
 import { create } from 'zustand'
+import {
+  resolveEffectivePriority,
+  subscribePriorityChanges,
+} from './priorityOverrides'
 
 export interface StatusBarItem {
   id: string
@@ -24,6 +28,9 @@ export interface StatusBarItem {
   /** Extra class names appended to the `.status-bar-item` root. Use
    *  `'ember'` to mark an accent-colored sync indicator, etc. */
   className?: string
+  /** P2-02 — plugin's declared priority preserved across override
+   *  resolution. */
+  originalPriority?: number
 }
 
 interface StatusBarStore {
@@ -31,18 +38,25 @@ interface StatusBarStore {
   upsert: (item: StatusBarItem) => void
   update: (id: string, updates: Partial<StatusBarItem>) => void
   remove: (id: string) => void
+  /** P2-02 — re-resolve override priorities + re-sort. */
+  refreshPriorities: () => void
 }
 
 export const useStatusBarStore = create<StatusBarStore>((set) => ({
   items: [],
 
   upsert: (item) =>
-    set(s => ({
-      items: (s.items.some(i => i.id === item.id)
-        ? s.items.map(i => i.id === item.id ? item : i)
-        : [...s.items, item]
-      ).sort((a, b) => a.priority - b.priority),
-    })),
+    set(s => {
+      const original = item.originalPriority ?? item.priority
+      const effective = resolveEffectivePriority('statusBar', item.id, original)
+      const next: StatusBarItem = { ...item, priority: effective, originalPriority: original }
+      return {
+        items: (s.items.some(i => i.id === next.id)
+          ? s.items.map(i => i.id === next.id ? next : i)
+          : [...s.items, next]
+        ).sort((a, b) => a.priority - b.priority),
+      }
+    }),
 
   update: (id, updates) =>
     set(s => ({
@@ -51,7 +65,22 @@ export const useStatusBarStore = create<StatusBarStore>((set) => ({
 
   remove: (id) =>
     set(s => ({ items: s.items.filter(i => i.id !== id) })),
+
+  refreshPriorities: () =>
+    set(s => ({
+      items: s.items
+        .map(i => {
+          const original = i.originalPriority ?? i.priority
+          const effective = resolveEffectivePriority('statusBar', i.id, original)
+          return effective === i.priority ? i : { ...i, priority: effective }
+        })
+        .sort((a, b) => a.priority - b.priority),
+    })),
 }))
+
+subscribePriorityChanges('statusBar', () => {
+  useStatusBarStore.getState().refreshPriorities()
+})
 
 export class StatusBarRegistry {
   create(pluginId: string, config: Omit<StatusBarItem, 'pluginId'>): {
