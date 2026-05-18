@@ -649,55 +649,11 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_OUTGOING_LINKS => crate::handlers::graph::outgoing_links(engine, args),
             HANDLER_UNRESOLVED_LINKS => crate::handlers::graph::unresolved_links(engine),
             HANDLER_LIST_ALL_LINKS => crate::handlers::graph::list_all_links(engine),
-            HANDLER_CANVAS_READ => {
-                let path = path_arg(args, "canvas_read")?;
-                let canvas_file = engine
-                    .read_canvas(&path)
-                    .map_err(|e| exec_err(format!("canvas_read: {e}")))?;
-                to_value(&canvas_file, "canvas_read")
-            }
-            HANDLER_CANVAS_WRITE => {
-                let path = path_arg(args, "canvas_write")?;
-                let canvas_file: crate::CanvasFile = args
-                    .get("canvas")
-                    .ok_or_else(|| exec_err("canvas_write: missing 'canvas'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone())
-                            .map_err(|e| exec_err(format!("canvas_write: canvas decode: {e}")))
-                    })?;
-                let meta = engine
-                    .write_canvas(&path, &canvas_file)
-                    .map_err(|e| exec_err(format!("canvas_write: {e}")))?;
-                to_value(&meta, "canvas_write")
-            }
-            HANDLER_CANVAS_PATCH => {
-                let path = path_arg(args, "canvas_patch")?;
-                let ops: Vec<crate::CanvasPatchOp> = args
-                    .get("ops")
-                    .ok_or_else(|| exec_err("canvas_patch: missing 'ops'".to_string()))
-                    .and_then(|v| {
-                        serde_json::from_value(v.clone())
-                            .map_err(|e| exec_err(format!("canvas_patch: ops decode: {e}")))
-                    })?;
-                let meta = engine
-                    .patch_canvas(&path, &ops)
-                    .map_err(|e| exec_err(format!("canvas_patch: {e}")))?;
-                to_value(&meta, "canvas_patch")
-            }
-            HANDLER_CANVAS_NODES => {
-                let path = path_arg(args, "canvas_nodes")?;
-                let nodes = engine
-                    .canvas_nodes_by_path(&path)
-                    .map_err(|e| exec_err(format!("canvas_nodes: {e}")))?;
-                to_value(&nodes, "canvas_nodes")
-            }
-            HANDLER_CANVAS_EDGES => {
-                let path = path_arg(args, "canvas_edges")?;
-                let edges = engine
-                    .canvas_edges_by_path(&path)
-                    .map_err(|e| exec_err(format!("canvas_edges: {e}")))?;
-                to_value(&edges, "canvas_edges")
-            }
+            HANDLER_CANVAS_READ => crate::handlers::canvas::read(engine, args),
+            HANDLER_CANVAS_WRITE => crate::handlers::canvas::write(engine, args),
+            HANDLER_CANVAS_PATCH => crate::handlers::canvas::patch(engine, args),
+            HANDLER_CANVAS_NODES => crate::handlers::canvas::nodes(engine, args),
+            HANDLER_CANVAS_EDGES => crate::handlers::canvas::edges(engine, args),
             HANDLER_BASE_RECORD_CREATE => {
                 let path = path_arg(args, "base_record_create")?;
                 let record: nexus_types::bases::BaseRecord = args
@@ -924,52 +880,11 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("base_list: {e}")))?;
                 to_value(&bases, "base_list")
             }
-            HANDLER_LIST_DIR => {
-                let relpath = args
-                    .get("relpath")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let entries = engine
-                    .list_dir(&relpath)
-                    .map_err(|e| exec_err(format!("list_dir: {e}")))?;
-                to_value(&entries, "list_dir")
-            }
-            HANDLER_CREATE_FILE => {
-                let relpath = relpath_arg(args, "create_file")?;
-                engine
-                    .create_file(&relpath)
-                    .map_err(|e| exec_err(format!("create_file: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_CREATE_DIR => {
-                let relpath = relpath_arg(args, "create_dir")?;
-                engine
-                    .create_dir(&relpath)
-                    .map_err(|e| exec_err(format!("create_dir: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_RENAME_ENTRY => {
-                let from = args
-                    .get("from")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| exec_err("rename_entry: missing 'from' string".to_string()))?;
-                let to = args
-                    .get("to")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| exec_err("rename_entry: missing 'to' string".to_string()))?;
-                engine
-                    .rename_entry(from, to)
-                    .map_err(|e| exec_err(format!("rename_entry: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
-            HANDLER_DELETE_ENTRY => {
-                let relpath = relpath_arg(args, "delete_entry")?;
-                engine
-                    .delete_entry(&relpath)
-                    .map_err(|e| exec_err(format!("delete_entry: {e}")))?;
-                Ok(serde_json::json!({}))
-            }
+            HANDLER_LIST_DIR => crate::handlers::tree::list_dir(engine, args),
+            HANDLER_CREATE_FILE => crate::handlers::tree::create_file(engine, args),
+            HANDLER_CREATE_DIR => crate::handlers::tree::create_dir(engine, args),
+            HANDLER_RENAME_ENTRY => crate::handlers::tree::rename_entry(engine, args),
+            HANDLER_DELETE_ENTRY => crate::handlers::tree::delete_entry(engine, args),
             HANDLER_BASE_QUERY => {
                 let path = path_arg(args, "base_query")?;
                 let filters: Vec<String> = args
@@ -1135,10 +1050,6 @@ nexus_plugins::define_dispatch_helpers!();
 
 fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
     string_arg(value, command, "path")
-}
-
-fn relpath_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    string_arg(value, command, "relpath")
 }
 
 fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {

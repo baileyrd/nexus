@@ -10,6 +10,7 @@
 //! `HANDLER_ENTITY_SEARCH`. Helpers shared across modules live in
 //! [`shared`].
 
+pub(crate) mod canvas;
 pub(crate) mod config;
 pub(crate) mod entity;
 pub(crate) mod files;
@@ -17,4 +18,5 @@ pub(crate) mod graph;
 pub(crate) mod search;
 pub(crate) mod shared;
 pub(crate) mod tasks;
+pub(crate) mod tree;
 pub(crate) mod vector;
