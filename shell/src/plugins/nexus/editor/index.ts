@@ -1424,14 +1424,17 @@ export const editorPlugin: Plugin = {
 
     // P4-07 — wire the subset of tab-action stubs that have a thin
     // existing backend. The remaining stubs (splitRight/Down,
-    // openInNewWindow, openLinkedView, moveTo, addProperty,
-    // versionHistory, mergeFile, exportPdf) need either new layout
-    // primitives or new IPC handlers and remain "coming soon" until
-    // their dedicated follow-ups land.
+    // addProperty, versionHistory, mergeFile, exportPdf) need either
+    // new layout primitives, new Rust IPC handlers, or new heavy
+    // libraries (PDF) and remain "coming soon" until their dedicated
+    // follow-ups land.
     const WIRED: ReadonlySet<string> = new Set([
       'nexus.editor.stub.bookmark',
       'nexus.editor.stub.rename',
       'nexus.editor.stub.backlinksInDocument',
+      'nexus.editor.stub.moveTo',
+      'nexus.editor.stub.openInNewWindow',
+      'nexus.editor.stub.openLinkedView',
     ])
     for (const stub of STUB_COMMANDS) {
       if (WIRED.has(stub.id)) continue
@@ -1485,6 +1488,87 @@ export const editorPlugin: Plugin = {
           message: `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
         })
       }
+    })
+
+    api.commands.register('nexus.editor.stub.moveTo', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      // Prompt with the full forge-relative path. Same underlying IPC
+      // as rename — `storage::rename_entry` accepts a destination in
+      // any directory and creates parent dirs as needed.
+      const to = await api.input.prompt(`Move "${relpath}" to forge-relative path:`, relpath)
+      if (!to || to === relpath) return
+      try {
+        await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'rename_entry', {
+          from: relpath,
+          to,
+        })
+        const base = to.includes('/') ? to.slice(to.lastIndexOf('/') + 1) : to
+        useEditorStore.getState().closeTab(relpath)
+        api.events.emit('files:open', { relpath: to, name: base })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Move failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register('nexus.editor.stub.openInNewWindow', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const activeLeafId = workspace.activeLeafId
+      if (!activeLeafId) return
+      try {
+        // Bridge pairs the workspace-store mutation with the OS-side
+        // Tauri popout. We import lazily so this module doesn't pay
+        // the cost on plugins that never popout.
+        const { popoutLeaf } = await import('../../../workspace/popoutWindowBridge')
+        await popoutLeaf(activeLeafId, { title: relpath })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Open in new window failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register('nexus.editor.stub.openLinkedView', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      let raw: unknown
+      try {
+        raw = await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'backlinks', { path: relpath })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Backlinks lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      if (!Array.isArray(raw) || raw.length === 0) {
+        api.notifications.show({ type: 'info', message: 'No linked notes.' })
+        return
+      }
+      const seen = new Set<string>()
+      const items: { label: string; value: string }[] = []
+      for (const row of raw as Array<{ source_path?: unknown }>) {
+        const src = typeof row?.source_path === 'string' ? row.source_path : null
+        if (!src || src === relpath || seen.has(src)) continue
+        seen.add(src)
+        const base = src.includes('/') ? src.slice(src.lastIndexOf('/') + 1) : src
+        items.push({ label: base, value: src })
+      }
+      if (items.length === 0) {
+        api.notifications.show({ type: 'info', message: 'No linked notes.' })
+        return
+      }
+      const picked = await api.input.pick<string>(items, {
+        placeholder: 'Open linked note',
+      })
+      if (!picked) return
+      const base = picked.includes('/') ? picked.slice(picked.lastIndexOf('/') + 1) : picked
+      api.events.emit('files:open', { relpath: picked, name: base })
     })
 
     api.commands.register(COMMAND_DELETE_FILE, async () => {

@@ -151,7 +151,7 @@ Closes theoretical regression paths in the invariant enforcement. Items from [`a
 
 ## Phase 4 — Stub completion (P2)
 
-> **Phase 4 partial 2026-05-18.** Items P4-01..P4-05, P4-08, P4-09, P4-10 shipped. P4-07 partial (3/12 tab-action stubs wired). P4-06 (SettingsPanelView "Coming soon" wiring, XL) and the remaining 9 P4-07 actions warrant their own dedicated PRs.
+> **Phase 4 partial 2026-05-18.** Items P4-01..P4-05, P4-08, P4-09, P4-10 shipped. P4-07 partial (6/12 tab-action stubs wired). P4-06 (SettingsPanelView "Coming soon" wiring, XL) and the remaining 6 P4-07 actions warrant their own dedicated PRs.
 
 UX surface work — the stubs are honest (every "coming soon" surfaces a toast) but they add up to a lot of user-visible friction. From [`reference/todos.md`](reference/todos.md).
 
@@ -170,7 +170,7 @@ UX surface work — the stubs are honest (every "coming soon" surfaces a toast) 
 | ID | Item | Effort | Notes |
 |----|------|:------:|-------|
 | **P4-06** | Wire the **57 "Coming soon" controls** in `SettingsPanelView.tsx` to real backend handlers. Group by tab: General (5), Editor (21), Files & links (14), Keychain (1), Canvas (8), Backlinks (1), Daily notes (3), File recovery (4), Note composer (4). **Now also includes** the P2-01/02/03 cascade-key exposure (keybinding UI already exists via WI-04; priority + fileExtensions need new UI). | XL | Touches ~9 settings tabs. Many depend on Phase 2 settings infrastructure. Best done in 3-4 sub-PRs grouped by tab. Today the cascade keys are user-tunable via direct `app.toml` edit — see [`settings/forge-config.md`](settings/forge-config.md#settings-cascade-keys-p2-cascades). |
-| **P4-07** ◐ | Wire the **12 editor tab-action stubs** (`nexus.editor.stub.*`): splitRight, splitDown, openInNewWindow, openLinkedView, rename, moveTo, bookmark, addProperty, backlinksInDocument, versionHistory, mergeFile, exportPdf. Each is a discrete handler. | L | Partial 2026-05-18: `bookmark` (→ `nexus.bookmarks.toggleActive`), `rename` (→ `storage::rename_entry` via `api.input.prompt`), and `backlinksInDocument` (→ `nexus.backlinks.focus`) shipped. Remaining 9 stubs still surface "coming soon" — they need new layout primitives (split*, openInNewWindow, openLinkedView) or new IPC handlers (moveTo, addProperty/frontmatter write, versionHistory, mergeFile, exportPdf). |
+| **P4-07** ◐ | Wire the **12 editor tab-action stubs** (`nexus.editor.stub.*`): splitRight, splitDown, openInNewWindow, openLinkedView, rename, moveTo, bookmark, addProperty, backlinksInDocument, versionHistory, mergeFile, exportPdf. Each is a discrete handler. | L | Partial 2026-05-18: **6/12 shipped** — `bookmark` (→ `nexus.bookmarks.toggleActive`), `rename` and `moveTo` (→ `storage::rename_entry` via `api.input.prompt` — moveTo prompts for a full forge-relative path), `backlinksInDocument` (→ `nexus.backlinks.focus`), `openInNewWindow` (→ `popoutWindowBridge.popoutLeaf(activeLeafId)`), `openLinkedView` (→ `storage::backlinks` + `api.input.pick` + `files:open`). Remaining 6 deferred: `splitRight`/`splitDown` (need a new `workspace.splitLeaf(leafId, direction)` primitive — ~40 lines but touches layout invariants), `addProperty` (needs new `storage::write_frontmatter` IPC handler), `versionHistory` (needs git file-log IPC + history UI), `mergeFile` (needs conflict-list IPC + 3-pane resolver), `exportPdf` (needs PDF library — `printpdf` or wkhtmltopdf). |
 
 ### Other stubs
 
