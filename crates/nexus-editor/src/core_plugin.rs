@@ -412,19 +412,19 @@ pub struct EditorSnapshot {
 // ── Plugin state ─────────────────────────────────────────────────────────────
 
 /// A single open document.
-struct Session {
-    tree: BlockTree,
-    undo: UndoTree,
-    relpath: String,
+pub(crate) struct Session {
+    pub(crate) tree: BlockTree,
+    pub(crate) undo: UndoTree,
+    pub(crate) relpath: String,
     /// Monotonic mutation counter. See [`EditorSnapshot::revision`].
-    revision: u64,
+    pub(crate) revision: u64,
     /// BL-141 — `true` for multibuffer / excerpt sessions assembled
     /// from `open_excerpts`. Synthetic sessions are not backed by a
     /// single source file on disk; `save` and `apply_transaction`
     /// reject them so the caller can't silently corrupt the source
     /// files behind their excerpts. (Read-write multibuffer with
     /// per-excerpt edit routing is BL-141 Phase 2.)
-    is_synthetic: bool,
+    pub(crate) is_synthetic: bool,
 }
 
 /// BL-126 follow-up: per-session lock. The outer map is acquired
@@ -432,20 +432,20 @@ struct Session {
 /// concurrent dispatches against different relpaths can hold their
 /// inner locks simultaneously. The inner mutex serialises mutation
 /// of a single session — unchanged from the pre-refactor invariant.
-type SessionEntry = Arc<Mutex<Session>>;
+pub(crate) type SessionEntry = Arc<Mutex<Session>>;
 
 /// BL-126 follow-up: the editor-plugin session map. See
 /// [`SessionEntry`] for the locking discipline; helpers
 /// [`acquire_session_entry`] / [`get_session_entry`] /
 /// [`insert_session_entry`] / [`remove_session_entry`] encapsulate
 /// every outer-lock-and-drop access pattern.
-type SessionMap = Mutex<HashMap<String, SessionEntry>>;
+pub(crate) type SessionMap = Mutex<HashMap<String, SessionEntry>>;
 
 /// BL-126 follow-up: acquire the per-session `Arc` for `relpath`,
 /// holding the outer map lock only long enough to clone it. Returns
 /// `Err` with a uniformly-shaped "no open session for …" message
 /// keyed by the operation name when the session is missing.
-fn acquire_session_entry(
+pub(crate) fn acquire_session_entry(
     sessions: &SessionMap,
     relpath: &str,
     op: &str,
@@ -631,7 +631,7 @@ impl CorePlugin for EditorCorePlugin {
             // (storage IPC). The sync entry point still drops the
             // session — unit tests use it directly.
             HANDLER_CLOSE => handle_close(&self.sessions, self.op_observer.as_ref(), args),
-            HANDLER_GET_TREE => handle_get_tree(&self.sessions, args),
+            HANDLER_GET_TREE => crate::handlers::tree::get_tree(&self.sessions, args),
             HANDLER_SAVE => handle_save_sync(&self.forge_root, &self.sessions, args),
             HANDLER_APPLY_TRANSACTION => handle_apply_transaction(
                 &self.sessions,
@@ -651,16 +651,16 @@ impl CorePlugin for EditorCorePlugin {
                 self.op_observer.as_ref(),
                 args,
             ),
-            HANDLER_LIST_OPEN => handle_list_open(&self.sessions),
+            HANDLER_LIST_OPEN => crate::handlers::tree::list_open(&self.sessions),
             HANDLER_SYNC_CONTENT => handle_sync_content(
                 &self.sessions,
                 self.event_bus.as_ref(),
                 self.op_observer.as_ref(),
                 args,
             ),
-            HANDLER_GET_MARKDOWN => handle_get_markdown(&self.sessions, args),
+            HANDLER_GET_MARKDOWN => crate::handlers::tree::get_markdown(&self.sessions, args),
             HANDLER_STAMP_BLOCK => {
-                handle_stamp_block(&self.sessions, self.event_bus.as_ref(), args)
+                crate::handlers::tree::stamp_block(&self.sessions, self.event_bus.as_ref(), args)
             }
             HANDLER_EXECUTE_DATABASE_VIEW => Err(exec_err(
                 "execute_database_view requires the async dispatch path \
@@ -1169,16 +1169,6 @@ async fn handle_close_async(
     }
 
     Ok(serde_json::json!({}))
-}
-
-fn handle_get_tree(
-    sessions: &SessionMap,
-    args: &Value,
-) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "get_tree")?;
-    let entry = acquire_session_entry(sessions, &relpath, "get_tree")?;
-    let s = entry.lock().map_err(|_| sessions_poisoned())?;
-    snapshot_to_value(&snapshot_of(&s), "get_tree")
 }
 
 /// BL-141 Phase 2 — one excerpt to splice back into its source
@@ -2546,13 +2536,6 @@ fn handle_redo(
     Ok(value)
 }
 
-fn handle_list_open(sessions: &SessionMap) -> Result<Value, PluginError> {
-    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let mut paths: Vec<String> = guard.keys().cloned().collect();
-    paths.sort();
-    serde_json::to_value(paths).map_err(|e| exec_err(format!("list_open: serialize: {e}")))
-}
-
 /// Re-parse `content` and update (or create) the block tree for `relpath`.
 ///
 /// The undo history is left untouched: `sync_content` is a background resync
@@ -2612,84 +2595,9 @@ fn handle_sync_content(
     Ok(serde_json::json!({}))
 }
 
-/// Serialize the session's block tree to markdown and return it as a
-/// bare JSON string. Matches `serialize_session` but surfaces the
-/// result over IPC rather than routing it to disk.
-fn handle_get_markdown(
-    sessions: &SessionMap,
-    args: &Value,
-) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "get_markdown")?;
-    let entry = acquire_session_entry(sessions, &relpath, "get_markdown")?;
-    let s = entry.lock().map_err(|_| sessions_poisoned())?;
-    let markdown = MarkdownSerializer::serialize(&s.tree);
-    Ok(Value::String(markdown))
-}
-
-/// Stamp the addressed block with a fresh v4 stable id so the next
-/// `save` writes a `<!-- ^<uuid> -->` marker and the id survives
-/// upstream insertions on reload (ADR 0017). Idempotent: a second
-/// call against an already-stamped block returns the existing stamp
-/// without bumping the session revision or publishing a changed
-/// event.
-///
-/// The block is rekeyed via [`crate::BlockTree::rekey`] from its
-/// current positional id to the fresh stamp; references in the
-/// parent's `children` list, `root_blocks`, and child blocks'
-/// `parent_id` are all updated together. After rekey, the block's
-/// `id` and `stable_id` are equal — the lookup `block_id` arg passed
-/// in is returned as `block_id` in the response so the caller can
-/// still reference it, while `stable_id` carries the new uuid that's
-/// now the canonical key.
-fn handle_stamp_block(
-    sessions: &SessionMap,
-    event_bus: Option<&Arc<EventBus>>,
-    args: &Value,
-) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "stamp_block")?;
-    let block_id_str = args
-        .get("block_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| exec_err("stamp_block: missing 'block_id' string".to_string()))?;
-    let block_id = uuid::Uuid::parse_str(block_id_str)
-        .map_err(|e| exec_err(format!("stamp_block: invalid 'block_id': {e}")))?;
-
-    let entry = acquire_session_entry(sessions, &relpath, "stamp_block")?;
-    let (stable_id, newly_stamped, revision) = {
-        let mut guard = entry.lock().map_err(|_| sessions_poisoned())?;
-        let s: &mut Session = &mut guard;
-        let block = s.tree.get(block_id).ok_or_else(|| {
-            exec_err(format!(
-                "stamp_block: block '{block_id}' not present in '{relpath}'"
-            ))
-        })?;
-        if let Some(existing) = block.stable_id {
-            // Already stamped: return the existing stamp untouched.
-            (existing, false, s.revision)
-        } else {
-            let new_id = uuid::Uuid::new_v4();
-            s.tree
-                .rekey(block_id, new_id)
-                .map_err(|e| exec_err(format!("stamp_block: rekey: {e}")))?;
-            s.revision = s.revision.saturating_add(1);
-            (new_id, true, s.revision)
-        }
-    };
-
-    if newly_stamped {
-        publish_changed(event_bus, &relpath, revision, None);
-    }
-
-    Ok(serde_json::json!({
-        "block_id": block_id,
-        "stable_id": stable_id,
-        "newly_stamped": newly_stamped,
-    }))
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn snapshot_of(s: &Session) -> EditorSnapshot {
+pub(crate) fn snapshot_of(s: &Session) -> EditorSnapshot {
     let undo_len = s.undo.len();
     let undo_position = s.undo.current();
     // `can_undo`: there is a current transaction to reverse.
@@ -2714,7 +2622,7 @@ fn snapshot_of(s: &Session) -> EditorSnapshot {
 /// — none of those carry a client-supplied id the shell could echo-
 /// suppress on. Mirrors the publish-on-mutation pattern used by
 /// `com.nexus.theme` (see `crates/nexus-theme/src/core_plugin.rs`).
-fn publish_changed(
+pub(crate) fn publish_changed(
     event_bus: Option<&Arc<EventBus>>,
     relpath: &str,
     revision: u64,
@@ -2740,7 +2648,7 @@ fn publish_changed(
     }
 }
 
-fn snapshot_to_value(snapshot: &EditorSnapshot, command: &str) -> Result<Value, PluginError> {
+pub(crate) fn snapshot_to_value(snapshot: &EditorSnapshot, command: &str) -> Result<Value, PluginError> {
     serde_json::to_value(snapshot)
         .map_err(|e| exec_err(format!("{command}: serialize snapshot: {e}")))
 }
@@ -2751,7 +2659,7 @@ fn relpath_arg(args: &Value, command: &str) -> Result<String, PluginError> {
     string_arg(args, command, "relpath")
 }
 
-fn sessions_poisoned() -> PluginError {
+pub(crate) fn sessions_poisoned() -> PluginError {
     exec_err("sessions lock poisoned".to_string())
 }
 
