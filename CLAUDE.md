@@ -37,7 +37,7 @@ The other `scripts/test_*.sh` and `scripts/check_*.sh` helpers are thin wrappers
 
 ## Architecture
 
-Nexus is a **microkernel** Rust workspace. Read `docs/architecture/C4.md`, `docs/architecture/invariants.md`, and the ADRs under `docs/adr/` (especially 0004, 0005, 0011, 0016) before making structural changes. The doc index is at `docs/README.md`; for "what's actually shipped right now" see `docs/PRDs/IMPLEMENTATION_STATUS.md`.
+Nexus is a **microkernel** Rust workspace. Authoritative current docs are under `docs/0.1.2/` — start at [`docs/0.1.2/README.md`](docs/0.1.2/README.md), then [`docs/0.1.2/architecture.md`](docs/0.1.2/architecture.md), [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md), [`docs/0.1.2/ipc-handlers.md`](docs/0.1.2/ipc-handlers.md), and [`docs/0.1.2/capabilities.md`](docs/0.1.2/capabilities.md). Settings live at [`docs/0.1.2/settings/`](docs/0.1.2/settings/) — every config knob is listed there, and hardcoded values flagged for promotion are at [`docs/0.1.2/settings/hardcoded-rust.md`](docs/0.1.2/settings/hardcoded-rust.md) / [`docs/0.1.2/settings/hardcoded-shell.md`](docs/0.1.2/settings/hardcoded-shell.md). The pre-0.1.2 doc set (PRDs, ADRs 0001–0029, prior audits) is preserved verbatim under `docs/archive/pre-0.1.2/` — useful historical reference, but when it disagrees with the code or with `docs/0.1.2/`, the code wins.
 
 **Four invariants drive the shape of the system:**
 
@@ -54,7 +54,7 @@ Nexus is a **microkernel** Rust workspace. Read `docs/architecture/C4.md`, `docs
 
 - `crates/nexus-kernel/` — event bus, IPC dispatcher, capability system, plugin lifecycle. Keep small.
 - `crates/nexus-storage/` — file-as-truth, SQLite, Tantivy, file watcher, knowledge graph. Owns the forge.
-- `crates/nexus-<service>/` — service plugins (`ai`, `agent`, `comments`, `editor`, `git`, `linkpreview`, `mcp`, `skills`, `templates`, `terminal`, `theme`, `workflow`, `database`, `kv`, `security`, `formats`, `panic-log`). Each is a `CorePlugin` registered by `nexus-bootstrap` in deterministic order. The full Cargo workspace has 25 members; see `Cargo.toml` for the authoritative list (also includes `nexus-types`, `nexus-plugin-api`, and `nexus-plugins` which are libraries rather than service plugins).
+- `crates/nexus-<service>/` — service plugins (`ai`, `ai-runtime`, `agent`, `comments`, `editor`, `git`, `linkpreview`, `mcp`, `lsp`, `dap`, `acp`, `skills`, `templates`, `terminal`, `theme`, `workflow`, `database`, `kv`, `security`, `formats`, `notifications`, `audio`, `collab`, `crdt`, `panic-log`, `remote`, `fuzz`). Each `CorePlugin` is registered by `nexus-bootstrap` in deterministic order. The full Cargo workspace has 35 members; see `Cargo.toml` for the authoritative list and [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for a one-row-per-crate inventory.
 - `crates/nexus-bootstrap/` — the orchestrator. Frontends call `build_cli_runtime(forge_root)` / `build_tui_runtime(forge_root)` to get a `Runtime` (kernel + registered plugins + invoker context).
 - `crates/nexus-cli/` (`nexus`), `crates/nexus-tui/` (`nexus-tui`), `crates/nexus-mcp/` — frontends. They consume `nexus-bootstrap` and route through `context.ipc_call(...)`.
 - `shell/` + `shell/src-tauri/` (crate `nexus-shell`) — the **single** active desktop target per ADR 0011. The legacy tri-pane `app/` + `crates/nexus-app` was retired in v0.4.0 (recoverable via `v0.1.0-legacy-shell` git tag).
@@ -63,24 +63,35 @@ Nexus is a **microkernel** Rust workspace. Read `docs/architecture/C4.md`, `docs
 
 **Guardrails when adding features:**
 
-- New backend capability ⇒ add an IPC handler to the appropriate `nexus-<service>` crate so it's reachable from CLI, TUI, MCP, and the shell uniformly. Do **not** add bespoke `#[tauri::command]` handlers in `shell/src-tauri/` for new capability; route it through `kernel_invoke` → `ipc_call` instead. The Tauri bridge in `shell/src-tauri/src/lib.rs` registers 23 commands today, grouped by intent: 7 kernel (`init_forge`, `boot_kernel`, `kernel_invoke`, `kernel_subscribe`, `kernel_unsubscribe`, `kernel_is_booted`, `shutdown_kernel`), 5 plugin-management (`scan_plugin_directory`, `scan_plugin_directory_at`, `set_plugin_enabled`, `get_plugin_granted_capabilities`, `set_plugin_granted_capabilities`), 4 persistence (`get_shell_state`, `save_shell_state`, `write_last_forge_path`, `forget_forge_path`), 2 utility (`path_exists`, `append_shell_log`), and 5 popout (`popout_window`, `close_popout_window`, `list_popout_windows`, `get_popout_window_bounds`, `set_popout_window_bounds`) per [ADR 0020](docs/adr/0020-popout-window-architecture.md). Adding a new shell-management command (popout, persistence, etc.) is OK if it's intrinsic to the host; adding a new feature command is not.
+- New backend capability ⇒ add an IPC handler to the appropriate `nexus-<service>` crate so it's reachable from CLI, TUI, MCP, and the shell uniformly. Do **not** add bespoke `#[tauri::command]` handlers in `shell/src-tauri/` for new capability; route it through `kernel_invoke` → `ipc_call` instead. The Tauri bridge in `shell/src-tauri/src/lib.rs` registers 29 commands today (10 kernel+bridge, 5 plugin-mgmt, 6 persistence, 3 host-platform-primitive utility, 5 popout). Full breakdown at [`docs/0.1.2/shell.md`](docs/0.1.2/shell.md); adherence audit at [`docs/0.1.2/architecture-adherence.md`](docs/0.1.2/architecture-adherence.md). Adding a new shell-management command (popout, persistence) is OK; a new feature command is not unless it's a host-platform primitive wrapping a Tauri-only capability.
+- New setting ⇒ add a field to a `Config` struct in the owning service crate with a `serde(default)` helper, document it in [`docs/0.1.2/settings/`](docs/0.1.2/settings/), and **delete the corresponding row** from [`docs/0.1.2/settings/hardcoded-rust.md`](docs/0.1.2/settings/hardcoded-rust.md) or [`hardcoded-shell.md`](docs/0.1.2/settings/hardcoded-shell.md). Do not introduce a new top-level TOML file in `.forge/` without an entry in [`docs/0.1.2/settings/README.md`](docs/0.1.2/settings/README.md).
 - New UI ⇒ add a plugin under `shell/src/plugins/nexus/<feature>/`, not a hard-coded shell component.
 - If you change an IPC-boundary type (anything that flows through `ipc_call`), regenerate bindings with `scripts/check_ipc_drift.sh` before committing.
 
 ## Plugin tiers
 
-- **Core plugins** — native Rust crates registered at bootstrap, full access.
-- **Community plugins** — WASM-sandboxed via wasmtime, capability-gated. Scaffolded via `nexus plugin scaffold --type wasm ...`.
-
-See `docs/writing-your-first-plugin.md` and `shell/docs/writing-a-plugin.md`.
+- **Core plugins** — native Rust crates registered at bootstrap, full access. 23 in-tree — list at [`docs/0.1.2/plugins/core.md`](docs/0.1.2/plugins/core.md).
+- **Community plugins** — WASM-sandboxed via wasmtime or JS-sandboxed via iframe, capability-gated. See [`docs/0.1.2/plugins/community.md`](docs/0.1.2/plugins/community.md). Scaffold via `nexus plugin scaffold --type wasm ...` or `--type script ...`.
 
 ## Forge layout
 
-A "forge" is a user's directory of markdown files. Nexus stores its index alongside in `<forge>/.forge/`:
+A "forge" is a user's directory of markdown files. Nexus stores its index alongside in `<forge>/.forge/`. Full schema + every file at [`docs/0.1.2/settings/README.md`](docs/0.1.2/settings/README.md). Key entries:
 
 ```
 <forge>/
-├── .forge/{index.db, search/, config.toml, logs/, temp/}
+├── .forge/
+│   ├── index.db          # SQLite — derived state
+│   ├── search/           # Tantivy — derived state
+│   ├── app.toml          # AppConfig — see settings/forge-config.md
+│   ├── workspace.json    # shell layout state
+│   ├── ai.toml mcp.toml lsp.toml dap.toml acp.toml notifications.toml
+│   ├── kv.sqlite3        # KV store
+│   ├── procmgr.sqlite sessions.sqlite agent/transcripts.sqlite
+│   ├── .editor/crdt/     # CRDT snapshots
+│   ├── .kernel/audit.db  # audit log
+│   ├── plugins/          # community WASM plugins (forge-scoped)
+│   ├── logs/  temp/  .lock
+│   └── …
 └── <user markdown files>
 ```
 
@@ -89,7 +100,7 @@ A "forge" is a user's directory of markdown files. Nexus stores its index alongs
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **nexus** (37324 symbols, 68940 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **nexus** (40844 symbols, 76328 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

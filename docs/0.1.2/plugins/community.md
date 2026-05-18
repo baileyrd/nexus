@@ -1,0 +1,111 @@
+# Community Plugins
+
+> 3rd-party plugins loaded at runtime. WASM-sandboxed via wasmtime (ADR 0016) or JS-sandboxed via iframe (ADR 0015). Capability-gated at every kernel-mediated call.
+
+## Three runtime variants
+
+`PluginRuntime` enum (`crates/nexus-plugins/src/manifest.rs`):
+
+- `Native` — Rust core plugin. Community plugins **cannot** declare this; reserved for in-tree.
+- `Wasm` — `.wasm` module loaded into a `wasmtime::Store` with fuel + epoch-deadline + memory cap. Calls Nexus through `host_fns.rs` imports.
+- `Script` — JS module loaded into an iframe `WebView` by the shell. Calls Nexus through the `@nexus/extension-api` SDK.
+
+## WASM sandbox (`crates/nexus-plugins/src/sandbox.rs`)
+
+```
+wasmtime::Engine
+    │
+    └── wasmtime::Store
+            │
+            ├── PluginData (host-side state: pluginId, capabilities, kv handle)
+            ├── PluginEventForwarder (kernel-bus subscriptions)
+            └── fuel + epoch_deadline (per-call budget)
+```
+
+Each WASM call is fueled — at fuel exhaustion the call traps. Each call also runs under an epoch deadline (`manifest.wasm.max_execution_ms`, default 5000ms). Host imports exposed (`host_fns.rs`):
+
+- `ipc_call(plugin_id, command, args, args_len, out, out_len)` → integer status
+- `publish_event(topic, payload, payload_len)` → integer status
+- `log(level, msg, msg_len)` → void
+- `kv_get(key, key_len, out, out_len)` → integer status
+- `kv_set(key, key_len, value, value_len)` → integer status
+- … plus capability check + error code helpers
+
+Negative status codes for host errors:
+- `-1001` = `HOST_CAPABILITY_DENIED`
+- `-1002` = `HOST_BUFFER_OVERFLOW`
+
+## JS / Script sandbox (`shell/src/host/sandbox/`)
+
+Iframe-based per ADR 0015. The host owns the iframe; the plugin gets a `PluginAPI` proxy from `@nexus/extension-api`:
+
+```typescript
+import { definePlugin } from '@nexus/extension-api';
+
+export default definePlugin({
+  id: 'com.example.my-plugin',
+  activate(ctx) {
+    ctx.ipc.call('com.nexus.storage', 'read_file', { path: 'notes/foo.md' })
+       .then((value) => console.log(value));
+
+    ctx.events.subscribe('com.nexus.git.state', (event) => { ... });
+  },
+});
+```
+
+The orchestrator-assigned `pluginId` is bound at handshake time per F-8.1.2 — a plugin **cannot** spoof a different id by passing one through; `assertValidPluginId` rejects empty / colon-bearing ids on every host-side call.
+
+## Install flow
+
+1. User downloads `<plugin>/` directory with `plugin.toml` + `plugin.wasm` (or `plugin.json` + `index.js` for JS) into `<forge>/.forge/plugins/` (WASM) or `~/.nexus-shell/plugins/` (JS).
+2. `PluginLoader::load(plugin_dir)` parses the manifest. Rejected if `trust_level = "core"`.
+3. Capability check UI shows the user `manifest.capabilities.required` and `optional`, with HIGH-risk verbs highlighted.
+4. User grants a subset → sealed under `chacha20poly1305` and persisted to `<plugin_dir>/granted_caps.json` (key in OS keyring; `NEXUS_NO_KEYRING=1` to bypass for development).
+5. Plugin loads. Lifecycle hooks fire per `manifest.lifecycle` config: `on_init` → `on_start` → (running) → `on_stop`.
+
+## At runtime
+
+Every `ipc_call` from the plugin checks:
+1. `ipc.call` capability (unconditional).
+2. The handler's `cap_matrix.toml` row — either `caps = [...]` (caller must hold all) or `unrestricted` (no extra check). Any args-aware `policy = "name"` runs after.
+3. Per-call audit log entry (`com.nexus.security::query_audit_log` to inspect).
+
+Fuel + epoch checks happen per-call inside the sandbox.
+
+## Hot reload
+
+`PluginLoader::hot_reload` watches plugin directories (`notify-debouncer-mini`). On change:
+1. `on_stop` the current instance.
+2. Parse the new manifest. If invalid → rollback to last-good (`hot_reload.rs`).
+3. Re-instantiate sandbox. If load throws → rollback.
+4. `on_init` + `on_start` the new instance.
+
+A crash quarantine counter is incremented per failure; after 3 crashes the plugin is disabled until manually re-enabled.
+
+## Signing (BL-099)
+
+Manifests can carry an ed25519 signature:
+
+```toml
+[signature]
+public_key = "base64..."
+signature  = "base64..."
+```
+
+When `KernelConfig.require_signatures = true`, unsigned manifests are rejected at load. Public keys are matched against a trusted-keys list maintained by the marketplace (not yet wired — manual at v0.1.2).
+
+## Authoring quickstart
+
+```bash
+nexus plugin scaffold --type wasm com.example.my-plugin
+# emits plugin.toml + Rust skeleton; cargo build to .wasm
+```
+
+For JS:
+
+```bash
+nexus plugin scaffold --type script com.example.my-plugin
+# emits plugin.json + index.ts with @nexus/extension-api import
+```
+
+Reference manifests: `crates/nexus-plugins/src/manifest.rs` (Rust types), [`../settings/plugin-manifests.md`](../settings/plugin-manifests.md) (TOML schema).
