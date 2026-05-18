@@ -740,6 +740,137 @@ function StubRow({
   )
 }
 
+// ─── Wired primitives (P4-06) ────────────────────────────────────────────────
+//
+// Sibling components to the Stub* primitives above, but with their value
+// hooked into the per-forge `configStore`. Use these for controls whose
+// state we want to round-trip to `<forge>/.forge/app.toml` even if a
+// real backend consumer doesn't exist yet — saving the value at least
+// makes the UI feel honest, and future feature code can read the same
+// key once the corresponding behavior ships.
+
+function WiredToggle({
+  settingKey,
+  defaultValue,
+  label,
+}: {
+  settingKey: string
+  defaultValue: boolean
+  label: string
+}) {
+  const value = useConfigValue<boolean>(settingKey, defaultValue)
+  const onClick = () => useConfigStore.getState().set(settingKey, !value)
+  return <StubToggle on={value} label={label} onClick={onClick} />
+}
+
+function WiredSelect({
+  settingKey,
+  defaultValue,
+  options,
+  label,
+}: {
+  settingKey: string
+  defaultValue: string
+  options: ReadonlyArray<{ value: string; label: string }>
+  label: string
+}) {
+  const value = useConfigValue<string>(settingKey, defaultValue)
+  return (
+    <select
+      value={value}
+      aria-label={label}
+      onChange={(e) => useConfigStore.getState().set(settingKey, e.target.value)}
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function WiredNumberRange({
+  settingKey,
+  defaultValue,
+  min,
+  max,
+  step,
+  label,
+}: {
+  settingKey: string
+  defaultValue: number
+  min: number
+  max: number
+  step?: number
+  label: string
+}) {
+  const value = useConfigValue<number>(settingKey, defaultValue)
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step ?? 1}
+      value={value}
+      aria-label={label}
+      onChange={(e) =>
+        useConfigStore.getState().set(settingKey, Number(e.target.value))
+      }
+      style={{ minWidth: 120 }}
+    />
+  )
+}
+
+function WiredText({
+  settingKey,
+  defaultValue,
+  label,
+  placeholder,
+}: {
+  settingKey: string
+  defaultValue: string
+  label: string
+  placeholder?: string
+}) {
+  const value = useConfigValue<string>(settingKey, defaultValue)
+  return (
+    <input
+      type="text"
+      value={value}
+      placeholder={placeholder}
+      aria-label={label}
+      onChange={(e) => useConfigStore.getState().set(settingKey, e.target.value)}
+    />
+  )
+}
+
+function WiredNumber({
+  settingKey,
+  defaultValue,
+  min,
+  max,
+  label,
+}: {
+  settingKey: string
+  defaultValue: number
+  min?: number
+  max?: number
+  label: string
+}) {
+  const value = useConfigValue<number>(settingKey, defaultValue)
+  return (
+    <input
+      type="number"
+      value={value}
+      min={min}
+      max={max}
+      aria-label={label}
+      onChange={(e) => useConfigStore.getState().set(settingKey, Number(e.target.value))}
+    />
+  )
+}
+
 function ComingSoonTab({ title, description }: { title: string; description: string }) {
   return (
     <div className="settings-section">
@@ -792,10 +923,10 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
         title="Automatic updates"
         description="Turn this off to prevent Nexus from checking for updates."
         control={
-          <StubToggle
-            on={true}
+          <WiredToggle
+            settingKey="nexus.settings.general.automaticUpdates"
+            defaultValue={true}
             label="Toggle automatic updates"
-            onClick={comingSoon('Automatic updates')}
           />
         }
       />
@@ -804,13 +935,12 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
         title="Language"
         description="Change the display language."
         control={
-          <select
+          <WiredSelect
+            settingKey="nexus.settings.general.language"
             defaultValue="en"
-            onChange={comingSoon('Language')}
-            title="Coming soon"
-          >
-            <option value="en">English</option>
-          </select>
+            label="Language"
+            options={[{ value: 'en', label: 'English' }]}
+          />
         }
       />
 
@@ -845,10 +975,10 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
         title="Notify if startup takes longer than expected"
         description="Diagnose issues by seeing what is causing the app to load slowly."
         control={
-          <StubToggle
-            on={false}
+          <WiredToggle
+            settingKey="nexus.settings.general.slowStartupNotification"
+            defaultValue={false}
             label="Toggle slow-startup notification"
-            onClick={comingSoon('Startup-time notification')}
           />
         }
       />
@@ -857,10 +987,10 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
         title="Command line interface"
         description="Allow interactions with Nexus from the command line."
         control={
-          <StubToggle
-            on={false}
+          <WiredToggle
+            settingKey="nexus.settings.general.commandLineInterface"
+            defaultValue={false}
             label="Toggle command line interface"
-            onClick={comingSoon('Command line interface')}
           />
         }
       />
@@ -885,37 +1015,51 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
         title="Always focus new tabs"
         description="When you open a link in a new tab, switch to it immediately."
         control={
-          <StubToggle on={true} label="Toggle focus new tabs" onClick={comingSoon('Always focus new tabs')} />
+          <WiredToggle
+            settingKey="nexus.settings.editor.alwaysFocusNewTabs"
+            defaultValue={true}
+            label="Toggle focus new tabs"
+          />
         }
       />
       <StubRow
         title="Default view for new tabs"
         description="The default view that a new Markdown tab gets opened in."
         control={
-          <select defaultValue="editing" onChange={comingSoon('Default view for new tabs')} title="Coming soon">
-            <option value="editing">Editing view</option>
-            <option value="reading">Reading view</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.editor.defaultView"
+            defaultValue="editing"
+            label="Default view for new tabs"
+            options={[
+              { value: 'editing', label: 'Editing view' },
+              { value: 'reading', label: 'Reading view' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Default editing mode"
         description="The default editing mode a new tab will start with."
         control={
-          <select defaultValue="live" onChange={comingSoon('Default editing mode')} title="Coming soon">
-            <option value="live">Live Preview</option>
-            <option value="source">Source mode</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.editor.defaultEditingMode"
+            defaultValue="live"
+            label="Default editing mode"
+            options={[
+              { value: 'live', label: 'Live Preview' },
+              { value: 'source', label: 'Source mode' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Show editing mode in status bar"
         description="Show the editing mode toggle in the status bar."
         control={
-          <StubToggle
-            on={true}
+          <WiredToggle
+            settingKey="nexus.settings.editor.showEditingModeInStatusBar"
+            defaultValue={true}
             label="Toggle editing-mode status bar"
-            onClick={comingSoon('Show editing mode in status bar')}
           />
         }
       />
@@ -926,53 +1070,94 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
         title="Readable line length"
         description="Limit maximum line length. Less content fits onscreen, but long blocks of text are more readable."
         control={
-          <StubToggle on={true} label="Toggle readable line length" onClick={comingSoon('Readable line length')} />
+          <WiredToggle
+            settingKey="nexus.settings.editor.readableLineLength"
+            defaultValue={true}
+            label="Toggle readable line length"
+          />
         }
       />
       <StubRow
         title="Strict line breaks"
         description="Markdown specs ignore single line breaks in reading view. Turn this off to make single line breaks visible."
         control={
-          <StubToggle on={false} label="Toggle strict line breaks" onClick={comingSoon('Strict line breaks')} />
+          <WiredToggle
+            settingKey="nexus.settings.editor.strictLineBreaks"
+            defaultValue={false}
+            label="Toggle strict line breaks"
+          />
         }
       />
       <StubRow
         title="Properties in document"
         description="Choose how properties are displayed at the top of notes. Select &ldquo;source&rdquo; to show properties as raw YAML."
         control={
-          <select defaultValue="visible" onChange={comingSoon('Properties in document')} title="Coming soon">
-            <option value="visible">Visible</option>
-            <option value="hidden">Hidden</option>
-            <option value="source">Source</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.editor.propertiesInDocument"
+            defaultValue="visible"
+            label="Properties in document"
+            options={[
+              { value: 'visible', label: 'Visible' },
+              { value: 'hidden', label: 'Hidden' },
+              { value: 'source', label: 'Source' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Fold heading"
         description="Lets you fold all content under a heading."
-        control={<StubToggle on={true} label="Toggle fold heading" onClick={comingSoon('Fold heading')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.foldHeading"
+            defaultValue={true}
+            label="Toggle fold heading"
+          />
+        }
       />
       <StubRow
         title="Fold indent"
         description="Lets you fold part of an indentation, such as lists."
-        control={<StubToggle on={true} label="Toggle fold indent" onClick={comingSoon('Fold indent')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.foldIndent"
+            defaultValue={true}
+            label="Toggle fold indent"
+          />
+        }
       />
       <StubRow
         title="Line numbers"
         description="Show line numbers in the gutter."
-        control={<StubToggle on={false} label="Toggle line numbers" onClick={comingSoon('Line numbers')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.lineNumbers"
+            defaultValue={false}
+            label="Toggle line numbers"
+          />
+        }
       />
       <StubRow
         title="Indentation guides"
         description="Show vertical relationship lines between list items."
         control={
-          <StubToggle on={true} label="Toggle indentation guides" onClick={comingSoon('Indentation guides')} />
+          <WiredToggle
+            settingKey="nexus.settings.editor.indentationGuides"
+            defaultValue={true}
+            label="Toggle indentation guides"
+          />
         }
       />
       <StubRow
         title="Right-to-left (RTL)"
         description="Sets the default text direction of notes to right-to-left."
-        control={<StubToggle on={false} label="Toggle RTL" onClick={comingSoon('Right-to-left (RTL)')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.rtl"
+            defaultValue={false}
+            label="Toggle RTL"
+          />
+        }
       />
 
       <div className="settings-section-title" style={{ marginTop: 24 }}>Behavior</div>
@@ -999,7 +1184,11 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
             >
               ⚙
             </button>
-            <StubToggle on={true} label="Toggle spellcheck" onClick={comingSoon('Spellcheck')} />
+            <WiredToggle
+              settingKey="nexus.settings.editor.spellcheck"
+              defaultValue={true}
+              label="Toggle spellcheck"
+            />
           </div>
         }
       />
@@ -1007,50 +1196,71 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
         title="Spellcheck languages"
         description="Choose the languages for the spellchecker to use."
         control={
-          <select defaultValue="en-US" onChange={comingSoon('Spellcheck languages')} title="Coming soon">
-            <option value="en-US">English (United States)</option>
-            <option value="add">+ Add language…</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.editor.spellcheckLanguages"
+            defaultValue="en-US"
+            label="Spellcheck languages"
+            options={[
+              { value: 'en-US', label: 'English (United States)' },
+              { value: 'add', label: '+ Add language…' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Auto-pair brackets"
         description="Pair brackets and quotes automatically."
-        control={<StubToggle on={true} label="Toggle auto-pair brackets" onClick={comingSoon('Auto-pair brackets')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.autoPairBrackets"
+            defaultValue={true}
+            label="Toggle auto-pair brackets"
+          />
+        }
       />
       <StubRow
         title="Auto-pair Markdown syntax"
         description="Pair symbols automatically for bold, italic, code, and more."
         control={
-          <StubToggle
-            on={true}
+          <WiredToggle
+            settingKey="nexus.settings.editor.autoPairMarkdownSyntax"
+            defaultValue={true}
             label="Toggle auto-pair Markdown syntax"
-            onClick={comingSoon('Auto-pair Markdown syntax')}
           />
         }
       />
       <StubRow
         title="Smart lists"
         description="Automatically set indentation and place list items correctly."
-        control={<StubToggle on={true} label="Toggle smart lists" onClick={comingSoon('Smart lists')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.smartLists"
+            defaultValue={true}
+            label="Toggle smart lists"
+          />
+        }
       />
       <StubRow
         title="Indent using tabs"
         description="Use tabs to indent by pressing the &ldquo;Tab&rdquo; key. Turn this off to indent using 4 spaces."
-        control={<StubToggle on={true} label="Toggle indent using tabs" onClick={comingSoon('Indent using tabs')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.indentUsingTabs"
+            defaultValue={true}
+            label="Toggle indent using tabs"
+          />
+        }
       />
       <StubRow
         title="Indent visual width"
         description="Number of spaces a tab character will render as."
         control={
-          <input
-            type="range"
+          <WiredNumberRange
+            settingKey="nexus.settings.editor.indentVisualWidth"
+            defaultValue={4}
             min={2}
             max={8}
-            defaultValue={4}
-            onChange={comingSoon('Indent visual width')}
-            title="Coming soon"
-            style={{ minWidth: 120 }}
+            label="Indent visual width"
           />
         }
       />
@@ -1061,17 +1271,23 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
         title="Convert pasted HTML to Markdown"
         description="Automatically convert HTML to Markdown when pasting and drag-and-drop from web pages. Use Ctrl/Cmd+Shift+V to paste HTML without converting."
         control={
-          <StubToggle
-            on={true}
+          <WiredToggle
+            settingKey="nexus.settings.editor.convertPastedHtml"
+            defaultValue={true}
             label="Toggle convert pasted HTML"
-            onClick={comingSoon('Convert pasted HTML to Markdown')}
           />
         }
       />
       <StubRow
         title="Vim key bindings"
         description="Use Vim key bindings when editing."
-        control={<StubToggle on={false} label="Toggle Vim key bindings" onClick={comingSoon('Vim key bindings')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.editor.vimKeyBindings"
+            defaultValue={false}
+            label="Toggle Vim key bindings"
+          />
+        }
       />
     </div>
   )
@@ -1092,37 +1308,48 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
         title="Default file to open"
         description="Choose which file to open when the app starts."
         control={
-          <select defaultValue="last" onChange={comingSoon('Default file to open')} title="Coming soon">
-            <option value="last">Last opened</option>
-            <option value="none">None</option>
-            <option value="specific">Specific file…</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.files.defaultFileToOpen"
+            defaultValue="last"
+            label="Default file to open"
+            options={[
+              { value: 'last', label: 'Last opened' },
+              { value: 'none', label: 'None' },
+              { value: 'specific', label: 'Specific file…' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Default location for new notes"
         description="Where newly created notes are placed."
         control={
-          <select defaultValue="root" onChange={comingSoon('Default location for new notes')} title="Coming soon">
-            <option value="root">Forge folder</option>
-            <option value="same">Same folder as current file</option>
-            <option value="specific">Specific folder…</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.files.defaultNoteLocation"
+            defaultValue="root"
+            label="Default location for new notes"
+            options={[
+              { value: 'root', label: 'Forge folder' },
+              { value: 'same', label: 'Same folder as current file' },
+              { value: 'specific', label: 'Specific folder…' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Default location for new attachments"
         description="Where newly added attachments are placed."
         control={
-          <select
+          <WiredSelect
+            settingKey="nexus.settings.files.defaultAttachmentLocation"
             defaultValue="root"
-            onChange={comingSoon('Default location for new attachments')}
-            title="Coming soon"
-          >
-            <option value="root">Forge folder</option>
-            <option value="same">Same folder as current file</option>
-            <option value="specific">Specific folder…</option>
-          </select>
+            label="Default location for new attachments"
+            options={[
+              { value: 'root', label: 'Forge folder' },
+              { value: 'same', label: 'Same folder as current file' },
+              { value: 'specific', label: 'Specific folder…' },
+            ]}
+          />
         }
       />
 
@@ -1132,34 +1359,49 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
         title="New link format"
         description="What links to insert when auto-generating internal links."
         control={
-          <select defaultValue="shortest" onChange={comingSoon('New link format')} title="Coming soon">
-            <option value="shortest">Shortest path when possible</option>
-            <option value="relative">Relative path</option>
-            <option value="absolute">Absolute path</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.links.newLinkFormat"
+            defaultValue="shortest"
+            label="New link format"
+            options={[
+              { value: 'shortest', label: 'Shortest path when possible' },
+              { value: 'relative', label: 'Relative path' },
+              { value: 'absolute', label: 'Absolute path' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Automatically update internal links"
         description="Turn off to be prompted to update links after renaming a file."
         control={
-          <StubToggle
-            on={false}
+          <WiredToggle
+            settingKey="nexus.settings.links.autoUpdate"
+            defaultValue={false}
             label="Toggle automatic link updates"
-            onClick={comingSoon('Automatically update internal links')}
           />
         }
       />
       <StubRow
         title="Use [[Wikilinks]]"
         description="Auto-generate Wikilinks for [[links]] and ![[images]] instead of Markdown links and images. Disable this option to generate Markdown links instead."
-        control={<StubToggle on={true} label="Toggle wikilinks" onClick={comingSoon('Use Wikilinks')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.links.useWikilinks"
+            defaultValue={true}
+            label="Toggle wikilinks"
+          />
+        }
       />
       <StubRow
         title="Show all file types"
         description="Show files with any extension even if Nexus can't open them natively, so you can link to them and see them in the file explorer and quick switcher."
         control={
-          <StubToggle on={false} label="Toggle show all file types" onClick={comingSoon('Show all file types')} />
+          <WiredToggle
+            settingKey="nexus.settings.files.showAllFileTypes"
+            defaultValue={false}
+            label="Toggle show all file types"
+          />
         }
       />
 
@@ -1169,33 +1411,43 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
         title="Confirm before deleting files"
         description="Avoid accidentally deleting files."
         control={
-          <StubToggle on={true} label="Toggle delete confirmation" onClick={comingSoon('Confirm before deleting files')} />
+          <WiredToggle
+            settingKey="nexus.settings.files.confirmBeforeDelete"
+            defaultValue={true}
+            label="Toggle delete confirmation"
+          />
         }
       />
       <StubRow
         title="Delete attachments when deleting files"
         description="Automatically remove attachments linked to the deleted file if they're not used elsewhere."
         control={
-          <select
+          <WiredSelect
+            settingKey="nexus.settings.files.deleteAttachments"
             defaultValue="ask"
-            onChange={comingSoon('Delete attachments when deleting files')}
-            title="Coming soon"
-          >
-            <option value="ask">Ask each time</option>
-            <option value="always">Always</option>
-            <option value="never">Never</option>
-          </select>
+            label="Delete attachments when deleting files"
+            options={[
+              { value: 'ask', label: 'Ask each time' },
+              { value: 'always', label: 'Always' },
+              { value: 'never', label: 'Never' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Deleted files"
         description="What happens to a file after you delete it."
         control={
-          <select defaultValue="system" onChange={comingSoon('Deleted files')} title="Coming soon">
-            <option value="system">Move to system trash</option>
-            <option value="forge">Move to .trash in forge</option>
-            <option value="permanent">Delete permanently</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.files.deletedFilesDestination"
+            defaultValue="system"
+            label="Deleted files"
+            options={[
+              { value: 'system', label: 'Move to system trash' },
+              { value: 'forge', label: 'Move to .trash in forge' },
+              { value: 'permanent', label: 'Delete permanently' },
+            ]}
+          />
         }
       />
 
@@ -1227,19 +1479,24 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
         title="Override config folder"
         description="Use a different config folder than the default one. Must start with a dot."
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.files.overrideConfigFolder"
+            defaultValue=""
             placeholder=".forge"
-            onChange={comingSoon('Override config folder')}
-            title="Coming soon"
-            style={{ minWidth: 180 }}
+            label="Override config folder"
           />
         }
       />
       <StubRow
         title="Allow URI callbacks"
         description="Enable the use of x-callback-url through x-success or x-error when handling Nexus URIs."
-        control={<StubToggle on={false} label="Toggle URI callbacks" onClick={comingSoon('Allow URI callbacks')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.files.allowUriCallbacks"
+            defaultValue={false}
+            label="Toggle URI callbacks"
+          />
+        }
       />
       <StubRow
         title="Rebuild forge cache"
@@ -1395,90 +1652,122 @@ const STUB_CORE_PLUGINS: ReadonlyArray<StubCorePluginEntry> = [
 
 const STUB_CORE_BY_ID = new Map(STUB_CORE_PLUGINS.map((p) => [p.id, p]))
 
-function StubBacklinksPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubBacklinksPage(_: { api?: PluginAPI }) {
   return (
     <div className="settings-section">
       <StubRow
         title="Show backlinks at the bottom of notes"
         description="Make backlinks visible in new tabs by default."
         control={
-          <StubToggle on={false} label="Toggle backlinks at bottom" onClick={comingSoon('Show backlinks at the bottom of notes')} />
+          <WiredToggle
+            settingKey="nexus.settings.backlinks.showAtBottom"
+            defaultValue={false}
+            label="Toggle backlinks at bottom"
+          />
         }
       />
     </div>
   )
 }
 
-function StubCanvasPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubCanvasPage(_: { api?: PluginAPI }) {
   return (
     <div className="settings-section">
       <StubRow
         title="Default location for new canvas files"
         description="Where newly created canvases are placed."
         control={
-          <select defaultValue="root" onChange={comingSoon('Default canvas location')} title="Coming soon">
-            <option value="root">Forge folder</option>
-            <option value="same">Same folder as current file</option>
-            <option value="specific">Specific folder…</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.canvas.defaultLocation"
+            defaultValue="root"
+            label="Default canvas location"
+            options={[
+              { value: 'root', label: 'Forge folder' },
+              { value: 'same', label: 'Same folder as current file' },
+              { value: 'specific', label: 'Specific folder…' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Default mouse wheel behavior"
         description=""
         control={
-          <select defaultValue="pan" onChange={comingSoon('Default mouse wheel behavior')} title="Coming soon">
-            <option value="pan">Pan</option>
-            <option value="zoom">Zoom</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.canvas.mouseWheel"
+            defaultValue="pan"
+            label="Default mouse wheel behavior"
+            options={[
+              { value: 'pan', label: 'Pan' },
+              { value: 'zoom', label: 'Zoom' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Default Ctrl + Drag behavior"
         description=""
         control={
-          <select defaultValue="menu" onChange={comingSoon('Default Ctrl+Drag behavior')} title="Coming soon">
-            <option value="menu">Show menu</option>
-            <option value="select">Select</option>
-            <option value="zoom">Zoom</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.canvas.ctrlDrag"
+            defaultValue="menu"
+            label="Default Ctrl+Drag behavior"
+            options={[
+              { value: 'menu', label: 'Show menu' },
+              { value: 'select', label: 'Select' },
+              { value: 'zoom', label: 'Zoom' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Show card names"
         description=""
         control={
-          <select defaultValue="always" onChange={comingSoon('Show card names')} title="Coming soon">
-            <option value="always">Always</option>
-            <option value="hover">On hover</option>
-            <option value="never">Never</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.canvas.showCardNames"
+            defaultValue="always"
+            label="Show card names"
+            options={[
+              { value: 'always', label: 'Always' },
+              { value: 'hover', label: 'On hover' },
+              { value: 'never', label: 'Never' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Snap to grid"
         description="Snap cards to the background grid when moving and resizing."
-        control={<StubToggle on={true} label="Toggle snap to grid" onClick={comingSoon('Snap to grid')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.canvas.snapToGrid"
+            defaultValue={true}
+            label="Toggle snap to grid"
+          />
+        }
       />
       <StubRow
         title="Snap to objects"
         description="Snap cards to nearby objects when moving and resizing."
-        control={<StubToggle on={true} label="Toggle snap to objects" onClick={comingSoon('Snap to objects')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.canvas.snapToObjects"
+            defaultValue={true}
+            label="Toggle snap to objects"
+          />
+        }
       />
       <StubRow
         title="Zoom threshold for hiding card content"
         description="Lower values will increase performance but hide card content sooner when zooming out."
         control={
-          <input
-            type="range"
+          <WiredNumberRange
+            settingKey="nexus.settings.canvas.zoomHideThreshold"
+            defaultValue={40}
             min={0}
             max={100}
-            defaultValue={40}
-            onChange={comingSoon('Zoom threshold for hiding card content')}
-            title="Coming soon"
-            style={{ minWidth: 120 }}
+            label="Zoom threshold for hiding card content"
           />
         }
       />
@@ -1511,8 +1800,7 @@ function StubCommandPalettePage() {
   )
 }
 
-function StubDailyNotesPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubDailyNotesPage(_: { api?: PluginAPI }) {
   const today = new Date().toISOString().slice(0, 10)
   return (
     <div className="settings-section">
@@ -1520,12 +1808,10 @@ function StubDailyNotesPage({ api }: { api?: PluginAPI }) {
         title="Date format"
         description="Choose how daily notes are named in your forge."
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.dailyNotes.dateFormat"
             defaultValue={today}
-            onChange={comingSoon('Date format')}
-            title="Coming soon"
-            style={{ minWidth: 160 }}
+            label="Date format"
           />
         }
       />
@@ -1533,12 +1819,11 @@ function StubDailyNotesPage({ api }: { api?: PluginAPI }) {
         title="New file location"
         description="New daily notes will be placed here."
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.dailyNotes.fileLocation"
+            defaultValue=""
             placeholder="Example: folder 1/folder 2"
-            onChange={comingSoon('Daily note location')}
-            title="Coming soon"
-            style={{ minWidth: 200 }}
+            label="Daily note location"
           />
         }
       />
@@ -1546,12 +1831,11 @@ function StubDailyNotesPage({ api }: { api?: PluginAPI }) {
         title="Template file location"
         description="Choose the file to use as a template."
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.dailyNotes.templateLocation"
+            defaultValue=""
             placeholder="Example: folder/note"
-            onChange={comingSoon('Daily note template')}
-            title="Coming soon"
-            style={{ minWidth: 200 }}
+            label="Daily note template"
           />
         }
       />
@@ -1567,13 +1851,11 @@ function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
         title="Snapshot interval"
         description="Minimal interval in minutes between two snapshots."
         control={
-          <input
-            type="number"
-            min={1}
+          <WiredNumber
+            settingKey="nexus.settings.fileRecovery.snapshotIntervalMinutes"
             defaultValue={5}
-            onChange={comingSoon('Snapshot interval')}
-            title="Coming soon"
-            style={{ width: 80 }}
+            min={1}
+            label="Snapshot interval"
           />
         }
       />
@@ -1581,13 +1863,11 @@ function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
         title="History length"
         description="Number of days the snapshots are kept for."
         control={
-          <input
-            type="number"
-            min={1}
+          <WiredNumber
+            settingKey="nexus.settings.fileRecovery.historyDays"
             defaultValue={7}
-            onChange={comingSoon('History length')}
-            title="Coming soon"
-            style={{ width: 80 }}
+            min={1}
+            label="History length"
           />
         }
       />
@@ -1639,45 +1919,53 @@ function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
   )
 }
 
-function StubNoteComposerPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubNoteComposerPage(_: { api?: PluginAPI }) {
   return (
     <div className="settings-section">
       <StubRow
         title="Text after extraction"
         description="What to show in place of the selected text after extracting it."
         control={
-          <select defaultValue="link" onChange={comingSoon('Text after extraction')} title="Coming soon">
-            <option value="link">Link to new file</option>
-            <option value="embed">Embed new file</option>
-            <option value="nothing">Nothing</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.noteComposer.textAfterExtraction"
+            defaultValue="link"
+            label="Text after extraction"
+            options={[
+              { value: 'link', label: 'Link to new file' },
+              { value: 'embed', label: 'Embed new file' },
+              { value: 'nothing', label: 'Nothing' },
+            ]}
+          />
         }
       />
       <StubRow
         title="Template file location"
         description="Template file to use when merging or extracting. Available variables: {{content}}, {{fromTitle}}, {{newTitle}}, {{date:FORMAT}}, e.g. {{date:YYYY-MM-DD}}."
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.noteComposer.templateLocation"
+            defaultValue=""
             placeholder="Example: folder/note"
-            onChange={comingSoon('Note composer template')}
-            title="Coming soon"
-            style={{ minWidth: 200 }}
+            label="Note composer template"
           />
         }
       />
       <StubRow
         title="Confirm file merge"
         description="Prompt before merging two files."
-        control={<StubToggle on={true} label="Toggle confirm file merge" onClick={comingSoon('Confirm file merge')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.noteComposer.confirmMerge"
+            defaultValue={true}
+            label="Toggle confirm file merge"
+          />
+        }
       />
     </div>
   )
 }
 
-function StubPagePreviewPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubPagePreviewPage(_: { api?: PluginAPI }) {
   const surfaces: ReadonlyArray<{ key: string; label: string; on: boolean }> = [
     { key: 'search', label: 'Search, Backlinks, and Outgoing links', on: true },
     { key: 'reading', label: 'Reading view', on: false },
@@ -1699,10 +1987,10 @@ function StubPagePreviewPage({ api }: { api?: PluginAPI }) {
           title={s.label}
           description=""
           control={
-            <StubToggle
-              on={s.on}
+            <WiredToggle
+              settingKey={`nexus.settings.pagePreview.ctrlRequired.${s.key}`}
+              defaultValue={s.on}
               label={`Toggle Ctrl-required on ${s.label}`}
-              onClick={comingSoon(`Page preview: ${s.label}`)}
             />
           }
         />
@@ -1711,21 +1999,30 @@ function StubPagePreviewPage({ api }: { api?: PluginAPI }) {
   )
 }
 
-function StubQuickSwitcherPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubQuickSwitcherPage(_: { api?: PluginAPI }) {
   return (
     <div className="settings-section">
       <StubRow
         title="Show existing only"
         description="Only show results from existing files. Links to files that are not yet created will be hidden."
         control={
-          <StubToggle on={false} label="Toggle show existing only" onClick={comingSoon('Show existing only')} />
+          <WiredToggle
+            settingKey="nexus.settings.quickSwitcher.showExistingOnly"
+            defaultValue={false}
+            label="Toggle show existing only"
+          />
         }
       />
       <StubRow
         title="Show attachments"
         description="Show attachment files like images, videos, and PDFs."
-        control={<StubToggle on={true} label="Toggle show attachments" onClick={comingSoon('Show attachments')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.quickSwitcher.showAttachments"
+            defaultValue={true}
+            label="Toggle show attachments"
+          />
+        }
       />
     </div>
   )
@@ -1780,8 +2077,7 @@ function StubSyncPage({ api }: { api?: PluginAPI }) {
   )
 }
 
-function StubTemplatesPage({ api }: { api?: PluginAPI }) {
-  const comingSoon = useComingSoon(api)
+function StubTemplatesPage(_: { api?: PluginAPI }) {
   const now = new Date()
   const today = now.toISOString().slice(0, 10)
   const time = now.toTimeString().slice(0, 5)
@@ -1791,12 +2087,11 @@ function StubTemplatesPage({ api }: { api?: PluginAPI }) {
         title="Template folder location"
         description="Files in this folder will be available as templates."
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.templates.folderLocation"
+            defaultValue=""
             placeholder="Example: folder 1/folder 2"
-            onChange={comingSoon('Template folder location')}
-            title="Coming soon"
-            style={{ minWidth: 200 }}
+            label="Template folder location"
           />
         }
       />
@@ -1807,12 +2102,11 @@ function StubTemplatesPage({ api }: { api?: PluginAPI }) {
           `Your current syntax looks like this: ${today}`
         }
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.templates.dateFormat"
+            defaultValue=""
             placeholder="YYYY-MM-DD"
-            onChange={comingSoon('Templates date format')}
-            title="Coming soon"
-            style={{ minWidth: 160 }}
+            label="Templates date format"
           />
         }
       />
@@ -1823,12 +2117,11 @@ function StubTemplatesPage({ api }: { api?: PluginAPI }) {
           `Your current syntax looks like this: ${time}`
         }
         control={
-          <input
-            type="text"
+          <WiredText
+            settingKey="nexus.settings.templates.timeFormat"
+            defaultValue=""
             placeholder="HH:mm"
-            onChange={comingSoon('Templates time format')}
-            title="Coming soon"
-            style={{ minWidth: 160 }}
+            label="Templates time format"
           />
         }
       />
@@ -2093,17 +2386,35 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
       <StubRow
         title="Inline title"
         description="Display the filename as an editable title inline with the file contents."
-        control={<StubToggle on={true} label="Toggle inline title" onClick={comingSoon('Inline title')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.appearance.inlineTitle"
+            defaultValue={true}
+            label="Toggle inline title"
+          />
+        }
       />
       <StubRow
         title="Show tab title bar"
         description="Display the header at the top of every tab."
-        control={<StubToggle on={true} label="Toggle tab title bar" onClick={comingSoon('Show tab title bar')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.appearance.showTabTitleBar"
+            defaultValue={true}
+            label="Toggle tab title bar"
+          />
+        }
       />
       <StubRow
         title="Show ribbon"
         description="Display vertical toolbar on the side of the window."
-        control={<StubToggle on={true} label="Toggle ribbon" onClick={comingSoon('Show ribbon')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.appearance.showRibbon"
+            defaultValue={true}
+            label="Toggle ribbon"
+          />
+        }
       />
       <StubRow
         title="Ribbon menu configuration"
@@ -2200,14 +2511,12 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
         title="Font size"
         description="Font size in pixels that affects editing and reading views."
         control={
-          <input
-            type="range"
+          <WiredNumberRange
+            settingKey="nexus.settings.appearance.fontSize"
+            defaultValue={14}
             min={10}
             max={24}
-            defaultValue={14}
-            onChange={comingSoon('Font size')}
-            title="Coming soon"
-            style={{ minWidth: 120 }}
+            label="Font size"
           />
         }
       />
@@ -2215,10 +2524,10 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
         title="Quick font size adjustment"
         description="Adjust the font size using Ctrl + Scroll, or using the trackpad pinch-zoom gesture."
         control={
-          <StubToggle
-            on={false}
+          <WiredToggle
+            settingKey="nexus.settings.appearance.quickFontAdjust"
+            defaultValue={false}
             label="Toggle quick font size adjustment"
-            onClick={comingSoon('Quick font size adjustment')}
           />
         }
       />
@@ -2229,31 +2538,40 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
         title="Zoom level"
         description="Controls the overall zoom level of the app."
         control={
-          <input
-            type="range"
+          <WiredNumberRange
+            settingKey="nexus.settings.appearance.zoomLevel"
+            defaultValue={100}
             min={50}
             max={200}
-            defaultValue={100}
-            onChange={comingSoon('Zoom level')}
-            title="Coming soon"
-            style={{ minWidth: 120 }}
+            label="Zoom level"
           />
         }
       />
       <StubRow
         title="Native menus"
         description="Menus throughout the app will match the operating system. They will not be affected by your theme."
-        control={<StubToggle on={false} label="Toggle native menus" onClick={comingSoon('Native menus')} />}
+        control={
+          <WiredToggle
+            settingKey="nexus.settings.appearance.nativeMenus"
+            defaultValue={false}
+            label="Toggle native menus"
+          />
+        }
       />
       <StubRow
         title="Window frame style"
         description="Determines the styling of the title bar of Nexus windows. Requires a full restart to take effect."
         control={
-          <select defaultValue="hidden" onChange={comingSoon('Window frame style')} title="Coming soon">
-            <option value="hidden">Hidden (default)</option>
-            <option value="native">Native</option>
-            <option value="custom">Custom</option>
-          </select>
+          <WiredSelect
+            settingKey="nexus.settings.appearance.windowFrame"
+            defaultValue="hidden"
+            label="Window frame style"
+            options={[
+              { value: 'hidden', label: 'Hidden (default)' },
+              { value: 'native', label: 'Native' },
+              { value: 'custom', label: 'Custom' },
+            ]}
+          />
         }
       />
       <StubRow
@@ -2285,10 +2603,10 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
           'If you turn this off, app performance will be severely degraded.'
         }
         control={
-          <StubToggle
-            on={true}
+          <WiredToggle
+            settingKey="nexus.settings.appearance.hardwareAcceleration"
+            defaultValue={true}
             label="Toggle hardware acceleration"
-            onClick={comingSoon('Hardware acceleration')}
           />
         }
       />
