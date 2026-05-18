@@ -192,6 +192,13 @@ fn every_publish_call_emits_in_namespace() {
 #[test]
 fn owners_table_matches_plugin_id_constants() {
     let crates_dir = workspace_root().join("crates");
+    // Crates that have centralized `PLUGIN_ID` to `nexus_types::plugin_ids`
+    // no longer carry the literal in their own src tree — accept the
+    // canonical registry as proof instead.
+    let plugin_ids_registry = crates_dir
+        .join("nexus-types")
+        .join("src")
+        .join("plugin_ids.rs");
     let mut errors = Vec::new();
 
     for (crate_name, expected_id) in OWNERS {
@@ -204,10 +211,13 @@ fn owners_table_matches_plugin_id_constants() {
         // a couple declare it in `lib.rs` instead (e.g. nexus-ai-runtime).
         // Walk the tree rather than hard-requiring a fixed file path.
         if !core.exists() || !file_contains(&core, expected_id) {
-            if !found_plugin_id_in_tree(&src, expected_id) {
+            if !found_plugin_id_in_tree(&src, expected_id)
+                && !file_contains(&plugin_ids_registry, expected_id)
+            {
                 errors.push(format!(
                     "{crate_name}: expected literal {expected_id:?} \
-                     somewhere under src/ — OWNERS may be stale"
+                     somewhere under src/ or in nexus-types/src/plugin_ids.rs \
+                     — OWNERS may be stale"
                 ));
             }
         }

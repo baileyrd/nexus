@@ -1288,7 +1288,7 @@ mod tests {
                 .any(|r| r.round == i && !r.tool_calls.is_empty());
             let in_summary = summary_blob.contains(&format!("round {i}: read"));
             assert!(
-                in_live && in_summary || in_live || in_summary,
+                in_live || in_summary,
                 "decision for round {i} lost across compaction"
             );
         }
