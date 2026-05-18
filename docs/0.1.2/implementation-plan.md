@@ -19,7 +19,7 @@
 | Phase | Items | Effort estimate | Risk reduction |
 |-------|------:|-----------------|----------------|
 | 0 — Quick wins (done or trivial) | 8 | ~6 h | low (cosmetic) — **all 8 shipped 2026-05-17** |
-| 1 — Security hardening (P0) | 9 | 1–2 weeks | **high** (cap elevation closes hostile-plugin surface) — **8/9 shipped 2026-05-17; only P1-08 (RFC) deferred** |
+| 1 — Security hardening (P0) | 9 | 1–2 weeks | **high** (cap elevation closes hostile-plugin surface) — **8/9 shipped 2026-05-17; P1-08 RFC drafted 2026-05-18, implementation deferred** |
 | 2 — Settings infrastructure (P1) | 7 | 2–3 weeks | medium (user UX + future-proofing) |
 | 3 — Architecture hardening (P1) | 5 | 1 week | medium (closes theoretical regression paths) — **all 5 shipped 2026-05-18** |
 | 4 — Stub completion (P2) | 6 | 2–4 weeks | low (UX surface) |
@@ -49,7 +49,7 @@ Items already shipped during the audit, or trivial enough to bundle into any nea
 
 ## Phase 1 — Security hardening (P0)
 
-> **Phase 1 completed 2026-05-17** (less P1-08, which remains open for an RFC). All cap-elevations, the new caps (`security.write`, `security.audit.write`, `network.bind`), the in-tree-only marker, and the `KernelConfig.wasm_caps` ceiling shipped.
+> **Phase 1 completed 2026-05-17** (less P1-08, whose RFC was drafted 2026-05-18 — see [`rfcs/0001-workflow-cap-delegation.md`](rfcs/0001-workflow-cap-delegation.md) — and whose implementation remains deferred until sign-off). All cap-elevations, the new caps (`security.write`, `security.audit.write`, `network.bind`), the in-tree-only marker, and the `KernelConfig.wasm_caps` ceiling shipped.
 
 These items close real or potential hostile-plugin surface. Highest priority. Most are AUDIT-flagged handlers in `cap_matrix.toml`.
 
@@ -72,7 +72,7 @@ Each row promotes a handler from `unrestricted` to a `caps = [...]` requirement.
 | **P1-05** ✅ | `com.nexus.linkpreview::fetch` | existing `net.http` | XS | Shipped 2026-05-17. Pure cap_matrix.toml edit. |
 | **P1-06** ✅ | `com.nexus.agent::delegate`, `plan` | existing `ai.chat` | S | Shipped 2026-05-17. Pure cap_matrix.toml edits. |
 | **P1-07** ✅ | `com.nexus.collab::start_relay` | new `network.bind` cap | M | Shipped 2026-05-17 alongside P1-01. HIGH-risk, registered in `risk.rs`. |
-| **P1-08** | `com.nexus.workflow::run`, `run_digest` (issue #77 laundering surface) | **needs design** — workflow runs arbitrary handlers; per-step gating is already in place. The question is whether to add a `workflow.run.requires_<cap>` declarative gate. | L | Open RFC required. May not be solvable cleanly without a new "delegated caller" model. **Deferred — not shipped in this Phase 1 pass.** |
+| **P1-08** | `com.nexus.workflow::run`, `run_digest` (issue #77 laundering surface) | **RFC drafted 2026-05-18** — workflow runs arbitrary handlers; per-step gating is already in place. RFC ([0001](rfcs/0001-workflow-cap-delegation.md)) recommends a layered fix: step-target allowlist + drop workflow trust to Community + audit logging now; per-workflow `requires_caps` next; principal-passing deferred. | L | RFC in [`docs/0.1.2/rfcs/0001-workflow-cap-delegation.md`](rfcs/0001-workflow-cap-delegation.md) awaiting sign-off; implementation deferred until accepted. |
 
 ### Other P1 items
 
@@ -88,7 +88,7 @@ Each row promotes a handler from `unrestricted` to a `caps = [...]` requirement.
 - `KernelConfig.wasm_caps` ceiling
 - Updated `docs/generated/capabilities.md`
 - Reduced `# AUDIT:` count in `cap_matrix.toml` from 17 → 0 for the items above
-- 1 open RFC for workflow laundering surface (P1-08)
+- 1 drafted RFC for workflow laundering surface (P1-08) — [`rfcs/0001-workflow-cap-delegation.md`](rfcs/0001-workflow-cap-delegation.md)
 
 ---
 
@@ -258,7 +258,7 @@ Phase 3 adds `nexus-security` + `nexus-collab` to `scripts/check_ipc_drift.sh`. 
 - **0.1.4 (architecture hardening, ~1 week)** — Phase 1 P1-06, P1-07, P1-09 + Phase 3. Adds `KernelConfig.wasm_caps`, extends dep_invariants, ships drift-check expansion, ships the sandbox security audit.
 - **0.1.5 (settings + UX, ~3 weeks)** — Phase 2 + Phase 5. Settings cascade lands; keybindings + priorities become tunable; constants centralized.
 - **0.1.6 (stub completion, ~3 weeks)** — Phase 4. Settings panel fully wired; whole-plugin stubs implemented; CLI sync + run shipped.
-- **Defer (no release dependency)** — Phase 1 P1-08 (workflow laundering RFC) — needs design before code.
+- **Defer (no release dependency)** — Phase 1 P1-08 (workflow laundering) — RFC drafted ([`rfcs/0001-workflow-cap-delegation.md`](rfcs/0001-workflow-cap-delegation.md)); implementation lands once accepted.
 
 Total: **~8 weeks** from start of 0.1.3 to end of 0.1.6 for one engineer, or **~4 weeks** with two-engineer parallelism (Phase 2 settings + Phase 4 stubs are largely independent).
 
