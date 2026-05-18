@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, createElement, type MouseEvent as ReactMouseEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { PLUGIN_API_VERSION, type Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
@@ -871,6 +872,100 @@ function WiredNumber({
   )
 }
 
+function CustomAppIconChooser({ api }: { api?: PluginAPI }) {
+  const SETTING_KEY = 'nexus.settings.appearance.customAppIcon'
+  const current = useConfigValue<string>(SETTING_KEY, '')
+  const onPick = async () => {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'Image', extensions: ['png', 'ico', 'icns', 'svg', 'jpg', 'jpeg'] }],
+      })
+      if (typeof picked === 'string' && picked.length > 0) {
+        useConfigStore.getState().set(SETTING_KEY, picked)
+        api?.notifications.show({ type: 'info', message: `Icon set: ${picked}` })
+      }
+    } catch (err) {
+      api?.notifications.show({
+        type: 'error',
+        message: `Choose icon failed: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {current && (
+        <span
+          style={{
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            maxWidth: 220,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={current}
+        >
+          {current.slice(current.lastIndexOf('/') + 1)}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onPick}
+        style={{
+          background: 'var(--background-modifier-hover)',
+          color: 'var(--text-normal)',
+          border: 'none',
+          borderRadius: 4,
+          padding: '4px 12px',
+          fontSize: 13,
+          cursor: 'pointer',
+        }}
+      >
+        Choose
+      </button>
+      {current && (
+        <button
+          type="button"
+          onClick={() => useConfigStore.getState().set(SETTING_KEY, '')}
+          style={{
+            background: 'transparent',
+            color: 'var(--text-faint)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 12,
+          }}
+          title="Clear"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
+}
+
+function WiredAccentColor({ settingKey }: { settingKey: string }) {
+  const value = useConfigValue<string>(settingKey, '#8b5cf6')
+  return (
+    <input
+      type="color"
+      value={value}
+      aria-label="Accent color"
+      onChange={(e) => useConfigStore.getState().set(settingKey, e.target.value)}
+      style={{
+        width: 28,
+        height: 28,
+        border: '1px solid var(--background-modifier-border)',
+        borderRadius: 4,
+        cursor: 'pointer',
+        padding: 0,
+        background: 'transparent',
+      }}
+    />
+  )
+}
+
 function ComingSoonTab({ title, description }: { title: string; description: string }) {
   return (
     <div className="settings-section">
@@ -1564,8 +1659,40 @@ function KeychainTab({ api }: { api?: PluginAPI }) {
         <div className="settings-section-title" style={{ margin: 0 }}>Secrets</div>
         <button
           type="button"
-          onClick={comingSoon('Add secret')}
-          title="Coming soon"
+          onClick={async () => {
+            const pluginId = await api?.input.prompt(
+              'Plugin id that will read this secret (e.g. com.nexus.ai):',
+              'com.nexus.ai',
+            )
+            if (!pluginId) return
+            const name = await api?.input.prompt(
+              `Secret name for ${pluginId}:`,
+              'api_key',
+            )
+            if (!name) return
+            const value = await api?.input.prompt(
+              `Value for ${pluginId}:${name}:`,
+              '',
+            )
+            if (value === null || value === undefined) return
+            try {
+              await invoke('kernel_invoke', {
+                pluginId: 'com.nexus.security',
+                commandId: 'set_secret',
+                args: { plugin_id: pluginId, name, value },
+                timeoutMs: null,
+              })
+              api?.notifications.show({
+                type: 'info',
+                message: `Secret ${pluginId}:${name} stored.`,
+              })
+            } catch (err) {
+              api?.notifications.show({
+                type: 'error',
+                message: `Add secret failed: ${err instanceof Error ? err.message : String(err)}`,
+              })
+            }
+          }}
           aria-label="Add secret"
           style={{
             background: 'transparent',
@@ -2060,8 +2187,9 @@ function StubSyncPage({ api }: { api?: PluginAPI }) {
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button
           type="button"
-          onClick={comingSoon('Sign up for Sync')}
-          title="Coming soon"
+          onClick={() =>
+            window.open('https://github.com/baileyrd/nexus#sync', '_blank')
+          }
           style={{
             background: 'var(--interactive-accent)',
             color: 'var(--interactive-accent-ink)',
@@ -2076,8 +2204,9 @@ function StubSyncPage({ api }: { api?: PluginAPI }) {
         </button>
         <button
           type="button"
-          onClick={comingSoon('Log in to Sync')}
-          title="Coming soon"
+          onClick={() =>
+            window.open('https://github.com/baileyrd/nexus#sync', '_blank')
+          }
           style={{
             background: 'var(--background-modifier-hover)',
             color: 'var(--text-normal)',
@@ -2333,21 +2462,7 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
         title="Accent color"
         description="Choose the accent color used throughout the app."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Accent color')}
-            title="Coming soon"
-            aria-label="Pick accent color"
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: '50%',
-              background: 'var(--interactive-accent)',
-              border: '1px solid var(--background-modifier-border)',
-              cursor: 'pointer',
-              padding: 0,
-            }}
-          />
+          <WiredAccentColor settingKey="nexus.settings.appearance.accentColor" />
         }
       />
       <StubRow
@@ -2461,68 +2576,38 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
       <div className="settings-section-title" style={{ marginTop: 24 }}>Font</div>
       <StubRow
         title="Interface font"
-        description="Set base font for all of Nexus."
+        description="Set base font for all of Nexus. Comma-separated CSS font-family stack."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Interface font')}
-            title="Coming soon"
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Manage
-          </button>
+          <WiredText
+            settingKey="nexus.settings.appearance.fontInterface"
+            defaultValue=""
+            placeholder="system-ui, -apple-system, sans-serif"
+            label="Interface font"
+          />
         }
       />
       <StubRow
         title="Text font"
-        description="Set font for editing and reading views."
+        description="Set font for editing and reading views. Comma-separated CSS font-family stack."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Text font')}
-            title="Coming soon"
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Manage
-          </button>
+          <WiredText
+            settingKey="nexus.settings.appearance.fontText"
+            defaultValue=""
+            placeholder="ui-serif, Georgia, serif"
+            label="Text font"
+          />
         }
       />
       <StubRow
         title="Monospace font"
-        description="Set font for places like code blocks and frontmatter."
+        description="Set font for places like code blocks and frontmatter. Comma-separated CSS font-family stack."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Monospace font')}
-            title="Coming soon"
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Manage
-          </button>
+          <WiredText
+            settingKey="nexus.settings.appearance.fontMonospace"
+            defaultValue=""
+            placeholder="ui-monospace, SFMono-Regular, Menlo, monospace"
+            label="Monospace font"
+          />
         }
       />
       <StubRow
@@ -2594,24 +2679,9 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
       />
       <StubRow
         title="Custom app icon"
-        description="Set a custom icon for the app."
+        description="Set a custom icon for the app. Path is saved in app.toml; a future packaging step will pick it up."
         control={
-          <button
-            type="button"
-            onClick={comingSoon('Custom app icon')}
-            title="Coming soon"
-            style={{
-              background: 'var(--background-modifier-hover)',
-              color: 'var(--text-normal)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 12px',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            Choose
-          </button>
+          <CustomAppIconChooser api={api} />
         }
       />
       <StubRow

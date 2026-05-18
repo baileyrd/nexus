@@ -1438,6 +1438,7 @@ export const editorPlugin: Plugin = {
       'nexus.editor.stub.addProperty',
       'nexus.editor.stub.splitRight',
       'nexus.editor.stub.splitDown',
+      'nexus.editor.stub.exportPdf',
     ])
     for (const stub of STUB_COMMANDS) {
       if (WIRED.has(stub.id)) continue
@@ -1564,6 +1565,29 @@ export const editorPlugin: Plugin = {
 
     api.commands.register('nexus.editor.stub.splitDown', async () => {
       await performSplit('vertical')
+    })
+
+    api.commands.register('nexus.editor.stub.exportPdf', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const store = useEditorStore.getState()
+      const tab = store.tabs.find((t) => t.relpath === relpath)
+      const previous: EditorTabMode | null = tab?.mode ?? null
+      // Switch into preview before printing so the OS print dialog
+      // captures rendered Markdown rather than the editor's CodeMirror
+      // chrome. The user picks "Save as PDF" from their print dialog.
+      if (previous && previous !== 'preview') {
+        store.setMode(relpath, 'preview')
+      }
+      // Wait one frame for the preview to render before opening the dialog.
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      try {
+        window.print()
+      } finally {
+        if (previous && previous !== 'preview') {
+          useEditorStore.getState().setMode(relpath, previous)
+        }
+      }
     })
 
     api.commands.register('nexus.editor.stub.addProperty', async () => {
