@@ -28,8 +28,11 @@ use crate::watcher::{StorageEvent, Watcher};
 /// `crates/nexus-git/src/core_plugin.rs` for the producer side.
 const GIT_COMMIT_TOPIC: &str = "com.nexus.git.commit";
 
-/// Tick interval for the BL-114 git-commit subscriber thread.
-const GIT_COMMIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// P2-06 — tick interval for the BL-114 git-commit subscriber thread.
+/// Override via a future StorageConfig field; today the const is the
+/// only source.
+pub const DEFAULT_GIT_COMMIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const GIT_COMMIT_POLL_INTERVAL: Duration = DEFAULT_GIT_COMMIT_POLL_INTERVAL;
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.storage";

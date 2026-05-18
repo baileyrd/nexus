@@ -137,8 +137,14 @@ export const canvasPlugin: Plugin = {
     )
 
     // Opens `.canvas` files as leaves of view-type `canvas` via the
-    // editor plugin's existing viewTypeForFile() path.
-    api.viewRegistry.registerExtensions(['canvas'], 'canvas')
+    // editor plugin's existing viewTypeForFile() path. P2-03 — override
+    // via the `nexus.canvas.fileExtensions` setting (string[] of bare
+    // extensions, no leading dot).
+    const fileExtensions = api.configuration.getValue<string[]>(
+      'nexus.canvas.fileExtensions',
+      ['canvas'],
+    )
+    api.viewRegistry.registerExtensions(fileExtensions, 'canvas')
 
     // Commands all dispatch to the currently-focused canvas leaf. A
     // missing handle is a no-op (e.g. palette invocation with no

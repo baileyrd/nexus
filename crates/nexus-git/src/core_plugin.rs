@@ -175,7 +175,12 @@ pub const HANDLER_BLAME: u32 = 36;
 /// click-to-Revert affordance.
 pub const HANDLER_DISCARD_HUNKS: u32 = 37;
 
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// P2-06 — interval the background git-state watcher sleeps between
+/// `git status` polls. Override via the runtime
+/// [`crate::GitWorker`] constructor once GitSettings exposes a
+/// `poll_interval_secs` field; today the const is the only source.
+pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const POLL_INTERVAL: Duration = DEFAULT_POLL_INTERVAL;
 const POLL_TICK: Duration = Duration::from_millis(200);
 
 /// Core plugin that exposes git operations over IPC and publishes state-change
@@ -977,7 +982,13 @@ fn publish_git_activity(bus: &EventBus, kind: &str, head: &str, branch: Option<&
 // from the bus to track when the forge was last edited. After `idle_secs` of
 // no file modifications, stages everything and commits.
 
-const AC_TICK: Duration = Duration::from_secs(30);
+/// P2-06 — interval the auto-commit background loop wakes on to
+/// re-check the idle window. Distinct from the user-facing
+/// `[git] auto_commit_interval_secs` (= the idle window itself);
+/// this is the polling cadence within that window. Override via a
+/// future GitSettings field; today the const is the only source.
+pub const DEFAULT_AUTO_COMMIT_TICK: Duration = Duration::from_secs(30);
+const AC_TICK: Duration = DEFAULT_AUTO_COMMIT_TICK;
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_auto_committer(

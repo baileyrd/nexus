@@ -78,6 +78,14 @@ pub struct CollabConfig {
     /// Optional override for [`ReconnectConfig::buffer_capacity`].
     #[serde(default)]
     pub buffer_capacity: Option<usize>,
+    /// P2-06 — multiplier applied to the reconnect backoff between
+    /// failures. `None` ⇒ [`ReconnectConfig::default`]'s `2.0`.
+    #[serde(default)]
+    pub backoff_factor: Option<f32>,
+    /// P2-06 — handshake budget for the initial CollabClient connect.
+    /// `None` ⇒ [`nexus_collab::DEFAULT_HANDSHAKE_TIMEOUT`] (10 s).
+    #[serde(default)]
+    pub handshake_timeout_secs: Option<u64>,
 }
 
 impl CollabConfig {
@@ -168,7 +176,9 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
             .max_delay_ms
             .map(Duration::from_millis)
             .unwrap_or_else(|| ReconnectConfig::default().max_delay),
-        backoff_factor: ReconnectConfig::default().backoff_factor,
+        backoff_factor: cfg
+            .backoff_factor
+            .unwrap_or_else(|| ReconnectConfig::default().backoff_factor),
         buffer_capacity: cfg
             .buffer_capacity
             .unwrap_or_else(|| ReconnectConfig::default().buffer_capacity),
@@ -255,6 +265,8 @@ display_name = "Alice"
             initial_delay_ms: None,
             max_delay_ms: None,
             buffer_capacity: None,
+            backoff_factor: None,
+            handshake_timeout_secs: None,
         };
         assert!(!cfg.fields_complete());
     }

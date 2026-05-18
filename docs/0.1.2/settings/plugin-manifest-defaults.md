@@ -253,15 +253,21 @@ These ARE user settings and are tunable via the settings UI. Listed here so the 
 
 **Verdict:** ✅ These resolve the corresponding rows in [`hardcoded-shell.md`](hardcoded-shell.md) — they're declared, defaulted, and tunable. Several entries in the old shell audit are now redundant because the schema landed; those were already marked "✓ done" in the existing audit.
 
-### File / view-type registrations — hardcoded
+### File / view-type registrations
 
-| Plugin | Type | Pattern | Note |
-|--------|------|---------|------|
-| `nexus.bases` | file extension | `.bases`, `.base` | hardcoded list — to add a new bases-shape extension, edit the plugin |
-| `nexus.canvas` | file extension | `.canvas` | hardcoded |
-| `nexus.editor` | viewType | `markdown`, empty, `diff` | hardcoded |
+P2-03 (2026-05-17). Each plugin now consults `api.configuration.getValue(...)` at activate-time with the historical list as the default; users override per-forge via the `[settings]` bag in `app.toml`.
 
-**Suggested remediation:** allow per-plugin extension lists via `<plugin>.fileExtensions: string[]` schema.
+| Plugin | Type | Default pattern | Override key |
+|--------|------|-----------------|--------------|
+| `nexus.bases` | file extension | `['bases', 'base']` | `nexus.bases.fileExtensions: string[]` |
+| `nexus.canvas` | file extension | `['canvas']` | `nexus.canvas.fileExtensions: string[]` |
+| `nexus.editor` | file extension | `['md', 'markdown']` | `nexus.editor.fileExtensions: string[]` |
+| `nexus.editor` | viewType | `markdown`, empty, `diff` | viewType names are hardcoded; extension → viewType mapping is the user-tunable surface |
+
+Caveats:
+- Values are bare extensions, no leading dot (`"bases"` not `".bases"`).
+- The view registry doesn't currently re-bind on settings change; new values take effect on next shell start. Settings UI live-reload is a Phase 4 follow-up.
+- `DEFAULT_CODE_EXTENSIONS` (large array of `.toml`, `.rs`, `.json`, …) routed to the editor stays hardcoded; extensions a forge author wants to add can already use the `nexus.editor.fileExtensions` override.
 
 ### Categories — labels only, not settings
 

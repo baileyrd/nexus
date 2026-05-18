@@ -576,7 +576,15 @@ export const editorPlugin: Plugin = {
         sessionManager,
       ),
     )
-    api.viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
+    // P2-03 — override via `nexus.editor.fileExtensions` (string[] of
+    // bare extensions, no leading dot). The default `['md', 'markdown']`
+    // matches both the CommonMark `.md` and the rarer-but-supported
+    // `.markdown` ending.
+    const markdownExtensions = api.configuration.getValue<string[]>(
+      'nexus.editor.fileExtensions',
+      ['md', 'markdown'],
+    )
+    api.viewRegistry.registerExtensions(markdownExtensions, 'markdown')
     // Code-mode files share the same view type — the editor picks
     // document vs code rendering at tab-open time based on the
     // extension. Without this, opening `.toml` / `.rs` / etc. falls

@@ -316,10 +316,13 @@ pub async fn resolve(auth: &McpAuth) -> Result<ResolvedAuth, AuthError> {
     }
 }
 
-/// Wall-clock budget for the OAuth token POST. Picked at the same
-/// order of magnitude as `client::CONNECT_TIMEOUT` (15 s) so a stalled
-/// token endpoint doesn't outlive the rmcp handshake budget by much.
-const OAUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// P2-06 — wall-clock budget for the OAuth token POST. Picked at the
+/// same order of magnitude as `client::CONNECT_TIMEOUT` (15 s) so a
+/// stalled token endpoint doesn't outlive the rmcp handshake budget
+/// by much. Override via a future `[mcp.timeouts] oauth_secs = N`
+/// block (deferred from P2-06).
+pub const DEFAULT_OAUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const OAUTH_TIMEOUT: std::time::Duration = DEFAULT_OAUTH_TIMEOUT;
 
 async fn fetch_client_credentials_token(
     token_url: &str,

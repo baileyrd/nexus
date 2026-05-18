@@ -39,10 +39,16 @@ const GIT_PLUGIN: &str = "com.nexus.git";
 /// security plugin's `metrics_snapshot` handler is the canonical
 /// IPC surface for the global metrics registry. Read-only.
 const SECURITY_PLUGIN: &str = "com.nexus.security";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
-/// Longer timeout for AI calls — they make outbound HTTP requests to the
-/// chat + embedding providers.
-const AI_IPC_TIMEOUT: Duration = Duration::from_secs(120);
+/// P2-06 — default deadline the MCP server applies to inbound IPC
+/// calls into kernel-side plugins (storage, git, security, …).
+/// Override via a future `[mcp.timeouts] ipc_secs = N` block
+/// (deferred from P2-06).
+pub const DEFAULT_IPC_TIMEOUT: Duration = Duration::from_secs(30);
+const IPC_TIMEOUT: Duration = DEFAULT_IPC_TIMEOUT;
+/// P2-06 — longer deadline for AI calls — they make outbound HTTP
+/// requests to the chat + embedding providers.
+pub const DEFAULT_AI_IPC_TIMEOUT: Duration = Duration::from_secs(120);
+const AI_IPC_TIMEOUT: Duration = DEFAULT_AI_IPC_TIMEOUT;
 
 /// URI prefix for MCP resources representing forge notes (PRD-14 §7.1/§7.2).
 ///

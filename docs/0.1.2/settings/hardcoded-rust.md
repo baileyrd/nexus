@@ -42,22 +42,22 @@ Still open:
 
 ### Operation timeouts (user-perceivable)
 
-| File | Line | Value | Suggested setting key |
-|------|------|-------|----------------------|
-| `crates/nexus-mcp/src/client.rs` | 79 | `Duration::from_secs(15)` | `mcp.connect_timeout_secs` |
-| `crates/nexus-mcp/src/client.rs` | 83 | `Duration::from_secs(5)` | `mcp.shutdown_timeout_secs` |
-| `crates/nexus-mcp/src/server.rs` | 42 | `Duration::from_secs(30)` | `mcp.ipc_timeout_secs` |
-| `crates/nexus-mcp/src/server.rs` | 45 | `Duration::from_secs(120)` | `mcp.ai_ipc_timeout_secs` |
-| `crates/nexus-mcp/src/auth.rs` | 322 | `Duration::from_secs(30)` | `mcp.oauth_timeout_secs` |
-| `crates/nexus-collab/src/client.rs` | 77 | `Duration::from_secs(10)` | `collab.handshake_timeout_secs` |
-| `crates/nexus-collab/src/reconnect_client.rs` | 69 | `30 s` (backoff max) | `collab.backoff_max_secs` |
-| `crates/nexus-collab/src/reconnect_client.rs` | 84 | `2.0` (factor) | `collab.backoff_factor` |
-| `crates/nexus-git/src/core_plugin.rs` | 178 | `Duration::from_secs(2)` | `git.poll_interval_secs` |
-| `crates/nexus-git/src/core_plugin.rs` | 980 | `Duration::from_secs(30)` | `git.auto_commit_tick_secs` |
-| `crates/nexus-storage/src/core_plugin.rs` | 32 | `Duration::from_millis(500)` | `storage.git_commit_poll_interval_ms` |
-| `crates/nexus-theme/src/watcher.rs` | 25 | `500` ms | `ui.theme_debounce_ms` |
-| `crates/nexus-ai/src/indexing_daemon.rs` | 42 | `Duration::from_secs(2)` | `ai.indexing_debounce_secs` |
-| `crates/nexus-audio/src/provider_backend.rs` | 44 | `Duration::from_secs(2)` | `audio.creds_lookup_timeout_secs` |
+P2-06 (2026-05-17). Each value is now exposed as a `pub const DEFAULT_*` so it's discoverable from a single grep, even when no runtime override path is wired yet. Where a Config struct already receives the value (audio, collab bootstrap), the override is also live; where it doesn't (MCP, git, storage, theme, ai), the const is the only source today — a future `[mcp.timeouts]` / `[git.timing]` / etc. block is the next step.
+
+~~| `crates/nexus-mcp/src/client.rs` | 79 | `Duration::from_secs(15)` | `mcp.connect_timeout_secs` |~~ → `nexus_mcp::client::DEFAULT_CONNECT_TIMEOUT`.
+~~| `crates/nexus-mcp/src/client.rs` | 83 | `Duration::from_secs(5)` | `mcp.shutdown_timeout_secs` |~~ → `nexus_mcp::client::DEFAULT_SHUTDOWN_TIMEOUT`.
+~~| `crates/nexus-mcp/src/server.rs` | 42 | `Duration::from_secs(30)` | `mcp.ipc_timeout_secs` |~~ → `nexus_mcp::server::DEFAULT_IPC_TIMEOUT`.
+~~| `crates/nexus-mcp/src/server.rs` | 45 | `Duration::from_secs(120)` | `mcp.ai_ipc_timeout_secs` |~~ → `nexus_mcp::server::DEFAULT_AI_IPC_TIMEOUT`.
+~~| `crates/nexus-mcp/src/auth.rs` | 322 | `Duration::from_secs(30)` | `mcp.oauth_timeout_secs` |~~ → `nexus_mcp::auth::DEFAULT_OAUTH_TIMEOUT`.
+~~| `crates/nexus-collab/src/client.rs` | 77 | `Duration::from_secs(10)` | `collab.handshake_timeout_secs` |~~ → already `nexus_collab::DEFAULT_HANDSHAKE_TIMEOUT`; forward-compatible `[collab] handshake_timeout_secs` field added to bootstrap config (pending ReconnectingClient surfacing the knob).
+~~| `crates/nexus-collab/src/reconnect_client.rs` | 69 | `30 s` (backoff max) | `collab.backoff_max_secs` |~~ → already pluggable via `[collab] max_delay_ms` in `config.toml`.
+~~| `crates/nexus-collab/src/reconnect_client.rs` | 84 | `2.0` (factor) | `collab.backoff_factor` |~~ → new `[collab] backoff_factor` field threaded into `ReconnectConfig`.
+~~| `crates/nexus-git/src/core_plugin.rs` | 178 | `Duration::from_secs(2)` | `git.poll_interval_secs` |~~ → `nexus_git::core_plugin::DEFAULT_POLL_INTERVAL`.
+~~| `crates/nexus-git/src/core_plugin.rs` | 980 | `Duration::from_secs(30)` | `git.auto_commit_tick_secs` |~~ → `nexus_git::core_plugin::DEFAULT_AUTO_COMMIT_TICK`.
+~~| `crates/nexus-storage/src/core_plugin.rs` | 32 | `Duration::from_millis(500)` | `storage.git_commit_poll_interval_ms` |~~ → `nexus_storage::core_plugin::DEFAULT_GIT_COMMIT_POLL_INTERVAL`.
+~~| `crates/nexus-theme/src/watcher.rs` | 25 | `500` ms | `ui.theme_debounce_ms` |~~ → already `nexus_theme::watcher::DEFAULT_DEBOUNCE_MS`.
+~~| `crates/nexus-ai/src/indexing_daemon.rs` | 42 | `Duration::from_secs(2)` | `ai.indexing_debounce_secs` |~~ → already `nexus_ai::indexing_daemon::DEFAULT_DEBOUNCE`.
+~~| `crates/nexus-audio/src/provider_backend.rs` | 44 | `Duration::from_secs(2)` | `audio.creds_lookup_timeout_secs` |~~ → live: `[audio] creds_lookup_timeout_secs = N`; default `nexus_audio::provider_backend::DEFAULT_CREDS_LOOKUP_TIMEOUT`.
 
 ### Notification limits
 

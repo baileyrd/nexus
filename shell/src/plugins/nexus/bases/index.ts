@@ -15,6 +15,15 @@ import { setRuntime } from './runtime'
 import { withActiveBases } from './activeBases'
 
 const COMMAND_NEW = 'nexus.bases.new'
+
+/** P2-03 — default file extensions claimed by the bases view.
+ *  `.bases` directories ship the multi-file YAML form; `.base` is the
+ *  Obsidian single-file YAML variant (ADR 0019, read-only). Override
+ *  via the `nexus.bases.fileExtensions` setting (string[] of bare
+ *  extensions, no leading dot) — useful if you ship a forge with a
+ *  custom bases extension. */
+const DEFAULT_FILE_EXTENSIONS: readonly string[] = ['bases', 'base']
+const FILE_EXTENSIONS_SETTING = 'nexus.bases.fileExtensions'
 const EVENT_FILE_OPEN = 'files:open'
 const DIALOG_VIEW_ID = 'nexus.bases.newDialog'
 
@@ -98,7 +107,11 @@ export const basesPlugin: Plugin = {
     // `.bases` (directory) and `.base` (Obsidian single-file YAML —
     // ADR 0019, read-only) both mount the same view component. The
     // BasesView branches on extension to pick the correct loader.
-    api.viewRegistry.registerExtensions(['bases', 'base'], 'bases')
+    const fileExtensions = api.configuration.getValue<string[]>(
+      FILE_EXTENSIONS_SETTING,
+      [...DEFAULT_FILE_EXTENSIONS],
+    )
+    api.viewRegistry.registerExtensions(fileExtensions, 'bases')
 
     api.views.register(DIALOG_VIEW_ID, {
       slot: 'overlay',

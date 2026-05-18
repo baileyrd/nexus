@@ -73,14 +73,18 @@ use tokio::process::Command;
 use crate::auth::{self, AuthError};
 use crate::config::{McpServerSpec, McpTransport};
 
-/// Default timeout for the MCP initialize handshake. A non-responding server
-/// binary would otherwise hang connect for however long its stdout takes to
-/// unblock.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// P2-06 — default timeout for the MCP initialize handshake. A
+/// non-responding server binary would otherwise hang connect for
+/// however long its stdout takes to unblock. Override via a future
+/// `[mcp.timeouts] connect_secs = N` block (deferred from P2-06).
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const CONNECT_TIMEOUT: Duration = DEFAULT_CONNECT_TIMEOUT;
 
-/// Budget for graceful shutdown. Beyond this the transport will kill the
-/// child process forcibly (see `TokioChildProcess::graceful_shutdown`).
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+/// P2-06 — budget for graceful shutdown. Beyond this the transport
+/// will kill the child process forcibly (see
+/// `TokioChildProcess::graceful_shutdown`).
+pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const SHUTDOWN_TIMEOUT: Duration = DEFAULT_SHUTDOWN_TIMEOUT;
 
 /// Errors from the MCP Host client.
 #[derive(Debug, thiserror::Error)]

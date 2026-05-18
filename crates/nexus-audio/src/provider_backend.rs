@@ -46,7 +46,12 @@ const BACKEND_NAME: &str = "provider";
 /// `[audio] provider_base_url = "..."` in `config.toml` or by exporting
 /// `OPENAI_BASE_URL`.
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com";
-const CREDS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// P2-06 — default deadline for the `com.nexus.ai::resolve_credentials`
+/// IPC call. Short on purpose — the call sits on the dispatch hot
+/// path and a slow AI plugin shouldn't stall an unrelated audio
+/// dispatch. Override via `[audio] creds_lookup_timeout_secs = N`.
+pub const DEFAULT_CREDS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Credentials resolved at call time. Prefers `com.nexus.ai`'s live
 /// chat-provider config when reachable through the shared kernel
@@ -80,7 +85,7 @@ async fn resolve_creds(cfg: &AudioConfig, ctx: &SharedCtx) -> Result<ResolvedCre
                 "com.nexus.ai",
                 "resolve_credentials",
                 serde_json::json!({}),
-                CREDS_LOOKUP_TIMEOUT,
+                cfg.creds_lookup_timeout,
             )
             .await;
         if let Ok(value) = call {

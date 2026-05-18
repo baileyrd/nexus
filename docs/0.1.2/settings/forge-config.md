@@ -145,6 +145,7 @@ provider_stt_model = "whisper-1"
 provider_tts_model = "tts-1"
 provider_tts_voice = "alloy"
 whisper_model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin"  # P2-05 — template; {size} substituted at download
+creds_lookup_timeout_secs = 2                           # P2-06 — com.nexus.ai::resolve_credentials deadline
 
 [collab]                                                # CollabConfig — crates/nexus-bootstrap/src/collab.rs:61
 enabled = false
@@ -152,6 +153,11 @@ relay_url = "ws://relay.example:7700/"                  # required when enabled 
 token = "shared-secret"
 peer_id = "alice@laptop"
 display_name = "Alice"
+initial_delay_ms = 1000                                 # ReconnectConfig.initial_delay override
+max_delay_ms = 30000                                    # ReconnectConfig.max_delay override (P2-06: collab.backoff_max)
+backoff_factor = 2.0                                    # P2-06 — ReconnectConfig.backoff_factor override
+buffer_capacity = 256                                   # ReconnectConfig.buffer_capacity override
+handshake_timeout_secs = 10                             # P2-06 forward-compat — pending ReconnectingClient knob
 ```
 
 Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::collab::load_config(forge_root)` — `collab.rs:100`. Missing file / missing block ⇒ defaults.

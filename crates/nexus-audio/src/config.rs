@@ -107,6 +107,11 @@ pub struct AudioConfig {
     /// [`DEFAULT_WHISPER_MODEL_URL_TEMPLATE`]. Override via
     /// `[audio] whisper_model_url = "..."` in `config.toml`.
     pub whisper_model_url_template: String,
+    /// P2-06 — deadline for `com.nexus.ai::resolve_credentials` IPC
+    /// calls from the provider-routed backend. Override via
+    /// `[audio] creds_lookup_timeout_secs = N`. Default
+    /// [`crate::provider_backend::DEFAULT_CREDS_LOOKUP_TIMEOUT`] (2 s).
+    pub creds_lookup_timeout: std::time::Duration,
 }
 
 /// P2-05 — default URL template the local-audio backend uses to fetch
@@ -130,6 +135,7 @@ impl Default for AudioConfig {
             provider_tts_model: "tts-1".to_string(),
             provider_tts_voice: "alloy".to_string(),
             whisper_model_url_template: DEFAULT_WHISPER_MODEL_URL_TEMPLATE.to_string(),
+            creds_lookup_timeout: crate::provider_backend::DEFAULT_CREDS_LOOKUP_TIMEOUT,
         }
     }
 }
@@ -152,6 +158,7 @@ struct RawAudio {
     provider_tts_model: Option<String>,
     provider_tts_voice: Option<String>,
     whisper_model_url: Option<String>,
+    creds_lookup_timeout_secs: Option<u64>,
 }
 
 impl AudioConfig {
@@ -221,6 +228,9 @@ impl AudioConfig {
             if !v.is_empty() {
                 out.whisper_model_url_template = v;
             }
+        }
+        if let Some(secs) = raw.creds_lookup_timeout_secs {
+            out.creds_lookup_timeout = std::time::Duration::from_secs(secs);
         }
         // Env overrides — matches nexus-ai's detect_provider convention.
         if let Ok(env_key) = std::env::var("OPENAI_API_KEY") {
