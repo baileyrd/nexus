@@ -9,6 +9,8 @@
 //! Mirrors the layout already used by `nexus-storage` / `nexus-git`
 //! (see `crates/nexus-storage/src/handlers/mod.rs`).
 
+pub(crate) mod save;
 pub(crate) mod session;
 pub(crate) mod shared;
+pub(crate) mod transaction;
 pub(crate) mod tree;
