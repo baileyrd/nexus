@@ -1422,7 +1422,19 @@ export const editorPlugin: Plugin = {
       }
     })
 
+    // P4-07 — wire the subset of tab-action stubs that have a thin
+    // existing backend. The remaining stubs (splitRight/Down,
+    // openInNewWindow, openLinkedView, moveTo, addProperty,
+    // versionHistory, mergeFile, exportPdf) need either new layout
+    // primitives or new IPC handlers and remain "coming soon" until
+    // their dedicated follow-ups land.
+    const WIRED: ReadonlySet<string> = new Set([
+      'nexus.editor.stub.bookmark',
+      'nexus.editor.stub.rename',
+      'nexus.editor.stub.backlinksInDocument',
+    ])
     for (const stub of STUB_COMMANDS) {
+      if (WIRED.has(stub.id)) continue
       api.commands.register(stub.id, () => {
         api.notifications.show({
           type: 'info',
@@ -1430,6 +1442,50 @@ export const editorPlugin: Plugin = {
         })
       })
     }
+
+    api.commands.register('nexus.editor.stub.bookmark', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      // Delegates to the bookmarks plugin's toggle command so a single
+      // implementation drives both the activity-bar pane and the tab
+      // context-menu entry.
+      await api.commands.execute('nexus.bookmarks.toggleActive')
+      // Surface confirmation since the bookmark pane may be closed.
+      api.notifications.show({
+        type: 'info',
+        message: `Bookmark toggled for ${relpath}.`,
+      })
+    })
+
+    api.commands.register('nexus.editor.stub.backlinksInDocument', async () => {
+      await api.commands.execute('nexus.backlinks.focus')
+    })
+
+    api.commands.register('nexus.editor.stub.rename', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const oldBase = relpath.includes('/') ? relpath.slice(relpath.lastIndexOf('/') + 1) : relpath
+      const dir = relpath.includes('/') ? relpath.slice(0, relpath.lastIndexOf('/') + 1) : ''
+      const next = await api.input.prompt(`Rename "${oldBase}" to:`, oldBase)
+      if (!next || next === oldBase) return
+      const to = dir + next
+      try {
+        await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'rename_entry', {
+          from: relpath,
+          to,
+        })
+        // The editor reacts to filesystem events for the renamed file —
+        // closing the old tab here keeps the tab strip tidy. The watcher
+        // emits files:open for the new path so the rename feels atomic.
+        useEditorStore.getState().closeTab(relpath)
+        api.events.emit('files:open', { relpath: to, name: next })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
 
     api.commands.register(COMMAND_DELETE_FILE, async () => {
       const relpath = activeTabRelpath()
