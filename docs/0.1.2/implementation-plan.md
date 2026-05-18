@@ -151,17 +151,19 @@ Closes theoretical regression paths in the invariant enforcement. Items from [`a
 
 ## Phase 4 — Stub completion (P2)
 
+> **Phase 4 partial 2026-05-18.** Items P4-01..P4-05, P4-08, P4-09, P4-10 shipped. P4-06 (SettingsPanelView "Coming soon" wiring, XL) and P4-07 (12 editor tab-action stubs, L) remain — both warrant their own dedicated PRs.
+
 UX surface work — the stubs are honest (every "coming soon" surfaces a toast) but they add up to a lot of user-visible friction. From [`reference/todos.md`](reference/todos.md).
 
 ### Whole-plugin stubs
 
 | ID | Plugin | Backend handler to use | Effort |
 |----|--------|------------------------|:------:|
-| **P4-01** | `nexus.allProperties` — list every frontmatter property of active note | `com.nexus.storage::read_frontmatter` + entity index | S |
-| **P4-02** | `nexus.tags` — surface active note's tags | `com.nexus.storage::query_tags` | S |
-| **P4-03** | `nexus.fileProperties` — show file properties | `com.nexus.storage::read_frontmatter` + file metadata | S |
-| **P4-04** | `nexus.bookmarks` — list saved bookmarks | new — needs a `com.nexus.storage::bookmarks_*` handler family (S effort) or KV-backed | M |
-| **P4-05** | `nexus.outgoingLinks` — list outgoing links from current buffer (tab + command stubbed) | `com.nexus.storage::outgoing_links` | S |
+| **P4-01** ✅ | `nexus.allProperties` — list every frontmatter property of active note | `com.nexus.storage::read_frontmatter` + entity index | S |
+| **P4-02** ✅ | `nexus.tags` — surface active note's tags | `com.nexus.storage::read_frontmatter` (frontmatter `tags`) + `com.nexus.storage::query_tags` for per-tag usage drill-down | S |
+| **P4-03** ✅ | `nexus.fileProperties` — show file properties | `com.nexus.storage::read_frontmatter` + `query_files` for index metadata (size, mtime) | S |
+| **P4-04** ✅ | `nexus.bookmarks` — list saved bookmarks | KV-backed via the existing per-forge `configStore` (`nexus.bookmarks.entries`); no new Rust handler required. Adds `nexus.bookmarks.toggleActive` command. | M |
+| **P4-05** ✅ | `nexus.outgoingLinks` — list outgoing links from current buffer (tab + command stubbed) | `com.nexus.storage::outgoing_links` | S |
 
 ### Settings panel + tab actions
 
@@ -174,9 +176,9 @@ UX surface work — the stubs are honest (every "coming soon" surfaces a toast) 
 
 | ID | Item | Effort | Notes |
 |----|------|:------:|-------|
-| **P4-08** | CLI `nexus sync` subcommand — implement against storage / git plugins (mirror clone/pull behaviour for forge-to-forge sync). | M | New `commands::sync` module; removes `Sync(StubArgs)` from `main.rs:136`. |
-| **P4-09** | CLI `nexus run` subcommand — implement as a thin wrapper over `com.nexus.workflow::run` or `com.nexus.skills::invoke`. | S | Pick which subsystem owns; remove `Run(StubArgs)` from `main.rs:140`. |
-| **P4-10** | `PluginAPI.ts::defineSlot` SDK surface — implement dynamic slot definition. Today it warns instead of doing anything (`PluginAPI.ts:641`). | M | Touches the slot registry contract — plugins that define new slots become first-class. |
+| **P4-08** ✅ | CLI `nexus sync` subcommand — implement against storage / git plugins (mirror clone/pull behaviour for forge-to-forge sync). | M | Shipped 2026-05-18 as a thin convenience over `nexus git fetch|pull|push` with `--remote`/`--branch`/`--no-push` flags; no separate `commands::sync` module needed. `StubArgs` enum variant gone; the `stubs` module deleted. |
+| **P4-09** ✅ | CLI `nexus run` subcommand — implement as a thin wrapper over `com.nexus.workflow::run` or `com.nexus.skills::invoke`. | S | Shipped 2026-05-18. `Run { name }` dispatches to `commands::workflow::run(&mut app, &name)` — an alias for `nexus workflow run <name>`. |
+| **P4-10** ✅ | `PluginAPI.ts::defineSlot` SDK surface — implement dynamic slot definition. Today it warns instead of doing anything (`PluginAPI.ts:641`). | M | Shipped 2026-05-18. `SlotStore.slots` widened from `Record<SlotId, …>` to `Record<string, …>` so dynamic ids don't need to extend the static `SlotId` union; new `slotRegistry.defineSlot(id)` is idempotent and seeds an empty array. `register()` auto-creates the slot if absent. PluginAPI's `defineSlot` now calls through instead of warning. |
 
 ### Phase 4 deliverables
 

@@ -1,26 +1,140 @@
 import { createRoot, type Root } from 'react-dom/client'
-import { createElement } from 'react'
+import { createElement, useEffect, useState } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ViewBase, workspace, type Leaf } from '../../../workspace'
+import { useEditorStore } from '../editor/editorStore'
+import { getKernel } from '../files/kernelClient'
+import type { EventsAPI } from '../../../types/plugin'
+
+let events: EventsAPI | null = null
 
 const VIEW_TYPE = 'outgoing-links'
 const COMMAND_FOCUS = 'nexus.outgoingLinks.focus'
+const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 
-/** Placeholder body. Extraction of outgoing links from the active
- *  editor buffer is not yet implemented; the tab + command are
- *  scaffolded so the titlebar shortcut has a real target. */
+interface KernelOutgoingLink {
+  target_path?: unknown
+  link_text?: unknown
+  link_type?: unknown
+  is_resolved?: unknown
+}
+
+interface OutgoingLink {
+  targetPath: string
+  linkText: string
+  linkType: string
+  isResolved: boolean
+}
+
+function decode(raw: unknown): OutgoingLink[] {
+  if (!Array.isArray(raw)) return []
+  const out: OutgoingLink[] = []
+  for (const item of raw as KernelOutgoingLink[]) {
+    if (!item || typeof item !== 'object') continue
+    const targetPath = typeof item.target_path === 'string' ? item.target_path : null
+    if (!targetPath) continue
+    out.push({
+      targetPath,
+      linkText: typeof item.link_text === 'string' ? item.link_text : targetPath,
+      linkType: typeof item.link_type === 'string' ? item.link_type : '',
+      isResolved: item.is_resolved === true,
+    })
+  }
+  return out
+}
+
+function basename(relpath: string): string {
+  const i = relpath.lastIndexOf('/')
+  return i === -1 ? relpath : relpath.slice(i + 1)
+}
+
 function OutgoingLinksView() {
+  const activeRelpath = useEditorStore((s) => s.activeRelpath)
+  const [links, setLinks] = useState<OutgoingLink[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!activeRelpath) {
+      setLinks([])
+      setError(null)
+      setLoading(false)
+      return
+    }
+    const kernel = getKernel()
+    if (!kernel) {
+      setError('Kernel not ready.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    kernel
+      .invoke<unknown>(STORAGE_PLUGIN_ID, 'outgoing_links', { path: activeRelpath })
+      .then((raw) => {
+        if (cancelled) return
+        setLinks(decode(raw))
+        setLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setLinks([])
+        setError(err instanceof Error ? err.message : String(err))
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeRelpath])
+
+  if (!activeRelpath) {
+    return (
+      <div style={{ padding: 16, fontSize: 12, color: 'var(--text-faint)' }}>
+        No active note.
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div style={{ padding: 16, fontSize: 12, color: 'var(--text-faint)' }}>Loading…</div>
+    )
+  }
+  if (error) {
+    return (
+      <div style={{ padding: 16, fontSize: 12, color: 'var(--text-error)' }}>{error}</div>
+    )
+  }
+  if (links.length === 0) {
+    return (
+      <div style={{ padding: 16, fontSize: 12, color: 'var(--text-faint)' }}>
+        No outgoing links.
+      </div>
+    )
+  }
   return (
-    <div
-      style={{
-        padding: 16,
-        fontSize: 12,
-        color: 'var(--text-faint)',
-        lineHeight: 1.5,
-      }}
-    >
-      Not yet implemented. This inspector will list outgoing links
-      from the active note once a forward-link extractor ships.
+    <div style={{ padding: 8, fontSize: 13 }}>
+      {links.map((link, i) => {
+        const label = link.linkText || basename(link.targetPath)
+        const onClick = () => {
+          if (!link.isResolved) return
+          events?.emit('files:open', { relpath: link.targetPath, name: basename(link.targetPath) })
+        }
+        return (
+          <div
+            key={`${link.targetPath}-${i}`}
+            onClick={onClick}
+            title={link.targetPath}
+            style={{
+              padding: '4px 8px',
+              cursor: link.isResolved ? 'pointer' : 'default',
+              color: link.isResolved ? 'var(--text-normal)' : 'var(--text-muted)',
+              fontStyle: link.isResolved ? 'normal' : 'italic',
+            }}
+          >
+            {label}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -50,9 +164,6 @@ export const outgoingLinksPlugin: Plugin = {
     name: 'Outgoing Links',
     version: '0.1.0',
     core: false,
-    // WI-19 — lazy activation. Reached only via the focus command or
-    // a hydrated leaf of this view type; both fire the matching
-    // trigger before activate() is needed.
     activationEvents: [`onCommand:${COMMAND_FOCUS}`, `onView:${VIEW_TYPE}`],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Outgoing Links', category: 'View' }],
@@ -60,6 +171,7 @@ export const outgoingLinksPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
+    events = api.events
     api.viewRegistry.register(VIEW_TYPE, (leaf) => new OutgoingLinksPaneView(leaf))
     api.commands.register(COMMAND_FOCUS, async () => {
       const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'right')

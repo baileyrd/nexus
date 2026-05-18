@@ -41,9 +41,16 @@ export interface SlotEntry {
 }
 
 interface SlotStore {
-  slots: Record<SlotId, SlotEntry[]>
-  register: (slotId: SlotId, entry: SlotEntry) => void
+  /** Keyed by `SlotId` for the built-in slots plus any plugin-defined
+   *  slot identifiers added at runtime via `defineSlot`. Stored as
+   *  `Record<string, …>` so dynamic ids don't require widening the
+   *  `SlotId` contract. */
+  slots: Record<string, SlotEntry[]>
+  register: (slotId: string, entry: SlotEntry) => void
   unregister: (entryId: string) => void
+  /** P4-10 — register an empty slot identifier. Idempotent: calling
+   *  `defineSlot('x')` repeatedly leaves prior contributions intact. */
+  defineSlot: (slotId: string) => void
   /** P2-02 — re-resolve every entry's effective priority against the
    *  current configStore and re-sort. Called by the priority-override
    *  subscriber when `nexus.priority.slot.*` changes. */
@@ -70,11 +77,18 @@ export const useSlotStore = create<SlotStore>((set) => ({
     set(s => ({
       slots: {
         ...s.slots,
-        [slotId]: [...s.slots[slotId], next]
+        // Auto-define on first registration so a plugin can
+        // register straight into a slot it just defined.
+        [slotId]: [...(s.slots[slotId] ?? []), next]
           .sort((a, b) => a.priority - b.priority),
       },
     }))
   },
+
+  defineSlot: (slotId) =>
+    set(s =>
+      s.slots[slotId] !== undefined ? s : { slots: { ...s.slots, [slotId]: [] } },
+    ),
 
   unregister: (entryId) =>
     set(s => ({
@@ -99,7 +113,7 @@ export const useSlotStore = create<SlotStore>((set) => ({
             .sort((a, b) => a.priority - b.priority)
           return [k, rebuilt]
         }),
-      ) as Record<SlotId, SlotEntry[]>,
+      ) as Record<string, SlotEntry[]>,
     })),
 }))
 
@@ -138,11 +152,15 @@ export type SlotInventory = Record<SlotId, SlotEntrySnapshot[]>
 
 // Non-reactive read — for use outside React (e.g., in the extension host)
 export const slotRegistry = {
-  register: (slotId: SlotId, entry: SlotEntry) =>
+  register: (slotId: SlotId | string, entry: SlotEntry) =>
     useSlotStore.getState().register(slotId, entry),
 
   unregister: (entryId: string) =>
     useSlotStore.getState().unregister(entryId),
+
+  /** P4-10 — declare a slot identifier so plugin contributions can
+   *  target it before any registration has happened. Idempotent. */
+  defineSlot: (slotId: string) => useSlotStore.getState().defineSlot(slotId),
 
   /**
    * BL-067 Phase 0 — pure snapshot of every slot's entries minus

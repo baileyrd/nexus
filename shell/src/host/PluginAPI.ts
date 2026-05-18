@@ -635,10 +635,11 @@ export function buildPluginAPI(
       getInternalService<T>(name: string): T {
         return registry.getService<T>(name)
       },
-      defineSlot(_slotId: string) {
-        // Slot IDs are currently a union type — extending at runtime
-        // would require dynamic SlotId handling. Documented as future work.
-        clientLogger.warn('[PluginAPI] defineSlot is not yet implemented')
+      defineSlot(slotId: string) {
+        // P4-10 — seed an empty slot array on the slot store so
+        // contributions can target the new id immediately. Idempotent
+        // when the slot id already exists.
+        useSlotStore.getState().defineSlot(slotId)
       },
       registry,
     }

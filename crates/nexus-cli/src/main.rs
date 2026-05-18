@@ -1,7 +1,6 @@
 mod app;
 mod commands;
 mod output;
-mod stubs;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -132,12 +131,27 @@ enum Commands {
     /// local frontend can drive this headless instance. Phase 2 (SSH
     /// transport + `ssh://` forge URIs) lands separately.
     Serve(ServeArgs),
-    /// Sync operations (coming soon)
-    Sync(StubArgs),
+    /// Sync the forge against a git remote: fetch, pull (rebase),
+    /// then push. A thin convenience wrapper over `nexus git
+    /// fetch|pull|push`.
+    Sync {
+        /// Remote name. Defaults to `origin`.
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Branch override (defaults to the current branch).
+        #[arg(long)]
+        branch: Option<String>,
+        /// Skip the push step (sync down only).
+        #[arg(long)]
+        no_push: bool,
+    },
     /// Git operations (read-only)
     Git(GitArgs),
-    /// Run a script or task (coming soon)
-    Run(StubArgs),
+    /// Run a workflow by name — thin alias for `nexus workflow run <name>`.
+    Run {
+        /// Workflow name to execute (see `nexus workflow list`).
+        name: String,
+    },
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -2203,7 +2217,14 @@ fn main() {
                 ))
             }
         }
-        Commands::Sync(_) => stubs::not_implemented("sync"),
+        Commands::Sync { remote, branch, no_push } => (|| -> anyhow::Result<()> {
+            commands::git::fetch(&app, &remote)?;
+            commands::git::pull(&app, &remote, branch.as_deref())?;
+            if !no_push {
+                commands::git::push(&app, &remote, branch.as_deref())?;
+            }
+            Ok(())
+        })(),
         Commands::Git(args) => match args.command {
             GitCommand::Info => commands::git::info(&app),
             GitCommand::Status => commands::git::status(&app),
@@ -2240,7 +2261,7 @@ fn main() {
             }
             GitCommand::AbortMerge => commands::git::abort_merge(&app),
         },
-        Commands::Run(_) => stubs::not_implemented("run"),
+        Commands::Run { name } => commands::workflow::run(&mut app, &name),
 
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
