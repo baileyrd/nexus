@@ -27,6 +27,7 @@ mod canvas;
 pub mod config;
 pub mod bases;
 pub mod obsidian_base;
+mod handlers;
 pub mod core_plugin;
 /// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
 pub mod lfs;
