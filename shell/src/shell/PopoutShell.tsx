@@ -20,7 +20,6 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { emit } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useContextKey } from '../host/ContextKeyService'
-import { useWorkspaceStore as useNexusWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
 import {
   workspace as workspaceStore,
   useWorkspaceStore,
@@ -255,7 +254,13 @@ export function PopoutShell(): JSX.Element {
   // viewRegistry.register(...) call has run before we hydrate so saved
   // leaves resolve their creator instead of falling back to `empty`.
   const shellReady = useContextKey('shellReady') === true
-  const rootPath = useNexusWorkspaceStore((s) => s.rootPath)
+  // SD-08 / AA-04 — read rootPath via the shell-owned ContextKeyService
+  // contract that `nexus.workspace` publishes to (key
+  // `nexus.workspace.rootPath`) rather than importing the plugin's
+  // internal zustand store. Matches the App.tsx fix already shipped.
+  const rootPathCtx = useContextKey('nexus.workspace.rootPath')
+  const rootPath: string | null =
+    typeof rootPathCtx === 'string' && rootPathCtx.length > 0 ? rootPathCtx : null
 
   const [resolution, setResolution] = useState<Resolution>({ kind: 'pending' })
 
