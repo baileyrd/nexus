@@ -575,6 +575,96 @@ function popoutLeaf(
 }
 
 /**
+ * P4-07 — split the leaf's parent Tabs in `direction`, creating a fresh
+ * sibling Tabs alongside it that holds a single empty leaf. The new
+ * leaf becomes active so the caller can immediately `setViewState` on
+ * it (or emit `files:open` which the editor plugin routes to the
+ * active empty leaf in the main dock).
+ *
+ *  - When the grandparent is already a Split with matching direction,
+ *    the new Tabs is inserted as the next sibling — the layout grows
+ *    laterally without adding a level of nesting.
+ *  - Otherwise the parent Tabs is wrapped in a fresh Split of the
+ *    requested direction, so a 1-pane editor + splitDown becomes
+ *    [editor / new], and splitRight from there becomes
+ *    [[editor / new] | newer].
+ *
+ * Returns the new leaf so the caller can address it directly.
+ *
+ * Throws if `leafId` is unknown, the leaf isn't in the main rootSplit
+ * or any floating window, or the leaf sits under a Root/FloatingWindow
+ * `child` that isn't the parent Tabs (a structural invariant violation
+ * the caller can't recover from).
+ */
+function splitLeaf(
+  leafId: string,
+  direction: 'horizontal' | 'vertical',
+): Leaf {
+  const leaf = state().leaves.get(leafId)
+  if (!leaf) {
+    throw new Error(`[workspace.splitLeaf] unknown leaf id: ${leafId}`)
+  }
+  const roots: WorkspaceParent[] = [state().rootSplit, ...state().floating]
+  let chain: WorkspaceParent[] | null = null
+  for (const root of roots) {
+    chain = findLeafAncestry(leaf, root, [])
+    if (chain) break
+  }
+  if (!chain || chain.length < 2) {
+    throw new Error('[workspace.splitLeaf] leaf has no splittable parent')
+  }
+  const parentTabs = chain[chain.length - 1] as Tabs
+  const grandparent = chain[chain.length - 2]
+
+  const newTabs = makeTabs()
+  const newLeaf = createLeaf(newTabs)
+  newTabs.leaves.push(newLeaf)
+  newTabs.activeIndex = 0
+
+  if (grandparent.kind === 'split' && (grandparent as Split).direction === direction) {
+    const split = grandparent as Split
+    const idx = split.children.findIndex((c) => c === parentTabs)
+    if (idx < 0) {
+      throw new Error('[workspace.splitLeaf] parent Tabs missing from grandparent split')
+    }
+    split.children.splice(idx + 1, 0, newTabs)
+  } else if (grandparent.kind === 'split') {
+    // Grandparent is a Split but with the *other* direction — wrap.
+    const split = grandparent as Split
+    const idx = split.children.findIndex((c) => c === parentTabs)
+    if (idx < 0) {
+      throw new Error('[workspace.splitLeaf] parent Tabs missing from grandparent split')
+    }
+    const wrapping: Split = {
+      kind: 'split',
+      id: newId(),
+      direction,
+      children: [parentTabs, newTabs],
+    }
+    split.children[idx] = wrapping
+  } else {
+    // Root or FloatingWindow — both expose `child: WorkspaceParent`.
+    const withChild = grandparent as { child?: WorkspaceParent }
+    if (withChild.child !== parentTabs) {
+      throw new Error(
+        '[workspace.splitLeaf] grandparent.child does not match parent Tabs',
+      )
+    }
+    const wrapping: Split = {
+      kind: 'split',
+      id: newId(),
+      direction,
+      children: [parentTabs, newTabs],
+    }
+    withChild.child = wrapping
+  }
+
+  setActiveLeaf(newLeaf)
+  emitInternal('layout-change')
+  return newLeaf
+}
+
+/**
  * Find a FloatingWindow by id. Returns null if absent.
  */
 function findFloatingWindow(id: string): FloatingWindow | null {
@@ -1164,6 +1254,8 @@ export const workspace = {
   moveLeafToDock,
   // BL-029
   popoutLeaf,
+  // P4-07
+  splitLeaf,
   closeFloatingWindow,
   setFloatingWindowBounds,
   findFloatingWindow,

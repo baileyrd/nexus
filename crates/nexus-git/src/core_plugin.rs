@@ -208,6 +208,13 @@ pub const HANDLER_BLAME: u32 = 36;
 /// `com.nexus.git::diff_file` returned. Drives the editor gutter's
 /// click-to-Revert affordance.
 pub const HANDLER_DISCARD_HUNKS: u32 = 37;
+/// P4-07 IPC handler: walk the commit log for a single file. Args
+/// `{ path: String, limit?: u64 }`. Returns the same `LogEntry` shape
+/// as [`HANDLER_LOG`] but filtered to commits that changed `path`.
+/// Drives the editor tab-action "Open version history" — the shell
+/// modal lists the entries and routes click-throughs to the
+/// existing `diff_file`/`blame` surfaces.
+pub const HANDLER_FILE_LOG: u32 = 38;
 
 /// P2-06 — interval the background git-state watcher sleeps between
 /// `git status` polls. Override per-forge via
@@ -522,6 +529,30 @@ impl CorePlugin for GitCorePlugin {
                 let indices = hunk_indices_arg(args)?;
                 h.with(move |e| e.discard_hunks(&path, &indices)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
+            }
+            HANDLER_FILE_LOG => {
+                let path = path_arg(args, &self.forge_root)?;
+                let limit = args
+                    .get("limit")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .unwrap_or(20);
+                let entries = h
+                    .with(move |e| e.log_file(&path, limit))
+                    .map_err(map_err)?;
+                let arr: Vec<_> = entries
+                    .iter()
+                    .map(|le| {
+                        json!({
+                            "hash": le.hash,
+                            "author": le.author,
+                            "date": le.date.to_rfc3339(),
+                            "message": le.message,
+                            "parents": le.parents,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
             }
             HANDLER_STASH_PUSH => {
                 let message = args.get("message").and_then(|v| v.as_str()).map(str::to_string);

@@ -1424,10 +1424,9 @@ export const editorPlugin: Plugin = {
 
     // P4-07 — wire the subset of tab-action stubs that have a thin
     // existing backend. The remaining stubs (splitRight/Down,
-    // addProperty, versionHistory, mergeFile, exportPdf) need either
-    // new layout primitives, new Rust IPC handlers, or new heavy
-    // libraries (PDF) and remain "coming soon" until their dedicated
-    // follow-ups land.
+    // mergeFile, exportPdf) need either new layout primitives or new
+    // heavy libraries (PDF) and remain "coming soon" until their
+    // dedicated follow-ups land.
     const WIRED: ReadonlySet<string> = new Set([
       'nexus.editor.stub.bookmark',
       'nexus.editor.stub.rename',
@@ -1435,6 +1434,10 @@ export const editorPlugin: Plugin = {
       'nexus.editor.stub.moveTo',
       'nexus.editor.stub.openInNewWindow',
       'nexus.editor.stub.openLinkedView',
+      'nexus.editor.stub.versionHistory',
+      'nexus.editor.stub.addProperty',
+      'nexus.editor.stub.splitRight',
+      'nexus.editor.stub.splitDown',
     ])
     for (const stub of STUB_COMMANDS) {
       if (WIRED.has(stub.id)) continue
@@ -1529,6 +1532,132 @@ export const editorPlugin: Plugin = {
         api.notifications.show({
           type: 'error',
           message: `Open in new window failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    const performSplit = async (direction: 'horizontal' | 'vertical') => {
+      const relpath = activeTabRelpath()
+      const activeLeafId = workspace.activeLeafId
+      if (!activeLeafId) return
+      try {
+        // Creates a new empty leaf adjacent in the requested direction
+        // and makes it active. The subsequent files:open routes into
+        // the new leaf because `mountFileInMainLeaf` prefers an empty
+        // active leaf in the main dock.
+        workspace.splitLeaf(activeLeafId, direction)
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Split failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      if (!relpath) return
+      const base = relpath.includes('/') ? relpath.slice(relpath.lastIndexOf('/') + 1) : relpath
+      api.events.emit('files:open', { relpath, name: base })
+    }
+
+    api.commands.register('nexus.editor.stub.splitRight', async () => {
+      await performSplit('horizontal')
+    })
+
+    api.commands.register('nexus.editor.stub.splitDown', async () => {
+      await performSplit('vertical')
+    })
+
+    api.commands.register('nexus.editor.stub.addProperty', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const key = await api.input.prompt('Property key:', 'tags')
+      if (!key) return
+      const value = await api.input.prompt(`Value for "${key}":`, '')
+      if (value === null) return
+      try {
+        await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'write_frontmatter', {
+          path: relpath,
+          key,
+          value,
+        })
+        api.notifications.show({
+          type: 'info',
+          message: `Property "${key}" updated.`,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Add property failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register('nexus.editor.stub.versionHistory', async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      interface LogEntry {
+        hash?: unknown
+        author?: unknown
+        date?: unknown
+        message?: unknown
+      }
+      let raw: unknown
+      try {
+        raw = await api.kernel.invoke<unknown>('com.nexus.git', 'file_log', {
+          path: relpath,
+          limit: 50,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Version history failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+      if (!Array.isArray(raw) || raw.length === 0) {
+        api.notifications.show({
+          type: 'info',
+          message: 'No commit history for this file.',
+        })
+        return
+      }
+      const items = (raw as LogEntry[])
+        .map((entry) => {
+          const hash =
+            typeof entry.hash === 'string' ? entry.hash.slice(0, 7) : '???????'
+          const date = typeof entry.date === 'string' ? entry.date.slice(0, 10) : ''
+          const author = typeof entry.author === 'string' ? entry.author : ''
+          const message = typeof entry.message === 'string'
+            ? entry.message.split('\n')[0]
+            : ''
+          return {
+            label: `${hash} · ${date} · ${message}`,
+            description: author,
+            value: typeof entry.hash === 'string' ? entry.hash : '',
+          }
+        })
+        .filter((i) => i.value.length > 0)
+      if (items.length === 0) {
+        api.notifications.show({ type: 'info', message: 'No commits for this file.' })
+        return
+      }
+      const picked = await api.input.pick<string>(items, {
+        title: `History — ${relpath}`,
+        placeholder: 'Pick a commit',
+      })
+      if (!picked) return
+      // Surface the commit hash via clipboard + toast — a full diff
+      // viewer is the follow-up surface (would split a diff leaf
+      // showing this commit vs HEAD).
+      try {
+        await navigator.clipboard.writeText(picked)
+        api.notifications.show({
+          type: 'info',
+          message: `Commit ${picked.slice(0, 7)} copied to clipboard.`,
+        })
+      } catch {
+        api.notifications.show({
+          type: 'info',
+          message: `Selected commit ${picked.slice(0, 7)}.`,
         })
       }
     })

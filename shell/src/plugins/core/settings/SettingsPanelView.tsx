@@ -950,8 +950,9 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
         control={
           <button
             type="button"
-            onClick={comingSoon('Help')}
-            title="Coming soon"
+            onClick={() =>
+              window.open('https://github.com/baileyrd/nexus#readme', '_blank')
+            }
             style={{
               background: 'var(--background-modifier-hover)',
               color: 'var(--text-normal)',
@@ -1504,8 +1505,25 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
         control={
           <button
             type="button"
-            onClick={comingSoon('Rebuild forge cache')}
-            title="Coming soon"
+            onClick={async () => {
+              try {
+                await invoke('kernel_invoke', {
+                  pluginId: 'com.nexus.storage',
+                  commandId: 'rebuild_index',
+                  args: {},
+                  timeoutMs: null,
+                })
+                api?.notifications.show({
+                  type: 'info',
+                  message: 'Forge cache rebuilt.',
+                })
+              } catch (err) {
+                api?.notifications.show({
+                  type: 'error',
+                  message: `Rebuild failed: ${err instanceof Error ? err.message : String(err)}`,
+                })
+              }
+            }}
             style={{
               background: 'transparent',
               color: 'var(--text-error, #e06c75)',

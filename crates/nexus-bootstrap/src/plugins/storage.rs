@@ -55,6 +55,10 @@ pub(super) fn register(
                         nexus_storage::core_plugin::HANDLER_READ_FRONTMATTER,
                     ),
                     (
+                        "write_frontmatter",
+                        nexus_storage::core_plugin::HANDLER_WRITE_FRONTMATTER,
+                    ),
+                    (
                         "write_default_gitignore",
                         nexus_storage::core_plugin::HANDLER_WRITE_DEFAULT_GITIGNORE,
                     ),

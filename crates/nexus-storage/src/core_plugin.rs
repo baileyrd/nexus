@@ -358,6 +358,15 @@ pub const HANDLER_ENTITY_MERGE: u32 = 70;
 /// (default `0.5` — Dream-Cycle proposal value). Drives the shell
 /// inbox; approve/skip flow through `entity_get` + `entity_upsert`.
 pub const HANDLER_LIST_DRAFT_RELATIONS: u32 = 71;
+/// P4-07 — `write_frontmatter`. Args:
+/// `{ "path": String, "key": String, "value": String | null }`.
+/// Setting `value` to a non-null string inserts/replaces a top-level
+/// scalar frontmatter field; setting it to `null` removes the field
+/// (no-op when absent). Files without an existing `---` block gain a
+/// freshly-prepended one. The handler delegates to `write_file` so
+/// the FTS index, knowledge graph, and watcher all stay in sync.
+/// Returns `{ "ok": true }`.
+pub const HANDLER_WRITE_FRONTMATTER: u32 = 72;
 
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
@@ -1327,6 +1336,35 @@ impl CorePlugin for StorageCorePlugin {
                 let result = read_frontmatter_for_path(&self.forge_root, &path);
                 to_value(&result, "read_frontmatter")
             }
+            HANDLER_WRITE_FRONTMATTER => {
+                let path = path_arg(args, "write_frontmatter")?;
+                let key = args
+                    .get("key")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("write_frontmatter: missing 'key' string".to_string())
+                    })?
+                    .to_string();
+                // `value: null` removes the key (no-op when absent).
+                // Any other type is rejected — we only round-trip scalars
+                // through the user-facing add-property flow.
+                let value: Option<String> = match args.get("value") {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(serde_json::Value::String(s)) => Some(s.clone()),
+                    Some(other) => {
+                        return Err(exec_err(format!(
+                            "write_frontmatter: 'value' must be string or null, got {other:?}"
+                        )))
+                    }
+                };
+                let current = std::fs::read_to_string(self.forge_root.join(&path))
+                    .map_err(|e| exec_err(format!("write_frontmatter: read: {e}")))?;
+                let next = apply_frontmatter_edit(&current, &key, value.as_deref());
+                engine
+                    .write_file(&path, next.as_bytes())
+                    .map_err(|e| exec_err(format!("write_frontmatter: write: {e}")))?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
     }
@@ -1450,6 +1488,112 @@ fn read_frontmatter_for_path(
         return crate::ipc::ReadFrontmatterResult::default();
     };
     crate::ipc::frontmatter_from_source(&content)
+}
+
+/// P4-07 — splice a top-level scalar frontmatter field into a markdown
+/// source. `value = Some(s)` inserts or replaces the field's line in
+/// the YAML frontmatter; `value = None` removes the field if present.
+/// Files without a leading `---` block gain a freshly-prepended one
+/// when `value` is `Some` (and are returned unchanged on `None`).
+///
+/// Only top-level scalar keys are supported — nested objects, lists,
+/// and multi-line block scalars are left intact, but if the caller
+/// names a list key the write replaces it with a scalar string.
+/// Power users wanting structured edits should reach for a dedicated
+/// YAML editor; the user-facing add-property prompt is the only
+/// caller today and accepts a single string value.
+#[must_use]
+pub fn apply_frontmatter_edit(content: &str, key: &str, value: Option<&str>) -> String {
+    // Locate the closing `---` of the existing frontmatter, if any.
+    let (open_len, fm_body_start, fm_close_start) = match locate_frontmatter(content) {
+        Some(triple) => triple,
+        None => {
+            // No frontmatter block.
+            let Some(v) = value else {
+                // Remove on a file that has no frontmatter — no-op.
+                return content.to_string();
+            };
+            let opener = if content.starts_with("---\r\n") || content.contains("\r\n") {
+                "---\r\n"
+            } else {
+                "---\n"
+            };
+            let closer = if opener.ends_with("\r\n") {
+                "---\r\n\r\n"
+            } else {
+                "---\n\n"
+            };
+            let line_end = if opener.ends_with("\r\n") { "\r\n" } else { "\n" };
+            return format!("{opener}{key}: {v}{line_end}{closer}{content}");
+        }
+    };
+    let yaml_src = &content[open_len..fm_close_start];
+    let line_end = if content[..open_len].ends_with("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let prefix = format!("{key}:");
+    let mut found = false;
+    let mut rebuilt = String::with_capacity(yaml_src.len() + 32);
+    for line in yaml_src.split_inclusive('\n') {
+        let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+        if !found && trimmed.starts_with(&prefix) {
+            found = true;
+            if let Some(v) = value {
+                rebuilt.push_str(&format!("{key}: {v}{line_end}"));
+            }
+            // value == None ⇒ drop this line entirely.
+            continue;
+        }
+        rebuilt.push_str(line);
+    }
+    if !found {
+        if let Some(v) = value {
+            // Append the new key just before the closing `---`. Ensure
+            // the body ends with a newline so we don't glue keys.
+            if !rebuilt.ends_with('\n') {
+                rebuilt.push_str(line_end);
+            }
+            rebuilt.push_str(&format!("{key}: {v}{line_end}"));
+        }
+        // value == None ⇒ key absent, nothing to do.
+    }
+    let mut out = String::with_capacity(content.len() + 32);
+    out.push_str(&content[..open_len]);
+    out.push_str(&rebuilt);
+    out.push_str(&content[fm_close_start..fm_body_start]);
+    out.push_str(&content[fm_body_start..]);
+    out
+}
+
+/// Locate the byte ranges of an existing frontmatter block. Returns
+/// `(open_len, body_start, close_start)` where `open_len` is the
+/// length of the opening `---` line (so `content[..open_len]` is the
+/// opener), `close_start` is the index of the closing `---` line, and
+/// `body_start` is the index just after the closing `---\n` (or
+/// `---\r\n`). Returns `None` for files without a well-formed block.
+fn locate_frontmatter(content: &str) -> Option<(usize, usize, usize)> {
+    let open_len = if content.starts_with("---\r\n") {
+        5
+    } else if content.starts_with("---\n") {
+        4
+    } else {
+        return None;
+    };
+    // Find `\n---` followed by `\n` or `\r\n` or EOF.
+    let rest = &content[open_len..];
+    let close_offset = rest.find("\n---")?;
+    let close_start = open_len + close_offset + 1; // index of the `---` itself
+    let after = close_start + 3; // index past `---`
+    let body_start = if content[after..].starts_with("\r\n") {
+        after + 2
+    } else if content[after..].starts_with('\n') {
+        after + 1
+    } else {
+        after
+    };
+    Some((open_len, body_start, close_start))
 }
 
 // ── Config handlers ──────────────────────────────────────────────────────────
@@ -2169,6 +2313,7 @@ mod tests {
             ("HANDLER_ENTITY_RELATIONS", HANDLER_ENTITY_RELATIONS),
             ("HANDLER_ENTITY_UPSERT", HANDLER_ENTITY_UPSERT),
             ("HANDLER_ENTITY_FIND_DUPLICATES", HANDLER_ENTITY_FIND_DUPLICATES),
+            ("HANDLER_WRITE_FRONTMATTER", HANDLER_WRITE_FRONTMATTER),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {
@@ -2534,5 +2679,47 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get("to").and_then(|v| v.as_str()), Some("nexus"));
+    }
+
+    // ── apply_frontmatter_edit (P4-07) ───────────────────────────────────────
+
+    #[test]
+    fn frontmatter_edit_inserts_new_key_when_block_absent() {
+        let out = apply_frontmatter_edit("body line\n", "title", Some("Hello"));
+        assert_eq!(out, "---\ntitle: Hello\n---\n\nbody line\n");
+    }
+
+    #[test]
+    fn frontmatter_edit_appends_into_existing_block() {
+        let src = "---\ntitle: Old\n---\n\nbody\n";
+        let out = apply_frontmatter_edit(src, "tags", Some("a, b"));
+        assert_eq!(out, "---\ntitle: Old\ntags: a, b\n---\n\nbody\n");
+    }
+
+    #[test]
+    fn frontmatter_edit_replaces_existing_key() {
+        let src = "---\ntitle: Old\ntags: a\n---\n\nbody\n";
+        let out = apply_frontmatter_edit(src, "title", Some("New"));
+        assert_eq!(out, "---\ntitle: New\ntags: a\n---\n\nbody\n");
+    }
+
+    #[test]
+    fn frontmatter_edit_removes_key_when_value_none() {
+        let src = "---\ntitle: T\ntags: a\n---\n\nbody\n";
+        let out = apply_frontmatter_edit(src, "tags", None);
+        assert_eq!(out, "---\ntitle: T\n---\n\nbody\n");
+    }
+
+    #[test]
+    fn frontmatter_edit_remove_missing_key_is_noop() {
+        let src = "---\ntitle: T\n---\n\nbody\n";
+        let out = apply_frontmatter_edit(src, "tags", None);
+        assert_eq!(out, src);
+    }
+
+    #[test]
+    fn frontmatter_edit_remove_when_block_absent_is_noop() {
+        let out = apply_frontmatter_edit("body\n", "title", None);
+        assert_eq!(out, "body\n");
     }
 }

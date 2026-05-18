@@ -566,3 +566,57 @@ test('hydrate restores floating[] entries with bounds', async () => {
   assert.equal(out.floating!.length, 1)
   assert.equal(out.floating![0]!.id, 'fw-1')
 })
+
+// --- P4-07 splitLeaf -----------------------------------------------------
+
+test('splitLeaf horizontal: wraps a same-direction sibling onto the rootSplit', async () => {
+  freshLayout()
+  const tabs = firstTabs(workspace.rootSplit)
+  const a = workspace.createLeaf(tabs)
+  tabs.leaves.push(a)
+  await a.setViewState({ type: 'foo' })
+
+  // rootSplit defaults to horizontal in resetToDefault, so the new
+  // sibling Tabs lands as the next child of the same Split — no extra
+  // wrapping level.
+  const beforeChildCount = workspace.rootSplit.children.length
+  const newLeaf = workspace.splitLeaf(a.id, workspace.rootSplit.direction)
+
+  assert.notEqual(newLeaf.id, a.id)
+  assert.equal(workspace.activeLeafId, newLeaf.id, 'new leaf becomes active')
+  assert.equal(
+    workspace.rootSplit.children.length,
+    beforeChildCount + 1,
+    'one new sibling Tabs in the same Split',
+  )
+})
+
+test('splitLeaf orthogonal: wraps parent Tabs in a new Split of requested direction', async () => {
+  freshLayout()
+  const tabs = firstTabs(workspace.rootSplit)
+  const a = workspace.createLeaf(tabs)
+  tabs.leaves.push(a)
+  await a.setViewState({ type: 'foo' })
+
+  const opposite =
+    workspace.rootSplit.direction === 'horizontal' ? 'vertical' : 'horizontal'
+  const newLeaf = workspace.splitLeaf(a.id, opposite)
+
+  // The parent Tabs should now sit inside a fresh wrapping Split that
+  // is itself a child of rootSplit.
+  const wrappers = workspace.rootSplit.children.filter(
+    (c) => c.kind === 'split' && (c as { direction?: string }).direction === opposite,
+  )
+  assert.ok(
+    wrappers.length >= 1,
+    'a new orthogonal Split should appear as a rootSplit child',
+  )
+  assert.equal(workspace.activeLeafId, newLeaf.id)
+})
+
+test('splitLeaf throws for unknown leaf id', () => {
+  freshLayout()
+  assert.throws(() => workspace.splitLeaf('does-not-exist', 'horizontal'), {
+    message: /unknown leaf id/,
+  })
+})

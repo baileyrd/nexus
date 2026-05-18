@@ -66,6 +66,7 @@ pub(super) fn register(
                     ("merge", nexus_git::core_plugin::HANDLER_MERGE),
                     ("blame", nexus_git::core_plugin::HANDLER_BLAME),
                     ("discard_hunks", nexus_git::core_plugin::HANDLER_DISCARD_HUNKS),
+                    ("file_log", nexus_git::core_plugin::HANDLER_FILE_LOG),
                 ]),
             ),
             forge_root,

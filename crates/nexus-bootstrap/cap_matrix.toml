@@ -586,6 +586,11 @@ unrestricted = "read-only commit history"
 
 [[handler]]
 plugin = "com.nexus.git"
+command = "file_log"
+unrestricted = "read-only per-file commit history"
+
+[[handler]]
+plugin = "com.nexus.git"
 command = "branches"
 unrestricted = "read-only branch list"
 
@@ -1158,6 +1163,11 @@ unrestricted = "read-only Obsidian-shape Base query"
 plugin = "com.nexus.storage"
 command = "write_file"
 unrestricted = "writes a forge-relative file — gated downstream by the storage plugin's fs.write check; external paths are rejected there"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "write_frontmatter"
+unrestricted = "frontmatter splice over an existing markdown file — routes through write_file's fs.write check downstream"
 
 [[handler]]
 plugin = "com.nexus.storage"
