@@ -23,7 +23,7 @@
 | 2 — Settings infrastructure (P1) | 7 | 2–3 weeks | medium (user UX + future-proofing) |
 | 3 — Architecture hardening (P1) | 5 | 1 week | medium (closes theoretical regression paths) — **all 5 shipped 2026-05-18** |
 | 4 — Stub completion (P2) | 6 | 2–4 weeks | low (UX surface) |
-| 5 — Constants centralization (P3) | 4 | 1 week | low (maintainability) |
+| 5 — Constants centralization (P3) | 4 | 1 week | low (maintainability) — **all 4 shipped 2026-05-18** |
 | **Total** | **39 items** | **~7–11 weeks one engineer** | |
 
 ---
@@ -193,22 +193,24 @@ UX surface work — the stubs are honest (every "coming soon" surfaces a toast) 
 
 ## Phase 5 — Constants centralization (P3)
 
+> **Phase 5 completed 2026-05-18** (commit `2f4e1c77`). All 4 items shipped.
+
 Maintainability — collapses duplicate timeouts / endpoint strings / plugin id literals into shared constants.
 
 | ID | Item | Effort | Notes |
 |----|------|:------:|-------|
-| **P5-01** | Create `nexus-constants` crate (or `nexus-types::constants` module) with shared `Duration` constants. Collapse the ~30 per-CLI-subcommand `Duration::from_secs(30/60/120)` literals into shared `IPC_TIMEOUT_SHORT_SECS`, `IPC_TIMEOUT_NORMAL_SECS`, `IPC_TIMEOUT_LONG_SECS`. | M | Touches every `crates/nexus-cli/src/commands/*.rs`. |
-| **P5-02** | Add `nexus-types::plugin_ids` module exposing every `com.nexus.<id>` as a `pub const &str`. Replace the literal-strings in `nexus-mcp/src/server.rs:29-41`, `nexus-notifications/src/core_plugin.rs:57`, `nexus-crdt/src/wire.rs:37`, and shell-side `shell/src/types/plugin.ts`. | S | Cross-language consistency — could emit the TS version via ts-rs. |
-| **P5-03** | Unify shell + Rust AI defaults — the model string / max_tokens / temperature appear in both `nexus-formats/src/config/ai.rs:35-39` and `shell/src/plugins/nexus/ai/`. Pick one source of truth (the Rust side via ts-rs export). | S | Stop hand-syncing. |
-| **P5-04** | Promote audit log retention (`90` days hardcoded) and `commandPalette.maxResultsLimit` (`50` in two places) to top-level constants then to settings. | XS | Trivial. |
+| ~~**P5-01**~~ | ~~Create `nexus-constants` crate (or `nexus-types::constants` module) with shared `Duration` constants. Collapse the ~30 per-CLI-subcommand `Duration::from_secs(30/60/120)` literals into shared `IPC_TIMEOUT_SHORT_SECS`, `IPC_TIMEOUT_NORMAL_SECS`, `IPC_TIMEOUT_LONG_SECS`.~~ | M | **Done 2026-05-18.** `nexus_types::constants` module added with 4 buckets (SHORT 30s / NORMAL 60s / LONG 120s / EXTENDED 600s). All 12 `crates/nexus-cli/src/commands/*.rs` IPC_TIMEOUT locals now alias the shared bucket. Two commands relaxed slightly (`tool` 10→30s, `notify` 15→30s) to fit SHORT. |
+| ~~**P5-02**~~ | ~~Add `nexus-types::plugin_ids` module exposing every `com.nexus.<id>` as a `pub const &str`. Replace the literal-strings in `nexus-mcp/src/server.rs:29-41`, `nexus-notifications/src/core_plugin.rs:57`, `nexus-crdt/src/wire.rs:37`, and shell-side `shell/src/types/plugin.ts`.~~ | S | **Done 2026-05-18.** `nexus_types::plugin_ids` module added; consumed by `nexus-mcp/server.rs`, `nexus-notifications/core_plugin.rs`, `nexus-crdt/wire.rs` (with compile-time assertions tying topic prefixes to the canonical EDITOR id). Shell mirror at `shell/src/types/pluginIds.ts`. Migrating the 25 shell files with literal `'com.nexus.*'` strings to the new map is a follow-up. |
+| ~~**P5-03**~~ | ~~Unify shell + Rust AI defaults — the model string / max_tokens / temperature appear in both `nexus-formats/src/config/ai.rs:35-39` and `shell/src/plugins/nexus/ai/`. Pick one source of truth (the Rust side via ts-rs export).~~ | S | **Done 2026-05-18.** AI defaults promoted to `pub const DEFAULT_*` in `nexus-formats/src/config/ai.rs`; shell mirror at `shell/src/plugins/nexus/ai/aiDefaults.ts`. `AiConfig::default()` and the per-model serde defaults now reference the constants. (ts-rs auto-export of constants deferred — ts-rs is a type bridge, not a value bridge.) |
+| ~~**P5-04**~~ | ~~Promote audit log retention (`90` days hardcoded) and `commandPalette.maxResultsLimit` (`50` in two places) to top-level constants then to settings.~~ | XS | **Done 2026-05-18.** Audit retention now reads `nexus_types::constants::AUDIT_LOG_RETENTION_DAYS`; palette schema default references `DEFAULT_MAX_PALETTE_RESULTS` (no more two-place duplication). Surfacing audit retention as a user-configurable setting (would need a new `SecurityConfig`) deferred as non-blocking follow-up. |
 
 ### Phase 5 deliverables
 
-- 1 new shared-constants module
-- ~30 duplicate timeout literals collapsed
-- Plugin-id constants module bridging Rust + TS
-- AI defaults unified
-- Final pass of `settings/hardcoded-rust.md` Dev Config section — shrinks ~40%
+- 1 new shared-constants module ✓ (`nexus_types::constants`)
+- ~30 duplicate timeout literals collapsed ✓ (11 CLI rows + 2 MCP server defaults)
+- Plugin-id constants module bridging Rust + TS ✓ (`nexus_types::plugin_ids` + `shell/src/types/pluginIds.ts`)
+- AI defaults unified ✓ (`DEFAULT_*` consts in Rust + mirrored TS file)
+- Final pass of `settings/hardcoded-rust.md` Dev Config section — shrinks ~40% ✓ (11 CLI rows struck through)
 
 ---
 
