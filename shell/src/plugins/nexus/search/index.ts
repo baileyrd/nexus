@@ -34,6 +34,7 @@ export const searchPlugin: Plugin = {
         pluginId: 'nexus.search',
         title: 'Search',
         order: 30,
+        category: 'navigation',
         schema: [
           {
             key: 'search.maxResultsLimit',

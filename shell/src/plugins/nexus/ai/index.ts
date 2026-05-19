@@ -87,6 +87,7 @@ export const aiPlugin: Plugin = {
         pluginId: 'nexus.ai',
         title: 'AI Chat',
         order: 50,
+        category: 'ai',
         // Provider settings live in the same section so the existing
         // settings panel auto-renders them. The shell pushes these
         // values to the kernel via `set_config` on activate and on

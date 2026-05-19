@@ -26,6 +26,7 @@ export const fileExplorerPlugin: Plugin = {
         pluginId: 'core.file-explorer',
         title: 'File Explorer',
         order: 10,
+        category: 'files',
         schema: [
           {
             key: 'fileExplorer.showHidden',

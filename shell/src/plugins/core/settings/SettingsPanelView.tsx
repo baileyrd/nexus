@@ -15,6 +15,7 @@ import {
   type AvailableSnippet,
 } from '../../../stores/themeStore'
 import type { ConfigSection, ConfigSchema, PluginAPI, SettingsTabEntry } from '../../../types/plugin'
+import type { PluginCategory } from '@nexus/extension-api'
 import { eventBus } from '../../../host/EventBus'
 import { clientLogger } from '../../../clientLogger'
 import {
@@ -111,6 +112,32 @@ type NavTab = BuiltInTab | string
 const LAST_TAB_STORAGE_KEY = 'plugin:core.settings:last-tab'
 const PANEL_OFFSET_STORAGE_KEY = 'plugin:core.settings:panel-offset'
 
+// Sub-grouping inside the "Core plugins" rail group. The category
+// itself is declared by each plugin on its `ConfigSection` (see
+// `@nexus/extension-api`); this file only owns the display order and
+// the user-facing labels. The `cp-stub:*` Obsidian-parity stubs carry
+// their category on `StubCorePluginEntry` since they don't go through
+// the `configuration.register` path.
+const CATEGORY_ORDER: ReadonlyArray<PluginCategory> = [
+  'ai',
+  'editor',
+  'navigation',
+  'files',
+  'appearance',
+  'system',
+  'other',
+]
+
+const CATEGORY_LABELS: Record<PluginCategory, string> = {
+  ai: 'AI & intelligence',
+  editor: 'Editor & writing',
+  navigation: 'Navigation & search',
+  files: 'Files & sync',
+  appearance: 'Appearance',
+  system: 'System & I/O',
+  other: 'Other',
+}
+
 // `api` is supplied by the settings plugin's `views.register()` wrapper
 // in `index.ts` — the slot system itself doesn't pass props, so we
 // inject it via a closure component there. Optional here because the
@@ -130,6 +157,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
 
   const [navTab, setNavTab] = useState<NavTab>('general')
   const [query, setQuery] = useState('')
+  const [pluginFilter, setPluginFilter] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Drag state — translates the panel from its centered resting
@@ -360,37 +388,14 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             />
           ))}
 
-          {(sections.length > 0 || STUB_CORE_PLUGINS.length > 0) && (
-            <div className="settings-rail-group-header">Core plugins</div>
-          )}
-          {sections.map((s) => (
-            <RailItem
-              key={s.pluginId}
-              label={s.title}
-              active={navTab === s.pluginId}
-              onClick={() => setNavTab(s.pluginId)}
-            />
-          ))}
-          {STUB_CORE_PLUGINS.map((p) => (
-            <RailItem
-              key={p.id}
-              label={p.label}
-              active={navTab === p.id}
-              onClick={() => setNavTab(p.id)}
-            />
-          ))}
-
-          {pluginContributed.length > 0 && (
-            <div className="settings-rail-group-header">Community plugins</div>
-          )}
-          {pluginContributed.map((t) => (
-            <RailItem
-              key={t.id}
-              label={t.title}
-              active={navTab === t.id}
-              onClick={() => setNavTab(t.id)}
-            />
-          ))}
+          <PluginRailGroups
+            sections={sections}
+            community={pluginContributed}
+            filter={pluginFilter}
+            onFilterChange={setPluginFilter}
+            activeTab={navTab}
+            onSelect={setNavTab}
+          />
         </nav>
 
         {/* Right pane — topbar + content for the selected rail entry.
@@ -1540,6 +1545,7 @@ function KeychainTab({ api }: { api?: PluginAPI }) {
 interface StubCorePluginEntry {
   id: string
   label: string
+  category: PluginCategory
   render: (api: PluginAPI | undefined) => React.ReactNode
 }
 
@@ -1547,51 +1553,61 @@ const STUB_CORE_PLUGINS: ReadonlyArray<StubCorePluginEntry> = [
   {
     id: 'cp-stub:backlinks',
     label: 'Backlinks',
+    category: 'files',
     render: (api) => <StubBacklinksPage api={api} />,
   },
   {
     id: 'cp-stub:canvas',
     label: 'Canvas',
+    category: 'editor',
     render: (api) => <StubCanvasPage api={api} />,
   },
   {
     id: 'cp-stub:command-palette',
     label: 'Command palette',
+    category: 'navigation',
     render: () => <StubCommandPalettePage />,
   },
   {
     id: 'cp-stub:daily-notes',
     label: 'Daily notes',
+    category: 'files',
     render: (api) => <StubDailyNotesPage api={api} />,
   },
   {
     id: 'cp-stub:file-recovery',
     label: 'File recovery',
+    category: 'files',
     render: (api) => <StubFileRecoveryPage api={api} />,
   },
   {
     id: 'cp-stub:note-composer',
     label: 'Note composer',
+    category: 'editor',
     render: (api) => <StubNoteComposerPage api={api} />,
   },
   {
     id: 'cp-stub:page-preview',
     label: 'Page preview',
+    category: 'editor',
     render: (api) => <StubPagePreviewPage api={api} />,
   },
   {
     id: 'cp-stub:quick-switcher',
     label: 'Quick switcher',
+    category: 'navigation',
     render: (api) => <StubQuickSwitcherPage api={api} />,
   },
   {
     id: 'cp-stub:sync',
     label: 'Sync',
+    category: 'files',
     render: () => <StubSyncPage />,
   },
   {
     id: 'cp-stub:templates',
     label: 'Templates',
+    category: 'editor',
     render: (api) => <StubTemplatesPage api={api} />,
   },
 ]
@@ -2130,6 +2146,134 @@ function RailItem({
     >
       {label}
     </button>
+  )
+}
+
+interface RailEntry {
+  id: string
+  label: string
+  category: PluginCategory
+}
+
+/**
+ * Renders the "Core plugins" + "Community plugins" sections of the rail.
+ * Core plugins (real schema-owners and `cp-stub:*` Obsidian-parity stubs)
+ * are partitioned into topical sub-buckets — each plugin declares its
+ * own bucket on the `ConfigSection.category` field; community plugins
+ * remain a flat list. A single shared filter input narrows both —
+ * buckets/groups with zero matches collapse so the rail stays tight
+ * under heavy filtering.
+ */
+function PluginRailGroups({
+  sections,
+  community,
+  filter,
+  onFilterChange,
+  activeTab,
+  onSelect,
+}: {
+  sections: ConfigSection[]
+  community: SettingsTabEntry[]
+  filter: string
+  onFilterChange: (v: string) => void
+  activeTab: NavTab
+  onSelect: (id: NavTab) => void
+}) {
+  const q = filter.trim().toLowerCase()
+  const matches = (e: RailEntry) =>
+    !q ||
+    e.label.toLowerCase().includes(q) ||
+    e.id.toLowerCase().includes(q)
+
+  const coreEntries: RailEntry[] = [
+    ...sections.map((s) => ({
+      id: s.pluginId,
+      label: s.title,
+      category: s.category ?? 'other',
+    })),
+    ...STUB_CORE_PLUGINS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      category: p.category,
+    })),
+  ]
+
+  const byCategory = new Map<PluginCategory, RailEntry[]>()
+  for (const entry of coreEntries) {
+    if (!matches(entry)) continue
+    const list = byCategory.get(entry.category) ?? []
+    list.push(entry)
+    byCategory.set(entry.category, list)
+  }
+  for (const list of byCategory.values()) {
+    list.sort((a, b) => a.label.localeCompare(b.label))
+  }
+
+  const communityFiltered = community
+    .map((t) => ({ id: t.id, label: t.title, category: 'other' as PluginCategory }))
+    .filter(matches)
+
+  const showCoreHeader = coreEntries.length > 0
+  const showCommunityHeader = community.length > 0
+  const anyCoreMatch = Array.from(byCategory.values()).some((l) => l.length > 0)
+  const anyCommunityMatch = communityFiltered.length > 0
+  const showNoMatches =
+    !!q && !anyCoreMatch && !anyCommunityMatch && (showCoreHeader || showCommunityHeader)
+
+  return (
+    <>
+      {(showCoreHeader || showCommunityHeader) && (
+        <input
+          type="search"
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          placeholder="Filter plugins…"
+          spellCheck={false}
+          autoComplete="off"
+          className="settings-rail-filter"
+          aria-label="Filter plugin list"
+        />
+      )}
+
+      {showCoreHeader && (
+        <div className="settings-rail-group-header">Core plugins</div>
+      )}
+      {CATEGORY_ORDER.map((cat) => {
+        const items = byCategory.get(cat) ?? []
+        if (items.length === 0) return null
+        return (
+          <div key={cat}>
+            <div className="settings-rail-subgroup-header">
+              {CATEGORY_LABELS[cat]}
+            </div>
+            {items.map((e) => (
+              <RailItem
+                key={e.id}
+                label={e.label}
+                active={activeTab === e.id}
+                onClick={() => onSelect(e.id)}
+              />
+            ))}
+          </div>
+        )
+      })}
+
+      {showCommunityHeader && (
+        <div className="settings-rail-group-header">Community plugins</div>
+      )}
+      {communityFiltered.map((e) => (
+        <RailItem
+          key={e.id}
+          label={e.label}
+          active={activeTab === e.id}
+          onClick={() => onSelect(e.id)}
+        />
+      ))}
+
+      {showNoMatches && (
+        <div className="settings-rail-empty">No plugins match</div>
+      )}
+    </>
   )
 }
 

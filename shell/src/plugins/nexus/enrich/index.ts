@@ -39,6 +39,7 @@ export const enrichPlugin: Plugin = {
         pluginId: 'nexus.enrich',
         title: 'AI Auto-Enrichment',
         order: 72,
+        category: 'ai',
         schema: [],
       },
       commands: [

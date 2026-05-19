@@ -607,6 +607,7 @@ export const editorPlugin: Plugin = {
       pluginId: 'nexus.editor',
       title: 'Editor',
       order: 10,
+      category: 'editor',
       schema: [
         {
           key: CONFIG_CONFIRM_CLOSE_DIRTY,

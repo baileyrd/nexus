@@ -79,6 +79,7 @@ export const canvasPlugin: Plugin = {
         pluginId: 'nexus.canvas',
         title: 'Canvas',
         order: 30,
+        category: 'editor',
         schema: [
           {
             key: 'canvas.exportMarginUnits',

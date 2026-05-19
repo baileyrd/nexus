@@ -19,6 +19,7 @@ export const commandPalettePlugin: Plugin = {
         pluginId: 'core.command-palette',
         title: 'Command Palette',
         order: 15,
+        category: 'navigation',
         schema: [
           {
             key: 'commandPalette.maxResultsLimit',

@@ -553,11 +553,28 @@ export interface ViewContribution {
 
 // ─── Configuration (moved from shell/src/types/plugin.ts) ────────────────────
 
+/**
+ * Topical bucket for the Settings → "Core plugins" rail. Each
+ * `ConfigSection` declares which bucket it lives in; the rail groups
+ * entries under sub-headers in the order defined here. Plugins that
+ * omit `category` (or use an unrecognised value) appear under "Other".
+ */
+export type PluginCategory =
+  | 'ai'
+  | 'editor'
+  | 'navigation'
+  | 'files'
+  | 'appearance'
+  | 'system'
+  | 'other';
+
 export interface ConfigSection {
   pluginId: string;
   title: string;
   order: number;
   schema: ConfigSchema[];
+  /** Settings-rail bucket. Defaults to `'other'` when omitted. */
+  category?: PluginCategory;
 }
 
 export interface ConfigSchema {

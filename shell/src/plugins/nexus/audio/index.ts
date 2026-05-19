@@ -45,6 +45,7 @@ export const audioPlugin: Plugin = {
         pluginId: 'nexus.audio',
         title: 'Audio',
         order: 72,
+        category: 'system',
         schema: [
           {
             key: CONFIG_USE_WEB_SPEECH,

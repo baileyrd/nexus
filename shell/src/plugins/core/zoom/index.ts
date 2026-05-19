@@ -57,6 +57,7 @@ export const zoomPlugin: Plugin = {
         pluginId: 'core.zoom',
         title: 'Zoom',
         order: 5,
+        category: 'appearance',
         schema: [
           {
             key: CONFIG_KEY,

@@ -87,6 +87,7 @@ export const terminalPlugin: Plugin = {
         pluginId: 'nexus.terminal',
         title: 'Terminal',
         order: 20,
+        category: 'system',
         schema: [
           {
             key: 'ui.commandSaveNotificationMs',

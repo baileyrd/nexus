@@ -70,6 +70,7 @@ export const notificationServicePlugin: Plugin = {
         pluginId: 'core.notification-service',
         title: 'Notifications',
         order: 20,
+        category: 'system',
         schema: [
           {
             key: CONFIG_KEY_DURATION,

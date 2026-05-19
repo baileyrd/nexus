@@ -49,6 +49,7 @@ export const recallPlugin: Plugin = {
         pluginId: 'nexus.recall',
         title: 'AI Recall',
         order: 71,
+        category: 'ai',
         schema: [
           {
             key: CONFIG_HOTKEY,

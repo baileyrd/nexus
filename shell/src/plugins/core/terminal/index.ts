@@ -28,6 +28,7 @@ export const terminalPlugin: Plugin = {
         pluginId: 'core.terminal',
         title: 'Terminal',
         order: 30,
+        category: 'system',
         schema: [
           {
             key: 'terminal.fontSize',

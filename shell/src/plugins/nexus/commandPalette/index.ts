@@ -59,6 +59,7 @@ export const commandPalettePlugin: Plugin = {
         pluginId: 'nexus.commandPalette',
         title: 'Command Palette',
         order: 30,
+        category: 'navigation',
         schema: [
           {
             key: CONFIG_KEY_PALETTE_LIMIT,

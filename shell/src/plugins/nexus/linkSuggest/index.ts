@@ -31,6 +31,7 @@ export const linkSuggestPlugin: Plugin = {
         pluginId: 'nexus.linkSuggest',
         title: 'AI Link Suggestions',
         order: 51,
+        category: 'ai',
         schema: [
           {
             key: 'ai.linkSuggest.enabled',

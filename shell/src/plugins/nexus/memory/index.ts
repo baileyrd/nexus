@@ -77,6 +77,7 @@ export const memoryPlugin: Plugin = {
         pluginId: 'nexus.memory',
         title: 'Memory',
         order: 70,
+        category: 'ai',
         schema: [
           {
             key: CONFIG_HOTKEY,
