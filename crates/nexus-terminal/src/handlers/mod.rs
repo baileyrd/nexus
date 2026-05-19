@@ -9,6 +9,7 @@
 pub(crate) mod adhoc;
 pub(crate) mod info;
 pub(crate) mod io;
+pub(crate) mod repl;
 pub(crate) mod saved;
 pub(crate) mod session;
 pub(crate) mod shared;
