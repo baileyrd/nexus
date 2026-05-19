@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorSyncContentArgs",
+  "description": "Args for `sync_content`. Re-seeds the session's content from a\ncaller-supplied string (used by the shell when the user pastes a\nfull document or after external file changes).",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "New full document content. Reparsed end-to-end.",
+      "type": "string"
+    },
+    "relpath": {
+      "description": "Forge-relative path of the session.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath",
+    "content"
+  ]
+}

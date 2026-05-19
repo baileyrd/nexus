@@ -17,6 +17,7 @@ pub mod database_view;
 mod error;
 pub(crate) mod excerpt_map;
 pub(crate) mod handlers;
+pub mod ipc;
 pub mod markdown;
 mod transaction;
 mod tree;

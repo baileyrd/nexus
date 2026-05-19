@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorPathArgs",
+  "description": "Args for the relpath-only handlers: `open`, `close`, `get_tree`,\n`get_markdown`, `save`, `undo`, `redo`, `refresh_excerpts`.",
+  "type": "object",
+  "properties": {
+    "relpath": {
+      "description": "Forge-relative path of the session.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorOk",
+  "description": "Standard `{}` ack reply for handlers that return no payload:\n`close`, `save`, `sync_content`, `refresh_excerpts`, `undo`/`redo`\nin some paths.",
+  "type": "object",
+  "additionalProperties": false
+}

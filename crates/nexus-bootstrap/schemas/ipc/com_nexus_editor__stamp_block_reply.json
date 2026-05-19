@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorStampBlockReply",
+  "description": "Reply for `stamp_block`. The handler returns both the input and\npost-stamp UUIDs (as JSON strings) because allocation rekeys the\nblock: callers that were tracking the input id need the new\n`stable_id` to address the block in subsequent transactions.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "Echo of the caller-supplied block UUID, JSON-stringified.",
+      "type": "string"
+    },
+    "newly_stamped": {
+      "description": "`true` when the handler allocated a new stamp on this call;\n`false` if the block was already stamped.",
+      "type": "boolean"
+    },
+    "stable_id": {
+      "description": "Post-stamp UUID — equal to `block_id` when the block was\nalready stamped, freshly allocated otherwise.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "block_id",
+    "stable_id",
+    "newly_stamped"
+  ]
+}

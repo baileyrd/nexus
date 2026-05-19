@@ -31,6 +31,8 @@ ts-export = [
     "nexus-workflow/ts-export",
     "nexus-terminal/ts-export",
     "nexus-database/ts-export",
+    # P1-3 (#113) — editor wire-mirror IPC types (`ipc.rs`).
+    "nexus-editor/ts-export",
     # BL-052 — activity-timeline types live in `nexus-types::activity`.
     "nexus-types/ts-export",
     # BL-117 — audio subsystem IPC types.

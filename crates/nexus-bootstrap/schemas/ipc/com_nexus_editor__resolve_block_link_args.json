@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorResolveBlockLinkArgs",
+  "description": "Args for `resolve_block_link`. Note: the field is `file_relpath`,\nnot `relpath` — the handler uses this name to disambiguate from\nthe *current* session path when resolving cross-file links.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "UUID of the block to resolve, as a string.",
+      "type": "string"
+    },
+    "file_relpath": {
+      "description": "Forge-relative path of the target file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_relpath",
+    "block_id"
+  ]
+}
