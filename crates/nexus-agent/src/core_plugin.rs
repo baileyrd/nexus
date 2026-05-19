@@ -234,12 +234,7 @@ impl CorePlugin for AgentCorePlugin {
         if handler_id == HANDLER_LIST_TOOLS {
             return handlers::list_tools::handle_list_tools(_args);
         }
-        Err(PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!(
-                "handler {handler_id}: agent commands are async; caller should use dispatch_async"
-            ),
-        })
+        Err(PluginError::HandlerIsAsyncOnly { handler_id })
     }
 
     fn dispatch_async(

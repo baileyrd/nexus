@@ -1529,15 +1529,15 @@ impl CorePlugin for WorkflowCorePlugin {
             HANDLER_GET => handlers::get::handle(&self.registry, args),
             HANDLER_RELOAD => handlers::reload::handle(&self.root, &self.registry),
             HANDLER_VALIDATE => handlers::validate::handle_sync(args),
-            HANDLER_RUN => Err(handlers::shared::exec_err(format!(
-                "handler {HANDLER_RUN}: run is async; caller should use dispatch_async"
-            ))),
-            HANDLER_RUN_DIGEST => Err(handlers::shared::exec_err(format!(
-                "handler {HANDLER_RUN_DIGEST}: run_digest is async; caller should use dispatch_async"
-            ))),
-            HANDLER_SET_DIGEST_CONFIG => Err(handlers::shared::exec_err(format!(
-                "handler {HANDLER_SET_DIGEST_CONFIG}: set_digest_config is async; caller should use dispatch_async"
-            ))),
+            HANDLER_RUN => Err(PluginError::HandlerIsAsyncOnly {
+                handler_id: HANDLER_RUN,
+            }),
+            HANDLER_RUN_DIGEST => Err(PluginError::HandlerIsAsyncOnly {
+                handler_id: HANDLER_RUN_DIGEST,
+            }),
+            HANDLER_SET_DIGEST_CONFIG => Err(PluginError::HandlerIsAsyncOnly {
+                handler_id: HANDLER_SET_DIGEST_CONFIG,
+            }),
             HANDLER_TEMPLATES_LIST => handlers::templates::handle_list(),
             HANDLER_TEMPLATES_GET => handlers::templates::handle_get(args),
             HANDLER_TEMPLATES_INIT => handlers::templates::handle_init(&self.root, args),

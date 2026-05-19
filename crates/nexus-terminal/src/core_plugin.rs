@@ -1872,15 +1872,12 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_ADHOC_DELETE => self.dispatch_adhoc_delete(args),
             HANDLER_ADHOC_PROMOTE => self.dispatch_adhoc_promote(args),
             HANDLER_RUN_SAVED => self.dispatch_run_saved(args),
-            // BL-064 — `suggest` is async (it issues a nested
-            // `com.nexus.ai` IPC call). Surfacing this from the sync
-            // path makes the failure mode obvious if the dispatcher
-            // ever lost its async route.
-            HANDLER_SUGGEST => Err(exec_err(
-                format!(
-                    "handler {HANDLER_SUGGEST}: suggest is async; caller should use dispatch_async"
-                ),
-            )),
+            // BL-064 — `suggest` is async (issues a nested
+            // `com.nexus.ai` IPC call). Surface the routing mistake
+            // via the typed `HandlerIsAsyncOnly` error.
+            HANDLER_SUGGEST => Err(PluginError::HandlerIsAsyncOnly {
+                handler_id: HANDLER_SUGGEST,
+            }),
             HANDLER_CROSS_SESSION_SEARCH => self.dispatch_cross_session_search(args),
             HANDLER_REPL_START => self.dispatch_repl_start(args),
             HANDLER_REPL_EVAL => self.dispatch_repl_eval(args),
@@ -3563,8 +3560,8 @@ mod tests {
             .dispatch(HANDLER_SUGGEST, &serde_json::json!({}))
             .unwrap_err();
         match err {
-            PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("dispatch_async"), "got: {reason}");
+            PluginError::HandlerIsAsyncOnly { handler_id } => {
+                assert_eq!(handler_id, HANDLER_SUGGEST);
             }
             other => panic!("unexpected: {other:?}"),
         }

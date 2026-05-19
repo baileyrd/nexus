@@ -278,13 +278,12 @@ impl CorePlugin for SkillsCorePlugin {
             HANDLER_RELOAD => self.dispatch_reload(),
             HANDLER_RENDER => self.dispatch_render(args),
             HANDLER_COMPOSE => self.dispatch_compose(args),
-            // BL-054 Phase 3 — `invoke` is async (it issues a nested
-            // `com.nexus.agent` IPC call). Surfacing the routing
-            // mistake from the sync path makes it obvious if a future
-            // dispatcher loses the async route.
-            HANDLER_INVOKE => Err(exec_err(format!(
-                "handler {HANDLER_INVOKE}: invoke is async; caller should use dispatch_async"
-            ))),
+            // BL-054 Phase 3 — `invoke` is async (issues a nested
+            // `com.nexus.agent` IPC call). Surface the routing mistake
+            // via the typed `HandlerIsAsyncOnly` error.
+            HANDLER_INVOKE => Err(PluginError::HandlerIsAsyncOnly {
+                handler_id: HANDLER_INVOKE,
+            }),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -764,8 +763,8 @@ body B
             )
             .unwrap_err();
         match err {
-            PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("dispatch_async"), "got: {reason}");
+            PluginError::HandlerIsAsyncOnly { handler_id } => {
+                assert_eq!(handler_id, HANDLER_INVOKE);
             }
             _ => panic!("unexpected error"),
         }

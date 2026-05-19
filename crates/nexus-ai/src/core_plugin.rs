@@ -382,12 +382,7 @@ impl CorePlugin for AiCorePlugin {
             return serde_json::to_value(&snap)
                 .map_err(|e| exec_err(format!("index_status: serialize: {e}")));
         }
-        Err(PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!(
-                "handler {handler_id}: AI command is async; caller should use dispatch_async"
-            ),
-        })
+        Err(PluginError::HandlerIsAsyncOnly { handler_id })
     }
 
     /// Async dispatch path. Captures the context + configs into the returned

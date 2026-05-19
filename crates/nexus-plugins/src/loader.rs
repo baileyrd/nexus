@@ -126,13 +126,22 @@ pub trait CorePlugin: Send + Sync {
     /// `handler_id` values correspond to those declared in the plugin manifest's
     /// `[registrations]` sections (same numbering as the WASM ABI).
     ///
+    /// The default impl returns [`PluginError::HandlerIsAsyncOnly`] so a
+    /// plugin whose every handler routes through [`dispatch_async`](Self::dispatch_async)
+    /// can omit this method entirely. Plugins with mixed sync/async surfaces
+    /// override this, handle their sync handlers, and fall through to the
+    /// same typed error for the async-only ids.
+    ///
     /// # Errors
     /// Return [`PluginError`] on dispatch failure.
     fn dispatch(
         &mut self,
         handler_id: u32,
         args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError>;
+    ) -> Result<serde_json::Value, PluginError> {
+        let _ = args;
+        Err(PluginError::HandlerIsAsyncOnly { handler_id })
+    }
 
     /// Async dispatch path for handlers that perform HTTP calls, nested
     /// `ipc_call`s, or other `.await`-bound work.

@@ -165,13 +165,13 @@ A pure-compute plugin (`nexus-database`, `nexus-formats`) uses essentially `log`
 
 **Recommendation:** split into supertraits — `pub trait PluginContext: Identity + FileSystem + KvAccess + Events + Ipc + Log {}` — and let small consumers depend on only the slice they need. This is a non-breaking refactor if the umbrella trait is preserved as an auto-impl.
 
-### 4.2 `CorePlugin` — borderline ⚠️
+### 4.2 `CorePlugin` — ✅ resolved 2026-05-18 (SD-05)
 
-The `CorePlugin` trait (`crates/nexus-plugins/src/loader.rs:91`) requires every plugin to implement `dispatch` (the only non-default method) plus opt-in defaults for `on_init`, `on_start`, `on_stop`, `on_enable`, `on_disable`, `on_settings_changed`, `dispatch_async`, `wire_context`. The default-method pattern is the right ISP escape hatch — a plugin that doesn't need lifecycle hooks just doesn't implement them.
+The `CorePlugin` trait (`crates/nexus-plugins/src/loader.rs:91`) now has zero non-default methods: `dispatch`, `dispatch_async`, and the lifecycle hooks all have sensible defaults. Plugins implement only the methods relevant to their surface.
 
-The remaining smell: `dispatch` returns `Result<Value, PluginError>` (sync) and `dispatch_async` returns `Option<CorePluginFuture>` (async). Mixed sync/async surface forces every consumer to handle both. In practice the loader dispatches async-first and falls back, but plugins authoring a purely-async surface like `nexus-ai` must still provide a sync `dispatch` that returns a `"caller should use dispatch_async"` error (see `crates/nexus-ai/src/core_plugin.rs:352`). That's an ISP indicator — the trait shape doesn't fit the case.
+`dispatch`'s default impl returns the typed `PluginError::HandlerIsAsyncOnly { handler_id }` — async-only plugins (`nexus-ai-runtime`) skip the method entirely, and mixed sync/async plugins (`nexus-ai`, `nexus-agent`, `nexus-skills`, `nexus-workflow`, `nexus-terminal`) handle their sync arms and emit the same typed error for the async-only ids instead of hand-formatting a `"caller should use dispatch_async"` string. The eight sentinel-string sites across six core plugins collapsed to one trait default. The `dispatch_suggest_via_sync_path_surfaces_async_hint` test (BL-064) and its `nexus-skills` sibling now pin the typed variant.
 
-**Recommendation (lower priority):** split `CorePlugin` into `SyncCorePlugin` and `AsyncCorePlugin`, or make the trait expose a unified `async fn dispatch` and require plugins to choose sync vs `tokio::task::block_in_place` internally. The current shape is workable but verbose.
+The full split into `SyncCorePlugin` + `AsyncCorePlugin` was not pursued: the loader already routes async-first with sync fallback, so the trait *shape* fits both. The ergonomic problem was the hand-written sentinel boilerplate, which is gone.
 
 ### 4.3 Capability enum granularity ✅
 
@@ -305,7 +305,7 @@ Roughly ordered by `(impact ÷ effort)`. None are correctness bugs.
 | **SD-02** | Add a `dispatch!(handler_id, args, [(HANDLER_X, "x", engine.do_x), …])` macro (or `Handler` trait) so the per-arm boilerplate collapses to one line. | DRY / SRP | M | H |
 | **SD-03** | Migrate `nexus-storage` / `nexus-editor` / `nexus-terminal` / `nexus-git` to the `handlers/<verb>.rs` + `handlers/shared.rs` layout already used by `nexus-ai` / `nexus-workflow` / `nexus-agent`. | SRP | M | H |
 | **SD-04** | Split `PluginContext` into supertraits (`Identity` + `FileSystem` + `KvAccess` + `Events` + `Ipc` + `Log`) with the current trait kept as auto-impl umbrella. Lets pure-compute plugins depend on `Identity + Log`. | ISP | M | M |
-| **SD-05** | Split `CorePlugin` into `SyncCorePlugin` + `AsyncCorePlugin`, or unify to a single `async fn dispatch`. Removes the "AI command is async; caller should use dispatch_async" sentinel-error pattern. | ISP | M | M |
+| **SD-05** | ~~Split `CorePlugin` into `SyncCorePlugin` + `AsyncCorePlugin`, or unify to a single `async fn dispatch`. Removes the "AI command is async; caller should use dispatch_async" sentinel-error pattern.~~ **Resolved 2026-05-18.** `CorePlugin::dispatch` now has a default impl returning typed `PluginError::HandlerIsAsyncOnly { handler_id }`. Pure-async plugins (`nexus-ai-runtime`) omit `dispatch` entirely; the eight hand-written sentinel-string sites across six plugins collapse to the trait default. No trait split needed. | ISP | M | M |
 | **SD-06** | ~~Drive handler-id ↔ name registration from a single source (derive macro or `inventory` slice) so bootstrap doesn't repeat each name.~~ **Resolved 2026-05-18.** Each subsystem now exports `pub const IPC_HANDLERS: &[(&str, u32)]` next to its `HANDLER_*` constants; bootstrap registrations are one-liners (`with_v1_aliases(nexus_X::core_plugin::IPC_HANDLERS)`). `crates/nexus-bootstrap/src/plugins/` shrank from 2269 → 1390 LOC. | DRY | M | L |
 | **SD-07** | Add a `#![warn(clippy::too_many_lines)]` or a file-LOC budget to CI for `core_plugin.rs` so the four largest files can't grow further. | SRP guardrail | S | M |
 | **SD-08** | Fix `shell/src/shell/App.tsx:8` — invert the dependency on `plugins/nexus/workspace/workspaceStore`. (Already tracked as AA-04.) | DIP | S | L |

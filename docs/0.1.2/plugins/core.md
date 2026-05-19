@@ -8,22 +8,25 @@ Defined in `crates/nexus-plugins/src/loader.rs`. Service crates implement this t
 
 ```rust
 pub trait CorePlugin: Send + Sync {
-    fn on_init(&mut self) -> Result<()>;
-    fn on_start(&mut self) -> Result<()>;
-    fn on_stop(&mut self);
+    fn on_init(&mut self) -> Result<()> { Ok(()) }
+    fn on_start(&mut self) -> Result<()> { Ok(()) }
+    fn on_stop(&mut self) {}
     fn on_enable(&mut self) -> Result<()> { Ok(()) }
     fn on_disable(&mut self) {}
     fn on_settings_changed(&mut self, _settings: &Value) -> Result<()> { Ok(()) }
 
-    fn dispatch(&self, handler_id: u32, args: Value) -> Result<Value>;
-    fn dispatch_async(&self, handler_id: u32, args: Value)
-        -> Option<CorePluginFuture>;
-    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>);
+    fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value> {
+        Err(PluginError::HandlerIsAsyncOnly { handler_id })
+    }
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value)
+        -> Option<CorePluginFuture> { None }
+    fn wire_context(&mut self, _ctx: Arc<KernelPluginContext>) {}
 }
 ```
 
-- `dispatch` — synchronous IPC handler.
-- `dispatch_async` — futures-returning handler; only override for handlers that need `await`. If both are implemented, `dispatch_async` wins.
+- Every method has a default — plugins implement only what they actually surface.
+- `dispatch` — synchronous IPC handler. Default returns `PluginError::HandlerIsAsyncOnly { handler_id }`, so async-only plugins can omit it entirely.
+- `dispatch_async` — futures-returning handler; override for handlers that need `await`. The dispatcher tries `dispatch_async` first and falls back to sync.
 - `wire_context` — kernel calls this exactly once with a per-plugin `KernelPluginContext` that the plugin uses for nested `ipc_call`, `emit_event`, `settings()`.
 
 ## 23 in-tree core plugins

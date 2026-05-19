@@ -189,6 +189,17 @@ pub enum PluginError {
         consecutive_timeouts: u32,
     },
 
+    /// The requested handler exists only on the async dispatch path and was
+    /// invoked via the sync `dispatch` route. Surfaces a routing mistake
+    /// (the dispatcher tries `dispatch_async` first and falls back to sync,
+    /// so this error only appears if a caller bypasses that path or a
+    /// plugin's `dispatch_async` declines a handler it has no sync arm for).
+    #[error("handler {handler_id}: only available via dispatch_async")]
+    HandlerIsAsyncOnly {
+        /// The handler id that was routed to the sync path.
+        handler_id: u32,
+    },
+
     /// An underlying I/O error occurred.
     #[error("I/O error: {0}")]
     Io(

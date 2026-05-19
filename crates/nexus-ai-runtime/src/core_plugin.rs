@@ -129,19 +129,10 @@ impl AiRuntimeCorePlugin {
 }
 
 impl CorePlugin for AiRuntimeCorePlugin {
-    fn dispatch(
-        &mut self,
-        handler_id: u32,
-        _args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        // Every Phase-1 handler is async — the sync entrypoint is
-        // here only for trait-completeness. Returning a clear "use
-        // dispatch_async" error matches the convention used by
-        // `nexus-ai`'s plugin (see `core_plugin.rs:407` in that crate).
-        Err(exec_err(format!(
-            "handler {handler_id}: ai-runtime is async; caller must use dispatch_async"
-        )))
-    }
+    // Every Phase-1 handler is async — the default `CorePlugin::dispatch`
+    // impl returns `PluginError::HandlerIsAsyncOnly { handler_id }`, which
+    // is exactly the routing-mistake error we want, so we don't override
+    // the sync path here.
 
     fn dispatch_async(
         &mut self,
