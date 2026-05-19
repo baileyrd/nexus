@@ -56,6 +56,12 @@ export const rafScheduler: Scheduler = (cb) => {
   return () => cancelAnimationFrame(id)
 }
 
+// Same variance-escape reason as `SnapshotResult` above — a heterogeneous
+// tuple of `SnapshotEntry<StateA, …> | SnapshotEntry<StateB, …>` won't
+// assign to a single `SnapshotEntry<X, Y>[]` because the selector
+// parameter is contravariant. Per-element typing is preserved via
+// `SnapshotResult<T>` on the values field.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class FrameSnapshot<T extends readonly SnapshotEntry<any, any>[]> {
   private values: SnapshotResult<T>
   private pending = false

@@ -598,9 +598,9 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                   ))}
                 </>
               ) : navTab === 'general' ? (
-                <GeneralTab api={api} />
+                <GeneralTab />
               ) : navTab === 'editor-options' ? (
-                <EditorOptionsTab api={api} />
+                <EditorOptionsTab />
               ) : navTab === 'files-links' ? (
                 <FilesLinksTab api={api} />
               ) : navTab === 'appearance' ? (
@@ -971,7 +971,7 @@ function ComingSoonTab({ title, description }: { title: string; description: str
   )
 }
 
-function GeneralTab({ api }: { api?: PluginAPI }) {
+function GeneralTab() {
   const version = (import.meta.env?.VITE_APP_VERSION as string | undefined) ?? '0.1.0'
 
   return (
@@ -1093,7 +1093,7 @@ function GeneralTab({ api }: { api?: PluginAPI }) {
 // `Core plugins > nexus.editor`; this stub will eventually consolidate
 // them into a single Obsidian-style page.
 
-function EditorOptionsTab({ api }: { api?: PluginAPI }) {
+function EditorOptionsTab() {
   return (
     <div className="settings-section">
       <StubRow
@@ -1746,7 +1746,7 @@ const STUB_CORE_PLUGINS: ReadonlyArray<StubCorePluginEntry> = [
   {
     id: 'cp-stub:sync',
     label: 'Sync',
-    render: (api) => <StubSyncPage api={api} />,
+    render: () => <StubSyncPage />,
   },
   {
     id: 'cp-stub:templates',
@@ -2140,7 +2140,7 @@ function StubQuickSwitcherPage(_: { api?: PluginAPI }) {
   )
 }
 
-function StubSyncPage({ api }: { api?: PluginAPI }) {
+function StubSyncPage() {
   return (
     <div className="settings-section">
       <p style={{ marginBottom: 12 }}>
