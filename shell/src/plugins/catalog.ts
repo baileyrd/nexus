@@ -337,13 +337,6 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/pluginsMgmt').then(m => m.pluginsMgmtPlugin),
   },
   {
-    id: 'nexus.extensionsTab', name: 'Extensions Tab',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    popoutCompatible: false,
-    description: 'Activity-bar tab listing installed plugins with at-a-glance state and errors.',
-    load: () => import('./nexus/extensionsTab').then(m => m.extensionsTabPlugin),
-  },
-  {
     id: 'nexus.memory', name: 'Memory',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,

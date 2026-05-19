@@ -90,7 +90,6 @@ Source: `shell/src/plugins/nexus/<name>/index.ts`. `ls` shows 62 entries under `
 | `nexus.dreamCycle` | `dreamCycle` | commands | Dream Cycle inbox; refresh |
 | `nexus.editor` | `editor` | commands, keybindings, contextKeys, settingsTabs | Tabbed editor; save / find / replace / blame; LSP rename / references; REPL kernel settings tab |
 | `nexus.enrich` | `enrich` | commands, configuration | Force AI auto-enrichment of current file |
-| `nexus.extensionsTab` | `extensionsTab` | settingsTabs | Extensions tab inside the settings modal |
 | `nexus.files` | `files` | commands, keybindings, contextKeys | Files sidebar; new / rename / delete / reveal / copy path; `F2`/`Del` in tree |
 | `nexus.gitPanel` | `gitPanel` | commands | Git Panel (status / diff / history tabs) |
 | `nexus.gitStatus` | `gitStatus` | (utility) | Status-bar git indicator |

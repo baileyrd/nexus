@@ -68,7 +68,7 @@ Domain groupings (folder names under `shell/src/plugins/nexus/`):
 - **System / chrome supplements:** `activityBar`, `sidebar`, `rightPanel`, `statusBar`, `status`, `commandPalette`
 - **Notifications & observability:** `notifications`, `notificationsInbox`, `notificationsSettings`, `healthPanel`, `observability`, `diagnostics`
 - **Files & metadata:** `fileProperties`, `allProperties`
-- **Extension / catalog:** `pluginsMgmt`, `extensionsTab`, `themePicker`
+- **Extension / catalog:** `pluginsMgmt`, `themePicker`
 - **Collaboration:** `collab`
 - **Audio:** `audio`
 - **Notion import/export:** `notion`
