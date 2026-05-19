@@ -2079,34 +2079,6 @@ impl CorePlugin for TerminalCorePlugin {
 
 impl TerminalCorePlugin {
 
-    fn dispatch_send_input(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: SendInputArgs = parse_args(args, "send_input")?;
-        let id = SessionId::from_string(a.id);
-        self.server
-            .lock()
-            .map_err(poisoned)?
-            .send_input(&id, &a.input)
-            .map_err(crate_err)?;
-        Ok(serde_json::Value::Null)
-    }
-
-    fn dispatch_send_raw_input(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: SendRawInputArgs = parse_args(args, "send_raw_input")?;
-        let id = SessionId::from_string(a.id);
-        self.server
-            .lock()
-            .map_err(poisoned)?
-            .send_raw_input(&id, &a.data)
-            .map_err(crate_err)?;
-        Ok(serde_json::Value::Null)
-    }
-
     /// BL-142 Phase 1 — spawn a language kernel and register it as
     /// a REPL session. Reuses the existing `create_session` /
     /// `ShellSpec` machinery so PTY, scrollback, output bus, memory
@@ -2223,98 +2195,6 @@ impl TerminalCorePlugin {
         to_value(&infos, "repl_list")
     }
 
-    fn dispatch_pump(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: PumpArgs = parse_args(args, "pump")?;
-        let id = SessionId::from_string(a.id);
-        let timeout = Duration::from_millis(a.timeout_ms.unwrap_or(100));
-        // Hold the server lock just long enough to drain + read the new
-        // bytes since our internal cursor; release before publishing so
-        // a slow subscriber can't back-pressure the next IPC dispatch.
-        let (bytes, new_chunk) = {
-            let mut server = self.server.lock().map_err(poisoned)?;
-            let bytes = server.pump(&id, timeout).map_err(crate_err)?;
-            let new_chunk = self.fetch_new_bytes(&server, &id);
-            (bytes, new_chunk)
-        };
-        if let Some((next_cursor, data)) = new_chunk {
-            self.publish_output(&id, next_cursor, data);
-        }
-        to_value(&PumpResponse { bytes }, "pump")
-    }
-
-    fn dispatch_read_output(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: ReadOutputArgs = parse_args(args, "read_output")?;
-        let id = SessionId::from_string(a.id);
-        let lines = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .read_output(&id, a.start, a.count)
-            .map_err(crate_err)?;
-        to_value(&lines, "read_output")
-    }
-
-    fn dispatch_read_raw_since(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: ReadRawSinceArgs = parse_args(args, "read_raw_since")?;
-        let id = SessionId::from_string(a.id);
-        let timeout = Duration::from_millis(a.timeout_ms.unwrap_or(30));
-        // Same lock-discipline as `dispatch_pump`: drain inside the
-        // server lock, derive the event bytes from the plugin's
-        // independent cursor, then drop the lock before publishing.
-        let (cursor, data, new_chunk) = {
-            let mut server = self.server.lock().map_err(poisoned)?;
-            let (cursor, data) = server
-                .read_raw_since(&id, a.cursor, timeout)
-                .map_err(crate_err)?;
-            let new_chunk = self.fetch_new_bytes(&server, &id);
-            (cursor, data, new_chunk)
-        };
-        if let Some((next_cursor, bytes)) = new_chunk {
-            self.publish_output(&id, next_cursor, bytes);
-        }
-        to_value(&ReadRawSinceResponse { cursor, data }, "read_raw_since")
-    }
-
-    fn dispatch_search_output(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: SearchOutputArgs = parse_args(args, "search_output")?;
-        let id = SessionId::from_string(a.id);
-        let hits = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .search_output(&id, &a.query, a.is_regex)
-            .map_err(crate_err)?;
-        to_value(&hits, "search_output")
-    }
-
-    fn dispatch_wait_for_pattern(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: WaitForPatternArgs = parse_args(args, "wait_for_pattern")?;
-        let id = SessionId::from_string(a.id);
-        let timeout = Duration::from_millis(a.timeout_ms);
-        let matched = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .wait_for_pattern(&id, &a.pattern, a.is_regex, timeout)
-            .map_err(crate_err)?;
-        to_value(&WaitForPatternResponse { matched }, "wait_for_pattern")
-    }
-
     /// BL-061 — read the latest RSS the poller cached for `session_id`.
     /// Returns `None` when the plugin was built without a memory
     /// monitor, when the session isn't known to the monitor (e.g. it
@@ -2340,7 +2220,7 @@ impl TerminalCorePlugin {
     /// snapshot from the manager (no further drain) so the byte
     /// shape matches exactly what `read_raw_since` would have
     /// returned for the same cursor.
-    fn fetch_new_bytes(
+    pub(crate) fn fetch_new_bytes(
         &self,
         server: &InMemoryTerminalServer,
         id: &SessionId,
@@ -2366,7 +2246,7 @@ impl TerminalCorePlugin {
     /// cursor that comes after this chunk and is informational only —
     /// it's already been recorded by [`Self::fetch_new_bytes`]. Shares
     /// seq state with the autonomous drainer via [`publish_chunk`].
-    fn publish_output(&self, id: &SessionId, _next_cursor: u64, data: Vec<u8>) {
+    pub(crate) fn publish_output(&self, id: &SessionId, _next_cursor: u64, data: Vec<u8>) {
         let Some(bus) = self.event_bus.as_ref() else {
             return;
         };
@@ -2501,36 +2381,6 @@ impl TerminalCorePlugin {
             },
             "run_saved",
         )
-    }
-
-    /// BL-063 — `cross_session_search` proxies into
-    /// [`SqliteSessionStore::cross_session_search`]. The store does
-    /// the FTS5 / regex work; the dispatch arm just decodes args and
-    /// surfaces a clear error when no store is wired.
-    fn dispatch_cross_session_search(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: CrossSessionSearchArgs = parse_args(args, "cross_session_search")?;
-        let store = self.session_store.as_ref().ok_or_else(|| {
-            exec_err(
-                "session store not attached (runtime built without a forge path)".into(),
-            )
-        })?;
-        let limit =
-            usize::try_from(a.limit.unwrap_or(100)).unwrap_or(100).max(1);
-        let session_ids_slice = a.session_ids.as_deref();
-        let store = store.lock().map_err(poisoned)?;
-        let hits = store
-            .cross_session_search(
-                &a.query,
-                a.is_regex,
-                session_ids_slice,
-                a.since_ts,
-                limit,
-            )
-            .map_err(crate_err)?;
-        to_value(&hits, "cross_session_search")
     }
 }
 
