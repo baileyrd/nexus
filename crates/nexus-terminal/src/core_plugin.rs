@@ -109,9 +109,9 @@ use ts_rs::TS;
 use crate::adhoc::SqliteAdHocStore;
 use crate::memory::{MemoryLimitAction, MemoryLimits, MemoryMonitor};
 use crate::persist::SqliteSessionStore;
-use crate::saved::{
-    promote_adhoc_to_saved, PromoteOptions, SavedCommand, SqliteSavedCommandStore,
-};
+use crate::saved::SqliteSavedCommandStore;
+#[cfg(test)]
+use crate::saved::SavedCommand;
 use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
 use crate::shell::ShellSpec;
@@ -927,23 +927,23 @@ pub struct ReplInfo {
 /// drainer competes for the same lock with short-blocking pumps. See
 /// [`spawn_drainer`] for the cadence + contention model.
 pub struct TerminalCorePlugin {
-    server: Arc<Mutex<InMemoryTerminalServer>>,
+    pub(crate) server: Arc<Mutex<InMemoryTerminalServer>>,
     /// SQLite-backed saved-commands store. `None` when the plugin is
     /// instantiated without a forge path (tests, embedded runtimes) —
     /// the saved-command handlers return a clear error in that case.
-    saved: Option<Mutex<SqliteSavedCommandStore>>,
+    pub(crate) saved: Option<Mutex<SqliteSavedCommandStore>>,
     /// SQLite-backed ad-hoc command history store (BL-060). `None` when
     /// the plugin is instantiated without a forge path — the
     /// `adhoc_*` handlers return a clear error in that case. Lives
     /// behind a separate `Mutex` from `saved` because the two stores
     /// own independent rusqlite `Connection`s (a `Connection` is
     /// `Send` but not `Sync`).
-    adhoc: Option<Mutex<SqliteAdHocStore>>,
+    pub(crate) adhoc: Option<Mutex<SqliteAdHocStore>>,
     /// Optional kernel event bus. When `Some`, the constructor spawns
     /// the autonomous drainer (see [`Self::drainer`]) and `pump` /
     /// `read_raw_since` dispatches additionally publish on demand for
     /// any bytes the drainer hasn't already shipped.
-    event_bus: Option<Arc<EventBus>>,
+    pub(crate) event_bus: Option<Arc<EventBus>>,
     /// Per-session emitter state — tracks the internal byte cursor we
     /// last published from and the next sequence number to assign.
     /// Shared between the dispatch path and the drainer thread; both
@@ -951,7 +951,7 @@ pub struct TerminalCorePlugin {
     /// atomic per chunk and neither path can publish the same bytes
     /// twice. Independent of the caller-supplied cursor in
     /// `read_raw_since`.
-    emitters: Arc<Mutex<HashMap<SessionId, EmitterState>>>,
+    pub(crate) emitters: Arc<Mutex<HashMap<SessionId, EmitterState>>>,
     /// Background drainer that pumps every active session and publishes
     /// new bytes onto the event bus without waiting for IPC clients to
     /// poll. Spawned by [`Self::with_event_bus`] and stopped on drop —
@@ -959,13 +959,13 @@ pub struct TerminalCorePlugin {
     /// of the plugin's `Arc`s release their data, the drainer has
     /// already let go of its clones. `None` when no event bus is wired
     /// (tests / embedded runtimes that don't need streaming).
-    drainer: Option<DrainerHandle>,
+    pub(crate) drainer: Option<DrainerHandle>,
     /// Background forwarder that pulls [`TerminalEvent`]s from the
     /// in-memory server's local mpsc and republishes them on the
     /// kernel bus as `com.nexus.terminal.events.<session_id>` (BL-013).
     /// `None` when no event bus is wired — the legacy mpsc subscriber
     /// path stays the only consumer in that case.
-    lifecycle_forwarder: Option<LifecycleForwarderHandle>,
+    pub(crate) lifecycle_forwarder: Option<LifecycleForwarderHandle>,
     /// BL-061 — memory monitor + last-RSS cache + poller config.
     /// `None` when the plugin was built without a memory monitor
     /// (tests, embedded runtimes); the poller thread is only spawned
@@ -973,47 +973,47 @@ pub struct TerminalCorePlugin {
     /// because publishing the kill event needs a bus. The cache lets
     /// `get_session_info` surface RSS without re-reading `/proc`
     /// every IPC dispatch.
-    memory: Option<Arc<Mutex<MemoryState>>>,
+    pub(crate) memory: Option<Arc<Mutex<MemoryState>>>,
     /// BL-061 — limits applied to every auto-tracked session.
     /// `None` = no monitoring (the default until `with_memory_monitor`
     /// is called); `Some(MemoryLimits::unlimited())` = sample but
     /// never kill (useful for the shell UI's RSS chip without the
     /// kill behavior).
-    memory_limits: Option<MemoryLimits>,
+    pub(crate) memory_limits: Option<MemoryLimits>,
     /// BL-061 — memory poller interval. Defaults to
     /// [`crate::RECOMMENDED_POLL_INTERVAL`] (1 s) per PRD-09 §7.2.
-    memory_poll_interval: Duration,
+    pub(crate) memory_poll_interval: Duration,
     /// BL-061 — handle to the memory poller thread. Drop signals
     /// stop and joins, mirroring the drainer pattern.
-    memory_poller: Option<MemoryPollerHandle>,
+    pub(crate) memory_poller: Option<MemoryPollerHandle>,
     /// BL-064 — kernel context, captured by `wire_context` so the
     /// async `suggest` handler can issue nested `ipc_call`s into
     /// `com.nexus.ai`. `None` until bootstrap finishes wiring; the
     /// handler returns a clear error if dispatched before then.
-    context: Option<Arc<KernelPluginContext>>,
+    pub(crate) context: Option<Arc<KernelPluginContext>>,
     /// BL-064 — pre-built suggestion engine. Holds the default rule
     /// set so every `suggest` dispatch reuses the same compiled
     /// regex state. Wrapped in `Arc` so the dispatch_async future
     /// can clone it without re-instantiating per-call.
-    suggest_engine: Arc<crate::ai::AiSuggestionEngine>,
+    pub(crate) suggest_engine: Arc<crate::ai::AiSuggestionEngine>,
     /// BL-063 — session-store handle for cross-session search.
     /// `None` when bootstrap didn't open a store (tests, embedded
     /// runtimes); the `cross_session_search` handler returns a
     /// clear error in that case. Bootstrap shares this same handle
     /// with the eviction persister, so a scrollback that the
     /// persister wrote is immediately searchable.
-    session_store: Option<Arc<Mutex<SqliteSessionStore>>>,
+    pub(crate) session_store: Option<Arc<Mutex<SqliteSessionStore>>>,
     /// BL-142 Phase 1 — tracks which sessions were spawned via
     /// `repl_start`. `repl_eval` + `repl_stop` consult this map to
     /// reject calls against regular terminal sessions, and
     /// `repl_list` snapshots the values for shell discovery.
-    repls: Arc<Mutex<HashMap<SessionId, ReplInfo>>>,
+    pub(crate) repls: Arc<Mutex<HashMap<SessionId, ReplInfo>>>,
 }
 
 /// BL-061 — shared memory state held behind a single `Mutex` so the
 /// poller, the IPC dispatcher, and the lifecycle hooks all see a
 /// consistent view.
-struct MemoryState {
+pub(crate) struct MemoryState {
     /// The active monitor — owns per-pid sample histories.
     monitor: MemoryMonitor,
     /// Map of `session_id -> latest RSS bytes`, refreshed by every
@@ -1050,7 +1050,7 @@ impl MemoryState {
 
 /// BL-061 — handle to the memory poller thread + its stop flag. Same
 /// shape as [`DrainerHandle`] / [`LifecycleForwarderHandle`].
-struct MemoryPollerHandle {
+pub(crate) struct MemoryPollerHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -1068,7 +1068,7 @@ impl Drop for MemoryPollerHandle {
 /// top of every drainer cycle and after each pumped session so a Drop
 /// signal during a long round still exits within one pump timeout. The
 /// `Option<JoinHandle>` lets `Drop` move the handle out for the join.
-struct DrainerHandle {
+pub(crate) struct DrainerHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -1108,7 +1108,7 @@ const LIFECYCLE_RECV_TIMEOUT_MS: u64 = 100;
 /// [`DrainerHandle`] — Drop sets the flag and joins. The thread also
 /// exits naturally when the server's mpsc senders are dropped (server
 /// destructed), so a forwarder outliving its server still terminates.
-struct LifecycleForwarderHandle {
+pub(crate) struct LifecycleForwarderHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -1127,7 +1127,7 @@ impl Drop for LifecycleForwarderHandle {
 /// Per-session bookkeeping for the output event stream. Mutated under
 /// the [`TerminalCorePlugin::emitters`] mutex.
 #[derive(Debug, Default, Clone, Copy)]
-struct EmitterState {
+pub(crate) struct EmitterState {
     /// Monotonic byte offset we last published bytes up to. Starts at
     /// `0`; on the first emit we publish from offset `0` to whatever
     /// the buffer currently exposes.
@@ -2383,45 +2383,12 @@ impl TerminalCorePlugin {
         to_value(&WaitForPatternResponse { matched }, "wait_for_pattern")
     }
 
-    fn dispatch_get_session_info(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: SessionIdArgs = parse_args(args, "get_session_info")?;
-        let id = SessionId::from_string(a.id);
-        let mut info = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .get_session_info(&id)
-            .map_err(crate_err)?;
-        info.rss_bytes = self.cached_rss(id.as_str());
-        to_value(&info, "get_session_info")
-    }
-
-    fn dispatch_list_sessions(
-        &self,
-        _args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let mut list = self.server.lock().map_err(poisoned)?.list_sessions();
-        // BL-061 — layer the cached RSS onto every row so a single
-        // list_sessions call gives the shell UI everything it needs
-        // for its memory chip without N follow-up `get_session_info`
-        // calls.
-        if self.memory.is_some() {
-            for info in &mut list {
-                info.rss_bytes = self.cached_rss(&info.id);
-            }
-        }
-        to_value(&list, "list_sessions")
-    }
-
     /// BL-061 — read the latest RSS the poller cached for `session_id`.
     /// Returns `None` when the plugin was built without a memory
     /// monitor, when the session isn't known to the monitor (e.g. it
     /// was just spawned and the next poll hasn't run yet), or when
     /// the memory lock is poisoned.
-    fn cached_rss(&self, session_id: &str) -> Option<u64> {
+    pub(crate) fn cached_rss(&self, session_id: &str) -> Option<u64> {
         let memory = self.memory.as_ref()?;
         let mem = memory.lock().ok()?;
         mem.latest_rss.get(session_id).copied()
@@ -2474,70 +2441,10 @@ impl TerminalCorePlugin {
         publish_chunk(bus, &self.emitters, id, data);
     }
 
-    fn saved_store(&self) -> Result<&Mutex<SqliteSavedCommandStore>, PluginError> {
+    pub(crate) fn saved_store(&self) -> Result<&Mutex<SqliteSavedCommandStore>, PluginError> {
         self.saved.as_ref().ok_or_else(|| {
             exec_err("saved-command store not attached (runtime built without a forge path)".into())
         })
-    }
-
-    fn dispatch_saved_list(&self) -> Result<serde_json::Value, PluginError> {
-        let store = self.saved_store()?.lock().map_err(poisoned)?;
-        let rows = store.list().map_err(crate_err)?;
-        to_value(&rows, "saved_list")
-    }
-
-    fn dispatch_saved_create(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let cmd: SavedCommand = parse_args(args, "saved_create")?;
-        let store = self.saved_store()?.lock().map_err(poisoned)?;
-        store.create(&cmd).map_err(crate_err)?;
-        to_value(&cmd, "saved_create")
-    }
-
-    fn dispatch_saved_update(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let cmd: SavedCommand = parse_args(args, "saved_update")?;
-        let store = self.saved_store()?.lock().map_err(poisoned)?;
-        store.update(&cmd).map_err(crate_err)?;
-        let fresh = store
-            .get(&cmd.slug)
-            .map_err(crate_err)?
-            .ok_or_else(|| exec_err(format!("saved_update: slug '{}' vanished", cmd.slug)))?;
-        to_value(&fresh, "saved_update")
-    }
-
-    fn dispatch_saved_delete(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        #[derive(serde::Deserialize)]
-        struct DeleteArgs {
-            slug: String,
-        }
-        let a: DeleteArgs = parse_args(args, "saved_delete")?;
-        let store = self.saved_store()?.lock().map_err(poisoned)?;
-        store.delete(&a.slug).map_err(crate_err)?;
-        Ok(serde_json::json!({ "slug": a.slug }))
-    }
-
-    fn dispatch_saved_reorder(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        #[derive(serde::Deserialize)]
-        struct ReorderArgs {
-            slug: String,
-            #[serde(default)]
-            sidebar_order: Option<i32>,
-        }
-        let a: ReorderArgs = parse_args(args, "saved_reorder")?;
-        let store = self.saved_store()?.lock().map_err(poisoned)?;
-        store.reorder(&a.slug, a.sidebar_order).map_err(crate_err)?;
-        Ok(serde_json::json!({ "slug": a.slug, "sidebar_order": a.sidebar_order }))
     }
 
     /// BL-059 — open the saved command's `working_dir` in the user's
@@ -2625,79 +2532,13 @@ impl TerminalCorePlugin {
 
     // ── BL-060 — ad-hoc history handlers ─────────────────────────────
 
-    fn adhoc_store(&self) -> Result<&Mutex<SqliteAdHocStore>, PluginError> {
+    pub(crate) fn adhoc_store(&self) -> Result<&Mutex<SqliteAdHocStore>, PluginError> {
         self.adhoc.as_ref().ok_or_else(|| {
             exec_err(
                 "ad-hoc history store not attached (runtime built without a forge path)"
                     .into(),
             )
         })
-    }
-
-    /// `adhoc_list` — most-recent-first slice of the ad-hoc history.
-    ///
-    /// `limit` defaults to 100 to keep payloads bounded; callers that
-    /// genuinely want everything can request a larger value but should
-    /// expect O(rows) cost. Wrapped here rather than in the store so
-    /// the store's plain-library shape stays unchanged.
-    fn dispatch_adhoc_list(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: AdHocListArgs = parse_args(args, "adhoc_list")?;
-        let limit = usize::try_from(a.limit.unwrap_or(100)).unwrap_or(usize::MAX);
-        let store = self.adhoc_store()?.lock().map_err(poisoned)?;
-        let rows = store.recent(limit).map_err(crate_err)?;
-        to_value(&rows, "adhoc_list")
-    }
-
-    /// `adhoc_get` — single row by id, or JSON `null` when unknown.
-    fn dispatch_adhoc_get(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: AdHocIdArgs = parse_args(args, "adhoc_get")?;
-        let store = self.adhoc_store()?.lock().map_err(poisoned)?;
-        let row = store.get(&a.id).map_err(crate_err)?;
-        match row {
-            Some(r) => to_value(&r, "adhoc_get"),
-            None => Ok(serde_json::Value::Null),
-        }
-    }
-
-    /// `adhoc_delete` — idempotent. Returns `{ id }` regardless of
-    /// whether the row existed; the store's `DELETE` is a no-op on a
-    /// missing id and the caller already knows the id they passed.
-    fn dispatch_adhoc_delete(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: AdHocIdArgs = parse_args(args, "adhoc_delete")?;
-        let store = self.adhoc_store()?.lock().map_err(poisoned)?;
-        store.delete(&a.id).map_err(crate_err)?;
-        Ok(serde_json::json!({ "id": a.id }))
-    }
-
-    /// `adhoc_promote` — wraps [`promote_adhoc_to_saved`]. Requires
-    /// both the ad-hoc and saved stores to be attached.
-    fn dispatch_adhoc_promote(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: AdHocPromoteArgs = parse_args(args, "adhoc_promote")?;
-        // Lock the adhoc store for the read, then drop before locking
-        // saved — keeps lock-acquisition order one-way and avoids any
-        // cross-call deadlock with a future handler that takes both.
-        let adhoc_lock = self.adhoc_store()?.lock().map_err(poisoned)?;
-        let saved_lock = self.saved_store()?.lock().map_err(poisoned)?;
-        let opts = PromoteOptions {
-            slug: a.slug,
-            icon: a.icon,
-            shell: a.shell,
-        };
-        let cmd = promote_adhoc_to_saved(&adhoc_lock, &saved_lock, &a.id, a.name, opts)
-            .map_err(crate_err)?;
-        to_value(&cmd, "adhoc_promote")
     }
 
     // ── BL-055 — run a saved command in a fresh session ──────────────
@@ -2862,16 +2703,16 @@ fn one_shot_flag(shell: &str) -> &'static str {
 
 // ── Error plumbing — SD-01: emitted by the shared macro ─────────────────────
 
-nexus_plugins::define_dispatch_helpers!();
+nexus_plugins::define_dispatch_helpers!(pub(crate));
 
-fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
+pub(crate) fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
     exec_err("server mutex poisoned — prior handler panicked".to_string())
 }
 
 // Used as a function pointer by `.map_err(crate_err)`; wrapping in a
 // closure would re-trip `redundant_closure`.
 #[allow(clippy::needless_pass_by_value)]
-fn crate_err(e: crate::TerminalError) -> PluginError {
+pub(crate) fn crate_err(e: crate::TerminalError) -> PluginError {
     exec_err(e.to_string())
 }
 

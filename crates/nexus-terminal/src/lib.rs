@@ -62,6 +62,7 @@ mod core_plugin;
 mod env;
 mod error;
 mod external_terminal;
+mod handlers;
 mod job_object;
 mod lines;
 mod manager;
