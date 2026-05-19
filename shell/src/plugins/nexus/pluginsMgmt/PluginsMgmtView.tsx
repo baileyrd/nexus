@@ -392,6 +392,18 @@ function BuiltInRow({ row }: BuiltInRowProps) {
           >
             {row.id}
           </div>
+          {row.description && (
+            <div
+              style={{
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-interface)',
+                fontSize: 12,
+                marginTop: 4,
+              }}
+            >
+              {row.description}
+            </div>
+          )}
         </div>
         <ConfigureButton pluginId={row.id} visible={row.canConfigure} />
         <StateBadge state={live.state} error={live.error} />
@@ -625,6 +637,18 @@ function AvailableRow({ row }: AvailableRowProps) {
           >
             {row.id}
           </div>
+          {row.description && (
+            <div
+              style={{
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-interface)',
+                fontSize: 12,
+                marginTop: 4,
+              }}
+            >
+              {row.description}
+            </div>
+          )}
         </div>
         <div
           style={{

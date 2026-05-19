@@ -80,6 +80,7 @@ interface AvailablePluginEntry {
   name: string
   version: string
   core: boolean
+  description?: string
 }
 
 /**
@@ -93,6 +94,7 @@ interface RegistryPluginEntry {
   core: boolean
   state: string
   error?: string
+  description?: string
   /**
    * Optional capability declaration. Not currently populated by
    * `main.tsx` (the shell-side `PluginManifest` has no capabilities
@@ -159,6 +161,7 @@ function readRows(api: PluginAPI): PluginRow[] {
         core: p.core,
         state: p.state,
         error: p.error,
+        description: p.description,
         capabilities: parseManifestCapabilities(p.capabilities),
         canConfigure: resolveSettingsTarget(p.id) !== null,
         optional: optionalIds.has(p.id),
@@ -243,6 +246,7 @@ function readRows(api: PluginAPI): PluginRow[] {
         name: p.name,
         version: p.version,
         core: p.core,
+        description: p.description,
       }),
     )
   } catch {

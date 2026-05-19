@@ -354,14 +354,18 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     await host.loadAll(communityPlugins)
   }
 
-  // Expose plugin manifest + state list so the settings panel can show it
+  // Expose plugin manifest + state list so the settings panel can show it.
+  // Description lives on the catalog `PluginEntry`, not the per-plugin manifest,
+  // so look it up by id to match what `refreshPluginServices` does later.
+  const descriptionById = new Map(ALL_PLUGINS.map(e => [e.id, e.description]))
   reg.registerService('pluginList', plugins.map(p => ({
-    id:      p.manifest.id,
-    name:    p.manifest.name,
-    version: p.manifest.version,
-    core:    p.manifest.core,
-    state:   host.getState(p.manifest.id) ?? 'unknown',
-    error:   host.getError(p.manifest.id)?.message,
+    id:          p.manifest.id,
+    name:        p.manifest.name,
+    version:     p.manifest.version,
+    core:        p.manifest.core,
+    state:       host.getState(p.manifest.id) ?? 'unknown',
+    error:       host.getError(p.manifest.id)?.message,
+    description: descriptionById.get(p.manifest.id),
   })))
 
   // WI-43: expose the default-off catalog entries that are NOT currently
@@ -373,10 +377,11 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   const availablePlugins = DEFAULT_OFF_PLUGINS
     .filter(e => !enabledIds.has(e.id))
     .map(e => ({
-      id:      e.id,
-      name:    e.name,
-      version: e.version,
-      core:    e.core,
+      id:          e.id,
+      name:        e.name,
+      version:     e.version,
+      core:        e.core,
+      description: e.description,
     }))
   reg.registerService('availablePlugins', availablePlugins)
   // Side-channel for the UI to announce how many total built-ins exist,

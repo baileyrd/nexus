@@ -26,6 +26,7 @@ export interface BuiltInPluginRow {
   core: boolean
   state: string
   error?: string
+  description?: string
   capabilities: Capability[] | null
   /**
    * True when the plugin contributes either a `settingsTabs` entry or a
@@ -104,6 +105,7 @@ export interface AvailablePluginRow {
   name: string
   version: string
   core: boolean
+  description?: string
 }
 
 export type PluginRow =
