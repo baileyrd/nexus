@@ -20,6 +20,15 @@ nexus-formats = { path = "../nexus-formats" }
 nexus-kernel  = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-types   = { path = "../nexus-types" }
+ts-rs         = { workspace = true, optional = true }
+schemars      = { workspace = true, optional = true }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for the wire-mirror IPC types in `ipc.rs`. Off by default so normal
+# Rust builds don't pull ts-rs / schemars. Enable via
+# `cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export`.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

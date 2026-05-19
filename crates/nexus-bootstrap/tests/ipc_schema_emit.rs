@@ -165,6 +165,13 @@ use nexus_audio::ipc::{
     AudioStatusResult, AudioSynthesizeArgs, AudioSynthesizeResult, AudioTranscribeArgs,
     AudioTranscribeResult,
 };
+// nexus-editor (P1-3 #113) — wire-mirror types; handlers parse args
+// from `Value` and emit responses with `serde_json::json!`.
+use nexus_editor::ipc::{
+    EditorApplyTransactionArgs, EditorExcerptRequest, EditorOk, EditorOpenExcerptsArgs,
+    EditorPathArgs, EditorResolveBlockLinkArgs, EditorStampBlockArgs, EditorStampBlockReply,
+    EditorSyncContentArgs,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -602,6 +609,24 @@ fn emit_all_schemas_impl() {
     write_schema::<AudioSynthesizeArgs>("com_nexus_audio__synthesize", "args");
     write_schema::<AudioSynthesizeResult>("com_nexus_audio__synthesize", "result");
     write_schema::<AudioStatusResult>("com_nexus_audio__status", "result");
+
+    // ── com.nexus.editor (P1-3 #113) ─────────────────────────────────────
+    // Wire-mirror Args + the `{}` ack reply. The structural reply
+    // (`EditorSnapshot` / `ApplyTransactionResponse`) transitively
+    // pulls in the block-tree domain model (`Block`, `BlockTree`,
+    // `BlockProperties`, …), which uses `#[serde(flatten)]` for
+    // forward-compat fields — incompatible with the P0-2
+    // `deny_unknown_fields` gate. Same scope choice as `nexus-skills`
+    // and `nexus-workflow`: args wired in, structural returns opaque.
+    write_schema::<EditorPathArgs>("com_nexus_editor", "path_args");
+    write_schema::<EditorSyncContentArgs>("com_nexus_editor__sync_content", "args");
+    write_schema::<EditorStampBlockArgs>("com_nexus_editor__stamp_block", "args");
+    write_schema::<EditorStampBlockReply>("com_nexus_editor__stamp_block", "reply");
+    write_schema::<EditorApplyTransactionArgs>("com_nexus_editor__apply_transaction", "args");
+    write_schema::<EditorResolveBlockLinkArgs>("com_nexus_editor__resolve_block_link", "args");
+    write_schema::<EditorOpenExcerptsArgs>("com_nexus_editor__open_excerpts", "args");
+    write_schema::<EditorExcerptRequest>("com_nexus_editor__open_excerpts", "item");
+    write_schema::<EditorOk>("com_nexus_editor", "ok");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

@@ -71,6 +71,9 @@ cargo test -p nexus-terminal --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (audit P1-3: database) …"
 cargo test -p nexus-database --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (audit P1-3: editor) …"
+cargo test -p nexus-editor --features ts-export --quiet --tests
+
 echo "[drift] regenerating IPC TS bindings (templates) …"
 cargo test -p nexus-templates --features ts-export --quiet --tests
 

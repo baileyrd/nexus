@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorOpenExcerptsArgs",
+  "description": "Args for `open_excerpts`. Each item is a\n[`crate::core_plugin::ExcerptRequest`] line-range over a source\nfile; the handler merges overlapping ranges and assembles a\nsynthetic read-only session.",
+  "type": "object",
+  "properties": {
+    "items": {
+      "description": "One or more excerpt requests. Empty arrays are rejected by\nthe handler.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EditorExcerptRequest"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "$defs": {
+    "EditorExcerptRequest": {
+      "description": "Wire-mirror of [`crate::core_plugin::ExcerptRequest`]. Kept here\nso the schema generator sees a `deny_unknown_fields` form even\nthough the impl type accepts `#[serde(default)]` for `label`.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "description": "Optional caller-supplied label rendered alongside the\n`{relpath}#L{line_start}-L{line_end}` excerpt header.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line_end": {
+          "description": "Last line to include (1-based, inclusive).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "line_start": {
+          "description": "First line to include (1-based, inclusive).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "relpath": {
+          "description": "Forge-relative path of the source file to read from.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relpath",
+        "line_start",
+        "line_end"
+      ]
+    }
+  }
+}

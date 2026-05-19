@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorApplyTransactionArgs",
+  "description": "Args for `apply_transaction`. The `transaction` blob is the typed\n[`crate::Transaction`] payload — kept opaque on the wire so this\nmodule doesn't transitively pull in the entire transaction domain\nmodel (which uses `#[serde(flatten)]` for forward-compat fields).",
+  "type": "object",
+  "properties": {
+    "relpath": {
+      "description": "Forge-relative path of the session.",
+      "type": "string"
+    },
+    "transaction": {
+      "description": "Serialized [`crate::Transaction`]. The handler decodes via\n`serde_json::from_value` and rejects payloads larger than 16\nMiB."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath",
+    "transaction"
+  ]
+}

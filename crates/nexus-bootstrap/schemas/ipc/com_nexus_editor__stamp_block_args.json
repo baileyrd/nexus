@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditorStampBlockArgs",
+  "description": "Args for `stamp_block`. Returns a stable `<!-- ^<uuid> -->` marker\nfor the addressed block, allocating one if absent.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "UUID of the block to stamp. Sent as a string so the wire form\nis JSON-friendly; the handler parses it back to a `uuid::Uuid`.",
+      "type": "string"
+    },
+    "relpath": {
+      "description": "Forge-relative path of the session.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath",
+    "block_id"
+  ]
+}
