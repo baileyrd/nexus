@@ -330,6 +330,22 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             active={navTab === 'keychain'}
             onClick={() => setNavTab('keychain')}
           />
+          {/* Plugin management lives in the standalone Plugins modal
+              (`nexus.pluginsMgmt`). The rail entry is an action, not a
+              nav target — clicking it closes the settings panel and
+              opens the modal so the user has a discoverable path
+              from Settings into plugin enable/disable + capability
+              review without needing to know the Ctrl+Shift+X shortcut. */}
+          <RailItem
+            label="Plugins…"
+            active={false}
+            title="Open the Plugins panel (Ctrl+Shift+X)"
+            onClick={() => {
+              useContextKeyStore.getState().set('settingsPanelVisible', false)
+              const reg = getRegistry()
+              if (reg) void reg.commands.execute('nexus.plugins.open')
+            }}
+          />
           <RailItem
             label="Snippets"
             active={navTab === 'snippets'}
