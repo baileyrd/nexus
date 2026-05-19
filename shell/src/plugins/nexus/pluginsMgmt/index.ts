@@ -29,6 +29,7 @@ import {
   kernelStringsToCaps,
   type PriorGrant,
 } from '../../core/capabilityPrompt'
+import { getRegistry } from '../../../host/shellRegistry'
 
 const VIEW_ID = 'nexus.pluginsMgmt.overlay'
 
@@ -39,7 +40,28 @@ const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
 // WI-43: enable a default-off built-in plugin. Writes the id into the
 // `plugins.enabled` config key and notifies the user to reload.
 const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
+/** Open the Settings panel to the given plugin's settings surface. */
+const COMMAND_CONFIGURE = 'nexus.plugins.configure'
 const CONTEXT_KEY_VISIBLE = 'nexus.plugins.visible'
+
+/**
+ * Resolve the rail-entry id to deep-link to when the user clicks
+ * Configure on a plugin row. Returns the contributed Settings tab's
+ * id when one is registered (richer UX than the auto-form), otherwise
+ * the plugin id itself — every plugin that registers a configuration
+ * schema gets a rail entry keyed on its id (see
+ * SettingsPanelView.tsx's per-plugin rail loop). Returns `null` when
+ * the plugin has neither surface, so the modal can hide the button.
+ */
+function resolveSettingsTarget(pluginId: string): string | null {
+  const reg = getRegistry()
+  if (!reg) return null
+  const tab = reg.settingsTabs.all().find((t) => t.pluginId === pluginId)
+  if (tab) return tab.id
+  const section = reg.config.all().find((s) => s.pluginId === pluginId)
+  if (section) return section.pluginId
+  return null
+}
 
 const SERVICE_PLUGIN_LIST = 'pluginList'
 const SERVICE_COMMUNITY_MANIFESTS = 'communityPluginManifests'
@@ -127,6 +149,7 @@ function readRows(api: PluginAPI): PluginRow[] {
         state: p.state,
         error: p.error,
         capabilities: parseManifestCapabilities(p.capabilities),
+        canConfigure: resolveSettingsTarget(p.id) !== null,
       }),
     )
   } catch (err) {
@@ -185,6 +208,7 @@ function readRows(api: PluginAPI): PluginRow[] {
           incompatible,
           grantSummary,
           pluginDir: m.dir,
+          canConfigure: resolveSettingsTarget(m.id) !== null,
         }
       },
     )
@@ -247,6 +271,11 @@ export const pluginsMgmtPlugin: Plugin = {
         {
           id: COMMAND_ENABLE_BUILTIN,
           title: 'Enable Built-in Plugin',
+          category: 'View',
+        },
+        {
+          id: COMMAND_CONFIGURE,
+          title: 'Configure Plugin',
           category: 'View',
         },
       ],
@@ -383,6 +412,34 @@ export const pluginsMgmtPlugin: Plugin = {
 
     api.commands.register(COMMAND_CLOSE, () => {
       usePluginsMgmtStore.getState().close()
+    })
+
+    // Deep-link from a plugin row to its Settings surface. Closes the
+    // modal, opens the settings panel, and routes the rail to either
+    // the plugin's contributed Settings tab (when one is registered)
+    // or its configuration-schema section (keyed on the plugin id).
+    // Re-resolves at click time so a tab registered after the modal
+    // opened is honoured without a row re-seed.
+    api.commands.register(COMMAND_CONFIGURE, async (...args: unknown[]) => {
+      const pluginId = args[0]
+      if (typeof pluginId !== 'string') {
+        clientLogger.warn('[nexus.pluginsMgmt] configure requires a pluginId')
+        return
+      }
+      const targetId = resolveSettingsTarget(pluginId)
+      if (!targetId) {
+        api.notifications.show({
+          type: 'info',
+          message: `${pluginId} has no settings surface.`,
+        })
+        return
+      }
+      usePluginsMgmtStore.getState().close()
+      await api.commands.execute('workbench.action.openSettings')
+      // `settingsActiveTab` is the canonical deep-link context key the
+      // settings panel reads on every open — same path used by
+      // `workbench.action.openKeybindings` in core/settings/index.ts.
+      api.context.set('settingsActiveTab', targetId)
     })
 
     // WI-43: flip a dormant default-off plugin's id into the persisted

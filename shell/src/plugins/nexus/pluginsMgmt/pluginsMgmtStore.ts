@@ -27,6 +27,13 @@ export interface BuiltInPluginRow {
   state: string
   error?: string
   capabilities: Capability[] | null
+  /**
+   * True when the plugin contributes either a `settingsTabs` entry or a
+   * `configuration` schema — i.e. the `nexus.plugins.configure` command
+   * has a destination to deep-link to. Computed by `readRows` against
+   * the live registries.
+   */
+  canConfigure?: boolean
 }
 
 export interface CommunityPluginRow {
@@ -73,6 +80,8 @@ export interface CommunityPluginRow {
   }
   /** Absolute path to the plugin's directory (for consent write-back). */
   pluginDir?: string
+  /** See `BuiltInPluginRow.canConfigure`. */
+  canConfigure?: boolean
 }
 
 /**

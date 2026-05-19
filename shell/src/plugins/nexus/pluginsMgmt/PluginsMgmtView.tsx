@@ -20,6 +20,7 @@ import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
 const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
 const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
+const COMMAND_CONFIGURE = 'nexus.plugins.configure'
 
 /**
  * Modal listing every plugin the shell has loaded — built-in (nexus.* /
@@ -346,6 +347,7 @@ function BuiltInRow({ row }: BuiltInRowProps) {
             {row.id}
           </div>
         </div>
+        <ConfigureButton pluginId={row.id} visible={row.canConfigure} />
         <StateBadge state={live.state} error={live.error} />
         <div
           style={{
@@ -483,6 +485,7 @@ function CommunityRow({ row }: CommunityRowProps) {
             </div>
           )}
         </div>
+        <ConfigureButton pluginId={row.id} visible={row.canConfigure} />
         {showReview && (
           <button
             type="button"
@@ -615,6 +618,47 @@ function AvailableRow({ row }: AvailableRowProps) {
         </button>
       </div>
     </div>
+  )
+}
+
+// ── Configure button ────────────────────────────────────────────────────────
+
+/**
+ * Small inline button that deep-links into the Settings panel for this
+ * plugin. Rendered only when `visible` (true when the row's `canConfigure`
+ * flag — computed by `readRows` against the live registries — is set).
+ * The destination tab is re-resolved inside the command handler at click
+ * time, so a tab registered after row seeding still routes correctly.
+ */
+function ConfigureButton({
+  pluginId,
+  visible,
+}: {
+  pluginId: string
+  visible: boolean | undefined
+}) {
+  if (!visible) return null
+  const onConfigure = () => {
+    void getApi().commands.execute(COMMAND_CONFIGURE, pluginId)
+  }
+  return (
+    <button
+      type="button"
+      onClick={onConfigure}
+      title="Open this plugin's settings"
+      style={{
+        padding: '2px 8px',
+        background: 'transparent',
+        color: 'var(--text-faint)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
+        fontFamily: 'var(--font-interface)',
+        fontSize: 11,
+        cursor: 'pointer',
+      }}
+    >
+      Configure
+    </button>
   )
 }
 
