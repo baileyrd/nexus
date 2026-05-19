@@ -58,7 +58,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   // truly needs a bespoke Tauri command, allow it in `shell/src/src-tauri/`
   // and document." A future WI may migrate some of these to kernel IPC.
   'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // shell-internal (WI-31): get/set_plugin_granted_capabilities
-  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // shell-internal: set_plugin_enabled
+  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // shell-internal: kernel_invoke (kernel-bridge calls)
   'shell/src/plugins/nexus/launcher/launcherState.ts',             // shell-internal: get/write/forget shell_state (recents)
   'shell/src/plugins/nexus/memory/index.ts',                       // BL-043: tauri-plugin-global-shortcut — no @nexus/extension-api global-hotkey surface yet
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
@@ -87,7 +87,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/commandPalette/CommandPaletteView.tsx',  // host/ContextKeyService + shellRegistry
   'shell/src/plugins/core/editorArea/EditorAreaView.tsx',          // host/ContextKeyService
   'shell/src/plugins/core/fileExplorer/FileExplorerView.tsx',      // host/ContextKeyService
-  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // host/shellRegistry + ContextKeyService + communityPluginLoader
+  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // host/shellRegistry + ContextKeyService + EventBus
   'shell/src/plugins/core/statusBar/StatusBarView.tsx',            // host/shellRegistry
   'shell/src/plugins/core/titleBar/TitleBarView.tsx',              // host/shellRegistry + ContextKeyService — same React-component pattern as the other *View.tsx entries (no `api` in scope)
   'shell/src/plugins/nexus/ai/index.ts',                           // host/ContextKeyService + EventBus — predates @nexus/extension-api context-keys / event surface; track under WI-25 drain
