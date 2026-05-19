@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use nexus_kernel::{Events as _, Identity as _, 
+use nexus_kernel::{Identity as _,
     Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
 };
 use nexus_plugins::{parse_manifest, CorePlugin, PluginError, PluginLoader};

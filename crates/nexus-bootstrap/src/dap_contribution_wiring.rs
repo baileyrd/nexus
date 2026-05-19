@@ -21,7 +21,7 @@
 use std::time::Duration;
 
 use nexus_dap::DapAdapterSpec;
-use nexus_kernel::{Identity as _, Ipc as _, KernelPluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::{collect_contributions, PluginManifest};
 use serde_json::{json, Value};
 

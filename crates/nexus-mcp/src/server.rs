@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{Identity as _, Ipc as _, KernelPluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{

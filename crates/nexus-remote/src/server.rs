@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{Events as _, Ipc as _, EventBus, KernelPluginContext};
+use nexus_kernel::{Ipc as _, EventBus, KernelPluginContext};
 use nexus_plugin_api::{EventFilter, PublishedEvent};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};

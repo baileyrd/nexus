@@ -41,8 +41,8 @@ use nexus_bootstrap::reconnect::{
 };
 use nexus_bootstrap::Runtime;
 use nexus_kernel::{
-    EventFilter, IpcErrorEnvelope, IpcErrorKind, Kernel, KernelPluginContext, NexusEvent,
-    PluginContext, RecvError,
+    EventFilter, Events, IpcErrorEnvelope, IpcErrorKind, Kernel, KernelPluginContext, NexusEvent,
+    RecvError,
 };
 use nexus_plugins::SharedPluginLoader;
 use nexus_remote::ForgeUri;

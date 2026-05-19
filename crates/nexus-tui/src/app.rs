@@ -14,7 +14,7 @@ use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRec
 use nexus_bootstrap::terminal as term_ipc;
 use nexus_bootstrap::terminal::OutputLine;
 use nexus_bootstrap::{build_tui_runtime, Runtime};
-use nexus_kernel::{Events as _, Ipc as _, EventFilter, EventSubscription, NexusEvent};
+use nexus_kernel::{Ipc as _, EventFilter, EventSubscription, NexusEvent};
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
 use tokio::task::JoinHandle;
