@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::{Deserialize, Serialize};
 

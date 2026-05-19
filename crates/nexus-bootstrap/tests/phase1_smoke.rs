@@ -21,7 +21,7 @@
 use std::time::Duration;
 
 use nexus_bootstrap::{build_cli_runtime, init_forge};
-use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, NexusEvent};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";

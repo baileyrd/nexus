@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::future::join_all;
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::Deserialize;
 
 use super::registry::{ToolExecutor, ToolError, ToolRegistry, ToolSchema};
@@ -250,8 +250,7 @@ fn mcp_tool_name(server: &str, tool: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_kernel::{
-        CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
+    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
         KernelPluginContext, KvStore,
     };
     use std::sync::Mutex;

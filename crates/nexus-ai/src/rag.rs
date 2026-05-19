@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ts-export")]
@@ -599,8 +599,7 @@ mod tests {
     use super::*;
     use crate::tokens::ApproxTokenCounter;
     use async_trait::async_trait;
-    use nexus_kernel::{
-        CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
+    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
         KernelPluginContext, KvStore,
     };
     use std::sync::{Arc, Mutex};

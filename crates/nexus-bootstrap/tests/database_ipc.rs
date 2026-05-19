@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
-use nexus_kernel::{IpcError, PluginContext};
+use nexus_kernel::{Ipc as _, IpcError};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const DATABASE_PLUGIN_ID: &str = "com.nexus.database";

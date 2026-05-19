@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Identity as _, Ipc as _, KernelPluginContext};
 use nexus_mcp::{McpServerSpec, McpTransport};
 use nexus_plugins::{collect_contributions, PluginManifest};
 use serde_json::{json, Value};

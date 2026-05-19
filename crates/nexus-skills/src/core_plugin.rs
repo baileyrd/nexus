@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 

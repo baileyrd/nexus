@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::{Deserialize, Serialize};
 
 use super::registry::{ToolExecutor, ToolError, ToolRegistry, ToolSchema};
@@ -939,8 +939,7 @@ mod tests {
     #[test]
     fn terminal_builtins_register_under_documented_names() {
         use crate::tools::registry::ToolRegistry;
-        use nexus_kernel::{
-            CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+        use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -973,8 +972,7 @@ mod tests {
     #[test]
     fn extended_builtins_register_under_documented_names() {
         use crate::tools::registry::ToolRegistry;
-        use nexus_kernel::{
-            CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+        use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
         };
 
         let dir = tempfile::tempdir().unwrap();

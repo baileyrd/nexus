@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
-use nexus_kernel::PluginContext;
+use nexus_kernel::Ipc as _;
 use nexus_templates::PLUGIN_ID;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);

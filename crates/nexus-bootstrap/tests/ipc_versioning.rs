@@ -20,7 +20,7 @@
 use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
-use nexus_kernel::PluginContext;
+use nexus_kernel::Ipc as _;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";

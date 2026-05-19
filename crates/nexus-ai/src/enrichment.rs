@@ -163,7 +163,7 @@ pub async fn apply(
 }
 
 async fn read_file_via_ipc(ctx: &KernelPluginContext, path: &str) -> Result<String, AiError> {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::Ipc as _;
     use std::time::Duration;
     let response = ctx
         .ipc_call(
@@ -188,7 +188,7 @@ async fn write_file_via_ipc(
     path: &str,
     bytes: &[u8],
 ) -> Result<(), AiError> {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::Ipc as _;
     use std::time::Duration;
     ctx.ipc_call(
         "com.nexus.storage",

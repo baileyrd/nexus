@@ -27,8 +27,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use nexus_kernel::{
-    Capability, CapabilitySet, EventBus, IpcDispatcher, Kernel, KernelConfig, KernelPluginContext,
+use nexus_kernel::{Capability, CapabilitySet, EventBus, IpcDispatcher, Kernel, KernelConfig, KernelPluginContext,
     PluginError as KernelPluginError,
 };
 use nexus_plugins::{CorePlugin, PluginError, PluginLoader, PluginManifest, SharedPluginLoader};

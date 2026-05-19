@@ -383,7 +383,7 @@ fn handle_submit(
 /// builds without spamming production logs.
 async fn republish_loop(store: Store, ctx: Arc<KernelPluginContext>) {
     use crate::republisher::{TOPIC_ROUND_PROPOSED, TOPIC_STREAM_CHUNK};
-    use nexus_kernel::{EventFilter, PluginContext as _};
+    use nexus_kernel::{Events as _, EventFilter};
 
     // Two separate subscriptions because `CustomPrefix` would over-
     // match (e.g. `stream_start` / `stream_done` carry session_id
@@ -546,7 +546,7 @@ async fn run_session(
     ctx: &KernelPluginContext,
     session_args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::Ipc as _;
 
     ctx.ipc_call(
         "com.nexus.agent",
@@ -574,7 +574,7 @@ async fn run_workflow_ai_step(
     workflow: &str,
     step: u32,
 ) -> Result<serde_json::Value, String> {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::Ipc as _;
 
     let span = tracing::info_span!(
         "workflow_ai_step",
@@ -707,7 +707,7 @@ fn record_and_publish(
     ring: &crate::SharedEventRing,
     event: &AiEvent,
 ) {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::Events as _;
 
     ring.push(event.clone());
     store.observe_status(event);

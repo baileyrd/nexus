@@ -96,7 +96,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use nexus_kernel::{EventBus, KernelPluginContext};
+use nexus_kernel::{Events as _, EventBus, KernelPluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 

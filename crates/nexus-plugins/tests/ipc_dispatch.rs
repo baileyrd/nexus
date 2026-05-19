@@ -8,9 +8,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use nexus_kernel::{
+use nexus_kernel::{Ipc as _, 
     Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError,
-    KernelPluginContext, KvStore, PluginContext,
+    KernelPluginContext, KvStore,
 };
 use nexus_plugins::{
     parse_manifest, CorePlugin, CorePluginFuture, PluginError, PluginLoader, SharedPluginLoader,

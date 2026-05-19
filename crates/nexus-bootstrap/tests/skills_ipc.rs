@@ -9,7 +9,7 @@ use std::fs;
 use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
-use nexus_kernel::{IpcError, PluginContext};
+use nexus_kernel::{Ipc as _, IpcError};
 use nexus_skills::PLUGIN_ID;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);

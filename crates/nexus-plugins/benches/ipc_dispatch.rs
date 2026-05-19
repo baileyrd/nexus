@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use nexus_kernel::{
+use nexus_kernel::{Events as _, FileSystem as _, Identity as _, Ipc as _, KvAccess as _, Log as _, 
     Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
     PluginContext,
 };

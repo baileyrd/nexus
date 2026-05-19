@@ -54,7 +54,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
-use nexus_kernel::{EventFilter, KernelPluginContext, NexusEvent, PluginContext, RecvError};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, KernelPluginContext, NexusEvent, RecvError};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 

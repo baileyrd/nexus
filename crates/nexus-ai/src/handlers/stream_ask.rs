@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Events as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 
 use crate::activity_log::ActivityRecorder;

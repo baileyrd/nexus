@@ -24,7 +24,7 @@
 
 use std::time::Duration;
 
-use nexus_kernel::{IpcError, KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, IpcError, KernelPluginContext};
 use serde_json::Value;
 
 /// Errors raised by an [`IpcInvoker::ipc_call`] dispatch.

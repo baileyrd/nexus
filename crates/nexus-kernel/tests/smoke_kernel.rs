@@ -105,8 +105,7 @@ async fn smoke_multiple_shutdown_calls_are_idempotent() {
 // can be named. If any of these names break, the contract has regressed.
 #[test]
 fn smoke_all_public_types_importable() {
-    use nexus_kernel::{
-        BusError, Capability, CapabilityError, CapabilityParseError, CapabilitySet, ConfigError,
+    use nexus_kernel::{BusError, Capability, CapabilityError, CapabilityParseError, CapabilitySet, ConfigError,
         Error, EventBus, EventFilter, EventMetadata, EventSubscription, IpcError, Kernel,
         KernelConfig, KvError, LogLevel, NexusEvent, PluginContext, PluginError, PluginInfo,
         PluginStatus, PublishedEvent, RecvError, Result,

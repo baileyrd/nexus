@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use nexus_bootstrap::{build_cli_runtime, Runtime};
-use nexus_kernel::{IpcError, PluginContext};
+use nexus_kernel::{Ipc as _, IpcError};
 
 /// Default timeout used by [`MinimalForge::ipc_call`]. Generous enough
 /// for IPC paths that touch the SQLite index without flaking on slow

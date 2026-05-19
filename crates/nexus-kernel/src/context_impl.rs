@@ -15,7 +15,7 @@ use nexus_types::{ForgePathValidator, PathValidationError};
 
 use crate::audit;
 use crate::capability::{Capability, CapabilitySet};
-use crate::context::PluginContext;
+use crate::context::{Events, FileSystem, Identity, Ipc, KvAccess, Log as LogTrait};
 use crate::error::{BusError, CapabilityError, Error, IpcError, Result};
 use crate::event::EventFilter;
 use crate::event_bus::{EventBus, EventSubscription};
@@ -285,10 +285,7 @@ impl KernelPluginContext {
     }
 }
 
-#[async_trait]
-impl PluginContext for KernelPluginContext {
-    // ---- Identity --------------------------------------------------------
-
+impl Identity for KernelPluginContext {
     fn plugin_id(&self) -> &str {
         &self.plugin_id
     }
@@ -300,9 +297,10 @@ impl PluginContext for KernelPluginContext {
     fn has_capability(&self, cap: Capability) -> bool {
         self.caps_contains(cap)
     }
+}
 
-    // ---- File system -----------------------------------------------------
-
+#[async_trait]
+impl FileSystem for KernelPluginContext {
     /// Read a file inside `forge_root`.
     ///
     /// Requires the `FsRead` capability. The path is canonicalized and
@@ -383,9 +381,10 @@ impl PluginContext for KernelPluginContext {
         }
         Ok(paths)
     }
+}
 
-    // ---- KV store --------------------------------------------------------
-
+#[async_trait]
+impl KvAccess for KernelPluginContext {
     async fn kv_get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         self.require_capability(Capability::KvRead)?;
         self.kv
@@ -406,9 +405,9 @@ impl PluginContext for KernelPluginContext {
             .delete(&self.plugin_id, key)
             .map_err(Error::Kv)
     }
+}
 
-    // ---- Events ----------------------------------------------------------
-
+impl Events for KernelPluginContext {
     fn publish(&self, type_id: &str, payload: serde_json::Value) -> Result<()> {
         // Fast-fail at the context boundary so the caller gets the same
         // error class regardless of whether the bus call eventually runs.
@@ -430,9 +429,10 @@ impl PluginContext for KernelPluginContext {
     fn subscribe(&self, filter: EventFilter) -> EventSubscription {
         self.event_bus.subscribe(filter)
     }
+}
 
-    // ---- IPC -------------------------------------------------------------
-
+#[async_trait]
+impl Ipc for KernelPluginContext {
     async fn ipc_call(
         &self,
         target_plugin_id: &str,
@@ -466,9 +466,9 @@ impl PluginContext for KernelPluginContext {
         }
         result
     }
+}
 
-    // ---- Logging ---------------------------------------------------------
-
+impl LogTrait for KernelPluginContext {
     fn log(&self, level: LogLevel, message: &str) {
         match level {
             LogLevel::Trace => tracing::trace!(plugin_id = %self.plugin_id, "{message}"),

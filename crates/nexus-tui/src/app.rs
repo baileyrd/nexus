@@ -14,7 +14,7 @@ use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRec
 use nexus_bootstrap::terminal as term_ipc;
 use nexus_bootstrap::terminal::OutputLine;
 use nexus_bootstrap::{build_tui_runtime, Runtime};
-use nexus_kernel::{EventFilter, EventSubscription, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, EventSubscription, NexusEvent};
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
 use tokio::task::JoinHandle;
@@ -1122,7 +1122,7 @@ impl TuiApp {
             return;
         }
         use std::time::Duration;
-        use nexus_kernel::PluginContext;
+        use nexus_kernel::Ipc as _;
         let result = self.rt.block_on(self.runtime.context.ipc_call(
             "com.nexus.security",
             "metrics_snapshot",

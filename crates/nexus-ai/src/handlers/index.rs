@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use tokio::sync::mpsc::UnboundedSender;
 

@@ -1,7 +1,7 @@
 //! `semantic_search` + `entity_recall` IPC handlers — embedding-driven
 //! retrieval over the shared chunk vectorstore.
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 
 use crate::config::AiConfig;

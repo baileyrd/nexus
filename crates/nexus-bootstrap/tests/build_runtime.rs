@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use nexus_bootstrap::{build_cli_runtime, build_tui_runtime, CLI_PLUGIN_ID, TUI_PLUGIN_ID};
-use nexus_kernel::{IpcError, PluginContext};
+use nexus_kernel::{Identity as _, Ipc as _, IpcError};
 
 fn scratch_forge() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
 use nexus_formats::PLUGIN_ID;
-use nexus_kernel::PluginContext;
+use nexus_kernel::Ipc as _;
 use zip::write::SimpleFileOptions;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);

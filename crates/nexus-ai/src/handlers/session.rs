@@ -3,7 +3,7 @@
 //! `<forge>/.forge/chat/sessions/<id>.json` (multi-session) or
 //! `<forge>/.forge/chat_session.json` (legacy single-session).
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{FileSystem as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 
 use crate::handlers::shared::exec_err;

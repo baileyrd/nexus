@@ -32,7 +32,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use nexus_kernel::{EventFilter, KernelPluginContext, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, KernelPluginContext, NexusEvent};
 use serde::Serialize;
 use tokio::sync::mpsc;
 

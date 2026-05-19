@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ts-export")]

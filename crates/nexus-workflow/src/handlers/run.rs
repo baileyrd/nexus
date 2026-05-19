@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::{CorePluginFuture, PluginError};
 
 use crate::ai_steps;
@@ -696,7 +696,7 @@ async fn submit_async_step(
     command: &str,
     ipc_args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::Ipc as _;
     let submit_args = build_async_submit_args(step, target_plugin, command, ipc_args);
     ctx.ipc_call(
         "com.nexus.ai.runtime",

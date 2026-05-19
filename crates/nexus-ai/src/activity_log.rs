@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Events as _, FileSystem as _, Identity as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use nexus_types::activity::{
     truncate_prompt, ActivityEntry, ACTIVITY_APPENDED_TOPIC, ACTIVITY_PROMPT_MAX_CHARS,

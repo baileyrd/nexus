@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
 use nexus_editor::{ApplyTransactionResponse, EditorSnapshot, EDITOR_PLUGIN_ID};
-use nexus_kernel::{EventFilter, IpcError, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, IpcError, NexusEvent};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 

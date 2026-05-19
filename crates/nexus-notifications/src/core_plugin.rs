@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use nexus_kernel::{EventBus, EventFilter, KernelPluginContext, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, EventBus, EventFilter, KernelPluginContext, NexusEvent};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 

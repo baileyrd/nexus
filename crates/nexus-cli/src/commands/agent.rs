@@ -13,7 +13,7 @@ use std::io::{self, BufRead, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, NexusEvent};
 use nexus_types::constants::IPC_TIMEOUT_EXTENDED as IPC_TIMEOUT;
 use nexus_types::plugin_ids;
 use serde_json::Value;

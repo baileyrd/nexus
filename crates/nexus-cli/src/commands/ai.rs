@@ -7,7 +7,7 @@ use std::io::{self, Write};
 
 use anyhow::{Context, Result};
 use nexus_bootstrap::storage as storage_ipc;
-use nexus_kernel::{EventFilter, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, NexusEvent};
 use nexus_types::constants::IPC_TIMEOUT_LONG as IPC_TIMEOUT;
 use nexus_types::plugin_ids;
 use rustyline::error::ReadlineError;

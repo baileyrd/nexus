@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use nexus_kernel::{EventBus, KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, EventBus, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::Deserialize;
 use serde_json::Value;

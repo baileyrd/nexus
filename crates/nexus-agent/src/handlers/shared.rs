@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Events as _, FileSystem as _, Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::Deserialize;
 

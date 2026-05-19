@@ -270,7 +270,7 @@ async fn run_cycle(
     ctx: &Arc<KernelPluginContext>,
     cfg: &nexus_formats::config::DreamCycleSettings,
 ) -> Result<CycleReport> {
-    use nexus_kernel::PluginContext;
+    use nexus_kernel::{Events as _, Ipc as _};
 
     let mut report = CycleReport::default();
 

@@ -28,8 +28,8 @@ mod common;
 use common::MinimalForge;
 
 use nexus_bootstrap::CLI_PLUGIN_ID;
-use nexus_kernel::{
-    BusError, Error, EventFilter, NexusEvent, PluginContext,
+use nexus_kernel::{Events as _, 
+    BusError, Error, EventFilter, NexusEvent,
 };
 
 /// (Property 1 + 3) Publishing through a real `PluginContext` produces a

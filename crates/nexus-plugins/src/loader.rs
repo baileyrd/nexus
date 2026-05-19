@@ -69,7 +69,7 @@ impl Drop for DispatchGuard {
     }
 }
 
-use nexus_kernel::{
+use nexus_kernel::{Events as _, Identity as _, 
     audit, Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher,
     IpcError, IpcFuture, KernelPluginContext, PluginInfo, PluginStatus, TrustLevel,
 };

@@ -750,8 +750,7 @@ mod read_only_filter_tests {
     use crate::tools::{
         register_extended_builtins, register_storage_builtins, register_terminal_builtins,
     };
-    use nexus_kernel::{
-        Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+    use nexus_kernel::{Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
     };
 
     fn ctx_for_test() -> std::sync::Arc<KernelPluginContext> {
@@ -1373,8 +1372,7 @@ mod semantic_search_dispatch_tests {
     //! tries to embed, so we can drive both code paths cheaply by
     //! arranging for one of those checks to fire.
     use super::*;
-    use nexus_kernel::{
-        CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
     };
     use std::sync::Arc;
 

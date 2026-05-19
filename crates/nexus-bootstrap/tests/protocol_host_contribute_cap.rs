@@ -23,9 +23,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::MinimalForge;
-use nexus_kernel::{
+use nexus_kernel::{Ipc as _, 
     Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError,
-    KernelPluginContext, KvStore, PluginContext,
+    KernelPluginContext, KvStore,
 };
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{EventFilter, KernelPluginContext, NexusEvent, PluginContext};
+use nexus_kernel::{Events as _, Ipc as _, EventFilter, KernelPluginContext, NexusEvent};
 use serde::Deserialize;
 
 /// Bus topic emitted by `handle_session_run` after a session finishes.

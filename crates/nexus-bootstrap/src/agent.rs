@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nexus_agent::{ChatDriver, Proposal, ProposedToolCall, ToolCall, ToolDispatcher};
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::Deserialize;
 
 /// Default per-tool timeout. Matches [`crate::terminal::IPC_TIMEOUT`]

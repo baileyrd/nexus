@@ -22,7 +22,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use base64::Engine;
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use reqwest::multipart;
 use tokio::runtime::Handle;
 

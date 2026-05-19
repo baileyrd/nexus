@@ -30,9 +30,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{
+use nexus_kernel::{Ipc as _, 
     Capability, CapabilitySet, EventBus, IpcDispatcher, IpcError, KernelPluginContext, KvStore,
-    PluginContext,
 };
 use nexus_plugins::SharedPluginLoader;
 

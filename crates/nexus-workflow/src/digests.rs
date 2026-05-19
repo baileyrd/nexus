@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Datelike, TimeZone, Utc};
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::{Deserialize, Serialize};
 

@@ -6,7 +6,7 @@
 //! surface; they're just the tiny error / serde plumbing layer plus
 //! the `publish_workflow_activity` helper used by `run`.
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{Events as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 
 use crate::core_plugin::PLUGIN_ID;
