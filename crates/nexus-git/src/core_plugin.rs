@@ -759,6 +759,16 @@ mod tests {
             .status()
             .expect("git init");
         assert!(ok.success());
+        // Disable commit signing locally — some dev/CI environments
+        // configure `commit.gpgsign=true` globally, which would make
+        // the `git commit` calls below fail silently (the tests use
+        // `let _ = …` to ignore exit status). Without a commit the
+        // branch ref is never created, and downstream assertions on
+        // `state().branch` see `None` instead of `Some("main")`.
+        let _ = Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(path)
+            .status();
     }
 
     #[test]
