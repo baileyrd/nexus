@@ -20,6 +20,7 @@ import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
 const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
 const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
+const COMMAND_DISABLE_BUILTIN = 'nexus.plugins.disableBuiltin'
 const COMMAND_CONFIGURE = 'nexus.plugins.configure'
 
 /**
@@ -322,6 +323,18 @@ interface BuiltInRowProps {
 
 function BuiltInRow({ row }: BuiltInRowProps) {
   const live = useLivePluginState(row.id, { state: row.state, error: row.error })
+  // Only DEFAULT_OFF entries are safe to disable mid-session; required
+  // built-ins render the toggle disabled with an explanatory tooltip.
+  const canToggle = row.optional === true
+  const toggleTitle = canToggle
+    ? 'Disable this plugin'
+    : 'Required built-in — cannot be disabled'
+  const onToggle = () => {
+    if (!canToggle) return
+    // BuiltInRow only renders for plugins currently loaded — toggle is
+    // always a disable action.
+    void getApi().commands.execute(COMMAND_DISABLE_BUILTIN, row.id)
+  }
   return (
     <div style={rowOuterStyle}>
       <div style={rowStyle}>
@@ -360,6 +373,12 @@ function BuiltInRow({ row }: BuiltInRowProps) {
         >
           v{row.version}
         </div>
+        <Toggle
+          enabled={true}
+          onToggle={onToggle}
+          disabled={!canToggle}
+          title={toggleTitle}
+        />
       </div>
       <CapabilityChips capabilities={row.capabilities} />
     </div>
@@ -539,9 +558,11 @@ interface AvailableRowProps {
 }
 
 /**
- * WI-43: a dormant built-in plugin. One-click Enable writes the id into
- * the `plugins.enabled` config key; the modal surfaces a toast saying a
- * reload is needed (no in-session hot-activate yet).
+ * A dormant default-off built-in. One-click Enable registers and
+ * activates the plugin against the live host and persists it into
+ * `plugins.enabled`; no reload required. The row drops out of this
+ * section automatically once `refreshPluginServices` re-publishes
+ * `availablePlugins`.
  */
 function AvailableRow({ row }: AvailableRowProps) {
   const onEnable = () => {
@@ -601,7 +622,7 @@ function AvailableRow({ row }: AvailableRowProps) {
         <button
           type="button"
           onClick={onEnable}
-          title="Add to plugins.enabled and reload to activate"
+          title="Enable this plugin"
           style={{
             padding: '4px 12px',
             background: 'var(--interactive-accent)',
@@ -722,10 +743,12 @@ function Toggle({
   enabled,
   onToggle,
   disabled = false,
+  title,
 }: {
   enabled: boolean
   onToggle: () => void
   disabled?: boolean
+  title?: string
 }) {
   return (
     <button
@@ -733,6 +756,7 @@ function Toggle({
       aria-pressed={enabled}
       aria-disabled={disabled || undefined}
       disabled={disabled}
+      title={title}
       style={{
         width: 36,
         height: 18,

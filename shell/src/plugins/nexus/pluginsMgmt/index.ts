@@ -20,8 +20,12 @@ import {
   type CommunityPluginRow,
   type PluginRow,
 } from './pluginsMgmtStore'
-import { PLUGINS_ENABLED_CONFIG_KEY } from '../../catalog'
-import { PLUGIN_LIST_CHANGED_EVENT } from '../../../host/pluginActivation'
+import { DEFAULT_OFF_PLUGINS } from '../../catalog'
+import {
+  PLUGIN_LIST_CHANGED_EVENT,
+  enableBuiltinPlugin,
+  disableBuiltinPlugin,
+} from '../../../host/pluginActivation'
 import { setApi } from './pluginsMgmtRuntime'
 import { CAPABILITY_INFO, parseManifestCapabilities } from './capabilityInfo'
 import {
@@ -37,9 +41,11 @@ const COMMAND_OPEN = 'nexus.plugins.open'
 const COMMAND_CLOSE = 'nexus.plugins.close'
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
 const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
-// WI-43: enable a default-off built-in plugin. Writes the id into the
-// `plugins.enabled` config key and notifies the user to reload.
+// Enable or disable an optional (default-off) built-in plugin against
+// the live ExtensionHost — no reload required. Persistence is handled
+// by `enableBuiltinPlugin` / `disableBuiltinPlugin` in pluginActivation.
 const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
+const COMMAND_DISABLE_BUILTIN = 'nexus.plugins.disableBuiltin'
 /** Open the Settings panel to the given plugin's settings surface. */
 const COMMAND_CONFIGURE = 'nexus.plugins.configure'
 const CONTEXT_KEY_VISIBLE = 'nexus.plugins.visible'
@@ -136,6 +142,11 @@ function readRows(api: PluginAPI): PluginRow[] {
   const internal = api.internal
   if (!internal) return []
 
+  // Optional built-ins = anything in DEFAULT_OFF_PLUGINS. These are the
+  // only built-ins safe to disable mid-session (disableBuiltinPlugin
+  // refuses to touch anything else).
+  const optionalIds = new Set(DEFAULT_OFF_PLUGINS.map((e) => e.id))
+
   let builtins: BuiltInPluginRow[] = []
   try {
     const raw = internal.getInternalService<RegistryPluginEntry[]>(SERVICE_PLUGIN_LIST)
@@ -150,6 +161,7 @@ function readRows(api: PluginAPI): PluginRow[] {
         error: p.error,
         capabilities: parseManifestCapabilities(p.capabilities),
         canConfigure: resolveSettingsTarget(p.id) !== null,
+        optional: optionalIds.has(p.id),
       }),
     )
   } catch (err) {
@@ -271,6 +283,11 @@ export const pluginsMgmtPlugin: Plugin = {
         {
           id: COMMAND_ENABLE_BUILTIN,
           title: 'Enable Built-in Plugin',
+          category: 'View',
+        },
+        {
+          id: COMMAND_DISABLE_BUILTIN,
+          title: 'Disable Built-in Plugin',
           category: 'View',
         },
         {
@@ -442,46 +459,53 @@ export const pluginsMgmtPlugin: Plugin = {
       api.context.set('settingsActiveTab', targetId)
     })
 
-    // WI-43: flip a dormant default-off plugin's id into the persisted
-    // enabled list. There is no in-session hot-activate path — new
-    // registrations run through main.tsx's boot sequence — so we prompt
-    // the user to reload. Re-enabling is idempotent (Set dedupes).
+    // Enable a default-off built-in plugin against the live host —
+    // registers, activates, and persists in one shot. No reload
+    // required. `enableBuiltinPlugin` fires PLUGIN_LIST_CHANGED_EVENT
+    // after refreshing services, which re-runs `readRows` and drops
+    // the row out of the Available section automatically.
     api.commands.register(COMMAND_ENABLE_BUILTIN, async (...args: unknown[]) => {
       const pluginId = args[0]
       if (typeof pluginId !== 'string') {
         clientLogger.warn('[nexus.pluginsMgmt] enableBuiltin requires a pluginId')
         return
       }
-      const current = api.configuration.getValue<string[]>(
-        PLUGINS_ENABLED_CONFIG_KEY,
-        [],
-      )
-      if (current.includes(pluginId)) {
-        // Already enabled — nothing to do. User probably needs a reload.
+      const result = await enableBuiltinPlugin(pluginId)
+      if (!result.ok) {
         api.notifications.show({
-          type: 'info',
-          message: `${pluginId} is already enabled. Reload the window to activate it.`,
+          type: 'error',
+          message: `Failed to enable ${pluginId}: ${result.error}`,
         })
         return
       }
-      const next = [...current, pluginId]
-      api.configuration.setValue(PLUGINS_ENABLED_CONFIG_KEY, next)
-
-      // Optimistically drop the row from the Available section so the UI
-      // reflects the write without waiting for a rescan. A reload will
-      // rebuild the full list from the fresh config value.
-      const rows = usePluginsMgmtStore.getState().rows
-      usePluginsMgmtStore
-        .getState()
-        .setRows(
-          rows.filter(
-            (r) => !(r.kind === 'available' && r.id === pluginId),
-          ),
-        )
-
       api.notifications.show({
         type: 'success',
-        message: `${pluginId} enabled. Reload the window to activate it.`,
+        message: `${pluginId} enabled.`,
+      })
+    })
+
+    // Disable a default-off built-in plugin against the live host.
+    // `disableBuiltinPlugin` refuses to touch required built-ins and
+    // returns an error string; surface it as a toast rather than
+    // silently no-op'ing so the user understands why the toggle
+    // didn't take.
+    api.commands.register(COMMAND_DISABLE_BUILTIN, async (...args: unknown[]) => {
+      const pluginId = args[0]
+      if (typeof pluginId !== 'string') {
+        clientLogger.warn('[nexus.pluginsMgmt] disableBuiltin requires a pluginId')
+        return
+      }
+      const result = await disableBuiltinPlugin(pluginId)
+      if (!result.ok) {
+        api.notifications.show({
+          type: 'error',
+          message: `Failed to disable ${pluginId}: ${result.error}`,
+        })
+        return
+      }
+      api.notifications.show({
+        type: 'info',
+        message: `${pluginId} disabled.`,
       })
     })
 

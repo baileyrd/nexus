@@ -34,6 +34,13 @@ export interface BuiltInPluginRow {
    * the live registries.
    */
   canConfigure?: boolean
+  /**
+   * True when the plugin is in `DEFAULT_OFF_PLUGINS` — i.e. the user can
+   * mid-session disable it via `disableBuiltinPlugin` without breaking
+   * the shell. Required built-ins (default-on) render the toggle as
+   * disabled.
+   */
+  optional?: boolean
 }
 
 export interface CommunityPluginRow {
