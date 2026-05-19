@@ -90,14 +90,13 @@
 //!   first-class IPC verb.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use nexus_kernel::{EventBus, KernelPluginContext, PluginContext};
+use nexus_kernel::{EventBus, KernelPluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 
@@ -112,9 +111,8 @@ use crate::persist::SqliteSessionStore;
 use crate::saved::SqliteSavedCommandStore;
 #[cfg(test)]
 use crate::saved::SavedCommand;
-use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalEvent, TerminalServer};
+use crate::server::{InMemoryTerminalServer, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
-use crate::shell::ShellSpec;
 
 /// Reverse-DNS identifier registered with the plugin loader.
 pub const PLUGIN_ID: &str = "com.nexus.terminal";
@@ -1015,18 +1013,18 @@ pub struct TerminalCorePlugin {
 /// consistent view.
 pub(crate) struct MemoryState {
     /// The active monitor — owns per-pid sample histories.
-    monitor: MemoryMonitor,
+    pub(crate) monitor: MemoryMonitor,
     /// Map of `session_id -> latest RSS bytes`, refreshed by every
     /// poller round. Read by `get_session_info`. Writes are
     /// effectively single-writer (only the poller updates), but the
     /// mutex on `MemoryState` keeps reads atomic against a partial
     /// update.
-    latest_rss: HashMap<String, u64>,
+    pub(crate) latest_rss: HashMap<String, u64>,
     /// Reverse map for cleanup: when a session closes, the lifecycle
     /// forwarder needs to drop the pid from the monitor and the
     /// session id from `latest_rss`. We can't read pid from a closed
     /// session, so cache it here at track-time.
-    session_pid: HashMap<String, u32>,
+    pub(crate) session_pid: HashMap<String, u32>,
     /// BL-061 follow-up — per-session memory-limit overrides staged
     /// by `dispatch_run_saved` (or any other handler that wants to
     /// pin a saved command's `memory_limit_mb` onto a freshly-spawned
@@ -1034,7 +1032,7 @@ pub(crate) struct MemoryState {
     /// first cycle the session's pid lands in `session_pid`. Stale
     /// entries (sessions that never reached the poller's `live` set)
     /// get retained via the per-round live-id sweep.
-    pending_overrides: HashMap<String, MemoryLimits>,
+    pub(crate) pending_overrides: HashMap<String, MemoryLimits>,
 }
 
 impl MemoryState {
@@ -1790,167 +1788,6 @@ fn build_activity_entry(
     Some(entry)
 }
 
-/// BL-064 — total budget for the LLM enrichment round-trip. After
-/// this, the handler falls back to the rule's static reason. PRD-09
-/// §12 doesn't specify a number; 10 s mirrors the BL-064 DoD and
-/// keeps the suggestion chip responsive on a slow provider.
-const SUGGEST_LLM_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// BL-064 — default tail-of-buffer scan size when the caller omits
-/// `line_count`. Large enough to catch a build-error block; small
-/// enough that the in-memory rule engine evaluates in microseconds.
-const SUGGEST_DEFAULT_LINE_COUNT: usize = 50;
-
-/// BL-064 — async handler for `com.nexus.terminal::suggest`. Walks
-/// the recent N lines, finds the first matching rule, and (when a
-/// kernel context is wired) routes the matched line + rule through
-/// `com.nexus.ai::stream_chat` for an enriched explanation.
-///
-/// The function is intentionally a free `async fn`: the dispatcher
-/// captures it via `Box::pin(...)` in `dispatch_async`, so it never
-/// borrows `&mut self` past the synchronous setup.
-async fn handle_suggest(
-    ctx: Option<&Arc<KernelPluginContext>>,
-    server: &Arc<Mutex<InMemoryTerminalServer>>,
-    engine: &Arc<crate::ai::AiSuggestionEngine>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let parsed: SuggestArgs = serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("suggest: invalid args: {e}")))?;
-    let limit = parsed
-        .line_count
-        .map(|n| usize::try_from(n).unwrap_or(SUGGEST_DEFAULT_LINE_COUNT))
-        .unwrap_or(SUGGEST_DEFAULT_LINE_COUNT)
-        .max(1);
-
-    // Read the tail of the line buffer under a brief server lock —
-    // we drop the lock before the (possibly slow) IPC call so the
-    // drainer / IPC dispatcher aren't blocked on the LLM provider.
-    let session_id = SessionId::from_string(parsed.session_id.clone());
-    let lines: Vec<crate::lines::Line> = {
-        let guard = server.lock().map_err(poisoned)?;
-        let manager = guard.manager();
-        let total = manager.line_count(&session_id).ok_or_else(|| {
-            exec_err(format!("suggest: unknown session '{}'", parsed.session_id))
-        })?;
-        let start = total.saturating_sub(limit);
-        manager
-            .lines_snapshot(&session_id, Some(start), Some(total - start))
-            .unwrap_or_default()
-    };
-
-    // First match wins. Iterating lines newest-first means a fresh
-    // breach near the prompt outranks an older error scrolling out
-    // of the tail window.
-    let suggestion = lines
-        .iter()
-        .rev()
-        .find_map(|line| engine.observe(&line.text_only).into_iter().next());
-    let Some(suggestion) = suggestion else {
-        return Ok(serde_json::Value::Null);
-    };
-
-    let static_response = SuggestResponse {
-        text: suggestion.text.clone(),
-        reason: suggestion.reason.clone(),
-        severity: severity_tag(suggestion.severity).to_string(),
-        source_rule: suggestion.source_rule.to_string(),
-        llm_used: false,
-    };
-
-    // No kernel context → no IPC → return the static rule response.
-    let Some(ctx) = ctx else {
-        return to_value(&static_response, "suggest");
-    };
-
-    // Build the enrichment prompt. Keep it tight — we want a 2-3
-    // sentence explanation, not a chat transcript. The matched line
-    // gives the model the concrete output that triggered the rule;
-    // the rule's reason gives it a structural framing.
-    let matched_line: String = lines
-        .iter()
-        .rev()
-        .find(|l| !engine.observe(&l.text_only).is_empty())
-        .map(|l| l.text_only.clone())
-        .unwrap_or_default();
-    let user_prompt = format!(
-        "Terminal pattern matched: {rule}\n\
-         Matched line: `{line}`\n\
-         Suggested command: `{cmd}`\n\n\
-         In 2-3 sentences, explain what's likely wrong and why the suggested \
-         command helps. Be concrete; don't restate the prompt.",
-        rule = suggestion.source_rule,
-        line = matched_line.replace('`', "'"),
-        cmd = suggestion.text,
-    );
-
-    let ai_args = serde_json::json!({
-        "messages": [
-            {"role": "user", "content": user_prompt}
-        ],
-        "system": "You are a developer assistant explaining terminal output. Reply with prose, no markdown lists.",
-        "mode": "complete",
-        "tools": "none",
-        "max_tokens": 200,
-    });
-
-    // Call into `com.nexus.ai::stream_chat` with a hard 10 s budget.
-    // tokio::time::timeout wraps the whole IPC future so a hanging
-    // provider doesn't strand the suggestion chip indefinitely. The
-    // inner `ipc_call` already accepts a per-call timeout, but a
-    // misbehaving provider can still leak the future past the
-    // deadline; the outer timeout is the load-bearing guarantee.
-    let llm_call = ctx.ipc_call(
-        "com.nexus.ai",
-        "stream_chat",
-        ai_args,
-        SUGGEST_LLM_TIMEOUT,
-    );
-    let enriched_text: Option<String> = match tokio::time::timeout(
-        SUGGEST_LLM_TIMEOUT,
-        llm_call,
-    )
-    .await
-    {
-        Ok(Ok(response)) => {
-            let text = response
-                .get("text")
-                .and_then(|v: &serde_json::Value| v.as_str())
-                .map(str::to_string);
-            text.filter(|s: &String| !s.trim().is_empty())
-        }
-        Ok(Err(err)) => {
-            tracing::debug!(plugin = PLUGIN_ID, %err, "suggest: AI call failed; falling back to static rule");
-            None
-        }
-        Err(_) => {
-            tracing::debug!(plugin = PLUGIN_ID, "suggest: AI call timed out after 10s; falling back to static rule");
-            None
-        }
-    };
-
-    let response = match enriched_text {
-        Some(reason) => SuggestResponse {
-            reason,
-            llm_used: true,
-            ..static_response
-        },
-        None => static_response,
-    };
-    to_value(&response, "suggest")
-}
-
-/// Map the [`crate::SuggestionSeverity`] enum to its serde tag — the
-/// IPC response carries the lowercase string verbatim so an off-the-
-/// shelf TS client can switch on it.
-fn severity_tag(s: crate::ai::SuggestionSeverity) -> &'static str {
-    match s {
-        crate::ai::SuggestionSeverity::Info => "info",
-        crate::ai::SuggestionSeverity::Warning => "warning",
-        crate::ai::SuggestionSeverity::Error => "error",
-    }
-}
-
 /// Free-function publish path used by both the drainer and the on-
 /// demand dispatch handlers. Assigns the next per-session sequence
 /// number under the emitters lock so both paths share monotonic seq.
@@ -2066,7 +1903,7 @@ impl CorePlugin for TerminalCorePlugin {
         let engine = Arc::clone(&self.suggest_engine);
         let args = args.clone();
         Some(Box::pin(async move {
-            handle_suggest(ctx.as_ref(), &server, &engine, &args).await
+            crate::handlers::ai::handle_suggest(ctx.as_ref(), &server, &engine, &args).await
         }))
     }
 
@@ -2155,133 +1992,6 @@ impl TerminalCorePlugin {
     }
 
     // ── BL-055 — run a saved command in a fresh session ──────────────
-
-    /// `run_saved` — look up a saved command and spawn a fresh PTY
-    /// session that runs its `shell_cmd` under its `shell`. Returns
-    /// `{ id }` (matching `create_session`'s response shape) so the
-    /// caller can poll `get_session_info` for exit status.
-    ///
-    /// The session inherits the saved command's `working_dir` (overridable
-    /// per-call) and `env_vars`. `pre_commands` and `auto_restart` are
-    /// **not** honored here — that's the procmgr layer's job. The
-    /// agent surface BL-055 unlocks needs the simpler "run it once,
-    /// observe the exit code" shape; replaying a richer lifecycle
-    /// belongs in a future `run_saved_managed` handler.
-    fn dispatch_run_saved(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let a: RunSavedArgs = parse_args(args, "run_saved")?;
-
-        let saved = {
-            let store = self.saved_store()?.lock().map_err(poisoned)?;
-            store
-                .get(&a.slug)
-                .map_err(crate_err)?
-                .ok_or_else(|| {
-                    exec_err(format!(
-                        "run_saved: no saved command with slug '{}'",
-                        a.slug
-                    ))
-                })?
-        };
-
-        // Resolve the working dir — caller override beats the saved
-        // value, both can fall back to inheriting the parent cwd.
-        let working_dir = a
-            .working_dir
-            .or_else(|| saved.working_dir.clone())
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from);
-
-        // Run the saved cmd through `<shell> -c "<cmd>"`. POSIX shells,
-        // pwsh (`-Command`), and cmd.exe (`/C`) all need a different
-        // flag for non-interactive invocation; pick the right one
-        // based on the shell's basename. Unknown shells fall back to
-        // `-c` which is the POSIX convention.
-        //
-        // BL-056 — `command` overrides `shell_cmd` so workflow's
-        // `run_adhoc` step can reuse the saved profile (shell, cwd,
-        // env) with a fresh command line per run.
-        let cmd_line = a.command.unwrap_or_else(|| saved.shell_cmd.clone());
-        let shell_args = vec![one_shot_flag(&saved.shell).to_string(), cmd_line];
-
-        // env_vars is HashMap<String, String> on SavedCommand; the
-        // server expects Vec<(String, String)>. Order is irrelevant
-        // (cmd-line env layering is left-to-right but the spawn
-        // already merges over the inherited env).
-        let env: Vec<(String, String)> =
-            saved.env_vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-
-        let cfg = ServerSpawnConfig {
-            name: Some(format!("saved:{}", saved.slug)),
-            shell: Some(ShellSpec {
-                program: PathBuf::from(saved.shell.clone()),
-                args: shell_args,
-            }),
-            working_dir,
-            env,
-        };
-
-        let id = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .create_session(cfg)
-            .map_err(crate_err)?;
-
-        // BL-061 follow-up — pin the saved command's memory_limit_mb
-        // onto this freshly-spawned session before the poller's next
-        // round. The single-knob saved-command field maps to the
-        // hard kill threshold (no separate soft warn — when a user
-        // sets a per-command limit they're being explicit; a soft
-        // warning at half doesn't add value). Applies only when both
-        // the limit is set AND a memory monitor is wired; without the
-        // monitor there's nothing to track against and the override
-        // is silently a no-op (matches pre-BL-061 behaviour for
-        // plugins built without `with_memory_monitor`).
-        if let (Some(limit_mb), Some(memory)) = (saved.memory_limit_mb, self.memory.as_ref()) {
-            let new_limits = MemoryLimits {
-                soft_mb: None,
-                hard_mb: Some(limit_mb),
-            };
-            let mut mem = memory.lock().map_err(poisoned)?;
-            mem.pending_overrides
-                .insert(id.as_str().to_string(), new_limits);
-            // Race-proof: the poller may have already tracked this
-            // session under the bootstrap-wide default (the override
-            // was staged after `create_session` returned). If so,
-            // update the live monitor entry in place so the wrong
-            // defaults don't kill the session before our override
-            // applies on the next round.
-            if let Some(&pid) = mem.session_pid.get(id.as_str()) {
-                mem.monitor.set_limits(pid, new_limits);
-            }
-        }
-
-        to_value(
-            &CreateSessionResponse {
-                id: id.as_str().to_string(),
-            },
-            "run_saved",
-        )
-    }
-}
-
-/// Pick the right "run a single command and exit" flag for `shell`.
-/// POSIX shells use `-c`; `pwsh`/`powershell.exe` use `-Command`;
-/// `cmd.exe` uses `/C`. Anything unrecognised falls back to `-c`.
-fn one_shot_flag(shell: &str) -> &'static str {
-    let basename = std::path::Path::new(shell)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .map(|s| s.strip_suffix(".exe").unwrap_or(s))
-        .unwrap_or(shell);
-    match basename.to_ascii_lowercase().as_str() {
-        "cmd" => "/C",
-        "pwsh" | "powershell" => "-Command",
-        _ => "-c",
-    }
 }
 
 // ── Error plumbing — SD-01: emitted by the shared macro ─────────────────────
@@ -2303,6 +2013,8 @@ pub(crate) fn crate_err(e: crate::TerminalError) -> PluginError {
 mod tests {
     use super::*;
     use crate::adhoc::{AdHocRecord, AdHocStatus};
+    use crate::handlers::ai::handle_suggest;
+    use crate::handlers::run::one_shot_flag;
     use crate::server::{OutputLine, SessionInfo};
 
     fn unix_only(name: &str) -> bool {

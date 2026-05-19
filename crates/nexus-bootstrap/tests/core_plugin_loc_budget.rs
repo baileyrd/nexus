@@ -38,16 +38,14 @@ const DEFAULT_BUDGET: usize = 2_000;
 /// expected lifecycle — that's the signal the SD-03 split has landed
 /// for that crate.
 const GRANDFATHERED: &[(&str, usize)] = &[
-    // Documented debt. The terminal crate still has ~30 dispatch_*
-    // methods on its CorePlugin impl that need careful per-domain
-    // extraction (interleaved with private helpers that touch struct
-    // internals). Tracked as a follow-on to the SD-03 git + storage
-    // pilots. nexus-editor's SD-03 split landed in 2026-05-18; its
-    // grandfather row now locks in the post-split size so the file
-    // can only shrink further (most of what remains is the dispatch
-    // impl plus a large IPC-roundtrip test module).
+    // Documented debt — both editor and terminal SD-03 splits landed
+    // 2026-05-18 and lower these grandfather rows to lock in the
+    // post-split sizes so the files can only shrink further. What
+    // remains in each `core_plugin.rs` is the dispatch impl plus a
+    // large IPC-roundtrip test module; the per-domain handler bodies
+    // live under `<crate>/src/handlers/<domain>.rs`.
     ("nexus-editor", 2_300),
-    ("nexus-terminal", 4_500),
+    ("nexus-terminal", 3_600),
     // Just over the default — earned a modest grandfather rather than
     // a full split. Bump to DEFAULT_BUDGET when the trigger / template
     // handlers move out of core_plugin.rs.
