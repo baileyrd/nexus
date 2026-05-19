@@ -16,6 +16,7 @@ import {
 } from '../../../stores/themeStore'
 import type { ConfigSection, ConfigSchema, PluginAPI, SettingsTabEntry } from '../../../types/plugin'
 import type { PluginCategory } from '@nexus/extension-api'
+import { PluginsMgmtInline } from '../../nexus/pluginsMgmt/PluginsMgmtView'
 import { eventBus } from '../../../host/EventBus'
 import { clientLogger } from '../../../clientLogger'
 import {
@@ -90,10 +91,12 @@ function useContributedSettingsTabs(): SettingsTabEntry[] {
 //   hotkeys       → keybindings table (was 'keybindings')
 //   snippets      → CSS snippets manager
 //
-// Plugin management lives in `nexus.pluginsMgmt` (Ctrl+Shift+X). The
-// retired `'plugins'` and `'community-plugins'` ids are filtered out
-// on load by the `BUILT_IN_TABS.includes` check below — sessions that
-// last opened one of those tabs simply fall back to 'general'.
+// Plugin management has two entry points sharing the same body:
+//   - the standalone modal `nexus.pluginsMgmt` (Ctrl+Shift+X), and
+//   - the inline `'plugins'` page in this panel.
+// The retired `'community-plugins'` id is filtered out on load by the
+// `BUILT_IN_TABS.includes` check below — sessions that last opened it
+// simply fall back to 'general'.
 const BUILT_IN_TABS = [
   'general',
   'editor-options',
@@ -101,6 +104,7 @@ const BUILT_IN_TABS = [
   'appearance',
   'hotkeys',
   'keychain',
+  'plugins',
   'snippets',
 ] as const
 type BuiltInTab = (typeof BUILT_IN_TABS)[number]
@@ -358,21 +362,13 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             active={navTab === 'keychain'}
             onClick={() => setNavTab('keychain')}
           />
-          {/* Plugin management lives in the standalone Plugins modal
-              (`nexus.pluginsMgmt`). The rail entry is an action, not a
-              nav target — clicking it closes the settings panel and
-              opens the modal so the user has a discoverable path
-              from Settings into plugin enable/disable + capability
-              review without needing to know the Ctrl+Shift+X shortcut. */}
+          {/* Plugin management — inline page sharing its body with the
+              standalone `nexus.pluginsMgmt` modal (Ctrl+Shift+X). */}
           <RailItem
-            label="Plugins…"
-            active={false}
-            title="Open the Plugins panel (Ctrl+Shift+X)"
-            onClick={() => {
-              useContextKeyStore.getState().set('settingsPanelVisible', false)
-              const reg = getRegistry()
-              if (reg) void reg.commands.execute('nexus.plugins.open')
-            }}
+            label="Plugins"
+            active={navTab === 'plugins'}
+            title="Manage plugins (Ctrl+Shift+X opens the standalone modal)"
+            onClick={() => setNavTab('plugins')}
           />
           <RailItem
             label="Snippets"
@@ -502,6 +498,8 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                 <KeychainTab api={api} />
               ) : navTab === 'snippets' ? (
                 <SnippetsTab />
+              ) : navTab === 'plugins' ? (
+                <PluginsMgmtInline />
               ) : sectionsByPlugin.has(navTab) ? (
                 <SettingsSection section={sectionsByPlugin.get(navTab)!} />
               ) : STUB_CORE_BY_ID.has(navTab) ? (

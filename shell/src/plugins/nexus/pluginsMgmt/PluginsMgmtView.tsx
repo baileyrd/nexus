@@ -27,63 +27,14 @@ const COMMAND_CONFIGURE = 'nexus.plugins.configure'
  * Modal listing every plugin the shell has loaded — built-in (nexus.* /
  * core.*) and community (drop-folder). Mirrors nexus.commandPalette's
  * overlay pattern: fixed backdrop, backdrop-click to dismiss, autofocused
- * filter input.
+ * filter input. The body is shared with the inline Settings → Plugins
+ * page via {@link PluginsMgmtInline}.
  */
 export function PluginsMgmtView() {
   const visible = usePluginsMgmtStore((s) => s.visible)
-  const query = usePluginsMgmtStore((s) => s.query)
-  const rows = usePluginsMgmtStore((s) => s.rows)
-  const setQuery = usePluginsMgmtStore((s) => s.setQuery)
   const close = usePluginsMgmtStore((s) => s.close)
 
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const [highRiskOnly, setHighRiskOnly] = useState(false)
-
-  const filtered = useMemo<PluginRow[]>(() => {
-    const q = query.trim().toLowerCase()
-    let next = rows
-    if (highRiskOnly) {
-      next = next.filter(
-        (r) =>
-          r.kind !== 'available' &&
-          r.capabilities &&
-          hasHighRisk(r.capabilities),
-      )
-    }
-    if (!q) return next
-    return next.filter((r) => {
-      const haystack = [
-        r.id,
-        r.name,
-        r.version,
-        r.kind === 'community' ? r.description ?? '' : '',
-        r.kind === 'community' ? r.author ?? '' : '',
-      ]
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(q)
-    })
-  }, [rows, query, highRiskOnly])
-
-  useEffect(() => {
-    if (visible) {
-      const id = requestAnimationFrame(() => inputRef.current?.focus())
-      return () => cancelAnimationFrame(id)
-    }
-  }, [visible])
-
   if (!visible) return null
-
-  const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      // Same rationale as CommandPalette: the App.tsx global keydown
-      // short-circuits on INPUT focus so the registered `escape`
-      // keybinding never fires here. Close directly.
-      e.preventDefault()
-      e.stopPropagation()
-      close()
-    }
-  }
 
   const onBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) close()
@@ -117,17 +68,99 @@ export function PluginsMgmtView() {
           flexDirection: 'column',
         }}
       >
-        {/* Header strip: title + filter input */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--divider-color)',
-          }}
-        >
+        <PluginsMgmtInline mode="modal" autoFocus onEscape={close} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Shared body of the plugins list — header strip with filter input +
+ * "high-risk only" toggle, scrollable section list, and a footer hint.
+ * Rendered as the modal's body (mode='modal') and as the Settings →
+ * Plugins inline page (mode='inline'). The inline mode omits the
+ * title row since the rail entry already labels the page.
+ */
+export function PluginsMgmtInline({
+  mode = 'inline',
+  autoFocus = false,
+  onEscape,
+}: {
+  mode?: 'modal' | 'inline'
+  autoFocus?: boolean
+  onEscape?: () => void
+}) {
+  const query = usePluginsMgmtStore((s) => s.query)
+  const rows = usePluginsMgmtStore((s) => s.rows)
+  const setQuery = usePluginsMgmtStore((s) => s.setQuery)
+
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [highRiskOnly, setHighRiskOnly] = useState(false)
+
+  const filtered = useMemo<PluginRow[]>(() => {
+    const q = query.trim().toLowerCase()
+    let next = rows
+    if (highRiskOnly) {
+      next = next.filter(
+        (r) =>
+          r.kind !== 'available' &&
+          r.capabilities &&
+          hasHighRisk(r.capabilities),
+      )
+    }
+    if (!q) return next
+    return next.filter((r) => {
+      const haystack = [
+        r.id,
+        r.name,
+        r.version,
+        r.kind === 'community' ? r.description ?? '' : '',
+        r.kind === 'community' ? r.author ?? '' : '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [rows, query, highRiskOnly])
+
+  useEffect(() => {
+    if (!autoFocus) return
+    const id = requestAnimationFrame(() => inputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [autoFocus])
+
+  const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape' && onEscape) {
+      // Modal mode: App.tsx's global keydown short-circuits on INPUT
+      // focus, so we close directly. Inline mode lets Escape bubble so
+      // the Settings panel's own handler closes it.
+      e.preventDefault()
+      e.stopPropagation()
+      onEscape()
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
+    >
+      {/* Header strip: title (modal only) + filter input + high-risk toggle */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: mode === 'modal' ? 'space-between' : 'flex-end',
+          gap: 12,
+          padding: '12px 16px',
+          borderBottom: '1px solid var(--divider-color)',
+        }}
+      >
+        {mode === 'modal' && (
           <div
             style={{
               color: 'var(--text-normal)',
@@ -138,89 +171,89 @@ export function PluginsMgmtView() {
           >
             Plugins
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <label
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                color: 'var(--text-faint)',
-                fontFamily: 'var(--font-interface)',
-                fontSize: 12,
-                cursor: 'pointer',
-                userSelect: 'none',
-              }}
-              title="Show only plugins with at least one high-risk capability"
-            >
-              <input
-                type="checkbox"
-                checked={highRiskOnly}
-                onChange={(e) => setHighRiskOnly(e.target.checked)}
-              />
-              High-risk only
-            </label>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-interface)',
+              fontSize: 12,
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            title="Show only plugins with at least one high-risk capability"
+          >
             <input
-              ref={inputRef}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={onInputKeyDown}
-              placeholder="Filter plugins…"
-              spellCheck={false}
-              autoComplete="off"
-              style={{
-                width: 260,
-                background: 'var(--background-primary)',
-                border: '1px solid var(--divider-color)',
-                borderRadius: 'var(--radius-s)',
-                outline: 0,
-                color: 'var(--text-normal)',
-                fontFamily: 'var(--font-interface)',
-                fontSize: 13,
-                padding: '6px 10px',
-              }}
+              type="checkbox"
+              checked={highRiskOnly}
+              onChange={(e) => setHighRiskOnly(e.target.checked)}
             />
+            High-risk only
+          </label>
+          <input
+            ref={inputRef}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onInputKeyDown}
+            placeholder="Filter plugins…"
+            spellCheck={false}
+            autoComplete="off"
+            style={{
+              width: 260,
+              background: 'var(--background-primary)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
+              outline: 0,
+              color: 'var(--text-normal)',
+              fontFamily: 'var(--font-interface)',
+              fontSize: 13,
+              padding: '6px 10px',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Body: scrollable list */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+        }}
+      >
+        {filtered.length === 0 ? (
+          <div
+            style={{
+              padding: '32px 16px',
+              textAlign: 'center',
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-interface)',
+              fontSize: 13,
+            }}
+          >
+            No plugins match
           </div>
-        </div>
+        ) : (
+          <SectionedRows rows={filtered} />
+        )}
+      </div>
 
-        {/* Body: scrollable list */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-          }}
-        >
-          {filtered.length === 0 ? (
-            <div
-              style={{
-                padding: '32px 16px',
-                textAlign: 'center',
-                color: 'var(--text-faint)',
-                fontFamily: 'var(--font-interface)',
-                fontSize: 13,
-              }}
-            >
-              No plugins match
-            </div>
-          ) : (
-            <SectionedRows rows={filtered} />
-          )}
-        </div>
-
-        {/* Footer hint */}
-        <div
-          style={{
-            padding: '8px 16px',
-            borderTop: '1px solid var(--divider-color)',
-            textAlign: 'right',
-            color: 'var(--text-faint)',
-            fontFamily: 'var(--font-interface)',
-            fontSize: 11,
-          }}
-        >
-          Drop plugin folders into ~/.nexus-shell/plugins/ and restart.
-        </div>
+      {/* Footer hint */}
+      <div
+        style={{
+          padding: '8px 16px',
+          borderTop: '1px solid var(--divider-color)',
+          textAlign: 'right',
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-interface)',
+          fontSize: 11,
+        }}
+      >
+        Drop plugin folders into ~/.nexus-shell/plugins/ and restart.
       </div>
     </div>
   )
