@@ -5,6 +5,14 @@ import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
 import { PluginsMgmtView } from './PluginsMgmtView'
+// Importing the lifecycle-status store at module load primes its
+// EventBus subscriptions so the modal's per-row state badges reflect
+// every `plugin:activated` / `plugin:deactivated` / `plugin:error`
+// from the very first plugin onwards. The priming used to live in
+// `nexus.extensionsTab/index.ts`; this plugin is default-on and
+// loaded at boot, so it's a safe home for the import once the
+// Extensions tab is retired.
+import '../../../stores/pluginsStatusStore'
 import {
   usePluginsMgmtStore,
   type AvailablePluginRow,

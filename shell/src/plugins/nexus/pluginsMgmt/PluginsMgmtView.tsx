@@ -15,6 +15,7 @@ import {
   hasHighRisk,
   type RiskLevel,
 } from './capabilityInfo'
+import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
 
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
 const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
@@ -292,11 +293,34 @@ function SectionHeader({ label }: { label: string }) {
 
 // ── Row components ──────────────────────────────────────────────────────────
 
+/**
+ * Read the live lifecycle state for `pluginId` from `pluginsStatusStore`,
+ * falling back to a per-row snapshot value when no `plugin:activated` /
+ * `plugin:deactivated` / `plugin:error` event has fired yet for that id.
+ *
+ * The store is primed at module load (via the side-effect import in
+ * `pluginsMgmt/index.ts`) and subscribes to the EventBus before any
+ * plugin activates, so once boot has progressed past `host.loadAll` the
+ * store value is authoritative. Until then the fallback covers the
+ * window where the modal could open before any lifecycle event has
+ * propagated (rare — the modal command requires user input, but the
+ * fallback keeps default-on plugins from rendering as `inactive`).
+ */
+function useLivePluginState(
+  pluginId: string,
+  fallback: { state: string; error?: string },
+): { state: string; error?: string } {
+  const status = usePluginsStatusStore((s) => s.byId[pluginId])
+  if (!status) return fallback
+  return { state: status.state, error: status.lastError?.message }
+}
+
 interface BuiltInRowProps {
   row: BuiltInPluginRow
 }
 
 function BuiltInRow({ row }: BuiltInRowProps) {
+  const live = useLivePluginState(row.id, { state: row.state, error: row.error })
   return (
     <div style={rowOuterStyle}>
       <div style={rowStyle}>
@@ -322,7 +346,7 @@ function BuiltInRow({ row }: BuiltInRowProps) {
             {row.id}
           </div>
         </div>
-        <StateBadge state={row.state} error={row.error} />
+        <StateBadge state={live.state} error={live.error} />
         <div
           style={{
             color: 'var(--text-muted)',
@@ -358,6 +382,13 @@ function CommunityRow({ row }: CommunityRowProps) {
     ? `Incompatible — requires apiVersion ${incompat.requested}, ` +
       `shell supports ${incompat.supported}`
     : undefined
+
+  // Prefer the lifecycle store's view (`active` / `inactive` / `error`)
+  // over the `row.enabled` heuristic — an enabled plugin whose activate
+  // threw should render as `error`, not `active`.
+  const live = useLivePluginState(row.id, {
+    state: row.enabled ? 'active' : 'inactive',
+  })
 
   const summary = row.grantSummary
   const showReview =
@@ -472,8 +503,8 @@ function CommunityRow({ row }: CommunityRowProps) {
           </button>
         )}
         <StateBadge
-          state={incompat ? 'error' : row.enabled ? 'active' : 'inactive'}
-          error={incompatTitle}
+          state={incompat ? 'error' : live.state}
+          error={incompat ? incompatTitle : live.error}
           labelOverride={incompat ? 'incompatible' : undefined}
         />
         <div
