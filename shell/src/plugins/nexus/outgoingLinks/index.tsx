@@ -1,9 +1,8 @@
 import { createRoot, type Root } from 'react-dom/client'
-import { createElement, useEffect, useState } from 'react'
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ViewBase, workspace, type Leaf } from '../../../workspace'
-import { useEditorStore } from '../editor/editorStore'
-import { getKernel } from '../files/kernelClient'
+import { useActiveFileQuery } from '../_lib/useActiveFileQuery'
 import type { EventsAPI } from '../../../types/plugin'
 
 let events: EventsAPI | null = null
@@ -49,43 +48,13 @@ function basename(relpath: string): string {
 }
 
 function OutgoingLinksView() {
-  const activeRelpath = useEditorStore((s) => s.activeRelpath)
-  const [links, setLinks] = useState<OutgoingLink[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!activeRelpath) {
-      setLinks([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const kernel = getKernel()
-    if (!kernel) {
-      setError('Kernel not ready.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    kernel
-      .invoke<unknown>(STORAGE_PLUGIN_ID, 'outgoing_links', { path: activeRelpath })
-      .then((raw) => {
-        if (cancelled) return
-        setLinks(decode(raw))
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setLinks([])
-        setError(err instanceof Error ? err.message : String(err))
-        setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [activeRelpath])
+  const { data: links, loading, error, activeRelpath } = useActiveFileQuery<OutgoingLink[]>({
+    fetch: async (kernel, relpath) => {
+      const raw = await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'outgoing_links', { path: relpath })
+      return decode(raw)
+    },
+    initial: [],
+  })
 
   if (!activeRelpath) {
     return (

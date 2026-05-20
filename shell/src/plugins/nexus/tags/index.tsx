@@ -2,8 +2,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { createElement, useEffect, useState } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ViewBase, workspace, type Leaf } from '../../../workspace'
-import { useEditorStore } from '../editor/editorStore'
-import { getKernel } from '../files/kernelClient'
+import { useActiveFileQuery } from '../_lib/useActiveFileQuery'
 import type { EventsAPI } from '../../../types/plugin'
 
 let events: EventsAPI | null = null
@@ -48,68 +47,33 @@ function extractTags(raw: unknown): string[] {
 }
 
 function TagsView() {
-  const activeRelpath = useEditorStore((s) => s.activeRelpath)
-  const [tags, setTags] = useState<TagUsage[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { data: tags, loading, error, activeRelpath } = useActiveFileQuery<TagUsage[]>({
+    fetch: async (kernel, relpath) => {
+      const raw = await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'read_frontmatter', { path: relpath })
+      const names = extractTags(raw)
+      if (names.length === 0) return []
+      return Promise.all(
+        names.map(async (name) => {
+          try {
+            const results = await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'query_tags', { name })
+            const filePaths = Array.isArray(results)
+              ? (results as KernelTagResult[])
+                  .map((r) => (typeof r.file_path === 'string' ? r.file_path : null))
+                  .filter((p): p is string => p !== null)
+              : []
+            return { name, filePaths }
+          } catch {
+            return { name, filePaths: [] }
+          }
+        }),
+      )
+    },
+    initial: [],
+  })
   const [expanded, setExpanded] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!activeRelpath) {
-      setTags([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const kernel = getKernel()
-    if (!kernel) {
-      setError('Kernel not ready.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    setExpanded(null)
-    kernel
-      .invoke<unknown>(STORAGE_PLUGIN_ID, 'read_frontmatter', { path: activeRelpath })
-      .then(async (raw) => {
-        if (cancelled) return
-        const names = extractTags(raw)
-        if (names.length === 0) {
-          setTags([])
-          setLoading(false)
-          return
-        }
-        const usages = await Promise.all(
-          names.map(async (name) => {
-            try {
-              const results = await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'query_tags', {
-                name,
-              })
-              const filePaths = Array.isArray(results)
-                ? (results as KernelTagResult[])
-                    .map((r) => (typeof r.file_path === 'string' ? r.file_path : null))
-                    .filter((p): p is string => p !== null)
-                : []
-              return { name, filePaths }
-            } catch {
-              return { name, filePaths: [] }
-            }
-          }),
-        )
-        if (cancelled) return
-        setTags(usages)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-        setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [activeRelpath])
+  // Drop the expanded-tag selection when the active file changes — a
+  // tag name from file A isn't meaningful for file B's tag set.
+  useEffect(() => { setExpanded(null) }, [activeRelpath])
 
   if (!activeRelpath) {
     return (
