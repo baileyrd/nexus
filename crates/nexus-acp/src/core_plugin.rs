@@ -5,6 +5,16 @@
 //! [`ConnectionPool`], proxies request/response traffic over IPC, and
 //! republishes agent-pushed notifications on the kernel event bus.
 //!
+//! # Status (0.1.2): experimental — no in-tree consumer
+//!
+//! ACP's IPC surface is fully wired and unit-tested, but no in-tree
+//! shell plugin invokes `com.nexus.acp::*` today. The only user-facing
+//! entry point is the inbound `nexus acp serve` CLI subcommand
+//! (`crates/nexus-cli/src/commands/acp.rs`) plus the
+//! `first-party-acp-echo` example plugin. Until a shell consumer
+//! lands, this plugin is best treated as experimental scaffolding.
+//! See `docs/0.1.2/plugins/assessment/PHASE5_DECISIONS.md` §5.1.
+//!
 //! # IPC surface
 //!
 //! | id | name | sync? | args |

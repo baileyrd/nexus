@@ -147,3 +147,7 @@ See [DEPENDENCIES.md](DEPENDENCIES.md) for a ground-truth dependency analysis: p
 ## Implementation plan
 
 See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for a sequenced six-phase plan to address every finding: doc fixes → declare hidden couplings → dead-code deletion → manifest-schema extensions → behavior-preserving refactors → strategic decisions. Each task lists effort, risk, prerequisites, and acceptance criteria.
+
+## Phase 5 decisions
+
+See [PHASE5_DECISIONS.md](PHASE5_DECISIONS.md) for the resolution of each strategic-decision item in Phase 5 (ship/cut `com.nexus.acp`, `audio` defaults, DAP/LSP status, cycle intent). 5 of 6 items are resolved; only the audio default backend remains open and is documented with options + recommendation.
