@@ -15,7 +15,9 @@ export const settingsPlugin: Plugin = {
     core: true,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['core.configuration-service', 'nexus.activityBar'],
+    // SettingsPanelView imports `PluginsMgmtView` from nexus.pluginsMgmt
+    // for the inline Plugins page — that plugin must be loaded first.
+    dependsOn: ['core.configuration-service', 'nexus.activityBar', 'nexus.pluginsMgmt'],
     contributes: {
       commands: [
         {

@@ -44,7 +44,9 @@ export const templatesPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
+    // Dispatches the `nexus.files.openByPath` command to reveal newly
+    // created notes — files plugin must be loaded.
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar', 'nexus.files'],
     contributes: {
       commands: [
         {

@@ -46,7 +46,9 @@ export const canvasPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace'],
+    // Imports `../editor/blockRefDrag` and `../editor/markdownRender`,
+    // so the editor plugin must be loaded first.
+    dependsOn: ['nexus.workspace', 'nexus.editor'],
     contributes: {
       commands: [
         { id: CANVAS_COMMANDS.new, title: 'Canvas: New canvas', category: 'Canvas' },

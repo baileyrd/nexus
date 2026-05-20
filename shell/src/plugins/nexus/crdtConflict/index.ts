@@ -33,6 +33,10 @@ export const crdtConflictPlugin: Plugin = {
     version: '0.2.0',
     core: false,
     activationEvents: ['onStartup'],
+    // Dead weight without nexus.collab driving the CRDT publisher —
+    // makes the soft requirement explicit so this plugin sorts after
+    // collab when both are enabled.
+    dependsOn: ['nexus.collab'],
     contributes: {},
   },
 

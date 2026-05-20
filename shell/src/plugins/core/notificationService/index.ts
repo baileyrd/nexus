@@ -65,6 +65,10 @@ export const notificationServicePlugin: Plugin = {
     version: '1.0.0',
     core: true,
     activationEvents: ['onStartup'],
+    // Reads the `ui.notificationDurationMs` setting via api.configuration
+    // and registers its own configuration schema — configuration-service
+    // must be loaded first.
+    dependsOn: ['core.configuration-service'],
     contributes: {
       configuration: {
         pluginId: 'core.notification-service',

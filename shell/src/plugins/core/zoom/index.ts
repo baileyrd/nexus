@@ -38,6 +38,9 @@ export const zoomPlugin: Plugin = {
     version: '1.0.0',
     core: true,
     activationEvents: ['onStartup'],
+    // Consumes api.configuration to persist/restore the zoom level —
+    // configuration-service must be loaded first.
+    dependsOn: ['core.configuration-service'],
     contributes: {
       commands: [
         { id: COMMAND_IN, title: 'Zoom In', category: 'View' },

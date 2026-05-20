@@ -11,10 +11,15 @@ export const statusBarPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    // `nexus.backlinks` is a soft dep — FileStats reads its zustand
-    // store, which is safe to read with no provider (returns 0). Listing
-    // it as a hard dep wedged status-bar activation when backlinks was
-    // default-off.
+    // `nexus.backlinks` is a *soft* dep — deliberately omitted from
+    // `dependsOn` so that the status bar still activates when the
+    // user has backlinks disabled (default-off plugin). The FileStats
+    // component reads the backlinks zustand store directly; if no
+    // provider has registered, the store returns 0 and the badge
+    // simply renders "0 references" rather than wedging activation.
+    // If a future schema gains a `softDependsOn` field, add
+    // `'nexus.backlinks'` there to make this intent declarative
+    // without changing the activation semantics.
     dependsOn: ['nexus.workspace', 'nexus.editor'],
   },
 

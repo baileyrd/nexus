@@ -21,7 +21,8 @@ export const gitStatusPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.workspace'],
+    // Registers a `statusBarLeft` view; statusBar owns that slot.
+    dependsOn: ['nexus.workspace', 'nexus.statusBar'],
     contributes: {},
   },
 

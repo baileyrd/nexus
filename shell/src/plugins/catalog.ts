@@ -93,6 +93,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'core.notification-service', name: 'Notification Service',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    dependsOn: ['core.configuration-service'],
     description: 'Toast + status notifications surfaced through api.notifications.',
     load: () => import('./core/notificationService').then(m => m.notificationServicePlugin),
   },
@@ -106,7 +107,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'core.settings', name: 'Settings',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['core.configuration-service', 'nexus.activityBar'],
+    dependsOn: ['core.configuration-service', 'nexus.activityBar', 'nexus.pluginsMgmt'],
     description: 'The Settings panel — config sections, themes, keybindings, plugin management.',
     load: () => import('./core/settings').then(m => m.settingsPlugin),
   },
@@ -126,6 +127,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'core.zoom', name: 'Zoom',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['core.configuration-service'],
     description: 'Application-wide UI zoom with persisted level (Ctrl+=, Ctrl+-, Ctrl+0).',
     load: () => import('./core/zoom').then(m => m.zoomPlugin),
   },
@@ -140,7 +142,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'nexus.gitStatus', name: 'Git Status',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.workspace'],
+    dependsOn: ['nexus.workspace', 'nexus.statusBar'],
     description: "Status bar branch + dirty indicator for the forge's git repository.",
     load: () => import('./nexus/gitStatus').then(m => m.gitStatusPlugin),
   },
@@ -203,24 +205,28 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.files', name: 'Files',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
     description: 'File-tree explorer with create / rename / move / delete and drag-and-drop.',
     load: () => import('./nexus/files').then(m => m.filesPlugin),
   },
   {
     id: 'nexus.editor', name: 'Editor',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.sidebar', 'nexus.files', 'nexus.comments'],
     description: 'CodeMirror-based markdown editor with live preview, snippets and link-aware extensions.',
     load: () => import('./nexus/editor').then(m => m.editorPlugin),
   },
   {
     id: 'nexus.outline', name: 'Outline',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.rightPanel', 'nexus.editor'],
     description: 'Heading outline of the active document, with click-to-jump navigation.',
     load: () => import('./nexus/outline').then(m => m.outlinePlugin),
   },
   {
     id: 'nexus.crdtConflict', name: 'CRDT Conflict',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    version: '0.2.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.collab'],
     description:
       'BL-007 / BL-074 — surfaces CRDT pull-landing conflicts (concurrent block edits, delete-vs-edit) as a toast so the user knows a merge needs review. Resolver modal is a deferred follow-up.',
     load: () => import('./nexus/crdtConflict').then(m => m.crdtConflictPlugin),
@@ -249,6 +255,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.diagnostics', name: 'Diagnostics',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.paneMode', 'nexus.activityBar', 'nexus.workspace', 'nexus.editor'],
     description:
       'BL-141 follow-up — global LSP diagnostics panel. Subscribes to com.nexus.lsp.textDocument.publishDiagnostics, groups errors / warnings / info / hints by file with click-to-jump, and ships an "Open all in multibuffer" button that funnels every in-forge diagnostic through editor.open_excerpts.',
     load: () => import('./nexus/diagnostics').then(m => m.diagnosticsPlugin),
@@ -319,6 +326,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.canvas', name: 'Canvas',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.editor'],
     description: 'Infinite-canvas surface for sketching, mind-maps and visual note layout.',
     load: () => import('./nexus/canvas').then(m => m.canvasPlugin),
   },
@@ -414,6 +422,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.templates', name: 'Templates',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar', 'nexus.files'],
     description: 'Insert templated notes from a library, with variable expansion and folder targeting.',
     load: () => import('./nexus/templates').then(m => m.templatesPlugin),
   },
@@ -499,6 +508,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.outgoingLinks', name: 'Outgoing Links',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.editor', 'nexus.files'],
     description: 'Side panel listing every link, embed, and unresolved reference in the active note.',
     load: () => import('./nexus/outgoingLinks').then(m => m.outgoingLinksPlugin),
   },
@@ -511,6 +521,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.tags', name: 'Tags',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.editor', 'nexus.files'],
     description: 'Browse and filter notes by #tag, with counts and nested-tag drill-down.',
     load: () => import('./nexus/tags').then(m => m.tagsPlugin),
   },
@@ -537,6 +548,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     id: 'nexus.osObservability', name: 'Observability',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    dependsOn: ['nexus.workspace', 'nexus.activity'],
     description: 'Three-tab observability panel — usage rollup over the AI activity log, foundation-workflow status with manual run, and a vault-feed of file activity under raw/, wiki/, output/ (BL-054 Phase 4).',
     load: () => import('./nexus/observability').then(m => m.osObservabilityPlugin),
   },

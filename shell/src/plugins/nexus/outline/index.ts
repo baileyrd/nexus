@@ -50,7 +50,9 @@ export const outlinePlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.rightPanel'],
+    // Imports `../editor/editorStore`, `../editor/runtime`, and
+    // `../editor/types` directly — editor plugin must be loaded first.
+    dependsOn: ['nexus.rightPanel', 'nexus.editor'],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Outline', category: 'View' }],
     },

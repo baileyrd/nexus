@@ -47,7 +47,8 @@ export const osObservabilityPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.workspace'],
+    // Imports `ActivityEntry` type from `../activityTimeline/activityTimelineStore`.
+    dependsOn: ['nexus.workspace', 'nexus.activity'],
   },
 
   async activate(api: PluginAPI) {

@@ -207,6 +207,9 @@ export const tagsPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: [`onCommand:${COMMAND_FOCUS}`, `onView:${VIEW_TYPE}`],
+    // Imports `../editor/editorStore` and `../files/kernelClient` —
+    // those plugins must be loaded first.
+    dependsOn: ['nexus.editor', 'nexus.files'],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Tags', category: 'View' }],
     },

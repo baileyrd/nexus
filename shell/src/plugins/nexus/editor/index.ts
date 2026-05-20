@@ -228,11 +228,12 @@ export const editorPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    // Not strictly dependent on nexus.files — we listen to the local
-    // `files:open` event bus and would render the empty state fine
-    // without it. The dependency on workspace/sidebar keeps plugin
-    // load order sensible (workspace → sidebar → files → editor).
-    dependsOn: ['nexus.workspace', 'nexus.sidebar'],
+    // We listen to the local `files:open` event bus, but also import
+    // commentsApi / workspaceStore / filesStore directly — those
+    // structural imports require the source plugins to be loaded
+    // before us. The dependency chain also keeps boot order sensible
+    // (workspace → sidebar → files → comments → editor).
+    dependsOn: ['nexus.workspace', 'nexus.sidebar', 'nexus.files', 'nexus.comments'],
     contributes: {
       commands: [
         { id: COMMAND_CLOSE_TAB, title: 'Close Tab', category: 'Editor' },

@@ -76,7 +76,10 @@ export const diagnosticsPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.paneMode', 'nexus.activityBar'],
+    // Imports `../workspace/workspaceStore` and `../editor/kernelClient`
+    // + `../editor/cm/lspIpc` + `../editor/cm/lspToExcerpts`, so the
+    // workspace and editor plugins must be loaded first.
+    dependsOn: ['nexus.paneMode', 'nexus.activityBar', 'nexus.workspace', 'nexus.editor'],
     contributes: {
       commands: [
         {
