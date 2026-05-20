@@ -16,15 +16,19 @@
 // to a different file clears the filter (a block id from file A is
 // meaningless against file B's inbound table).
 //
-// What's NOT in this module yet:
-//   - On-edit silent refresh (subscribing to editor session changes
-//     and re-running load without a loading flash). Lands in a
-//     follow-up commit; legacy code itself flagged the in-process
-//     refresh as "largely a no-op" because editing file A doesn't
-//     change its incoming backlinks.
+// On-edit silent refresh — also wired here. The editor's
+// `sessionManager.onChanged(...)` fires after every committed mutation
+// to a markdown session. We rAF-coalesce same-file events and silently
+// re-query the backlinks index without flashing the loading flag. The
+// architectural caveat the legacy plugin noted still applies: editing
+// file A doesn't change file A's *incoming* backlinks (those live on
+// other files), so today this is largely a no-op. It exists as the
+// well-defined hook for a future cross-file reindex event.
 
 import type { PluginAPI } from '../../../types/plugin'
 import { useEditorStore } from '../editor/editorStore'
+import { getEditorRuntime } from '../editor/runtime'
+import type { EditorChangedPayload } from '../editor/types'
 import { useBacklinksDataStore, type Backlink } from './backlinksDataStore'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
@@ -137,6 +141,52 @@ export function startBacklinksLoader(api: PluginAPI): void {
     }
   }
 
+  /**
+   * Silent refresh — re-queries the inbound-link index for `relpath`
+   * without flipping `loading` to true. Used by the editor-change
+   * subscription below so an in-progress edit picks up any future
+   * cross-file reindex without flashing "Loading…" on every
+   * keystroke. Guarded by the same request-id pattern as `load`.
+   *
+   * Bails silently on error: a transient failure here shouldn't
+   * clobber the displayed list. The next explicit tab switch will
+   * surface any persistent problem.
+   */
+  const refresh = async (relpath: string): Promise<void> => {
+    const requestId = ++currentRequestId
+    let available = false
+    try {
+      available = await api.kernel.available()
+    } catch {
+      available = false
+    }
+    if (!available) return
+    if (requestId !== currentRequestId) return
+    try {
+      const blockFilter = useBacklinksDataStore.getState().blockFilter
+      const raw = blockFilter
+        ? await api.kernel.invoke<KernelBacklink[]>(
+            STORAGE_PLUGIN_ID,
+            BACKLINKS_TO_BLOCK_COMMAND,
+            { path: relpath, block_id: blockFilter },
+          )
+        : await api.kernel.invoke<KernelBacklink[]>(
+            STORAGE_PLUGIN_ID,
+            BACKLINKS_COMMAND,
+            { path: relpath },
+          )
+      if (requestId !== currentRequestId) return
+      const store = useBacklinksDataStore.getState()
+      // Drop the result if the user switched files while we were in
+      // flight — `load()` for the new file has already taken over.
+      if (store.currentRelpath !== relpath) return
+      store.setLinks(decode(raw, relpath))
+      store.setError(null)
+    } catch {
+      // Silent.
+    }
+  }
+
   // React to editor tab switches. A different file invalidates the
   // active block filter (a UUID stamped in file A doesn't apply to
   // file B's inbound table).
@@ -154,6 +204,34 @@ export function startBacklinksLoader(api: PluginAPI): void {
     if (state.blockFilter !== prev.blockFilter && state.currentRelpath) {
       void load(state.currentRelpath)
     }
+  })
+
+  // On-edit silent refresh. The editor's session manager publishes
+  // a `com.nexus.editor.changed.<relpath>` event after each
+  // committed mutation; subscribe and rAF-coalesce so a flurry of
+  // keystrokes collapses into one refresh per frame.
+  //
+  // Deferred to the next microtask: the editor plugin sets up its
+  // runtime in its own activate(), and `register_all` boot order
+  // doesn't guarantee that runs before us (it should — `nexus.editor`
+  // is in our dependsOn — but `getEditorRuntime()` returning null
+  // is a defensible failure mode if the editor plugin isn't loaded
+  // for any reason).
+  let rafHandle: number | null = null
+  queueMicrotask(() => {
+    const runtime = getEditorRuntime()
+    if (!runtime) return
+    runtime.sessionManager.onChanged((payload: EditorChangedPayload) => {
+      const active = useEditorStore.getState().activeRelpath
+      if (payload.relpath !== active) return
+      if (rafHandle !== null) return
+      rafHandle = requestAnimationFrame(() => {
+        rafHandle = null
+        const relpath = useEditorStore.getState().activeRelpath
+        if (!relpath) return
+        void refresh(relpath)
+      })
+    })
   })
 
   // Seed with whatever is active at activation time — covers the
