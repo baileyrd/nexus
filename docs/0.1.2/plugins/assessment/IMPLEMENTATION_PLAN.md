@@ -244,14 +244,15 @@ Behavior-preserving cleanups, each with their own risk profile. Order independen
 - **Change:** The current name implies a block-editor port; the plugin only wraps `com.nexus.formats::import_notion/export_notion`. Rename in `index.ts`, `package.json`, `catalog.ts`. Update display strings.
 - **Acceptance:** name reflects what it does.
 
-### 4.8 Storage compile-time deps
-- **Effort:** L
-- **Risk:** medium
-- **Change:** `nexus-storage` Cargo-depends on `nexus-database` and `nexus-formats`. Two options:
-  - **Feature-flag:** put each behind a `storage_database` / `storage_formats` feature, default on, off-by-default for minimal builds.
-  - **Extract types:** move the shared types (whatever storage actually needs from these crates) into `nexus-types`. Storage drops the path-deps; database / formats keep their own crates.
-- **Recommendation:** extract types — it makes the IPC seam strict, which is what the architecture promises.
-- **Acceptance:** `nexus-storage`'s `Cargo.toml` lists only `nexus-types`, `nexus-plugin-api`, `nexus-kernel`, `nexus-plugins`, and external crates. `dep_invariants` test passes.
+### 4.8 Storage compile-time deps — withdrawn after code-level review
+
+- **Status:** **No action.** Initial framing in DEPENDENCIES.md called the `nexus-storage → {nexus-database, nexus-formats}` dependency a "compile-time leak past the IPC seam." Code-level review during execution found this is intentional layering:
+  - `nexus-formats/src/lib.rs:5` explicitly declares itself a "pure-Rust parsers and serializers" library with "No runtime services; no SQLite."
+  - `nexus-database/src/lib.rs:3-8` explicitly declares itself "**pure-logic** — it does not touch `rusqlite`. The SQL-backed query engine, schema migrations, and relation/rollup resolution that previously lived here moved into `nexus-storage` so that `nexus-storage` is the sole owner of the forge's SQLite database."
+  - `crates/nexus-bootstrap/tests/dep_invariants.rs::FORBIDDEN` enforces the layering from the other side — `nexus-database` is forbidden from linking `rusqlite`.
+- The IPC seam separates **plugins** for cross-trust dispatch, not **crates** for library reuse. `nexus-storage` consuming pure-logic types (`DatabaseError`, `PropertyConfig`, `FormulaValue`) and parsers (canvas, config, `sha256_hex`) from its pure-logic dep crates is correct architecture, not a leak.
+- DEPENDENCIES.md §6 and §8 and `_extract-rust-deps.md` updated to reflect the corrected analysis.
+- **No code change.** Nothing to do.
 
 ### 4.9 Document or remove `agent ↔ skills` cycle
 - **Effort:** S

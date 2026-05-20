@@ -103,11 +103,20 @@ What to **defer** until product can weigh in:
 
 **Net Phase 4.3 status:** plan as written is more expensive than warranted given the visible benefit; deferred pending UX direction. The shared-helper sub-task is captured here as a follow-up and can land at any time.
 
+## 4.8 — storage compile-time deps: withdrawn
+
+Originally flagged in DEPENDENCIES.md as a "compile-time leak past the IPC seam." Code-level review during execution found the framing was wrong:
+
+- `nexus-formats/src/lib.rs:5` explicitly declares itself a pure-logic parsers library with "No runtime services; no SQLite."
+- `nexus-database/src/lib.rs:3-8` explicitly declares itself "pure-logic — it does not touch `rusqlite`. The SQL-backed query engine ... moved into `nexus-storage`."
+- `crates/nexus-bootstrap/tests/dep_invariants.rs::FORBIDDEN` enforces the layering from the other side — `nexus-database` is forbidden from linking `rusqlite`.
+
+The IPC seam is for cross-PLUGIN dispatch, not cross-CRATE library reuse. `nexus-storage` legitimately depends on these pure-logic crates as bottom-tier libraries — that's the intended layering, not a leak. **No code change.** Doc claims in DEPENDENCIES.md, `_extract-rust-deps.md`, and IMPLEMENTATION_PLAN.md §4.8 updated to reflect the corrected analysis.
+
 ## What remains genuinely open
 
 - **5.2** — audio default backend (product call).
 - **4.3** — links-panel consolidation (UX direction, per above).
-- **4.8** — `nexus-storage` compile-time deps (architectural sign-off — would alter the IPC seam invariants).
-- **4.1 (4 remaining)** — module-scope singletons in `searchRuntime`, `recallApi`, `themePicker`, `pickerRuntime`. On Phase 4.1a inspection, 3 of these turned out to be reasonable patterns and 1 (`themePicker`) has a wider blast radius than the prototype handled. Captured in the Phase 4.1a commit message and the session summary.
+- **4.1 (4 remaining singletons)** — module-scope singletons in `searchRuntime`, `recallApi`, `themePicker`, `pickerRuntime`. On Phase 4.1a inspection, 3 of these turned out to be reasonable patterns and 1 (`themePicker`) has a wider blast radius than the prototype handled. Captured in the Phase 4.1a commit message and the session summary.
 
-These four are documented with options + recommendations so a decision-maker can act in minutes rather than re-do the analysis.
+These three are documented with options + recommendations so a decision-maker can act in minutes rather than re-do the analysis.
