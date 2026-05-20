@@ -112,7 +112,7 @@ test('hydrate: populates store from get_theme_config + get_available_themes + co
     throw new Error(`unexpected command: ${cmd}`)
   })
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
 
   const after = useThemeStore.getState()
   assert.equal(after.activeThemeId, 'nexus-dark')
@@ -151,13 +151,13 @@ test('hydrate: tracks applied variable names so subsequent compute can clear orp
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
   assert.deepEqual(
     [...useThemeStore.getState().appliedVariableNames].sort(),
     ['--a', '--b'],
   )
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
   assert.deepEqual(useThemeStore.getState().appliedVariableNames, ['--a'])
 })
 
@@ -178,7 +178,7 @@ test('setActiveTheme: invokes apply_theme and writes returned variables', async 
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().setActiveTheme(api, 'nexus-light')
+  await useThemeStore.getState().setActiveTheme(api.kernel, 'nexus-light')
 
   const after = useThemeStore.getState()
   assert.equal(after.activeThemeId, 'nexus-light')
@@ -204,7 +204,7 @@ test('setMode: invokes set_mode and updates legacy theme field for non-system mo
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().setMode(api, 'light')
+  await useThemeStore.getState().setMode(api.kernel, 'light')
   assert.equal(useThemeStore.getState().theme, 'light')
   const set = invocations.find((i) => i.commandId === 'set_mode')
   assert.ok(set)
@@ -212,7 +212,7 @@ test('setMode: invokes set_mode and updates legacy theme field for non-system mo
 
   // 'system' mode does not flip the legacy attr — kernel resolves it.
   reset()
-  await useThemeStore.getState().setMode(api, 'system')
+  await useThemeStore.getState().setMode(api.kernel, 'system')
   assert.equal(useThemeStore.getState().theme, 'dark', 'system mode preserves prior local theme')
 })
 
@@ -227,7 +227,7 @@ test('toggleSnippet: invokes toggle_snippet and lets event echo drive state', as
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().toggleSnippet(api, 'snip-x')
+  await useThemeStore.getState().toggleSnippet(api.kernel, 'snip-x')
   // No optimistic update — store waits for the .changed event echo.
   assert.deepEqual(useThemeStore.getState().enabledSnippets, [])
   const tog = invocations.find((i) => i.commandId === 'toggle_snippet')
@@ -256,7 +256,7 @@ test('event echo: a com.nexus.theme.changed notification triggers re-hydrate', a
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
   assert.equal(useThemeStore.getState().activeThemeId, 'nexus-dark')
 
   // Server-side change — equivalent to a `com.nexus.theme.changed`
@@ -264,7 +264,7 @@ test('event echo: a com.nexus.theme.changed notification triggers re-hydrate', a
   configState = { theme_id: 'nexus-light', mode: 'light', enabled_snippets: ['s1'] }
   varsState = { '--bg': '#fff' }
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
   const after = useThemeStore.getState()
   assert.equal(after.activeThemeId, 'nexus-light')
   assert.deepEqual(after.enabledSnippets, ['s1'])
@@ -292,7 +292,7 @@ test('hydrate: populates availableSnippets from get_available_snippets', async (
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
   assert.deepEqual(useThemeStore.getState().availableSnippets, snippets)
 
   // Confirm hydrate actually called get_available_snippets — guards
@@ -315,7 +315,7 @@ test('setSnippetOrder: invokes reorder_snippets with `ids` arg key', async () =>
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().setSnippetOrder(api, ['snip-c', 'snip-a', 'snip-b'])
+  await useThemeStore.getState().setSnippetOrder(api.kernel, ['snip-c', 'snip-a', 'snip-b'])
   // No optimistic update: store waits for the .changed event echo,
   // same convention as toggleSnippet.
   assert.deepEqual(useThemeStore.getState().enabledSnippets, [])
@@ -372,7 +372,7 @@ test('hydrate: pushes persisted selection back to kernel via apply_config', asyn
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
 
   // The persisted selection round-trips through the kernel, proving
   // both that `apply_config` was sent with the persisted snapshot and
@@ -418,7 +418,7 @@ test('hydrate: skips apply_config when no theme has been persisted yet', async (
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().hydrate(api)
+  await useThemeStore.getState().hydrate(api.kernel)
 
   const cmds = invocations.map((i) => i.commandId)
   assert.ok(!cmds.includes('apply_config'))
@@ -435,10 +435,10 @@ test('setMode: tracks kernelMode so the choice persists across restart', async (
     throw new Error(`unexpected: ${cmd}`)
   })
 
-  await useThemeStore.getState().setMode(api, 'system')
+  await useThemeStore.getState().setMode(api.kernel, 'system')
   assert.equal(useThemeStore.getState().kernelMode, 'system')
 
-  await useThemeStore.getState().setMode(api, 'dark')
+  await useThemeStore.getState().setMode(api.kernel, 'dark')
   assert.equal(useThemeStore.getState().kernelMode, 'dark')
 })
 

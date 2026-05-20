@@ -2334,13 +2334,13 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
 
   const handleThemeChange = (id: string) => {
     void run('Apply theme', () =>
-      useThemeStore.getState().setActiveTheme(api!, id),
+      useThemeStore.getState().setActiveTheme(api!.kernel, id),
     )
   }
 
   const handleSnippetToggle = (id: string) => {
     void run('Toggle snippet', () =>
-      useThemeStore.getState().toggleSnippet(api!, id),
+      useThemeStore.getState().toggleSnippet(api!.kernel, id),
     )
   }
 
@@ -2356,7 +2356,7 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
     const next = [...enabledSnippets]
     ;[next[idx], next[swap]] = [next[swap], next[idx]]
     void run('Reorder snippets', () =>
-      useThemeStore.getState().setSnippetOrder(api!, next),
+      useThemeStore.getState().setSnippetOrder(api!.kernel, next),
     )
   }
 

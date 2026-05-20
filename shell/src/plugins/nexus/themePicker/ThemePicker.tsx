@@ -52,7 +52,7 @@ function ThemePickerModal() {
   const kernelMode     = useThemeStore((s) => s.kernelMode)
 
   const applyMode = (mode: ThemeMode) => {
-    void useThemeStore.getState().setMode(getPickerApi(), mode)
+    void useThemeStore.getState().setMode(getPickerApi().kernel, mode)
   }
 
   const onBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -311,7 +311,7 @@ function ThemesTab() {
   }, [focusedIndex])
 
   const applyTheme = (themeId: string) =>
-    void useThemeStore.getState().setActiveTheme(getPickerApi(), themeId)
+    void useThemeStore.getState().setActiveTheme(getPickerApi().kernel, themeId)
 
   const close = useThemePickerStore((s) => s.close)
 
@@ -510,7 +510,7 @@ function SnippetsPanel() {
   )
 
   const toggle = (id: string) =>
-    void useThemeStore.getState().toggleSnippet(getPickerApi(), id)
+    void useThemeStore.getState().toggleSnippet(getPickerApi().kernel, id)
 
   // Move a snippet within the enabled set. `displayIndex` is the index in
   // `enabledOrdered` (reversed cascade). Moving "up" in display = higher
@@ -529,7 +529,7 @@ function SnippetsPanel() {
       next[targetCascadeIndex],
       next[cascadeIndex],
     ]
-    void useThemeStore.getState().setSnippetOrder(getPickerApi(), next)
+    void useThemeStore.getState().setSnippetOrder(getPickerApi().kernel, next)
   }
 
   if (availableSnippets.length === 0) {

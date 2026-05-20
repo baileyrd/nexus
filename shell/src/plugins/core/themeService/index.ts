@@ -40,7 +40,7 @@ export const themeServicePlugin: Plugin = {
     const tryHydrate = async () => {
       if (!(await api.kernel.available())) return
       try {
-        await useThemeStore.getState().hydrate(api)
+        await useThemeStore.getState().hydrate(api.kernel)
       } catch (err) {
         clientLogger.warn(
           '[core.theme-service] hydrate failed; using shell.css defaults',
@@ -68,7 +68,7 @@ export const themeServicePlugin: Plugin = {
         if (topic !== THEME_CHANGED_EVENT) return
         // Re-hydrate. `compute_variables` is cheap and idempotent;
         // the store no-ops if values match.
-        void useThemeStore.getState().hydrate(api)
+        void useThemeStore.getState().hydrate(api.kernel)
       })
     } catch (err) {
       clientLogger.warn(

@@ -23,7 +23,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { PluginAPI } from '../types/plugin'
+import type { KernelAPI } from '../types/plugin'
 import { clientLogger } from '../host/clientLogger'
 
 // Wire shapes — mirror the Rust DTOs in crates/nexus-theme. Kept
@@ -101,14 +101,19 @@ interface ThemeStore {
   appliedVariableNames: string[]
 
   // ── Kernel-driven actions ──────────────────────────────────────────
-  hydrate: (api: PluginAPI) => Promise<void>
-  setActiveTheme: (api: PluginAPI, themeId: string) => Promise<void>
-  setMode: (api: PluginAPI, mode: ThemeMode) => Promise<void>
-  toggleSnippet: (api: PluginAPI, snippetId: string) => Promise<void>
+  //
+  // Phase 4.1 narrowing: each action takes the kernel sub-API
+  // directly, not the full PluginAPI. The only PluginAPI surface
+  // they ever touched was `kernel.invoke(...)`; passing the
+  // narrow `KernelAPI` makes the dep visible at every call site.
+  hydrate: (kernel: KernelAPI) => Promise<void>
+  setActiveTheme: (kernel: KernelAPI, themeId: string) => Promise<void>
+  setMode: (kernel: KernelAPI, mode: ThemeMode) => Promise<void>
+  toggleSnippet: (kernel: KernelAPI, snippetId: string) => Promise<void>
   // Replace the full ordered list of enabled snippet ids. The kernel
   // emits `com.nexus.theme.changed`, the themeService subscriber
   // re-hydrates, and the new cascade lands on :root automatically.
-  setSnippetOrder: (api: PluginAPI, orderedIds: string[]) => Promise<void>
+  setSnippetOrder: (kernel: KernelAPI, orderedIds: string[]) => Promise<void>
   applyResolvedVariables: () => void
 }
 
@@ -182,7 +187,7 @@ export const useThemeStore = create<ThemeStore>()(
       loaded: false,
       appliedVariableNames: [],
 
-      hydrate: async (api: PluginAPI) => {
+      hydrate: async (kernel: KernelAPI) => {
         // Restore the persisted selection into the kernel before
         // reading state back. The kernel's theme plugin only holds
         // in-memory state (`ThemeCorePlugin::with_builtins(...)` in
@@ -195,7 +200,7 @@ export const useThemeStore = create<ThemeStore>()(
         const persisted = get()
         if (persisted.activeThemeId) {
           try {
-            await api.kernel.invoke(THEME_PLUGIN_ID, 'apply_config', {
+            await kernel.invoke(THEME_PLUGIN_ID, 'apply_config', {
               config: {
                 theme_id: persisted.activeThemeId,
                 mode: persisted.kernelMode,
@@ -268,12 +273,12 @@ export const useThemeStore = create<ThemeStore>()(
         get().applyResolvedVariables()
       },
 
-      setActiveTheme: async (api: PluginAPI, themeId: string) => {
+      setActiveTheme: async (kernel: KernelAPI, themeId: string) => {
         // Fire-and-update: the kernel echoes the resulting AppliedTheme
         // so we can apply variables synchronously. The .changed event
         // also fires (and a subscriber will re-hydrate) — that's a
         // safe no-op since the values match.
-        const applied = await api.kernel.invoke<AppliedTheme>(
+        const applied = await kernel.invoke<AppliedTheme>(
           THEME_PLUGIN_ID,
           'apply_theme',
           { id: themeId },
@@ -285,8 +290,8 @@ export const useThemeStore = create<ThemeStore>()(
         get().applyResolvedVariables()
       },
 
-      setMode: async (api: PluginAPI, mode: ThemeMode) => {
-        await api.kernel.invoke(THEME_PLUGIN_ID, 'set_mode', { mode })
+      setMode: async (kernel: KernelAPI, mode: ThemeMode) => {
+        await kernel.invoke(THEME_PLUGIN_ID, 'set_mode', { mode })
         // Track the kernel-side mode separately from the legacy
         // `theme` slot — the legacy field can't represent `'system'`,
         // so persisting it alone would lose the user's choice across
@@ -322,11 +327,11 @@ export const useThemeStore = create<ThemeStore>()(
           typeof active?.category === 'string' ? active.category : undefined
         if (activeCat === desired) return
         const match = themes.find((t) => t.category === desired)
-        if (match) await get().setActiveTheme(api, match.id)
+        if (match) await get().setActiveTheme(kernel, match.id)
       },
 
-      toggleSnippet: async (api: PluginAPI, snippetId: string) => {
-        await api.kernel.invoke<string[]>(THEME_PLUGIN_ID, 'toggle_snippet', {
+      toggleSnippet: async (kernel: KernelAPI, snippetId: string) => {
+        await kernel.invoke<string[]>(THEME_PLUGIN_ID, 'toggle_snippet', {
           id: snippetId,
         })
         // The .changed event will re-hydrate variables; nothing else
@@ -335,7 +340,7 @@ export const useThemeStore = create<ThemeStore>()(
         // truth and we'd rather avoid a flicker if it differs.
       },
 
-      setSnippetOrder: async (api: PluginAPI, orderedIds: string[]) => {
+      setSnippetOrder: async (kernel: KernelAPI, orderedIds: string[]) => {
         // Wire arg name is `ids` (not `ordered_ids`) — see
         // `ReorderSnippetsArgs` in `crates/nexus-theme/src/core_plugin.rs`.
         // The kernel emits `com.nexus.theme.changed` after applying;
@@ -343,7 +348,7 @@ export const useThemeStore = create<ThemeStore>()(
         // local state optimistically: a server-side validation reject
         // (unknown id) would otherwise leave the UI temporarily
         // showing an order the kernel never accepted.
-        await api.kernel.invoke<string[]>(THEME_PLUGIN_ID, 'reorder_snippets', {
+        await kernel.invoke<string[]>(THEME_PLUGIN_ID, 'reorder_snippets', {
           ids: orderedIds,
         })
       },
