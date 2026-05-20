@@ -95,6 +95,19 @@ export interface PluginManifest {
    * Mirrors `PLUGIN_API_VERSION` from `@nexus/extension-api` (WI-33).
    */
   apiVersion?: number
+  /**
+   * Plugin ids this plugin requires to be active before it activates.
+   * Accepts two kinds of id:
+   *   - Shell plugin ids (`core.*`, `nexus.*`, `community.*`) — the
+   *     ExtensionHost ensures these are activated first; missing or
+   *     failed deps fail this plugin's activation.
+   *   - Kernel plugin ids (`com.nexus.*`) — documentation of cross-tier
+   *     coupling. The kernel loads every core plugin synchronously in
+   *     `register_all` before the shell mounts, so these are always
+   *     available when the shell activates. The host recognises the
+   *     prefix and skips the shell-registry lookup — kernel-side
+   *     enforcement is in `crates/nexus-plugins/src/loader.rs::check_dependencies`.
+   */
   dependsOn?: string[]
   contributes?: PluginContributions
   /**

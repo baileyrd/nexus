@@ -119,8 +119,20 @@ export class ExtensionHost {
     if (state === 'activating')  return  // circular — handled by topological sort
     if (state === 'error')       return  // failed — won't retry
 
-    // Ensure all dependencies are active first
+    // Ensure all dependencies are active first.
+    //
+    // BL-XXX Phase 3.2 — `dependsOn` accepts both shell plugin ids
+    // (`core.*` / `nexus.*` / `community.*`) and kernel-plugin ids
+    // (`com.nexus.*`). Kernel ids are documentation of cross-tier
+    // coupling: the kernel loads every core plugin synchronously in
+    // `register_all` before the shell mounts, so if `kernel.available()`
+    // is true (a precondition for shell boot) every declared kernel
+    // dep is already loaded. We recognise the prefix here and skip
+    // the shell-registry lookup; activation order across the tiers
+    // is enforced by the kernel side (see
+    // crates/nexus-plugins/src/loader.rs::check_dependencies).
     for (const depId of plugin.manifest.dependsOn ?? []) {
+      if (depId.startsWith('com.nexus.')) continue
       const dep = this.plugins.get(depId)
       if (!dep) {
         this.fail(id, new Error(
