@@ -476,6 +476,15 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/bookmarks').then(m => m.bookmarksPlugin),
   },
   {
+    id: 'nexus.noteContext', name: 'Note Context',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.rightPanel'],
+    description:
+      'Phase 4.3 — single right-panel accordion showing the active note\'s backlinks, outgoing links, tags, and a per-file graph. Default-off during the multi-step rollout (sibling plugins nexus.backlinks / nexus.outgoingLinks / nexus.tags stay live until step 6); enable manually to preview.',
+    load: () => import('./nexus/noteContext').then(m => m.noteContextPlugin),
+  },
+  {
     id: 'nexus.healthPanel', name: 'Kernel Health',
     version: '0.1.0', core: false,
     activationEvents: ['onCommand:nexus.healthPanel.focus', 'onView:health-panel'],
