@@ -11,7 +11,7 @@ use nexus_git::GitCorePlugin;
 use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 
-use super::{core_manifest_with_ipc, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
 
 pub(super) fn register(
     loader: &mut PluginLoader,
@@ -20,7 +20,7 @@ pub(super) fn register(
 ) -> Result<()> {
     loader
         .register_core(
-            core_manifest_with_ipc(
+            core_manifest_with_ipc_and_deps(
                 "com.nexus.git",
                 "Git",
                 LifecycleFlags {
@@ -29,6 +29,7 @@ pub(super) fn register(
                     on_stop: true,
                 },
                 &with_v1_aliases(nexus_git::core_plugin::IPC_HANDLERS),
+                nexus_git::core_plugin::MANIFEST_DEPS,
             ),
             forge_root,
             Box::new(GitCorePlugin::new(

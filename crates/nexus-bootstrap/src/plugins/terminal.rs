@@ -16,7 +16,7 @@ use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 use nexus_terminal::TerminalCorePlugin;
 
-use super::{core_manifest_with_ipc, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
 
 pub(super) fn register(
     loader: &mut PluginLoader,
@@ -105,11 +105,12 @@ pub(super) fn register(
     let terminal_plugin = terminal_plugin.with_event_bus(Arc::clone(event_bus));
     loader
         .register_core(
-            core_manifest_with_ipc(
+            core_manifest_with_ipc_and_deps(
                 "com.nexus.terminal",
                 "Terminal",
                 LifecycleFlags::NONE,
                 &with_v1_aliases(nexus_terminal::IPC_HANDLERS),
+                nexus_terminal::core_plugin::MANIFEST_DEPS,
             ),
             forge_root,
             Box::new(terminal_plugin),

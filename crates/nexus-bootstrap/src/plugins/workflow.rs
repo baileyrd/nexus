@@ -12,7 +12,7 @@ use nexus_workflow::WorkflowCorePlugin;
 
 use crate::{load_digest_config, load_webhook_config};
 
-use super::{core_manifest_with_ipc, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
 
 pub(super) fn register(
     loader: &mut PluginLoader,
@@ -22,11 +22,12 @@ pub(super) fn register(
     let workflows_dir = forge_root.join(".workflows");
     loader
         .register_core(
-            core_manifest_with_ipc(
+            core_manifest_with_ipc_and_deps(
                 "com.nexus.workflow",
                 "Workflow",
                 LifecycleFlags::NONE,
                 &with_v1_aliases(nexus_workflow::core_plugin::IPC_HANDLERS),
+                nexus_workflow::core_plugin::MANIFEST_DEPS,
             ),
             forge_root,
             Box::new(WorkflowCorePlugin::open_full(

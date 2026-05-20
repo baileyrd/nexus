@@ -216,6 +216,10 @@ pub const HANDLER_DISCARD_HUNKS: u32 = 37;
 /// existing `diff_file`/`blame` surfaces.
 pub const HANDLER_FILE_LOG: u32 = 38;
 
+/// Plugin ids this plugin requires already loaded — `nexus-security`
+/// provides the capability + credential types this crate uses.
+pub const MANIFEST_DEPS: &[&str] = &["com.nexus.security"];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::git::register`. Order
 /// matches the pre-SD-06 bootstrap registration so the emitted

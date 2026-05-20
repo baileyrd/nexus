@@ -33,6 +33,11 @@ pub const HANDLER_SYNTHESIZE: u32 = 2;
 /// Handler id for `status`. No args; reply [`AudioStatusResult`].
 pub const HANDLER_STATUS: u32 = 3;
 
+/// Plugin ids this plugin invokes at handler-dispatch time. `ai` is
+/// the credentials backstop the `provider` backend uses for OPENAI_API_KEY
+/// resolution (see `provider_backend::AudioProviderBackend`).
+pub const MANIFEST_DEPS: &[&str] = &["com.nexus.ai"];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::audio::register`.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[

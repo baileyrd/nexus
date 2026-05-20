@@ -112,6 +112,17 @@ pub const HANDLER_TEMPLATES_INIT: u32 = 10;
 /// `[{ name, expression, next_fire_at: RFC3339 | null }]`.
 pub const HANDLER_NEXT_FIRE: u32 = 12;
 
+/// Plugin ids this plugin reaches at handler-dispatch time. `terminal`
+/// is intentionally omitted — it loads AFTER workflow in `register_all`,
+/// so the `run_saved` / `list_sessions` calls happen only at workflow
+/// step execution (long after boot), not at load.
+pub const MANIFEST_DEPS: &[&str] = &[
+    "com.nexus.storage",
+    "com.nexus.ai",
+    "com.nexus.ai.runtime",
+    "com.nexus.notifications",
+];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::workflow::register`.
 /// Order matches the pre-SD-06 bootstrap registration.

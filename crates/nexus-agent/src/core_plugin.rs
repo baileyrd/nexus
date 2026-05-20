@@ -127,6 +127,20 @@ pub const HANDLER_DELEGATE: u32 = 24;
 /// BL-121 — `search_transcripts`.
 pub const HANDLER_SEARCH_TRANSCRIPTS: u32 = 25;
 
+/// Plugin ids this plugin invokes during planning + tool dispatch.
+/// `mcp.host` is intentionally omitted — it loads after agent in
+/// `register_all`, so its dynamic tool fan-out happens once both
+/// plugins are alive but cannot be declared as a load-time dep.
+/// `skills` forms a runtime cycle with this crate (see DEPENDENCIES.md
+/// §6); both have to be present to fully function.
+pub const MANIFEST_DEPS: &[&str] = &[
+    "com.nexus.storage",
+    "com.nexus.ai.runtime",
+    "com.nexus.ai",
+    "com.nexus.skills",
+    "com.nexus.notifications",
+];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::agent::register`.
 /// Order matches the pre-SD-06 bootstrap registration.

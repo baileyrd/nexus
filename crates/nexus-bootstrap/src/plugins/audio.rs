@@ -14,7 +14,7 @@ use nexus_audio::AudioCorePlugin;
 use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 
-use super::{core_manifest_with_ipc, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
 
 pub(super) fn register(
     loader: &mut PluginLoader,
@@ -23,7 +23,7 @@ pub(super) fn register(
 ) -> Result<()> {
     loader
         .register_core(
-            core_manifest_with_ipc(
+            core_manifest_with_ipc_and_deps(
                 "com.nexus.audio",
                 "Audio",
                 LifecycleFlags {
@@ -32,6 +32,7 @@ pub(super) fn register(
                     on_stop: false,
                 },
                 &with_v1_aliases(nexus_audio::core_plugin::IPC_HANDLERS),
+                nexus_audio::core_plugin::MANIFEST_DEPS,
             ),
             forge_root,
             Box::new(AudioCorePlugin::new(forge_root.to_path_buf())),

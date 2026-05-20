@@ -272,6 +272,12 @@ pub const HANDLER_OPEN_EXCERPTS: u32 = 14;
 /// re-renders.
 pub const HANDLER_REFRESH_EXCERPTS: u32 = 15;
 
+/// Plugin ids this plugin invokes at handler-dispatch time. The
+/// `register_all` boot order in `nexus-bootstrap` guarantees these are
+/// already loaded; declaring them here makes the coupling explicit and
+/// gives the loader's `check_dependencies` something to enforce.
+pub const MANIFEST_DEPS: &[&str] = &["com.nexus.storage", "com.nexus.database"];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::editor::register`.
 /// Order matches the pre-SD-06 bootstrap registration so the emitted

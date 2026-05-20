@@ -7,7 +7,7 @@ use nexus_ai::AiCorePlugin;
 use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 
-use super::{core_manifest_with_ipc, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
 
 pub(super) fn register(
     loader: &mut PluginLoader,
@@ -16,7 +16,7 @@ pub(super) fn register(
 ) -> Result<()> {
     loader
         .register_core(
-            core_manifest_with_ipc(
+            core_manifest_with_ipc_and_deps(
                 "com.nexus.ai",
                 "AI",
                 LifecycleFlags {
@@ -30,6 +30,7 @@ pub(super) fn register(
                     ..LifecycleFlags::NONE
                 },
                 &with_v1_aliases(nexus_ai::core_plugin::IPC_HANDLERS),
+                nexus_ai::core_plugin::MANIFEST_DEPS,
             ),
             forge_root,
             Box::new(AiCorePlugin::new()),

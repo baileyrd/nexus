@@ -232,6 +232,16 @@ pub const HANDLER_INFER_ENTITY_RELATIONS: u32 = 25;
 /// back to a chat-shaped FIM prompt for OpenAI / Anthropic.
 pub const HANDLER_PREDICT: u32 = 26;
 
+/// Plugin ids this plugin requires already loaded. `ai-runtime` is
+/// hard — `wire_context` grabs the shared tokio worker-pool handle
+/// the runtime publishes. `storage` underwrites every RAG / vector
+/// call. `security` provides credential + TLS pin types.
+pub const MANIFEST_DEPS: &[&str] = &[
+    "com.nexus.security",
+    "com.nexus.storage",
+    "com.nexus.ai.runtime",
+];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::ai::register`. Order
 /// matches the pre-SD-06 bootstrap registration so the emitted

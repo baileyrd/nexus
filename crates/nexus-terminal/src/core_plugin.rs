@@ -271,6 +271,12 @@ pub const HANDLER_REPL_STOP: u32 = 28;
 /// here.
 pub const HANDLER_REPL_LIST: u32 = 29;
 
+/// Plugin ids this plugin calls at handler-dispatch time. Soft —
+/// `stream_chat` is only used by the inline-suggest path, which
+/// gracefully degrades when `com.nexus.ai` is absent — but
+/// `register_all` always loads ai first, so we can declare it.
+pub const MANIFEST_DEPS: &[&str] = &["com.nexus.ai"];
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::terminal::register`.
 /// Order matches the pre-SD-06 bootstrap registration so the emitted

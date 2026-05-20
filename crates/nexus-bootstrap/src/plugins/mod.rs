@@ -115,6 +115,24 @@ pub(crate) fn core_manifest_with_ipc<S: AsRef<str>>(
     lc: LifecycleFlags,
     ipc_commands: &[(S, u32)],
 ) -> PluginManifest {
+    core_manifest_with_ipc_and_deps(id, name, lc, ipc_commands, &[])
+}
+
+/// Generate a core-plugin manifest with IPC command registrations and
+/// declared inter-plugin dependencies.
+///
+/// Each entry in `deps` is the reverse-DNS id of another core plugin
+/// that must already be loaded when this plugin loads — the loader's
+/// `check_dependencies` enforces this against the
+/// [`register_all`] order at boot. Version is left as `"*"` because
+/// every in-tree core plugin currently ships at the same version.
+pub(crate) fn core_manifest_with_ipc_and_deps<S: AsRef<str>>(
+    id: &str,
+    name: &str,
+    lc: LifecycleFlags,
+    ipc_commands: &[(S, u32)],
+    deps: &[&str],
+) -> PluginManifest {
     let mut toml = format!(
         r#"
 [plugin]
@@ -140,6 +158,13 @@ on_stop = {stop}
             toml,
             "\n[[registrations.ipc_command]]\nid = \"{cmd_id}\"\nhandler_id = {handler_id}\n"
         );
+    }
+    if !deps.is_empty() {
+        use std::fmt::Write as _;
+        toml.push_str("\n[dependencies]\n");
+        for dep_id in deps {
+            let _ = writeln!(toml, "\"{dep_id}\" = \"*\"");
+        }
     }
     parse_manifest(&toml, "bootstrap.toml")
         .unwrap_or_else(|e| panic!("bootstrap manifest for {id} failed to parse: {e}"))
