@@ -7,7 +7,7 @@ Companion to [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §Phase 5. Each 
 | Item  | Topic                              | Resolution                          | Lands in            |
 |-------|------------------------------------|-------------------------------------|---------------------|
 | 5.1   | Ship or cut `com.nexus.acp`        | **Keep as experimental**            | This commit (doc + crate header) |
-| 5.2   | `com.nexus.audio` local default    | **Open** — needs product call       | Documented, not changed |
+| 5.2   | `com.nexus.audio` local default    | **Platform default**                | This commit             |
 | 5.3   | `com.nexus.dap` / `com.nexus.lsp`  | **Both keep — original concern was wrong** | This commit (doc only) |
 | 5.4   | `agent ↔ skills` cycle intent      | **Intentional cycle — documented**  | Phase 4.9 (`635ac11c`) |
 | 5.5   | Drop or repurpose `nexus.sidebar`  | **Dropped**                         | Phase 2 (`cbc6871f`) |
@@ -46,9 +46,9 @@ Companion to [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §Phase 5. Each 
 3. **Build the shipping release with `local-whisper` enabled** — the original BL-117 intent. Adds binary size + model-download UX. Requires audit of the Whisper licence + redistribution.
 4. **Keep `Local` default and improve the error message** — current behaviour; cheap but bad first impression.
 
-**Resolution:** **Deferred — needs product call.** Each option trades off a different axis (binary size vs setup friction vs feature parity). The engineering team can land any of them in <30 minutes once the choice is made.
+**Resolution: Platform default.** Both `stt_backend` and `tts_backend` defaults flipped from `Local` to `Platform` in `AudioConfig::default()` (`crates/nexus-audio/src/config.rs:128-129`). Rationale: of the three backends, Platform has the lightest setup ask — no API key, no model download, no cargo-feature build. The Rust side still ships a stub, but the `nexus.audio` shell plugin contributes a Web Speech adapter at runtime via BL-113, so once a user enables that plugin, audio works without any further configuration. Operators on backed-up internet or who prefer on-device transcription can still flip `[audio] stt_backend = "local"` (with a `local-whisper` build) or `"provider"` (with `OPENAI_API_KEY`).
 
-If no decision is made, **recommendation:** option 1 (Platform default). Web Speech is the only backend that works with zero setup AND zero build-time changes; users on backed-up internet or who prefer on-device can still flip to `Provider` or build with `local-whisper`.
+Doc comment on `AudioBackendName::Platform` and the `AudioConfig` struct updated to reflect the new default. Test `load_returns_defaults_when_no_config_file` (line 311-315) asserts Platform. `forge-config.md` sample TOML updated.
 
 ## 5.3 — `com.nexus.dap` / `com.nexus.lsp`: both have consumers, keep
 
@@ -115,8 +115,7 @@ The IPC seam is for cross-PLUGIN dispatch, not cross-CRATE library reuse. `nexus
 
 ## What remains genuinely open
 
-- **5.2** — audio default backend (product call).
 - **4.3** — links-panel consolidation (UX direction, per above).
 - **4.1 (4 remaining singletons)** — module-scope singletons in `searchRuntime`, `recallApi`, `themePicker`, `pickerRuntime`. On Phase 4.1a inspection, 3 of these turned out to be reasonable patterns and 1 (`themePicker`) has a wider blast radius than the prototype handled. Captured in the Phase 4.1a commit message and the session summary.
 
-These three are documented with options + recommendations so a decision-maker can act in minutes rather than re-do the analysis.
+These two are documented with options + recommendations so a decision-maker can act in minutes rather than re-do the analysis.

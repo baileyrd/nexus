@@ -155,8 +155,8 @@ Shared TOML file read by several subsystems for blocks they own. Each block is o
 
 ```toml
 [audio]                                                 # AudioConfig — crates/nexus-audio/src/config.rs:64
-stt_backend = "local"                                   # "local" | "provider" | "platform"
-tts_backend = "local"
+stt_backend = "platform"                                # "local" | "provider" | "platform" (default: platform)
+tts_backend = "platform"
 local_model_size = "base.en"
 local_model_dir = "/abs/path"                           # default: <forge>/.forge/.audio/models
 provider_api_key = ""                                   # falls back to OPENAI_API_KEY

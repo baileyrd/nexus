@@ -2,10 +2,14 @@
 //!
 //! BL-117 STT + TTS subsystem. `on_init` loads the
 //! `<forge>/.forge/config.toml::[audio]` block and builds the
-//! configured backend pair (local / provider / platform). The
-//! shipped build stubs `local` + `platform` so a forge without
-//! an `OPENAI_API_KEY` surfaces a clear "backend not enabled"
-//! error from the first dispatch rather than a panic.
+//! configured backend pair (local / provider / platform). Default
+//! is `platform` (Web Speech) — the lightest setup ask of the three
+//! backends; the Rust side ships a stub that the `nexus.audio` shell
+//! plugin replaces at runtime via the BL-113 contribution path. When
+//! the shell plugin isn't enabled, the first dispatch surfaces a
+//! clear `BackendNotEnabled` error rather than a panic, mirroring
+//! the behaviour of the `local` stub (without the `local-whisper`
+//! cargo feature) and the `provider` backend (without an API key).
 
 use std::sync::Arc;
 

@@ -19,14 +19,20 @@ use crate::AudioError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AudioBackendName {
-    /// On-device Whisper / Piper. Default per BL-117 — but the
-    /// shipped build stubs this out behind the `local-whisper` cargo
-    /// feature; flip the config to `provider` if you haven't built
-    /// with the feature on.
+    /// On-device Whisper / Piper. Shipped build stubs this out behind
+    /// the `local-whisper` cargo feature — set the config to `local`
+    /// only when running a build that opts into that feature.
     Local,
-    /// Delegate to the configured AI provider (OpenAI today).
+    /// Delegate to the configured AI provider (OpenAI today). Needs
+    /// `OPENAI_API_KEY` (or `[audio] provider_api_key`).
     Provider,
-    /// Shell-side Web Speech API (BL-118).
+    /// Shell-side Web Speech API (BL-118). Default — the Rust side
+    /// ships a stub that the `nexus.audio` shell plugin replaces at
+    /// runtime via the BL-113 contribution path. Works once the
+    /// shell plugin is enabled; until then any dispatch returns
+    /// `BackendNotEnabled` like the other backends. Chosen as the
+    /// shipping default because it has the lightest setup ask of the
+    /// three (no API key, no model download, no cargo-feature build).
     Platform,
 }
 
@@ -58,8 +64,10 @@ impl AudioBackendName {
 }
 
 /// Resolved audio config. Loaded from `<forge>/.forge/config.toml`'s
-/// `[audio]` block; defaults are conservative (`local` for both,
-/// `base.en` whisper model size).
+/// `[audio]` block; defaults are conservative (`platform` for both —
+/// the Web Speech adapter contributed by the `nexus.audio` shell
+/// plugin — and `base.en` whisper model size for when operators
+/// flip to `local` on a `local-whisper`-built binary).
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
     /// Backend handling `transcribe` requests.
@@ -124,8 +132,8 @@ pub const DEFAULT_WHISPER_MODEL_URL_TEMPLATE: &str =
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
-            stt_backend: AudioBackendName::Local,
-            tts_backend: AudioBackendName::Local,
+            stt_backend: AudioBackendName::Platform,
+            tts_backend: AudioBackendName::Platform,
             local_model_size: "base.en".to_string(),
             local_model_dir: PathBuf::from(".forge/.audio/models"),
             tls_pinning_enabled: false,
@@ -302,8 +310,8 @@ mod tests {
     fn load_returns_defaults_when_no_config_file() {
         let dir = tempdir().unwrap();
         let cfg = AudioConfig::load(dir.path()).unwrap();
-        assert_eq!(cfg.stt_backend, AudioBackendName::Local);
-        assert_eq!(cfg.tts_backend, AudioBackendName::Local);
+        assert_eq!(cfg.stt_backend, AudioBackendName::Platform);
+        assert_eq!(cfg.tts_backend, AudioBackendName::Platform);
         assert_eq!(cfg.local_model_size, "base.en");
     }
 
