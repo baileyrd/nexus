@@ -44,7 +44,7 @@ export const basesPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace'],
+    dependsOn: ['nexus.workspace', 'com.nexus.storage', 'com.nexus.database'],
     contributes: {
       commands: [
         {

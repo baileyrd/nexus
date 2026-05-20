@@ -90,6 +90,10 @@ export const semanticSearchPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    // Functionally requires both — storage owns the corpus, ai owns
+    // the embedding model. Activate-time api.kernel.available checks
+    // still cover the case where the kernel itself is down.
+    dependsOn: ['com.nexus.storage', 'com.nexus.ai'],
     contributes: {
       commands: [
         {

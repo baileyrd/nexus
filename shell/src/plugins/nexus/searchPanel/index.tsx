@@ -49,6 +49,7 @@ export const searchPanelPlugin: Plugin = {
     // Lazy activation — only when the user invokes the command or
     // the workspace hydrates a leaf of this type.
     activationEvents: [`onCommand:${COMMAND_FOCUS}`, `onView:${VIEW_TYPE}`],
+    dependsOn: ['com.nexus.storage'],
     contributes: {
       commands: [
         {

@@ -142,7 +142,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'nexus.gitStatus', name: 'Git Status',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.workspace', 'nexus.statusBar'],
+    dependsOn: ['nexus.workspace', 'nexus.statusBar', 'com.nexus.git'],
     description: "Status bar branch + dirty indicator for the forge's git repository.",
     load: () => import('./nexus/gitStatus').then(m => m.gitStatusPlugin),
   },
@@ -150,7 +150,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'nexus.gitPanel', name: 'Git Panel',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.gitStatus'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.gitStatus', 'com.nexus.git'],
     description: 'Source control sidebar — staged/unstaged files, commit UI, branch picker, and commit log.',
     load: () => import('./nexus/gitPanel').then(m => m.gitPanelPlugin),
   },
@@ -198,14 +198,17 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.files', name: 'Files',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'com.nexus.storage'],
     description: 'File-tree explorer with create / rename / move / delete and drag-and-drop.',
     load: () => import('./nexus/files').then(m => m.filesPlugin),
   },
   {
     id: 'nexus.editor', name: 'Editor',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.files', 'nexus.comments'],
+    dependsOn: [
+      'nexus.workspace', 'nexus.files', 'nexus.comments',
+      'com.nexus.storage', 'com.nexus.git', 'com.nexus.editor', 'com.nexus.ai',
+    ],
     description: 'CodeMirror-based markdown editor with live preview, snippets and link-aware extensions.',
     load: () => import('./nexus/editor').then(m => m.editorPlugin),
   },
@@ -304,7 +307,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'nexus.themePicker', name: 'Theme Picker',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['core.theme-service', 'nexus.activityBar'],
+    dependsOn: ['core.theme-service', 'nexus.activityBar', 'com.nexus.theme'],
     description: 'Browse and apply colour themes — Ctrl+Shift+T opens the picker overlay.',
     load: () => import('./nexus/themePicker').then(m => m.themePickerPlugin),
   },
@@ -312,6 +315,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.search', name: 'Search',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'com.nexus.storage'],
     description: 'Full-text search across the forge with path:, tag: and prop: operators.',
     load: () => import('./nexus/search').then(m => m.searchPlugin),
   },
@@ -326,6 +330,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.bases', name: 'Bases',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'com.nexus.storage', 'com.nexus.database'],
     description: 'Database-style table views over notes, filtered by frontmatter properties.',
     load: () => import('./nexus/bases').then(m => m.basesPlugin),
   },
@@ -361,6 +366,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.semanticSearch', name: 'Semantic Search',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.storage', 'com.nexus.ai'],
     description: 'Embedding-based search across the forge — find notes by meaning, not keyword.',
     load: () => import('./nexus/semanticSearch').then(m => m.semanticSearchPlugin),
   },
@@ -428,6 +434,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.terminal', name: 'Terminal',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'com.nexus.terminal'],
     description: 'Embedded shell tabs running inside the panel area, scoped to the forge directory.',
     load: () => import('./nexus/terminal').then(m => m.terminalPlugin),
   },
@@ -486,6 +493,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     id: 'nexus.searchPanel', name: 'Search in Files',
     version: '0.1.0', core: false,
     activationEvents: ['onCommand:nexus.searchPanel.focus', 'onView:search-panel'],
+    dependsOn: ['com.nexus.storage'],
     description:
       'BL-078 — multi-file find / replace across the forge. Plain-text, regex, case-sensitive, and whole-word; results grouped by file with click-to-open and per-file or workspace-wide replace.',
     load: () => import('./nexus/searchPanel').then(m => m.searchPanelPlugin),

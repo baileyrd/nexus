@@ -20,7 +20,7 @@ export const gitPanelPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.gitStatus'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.gitStatus', 'com.nexus.git'],
     contributes: {
       commands: [
         { id: COMMAND_FOCUS, title: 'Focus Git Panel', category: 'Git' },

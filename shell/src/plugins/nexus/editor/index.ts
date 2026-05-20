@@ -233,7 +233,16 @@ export const editorPlugin: Plugin = {
     // structural imports require the source plugins to be loaded
     // before us. The dependency chain also keeps boot order sensible
     // (workspace → sidebar → files → comments → editor).
-    dependsOn: ['nexus.workspace', 'nexus.files', 'nexus.comments'],
+    dependsOn: [
+      'nexus.workspace',
+      'nexus.files',
+      'nexus.comments',
+      // Kernel-tier deps (BL-XXX Phase 3.2 — see types/plugin.ts).
+      'com.nexus.storage',
+      'com.nexus.git',
+      'com.nexus.editor',
+      'com.nexus.ai',
+    ],
     contributes: {
       commands: [
         { id: COMMAND_CLOSE_TAB, title: 'Close Tab', category: 'Editor' },

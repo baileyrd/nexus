@@ -19,9 +19,7 @@ export const themePickerPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    // BL-XXX — was previously declared only in catalog.ts; matched here
-    // so the plugin's own manifest is the single source of truth.
-    dependsOn: ['core.theme-service', 'nexus.activityBar'],
+    dependsOn: ['core.theme-service', 'nexus.activityBar', 'com.nexus.theme'],
     contributes: {
       commands: [
         {

@@ -28,7 +28,7 @@ export const searchPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'com.nexus.storage'],
     contributes: {
       configuration: {
         pluginId: 'nexus.search',
