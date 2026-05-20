@@ -93,9 +93,9 @@ Not strictly a Phase 5 item, but the same "needs direction" tag applies. Capture
 
 **Revised recommendation: smaller scope, do later when there's UX direction.**
 
-What's worth doing **now** (small, low-risk):
-- Extract the shared "active-file subscriber with request-id guard + kernel.available gate" pattern into a tiny shared helper (e.g. `shell/src/plugins/nexus/_lib/activeFileLoader.ts`). Each of the 4 plugins replaces ~50 lines of duplicated wiring with 4–5 lines of helper invocation. Pure refactor, behavior-preserving, ~200 lines removed across the 4 plugins.
-- Each plugin keeps its own manifest, view, kernel calls, store — nothing user-visible changes.
+What's worth doing **now** — **done** (commit `24ae8958`):
+- Extracted the shared in-component "fetch on active-file change with React-style cancellation" pattern into `shell/src/plugins/nexus/_lib/useActiveFileQuery.ts`. Refactored `nexus.outgoingLinks` and `nexus.tags` (the two plugins that used that pattern; `nexus.backlinks` and `nexus.graph` use a different plugin-level subscriber pattern and stay as-is).
+- Net: ~150 lines of duplicated wiring replaced with ~10 lines of hook invocation each; new hook is ~100 lines including comments. Behaviour preserved.
 
 What to **defer** until product can weigh in:
 - Whether to collapse the 4 right-panel tabs into a single `nexus.links` tabbed entry. The visible UX delta is small (already tabs) and the layout question — should this be a horizontal tab strip, a segmented control, or stay as parallel tabs? — is a design call.
