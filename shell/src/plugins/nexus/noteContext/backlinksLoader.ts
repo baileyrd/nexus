@@ -10,15 +10,18 @@
 // The legacy `nexus.backlinks` plugin owned this subscriber. After
 // the Phase 4.3 merge, it lives here.
 //
-// What's NOT in this module:
+// BL-049 phase 4 — when the store's `blockFilter` is set, the load
+// path switches from the `backlinks` IPC to `backlinks_to_block`.
+// Toggling the filter re-runs the load with the new mode. Switching
+// to a different file clears the filter (a block id from file A is
+// meaningless against file B's inbound table).
+//
+// What's NOT in this module yet:
 //   - On-edit silent refresh (subscribing to editor session changes
 //     and re-running load without a loading flash). Lands in a
 //     follow-up commit; legacy code itself flagged the in-process
 //     refresh as "largely a no-op" because editing file A doesn't
 //     change its incoming backlinks.
-//   - Block-filter mode (BL-049 phase 4 — toggle between `backlinks`
-//     and `backlinks_to_block` IPCs). Lands in a follow-up commit;
-//     the data store will gain a `blockFilter` field at that point.
 
 import type { PluginAPI } from '../../../types/plugin'
 import { useEditorStore } from '../editor/editorStore'
@@ -26,6 +29,9 @@ import { useBacklinksDataStore, type Backlink } from './backlinksDataStore'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 const BACKLINKS_COMMAND = 'backlinks'
+/** BL-049 phase 4 — handler is registered as `backlinks_to_block` in
+ *  nexus-bootstrap (delegates to `KnowledgeGraph::backlinks_to_block`). */
+const BACKLINKS_TO_BLOCK_COMMAND = 'backlinks_to_block'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 interface KernelBacklink {
@@ -107,11 +113,18 @@ export function startBacklinksLoader(api: PluginAPI): void {
     }
 
     try {
-      const raw = await api.kernel.invoke<KernelBacklink[]>(
-        STORAGE_PLUGIN_ID,
-        BACKLINKS_COMMAND,
-        { path: relpath },
-      )
+      const blockFilter = useBacklinksDataStore.getState().blockFilter
+      const raw = blockFilter
+        ? await api.kernel.invoke<KernelBacklink[]>(
+            STORAGE_PLUGIN_ID,
+            BACKLINKS_TO_BLOCK_COMMAND,
+            { path: relpath, block_id: blockFilter },
+          )
+        : await api.kernel.invoke<KernelBacklink[]>(
+            STORAGE_PLUGIN_ID,
+            BACKLINKS_COMMAND,
+            { path: relpath },
+          )
       if (requestId !== currentRequestId) return
       store.setLinks(decode(raw, relpath))
       store.setLoading(false)
@@ -124,10 +137,22 @@ export function startBacklinksLoader(api: PluginAPI): void {
     }
   }
 
-  // React to editor tab switches.
+  // React to editor tab switches. A different file invalidates the
+  // active block filter (a UUID stamped in file A doesn't apply to
+  // file B's inbound table).
   useEditorStore.subscribe((state, prev) => {
     if (state.activeRelpath !== prev.activeRelpath) {
+      const cur = useBacklinksDataStore.getState()
+      if (cur.blockFilter !== null) cur.setBlockFilter(null)
       void load(state.activeRelpath)
+    }
+  })
+
+  // React to block-filter toggling — re-issue the load against the
+  // same file with the new mode.
+  useBacklinksDataStore.subscribe((state, prev) => {
+    if (state.blockFilter !== prev.blockFilter && state.currentRelpath) {
+      void load(state.currentRelpath)
     }
   })
 

@@ -16,8 +16,10 @@
 //   - `RightPanelFooter.tsx`           — reads links.length / loading
 //   - `statusBar/FileStats.tsx`        — same
 //
-// Block-filter mode (BL-049 phase 4) is not modelled here yet — a
-// follow-up commit will add it once basic count parity is restored.
+// BL-049 phase 4 — when `blockFilter` is set, the loader switches
+// from the `backlinks` IPC to `backlinks_to_block` with the same
+// path and an extra `block_id` arg. Clearing the filter (back to
+// `null`) reverts to the unfiltered call.
 
 import { create } from 'zustand'
 
@@ -45,11 +47,18 @@ interface BacklinksDataState {
   loading: boolean
   /** Human-readable error string when the last load failed, else null. */
   error: string | null
+  /** BL-049 phase 4 — when set, narrows the kernel call to
+   *  `backlinks_to_block` with this block id (no leading `^`).
+   *  Cleared by clicking the active-filter chip's `×`, by switching
+   *  to a different file, or by closing the workspace. `null` means
+   *  "show every backlink to the current file." */
+  blockFilter: string | null
 
   setCurrent(relpath: string | null): void
   setLinks(ls: Backlink[]): void
   setLoading(b: boolean): void
   setError(e: string | null): void
+  setBlockFilter(blockId: string | null): void
   /** Reset everything — used on workspace close. */
   clear(): void
 }
@@ -59,10 +68,18 @@ export const useBacklinksDataStore = create<BacklinksDataState>((set) => ({
   links: [],
   loading: false,
   error: null,
+  blockFilter: null,
   setCurrent: (currentRelpath) => set({ currentRelpath }),
   setLinks: (links) => set({ links }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
+  setBlockFilter: (blockFilter) => set({ blockFilter }),
   clear: () =>
-    set({ currentRelpath: null, links: [], loading: false, error: null }),
+    set({
+      currentRelpath: null,
+      links: [],
+      loading: false,
+      error: null,
+      blockFilter: null,
+    }),
 }))
