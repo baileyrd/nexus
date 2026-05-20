@@ -91,17 +91,27 @@ Not strictly a Phase 5 item, but the same "needs direction" tag applies. Capture
 
 3. **Implementation cost is high relative to benefit.** Each plugin has its own zustand store, request-id race guard, kernel-availability guard, active-file subscriber, and on-change refresh hook. Total ~1,600 LOC across 7 files (`outgoingLinks/index.tsx` 184, `tags/index.tsx` 226, `backlinks/{index.ts, BacklinksView.tsx}` 623, `graph/{index.ts, GraphView.tsx, GraphPaneView.tsx}` 571). A merge that preserves behavior means re-implementing all of that subscriber wiring in one plugin — substantial regression surface for 4 default-off features at once.
 
-**Revised recommendation: smaller scope, do later when there's UX direction.**
+**Resolution — implemented as `nexus.noteContext` accordion** (commits `ff530f49` through `5d38d09b`, 6 steps).
 
-What's worth doing **now** — **done** (commit `24ae8958`):
-- Extracted the shared in-component "fetch on active-file change with React-style cancellation" pattern into `shell/src/plugins/nexus/_lib/useActiveFileQuery.ts`. Refactored `nexus.outgoingLinks` and `nexus.tags` (the two plugins that used that pattern; `nexus.backlinks` and `nexus.graph` use a different plugin-level subscriber pattern and stay as-is).
-- Net: ~150 lines of duplicated wiring replaced with ~10 lines of hook invocation each; new hook is ~100 lines including comments. Behaviour preserved.
+UX inputs received from the user:
+- **Shape**: B — vertical accordion, each section collapsible, multiple can be expanded.
+- **Name**: "Note Context".
+- **Lazy-load**: hard — each section's data subscriber starts when expanded, stops when collapsed.
+- **Per-file `nexus.graph`**: keep as a standalone plugin too; embedded as the Graph section via direct `<GraphView />` reuse (no duplicate subscriber).
 
-What to **defer** until product can weigh in:
-- Whether to collapse the 4 right-panel tabs into a single `nexus.links` tabbed entry. The visible UX delta is small (already tabs) and the layout question — should this be a horizontal tab strip, a segmented control, or stay as parallel tabs? — is a design call.
-- Whether to ship `nexus.graph`'s per-file view standalone or only as a tab. (`nexus.graph.global` stays either way — confirmed live consumer in `globalIndex.ts`.)
+Lands the Phase 4.1a `useActiveFileQuery` hook as part of the migration: outgoingLinks/tags/backlinks sections all use it. Graph section reuses `nexus.graph`'s existing `useGraphStore` + `GraphView`.
 
-**Net Phase 4.3 status:** plan as written is more expensive than warranted given the visible benefit; deferred pending UX direction. The shared-helper sub-task is captured here as a follow-up and can land at any time.
+Migration:
+- `nexus.backlinks`, `nexus.outgoingLinks`, `nexus.tags` deleted (~1474 LOC net removal across 9 files).
+- `nexus.noteContext` catalog entry declares `legacyPluginIds: ['nexus.backlinks', 'nexus.outgoingLinks', 'nexus.tags']` so existing forges with any of those enabled get noteContext auto-enabled on next boot.
+- Legacy focus command ids (`nexus.backlinks.focus`, `nexus.outgoingLinks.focus`, `nexus.tags.focus`) registered as aliases that focus the panel and expand the matching section — keybindings + palette muscle memory survive.
+
+Known minor regression — captured as a follow-up:
+- The "X backlinks" indicator in `RightPanelFooter` and `statusBar/FileStats` was driven by `useBacklinksStore`, which the retired plugin populated. Re-adding it means re-introducing an always-on subscriber outside the accordion's lazy-load contract. Both surfaces drop the column cleanly for now (words/chars/sync still shown).
+
+Skipped features (each can be picked up later as small follow-ups):
+- BL-049 phase 4 block-filter mode (toggle between `backlinks` and `backlinks_to_block` IPCs to narrow to a specific block id).
+- On-edit silent refresh — the legacy plugin's own comment noted this was "largely a no-op" because editing file A doesn't change file A's incoming backlinks, so the skip is low-cost.
 
 ## 4.8 — storage compile-time deps: withdrawn
 
