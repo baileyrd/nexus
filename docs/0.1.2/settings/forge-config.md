@@ -178,9 +178,20 @@ max_delay_ms = 30000                                    # ReconnectConfig.max_de
 backoff_factor = 2.0                                    # P2-06 — ReconnectConfig.backoff_factor override
 buffer_capacity = 256                                   # ReconnectConfig.buffer_capacity override
 handshake_timeout_secs = 10                             # P2-06 forward-compat — pending ReconnectingClient knob
+
+[digests]                                               # DigestConfig — crates/nexus-workflow/src/digests.rs:56
+enabled = false                                         # master switch; cron loop only fires when true
+daily_cron = "0 7 * * *"                                # 5-field cron; null disables daily
+weekly_cron = "0 7 * * 1"                               # 5-field cron; null disables weekly
+scope_path = "Inbox"                                    # forge-relative subtree; null = whole forge
+digests_dir = "Digests"                                 # forge-relative output dir
+
+[webhooks]                                              # WebhookConfig — crates/nexus-workflow/src/webhook.rs:61
+enabled = false                                         # master switch; HTTP listener only spawns when true
+bind = "127.0.0.1:18080"                                # host:port
 ```
 
-Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::collab::load_config(forge_root)` — `collab.rs:100`. Missing file / missing block ⇒ defaults.
+Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::collab::load_config(forge_root)` — `collab.rs:100`; `nexus_bootstrap::load_digest_config(forge_root)` — `lib.rs:488`; `nexus_bootstrap::load_webhook_config(forge_root)` — `lib.rs:923`. Missing file / missing block ⇒ defaults. The `enabled = false` default for both `[digests]` and `[webhooks]` keeps the cron loop and HTTP listener dormant; manual `com.nexus.workflow::run_digest` IPC calls still work regardless.
 
 ## `<forge>/.nexus/config.toml`
 

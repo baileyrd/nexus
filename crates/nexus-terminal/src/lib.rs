@@ -17,15 +17,13 @@
 //!
 //! # Microkernel fit
 //!
-//! `nexus-terminal` is an **invoker-local library**, not a core plugin yet —
-//! mirroring the positioning of `nexus-git` (PRD-11) and the MCP Host
-//! client. Nothing in the kernel event bus or plugin IPC calls the terminal
-//! today; when a consumer appears, a `com.nexus.terminal` core plugin can
-//! wrap [`Session`] in dispatch handlers without touching this module.
-//!
-//! The only shared-trait dependency is the workspace's capability enum via
-//! future host functions — and none land here. Keeping the crate a pure
-//! library means the kernel does not have to know about PTYs at all.
+//! `nexus-terminal` is now a registered core plugin (`com.nexus.terminal`,
+//! see [`core_plugin::TerminalCorePlugin`]). It wraps [`Session`] in IPC
+//! dispatch handlers and publishes `com.nexus.terminal.events.*` /
+//! `com.nexus.terminal.output.*` topics on the kernel event bus. The
+//! original library-only positioning described in earlier drafts no longer
+//! applies; the crate is registered alongside `nexus-git` in
+//! `crates/nexus-bootstrap/src/plugins/mod.rs::register_all`.
 //!
 //! # Threading model
 //!

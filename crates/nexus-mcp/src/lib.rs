@@ -9,12 +9,14 @@
 //!   `<forge>/.forge/mcp.toml` as a Host, mirroring Claude Desktop's
 //!   `mcp.json` pattern.
 //!
-//! Both halves are invoker-local libraries — no IPC surface, no core
-//! plugin wrapper — because no kernel or plugin consumer calls them today.
-//! The natural next step, if one appears, is a `com.nexus.mcp.host` core
-//! plugin that exposes `connect_server` / `list_tools` / `call_tool` IPC
-//! handlers; it would layer on top of this module without requiring any
-//! changes here.
+//! Both halves are exposed through the kernel today. The Host client is
+//! wrapped by [`core_plugin::McpHostPlugin`] (`com.nexus.mcp.host`),
+//! which registers IPC handlers including `connect_server`, `list_servers`,
+//! `list_tools`, and `call_tool` — see [`core_plugin::IPC_HANDLERS`] for
+//! the authoritative surface. The server half ships as the `nexus-mcp`
+//! binary (built from `src/server.rs`) and reaches into the same kernel
+//! over `ctx.ipc_call(...)` to call `com.nexus.storage`, `com.nexus.git`,
+//! `com.nexus.ai`, and other core plugins.
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
