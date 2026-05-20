@@ -138,4 +138,8 @@ In bootstrap registration order:
 
 ## Top-line summary
 
-Filled in once per-plugin assessments are complete. See [SUMMARY.md](SUMMARY.md).
+See [SUMMARY.md](SUMMARY.md) for the per-plugin verdict roll-up and headline findings.
+
+## Dependency graph
+
+See [DEPENDENCIES.md](DEPENDENCIES.md) for a ground-truth dependency analysis: per-plugin declared/runtime/event/compile-time deps, the inverse "who depends on whom" index, transitive closure for the basic-capability scope, cycles and reverse couplings, and hidden coupling list. Raw extraction data is in `_extract-rust-deps.md` and `_extract-shell-deps-A.md` / `_extract-shell-deps-B.md`.
