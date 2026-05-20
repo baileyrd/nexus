@@ -8,6 +8,7 @@
 import { type ReactNode, useCallback } from 'react'
 import { AccordionSection } from './accordion'
 import { BacklinksSection } from './sections/BacklinksSection'
+import { GraphSection } from './sections/GraphSection'
 import { OutgoingLinksSection } from './sections/OutgoingLinksSection'
 import { TagsSection } from './sections/TagsSection'
 import { useNoteContextStore } from './store'
@@ -15,13 +16,8 @@ import { useNoteContextStore } from './store'
 interface SectionMeta {
   id: string
   title: string
-  /** Component rendered when the section is expanded. `null` during
-   *  the multi-step rollout for sections that haven't been ported
-   *  yet — Phase 4.3 step 1 lands the shell, steps 2–5 wire each
-   *  section's real body. */
-  body: (() => ReactNode) | null
-  /** Phase number that owns this section's port — for the placeholder. */
-  pendingStep?: number
+  /** Component rendered when the section is expanded. */
+  body: () => ReactNode
 }
 
 // Order matters — this is the visual order in the panel.
@@ -29,7 +25,7 @@ const SECTIONS: SectionMeta[] = [
   { id: 'backlinks',     title: 'Backlinks',      body: () => <BacklinksSection /> },
   { id: 'outgoingLinks', title: 'Outgoing Links', body: () => <OutgoingLinksSection /> },
   { id: 'tags',          title: 'Tags',           body: () => <TagsSection /> },
-  { id: 'graph',         title: 'Graph',          body: null, pendingStep: 5 },
+  { id: 'graph',         title: 'Graph',          body: () => <GraphSection /> },
 ]
 
 export function NoteContextView() {
@@ -56,13 +52,7 @@ export function NoteContextView() {
           expanded={expanded.has(s.id)}
           onToggle={onToggle}
         >
-          {s.body
-            ? s.body()
-            : (
-              <div style={{ padding: 16, fontSize: 12, color: 'var(--text-faint)' }}>
-                Placeholder — Phase 4.3 step {s.pendingStep} wires this section.
-              </div>
-            )}
+          {s.body()}
         </AccordionSection>
       ))}
     </div>

@@ -45,7 +45,12 @@ export const noteContextPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.rightPanel'],
+    // nexus.graph owns the per-file graph data subscriber; the Graph
+    // section in our accordion renders its `GraphView` component
+    // directly and reads `useGraphStore`. Declaring it here ensures
+    // the host activates `nexus.graph` first so the store is
+    // populated by the time the section can be expanded.
+    dependsOn: ['nexus.rightPanel', 'nexus.graph'],
     contributes: {
       commands: [
         { id: COMMAND_FOCUS, title: 'Focus Note Context', category: 'View' },

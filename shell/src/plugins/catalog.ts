@@ -479,7 +479,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     id: 'nexus.noteContext', name: 'Note Context',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.rightPanel'],
+    dependsOn: ['nexus.rightPanel', 'nexus.graph'],
     description:
       'Phase 4.3 — single right-panel accordion showing the active note\'s backlinks, outgoing links, tags, and a per-file graph. Default-off during the multi-step rollout (sibling plugins nexus.backlinks / nexus.outgoingLinks / nexus.tags stay live until step 6); enable manually to preview.',
     load: () => import('./nexus/noteContext').then(m => m.noteContextPlugin),
