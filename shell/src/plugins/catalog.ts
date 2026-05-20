@@ -257,13 +257,6 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/diagnostics').then(m => m.diagnosticsPlugin),
   },
   {
-    id: 'nexus.multibufferSync', name: 'Multibuffer Sync',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description:
-      'BL-141 Approach B step 3b — watches files:open for multibuffer:// tabs, tracks which source files each multibuffer covers, and calls editor.refresh_excerpts when com.nexus.editor.changed.<source> reports a source-file mutation. Block ids survive the refresh so cursor anchors stay valid.',
-    load: () => import('./nexus/multibufferSync').then(m => m.multibufferSyncPlugin),
-  },
-  {
     id: 'nexus.notificationsSettings', name: 'Notifications Settings',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,

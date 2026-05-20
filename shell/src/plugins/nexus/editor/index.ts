@@ -7,6 +7,7 @@ import { clientLogger } from '../../../clientLogger'
 import { viewRegistry, workspace } from '../../../workspace'
 import type { Leaf, Tabs, WorkspaceParent } from '../../../workspace'
 import { EditorView } from './EditorView'
+import { startMultibufferSync } from './multibuffer/sync'
 import { markdownViewCreator } from './MarkdownView'
 import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
 import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
@@ -348,6 +349,10 @@ export const editorPlugin: Plugin = {
     installBlockHandleStyles()
     installInlineToolbarStyles()
     installMarginSuggestStyles()
+    // BL-141 / Phase 4.6 — multibuffer external-edit sync. Was a
+    // standalone nexus.multibufferSync plugin; folded in here since
+    // no other plugin consumed it. Wiring lives in editor/multibuffer/.
+    startMultibufferSync(api)
     const editorClient = makeEditorClient(api.kernel)
     // Phase 4: pass the kernel API so the manager can open a
     // `com.nexus.editor.changed.<relpath>` subscription on acquire.

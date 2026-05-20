@@ -15,7 +15,7 @@ import {
   isMultibufferRelpath,
   multibuffersWatchingSource,
   type MultibufferRegistry,
-} from '../src/plugins/nexus/multibufferSync/multibufferRegistry'
+} from '../src/plugins/nexus/editor/multibuffer/multibufferRegistry'
 
 function snapshotWith(blocks: Array<{ kind: string; source_relpath?: string }>): EditorSnapshot {
   const blockMap: Record<BlockId, never> = {} as Record<BlockId, never>
