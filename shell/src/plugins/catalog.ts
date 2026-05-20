@@ -172,13 +172,6 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/activityBar').then(m => m.activityBarPlugin),
   },
   {
-    id: 'nexus.sidebar', name: 'Sidebar',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    popoutCompatible: false,
-    description: 'The collapsible left panel that hosts file tree, search, and plugin views.',
-    load: () => import('./nexus/sidebar').then(m => m.sidebarPlugin),
-  },
-  {
     id: 'nexus.rightPanel', name: 'Right Panel',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
@@ -205,14 +198,14 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.files', name: 'Files',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
     description: 'File-tree explorer with create / rename / move / delete and drag-and-drop.',
     load: () => import('./nexus/files').then(m => m.filesPlugin),
   },
   {
     id: 'nexus.editor', name: 'Editor',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.sidebar', 'nexus.files', 'nexus.comments'],
+    dependsOn: ['nexus.workspace', 'nexus.files', 'nexus.comments'],
     description: 'CodeMirror-based markdown editor with live preview, snippets and link-aware extensions.',
     load: () => import('./nexus/editor').then(m => m.editorPlugin),
   },
@@ -422,7 +415,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.templates', name: 'Templates',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar', 'nexus.files'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.files'],
     description: 'Insert templated notes from a library, with variable expansion and folder targeting.',
     load: () => import('./nexus/templates').then(m => m.templatesPlugin),
   },

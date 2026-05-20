@@ -108,7 +108,7 @@ export const skillsPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
     contributes: {
       commands: [
         { id: COMMAND_REFRESH, title: 'Refresh Skills', category: 'Skills' },

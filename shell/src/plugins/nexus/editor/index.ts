@@ -233,7 +233,7 @@ export const editorPlugin: Plugin = {
     // structural imports require the source plugins to be loaded
     // before us. The dependency chain also keeps boot order sensible
     // (workspace → sidebar → files → comments → editor).
-    dependsOn: ['nexus.workspace', 'nexus.sidebar', 'nexus.files', 'nexus.comments'],
+    dependsOn: ['nexus.workspace', 'nexus.files', 'nexus.comments'],
     contributes: {
       commands: [
         { id: COMMAND_CLOSE_TAB, title: 'Close Tab', category: 'Editor' },

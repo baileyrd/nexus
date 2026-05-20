@@ -3,7 +3,12 @@
 // inspector (Outline tab, eventually backlinks/graph too).
 
 import { create } from 'zustand'
-import type { Heading } from '../plugins/core/editorArea/MarkdownDoc'
+
+export interface Heading {
+  id: string
+  level: 1 | 2 | 3
+  text: string
+}
 
 interface DocStore {
   headings: Heading[]

@@ -15,7 +15,7 @@ import {
 } from './kernelClient'
 import { setApi } from './runtime'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
-import { useStatusStore } from '../status/statusStore'
+import { useStatusStore } from './status/statusStore'
 
 const COMMAND_FOCUS = 'nexus.files.focus'
 // WI-21: context-menu / shortcut commands. Surface the same actions
@@ -81,7 +81,7 @@ export const filesPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
     contributes: {
       commands: [
         { id: COMMAND_FOCUS, title: 'Focus Files', category: 'Files' },
