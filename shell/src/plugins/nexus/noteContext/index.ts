@@ -22,6 +22,7 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { workspace } from '../../../workspace'
 import { NoteContextPaneView } from './NoteContextPaneView'
 import { setEventBus } from './eventBus'
+import { startBacklinksLoader } from './backlinksLoader'
 import { useNoteContextStore } from './store'
 
 const VIEW_TYPE = 'note-context'
@@ -84,6 +85,13 @@ export const noteContextPlugin: Plugin = {
 
   activate(api: PluginAPI) {
     setEventBus(api.events)
+
+    // Always-on backlinks subscriber — populates useBacklinksDataStore
+    // so the RightPanelFooter / FileStats indicators stay fresh
+    // regardless of whether the Backlinks accordion section is
+    // currently expanded. See backlinksLoader.ts for the trade-off.
+    startBacklinksLoader(api)
+
     api.viewRegistry.register(VIEW_TYPE, (leaf) => new NoteContextPaneView(leaf))
 
     // Advertise the tab to the right-panel host.

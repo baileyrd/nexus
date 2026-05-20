@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useEditorStore } from '../editor/editorStore'
+import { useBacklinksDataStore } from '../noteContext/backlinksDataStore'
 import { snap, useFrameSnapshot } from '../../../stores/useFrameSnapshot'
 
 function fileExt(name: string): string | null {
@@ -14,25 +15,28 @@ const SEP_STYLE: React.CSSProperties = {
   userSelect: 'none',
 }
 
-// BL-110: pull selectors that drive this status-bar slice through one
-// rAF-coalesced snapshot. Editor tabs update from kernel watch events;
-// pre-BL-110 a save followed by a re-render produced two paint
-// commits, now one per frame.
+// BL-110: pull the four selectors that drive this status-bar slice
+// through one rAF-coalesced snapshot. Editor tabs + backlinks are
+// updated from independent async sources (kernel watch events vs
+// post-active-file-change backlinks load); pre-BL-110 a save followed
+// by a backlinks refresh produced two paint commits, now one per
+// frame.
 //
-// BL-XXX Phase 4.3 step 6 — the "X backlinks" indicator that previously
-// lived here was driven by useBacklinksStore, populated by the legacy
-// `nexus.backlinks` plugin. After the merge into `nexus.noteContext`
-// the store is no longer maintained (the new section's data lives
-// inside the section's React subtree). Re-adding the indicator means
-// re-introducing a permanent always-on subscriber outside the
-// accordion's lazy-load contract; captured as a follow-up.
+// Phase 4.3 follow-up — backlinks now come from
+// `nexus.noteContext`'s shared `useBacklinksDataStore` (populated by
+// the always-on subscriber in `backlinksLoader.ts`) rather than the
+// retired `nexus.backlinks` plugin's store. Same selectors, different
+// owner.
 const FILE_STATS_ENTRIES = [
   snap(useEditorStore, (s) => s.tabs),
   snap(useEditorStore, (s) => s.activeRelpath),
+  snap(useBacklinksDataStore, (s) => s.links.length),
+  snap(useBacklinksDataStore, (s) => s.loading),
 ] as const
 
 export function FileStats() {
-  const [tabs, activeRelpath] = useFrameSnapshot(FILE_STATS_ENTRIES)
+  const [tabs, activeRelpath, backlinksCount, backlinksLoading] =
+    useFrameSnapshot(FILE_STATS_ENTRIES)
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
@@ -45,6 +49,10 @@ export function FileStats() {
   const content = activeTab.content
   const words = content.trim() ? content.trim().split(/\s+/).length : 0
   const chars = content.length
+
+  const backlinksLabel = backlinksLoading
+    ? '… backlinks'
+    : `${backlinksCount} backlinks`
 
   return (
     <span
@@ -65,6 +73,8 @@ export function FileStats() {
       <span>
         {words.toLocaleString()} words · {chars.toLocaleString()} chars
       </span>
+      <span style={SEP_STYLE}>|</span>
+      <span>{backlinksLabel}</span>
     </span>
   )
 }
