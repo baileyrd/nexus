@@ -521,12 +521,6 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/tags').then(m => m.tagsPlugin),
   },
   {
-    id: 'nexus.allProperties', name: 'All Properties',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Forge-wide property explorer — every frontmatter key, value, and the notes using it.',
-    load: () => import('./nexus/allProperties').then(m => m.allPropertiesPlugin),
-  },
-  {
     id: 'community.mermaid', name: 'Mermaid',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Renders ```mermaid``` code blocks as inline diagrams in read-mode previews.',
