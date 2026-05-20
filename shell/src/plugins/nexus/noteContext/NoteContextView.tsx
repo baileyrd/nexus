@@ -5,21 +5,29 @@
 // (backlinks, outgoing-links, tags, graph) into these slots and
 // retire the standalone plugins.
 
-import { useCallback } from 'react'
+import { type ReactNode, useCallback } from 'react'
 import { AccordionSection } from './accordion'
+import { OutgoingLinksSection } from './sections/OutgoingLinksSection'
 import { useNoteContextStore } from './store'
 
 interface SectionMeta {
   id: string
   title: string
+  /** Component rendered when the section is expanded. `null` during
+   *  the multi-step rollout for sections that haven't been ported
+   *  yet — Phase 4.3 step 1 lands the shell, steps 2–5 wire each
+   *  section's real body. */
+  body: (() => ReactNode) | null
+  /** Phase number that owns this section's port — for the placeholder. */
+  pendingStep?: number
 }
 
 // Order matters — this is the visual order in the panel.
 const SECTIONS: SectionMeta[] = [
-  { id: 'backlinks',     title: 'Backlinks' },
-  { id: 'outgoingLinks', title: 'Outgoing Links' },
-  { id: 'tags',          title: 'Tags' },
-  { id: 'graph',         title: 'Graph' },
+  { id: 'backlinks',     title: 'Backlinks',      body: null, pendingStep: 4 },
+  { id: 'outgoingLinks', title: 'Outgoing Links', body: () => <OutgoingLinksSection /> },
+  { id: 'tags',          title: 'Tags',           body: null, pendingStep: 3 },
+  { id: 'graph',         title: 'Graph',          body: null, pendingStep: 5 },
 ]
 
 export function NoteContextView() {
@@ -46,9 +54,13 @@ export function NoteContextView() {
           expanded={expanded.has(s.id)}
           onToggle={onToggle}
         >
-          <div style={{ padding: 16, fontSize: 12, color: 'var(--text-faint)' }}>
-            Placeholder — Phase 4.3 step {s.id === 'backlinks' ? '4' : s.id === 'outgoingLinks' ? '2' : s.id === 'tags' ? '3' : '5'} wires this section.
-          </div>
+          {s.body
+            ? s.body()
+            : (
+              <div style={{ padding: 16, fontSize: 12, color: 'var(--text-faint)' }}>
+                Placeholder — Phase 4.3 step {s.pendingStep} wires this section.
+              </div>
+            )}
         </AccordionSection>
       ))}
     </div>

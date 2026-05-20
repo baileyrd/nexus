@@ -18,6 +18,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { workspace } from '../../../workspace'
 import { NoteContextPaneView } from './NoteContextPaneView'
+import { setEventBus } from './eventBus'
 import { useNoteContextStore } from './store'
 
 const VIEW_TYPE = 'note-context'
@@ -53,6 +54,7 @@ export const noteContextPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
+    setEventBus(api.events)
     api.viewRegistry.register(VIEW_TYPE, (leaf) => new NoteContextPaneView(leaf))
 
     // Advertise the tab to the right-panel host.
