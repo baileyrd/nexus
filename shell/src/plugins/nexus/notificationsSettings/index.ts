@@ -9,7 +9,7 @@
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { NotificationsSettings } from './NotificationsSettings'
-import { setNotificationsSettingsApi } from './notificationsSettingsRuntime'
+import { setNotificationsSettingsKernel } from './notificationsSettingsRuntime'
 
 const TAB_ID = 'notifications'
 
@@ -34,7 +34,7 @@ export const notificationsSettingsPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    setNotificationsSettingsApi(api)
+    setNotificationsSettingsKernel(api)
     api.settings.registerTab(TAB_ID, NotificationsSettings, {
       title: 'Notifications',
       group: 'options',

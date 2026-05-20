@@ -12,11 +12,8 @@
 // routing (which producer→which channel) stays a TOML concern.
 
 import { useCallback, useEffect, useState } from 'react'
-import { getNotificationsSettingsApi } from './notificationsSettingsRuntime'
+import { getNotificationsSettingsKernel } from './notificationsSettingsRuntime'
 import { clientLogger } from '../../../clientLogger'
-
-const SECURITY_PLUGIN_ID = 'com.nexus.security'
-const NOTIFICATIONS_PLUGIN_ID = 'com.nexus.notifications'
 
 // Plugin id used as the keyring namespace. Every credential the panel
 // writes shares this prefix so deleting the namespace cleans up cleanly.
@@ -42,14 +39,6 @@ const SECRET_KEYS = [
   KEY_SMTP_TO,
 ] as const
 
-interface ListNamesResult {
-  names: string[]
-}
-
-interface SetSecretResult {
-  ok: boolean
-}
-
 interface ChannelStatus {
   configured: boolean
   busy: boolean
@@ -66,13 +55,8 @@ const INITIAL_STATUS: Record<ChannelKey, ChannelStatus> = {
 }
 
 async function listConfiguredKeys(): Promise<Set<string>> {
-  const api = getNotificationsSettingsApi()
   try {
-    const result = await api.kernel.invoke<ListNamesResult>(
-      SECURITY_PLUGIN_ID,
-      'list_secret_names',
-      { plugin_id: KEYRING_PLUGIN_ID },
-    )
+    const result = await getNotificationsSettingsKernel().listSecretNames(KEYRING_PLUGIN_ID)
     return new Set(result.names ?? [])
   } catch (err) {
     clientLogger.warn('[nexus.notificationsSettings] list_secret_names failed:', err)
@@ -81,15 +65,12 @@ async function listConfiguredKeys(): Promise<Set<string>> {
 }
 
 async function writeSecret(name: string, value: string): Promise<boolean> {
-  const api = getNotificationsSettingsApi()
+  const kernel = getNotificationsSettingsKernel()
   const trimmed = value.trim()
   if (!trimmed) {
     // Empty string → delete the stored credential.
     try {
-      await api.kernel.invoke(SECURITY_PLUGIN_ID, 'delete_secret', {
-        plugin_id: KEYRING_PLUGIN_ID,
-        name,
-      })
+      await kernel.deleteSecret(KEYRING_PLUGIN_ID, name)
       return true
     } catch (err) {
       clientLogger.warn(`[nexus.notificationsSettings] delete ${name} failed:`, err)
@@ -97,11 +78,7 @@ async function writeSecret(name: string, value: string): Promise<boolean> {
     }
   }
   try {
-    const result = await api.kernel.invoke<SetSecretResult>(
-      SECURITY_PLUGIN_ID,
-      'set_secret',
-      { plugin_id: KEYRING_PLUGIN_ID, name, value: trimmed },
-    )
+    const result = await kernel.setSecret(KEYRING_PLUGIN_ID, name, trimmed)
     return result.ok
   } catch (err) {
     clientLogger.warn(`[nexus.notificationsSettings] set ${name} failed:`, err)
@@ -110,9 +87,8 @@ async function writeSecret(name: string, value: string): Promise<boolean> {
 }
 
 async function sendTest(channel: ChannelKey): Promise<ChannelStatus['testResult'] extends infer R ? R : never> {
-  const api = getNotificationsSettingsApi()
   try {
-    await api.kernel.invoke(NOTIFICATIONS_PLUGIN_ID, 'send', {
+    await getNotificationsSettingsKernel().sendTest({
       source: 'settings',
       title: 'Notifications test',
       message: `Test from Settings → Notifications (channel: ${channel}).`,
