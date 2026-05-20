@@ -29,13 +29,11 @@
 //
 // The runtime is functional, not class-based, to mirror cmdIRuntime.ts.
 
-import type { PluginAPI } from '../../../types/plugin'
 import { getActiveCmView } from '../editor/runtime'
 import { formatRecallLink, formatRecallSnippet } from './insertFormat'
+import type { RecallApi, SemanticSearchResult } from './recallApi'
 import { useRecallStore, type RecallMatch } from './recallStore'
 
-const AI_PLUGIN_ID = 'com.nexus.ai'
-const HANDLER_SEMANTIC_SEARCH = 'semantic_search'
 const SEARCH_LIMIT = 10
 
 /** Debounce window — short enough that typing-then-pausing feels
@@ -44,11 +42,9 @@ const SEARCH_LIMIT = 10
  *  surface settled on after an internal poll. */
 export const RECALL_DEBOUNCE_MS = 200
 
-/** Inbox-path config key — owned by the memory plugin (BL-043). We
- *  read it through `api.configuration.getValue` rather than importing
- *  the constant so the plugins stay decoupled. */
-const CONFIG_INBOX_PATH = 'memory.inboxPath'
-const DEFAULT_INBOX_PATH = 'Inbox.md'
+// `memory.inboxPath` (BL-043) is read via `RecallApi.getInboxPath()`;
+// the config key + default live in recallApi.ts so this runtime stays
+// agnostic to the underlying configuration plumbing.
 
 /** Tag a recall request id so future correlation noise (e.g. logging
  *  on the kernel side) can tell recall traffic apart from semantic
@@ -60,10 +56,6 @@ function newRequestId(): string {
     return `${RECALL_REQUEST_PREFIX}${crypto.randomUUID()}`
   }
   return `${RECALL_REQUEST_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-interface SemanticSearchResult {
-  matches?: unknown
 }
 
 /** Coerce raw JSON into `RecallMatch[]`. Same defensive decode pattern
@@ -137,7 +129,7 @@ export function cancelPendingSearch(): void {
  * reads results out of the store directly.
  */
 export async function searchDebounced(
-  api: PluginAPI,
+  api: RecallApi,
   query: string,
 ): Promise<void> {
   cancelPendingSearch()
@@ -160,28 +152,14 @@ export async function searchDebounced(
 
 /** Single search round-trip. Exported so tests can call it without
  *  waiting on the debounce timer. */
-export async function runSearch(api: PluginAPI, query: string): Promise<void> {
+export async function runSearch(api: RecallApi, query: string): Promise<void> {
   const requestId = newRequestId()
   useRecallStore.getState().beginSearch(requestId)
 
-  let inboxPath: string | null = null
-  try {
-    inboxPath = api.configuration.getValue<string>(
-      CONFIG_INBOX_PATH,
-      DEFAULT_INBOX_PATH,
-    )
-  } catch {
-    // Configuration registry not active (memory plugin disabled). Fall
-    // through with no scope filter.
-    inboxPath = null
-  }
+  const inboxPath = api.getInboxPath()
 
   try {
-    const raw = await api.kernel.invoke<SemanticSearchResult>(
-      AI_PLUGIN_ID,
-      HANDLER_SEMANTIC_SEARCH,
-      { query, limit: SEARCH_LIMIT },
-    )
+    const raw: SemanticSearchResult = await api.semanticSearch(query, SEARCH_LIMIT)
     const decoded = decodeMatches(raw)
     const scoped = filterToInboxScope(decoded, inboxPath)
     useRecallStore.getState().setResults(requestId, scoped)

@@ -1,5 +1,5 @@
-// Module-scoped holder for the kernel API handle and the search
-// input's focus callback.
+// Module-scoped holder for the search-specific kernel surface and
+// the search input's focus callback.
 //
 // Held out of React so:
 //   * the plugin's `activate` can stash them once
@@ -9,6 +9,13 @@
 //     method even when the sidebar is hidden (the view is lazily
 //     mounted — the focus callback is only present while SearchView
 //     is mounted, so we gate on that).
+//
+// Phase 4.1 narrowing: the stored handle is a `SearchKernel`
+// interface that exposes only the two operations this module uses
+// (`available()` and `search(...)`), built once at `setKernel()` time
+// from the broader `KernelAPI`. Reading this file now shows exactly
+// the IPC surface the search plugin depends on, without grepping
+// downstream call sites for `kernel.invoke` strings.
 
 import type { KernelAPI } from '../../../types/plugin'
 import { configStore } from '../../../stores/configStore'
@@ -20,14 +27,23 @@ const SEARCH_COMMAND = 'search'
 const MAX_SEARCH_RESULTS = 50
 const CONFIG_KEY_SEARCH_LIMIT = 'search.maxResultsLimit'
 
-let kernel: KernelAPI | null = null
-
-export function setKernel(api: KernelAPI) {
-  kernel = api
+/**
+ * Narrow kernel surface used by the search plugin. Every method maps
+ * 1:1 to a `kernel.invoke(<plugin>, <handler>, args)` call, declared
+ * here so the plugin's IPC dependencies are visible at a glance.
+ */
+interface SearchKernel {
+  available(): Promise<boolean>
+  search(args: { query: string; limit: number }): Promise<unknown>
 }
 
-export function getKernel(): KernelAPI | null {
-  return kernel
+let kernel: SearchKernel | null = null
+
+export function setKernel(api: KernelAPI) {
+  kernel = {
+    available: () => api.available(),
+    search: (args) => api.invoke(STORAGE_PLUGIN_ID, SEARCH_COMMAND, args),
+  }
 }
 
 // ── Focus plumbing ──────────────────────────────────────────────────────
@@ -174,7 +190,7 @@ async function runSearch(query: string) {
   store.setError(null)
 
   try {
-    const raw = await k.invoke(STORAGE_PLUGIN_ID, SEARCH_COMMAND, {
+    const raw = await k.search({
       query,
       limit: configStore.get<number>(CONFIG_KEY_SEARCH_LIMIT, MAX_SEARCH_RESULTS) ?? MAX_SEARCH_RESULTS,
     })

@@ -16,10 +16,9 @@ import {
 } from './recallRuntime.ts'
 import { useRecallStore, type RecallMatch } from './recallStore.ts'
 
-interface InvokeCall {
-  pluginId: string
-  commandId: string
-  args: Record<string, unknown>
+interface SearchCall {
+  query: string
+  limit: number
 }
 
 function reset(): void {
@@ -35,40 +34,27 @@ function reset(): void {
   })
 }
 
-/** Build a stub PluginAPI with kernel.invoke + configuration.getValue. */
+/**
+ * Build a stub `RecallApi` (the narrow surface declared in
+ * `recallApi.ts` — Phase 4.1). The runtime under test calls
+ * `semanticSearch(query, limit)` and `getInboxPath()`; this stub
+ * captures the search calls and returns `opts.matches` as the kernel
+ * reply.
+ */
 function stubApi(opts: {
   matches?: unknown
   inboxPath?: string | null
-  invokeImpl?: (call: InvokeCall) => Promise<unknown>
+  searchImpl?: (call: SearchCall) => Promise<{ matches?: unknown }>
 }) {
-  const calls: InvokeCall[] = []
-  const inbox = opts.inboxPath
+  const calls: SearchCall[] = []
   const api = {
-    kernel: {
-      invoke: async (
-        pluginId: string,
-        commandId: string,
-        args: unknown,
-      ) => {
-        const call: InvokeCall = {
-          pluginId,
-          commandId,
-          args: args as Record<string, unknown>,
-        }
-        calls.push(call)
-        if (opts.invokeImpl) return opts.invokeImpl(call)
-        return { matches: opts.matches ?? [] }
-      },
+    semanticSearch: async (query: string, limit: number) => {
+      const call: SearchCall = { query, limit }
+      calls.push(call)
+      if (opts.searchImpl) return opts.searchImpl(call)
+      return { matches: opts.matches ?? [] }
     },
-    configuration: {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      getValue: <T,>(key: string, def: T): T => {
-        if (key === 'memory.inboxPath') {
-          return (inbox === undefined ? def : (inbox as unknown as T)) as T
-        }
-        return def
-      },
-    },
+    getInboxPath: () => opts.inboxPath ?? null,
   }
   return { api, calls }
 }
@@ -116,13 +102,10 @@ test('runSearch: maps semantic_search response into recallStore.results', async 
       { chunk_text: 'orphan', score: 0.1 },
     ],
   })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await runSearch(api as any, 'query')
+  await runSearch(api, 'query')
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].pluginId, 'com.nexus.ai')
-  assert.equal(calls[0].commandId, 'semantic_search')
-  assert.equal((calls[0].args as { query: string }).query, 'query')
-  assert.equal((calls[0].args as { limit: number }).limit, 10)
+  assert.equal(calls[0].query, 'query')
+  assert.equal(calls[0].limit, 10)
   const results = useRecallStore.getState().results
   assert.equal(results.length, 2)
   assert.equal(results[0].file_path, 'A.md')
@@ -140,8 +123,7 @@ test('runSearch: applies the inbox-path filter when configured', async () => {
       { file_path: 'Other.md', chunk_text: 'dropped', score: 0.5 },
     ],
   })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await runSearch(api as any, 'q')
+  await runSearch(api, 'q')
   const results = useRecallStore.getState().results
   assert.equal(results.length, 1)
   assert.equal(results[0].file_path, 'Inbox.md')
@@ -149,16 +131,12 @@ test('runSearch: applies the inbox-path filter when configured', async () => {
 
 test('runSearch: kernel rejection flips status → error', async () => {
   reset()
-  const api = {
-    kernel: {
-      invoke: async () => {
-        throw new Error('provider not configured')
-      },
+  const { api } = stubApi({
+    searchImpl: async () => {
+      throw new Error('provider not configured')
     },
-    configuration: { getValue: <T,>(_k: string, d: T) => d },
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await runSearch(api as any, 'q')
+  })
+  await runSearch(api, 'q')
   const s = useRecallStore.getState()
   assert.equal(s.status, 'error')
   assert.equal(s.error?.message, 'provider not configured')
@@ -173,8 +151,7 @@ test('searchDebounced: empty query short-circuits to a clean state', async () =>
     status: 'idle',
   })
   const { api, calls } = stubApi({ matches: [] })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await searchDebounced(api as any, '   ')
+  await searchDebounced(api, '   ')
   assert.equal(calls.length, 0, 'no kernel call for whitespace-only query')
   assert.equal(useRecallStore.getState().results.length, 0)
 })
@@ -186,14 +163,11 @@ test('searchDebounced: collapses bursts — only the last query reaches the kern
     matches: [{ file_path: 'A.md', chunk_text: 'final', score: 0.9 }],
   })
   // Three rapid keystrokes; only the last fires after the debounce window.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  void searchDebounced(api as any, 'a')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  void searchDebounced(api as any, 'ab')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await searchDebounced(api as any, 'abc')
+  void searchDebounced(api, 'a')
+  void searchDebounced(api, 'ab')
+  await searchDebounced(api, 'abc')
   assert.equal(calls.length, 1, 'debounce collapses bursts')
-  assert.equal((calls[0].args as { query: string }).query, 'abc')
+  assert.equal(calls[0].query, 'abc')
   assert.equal(useRecallStore.getState().results[0].chunk_text, 'final')
 })
 
