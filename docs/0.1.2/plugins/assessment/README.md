@@ -143,3 +143,7 @@ See [SUMMARY.md](SUMMARY.md) for the per-plugin verdict roll-up and headline fin
 ## Dependency graph
 
 See [DEPENDENCIES.md](DEPENDENCIES.md) for a ground-truth dependency analysis: per-plugin declared/runtime/event/compile-time deps, the inverse "who depends on whom" index, transitive closure for the basic-capability scope, cycles and reverse couplings, and hidden coupling list. Raw extraction data is in `_extract-rust-deps.md` and `_extract-shell-deps-A.md` / `_extract-shell-deps-B.md`.
+
+## Implementation plan
+
+See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for a sequenced six-phase plan to address every finding: doc fixes → declare hidden couplings → dead-code deletion → manifest-schema extensions → behavior-preserving refactors → strategic decisions. Each task lists effort, risk, prerequisites, and acceptance criteria.
