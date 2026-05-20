@@ -5,7 +5,6 @@
 
 import { useMemo } from 'react'
 import { useEditorStore } from '../plugins/nexus/editor/editorStore'
-import { useBacklinksStore } from '../plugins/nexus/backlinks/backlinksStore'
 import { useWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
 
 const SEP_STYLE: React.CSSProperties = {
@@ -17,8 +16,6 @@ const SEP_STYLE: React.CSSProperties = {
 export function RightPanelFooter(): JSX.Element {
   const tabs = useEditorStore((s) => s.tabs)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
-  const backlinksCount = useBacklinksStore((s) => s.links.length)
-  const backlinksLoading = useBacklinksStore((s) => s.loading)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const synced = rootPath !== null
 
@@ -39,10 +36,14 @@ export function RightPanelFooter(): JSX.Element {
         }
       : null
 
-  const backlinksLabel = backlinksLoading
-    ? '…'
-    : backlinksCount.toLocaleString()
-
+  // BL-XXX Phase 4.3 step 6 — the "X backlinks" indicator that lived
+  // here was driven by `useBacklinksStore`, which the legacy
+  // `nexus.backlinks` plugin populated. After the merge into
+  // `nexus.noteContext` the store is no longer maintained (the new
+  // section's data lives inside the section's React subtree and only
+  // exists while the section is expanded). Re-adding the indicator
+  // means re-introducing a permanent always-on subscriber outside the
+  // accordion's lazy-load contract — captured as a follow-up.
   return (
     <div
       style={{
@@ -62,8 +63,6 @@ export function RightPanelFooter(): JSX.Element {
     >
       {stats ? (
         <>
-          <span>{backlinksLabel} backlinks</span>
-          <span style={SEP_STYLE}>|</span>
           <span>{stats.words.toLocaleString()} words</span>
           <span style={SEP_STYLE}>|</span>
           <span>{stats.chars.toLocaleString()} chars</span>

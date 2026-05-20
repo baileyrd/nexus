@@ -458,12 +458,6 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/graph/globalIndex').then(m => m.graphGlobalPlugin),
   },
   {
-    id: 'nexus.backlinks', name: 'Backlinks',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Side panel listing every note that links to the current document.',
-    load: () => import('./nexus/backlinks').then(m => m.backlinksPlugin),
-  },
-  {
     id: 'nexus.comments', name: 'Comments',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Inline review comments anchored to selections, persisted alongside the note.',
@@ -477,11 +471,12 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   },
   {
     id: 'nexus.noteContext', name: 'Note Context',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    version: '0.2.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
-    dependsOn: ['nexus.rightPanel', 'nexus.graph'],
+    dependsOn: ['nexus.rightPanel', 'nexus.graph', 'nexus.editor', 'nexus.files', 'com.nexus.storage'],
+    legacyPluginIds: ['nexus.backlinks', 'nexus.outgoingLinks', 'nexus.tags'],
     description:
-      'Phase 4.3 — single right-panel accordion showing the active note\'s backlinks, outgoing links, tags, and a per-file graph. Default-off during the multi-step rollout (sibling plugins nexus.backlinks / nexus.outgoingLinks / nexus.tags stay live until step 6); enable manually to preview.',
+      'Right-panel accordion showing the active note\'s backlinks, outgoing links, tags, and a per-file graph in one collapsible panel. Replaces the sibling nexus.backlinks / nexus.outgoingLinks / nexus.tags plugins (their ids forward to this one via legacyPluginIds so an existing plugins.enabled list migrates automatically). The standalone nexus.graph plugin stays for users who dock the graph separately.',
     load: () => import('./nexus/noteContext').then(m => m.noteContextPlugin),
   },
   {
@@ -510,24 +505,10 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/debugger').then(m => m.debuggerPlugin),
   },
   {
-    id: 'nexus.outgoingLinks', name: 'Outgoing Links',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.editor', 'nexus.files'],
-    description: 'Side panel listing every link, embed, and unresolved reference in the active note.',
-    load: () => import('./nexus/outgoingLinks').then(m => m.outgoingLinksPlugin),
-  },
-  {
     id: 'nexus.fileProperties', name: 'File Properties',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: "Edit the active note's frontmatter as a typed key/value form.",
     load: () => import('./nexus/fileProperties').then(m => m.filePropertiesPlugin),
-  },
-  {
-    id: 'nexus.tags', name: 'Tags',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.editor', 'nexus.files'],
-    description: 'Browse and filter notes by #tag, with counts and nested-tag drill-down.',
-    load: () => import('./nexus/tags').then(m => m.tagsPlugin),
   },
   {
     id: 'community.mermaid', name: 'Mermaid',
