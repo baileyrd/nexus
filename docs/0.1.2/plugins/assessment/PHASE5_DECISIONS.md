@@ -123,9 +123,25 @@ Originally flagged in DEPENDENCIES.md as a "compile-time leak past the IPC seam.
 
 The IPC seam is for cross-PLUGIN dispatch, not cross-CRATE library reuse. `nexus-storage` legitimately depends on these pure-logic crates as bottom-tier libraries — that's the intended layering, not a leak. **No code change.** Doc claims in DEPENDENCIES.md, `_extract-rust-deps.md`, and IMPLEMENTATION_PLAN.md §4.8 updated to reflect the corrected analysis.
 
+## 4.3 — links-panel consolidation
+
+Landed end-to-end as `nexus.noteContext` across 6 steps (commits `ff530f49` → `5d38d09b`). User-provided UX inputs: accordion shape, "Note Context" name, hard lazy-load, keep `nexus.graph` standalone.
+
+The three known regressions from step 6 have all been restored:
+
+- **Backlinks-count indicator** (commit `9f825ac5`) — `RightPanelFooter` + `FileStats` re-add the "X backlinks" column, now reading from `noteContext`'s shared `useBacklinksDataStore`. An always-on subscriber in `noteContext.activate` populates it (deliberate deviation from hard-lazy; documented in `backlinksLoader.ts` header).
+- **BL-049 block-filter** (commit `7fccb290`) — clicking a `^<block-id>` fragment chip narrows the panel via `backlinks_to_block`; chip with `×` clears it. Heading-anchor fragments stay non-interactive.
+- **On-edit silent refresh** (commit `1db6eece`) — subscribes to `sessionManager.onChanged`, filters to active file, rAF-coalesces bursts, re-fetches without flashing loading.
+
+## 4.1 — all four singletons narrowed
+
+After the Phase 4.1a prototype (`notificationsSettings`), the user asked to do the remaining three as well. They landed in two commits:
+
+- **`searchRuntime` + `recallApi`** (commit `54de2f15`) — same adapter pattern as 4.1a. Stored handle is a typed `SearchKernel` / `RecallApi` interface listing every kernel + config call the plugin makes. `recallApi`'s test stub rewritten to assert against the narrow shape directly (drops the `as any` casts).
+- **`themePicker`** (commit `51200d06`) — wider surface, narrowed in two layers: `themeStore` actions now take `KernelAPI` instead of `PluginAPI`, and `pickerRuntime` stores `Pick<PluginAPI, 'kernel' | 'platform'>`. Call sites in `ThemePicker.tsx`, `SettingsPanelView.tsx`, `themeService/index.ts`, and the `themeStore` tests pass `.kernel` where they used to pass the full PluginAPI.
+
+The original assessment listed `pickerRuntime` as a fifth singleton — that was conflated with `themePicker/pickerRuntime.ts`. The `nexus.pick` plugin uses a published-late-binding pattern (host's `api.input.pick` lazy-imports `requestPick`), which is intentional and not a singleton.
+
 ## What remains genuinely open
 
-- **4.3** — links-panel consolidation (UX direction, per above).
-- **4.1 (4 remaining singletons)** — module-scope singletons in `searchRuntime`, `recallApi`, `themePicker`, `pickerRuntime`. On Phase 4.1a inspection, 3 of these turned out to be reasonable patterns and 1 (`themePicker`) has a wider blast radius than the prototype handled. Captured in the Phase 4.1a commit message and the session summary.
-
-These two are documented with options + recommendations so a decision-maker can act in minutes rather than re-do the analysis.
+Nothing. The assessment cycle (Phases 0–5 plus the follow-ups landed in this round) is functionally complete; every item has either landed or has a documented reason for no action.
