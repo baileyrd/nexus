@@ -20,6 +20,18 @@
 //! | 8  | `invoke`           | `{ skill_id, input, archetype? }` | BL-054 Phase 3 — run a skill via `com.nexus.agent::session_run` |
 //!
 //! Ids are append-only.
+//!
+//! # Intentional runtime cycle with `com.nexus.agent`
+//!
+//! Handler #8 (`invoke`) calls `com.nexus.agent::session_run` to
+//! actually execute the skill, while the agent plugin calls
+//! `com.nexus.skills::{triggered_by, compose, render}` during its
+//! planning loop. Both plugins must be present for either to fully
+//! function, but the calls are async and lock-free, so the cycle is
+//! functional — not a deadlock. Boot order loads skills (#8) before
+//! agent (#16); the load-time half of the cycle is therefore broken,
+//! and only the runtime half remains. The mirror of this comment
+//! lives in `crates/nexus-agent/src/core_plugin.rs`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

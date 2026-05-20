@@ -82,14 +82,11 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
  * eventually be replaced by an `api.*` call.
  */
 const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
-  'shell/src/plugins/core/activityBar/ActivityBarView.tsx',        // host/shellRegistry
+  // Phase 2 (assessment cleanup) deleted the activityBar/commandPalette/
+  // editorArea/fileExplorer/statusBar/titleBar core stubs; their allowlist
+  // rows are gone with them.
   'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // WI-31: host/communityPluginLoader (manifest type)
-  'shell/src/plugins/core/commandPalette/CommandPaletteView.tsx',  // host/ContextKeyService + shellRegistry
-  'shell/src/plugins/core/editorArea/EditorAreaView.tsx',          // host/ContextKeyService
-  'shell/src/plugins/core/fileExplorer/FileExplorerView.tsx',      // host/ContextKeyService
   'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // host/shellRegistry + ContextKeyService + EventBus
-  'shell/src/plugins/core/statusBar/StatusBarView.tsx',            // host/shellRegistry
-  'shell/src/plugins/core/titleBar/TitleBarView.tsx',              // host/shellRegistry + ContextKeyService — same React-component pattern as the other *View.tsx entries (no `api` in scope)
   'shell/src/plugins/nexus/ai/index.ts',                           // host/ContextKeyService + EventBus — predates @nexus/extension-api context-keys / event surface; track under WI-25 drain
   'shell/src/plugins/nexus/backlinks/BacklinksView.tsx',           // host/EventBus
   'shell/src/plugins/nexus/bases/BasesView.tsx',                   // host/ContextKeyService — BL-030 mirrors the canvas active-handle pattern; @nexus/extension-api context-keys not yet wired to React components

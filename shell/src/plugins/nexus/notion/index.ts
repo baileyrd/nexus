@@ -35,9 +35,9 @@ interface ExportReport {
  */
 export const notionPlugin: Plugin = {
   manifest: {
-    id: 'nexus.notion',
-    name: 'Notion',
-    version: '0.1.0',
+    id: 'nexus.notionImport',
+    name: 'Notion Import',
+    version: '0.2.0',
     core: false,
     activationEvents: ['onStartup'],
     contributes: {

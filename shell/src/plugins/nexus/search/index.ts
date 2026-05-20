@@ -52,9 +52,10 @@ export const searchPlugin: Plugin = {
           category: 'Search',
         },
       ],
-      keybindings: [
-        { command: COMMAND_FOCUS, key: 'ctrl+shift+f', mac: 'cmd+shift+f' },
-      ],
+      // BL-XXX Phase 4.5 — Ctrl/Cmd+Shift+F binds nexus.searchPanel
+      // (the richer multi-file find/replace surface). The sidebar
+      // search overlay stays reachable via the command palette
+      // ("Focus Search") and any custom user binding.
     },
   },
 

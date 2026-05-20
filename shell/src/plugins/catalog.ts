@@ -426,8 +426,9 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/templates').then(m => m.templatesPlugin),
   },
   {
-    id: 'nexus.notion', name: 'Notion',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    id: 'nexus.notionImport', name: 'Notion Import',
+    version: '0.2.0', core: false, activationEvents: ['onStartup'],
+    legacyPluginIds: ['nexus.notion'],
     description: 'Import Notion exports as markdown, preserving frontmatter and attachment links.',
     load: () => import('./nexus/notion').then(m => m.notionPlugin),
   },

@@ -15,6 +15,17 @@
 //! `nexus-bootstrap`. The bridges here and in bootstrap are
 //! intentionally identical in behaviour.
 //!
+//! # Intentional runtime cycle with `com.nexus.skills`
+//!
+//! `dispatch_run` invokes `com.nexus.skills::{triggered_by, compose,
+//! render}` while the skills plugin invokes `com.nexus.agent::session_run`
+//! to execute a composed skill. The cycle is deliberate — both plugins
+//! must be present for either to fully function, but the calls are
+//! async and lock-free, so it is functional rather than a deadlock.
+//! Boot order loads skills (#8) before agent (#16), which breaks the
+//! load-time half of the cycle; the runtime half is documented here
+//! and in `crates/nexus-skills/src/core_plugin.rs`.
+//!
 //! # Handlers
 //!
 //! | Handler id | Command             | Purpose                               |
