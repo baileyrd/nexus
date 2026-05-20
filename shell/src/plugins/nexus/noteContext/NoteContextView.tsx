@@ -8,6 +8,7 @@
 import { type ReactNode, useCallback } from 'react'
 import { AccordionSection } from './accordion'
 import { OutgoingLinksSection } from './sections/OutgoingLinksSection'
+import { TagsSection } from './sections/TagsSection'
 import { useNoteContextStore } from './store'
 
 interface SectionMeta {
@@ -26,7 +27,7 @@ interface SectionMeta {
 const SECTIONS: SectionMeta[] = [
   { id: 'backlinks',     title: 'Backlinks',      body: null, pendingStep: 4 },
   { id: 'outgoingLinks', title: 'Outgoing Links', body: () => <OutgoingLinksSection /> },
-  { id: 'tags',          title: 'Tags',           body: null, pendingStep: 3 },
+  { id: 'tags',          title: 'Tags',           body: () => <TagsSection /> },
   { id: 'graph',         title: 'Graph',          body: null, pendingStep: 5 },
 ]
 
