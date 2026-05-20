@@ -72,6 +72,42 @@ Resolved in Phase 2 (commit `cbc6871f`). The stub was removed, every other plugi
 
 Resolved in Phase 2 (decision recorded in `cbc6871f` commit message). The shim hosts two user-facing settings; removing it would orphan those settings in existing forges with no behaviour upside. Kept as-is.
 
+## 4.3 — Consolidate links plugins: revised scope
+
+Not strictly a Phase 5 item, but the same "needs direction" tag applies. Captured here so the original plan's recommendation can be revisited with evidence.
+
+**The plan said:** Merge `outgoingLinks` + `tags` + `backlinks` + per-file `graph` into a single `nexus.links` panel with tabs.
+
+**On closer reading, three findings change the cost/benefit:**
+
+1. **The 4 plugins are already rendered as a tab cluster in the right panel.** Each emits `rightPanel:registerTab` at activate-time; the right-panel host collects them and renders Backlinks / Outgoing / Tags / Graph as sibling tabs. Users today already see them as a unified panel. The visible UX gain of "consolidate into one tabbed panel" is small to zero.
+
+2. **The kernel calls are not shared the way the plan implied.** The plan assumed all four read the same `backlinks` / `outgoing_links` handlers. Actual:
+   - `nexus.backlinks` → `com.nexus.storage::backlinks` + `backlinks_to_block`
+   - `nexus.outgoingLinks` → `com.nexus.storage::outgoing_links`
+   - `nexus.tags` → `com.nexus.storage::query_tags` + `read_frontmatter`
+   - `nexus.graph` → mix of `backlinks` + `outgoing_links` (per-file view)
+   So `tags` is the odd one out, and the "shared call" simplification doesn't survive contact with the code.
+
+3. **Implementation cost is high relative to benefit.** Each plugin has its own zustand store, request-id race guard, kernel-availability guard, active-file subscriber, and on-change refresh hook. Total ~1,600 LOC across 7 files (`outgoingLinks/index.tsx` 184, `tags/index.tsx` 226, `backlinks/{index.ts, BacklinksView.tsx}` 623, `graph/{index.ts, GraphView.tsx, GraphPaneView.tsx}` 571). A merge that preserves behavior means re-implementing all of that subscriber wiring in one plugin — substantial regression surface for 4 default-off features at once.
+
+**Revised recommendation: smaller scope, do later when there's UX direction.**
+
+What's worth doing **now** (small, low-risk):
+- Extract the shared "active-file subscriber with request-id guard + kernel.available gate" pattern into a tiny shared helper (e.g. `shell/src/plugins/nexus/_lib/activeFileLoader.ts`). Each of the 4 plugins replaces ~50 lines of duplicated wiring with 4–5 lines of helper invocation. Pure refactor, behavior-preserving, ~200 lines removed across the 4 plugins.
+- Each plugin keeps its own manifest, view, kernel calls, store — nothing user-visible changes.
+
+What to **defer** until product can weigh in:
+- Whether to collapse the 4 right-panel tabs into a single `nexus.links` tabbed entry. The visible UX delta is small (already tabs) and the layout question — should this be a horizontal tab strip, a segmented control, or stay as parallel tabs? — is a design call.
+- Whether to ship `nexus.graph`'s per-file view standalone or only as a tab. (`nexus.graph.global` stays either way — confirmed live consumer in `globalIndex.ts`.)
+
+**Net Phase 4.3 status:** plan as written is more expensive than warranted given the visible benefit; deferred pending UX direction. The shared-helper sub-task is captured here as a follow-up and can land at any time.
+
 ## What remains genuinely open
 
-Only **5.2** (audio default backend) requires a decision-maker's input. The right call is product, not engineering; this doc captures the trade-offs so whoever picks it up can act in minutes rather than re-do the analysis.
+- **5.2** — audio default backend (product call).
+- **4.3** — links-panel consolidation (UX direction, per above).
+- **4.8** — `nexus-storage` compile-time deps (architectural sign-off — would alter the IPC seam invariants).
+- **4.1 (4 remaining)** — module-scope singletons in `searchRuntime`, `recallApi`, `themePicker`, `pickerRuntime`. On Phase 4.1a inspection, 3 of these turned out to be reasonable patterns and 1 (`themePicker`) has a wider blast radius than the prototype handled. Captured in the Phase 4.1a commit message and the session summary.
+
+These four are documented with options + recommendations so a decision-maker can act in minutes rather than re-do the analysis.
