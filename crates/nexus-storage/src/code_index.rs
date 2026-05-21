@@ -198,13 +198,32 @@ pub fn upsert_file_symbols(
     symbols: &[ExtractedSymbol],
 ) -> Result<usize, StorageError> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute(
+    let n = upsert_file_symbols_in_tx(&tx, path, language, symbols)?;
+    tx.commit()?;
+    Ok(n)
+}
+
+/// Same as [`upsert_file_symbols`] but assumes the caller already owns
+/// an enclosing transaction (or savepoint) on `conn`. Use this when the
+/// upsert is one step inside a larger atomic write — the outer commit
+/// covers atomicity for the whole sequence and a nested
+/// `BEGIN DEFERRED` would fail at the SQLite layer.
+///
+/// # Errors
+/// Returns [`StorageError::Database`] on any SQLite failure.
+pub fn upsert_file_symbols_in_tx(
+    conn: &Connection,
+    path: &str,
+    language: CodeLanguage,
+    symbols: &[ExtractedSymbol],
+) -> Result<usize, StorageError> {
+    conn.execute(
         "DELETE FROM code_symbols WHERE path = ?1",
         rusqlite::params![path],
     )?;
     let mut row_ids: Vec<i64> = Vec::with_capacity(symbols.len());
     {
-        let mut stmt = tx.prepare(
+        let mut stmt = conn.prepare(
             "INSERT INTO code_symbols
                  (path, language, kind, name, line_start, line_end,
                   parent_id, doc_comment, indexed_at)
@@ -224,10 +243,9 @@ pub fn upsert_file_symbols(
                 parent_row_id,
                 sym.doc_comment,
             ])?;
-            row_ids.push(tx.last_insert_rowid());
+            row_ids.push(conn.last_insert_rowid());
         }
     }
-    tx.commit()?;
     Ok(symbols.len())
 }
 

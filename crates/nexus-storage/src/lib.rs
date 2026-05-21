@@ -209,26 +209,31 @@ impl StorageEngine {
             reason: e.to_string(),
         })?;
 
-        // 3. Lock write_conn.
-        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        // 3. Lock write_conn and open a transaction. All SQLite mutations below
+        //    go through `&tx`; the in-memory knowledge graph is only touched
+        //    AFTER `tx.commit()` succeeds, so a mid-sequence DB failure cannot
+        //    leave the graph holding state that doesn't exist on disk.
+        let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let tx = conn.transaction()?;
 
         // 4. Delete existing index entry if the path is already indexed.
-        if let Some(existing) = file_by_path(&conn, path)? {
-            conn.execute(
+        if let Some(existing) = file_by_path(&tx, path)? {
+            tx.execute(
                 "DELETE FROM fts_blocks WHERE file_path = ?1",
                 rusqlite::params![path],
             )?;
-            canvas::delete_canvas(&conn, existing.id.cast_signed())?;
+            canvas::delete_canvas(&tx, existing.id.cast_signed())?;
             // BL-114: drop any prior code symbols for this path so a
             // code→non-code rename doesn't leave stale rows.
-            let _ = code_index::delete_file_symbols(&conn, path);
-            delete_file(&conn, existing.id)?;
+            let _ = code_index::delete_file_symbols(&tx, path);
+            delete_file(&tx, existing.id)?;
         }
 
         let size_bytes = content.len() as u64;
         let file_type = infer_file_type(path);
 
-        // 5. Branch by file type.
+        // 5. Branch by file type. Each branch finishes the DB work, commits the
+        //    transaction, then applies the corresponding graph mutations.
         if path.ends_with(".canvas") {
             // ── Canvas path ──────────────────────────────────────────────
             let canvas_data = canvas::parse_canvas(text)?;
@@ -241,15 +246,18 @@ impl StorageEngine {
                 frontmatter: Vec::new(),
                 tasks: Vec::new(),
             };
-            let file_id = insert_file(&conn, path, &file_type, size_bytes, &empty_parsed)?;
-            canvas::insert_canvas(&conn, file_id.cast_signed(), &canvas_data)?;
+            let file_id = insert_file(&tx, path, &file_type, size_bytes, &empty_parsed)?;
+            canvas::insert_canvas(&tx, file_id.cast_signed(), &canvas_data)?;
+
+            let canvas_link_targets = canvas::extract_file_links(&canvas_data);
+            tx.commit()?;
 
             // Update knowledge graph: file-type nodes create links.
             {
                 let mut g = self.graph.write().expect("graph lock poisoned");
                 g.add_note(path);
                 g.remove_links_from(path);
-                for target in canvas::extract_file_links(&canvas_data) {
+                for target in canvas_link_targets {
                     g.add_link(path, &target, graph::EdgeData {
                         link_type: "canvas-embed".to_string(),
                         link_text: target.clone(),
@@ -276,17 +284,21 @@ impl StorageEngine {
                 (parse_markdown(text)?, Vec::new())
             };
 
-            let file_id = insert_file(&conn, path, &file_type, size_bytes, &parsed)?;
+            let file_id = insert_file(&tx, path, &file_type, size_bytes, &parsed)?;
 
             if !jsx_components.is_empty() {
-                insert_jsx_components(&conn, file_id, &jsx_components)?;
+                insert_jsx_components(&tx, file_id, &jsx_components)?;
             }
+
+            tx.commit()?;
 
             // BL-114: refresh the tree-sitter code-symbol index for
             // code-language files. detect_language returns None for
             // markdown / non-code files, so the call is a no-op there.
-            // Errors are logged and swallowed — a broken parser must
-            // not block a normal save.
+            // Runs OUTSIDE the file/blocks transaction with its own
+            // inner tx: errors are logged and swallowed — a broken
+            // parser must not block a normal save and must not roll
+            // back the file/blocks write that already succeeded.
             if let Some(lang) = code_index::detect_language(path) {
                 let symbols = code_index::extract_symbols(lang, text);
                 if let Err(e) = code_index::upsert_file_symbols(&conn, path, lang, &symbols) {
@@ -942,21 +954,27 @@ impl StorageEngine {
             std::fs::remove_file(&abs)?;
         }
 
-        // Remove from index.
-        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
-        if let Some(record) = file_by_path(&conn, path)? {
-            conn.execute(
+        // Remove from index. All SQLite mutations go through `&tx`; the
+        // graph node is only removed AFTER `tx.commit()` succeeds, so a
+        // mid-sequence DB failure cannot leave the graph believing the
+        // file is gone while its rows are still in `files` / `fts_blocks`.
+        let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let tx = conn.transaction()?;
+        if let Some(record) = file_by_path(&tx, path)? {
+            tx.execute(
                 "DELETE FROM fts_blocks WHERE file_path = ?1",
                 rusqlite::params![path],
             )?;
-            delete_file(&conn, record.id)?;
+            delete_file(&tx, record.id)?;
         }
         // BL-114: code symbols are path-keyed; drop them outside the
         // FTS/files cascade so a delete of a non-markdown file still
         // cleans up its symbols.
-        let _ = code_index::delete_file_symbols(&conn, path);
+        let _ = code_index::delete_file_symbols(&tx, path);
+        tx.commit()?;
 
-        // Remove from graph.
+        // Remove from graph. `remove_note` is a no-op for unknown
+        // paths, so it's safe even if the file was never indexed.
         {
             let mut g = self.graph.write().expect("graph lock poisoned");
             g.remove_note(path);
@@ -1151,17 +1169,26 @@ impl StorageEngine {
         // new path so searches/backlinks stay consistent without waiting for
         // a reconcile pass.
         if src.is_file() || dst.is_file() {
-            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
-            if let Some(record) = file_by_path(&conn, from)? {
-                conn.execute(
+            let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+            let tx = conn.transaction()?;
+            let was_indexed = if let Some(record) = file_by_path(&tx, from)? {
+                tx.execute(
                     "UPDATE files SET path = ?1 WHERE id = ?2;",
                     rusqlite::params![to, record.id.cast_signed()],
                 )?;
-                conn.execute(
+                tx.execute(
                     "UPDATE fts_blocks SET file_path = ?1 WHERE file_path = ?2;",
                     rusqlite::params![to, from],
                 )?;
-                // Graph node path needs to move as well.
+                true
+            } else {
+                false
+            };
+            tx.commit()?;
+            // Graph node path needs to move as well. Only re-key if the
+            // file was actually indexed — otherwise add_note(to) would
+            // create a node we don't want.
+            if was_indexed {
                 let mut g = self.graph.write().expect("graph lock poisoned");
                 g.remove_note(from);
                 g.add_note(to);
@@ -1191,16 +1218,21 @@ impl StorageEngine {
         if meta.is_dir() {
             std::fs::remove_dir_all(&target)?;
             // Best-effort index cleanup for files under this directory.
+            // Wrapped in a tx so the fts_blocks DELETE and files
+            // soft-delete are atomic — readers never observe one
+            // applied without the other.
             let prefix = format!("{}/", relpath.trim_end_matches('/'));
-            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
-            conn.execute(
+            let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+            let tx = conn.transaction()?;
+            tx.execute(
                 "DELETE FROM fts_blocks WHERE file_path LIKE ?1;",
                 rusqlite::params![format!("{prefix}%")],
             )?;
-            conn.execute(
+            tx.execute(
                 "UPDATE files SET is_deleted = 1 WHERE path LIKE ?1;",
                 rusqlite::params![format!("{prefix}%")],
             )?;
+            tx.commit()?;
             // Graph cleanup is deferred to the watcher reconcile pass — stale
             // nodes under the prefix only surface as unresolved links until then.
             Ok(())
@@ -2115,6 +2147,64 @@ mod tests {
         assert!(
             !dir.path().join("notes/gone.md").exists(),
             "file should be removed from disk"
+        );
+    }
+
+    // ── 4b. Graph + SQLite stay consistent across write/delete cycles ─────────
+    //
+    // Contract test for the post-commit invariant: every write_file /
+    // delete_file path must update the in-memory knowledge graph only AFTER
+    // the SQLite transaction commits. A regression that removed the graph
+    // mutation block, or that left the graph mutated when the DB write
+    // failed, would surface here as a divergence between `backlinks()`
+    // (graph-backed) and `query_files()` (DB-backed).
+    #[test]
+    fn graph_and_index_consistent_after_write_then_delete() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        engine
+            .write_file("notes/target.md", b"# Target\n")
+            .expect("write target");
+        engine
+            .write_file(
+                "notes/source.md",
+                b"# Source\n\nLinks to [[notes/target.md]].",
+            )
+            .expect("write source");
+
+        // After write_file commits, the graph must reflect the link.
+        let backs = engine.backlinks("notes/target.md").expect("backlinks");
+        assert!(
+            backs.iter().any(|b| b.source_path == "notes/source.md"),
+            "graph missing backlink from source after commit; got {backs:?}",
+        );
+        assert_eq!(
+            engine
+                .query_files(&FileFilter::default())
+                .expect("query")
+                .len(),
+            2,
+            "DB should hold both files post-commit",
+        );
+
+        // Delete the source. Both the DB row and the graph node must go away
+        // together — if the graph still remembers the source as a linker,
+        // backlinks(target) will still surface it.
+        engine.delete_file("notes/source.md").expect("delete");
+
+        let backs_after = engine.backlinks("notes/target.md").expect("backlinks");
+        assert!(
+            backs_after.is_empty(),
+            "graph still reports backlinks after source deletion; got {backs_after:?}",
+        );
+        assert_eq!(
+            engine
+                .query_files(&FileFilter::default())
+                .expect("query")
+                .len(),
+            1,
+            "only the target should remain in the DB",
         );
     }
 
