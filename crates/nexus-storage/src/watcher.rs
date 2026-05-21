@@ -73,13 +73,28 @@ pub enum StorageEvent {
     /// system). Emitted after a git "batch mode" — when
     /// `.git/index.lock` exists and then disappears, signaling that
     /// a checkout / rebase / merge probably moved many files at
-    /// once and per-file events would be unreliable.
+    /// once and per-file events would be unreliable — OR after the
+    /// downstream channel overflowed and per-file events had to be
+    /// dropped (see `WATCHER_CHANNEL_BOUND`).
+    ///
+    /// `dropped_events` is the number of debounced filesystem
+    /// notifications the watcher discarded since the last reconcile
+    /// signal. Zero means the reconcile is informational (e.g. an
+    /// initial-load recommendation); non-zero quantifies what the
+    /// consumer needs to recover. Surfaced in
+    /// `com.nexus.storage.indexing.completed` so operators can see
+    /// when git batch-mode or channel overflow is masking changes.
     ///
     /// Pre-#84 this was signaled in-band by a `FileModified`
     /// event with empty `path` and `content_hash` strings, which
     /// downstream consumers had to special-case. The dedicated
     /// variant makes the contract explicit.
-    ReconcileRequested,
+    ReconcileRequested {
+        /// Number of debounced filesystem notifications discarded
+        /// since the last reconcile signal. Drives operator-visible
+        /// observability for git batch-mode and channel overflow.
+        dropped_events: usize,
+    },
 }
 
 // ── Public helpers ────────────────────────────────────────────────────────────
@@ -208,15 +223,19 @@ fn enqueue(
     evt: StorageEvent,
     pending_reconcile: &mut bool,
 ) -> bool {
-    let evt_is_reconcile = matches!(evt, StorageEvent::ReconcileRequested);
+    let evt_is_reconcile = matches!(evt, StorageEvent::ReconcileRequested { .. });
 
     // If we owe a reconcile and the caller is sending something else,
     // try to flush the reconcile first. If even that won't fit we
     // keep the flag set and skip the current event too — the
     // reconcile signal IS the recovery, the per-file event would be
-    // a no-op once it lands.
+    // a no-op once it lands. `dropped_events: 0` here because the
+    // overflow path already logged the count via the warn below and
+    // does not thread an exact tally through; consumers learn the
+    // important bit (a reconcile is needed) without a misleading
+    // total.
     if *pending_reconcile && !evt_is_reconcile {
-        match tx.try_send(StorageEvent::ReconcileRequested) {
+        match tx.try_send(StorageEvent::ReconcileRequested { dropped_events: 0 }) {
             Ok(()) => *pending_reconcile = false,
             Err(mpsc::TrySendError::Full(_)) => return true,
             Err(mpsc::TrySendError::Disconnected(_)) => return false,
@@ -254,6 +273,13 @@ fn process_events(
     forge_root: PathBuf,
 ) {
     let mut git_batch_mode = false;
+    // Tracks how many debounced filesystem notifications were dropped
+    // while `.git/index.lock` was held. Reset every time the lock
+    // clears (signalling the end of a git operation); surfaced via
+    // ReconcileRequested.dropped_events and a tracing::info! line so
+    // operators see when batch-mode is masking changes.
+    let mut git_batch_dropped: usize = 0;
+    let mut git_batch_started_at: Option<std::time::Instant> = None;
     let mut pending_reconcile = false;
 
     for result in &raw_rx {
@@ -278,18 +304,42 @@ fn process_events(
         let lock_exists = lock_path.exists();
 
         if lock_exists {
+            if !git_batch_mode {
+                git_batch_started_at = Some(std::time::Instant::now());
+            }
             git_batch_mode = true;
+            // Count what would otherwise have been forwarded — gives
+            // the upcoming ReconcileRequested an exact tally of the
+            // batch instead of just "many".
+            git_batch_dropped = git_batch_dropped.saturating_add(events.len());
             continue;
         }
 
         if git_batch_mode {
             // Lock is gone — emit a dedicated reconcile signal so
             // downstream consumers don't have to special-case an
-            // empty-string `FileModified` (issue #84).
+            // empty-string `FileModified` (issue #84). The dropped
+            // count + held-duration tracing line gives operators a
+            // post-mortem of what the git batch hid; the consumer
+            // gets the count via ReconcileRequested.dropped_events.
             git_batch_mode = false;
+            let dropped = std::mem::replace(&mut git_batch_dropped, 0);
+            let held_ms = git_batch_started_at
+                .take()
+                .map(|t| u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX))
+                .unwrap_or(0);
+            tracing::info!(
+                audit = true,
+                dropped_events = dropped,
+                held_ms,
+                "storage watcher: .git/index.lock cleared after git batch; \
+                 emitting ReconcileRequested to recover state",
+            );
             if !enqueue(
                 &storage_tx,
-                StorageEvent::ReconcileRequested,
+                StorageEvent::ReconcileRequested {
+                    dropped_events: dropped,
+                },
                 &mut pending_reconcile,
             ) {
                 return;
@@ -475,7 +525,7 @@ mod tests {
 
         assert!(matches!(
             rx.try_recv().unwrap(),
-            StorageEvent::ReconcileRequested
+            StorageEvent::ReconcileRequested { .. }
         ));
         assert!(rx.try_recv().is_err(), "c should have been dropped");
     }
@@ -485,7 +535,11 @@ mod tests {
         let (tx, _rx) = mpsc::sync_channel::<StorageEvent>(2);
         let mut pending = true; // simulate a previously-latched overflow
 
-        assert!(enqueue(&tx, StorageEvent::ReconcileRequested, &mut pending));
+        assert!(enqueue(
+            &tx,
+            StorageEvent::ReconcileRequested { dropped_events: 42 },
+            &mut pending
+        ));
         assert!(
             !pending,
             "an explicit ReconcileRequested send must clear the latched flag"

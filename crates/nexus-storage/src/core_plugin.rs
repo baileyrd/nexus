@@ -980,9 +980,13 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             publish_file_activity(bus, "modified", path, None);
         }
 
-        StorageEvent::ReconcileRequested => {
+        StorageEvent::ReconcileRequested { dropped_events } => {
             // Watcher recommends a re-walk of the forge — typically
-            // emitted after a git batch (`.git/index.lock` came + went).
+            // emitted after a git batch (`.git/index.lock` came + went)
+            // or after the watcher channel overflowed and per-file
+            // events had to be dropped. `dropped_events` is the tally
+            // the watcher accumulated since the previous reconcile so
+            // operators can see how much state needed recovery.
             // Bracket the indexing window with started/completed events
             // so subscribers can debounce UI refreshes. The actual
             // reconcile is the consumer's responsibility (#84).
@@ -994,7 +998,10 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             let _ = bus.publish_plugin(
                 PLUGIN_ID,
                 "com.nexus.storage.indexing.completed",
-                serde_json::json!({ "triggered_by": "git-batch-mode" }),
+                serde_json::json!({
+                    "triggered_by": "git-batch-mode",
+                    "dropped_events": dropped_events,
+                }),
             );
         }
 
