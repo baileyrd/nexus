@@ -171,6 +171,13 @@ pub struct KernelRuntime {
     /// hold it for quick map operations (insert / remove / drain) — never
     /// across an await.
     subscriptions: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
+    /// Per-window cancellation tokens, keyed by Tauri webview label.
+    /// Lazily populated on the first `kernel_invoke` from each window;
+    /// the window's token is fired by [`cancel_window`] when the user
+    /// closes that window so in-flight calls from that window receive
+    /// `IpcError::Cancelled` and the kernel releases their resources
+    /// (rather than letting popout closes leak the work).
+    window_cancels: Arc<StdMutex<HashMap<String, nexus_kernel::cancel::CancellationToken>>>,
 }
 
 impl KernelRuntime {
@@ -180,6 +187,37 @@ impl KernelRuntime {
             inner: Arc::new(Mutex::new(None)),
             booted: Arc::new(AtomicBool::new(false)),
             subscriptions: Arc::new(StdMutex::new(HashMap::new())),
+            window_cancels: Arc::new(StdMutex::new(HashMap::new())),
+        }
+    }
+
+    /// Cancellation token for the given Tauri webview label. Creates a
+    /// new root token on first request from that window; returns the
+    /// same token on subsequent calls so every `kernel_invoke` from
+    /// the window shares a cancel scope. Cloned so the caller can
+    /// derive child tokens / scope it without holding the map lock.
+    pub fn window_cancel_token(&self, label: &str) -> nexus_kernel::cancel::CancellationToken {
+        let mut map = self
+            .window_cancels
+            .lock()
+            .expect("window_cancels mutex poisoned");
+        map.entry(label.to_string())
+            .or_insert_with(nexus_kernel::cancel::CancellationToken::new)
+            .clone()
+    }
+
+    /// Fire the cancellation token for `label` and drop the map entry.
+    /// Any in-flight `kernel_invoke` from that window observes the
+    /// cancel via the kernel's IPC dispatch race and returns
+    /// `IpcError::Cancelled`. No-op for windows that never invoked.
+    pub fn cancel_window(&self, label: &str) {
+        let token = self
+            .window_cancels
+            .lock()
+            .expect("window_cancels mutex poisoned")
+            .remove(label);
+        if let Some(token) = token {
+            token.cancel();
         }
     }
 
@@ -584,12 +622,19 @@ pub async fn revoke_plugin_capability(
 /// The outer runtime mutex is released before the dispatch `.await` so
 /// concurrent invokes don't serialize and re-entrant IPC calls don't
 /// deadlock against the mutex.
+///
+/// The call is scoped under the calling window's CancellationToken
+/// (see [`KernelRuntime::window_cancel_token`]) so a popout close
+/// fires the token and any in-flight dispatch from that window
+/// returns `IpcError::Cancelled`. Other windows' in-flight calls are
+/// unaffected because each window owns its own token.
 #[tauri::command]
 pub async fn kernel_invoke(
     plugin_id: String,
     command_id: String,
     args: serde_json::Value,
     timeout_ms: Option<u64>,
+    webview: tauri::Webview,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<serde_json::Value, IpcErrorEnvelope> {
     let invoker = {
@@ -611,9 +656,10 @@ pub async fn kernel_invoke(
     };
 
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_INVOKE_TIMEOUT_MS));
+    let window_token = runtime.window_cancel_token(webview.label());
 
-    invoker
-        .ipc_call(&plugin_id, &command_id, args, timeout)
+    let fut = invoker.ipc_call(&plugin_id, &command_id, args, timeout);
+    nexus_kernel::cancel::scope_async(window_token, fut)
         .await
         .map_err(|e| invoker_error_to_envelope(&e, &plugin_id, &command_id))
 }
@@ -943,5 +989,55 @@ mod tests {
         assert_eq!(env.kind, IpcErrorKind::Serialization);
         assert_eq!(env.plugin_id, "com.caller");
         assert_eq!(env.command, "do_thing");
+    }
+
+    // ── Per-window cancellation token map ────────────────────────────────────
+
+    #[test]
+    fn window_cancel_token_returns_same_token_per_window() {
+        let rt = KernelRuntime::new();
+        let a1 = rt.window_cancel_token("main");
+        let a2 = rt.window_cancel_token("main");
+        // Cancelling via the first reference must be observable via the
+        // second — proves both calls handed back clones of the same
+        // underlying token, not fresh roots per call.
+        assert!(!a1.is_cancelled());
+        a1.cancel();
+        assert!(a2.is_cancelled());
+    }
+
+    #[test]
+    fn window_cancel_token_is_independent_per_window() {
+        let rt = KernelRuntime::new();
+        let main = rt.window_cancel_token("main");
+        let popout = rt.window_cancel_token("popout-1");
+        rt.cancel_window("popout-1");
+        assert!(popout.is_cancelled(), "popout-1 must be cancelled");
+        assert!(
+            !main.is_cancelled(),
+            "main must NOT be cancelled when only popout-1 was closed",
+        );
+    }
+
+    #[test]
+    fn cancel_window_drops_map_entry_and_subsequent_lookup_creates_fresh_token() {
+        let rt = KernelRuntime::new();
+        let first = rt.window_cancel_token("popout-1");
+        rt.cancel_window("popout-1");
+        assert!(first.is_cancelled());
+        // Re-creating a window with the same label (rare but possible
+        // if Tauri reuses labels) must hand back a FRESH token so the
+        // new window's in-flight calls aren't born already-cancelled.
+        let second = rt.window_cancel_token("popout-1");
+        assert!(!second.is_cancelled(), "fresh token after cancel + reuse");
+    }
+
+    #[test]
+    fn cancel_window_is_a_no_op_for_unknown_label() {
+        let rt = KernelRuntime::new();
+        // Must not panic or poison anything when the window never invoked.
+        rt.cancel_window("never-invoked");
+        let token = rt.window_cancel_token("never-invoked");
+        assert!(!token.is_cancelled());
     }
 }

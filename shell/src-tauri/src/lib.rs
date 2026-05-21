@@ -692,21 +692,44 @@ pub fn run() {
 
             Ok(())
         })
-        // Fire the kernel shutdown when the user closes a window. Fire-and-
-        // forget for now — Tauri 2's `CloseRequested` has an `api` handle we
-        // could use to delay the actual close until shutdown completes, but
-        // that adds complexity we don't need until something demonstrates a
-        // race. A warning is logged if shutdown fails so it at least shows up
-        // in the dev console.
+        // Window-close cleanup. Two cases:
+        //
+        //   - Popout (or any non-last) closes: fire that window's
+        //     CancellationToken so its in-flight `kernel_invoke`s
+        //     observe the cancel and return `IpcError::Cancelled`
+        //     promptly, releasing whatever resources they held. The
+        //     kernel itself stays alive for the surviving windows.
+        //
+        //   - Last window closes: do the per-window cancel for
+        //     completeness, then shut the kernel down (the app is
+        //     about to exit). `KernelRuntime::shutdown` is
+        //     idempotent; a fire-and-forget spawn is fine because
+        //     Tauri 2's `CloseRequested.api` is available if we
+        //     ever need to delay the close itself.
+        //
+        // Pre-fix this branch unconditionally shut the kernel down
+        // for every close event, so a popout close would silently
+        // kill the main window's runtime — every subsequent
+        // `kernel_invoke` from main would fail with "kernel not
+        // booted" until the user restarted the app.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let app_handle = window.app_handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let runtime = app_handle.state::<bridge::KernelRuntime>();
-                    if let Err(e) = runtime.shutdown().await {
-                        eprintln!("[shutdown] kernel shutdown failed: {e}");
-                    }
-                });
+                let closing_label = window.label().to_string();
+                let runtime = app_handle.state::<bridge::KernelRuntime>();
+                runtime.cancel_window(&closing_label);
+                // `webview_windows()` includes the still-closing window
+                // at this point (the close is requested, not yet
+                // finalised), so "1 remaining" means this IS the last.
+                let is_last_window = app_handle.webview_windows().len() <= 1;
+                if is_last_window {
+                    tauri::async_runtime::spawn(async move {
+                        let runtime = app_handle.state::<bridge::KernelRuntime>();
+                        if let Err(e) = runtime.shutdown().await {
+                            eprintln!("[shutdown] kernel shutdown failed: {e}");
+                        }
+                    });
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

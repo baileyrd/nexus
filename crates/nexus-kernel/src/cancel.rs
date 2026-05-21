@@ -42,7 +42,10 @@
 //! is the correct behaviour — there is no caller to be cancelled by
 //! — but the `None` arm must be handled by opt-in callers.
 
-use tokio_util::sync::CancellationToken;
+// Re-exported so callers that need to name the token type (e.g. the
+// Tauri shell's per-window cancel map) can import it from the kernel
+// crate instead of pulling in a direct tokio-util dependency.
+pub use tokio_util::sync::CancellationToken;
 
 tokio::task_local! {
     /// Active cancellation token for the currently-dispatching IPC

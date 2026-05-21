@@ -7,7 +7,7 @@
 //! must route through `kernel_invoke` → `ipc_call` and live in a service
 //! crate, not as a new bespoke command here.
 //!
-//! This test pins the current 28-command set. If you add or remove a command
+//! This test pins the current 29-command set. If you add or remove a command
 //! and this test fails, that's the system asking: **is this a host concern,
 //! or did this belong behind an IPC handler?** If it really is a host
 //! concern, update both the [`EXPECTED`] list below and add an ADR (or
@@ -51,6 +51,7 @@ const EXPECTED: &[&str] = &[
     "set_plugin_granted_capabilities",
     "path_exists",
     "append_shell_log",
+    "notify_desktop",
     "persistence::get_shell_state",
     "persistence::save_shell_state",
     "persistence::write_last_forge_path",
