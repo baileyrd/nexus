@@ -1,6 +1,18 @@
 # Nexus — Gap & Inconsistency Review
 
 > **As of:** 2026-05-21. Scope: full workspace (35 crates, shell, packages, docs). Findings grouped by severity. Each item is file:line-grounded so you can jump straight to the work. The existing [`architecture-adherence.md`](../architecture-adherence.md) (2026-05-17) already covers the four microkernel invariants; this review covers what that audit explicitly didn't.
+>
+> **Status legend:** items closed during the 2026-05-21 sweep are marked **✅ Closed** with the commit SHA. Open items are unmarked.
+
+## Closed during this review
+
+| Item | Title | Commit |
+|------|-------|--------|
+| A2 | Silent error swallowing across event bus (audit plugin) | `0eb8bcc0` |
+| A4 | Unbounded channels in LSP/DAP/ACP protocol clients | `22aa9f88` |
+| A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
+
+Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
 ---
 
@@ -21,27 +33,29 @@ The plugin catalog in `shell/src/plugins/catalog.ts` declares itself the source 
 
 Plus 6 plugins with `index.ts` but only stub content: `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`.
 
-### A2. Silent error swallowing across event bus
+### A2. Silent error swallowing across event bus — ✅ partially closed (`0eb8bcc0`)
 `let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Worst sites:
-- `crates/nexus-security/src/core_plugin.rs:121,154,166` — **audit events dropped silently** (this is an audit plugin)
+- ✅ `crates/nexus-security/src/core_plugin.rs:121,154,166` — **audit events** (fixed in `0eb8bcc0`)
 - `crates/nexus-storage/src/core_plugin.rs:960,972,993,998,1009,1018` — 6 state-change events dropped
 - `crates/nexus-notifications/src/core_plugin.rs:556,679,947` — including `tx.send(res)` whose loss causes caller hangs
 - `crates/nexus-mcp/src/core_plugin.rs:312`
 - `crates/nexus-bootstrap/src/crdt_publisher.rs:293` (tmp-file leakage hidden)
 - `crates/nexus-bootstrap/src/plugins/mod.rs:253`
 
-### A3. Data-loss `unwrap_or_default()` on serialization
-- `crates/nexus-storage/src/bases/mod.rs:71,85` — `serde_json::to_string(&record).unwrap_or_default()` writes an empty string to disk on serialization failure.
-- `crates/nexus-notifications/src/inbox.rs:558` — corrupt channels config silently becomes empty list → notifications stop firing without warning.
-- `crates/nexus-notifications/src/core_plugin.rs:406,425` — bad router config falls back to default (no routing) silently.
-- `crates/nexus-workflow/src/digests.rs:178` — `LastFired` parse failure resets digest state silently.
-- `crates/nexus-workflow/src/core_plugin.rs:517,538` — `RwLock.read().ok()…unwrap_or_default()`: lock poisoning silently yields default config.
+### A3. Data-loss `unwrap_or_default()` on serialization — ✅ Closed (`88f990cd`)
+- ✅ `crates/nexus-storage/src/bases/mod.rs:71,85` — now propagate `StorageError::CorruptFile`.
+- ✅ `crates/nexus-notifications/src/inbox.rs:558` — now logs warn with entry id + raw json + parse error before defaulting.
+- ✅ `crates/nexus-notifications/src/core_plugin.rs:406,425` — test-only constructors now `.expect()` instead of papering over.
+- ✅ `crates/nexus-workflow/src/digests.rs:178` — documented soft-fail contract preserved; now logs warn.
+- ✅ `crates/nexus-workflow/src/core_plugin.rs:517,538` — now recovers via `into_inner()` and logs (with per-loop latch to avoid spam).
 
-### A4. Unbounded channels in protocol clients
-Three external-process clients hold unbounded mpsc channels — a chatty LSP/DAP server can OOM the process. Same class of bug as the recently-fixed storage watcher overflow (commit `0bd9eabe`).
-- `crates/nexus-lsp/src/client.rs:226` (LSP `notif_tx`)
-- `crates/nexus-dap/src/client.rs:253` (DAP `event_tx`)
-- `crates/nexus-acp/src/client.rs:198` (ACP `notif_tx`)
+### A4. Unbounded channels in protocol clients — ✅ Closed (`22aa9f88`)
+Three external-process clients held unbounded mpsc channels — a chatty LSP/DAP server could OOM the process. Same class of bug as the storage watcher overflow (commit `0bd9eabe`).
+- ✅ `crates/nexus-lsp/src/client.rs:226` (LSP `notif_tx`) — bounded at 1024 with `try_send` + latched warn.
+- ✅ `crates/nexus-dap/src/client.rs:253` (DAP `event_tx`) — same.
+- ✅ `crates/nexus-acp/src/client.rs:198` (ACP `notif_tx`) — same.
+
+`try_send` over `send().await` chosen deliberately: the reader task also delivers responses through the pending-request map, so an awaited stall would wedge every outstanding request on the client.
 
 ### A5. Workflow `run`/`run_digest` capability laundering (issue #77 still open)
 `cap_matrix.toml:1625,1631` — both unrestricted. A caller with no caps can compose a workflow that internally chains capability-gated handlers; each step is checked, but the *aggregation* of side effects is not. Track A audit flag still live.
@@ -181,8 +195,8 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 ## Recommended punchlist (priority order)
 
-1. **A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent. **Highest leverage**: aligns code with the user's stated principle.
-2. **A4** — bound the three protocol-client channels; same OOM class as the watcher fix.
+1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A3 closed (`88f990cd`); A2 closed for the audit plugin (`0eb8bcc0`); A2 remaining sites + D3 still open.**
+2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. **A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.
 4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
 5. **B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.
@@ -191,3 +205,9 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
 
 None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/observability wins.
+
+---
+
+## Changelog
+
+- **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
