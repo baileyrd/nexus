@@ -16,8 +16,8 @@
 
 import { create } from 'zustand'
 
-import type { KernelAPI } from '../../../types/plugin'
-import { clientLogger } from '../../../clientLogger'
+import type { KernelAPI } from '../../../../types/plugin'
+import { clientLogger } from '../../../../clientLogger'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 const READ_FRONTMATTER = 'read_frontmatter'

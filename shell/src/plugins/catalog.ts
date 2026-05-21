@@ -203,6 +203,12 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/files').then(m => m.filesPlugin),
   },
   {
+    id: 'nexus.comments', name: 'Comments',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Inline review comments anchored to selections, persisted alongside the note.',
+    load: () => import('./nexus/comments').then(m => m.commentsPlugin),
+  },
+  {
     id: 'nexus.editor', name: 'Editor',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     dependsOn: [
@@ -456,12 +462,6 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Forge-wide link graph — every note and edge, with clustering and search overlay.',
     load: () => import('./nexus/graph/globalIndex').then(m => m.graphGlobalPlugin),
-  },
-  {
-    id: 'nexus.comments', name: 'Comments',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Inline review comments anchored to selections, persisted alongside the note.',
-    load: () => import('./nexus/comments').then(m => m.commentsPlugin),
   },
   {
     id: 'nexus.bookmarks', name: 'Bookmarks',

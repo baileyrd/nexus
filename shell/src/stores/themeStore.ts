@@ -222,7 +222,7 @@ export const useThemeStore = create<ThemeStore>()(
         // than throwing, which would leave `loaded: false` forever and
         // strand the Appearance UI on "Loading…".
         const [config, availableThemes, availableSnippets] = await Promise.all([
-          api.kernel
+          kernel
             .invoke<KernelThemeConfig>(THEME_PLUGIN_ID, 'get_theme_config', {})
             .catch((err) => {
               clientLogger.warn(
@@ -231,14 +231,14 @@ export const useThemeStore = create<ThemeStore>()(
               )
               return null
             }),
-          api.kernel
+          kernel
             .invoke<ThemeManifestEntry[]>(
               THEME_PLUGIN_ID,
               'get_available_themes',
               {},
             )
             .catch(() => [] as ThemeManifestEntry[]),
-          api.kernel
+          kernel
             .invoke<AvailableSnippet[]>(
               THEME_PLUGIN_ID,
               'get_available_snippets',
@@ -249,7 +249,7 @@ export const useThemeStore = create<ThemeStore>()(
 
         const variables =
           config !== null
-            ? await api.kernel
+            ? await kernel
                 .invoke<Record<string, string>>(
                   THEME_PLUGIN_ID,
                   'compute_variables',

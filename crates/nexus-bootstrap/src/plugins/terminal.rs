@@ -110,7 +110,7 @@ pub(super) fn register(
                 "Terminal",
                 LifecycleFlags::NONE,
                 &with_v1_aliases(nexus_terminal::IPC_HANDLERS),
-                nexus_terminal::core_plugin::MANIFEST_DEPS,
+                nexus_terminal::MANIFEST_DEPS,
             ),
             forge_root,
             Box::new(terminal_plugin),

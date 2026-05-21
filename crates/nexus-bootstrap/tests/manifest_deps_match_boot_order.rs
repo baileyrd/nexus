@@ -48,7 +48,7 @@ fn registered_deps() -> Vec<(&'static str, &'static [&'static str])> {
         ("com.nexus.editor", nexus_editor::core_plugin::MANIFEST_DEPS),
         (
             "com.nexus.terminal",
-            nexus_terminal::core_plugin::MANIFEST_DEPS,
+            nexus_terminal::MANIFEST_DEPS,
         ),
         ("com.nexus.git", nexus_git::core_plugin::MANIFEST_DEPS),
         ("com.nexus.ai", nexus_ai::core_plugin::MANIFEST_DEPS),

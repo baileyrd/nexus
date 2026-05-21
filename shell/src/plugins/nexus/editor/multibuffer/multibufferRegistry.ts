@@ -6,7 +6,7 @@
 // The registry is a plain `Map`; pure helpers around it keep the
 // subscriber code easy to unit-test.
 
-import type { EditorSnapshot } from '../editor/types.ts'
+import type { EditorSnapshot } from '../types.ts'
 
 export const MULTIBUFFER_RELPATH_PREFIX = 'multibuffer://'
 

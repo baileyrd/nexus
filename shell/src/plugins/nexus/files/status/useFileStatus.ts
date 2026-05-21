@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo } from 'react'
 
-import type { KernelAPI } from '../../../types/plugin'
+import type { KernelAPI } from '../../../../types/plugin'
 import {
   fetchStatus,
   useStatusStore,
