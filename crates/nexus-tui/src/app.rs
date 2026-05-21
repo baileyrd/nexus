@@ -901,6 +901,7 @@ impl TuiApp {
     pub fn new(forge_root: PathBuf) -> Result<Self> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
+            .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
             .enable_all()
             .build()
             .context("failed to start tokio runtime")?;

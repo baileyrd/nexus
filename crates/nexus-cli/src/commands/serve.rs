@@ -38,7 +38,10 @@ pub fn serve(app: &App) -> Result<()> {
     let event_bus = kernel.event_bus();
     let server = nexus_remote::RemoteServer::new(Arc::new(context), event_bus);
 
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
+        .enable_all()
+        .build()?;
     rt.block_on(async {
         server
             .serve(tokio::io::stdin(), tokio::io::stdout())

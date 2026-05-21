@@ -7,10 +7,12 @@
 //! check to prevent traversal attacks.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use nexus_types::constants::{KERNEL_BLOCKING_POOL_SIZE, KERNEL_BLOCKING_POOL_WARN_DEPTH};
 use nexus_types::{ForgePathValidator, PathValidationError};
 
 use crate::audit;
@@ -199,7 +201,7 @@ impl KernelPluginContext {
             };
         }
 
-        let join = tokio::task::spawn_blocking({
+        let join = spawn_blocking_sync_dispatch({
             let target = target.clone();
             let command = command.clone();
             move || dispatcher.dispatch(&target, &command, &args)
@@ -480,6 +482,79 @@ impl LogTrait for KernelPluginContext {
     }
 }
 
+// ── Sync IPC dispatch blocking-pool observability ────────────────────────────
+
+/// In-flight count of sync IPC dispatches currently held on the host
+/// tokio runtime's blocking pool. Each `ipc_call` whose target handler
+/// is registered as sync (no async impl) increments this counter
+/// before `spawn_blocking` and decrements it when the spawned task
+/// completes (via a `Drop` guard, so a panic in the handler still
+/// returns the slot).
+///
+/// Bounded by the host runtime's `max_blocking_threads`, which
+/// frontends size from [`nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE`].
+/// Reads are lock-free (`Ordering::Relaxed`) — the value is advisory,
+/// used only for warn-on-high-water and metrics.
+static IN_FLIGHT_SYNC_DISPATCHES: AtomicUsize = AtomicUsize::new(0);
+
+/// Latches `true` once the in-flight depth crosses
+/// [`KERNEL_BLOCKING_POOL_WARN_DEPTH`] so the operator-visible warn
+/// fires once per saturation episode rather than per call. Resets to
+/// `false` when depth drops back below half the threshold (hysteresis
+/// against thrash near the boundary).
+static HIGH_WATER_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// Snapshot of the current in-flight sync IPC dispatch count.
+/// Exposed for metrics / debug surfaces; callers must treat the value
+/// as a monotonically-stale-by-one read.
+#[must_use]
+pub fn in_flight_sync_dispatches() -> usize {
+    IN_FLIGHT_SYNC_DISPATCHES.load(Ordering::Relaxed)
+}
+
+/// Like `tokio::task::spawn_blocking` but instruments the sync IPC
+/// dispatch path with an in-flight counter and a one-shot warn when
+/// the depth crosses [`KERNEL_BLOCKING_POOL_WARN_DEPTH`]. The
+/// counter decrements via a `Drop` guard inside the spawned closure
+/// so a handler panic still returns the slot.
+fn spawn_blocking_sync_dispatch<F, R>(f: F) -> tokio::task::JoinHandle<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let depth = IN_FLIGHT_SYNC_DISPATCHES.fetch_add(1, Ordering::Relaxed) + 1;
+    if depth >= KERNEL_BLOCKING_POOL_WARN_DEPTH
+        && !HIGH_WATER_WARNED.swap(true, Ordering::Relaxed)
+    {
+        tracing::warn!(
+            audit = true,
+            depth,
+            warn_threshold = KERNEL_BLOCKING_POOL_WARN_DEPTH,
+            pool_cap = KERNEL_BLOCKING_POOL_SIZE,
+            "kernel: sync IPC dispatch depth above warn threshold; the host \
+             tokio runtime is approaching its max_blocking_threads cap. \
+             Consider converting slow handlers to async dispatch."
+        );
+    }
+    tokio::task::spawn_blocking(move || {
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let prev = IN_FLIGHT_SYNC_DISPATCHES.fetch_sub(1, Ordering::Relaxed);
+                // Clear the warn latch on hysteresis — once depth drops
+                // below half the threshold the next saturation episode
+                // logs again. Avoids both warn-per-call spam and warn-
+                // suppression after a single sticky episode.
+                if prev.saturating_sub(1) < KERNEL_BLOCKING_POOL_WARN_DEPTH / 2 {
+                    HIGH_WATER_WARNED.store(false, Ordering::Relaxed);
+                }
+            }
+        }
+        let _guard = Guard;
+        f()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,5 +803,63 @@ mod tests {
         assert!(result.is_err(), "write through symlinked parent must fail");
         // The file must not have been created outside the sandbox.
         assert!(!outside.path().join("victim.txt").exists());
+    }
+
+    // ── Sync dispatch blocking-pool counter ──────────────────────────────────
+    //
+    // The counter is process-global static state. We can't reliably observe a
+    // specific peak without serialising the test (other tests in this file
+    // don't fire IPC, so the counter is effectively private to this test in
+    // practice, but we still capture a baseline and only assert deltas).
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spawn_blocking_sync_dispatch_counts_in_flight() {
+        let baseline = in_flight_sync_dispatches();
+
+        // Channel pair lets the spawned task hold the slot until the test
+        // releases it — gives us a deterministic point at which to read the
+        // counter mid-flight.
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let join = spawn_blocking_sync_dispatch(move || {
+            // Block until the test signals release.
+            let _ = release_rx.recv();
+            42_u64
+        });
+
+        // Wait briefly for the blocking task to start running. Spinning on
+        // the counter is more deterministic than a fixed sleep.
+        let start = std::time::Instant::now();
+        loop {
+            if in_flight_sync_dispatches() > baseline {
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(2) {
+                panic!(
+                    "counter never incremented; baseline={baseline}, \
+                     observed={}",
+                    in_flight_sync_dispatches()
+                );
+            }
+            tokio::task::yield_now().await;
+        }
+
+        let mid = in_flight_sync_dispatches();
+        assert!(
+            mid >= baseline + 1,
+            "expected in-flight count to rise by at least 1; baseline={baseline}, mid={mid}",
+        );
+
+        // Release and let the spawned task finish; counter must return to
+        // (or below — other tests may have decremented) the baseline.
+        release_tx.send(()).expect("release");
+        let result = join.await.expect("join");
+        assert_eq!(result, 42);
+
+        let post = in_flight_sync_dispatches();
+        assert!(
+            post <= mid - 1,
+            "expected at least one decrement after task completion; \
+             mid={mid}, post={post}",
+        );
     }
 }

@@ -31,7 +31,10 @@ pub fn serve(app: &App) -> Result<()> {
         loader: _loader,
     } = runtime;
     let server = nexus_acp::AcpServer::new(Arc::new(context));
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
+        .enable_all()
+        .build()?;
     rt.block_on(async {
         server
             .serve(tokio::io::stdin(), tokio::io::stdout())

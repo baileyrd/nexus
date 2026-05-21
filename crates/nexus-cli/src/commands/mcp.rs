@@ -35,7 +35,10 @@ pub fn serve(app: &App) -> Result<()> {
 
     let server = nexus_mcp::NexusMcpServer::new(Arc::clone(&context));
 
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
+        .enable_all()
+        .build()?;
     rt.block_on(server.serve_stdio())
         .map_err(|e| anyhow::anyhow!("MCP server error: {e}"))?;
 

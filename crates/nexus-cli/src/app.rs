@@ -162,6 +162,7 @@ impl App {
         if self.runtime.is_none() {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
+                .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
                 .enable_all()
                 .build()
                 .context("failed to start tokio runtime")?;
@@ -225,6 +226,7 @@ impl App {
         if self.rt.is_none() {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
+                .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
                 .enable_all()
                 .build()
                 .context("failed to start tokio runtime")?;

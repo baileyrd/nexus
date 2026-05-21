@@ -109,7 +109,11 @@ pub fn serve(
     }
     let token = Token::new(secret).context("token must not be empty")?;
 
-    let rt = tokio::runtime::Runtime::new().context("build tokio runtime")?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
     rt.block_on(async move {
         let server = Arc::new(RelayServer::new(token));
         let bind = format!("{bind_address}:{port}");
@@ -189,7 +193,11 @@ pub fn join(
         display_name,
     };
 
-    let rt = tokio::runtime::Runtime::new().context("build tokio runtime")?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
     rt.block_on(async move {
         let client = ReconnectingClient::start(
             params,
