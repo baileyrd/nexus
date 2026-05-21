@@ -68,7 +68,10 @@ pub fn insert_base(conn: &Connection, path: &str, base: &Base) -> Result<i64, St
          VALUES (?1, ?2, ?3, ?4, ?5);",
     )?;
     for record in &base.records {
-        let data = serde_json::to_string(&record).unwrap_or_default();
+        let data = serde_json::to_string(&record).map_err(|e| StorageError::CorruptFile {
+            path: path.to_string(),
+            reason: format!("record {} serialization failed: {e}", record.id),
+        })?;
         stmt.execute(rusqlite::params![base_id, record.id, data, now, now])?;
     }
 
@@ -82,7 +85,10 @@ pub fn insert_base(conn: &Connection, path: &str, base: &Base) -> Result<i64, St
          VALUES (?1, ?2, ?3, ?4);",
     )?;
     for view in &base.views {
-        let config = serde_json::to_string(view).unwrap_or_default();
+        let config = serde_json::to_string(view).map_err(|e| StorageError::CorruptFile {
+            path: path.to_string(),
+            reason: format!("view {:?} serialization failed: {e}", view.name),
+        })?;
         let vt = match view.view_type {
             ViewType::Table => "table",
             ViewType::Kanban => "kanban",

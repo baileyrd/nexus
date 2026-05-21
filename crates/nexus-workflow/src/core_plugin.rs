@@ -514,7 +514,16 @@ impl WorkflowCorePlugin {
         // so a later `set_digest_config` toggle takes effect without
         // restarting the plugin. The loop short-circuits each tick
         // when the live config still says disabled.
-        let initial = cfg_handle.read().ok().map(|g| g.clone()).unwrap_or_default();
+        let initial = match cfg_handle.read() {
+            Ok(g) => g.clone(),
+            Err(poisoned) => {
+                tracing::warn!(
+                    "digest config RwLock poisoned at scheduler arm; \
+                     recovering inner value (a previous writer panicked)"
+                );
+                poisoned.into_inner().clone()
+            }
+        };
         tracing::info!(
             enabled = initial.enabled,
             daily = ?initial.daily_cron,
@@ -534,8 +543,23 @@ async fn digest_scheduler_loop(
     forge_root: Option<std::path::PathBuf>,
 ) {
     use std::time::Duration;
+    // Latched once-per-process poison warn: after the first observation
+    // the loop keeps recovering via `into_inner` without log spam.
+    let mut poison_warned = false;
     loop {
-        let cfg = cfg_handle.read().ok().map(|g| g.clone()).unwrap_or_default();
+        let cfg = match cfg_handle.read() {
+            Ok(g) => g.clone(),
+            Err(poisoned) => {
+                if !poison_warned {
+                    tracing::warn!(
+                        "digest config RwLock poisoned inside scheduler loop; \
+                         recovering inner value (a previous writer panicked)"
+                    );
+                    poison_warned = true;
+                }
+                poisoned.into_inner().clone()
+            }
+        };
         if !cfg.enabled {
             // Park briefly so a `set_digest_config` toggle is picked up
             // within ~60s of being pushed.

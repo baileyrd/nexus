@@ -175,7 +175,21 @@ pub fn read_last_fired(forge_root: &std::path::Path) -> LastFired {
     let Ok(bytes) = std::fs::read(&path) else {
         return LastFired::default();
     };
-    serde_json::from_slice::<LastFired>(&bytes).unwrap_or_default()
+    match serde_json::from_slice::<LastFired>(&bytes) {
+        Ok(snapshot) => snapshot,
+        Err(e) => {
+            // Documented soft-fail: a lost watermark means one extra
+            // digest fire on the next minute boundary. Still log it so
+            // operators see persistent corruption rather than a
+            // re-firing oddity that looks like a scheduler bug.
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "digest last_fired watermark is malformed; resetting to empty"
+            );
+            LastFired::default()
+        }
+    }
 }
 
 /// Write the watermark file. Best-effort; logs at `warn` on failure.

@@ -403,7 +403,8 @@ impl NotificationsCorePlugin {
         transports: HashMap<Channel, Box<dyn Transport>>,
         config: NotificationsConfig,
     ) -> Self {
-        let router = Router::from_config(&config).unwrap_or_default();
+        let router = Router::from_config(&config)
+            .expect("test fixture: invalid notifications config");
         Self {
             transports,
             router,
@@ -422,7 +423,8 @@ impl NotificationsCorePlugin {
         transports: HashMap<Channel, Box<dyn Transport>>,
         config: NotificationsConfig,
     ) -> Self {
-        let router = Router::from_config(&config).unwrap_or_default();
+        let router = Router::from_config(&config)
+            .expect("test fixture: invalid notifications config");
         let max_rows = config.inbox.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
         let max_age = config.inbox.max_age_days.unwrap_or(DEFAULT_MAX_AGE_DAYS);
         let inbox = Inbox::in_memory(max_rows, max_age)

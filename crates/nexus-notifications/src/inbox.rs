@@ -547,6 +547,7 @@ pub struct UserStateRow {
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboxEntry> {
+    let id: String = row.get(0)?;
     let severity_str: String = row.get(2)?;
     let channels_json: String = row.get(5)?;
     let severity = match severity_str.as_str() {
@@ -555,9 +556,25 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboxEntry> {
         "error" => Severity::Error,
         _ => Severity::Info,
     };
-    let channels: Vec<Channel> = serde_json::from_str(&channels_json).unwrap_or_default();
+    // Channels are stored as a JSON array string. Corruption (a hand-
+    // edited DB, a schema-migration bug) shouldn't fail the whole
+    // query — but it also shouldn't silently strip the channel set.
+    // Log a warn so operators see corruption and the caller knows the
+    // entry is degraded.
+    let channels: Vec<Channel> = match serde_json::from_str(&channels_json) {
+        Ok(channels) => channels,
+        Err(e) => {
+            tracing::warn!(
+                entry_id = %id,
+                channels_json = %channels_json,
+                error = %e,
+                "inbox entry has corrupt channels_json; returning entry with empty channel set"
+            );
+            Vec::new()
+        }
+    };
     Ok(InboxEntry {
-        id: row.get(0)?,
+        id,
         source: row.get(1)?,
         severity,
         title: row.get(3)?,
