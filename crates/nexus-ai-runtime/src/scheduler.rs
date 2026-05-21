@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::events::AiEvent;
@@ -58,25 +59,39 @@ pub(crate) struct RunRow {
     pub cancel: Arc<CancelGate>,
 }
 
-/// BL-134 Phase 5 — atomic cancel flag paired with a Notify so the
-/// worker can park on `notified()` and the handler can fire-and-
-/// forget. The flag is what distinguishes a genuine cancellation
-/// from a spurious wakeup; the Notify is the wake mechanism.
+/// BL-134 Phase 5 — task-scoped cancel signal with a reason string
+/// surfaced in the emitted `AiEvent::Cancelled.by`.
+///
+/// Built on `tokio_util::sync::CancellationToken` (the same primitive
+/// the kernel uses for IPC cancellation, fix 0.1.5 #3), so future code
+/// that wants to propagate the gate's cancel into a nested IPC call
+/// can hand off the token via [`Self::token`] and let
+/// `nexus_kernel::ipc_cancel_token()` pick it up on the handler side.
+/// The `requested` flag preserves the original "first caller wins the
+/// reason" semantics on top of the token's cancel-is-idempotent
+/// contract.
 #[derive(Debug)]
 pub(crate) struct CancelGate {
-    flag: AtomicBool,
+    /// Atomic first-caller flag — `request` returns `true` only for
+    /// the call that flipped this, so `handle_cancel` IPC is
+    /// idempotent and a late `request("scheduler timeout")` can't
+    /// clobber an earlier `request("user clicked stop")` reason.
+    requested: AtomicBool,
     /// Free-form reason captured at cancel time — surfaced in the
     /// emitted `AiEvent::Cancelled.by` field.
     reason: Mutex<Option<String>>,
-    notify: Notify,
+    /// Underlying cancellation primitive — drives both the
+    /// `cancelled()` future and `is_cancelled()` query. Cloneable
+    /// child tokens propagate `cancel()` to inheritors.
+    token: CancellationToken,
 }
 
 impl CancelGate {
     pub(crate) fn new() -> Self {
         Self {
-            flag: AtomicBool::new(false),
+            requested: AtomicBool::new(false),
             reason: Mutex::new(None),
-            notify: Notify::new(),
+            token: CancellationToken::new(),
         }
     }
 
@@ -84,19 +99,19 @@ impl CancelGate {
     /// signal; subsequent `request` calls are no-ops so idempotent
     /// `handle_cancel` IPC behaviour falls out for free.
     pub(crate) fn request(&self, reason: Option<String>) -> bool {
-        if self.flag.swap(true, Ordering::SeqCst) {
+        if self.requested.swap(true, Ordering::SeqCst) {
             return false;
         }
         if let Ok(mut g) = self.reason.lock() {
             *g = reason;
         }
-        self.notify.notify_waiters();
+        self.token.cancel();
         true
     }
 
     /// `true` if cancel has been signalled. Cheap atomic load.
     pub(crate) fn is_cancelled(&self) -> bool {
-        self.flag.load(Ordering::SeqCst)
+        self.token.is_cancelled()
     }
 
     /// Reason captured at cancel time; cleared on read so the next
@@ -106,13 +121,14 @@ impl CancelGate {
         self.reason.lock().ok().and_then(|mut g| g.take())
     }
 
-    /// Build the future the worker awaits in its select arm.
-    /// `notified()` parks until the next `notify_waiters()`. The
-    /// caller is responsible for the pre-check / post-check pattern
-    /// so that a cancel signalled before the future is constructed
-    /// isn't lost.
+    /// Future the worker awaits in its select arm. Resolves the
+    /// moment `request` flips the gate — and stays resolved on every
+    /// subsequent call, so the pre-check / post-check pattern around
+    /// the worker's `tokio::select!` is no longer load-bearing
+    /// (Notify's "miss-the-edge" hazard is gone; CancellationToken
+    /// is level-triggered).
     pub(crate) async fn cancelled(&self) {
-        self.notify.notified().await;
+        self.token.cancelled().await;
     }
 }
 

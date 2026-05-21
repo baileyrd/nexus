@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl", "serde-json-impl"] }
