@@ -36,6 +36,11 @@ use crate::transport::{
     JsonRpcRequest, JsonRpcResponse, TransportError,
 };
 
+/// Bound on the agent-pushed notification channel. A chatty agent can
+/// outpace the consumer; rather than grow without limit, we drop the
+/// excess and log a single latched warn per saturation episode.
+const ACP_NOTIF_CHANNEL_BOUND: usize = 1024;
+
 /// Errors raised by [`AcpClient`].
 #[derive(Debug, thiserror::Error)]
 pub enum AcpClientError {
@@ -136,7 +141,7 @@ pub struct AcpClient {
     /// Reader task — reads child stdout and routes messages.
     _reader: JoinHandle<()>,
     /// Receives agent-pushed notifications.
-    notifications: Arc<Mutex<mpsc::UnboundedReceiver<AgentNotification>>>,
+    notifications: Arc<Mutex<mpsc::Receiver<AgentNotification>>>,
     /// Pending request map.
     pending: PendingMap,
     /// Monotonic id for outbound requests.
@@ -195,13 +200,16 @@ impl AcpClient {
         });
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (notif_tx, notif_rx) = mpsc::unbounded_channel();
+        let (notif_tx, notif_rx) = mpsc::channel(ACP_NOTIF_CHANNEL_BOUND);
         let pending_for_reader = Arc::clone(&pending);
         let stdin_arc: Arc<Mutex<ChildStdin>> = Arc::new(Mutex::new(stdin));
         let stdin_for_reader = Arc::clone(&stdin_arc);
         let label = agent_name.to_string();
         let reader = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
+            // Latched flag — one warn per saturation episode. Resets
+            // when a send succeeds.
+            let mut notif_dropped_warned = false;
             loop {
                 match read_message(&mut reader).await {
                     Ok(JsonRpcMessage::Response(resp)) => {
@@ -229,10 +237,36 @@ impl AcpClient {
                         }
                     }
                     Ok(JsonRpcMessage::Notification(n)) => {
-                        let _ = notif_tx.send(AgentNotification {
+                        let method = n.method.clone();
+                        let notif = AgentNotification {
                             method: n.method,
                             params: n.params.unwrap_or(serde_json::Value::Null),
-                        });
+                        };
+                        // try_send so a stalled consumer can't block
+                        // the reader (which also delivers responses
+                        // via the pending map).
+                        match notif_tx.try_send(notif) {
+                            Ok(()) => {
+                                notif_dropped_warned = false;
+                            }
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                if !notif_dropped_warned {
+                                    tracing::warn!(
+                                        agent = %label,
+                                        method = %method,
+                                        bound = ACP_NOTIF_CHANNEL_BOUND,
+                                        "ACP notification channel full; \
+                                         consumer is falling behind. \
+                                         Dropping notifications until it drains."
+                                    );
+                                    notif_dropped_warned = true;
+                                }
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                // Client dropped its receiver; reader
+                                // will exit on next EOF anyway.
+                            }
+                        }
                     }
                     Ok(JsonRpcMessage::Request(req)) => {
                         // ACP agents don't issue server-initiated

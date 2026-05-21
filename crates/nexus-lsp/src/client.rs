@@ -35,6 +35,13 @@ use crate::transport::{
     JsonRpcRequest, JsonRpcResponse, TransportError,
 };
 
+/// Bound on the server-pushed notification channel. A chatty server
+/// (rust-analyzer's `$/progress` storm, eslint diagnostics flood) can
+/// outpace the consumer; rather than grow without limit, we drop the
+/// excess and log a single latched warn per saturation episode so the
+/// operator notices but the log isn't flooded.
+const LSP_NOTIF_CHANNEL_BOUND: usize = 1024;
+
 /// Errors raised by [`LspClient`].
 #[derive(Debug, thiserror::Error)]
 pub enum LspClientError {
@@ -161,8 +168,9 @@ pub struct LspClient {
     stdin: Arc<Mutex<ChildStdin>>,
     /// Reader task — reads child stdout and routes messages.
     _reader: JoinHandle<()>,
-    /// Receives server-pushed notifications.
-    notifications: Arc<Mutex<mpsc::UnboundedReceiver<ServerNotification>>>,
+    /// Receives server-pushed notifications. Bounded; see
+    /// [`LSP_NOTIF_CHANNEL_BOUND`].
+    notifications: Arc<Mutex<mpsc::Receiver<ServerNotification>>>,
     /// Pending request map.
     pending: PendingMap,
     /// Monotonic id for outbound requests.
@@ -223,7 +231,7 @@ impl LspClient {
         });
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (notif_tx, notif_rx) = mpsc::unbounded_channel();
+        let (notif_tx, notif_rx) = mpsc::channel(LSP_NOTIF_CHANNEL_BOUND);
         let pending_for_reader = Arc::clone(&pending);
         // Wrap stdin in the shared `Arc<Mutex<...>>` BEFORE spawning the
         // reader so the reader can write responses back for
@@ -237,6 +245,10 @@ impl LspClient {
         let server_label = server_name.to_string();
         let reader = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
+            // Latched flag — one warn per saturation episode. Resets
+            // when a send succeeds, so a slow consumer that catches up
+            // and falls behind again gets logged a second time.
+            let mut notif_dropped_warned = false;
             loop {
                 match read_message(&mut reader).await {
                     Ok(JsonRpcMessage::Response(resp)) => {
@@ -264,10 +276,37 @@ impl LspClient {
                         }
                     }
                     Ok(JsonRpcMessage::Notification(n)) => {
-                        let _ = notif_tx.send(ServerNotification {
+                        let method = n.method.clone();
+                        let notif = ServerNotification {
                             method: n.method,
                             params: n.params.unwrap_or(serde_json::Value::Null),
-                        });
+                        };
+                        // try_send so a stalled consumer can't block
+                        // the reader (which also delivers responses
+                        // via the pending map — blocking here would
+                        // wedge the whole client).
+                        match notif_tx.try_send(notif) {
+                            Ok(()) => {
+                                notif_dropped_warned = false;
+                            }
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                if !notif_dropped_warned {
+                                    tracing::warn!(
+                                        server = %server_label,
+                                        method = %method,
+                                        bound = LSP_NOTIF_CHANNEL_BOUND,
+                                        "LSP notification channel full; \
+                                         consumer is falling behind. \
+                                         Dropping notifications until it drains."
+                                    );
+                                    notif_dropped_warned = true;
+                                }
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                // Client dropped its receiver; reader
+                                // will exit on next EOF anyway.
+                            }
+                        }
                     }
                     Ok(JsonRpcMessage::Request(req)) => {
                         // BL-076 — server-initiated requests

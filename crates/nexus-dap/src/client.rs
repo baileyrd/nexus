@@ -34,6 +34,12 @@ use crate::config::DapAdapterSpec;
 use crate::protocol::{ProtocolMessage, ProtocolRequest, ProtocolResponse};
 use crate::transport::{read_message, write_message, TransportError};
 
+/// Bound on the adapter-pushed event channel. High-frequency events
+/// during stepping (`stopped`, `continued`, `output`) can outpace the
+/// consumer; rather than grow without limit, we drop the excess and
+/// log a single latched warn per saturation episode.
+const DAP_EVENT_CHANNEL_BOUND: usize = 1024;
+
 /// Errors raised by [`DapClient`].
 #[derive(Debug, thiserror::Error)]
 pub enum DapClientError {
@@ -196,7 +202,7 @@ pub struct DapClient {
     /// host replies `success: false` and the adapter falls back).
     stdin: Arc<Mutex<ChildStdin>>,
     _reader: JoinHandle<()>,
-    events: Arc<Mutex<mpsc::UnboundedReceiver<AdapterEvent>>>,
+    events: Arc<Mutex<mpsc::Receiver<AdapterEvent>>>,
     pending: PendingMap,
     /// Outbound `seq` counter. DAP requires monotonic-per-direction.
     next_seq: AtomicI64,
@@ -250,7 +256,7 @@ impl DapClient {
         });
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(DAP_EVENT_CHANNEL_BOUND);
         let pending_for_reader = Arc::clone(&pending);
         let stdin_arc: Arc<Mutex<ChildStdin>> = Arc::new(Mutex::new(stdin));
         let stdin_for_reader = Arc::clone(&stdin_arc);
@@ -265,6 +271,9 @@ impl DapClient {
 
         let reader = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
+            // Latched flag — one warn per saturation episode. Resets
+            // when a send succeeds.
+            let mut event_dropped_warned = false;
             loop {
                 match read_message(&mut reader).await {
                     Ok(ProtocolMessage::Response(resp)) => {
@@ -280,10 +289,36 @@ impl DapClient {
                         }
                     }
                     Ok(ProtocolMessage::Event(evt)) => {
-                        let _ = event_tx.send(AdapterEvent {
+                        let event_name = evt.event.clone();
+                        let adapter_event = AdapterEvent {
                             event: evt.event,
                             body: evt.body.unwrap_or(serde_json::Value::Null),
-                        });
+                        };
+                        // try_send so a stalled consumer can't block
+                        // the reader (which also delivers responses
+                        // via the pending map).
+                        match event_tx.try_send(adapter_event) {
+                            Ok(()) => {
+                                event_dropped_warned = false;
+                            }
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                if !event_dropped_warned {
+                                    tracing::warn!(
+                                        adapter = %adapter_label,
+                                        event = %event_name,
+                                        bound = DAP_EVENT_CHANNEL_BOUND,
+                                        "DAP event channel full; \
+                                         consumer is falling behind. \
+                                         Dropping events until it drains."
+                                    );
+                                    event_dropped_warned = true;
+                                }
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                // Client dropped its receiver; reader
+                                // will exit on next EOF anyway.
+                            }
+                        }
                     }
                     Ok(ProtocolMessage::Request(req)) => {
                         // Adapter-initiated request. DAP defines a
