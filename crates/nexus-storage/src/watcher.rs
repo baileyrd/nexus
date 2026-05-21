@@ -12,6 +12,21 @@ use notify_debouncer_mini::{DebounceEventResult, DebouncedEventKind, new_debounc
 
 use crate::StorageError;
 
+/// Upper bound on the number of `StorageEvent`s the watcher buffers
+/// for its consumer. A stop-the-world consumer (or one slower than
+/// the filesystem burst rate of a `git checkout` / mass rename)
+/// would otherwise grow the queue without limit; with the bound,
+/// per-file events that don't fit are dropped and a single
+/// `ReconcileRequested` is enqueued the moment the consumer drains
+/// enough to take it. The consumer then re-walks the forge to
+/// recover the missed state.
+///
+/// 1024 comfortably covers a single git operation in a medium
+/// vault (~tens-of-thousands of files would still overflow, but the
+/// reconcile recovery path is designed for exactly that case). If a
+/// settings audit promotes this, route it through `StorageConfig`.
+const WATCHER_CHANNEL_BOUND: usize = 1024;
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// An event emitted by the file watcher.
@@ -138,7 +153,8 @@ impl Watcher {
     /// Returns [`StorageError::Watcher`] if the underlying notify watcher
     /// cannot be created or a directory cannot be watched.
     pub fn start(forge_root: &Path, debounce_ms: u64) -> Result<Self, StorageError> {
-        let (storage_tx, storage_rx) = mpsc::channel::<StorageEvent>();
+        let (storage_tx, storage_rx) =
+            mpsc::sync_channel::<StorageEvent>(WATCHER_CHANNEL_BOUND);
         let (raw_tx, raw_rx) = mpsc::channel::<DebounceEventResult>();
 
         let duration = Duration::from_millis(debounce_ms);
@@ -175,13 +191,70 @@ impl Watcher {
 
 // ── Event processing thread ───────────────────────────────────────────────────
 
+/// Send `evt` on the bounded watcher → consumer channel, handling
+/// both overflow (channel full) and disconnect (consumer dropped).
+///
+/// Recovery semantics: if the channel is full, the per-file event is
+/// dropped and `pending_reconcile` is latched true. On the next call
+/// where there is room, a single `ReconcileRequested` is flushed
+/// before the requested event so the consumer learns to do a full
+/// re-walk and recover whatever it missed. The latched flag also
+/// dedupes repeated overflow logs into one warn per backlog.
+///
+/// Returns `false` only on disconnect — the caller should break out
+/// of its event loop in that case (consumer is gone for good).
+fn enqueue(
+    tx: &mpsc::SyncSender<StorageEvent>,
+    evt: StorageEvent,
+    pending_reconcile: &mut bool,
+) -> bool {
+    let evt_is_reconcile = matches!(evt, StorageEvent::ReconcileRequested);
+
+    // If we owe a reconcile and the caller is sending something else,
+    // try to flush the reconcile first. If even that won't fit we
+    // keep the flag set and skip the current event too — the
+    // reconcile signal IS the recovery, the per-file event would be
+    // a no-op once it lands.
+    if *pending_reconcile && !evt_is_reconcile {
+        match tx.try_send(StorageEvent::ReconcileRequested) {
+            Ok(()) => *pending_reconcile = false,
+            Err(mpsc::TrySendError::Full(_)) => return true,
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+        }
+    }
+
+    match tx.try_send(evt) {
+        Ok(()) => {
+            if evt_is_reconcile {
+                *pending_reconcile = false;
+            }
+            true
+        }
+        Err(mpsc::TrySendError::Full(_)) => {
+            if !*pending_reconcile {
+                tracing::warn!(
+                    audit = true,
+                    bound = WATCHER_CHANNEL_BOUND,
+                    "storage watcher: event channel full; consumer is falling behind. \
+                     Dropping per-file events and queueing ReconcileRequested for \
+                     recovery once the consumer drains."
+                );
+                *pending_reconcile = true;
+            }
+            true
+        }
+        Err(mpsc::TrySendError::Disconnected(_)) => false,
+    }
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn process_events(
     raw_rx: mpsc::Receiver<DebounceEventResult>,
-    storage_tx: mpsc::Sender<StorageEvent>,
+    storage_tx: mpsc::SyncSender<StorageEvent>,
     forge_root: PathBuf,
 ) {
     let mut git_batch_mode = false;
+    let mut pending_reconcile = false;
 
     for result in &raw_rx {
         let events = match result {
@@ -214,7 +287,13 @@ fn process_events(
             // downstream consumers don't have to special-case an
             // empty-string `FileModified` (issue #84).
             git_batch_mode = false;
-            let _ = storage_tx.send(StorageEvent::ReconcileRequested);
+            if !enqueue(
+                &storage_tx,
+                StorageEvent::ReconcileRequested,
+                &mut pending_reconcile,
+            ) {
+                return;
+            }
         }
 
         for event in events {
@@ -276,26 +355,29 @@ fn process_events(
                 continue;
             };
 
-            if metadata.is_some() {
+            let to_send = if metadata.is_some() {
                 // File exists (we just stat'd it above) — read and
                 // hash it, emit FileModified.
                 match std::fs::read(path) {
                     Ok(bytes) => {
                         let hash = nexus_formats::sha256_hex(&bytes);
-                        let _ = storage_tx.send(StorageEvent::FileModified {
+                        StorageEvent::FileModified {
                             path: rel,
                             content_hash: hash,
-                        });
+                        }
                     }
                     Err(_) => {
                         // Genuine race: stat succeeded, then the file
                         // disappeared before we could read it. Treat
                         // as a deletion.
-                        let _ = storage_tx.send(StorageEvent::FileDeleted { path: rel });
+                        StorageEvent::FileDeleted { path: rel }
                     }
                 }
             } else {
-                let _ = storage_tx.send(StorageEvent::FileDeleted { path: rel });
+                StorageEvent::FileDeleted { path: rel }
+            };
+            if !enqueue(&storage_tx, to_send, &mut pending_reconcile) {
+                return;
             }
         }
     }
@@ -338,6 +420,87 @@ mod tests {
     fn should_ignore_backup_files() {
         assert!(should_ignore(Path::new("/forge/notes/my-note.md~")));
         assert!(should_ignore(Path::new("/forge/notes/old~")));
+    }
+
+    // ── Bounded channel + reconcile recovery ─────────────────────────────────
+    //
+    // Direct unit tests for the `enqueue` helper. Reproducing the full
+    // notify-debouncer + filesystem-fanout overflow via integration test
+    // would be timing-flaky on slow CI; the recovery semantics live entirely
+    // in this function, so testing it in isolation gives deterministic
+    // coverage of the contract.
+
+    fn mod_evt(path: &str) -> StorageEvent {
+        StorageEvent::FileModified {
+            path: path.to_string(),
+            content_hash: "deadbeef".into(),
+        }
+    }
+
+    #[test]
+    fn enqueue_passes_events_through_when_channel_has_room() {
+        let (tx, rx) = mpsc::sync_channel::<StorageEvent>(4);
+        let mut pending = false;
+
+        assert!(enqueue(&tx, mod_evt("a"), &mut pending));
+        assert!(enqueue(&tx, mod_evt("b"), &mut pending));
+        assert!(!pending);
+
+        let got: Vec<_> = (0..2).map(|_| rx.try_recv().unwrap()).collect();
+        assert_eq!(got, vec![mod_evt("a"), mod_evt("b")]);
+    }
+
+    #[test]
+    fn enqueue_sets_pending_reconcile_on_overflow_and_flushes_on_drain() {
+        // Capacity 1 makes the overflow path deterministic.
+        let (tx, rx) = mpsc::sync_channel::<StorageEvent>(1);
+        let mut pending = false;
+
+        // Fills the channel.
+        assert!(enqueue(&tx, mod_evt("a"), &mut pending));
+        assert!(!pending);
+
+        // Overflow. Event is dropped; flag is latched; returns Ok (true).
+        assert!(enqueue(&tx, mod_evt("b"), &mut pending));
+        assert!(pending, "overflow must latch pending_reconcile");
+
+        // Drain the channel so the next enqueue has room. The next call
+        // should flush ReconcileRequested FIRST, then attempt the new
+        // event. Capacity 1 means the new event itself overflows again
+        // (and re-sets the flag), but the reconcile signal made it in.
+        assert!(matches!(rx.try_recv().unwrap(), StorageEvent::FileModified { .. }));
+        assert!(enqueue(&tx, mod_evt("c"), &mut pending));
+        // Reconcile took the only slot, so c overflowed and pending is set again.
+        assert!(pending);
+
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            StorageEvent::ReconcileRequested
+        ));
+        assert!(rx.try_recv().is_err(), "c should have been dropped");
+    }
+
+    #[test]
+    fn enqueue_explicit_reconcile_clears_pending_flag() {
+        let (tx, _rx) = mpsc::sync_channel::<StorageEvent>(2);
+        let mut pending = true; // simulate a previously-latched overflow
+
+        assert!(enqueue(&tx, StorageEvent::ReconcileRequested, &mut pending));
+        assert!(
+            !pending,
+            "an explicit ReconcileRequested send must clear the latched flag"
+        );
+    }
+
+    #[test]
+    fn enqueue_returns_false_on_consumer_disconnect() {
+        let (tx, rx) = mpsc::sync_channel::<StorageEvent>(2);
+        drop(rx);
+        let mut pending = false;
+        assert!(
+            !enqueue(&tx, mod_evt("a"), &mut pending),
+            "disconnect must surface as false so the producer can break"
+        );
     }
 
     #[test]
