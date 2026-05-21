@@ -1363,69 +1363,91 @@ impl StorageEngine {
         crate::import::apply_import(source_root, self.forge.root(), plan, options)
     }
 
-    /// Rebuild the `SQLite` index from scratch by reconciling the filesystem.
+    /// Rebuild the `SQLite` index from scratch by reconciling the filesystem,
+    /// then refresh the Tantivy search index from the new SQL state.
     ///
-    /// Clears all index tables, then runs a full reconciliation pass. Returns
-    /// summary statistics.
+    /// Clears all index tables, runs a full reconciliation pass, then rebuilds
+    /// the FTS index so search results match the rebuilt SQL state. Returns
+    /// summary statistics for the SQL pass; the FTS rebuild is a slave step
+    /// without separate stats today.
+    ///
+    /// The FTS rebuild is part of the contract — callers do NOT need to invoke
+    /// [`rebuild_search_index`](Self::rebuild_search_index) afterwards. If the
+    /// FTS rebuild fails the error is returned as-is; the SQL rebuild is
+    /// already committed, so the user can retry safely (both passes are
+    /// idempotent).
     ///
     /// # Errors
-    /// Returns [`StorageError`] on I/O or database failure.
+    /// Returns [`StorageError`] on I/O, database, or Tantivy failure.
     ///
     /// # Panics
     /// Panics if the internal write-connection mutex is poisoned.
     pub fn rebuild_index(&self) -> Result<RebuildStats, StorageError> {
         let start = std::time::Instant::now();
-        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let stats = {
+            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
 
-        // Clear all tables (FTS first, then files which cascades the rest).
-        // BL-114: code_symbols is path-keyed, not foreign-keyed to files,
-        // so it needs its own DELETE before the rebuild walk.
-        conn.execute_batch(
-            "DELETE FROM fts_blocks;
-             DELETE FROM code_symbols;
-             DELETE FROM files;",
-        )?;
+            // Clear all tables (FTS first, then files which cascades the rest).
+            // BL-114: code_symbols is path-keyed, not foreign-keyed to files,
+            // so it needs its own DELETE before the rebuild walk.
+            conn.execute_batch(
+                "DELETE FROM fts_blocks;
+                 DELETE FROM code_symbols;
+                 DELETE FROM files;",
+            )?;
 
-        // Run reconcile to re-index from disk.
-        reconcile(&conn, self.forge.root())?;
+            // Run reconcile to re-index from disk.
+            reconcile(&conn, self.forge.root())?;
 
-        // Count what ended up in the DB.
-        let files_processed: usize = usize::try_from(
-            conn.query_row(
-                "SELECT COUNT(*) FROM files WHERE is_deleted = 0;",
-                [],
-                |r| r.get::<_, i64>(0),
+            // Count what ended up in the DB.
+            let files_processed: usize = usize::try_from(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM files WHERE is_deleted = 0;",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
             )
-            .unwrap_or(0),
-        )
-        .unwrap_or(0);
+            .unwrap_or(0);
 
-        let blocks_indexed: usize = usize::try_from(
-            conn.query_row("SELECT COUNT(*) FROM blocks;", [], |r| r.get::<_, i64>(0))
-                .unwrap_or(0),
-        )
-        .unwrap_or(0);
+            let blocks_indexed: usize = usize::try_from(
+                conn.query_row("SELECT COUNT(*) FROM blocks;", [], |r| r.get::<_, i64>(0))
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0);
 
-        let links_found: usize = usize::try_from(
-            conn.query_row("SELECT COUNT(*) FROM links;", [], |r| r.get::<_, i64>(0))
-                .unwrap_or(0),
-        )
-        .unwrap_or(0);
+            let links_found: usize = usize::try_from(
+                conn.query_row("SELECT COUNT(*) FROM links;", [], |r| r.get::<_, i64>(0))
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0);
 
-        let tags_found: usize = usize::try_from(
-            conn.query_row("SELECT COUNT(*) FROM tags;", [], |r| r.get::<_, i64>(0))
-                .unwrap_or(0),
-        )
-        .unwrap_or(0);
+            let tags_found: usize = usize::try_from(
+                conn.query_row("SELECT COUNT(*) FROM tags;", [], |r| r.get::<_, i64>(0))
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0);
+
+            RebuildStats {
+                files_processed,
+                blocks_indexed,
+                links_found,
+                tags_found,
+                duration_ms: 0,
+            }
+            // write_conn lock drops here so rebuild_search_index can take its
+            // own pool connection without contending with the writer.
+        };
+
+        // FTS would otherwise stay populated with documents pointing at the
+        // pre-rebuild block ids — search would return stale or missing rows
+        // until somebody remembered to call rebuild_search_index. Couple them.
+        self.rebuild_search_index()?;
 
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-
         Ok(RebuildStats {
-            files_processed,
-            blocks_indexed,
-            links_found,
-            tags_found,
             duration_ms,
+            ..stats
         })
     }
 
@@ -2391,6 +2413,52 @@ mod tests {
             stats.files_processed, 2,
             "expected 2 files_processed, got {}",
             stats.files_processed
+        );
+    }
+
+    // ── 7b. rebuild_index also refreshes the FTS search index ────────────────
+    //
+    // Contract test: callers of rebuild_index do NOT need to invoke
+    // rebuild_search_index afterwards. If somebody decouples the two paths,
+    // search will keep returning blocks indexed against the pre-rebuild row
+    // ids, which manifests here as a missing search hit for content the
+    // SQL rebuild definitely picked up.
+    #[test]
+    fn rebuild_index_also_refreshes_search() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        // Seed two files and warm the FTS index for the initial content.
+        engine
+            .write_file("notes/old.md", b"# Old\n\nstale-only-token\n")
+            .expect("write old");
+        engine.rebuild_search_index().expect("seed search");
+        let hits = engine.search("stale-only-token", 10).expect("search");
+        assert!(!hits.is_empty(), "search must find seeded content");
+
+        // Drop the old file from disk and add a brand-new one whose
+        // distinguishing token only exists post-rebuild.
+        std::fs::remove_file(dir.path().join("notes/old.md")).expect("rm old");
+        std::fs::write(
+            dir.path().join("notes/fresh.md"),
+            b"# Fresh\n\nzephyr-token-92a1\n",
+        )
+        .expect("write fresh");
+
+        // rebuild_index alone must (a) reflect the disk state in SQL and
+        // (b) refresh the FTS so search finds the new token AND no longer
+        // surfaces the deleted one.
+        engine.rebuild_index().expect("rebuild_index");
+
+        let fresh_hits = engine.search("zephyr-token-92a1", 10).expect("search");
+        assert!(
+            !fresh_hits.is_empty(),
+            "search must find post-rebuild content without an explicit rebuild_search_index call",
+        );
+        let stale_hits = engine.search("stale-only-token", 10).expect("search");
+        assert!(
+            stale_hits.is_empty(),
+            "search must not return content for files removed before rebuild_index; got {stale_hits:?}",
         );
     }
 
