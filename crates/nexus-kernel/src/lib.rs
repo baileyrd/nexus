@@ -15,6 +15,8 @@
 
 pub mod audit;
 pub mod audit_store;
+/// Cooperative IPC cancellation — task-local signal pipe + accessor.
+pub mod cancel;
 mod capability;
 mod config;
 mod context;
@@ -53,3 +55,6 @@ pub use event_bus::{type_id_in_namespace, EventBus, EventSubscription};
 pub use kernel::Kernel;
 pub use metrics::{CallStatus, HistogramSnapshot, KernelMetrics, MetricsSnapshot};
 pub use kv_store::{InMemoryKvStore, KvStore};
+
+// Cooperative cancellation accessor for handler opt-in. See [`cancel`].
+pub use cancel::ipc_cancel_token;

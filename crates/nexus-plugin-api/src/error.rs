@@ -79,6 +79,21 @@ pub enum IpcError {
         /// The command id.
         command: String,
     },
+
+    /// The IPC call was cancelled by the caller (or an ancestor)
+    /// firing the cancellation token that was active for this
+    /// dispatch. Handlers that observed the token mid-flight via
+    /// `nexus_kernel::ipc_cancel_token()` returned this themselves;
+    /// the kernel synthesises it as the wait-side result when the
+    /// token fires before the handler future resolves and the
+    /// handler did not opt in to cancellation.
+    #[error("IPC call to '{plugin_id}'.'{command}' was cancelled")]
+    Cancelled {
+        /// The target plugin id.
+        plugin_id: String,
+        /// The command id.
+        command: String,
+    },
 }
 
 /// Coarse classification of an [`IpcError`] suitable for cross-boundary
@@ -104,6 +119,10 @@ pub enum IpcErrorKind {
     DispatchFailed,
     /// (De)serialization of the IPC payload failed.
     Serialization,
+    /// The IPC call was cancelled cooperatively via the dispatch's
+    /// `CancellationToken`. Distinct from `Timeout` (deadline exceeded)
+    /// and `DispatchFailed` (could not route).
+    Cancelled,
     /// Variant the envelope mapper didn't recognize. Reserved for future
     /// `IpcError` additions so old shells still surface the failure.
     Unknown,
@@ -196,6 +215,17 @@ impl IpcErrorEnvelope {
                 command: command.clone(),
                 message,
                 retryable: false,
+            },
+            IpcError::Cancelled { plugin_id, command } => Self {
+                kind: IpcErrorKind::Cancelled,
+                plugin_id: plugin_id.clone(),
+                command: command.clone(),
+                message,
+                // A cancelled call may succeed on retry — the caller
+                // would have to choose not to cancel that one. Marked
+                // retryable so retry policies don't treat cancellation
+                // as a permanent failure of the underlying handler.
+                retryable: true,
             },
         }
     }

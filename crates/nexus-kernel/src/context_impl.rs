@@ -190,35 +190,75 @@ impl KernelPluginContext {
         let command = command_id.to_string();
         let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
 
+        // Track A — bind a cancellation token for this dispatch.
+        //
+        // If the caller is itself inside a dispatch, derive a CHILD token
+        // so a cancel upstream propagates down through nested ipc_call
+        // chains. Otherwise create a fresh root token. Either way the
+        // token is installed via the task-local for the duration of the
+        // handler; handlers opt in via `nexus_kernel::ipc_cancel_token()`.
+        let dispatch_cancel = match crate::cancel::ipc_cancel_token() {
+            Some(parent) => parent.child_token(),
+            None => tokio_util::sync::CancellationToken::new(),
+        };
+
         if let Some(fut) = dispatcher.dispatch_async(&target, &command, args.clone()) {
-            return match tokio::time::timeout(timeout, fut).await {
-                Ok(result) => result,
+            let scoped = crate::cancel::scope_async(dispatch_cancel.clone(), fut);
+            return tokio::select! {
+                // Bias toward cancel so a same-tick cancel beats a stale
+                // ready-result from the future arm.
+                biased;
+                () = dispatch_cancel.cancelled() => Err(IpcError::Cancelled {
+                    plugin_id: target,
+                    command,
+                }),
+                result = tokio::time::timeout(timeout, scoped) => match result {
+                    Ok(inner) => inner,
+                    Err(_elapsed) => Err(IpcError::Timeout {
+                        plugin_id: target,
+                        command,
+                        timeout_ms,
+                    }),
+                },
+            };
+        }
+
+        // Sync path: install the token on the spawned blocking thread so a
+        // sync handler that wants to participate can poll `is_cancelled()`
+        // at safe yield points. Rust offers no preemption inside the
+        // blocking body, so cancellation here releases the caller (and
+        // the blocking-pool slot's wait, not its execution) but cannot
+        // forcibly abort the handler.
+        let token_for_spawn = dispatch_cancel.clone();
+        let join = spawn_blocking_sync_dispatch({
+            let target = target.clone();
+            let command = command.clone();
+            move || {
+                crate::cancel::scope_sync(token_for_spawn, || {
+                    dispatcher.dispatch(&target, &command, &args)
+                })
+            }
+        });
+
+        tokio::select! {
+            biased;
+            () = dispatch_cancel.cancelled() => Err(IpcError::Cancelled {
+                plugin_id: target,
+                command,
+            }),
+            result = tokio::time::timeout(timeout, join) => match result {
+                Ok(Ok(inner)) => inner,
+                Ok(Err(_panic)) => Err(IpcError::PluginCrashedDuringCall {
+                    plugin_id: target,
+                    command,
+                    reason: String::new(),
+                }),
                 Err(_elapsed) => Err(IpcError::Timeout {
                     plugin_id: target,
                     command,
                     timeout_ms,
                 }),
-            };
-        }
-
-        let join = spawn_blocking_sync_dispatch({
-            let target = target.clone();
-            let command = command.clone();
-            move || dispatcher.dispatch(&target, &command, &args)
-        });
-
-        match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_panic)) => Err(IpcError::PluginCrashedDuringCall {
-                plugin_id: target,
-                command,
-                reason: String::new(),
-            }),
-            Err(_elapsed) => Err(IpcError::Timeout {
-                plugin_id: target,
-                command,
-                timeout_ms,
-            }),
+            },
         }
     }
 
@@ -457,6 +497,7 @@ impl Ipc for KernelPluginContext {
                     crate::metrics::CallStatus::NotFound
                 }
                 Err(IpcError::Timeout { .. }) => crate::metrics::CallStatus::Timeout,
+                Err(IpcError::Cancelled { .. }) => crate::metrics::CallStatus::Cancelled,
                 _ => crate::metrics::CallStatus::Error,
             };
             m.record_ipc_call(
@@ -860,6 +901,87 @@ mod tests {
             post <= mid - 1,
             "expected at least one decrement after task completion; \
              mid={mid}, post={post}",
+        );
+    }
+
+    // ── Track A: cooperative cancellation through ipc_call ───────────────────
+
+    /// Async-only dispatcher whose `dispatch_async` future sleeps for 10 s.
+    /// Used to verify the cancel race short-circuits long-running calls.
+    struct SlowAsyncDispatcher;
+
+    impl crate::ipc::IpcDispatcher for SlowAsyncDispatcher {
+        fn dispatch(
+            &self,
+            _target_plugin_id: &str,
+            _command_id: &str,
+            _args: &serde_json::Value,
+        ) -> std::result::Result<serde_json::Value, IpcError> {
+            unreachable!("test routes through dispatch_async only");
+        }
+
+        fn dispatch_async(
+            &self,
+            _target_plugin_id: &str,
+            _command_id: &str,
+            _args: serde_json::Value,
+        ) -> Option<crate::ipc::IpcFuture> {
+            Some(Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                Ok(serde_json::json!({"done": true}))
+            }))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipc_call_returns_cancelled_when_parent_token_fires() {
+        use crate::context::Ipc as _;
+        use tokio_util::sync::CancellationToken;
+
+        let dir = tempfile::tempdir().unwrap();
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
+        let bus = Arc::new(EventBus::new(16));
+        let dispatcher: Arc<dyn crate::ipc::IpcDispatcher> = Arc::new(SlowAsyncDispatcher);
+        let ctx = KernelPluginContext::new(
+            "com.test.caller",
+            "1.0.0",
+            [Capability::IpcCall].into_iter().collect::<CapabilitySet>(),
+            kv,
+            bus,
+            dir.path(),
+            Some(dispatcher),
+        )
+        .unwrap();
+
+        let parent = CancellationToken::new();
+        let to_fire = parent.clone();
+        // Trip the parent token after a short delay so the in-flight call
+        // observes it via the child-token derived inside ipc_call_inner.
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            to_fire.cancel();
+        });
+
+        let started = std::time::Instant::now();
+        let result = crate::cancel::scope_async(parent, async {
+            ctx.ipc_call(
+                "com.target",
+                "do",
+                serde_json::json!({}),
+                Duration::from_secs(10),
+            )
+            .await
+        })
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(result, Err(IpcError::Cancelled { .. })),
+            "expected Err(IpcError::Cancelled), got {result:?}",
+        );
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "cancel must short-circuit the 10-s sleep; took {elapsed:?}",
         );
     }
 }

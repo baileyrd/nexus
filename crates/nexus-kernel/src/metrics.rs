@@ -66,6 +66,11 @@ pub enum CallStatus {
     NotFound,
     /// Handler timed out.
     Timeout,
+    /// Caller (or ancestor IPC dispatch) cancelled the call via the
+    /// cooperative `CancellationToken` — distinct from `Timeout`
+    /// (deadline-driven) so dashboards can separate user / parent
+    /// abandonment from genuinely slow handlers.
+    Cancelled,
     /// Handler returned an error or trapped.
     Error,
 }
@@ -77,6 +82,7 @@ impl CallStatus {
             CallStatus::CapabilityDenied => "capability_denied",
             CallStatus::NotFound => "not_found",
             CallStatus::Timeout => "timeout",
+            CallStatus::Cancelled => "cancelled",
             CallStatus::Error => "error",
         }
     }

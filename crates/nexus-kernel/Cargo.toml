@@ -10,6 +10,7 @@ description = "Nexus kernel: event bus, plugin lifecycle, capability system"
 nexus-plugin-api = { workspace = true }
 nexus-types = { path = "../nexus-types" }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
