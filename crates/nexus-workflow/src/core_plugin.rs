@@ -112,15 +112,21 @@ pub const HANDLER_TEMPLATES_INIT: u32 = 10;
 /// `[{ name, expression, next_fire_at: RFC3339 | null }]`.
 pub const HANDLER_NEXT_FIRE: u32 = 12;
 
-/// Plugin ids this plugin reaches at handler-dispatch time. `terminal`
-/// is intentionally omitted — it loads AFTER workflow in `register_all`,
-/// so the `run_saved` / `list_sessions` calls happen only at workflow
-/// step execution (long after boot), not at load.
+/// Plugin ids this plugin reaches at handler-dispatch time. The
+/// loader's `check_dependencies` runs at load and rejects any
+/// declared dep that hasn't been registered yet, so this list must
+/// contain only plugins that load BEFORE workflow in `register_all`.
+///
+/// `terminal` and `notifications` are intentionally omitted — both
+/// load AFTER workflow in `register_all`, but the calls into them
+/// (`terminal` step, `notify` step) happen only at workflow step
+/// execution (long after boot), so the IPC dispatch resolves fine
+/// at runtime even without the manifest dep. Declaring them here
+/// would trip `check_dependencies` and fail boot.
 pub const MANIFEST_DEPS: &[&str] = &[
     "com.nexus.storage",
     "com.nexus.ai",
     "com.nexus.ai.runtime",
-    "com.nexus.notifications",
 ];
 
 /// SD-06 — single source of truth for `(command-name, handler-id)`
