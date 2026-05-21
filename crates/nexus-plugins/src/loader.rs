@@ -2630,11 +2630,23 @@ impl IpcDispatcher for SharedPluginLoader {
         // via a thread-local guard, then take the backend mutex with a
         // blocking `lock()` so unrelated concurrent calls queue rather
         // than erroring.
+        //
+        // The backend mutex is held across the handler call because
+        // `CorePlugin::dispatch` takes `&mut self` — Rust requires
+        // exclusive access for the full call duration. Concurrent
+        // dispatches to the same plugin therefore serialise behind
+        // this lock. We instrument lock-wait + handler time and emit
+        // a single warn at SLOW_SYNC_DISPATCH_WARN so operators can
+        // spot handlers that ought to migrate to `dispatch_async`
+        // (which captures state by value and releases the mutex after
+        // future construction, letting the runtime drive the actual
+        // work lock-free).
         let _dispatch_guard =
             DispatchGuard::enter(target_plugin_id).ok_or_else(|| IpcError::ReentrantCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
             })?;
+        let wait_start = std::time::Instant::now();
         let mut guard = backend
             .lock()
             .map_err(|_| IpcError::PluginCrashedDuringCall {
@@ -2642,13 +2654,33 @@ impl IpcDispatcher for SharedPluginLoader {
                 command: command_id.to_string(),
                 reason: String::new(),
             })?;
-        guard
-            .dispatch(handler_id, args)
-            .map_err(|e| IpcError::PluginCrashedDuringCall {
-                plugin_id: target_plugin_id.to_string(),
-                command: command_id.to_string(),
-                reason: e.to_string(),
-            })
+        let handler_start = std::time::Instant::now();
+        let result = guard.dispatch(handler_id, args);
+        let handler_elapsed = handler_start.elapsed();
+        drop(guard);
+        let lock_wait = handler_start.saturating_duration_since(wait_start);
+        let total = lock_wait.saturating_add(handler_elapsed);
+        if total > nexus_types::constants::SLOW_SYNC_DISPATCH_WARN {
+            tracing::warn!(
+                audit = true,
+                plugin_id = target_plugin_id,
+                command_id,
+                lock_wait_ms = u64::try_from(lock_wait.as_millis()).unwrap_or(u64::MAX),
+                handler_ms = u64::try_from(handler_elapsed.as_millis()).unwrap_or(u64::MAX),
+                threshold_ms = u64::try_from(
+                    nexus_types::constants::SLOW_SYNC_DISPATCH_WARN.as_millis()
+                )
+                .unwrap_or(u64::MAX),
+                "sync IPC dispatch held the backend mutex past the slow-dispatch \
+                 threshold. All concurrent sync calls to this plugin queued behind \
+                 it. Consider converting the handler to dispatch_async."
+            );
+        }
+        result.map_err(|e| IpcError::PluginCrashedDuringCall {
+            plugin_id: target_plugin_id.to_string(),
+            command: command_id.to_string(),
+            reason: e.to_string(),
+        })
     }
 
     /// Hand back an async future for `command_id`, if the target plugin has

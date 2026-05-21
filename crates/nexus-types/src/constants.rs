@@ -53,3 +53,16 @@ pub const KERNEL_BLOCKING_POOL_SIZE: usize = 64;
 /// the threshold) so operators see saturation building before the
 /// pool is exhausted. Set to 75 % of [`KERNEL_BLOCKING_POOL_SIZE`].
 pub const KERNEL_BLOCKING_POOL_WARN_DEPTH: usize = 48;
+
+/// Warn threshold for a single sync IPC dispatch's total wall-clock
+/// time inside the loader (mutex wait + handler execution).
+///
+/// `CorePlugin::dispatch` takes `&mut self`, so the backend mutex is
+/// held for the entire call — every concurrent dispatch to the same
+/// plugin serialises behind it. A handler that holds the mutex past
+/// this threshold is a strong signal it should be converted to
+/// `dispatch_async`, which releases the mutex after future
+/// construction and lets the runtime drive the actual work without a
+/// lock. The warn fires once per slow call (no dedup) so each offender
+/// is visible in the log.
+pub const SLOW_SYNC_DISPATCH_WARN: Duration = Duration::from_millis(500);
