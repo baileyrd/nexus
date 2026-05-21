@@ -155,6 +155,15 @@ impl BootedRuntime {
     }
 }
 
+/// Live subscription tracked by [`KernelRuntime::subscriptions`].
+/// The `window_label` tag lets `cancel_window` find every
+/// subscription belonging to a closing window without having to
+/// reach into the spawned forwarder task.
+struct SubscriptionEntry {
+    handle: JoinHandle<()>,
+    window_label: String,
+}
+
 /// Tauri-managed holder for the (optionally-booted) kernel runtime.
 ///
 /// The inner `Option<BootedRuntime>` starts as `None` and is populated by
@@ -167,10 +176,18 @@ pub struct KernelRuntime {
     /// Kept in sync with `inner.is_some()`. Writes happen only under the
     /// mutex so the two never drift from a reader's point of view.
     booted: Arc<AtomicBool>,
-    /// Active event subscriptions. Uses `std::sync::Mutex` because we only
-    /// hold it for quick map operations (insert / remove / drain) — never
-    /// across an await.
-    subscriptions: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
+    /// Active event subscriptions, tagged with the window label that
+    /// created them so `cancel_window` can find and abort every
+    /// subscription belonging to a closing window. Uses
+    /// `std::sync::Mutex` because we only hold it for quick map
+    /// operations (insert / remove / drain) — never across an await.
+    ///
+    /// Pre-fix this was `HashMap<sub_id, JoinHandle>`; the forwarder
+    /// task knew its window_label but the map did not, so a closing
+    /// window left its subscriptions running. They would silently
+    /// emit_to a dead window forever (Tauri no-ops the emit), leaking
+    /// a tokio task per popout-with-subscription.
+    subscriptions: Arc<StdMutex<HashMap<String, SubscriptionEntry>>>,
     /// Per-window cancellation tokens, keyed by Tauri webview label.
     /// Lazily populated on the first `kernel_invoke` from each window;
     /// the window's token is fired by [`cancel_window`] when the user
@@ -206,11 +223,20 @@ impl KernelRuntime {
             .clone()
     }
 
-    /// Fire the cancellation token for `label` and drop the map entry.
+    /// Fire the cancellation token for `label`, drop the token map
+    /// entry, and abort every subscription forwarder still running
+    /// for that window.
+    ///
     /// Any in-flight `kernel_invoke` from that window observes the
     /// cancel via the kernel's IPC dispatch race and returns
-    /// `IpcError::Cancelled`. No-op for windows that never invoked.
+    /// `IpcError::Cancelled`. Any active subscription (created via
+    /// `kernel_subscribe`) has its forwarder task aborted so it stops
+    /// `emit_to`-ing a now-dead window and stops draining its
+    /// `EventSubscription` from the kernel bus.
+    ///
+    /// No-op for windows that never invoked or subscribed.
     pub fn cancel_window(&self, label: &str) {
+        // Token side — see KernelRuntime::window_cancel_token.
         let token = self
             .window_cancels
             .lock()
@@ -218,6 +244,28 @@ impl KernelRuntime {
             .remove(label);
         if let Some(token) = token {
             token.cancel();
+        }
+
+        // Subscription side — find every entry tagged with this label,
+        // remove them from the map, and abort their forwarder tasks.
+        // Held briefly: the abort itself is sync-fire-and-forget.
+        let aborted: Vec<SubscriptionEntry> = {
+            let mut subs = self
+                .subscriptions
+                .lock()
+                .expect("subscriptions mutex poisoned");
+            let matching: Vec<String> = subs
+                .iter()
+                .filter(|(_, e)| e.window_label == label)
+                .map(|(id, _)| id.clone())
+                .collect();
+            matching
+                .into_iter()
+                .filter_map(|id| subs.remove(&id))
+                .collect()
+        };
+        for entry in aborted {
+            entry.handle.abort();
         }
     }
 
@@ -420,8 +468,8 @@ impl KernelRuntime {
         // touching the kernel before we tear it down.
         {
             let mut subs = self.subscriptions.lock().expect("subscriptions mutex poisoned");
-            for (_id, handle) in subs.drain() {
-                handle.abort();
+            for (_id, entry) in subs.drain() {
+                entry.handle.abort();
             }
         }
 
@@ -799,7 +847,13 @@ pub async fn kernel_subscribe(
             .subscriptions
             .lock()
             .expect("subscriptions mutex poisoned");
-        subs.insert(subscription_id.clone(), handle);
+        subs.insert(
+            subscription_id.clone(),
+            SubscriptionEntry {
+                handle,
+                window_label: webview.label().to_string(),
+            },
+        );
     }
 
     Ok(subscription_id)
@@ -813,7 +867,7 @@ fn spawn_local_forwarder(
     subscription_id: String,
     window_label: String,
     app: AppHandle,
-    subscriptions: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
+    subscriptions: Arc<StdMutex<HashMap<String, SubscriptionEntry>>>,
     mut subscription: nexus_kernel::EventSubscription,
 ) -> JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
@@ -854,7 +908,7 @@ fn spawn_remote_forwarder(
     subscription_id: String,
     window_label: String,
     app: AppHandle,
-    subscriptions: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
+    subscriptions: Arc<StdMutex<HashMap<String, SubscriptionEntry>>>,
     mut rx: mpsc::UnboundedReceiver<nexus_remote::EventDelivery>,
 ) -> JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
@@ -937,15 +991,15 @@ pub async fn kernel_unsubscribe(
             }
         }
     }
-    let handle = {
+    let entry = {
         let mut subs = runtime
             .subscriptions
             .lock()
             .expect("subscriptions mutex poisoned");
         subs.remove(&subscription_id)
     };
-    if let Some(h) = handle {
-        h.abort();
+    if let Some(entry) = entry {
+        entry.handle.abort();
     }
     Ok(())
 }
@@ -1039,5 +1093,90 @@ mod tests {
         rt.cancel_window("never-invoked");
         let token = rt.window_cancel_token("never-invoked");
         assert!(!token.is_cancelled());
+    }
+
+    // ── Subscription-cleanup on window close ─────────────────────────────────
+    //
+    // cancel_window must abort forwarder tasks belonging to the closing
+    // window and leave forwarders from other windows alone. Without this
+    // sweep, a popout that subscribed would leak its tokio task forever
+    // (it would keep draining the kernel bus and emit_to a dead window,
+    // which Tauri silently no-ops).
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_window_aborts_subscriptions_for_the_closing_window_only() {
+        let rt = KernelRuntime::new();
+
+        // Helper: spawn a forwarder-shaped task that parks on a oneshot
+        // until either the test releases it OR cancel_window aborts it.
+        // Returns the JoinHandle + the sender so the test can verify which
+        // tasks were aborted vs which received the release.
+        async fn spawn_pretend_forwarder() -> (JoinHandle<&'static str>, tokio::sync::oneshot::Sender<()>) {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let h = tauri::async_runtime::spawn(async move {
+                match rx.await {
+                    Ok(()) => "released",
+                    Err(_) => "released-on-drop",
+                }
+            });
+            (h, tx)
+        }
+
+        // Two subscriptions on the closing popout + one on the main window.
+        let (popout_h_1, _popout_tx_1) = spawn_pretend_forwarder().await;
+        let (popout_h_2, _popout_tx_2) = spawn_pretend_forwarder().await;
+        let (main_h, main_tx) = spawn_pretend_forwarder().await;
+
+        // The spawn_pretend_forwarder above returns &'static str but the
+        // real subscriptions map stores JoinHandle<()>. Cast via a no-op
+        // adapter task so we can drop them into the map.
+        async fn into_unit_handle(
+            h: JoinHandle<&'static str>,
+        ) -> JoinHandle<()> {
+            tauri::async_runtime::spawn(async move {
+                let _ = h.await;
+            })
+        }
+        let popout_h_1 = into_unit_handle(popout_h_1).await;
+        let popout_h_2 = into_unit_handle(popout_h_2).await;
+        let main_h = into_unit_handle(main_h).await;
+
+        {
+            let mut subs = rt.subscriptions.lock().unwrap();
+            subs.insert(
+                "sub-popout-1".into(),
+                SubscriptionEntry { handle: popout_h_1, window_label: "popout-1".into() },
+            );
+            subs.insert(
+                "sub-popout-2".into(),
+                SubscriptionEntry { handle: popout_h_2, window_label: "popout-1".into() },
+            );
+            subs.insert(
+                "sub-main".into(),
+                SubscriptionEntry { handle: main_h, window_label: "main".into() },
+            );
+        }
+        assert_eq!(rt.subscriptions.lock().unwrap().len(), 3);
+
+        rt.cancel_window("popout-1");
+
+        // The two popout entries must be removed; main must remain.
+        let surviving: Vec<String> = rt
+            .subscriptions
+            .lock()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(
+            surviving,
+            vec!["sub-main".to_string()],
+            "cancel_window must remove only the closing window's subscriptions; survivors {surviving:?}",
+        );
+
+        // Sanity: the main subscription's forwarder is still alive — we
+        // can release it via its oneshot and it completes normally
+        // rather than aborting prematurely.
+        let _ = main_tx.send(());
     }
 }
