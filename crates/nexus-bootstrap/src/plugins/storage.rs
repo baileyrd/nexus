@@ -40,6 +40,11 @@ pub(super) fn register(
                 Arc::clone(event_bus),
             )),
         )
-        .or_lifecycle_skip(event_bus, "com.nexus.storage")?;
+        // Storage is critical: without it, file persistence + indexing
+        // are gone, but the rest of the runtime would happily boot and
+        // present an editor that silently saves into the void. Use
+        // `or_critical` so a lifecycle hang aborts boot instead of
+        // degrading silently.
+        .or_critical("com.nexus.storage")?;
     Ok(())
 }

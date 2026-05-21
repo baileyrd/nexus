@@ -31,6 +31,12 @@ pub(super) fn register(
             forge_root,
             Box::new(SecurityCorePlugin::new(Some(Arc::clone(event_bus)))),
         )
-        .or_lifecycle_skip(event_bus, "com.nexus.security")?;
+        // Security is critical: capability gates and audit emission
+        // depend on it. A degraded boot without security would either
+        // fail closed on every cap-gated IPC call (best case — every
+        // editor save errors out) or fall back to permissive behavior
+        // (worst case — caps don't enforce). Use `or_critical` so a
+        // lifecycle hang aborts boot instead of either outcome.
+        .or_critical("com.nexus.security")?;
     Ok(())
 }

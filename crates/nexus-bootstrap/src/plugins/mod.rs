@@ -203,11 +203,30 @@ pub(crate) fn with_v1_aliases(ipc_commands: &[(&str, u32)]) -> Vec<(String, u32)
 /// source-plugin-id is anchor-only — bus's namespace anti-spoof
 /// check passes since the topic lies inside that string namespace.
 pub(crate) trait RegisterCoreResultExt {
+    /// Optional-plugin policy: a lifecycle hook timeout is swallowed
+    /// (the runtime continues with a degraded plugin set), every
+    /// other init error aborts boot.
     fn or_lifecycle_skip(
         self,
         event_bus: &EventBus,
         label: &str,
     ) -> Result<()>;
+
+    /// Critical-plugin policy: ANY init failure aborts boot, including
+    /// a lifecycle hook timeout that [`or_lifecycle_skip`] would have
+    /// degraded over.
+    ///
+    /// Use for plugins whose absence makes the runtime silently misbehave
+    /// rather than gracefully degrade — storage (no file persistence,
+    /// editor would "save" into the void) and security (cap-check system
+    /// goes degraded, every gated call fails closed at best, opens up at
+    /// worst). Booting without these would present a UI that pretends to
+    /// work; failing loudly is the safer default.
+    ///
+    /// Plugins not on this list (UI, networking, optional integrations)
+    /// keep using `or_lifecycle_skip` so a stuck terminal hook or a slow
+    /// MCP host doesn't take the whole app down.
+    fn or_critical(self, label: &str) -> Result<()>;
 }
 
 impl RegisterCoreResultExt
@@ -241,6 +260,34 @@ impl RegisterCoreResultExt
                     }),
                 );
                 Ok(())
+            }
+            Err(e) => {
+                Err(anyhow::Error::new(e).context(format!("failed to register {label}")))
+            }
+        }
+    }
+
+    fn or_critical(self, label: &str) -> Result<()> {
+        match self {
+            Ok(_) => Ok(()),
+            Err(PluginError::LifecycleTimeout {
+                plugin_id,
+                hook,
+                timeout_secs,
+            }) => {
+                tracing::error!(
+                    plugin_id = %plugin_id,
+                    ?hook,
+                    timeout_secs,
+                    "critical plugin lifecycle hook timed out — aborting boot \
+                     instead of running with a missing core capability",
+                );
+                Err(anyhow::anyhow!(
+                    "critical plugin '{plugin_id}' timed out in {hook:?} \
+                     after {timeout_secs}s; the runtime cannot function \
+                     without it"
+                )
+                .context(format!("failed to register {label}")))
             }
             Err(e) => {
                 Err(anyhow::Error::new(e).context(format!("failed to register {label}")))
@@ -352,4 +399,55 @@ mod or_lifecycle_skip_tests {
     // `or_lifecycle_skip`); a synthetic `Ok(PluginInfo)` test would
     // have to fabricate a real `PluginInfo` whose constructor isn't
     // public, so we skip it here.
+}
+
+#[cfg(test)]
+mod or_critical_tests {
+    use nexus_plugins::PluginError;
+
+    use super::RegisterCoreResultExt;
+
+    /// `or_critical` MUST abort boot on a lifecycle timeout — the
+    /// inverse of `or_lifecycle_skip`. Storage / security going
+    /// missing is the exact "silent misbehavior" the policy is
+    /// meant to prevent; this test pins the behavior so a future
+    /// refactor that re-introduces skip semantics is caught here.
+    #[test]
+    fn lifecycle_timeout_aborts_boot_for_critical_plugins() {
+        let result: Result<nexus_plugins::PluginInfo, PluginError> =
+            Err(PluginError::LifecycleTimeout {
+                plugin_id: "com.nexus.storage".to_string(),
+                hook: "on_init".to_string(),
+                timeout_secs: 30,
+            });
+        let outcome = result.or_critical("com.nexus.storage");
+        let err = outcome
+            .expect_err("critical plugin lifecycle timeout must abort boot");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("failed to register com.nexus.storage"),
+            "context label missing in {msg}",
+        );
+        assert!(
+            msg.contains("timed out") && msg.contains("on_init"),
+            "error chain should mention the hook + timeout; got {msg}",
+        );
+    }
+
+    /// Non-timeout errors propagate with anyhow context — same shape
+    /// as `or_lifecycle_skip`'s non-timeout arm, just without the bus
+    /// event. Confirms `or_critical` doesn't accidentally swallow
+    /// programming bugs (DuplicatePlugin) either.
+    #[test]
+    fn non_timeout_errors_still_propagate_for_critical_plugins() {
+        let result: Result<nexus_plugins::PluginInfo, PluginError> =
+            Err(PluginError::DuplicatePlugin("com.nexus.security".to_string()));
+        let outcome = result.or_critical("com.nexus.security");
+        let err = outcome.expect_err("duplicate-id should propagate");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("failed to register com.nexus.security"),
+            "context label missing in {msg}",
+        );
+    }
 }
