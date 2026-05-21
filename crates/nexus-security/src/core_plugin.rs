@@ -118,7 +118,14 @@ impl SecurityCorePlugin {
     pub fn publish_audit(&self, event_type: &str, payload: serde_json::Value) {
         if let Some(bus) = &self.event_bus {
             let type_id = format!("{PLUGIN_ID}.audit.{event_type}");
-            let _ = bus.publish_plugin(PLUGIN_ID, &type_id, payload);
+            if let Err(e) = bus.publish_plugin(PLUGIN_ID, &type_id, payload) {
+                tracing::error!(
+                    plugin_id = PLUGIN_ID,
+                    event_type = %type_id,
+                    error = %e,
+                    "audit event dropped — bus publish failed"
+                );
+            }
         }
     }
 }
@@ -151,11 +158,17 @@ impl CorePlugin for SecurityCorePlugin {
 
     fn on_start(&mut self) -> Result<(), PluginError> {
         if let Some(bus) = &self.event_bus {
-            let _ = bus.publish_plugin(
+            if let Err(e) = bus.publish_plugin(
                 PLUGIN_ID,
                 "com.nexus.security.started",
                 serde_json::json!({}),
-            );
+            ) {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    error = %e,
+                    "failed to publish security.started lifecycle event"
+                );
+            }
         }
         tracing::info!(plugin_id = PLUGIN_ID, "security subsystem started");
         Ok(())
@@ -163,11 +176,17 @@ impl CorePlugin for SecurityCorePlugin {
 
     fn on_stop(&mut self) {
         if let Some(bus) = &self.event_bus {
-            let _ = bus.publish_plugin(
+            if let Err(e) = bus.publish_plugin(
                 PLUGIN_ID,
                 "com.nexus.security.stopped",
                 serde_json::json!({}),
-            );
+            ) {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    error = %e,
+                    "failed to publish security.stopped lifecycle event"
+                );
+            }
         }
         tracing::info!(plugin_id = PLUGIN_ID, "security subsystem stopped");
     }
