@@ -247,7 +247,10 @@ async fn republisher_translates_round_proposed_to_typed_ai_event() {
     // Wait briefly for the subscriber to register and the worker to
     // ingest the correlation. The publish below is what the agent
     // would have done from inside session_run; we shortcut directly
-    // to the bus.
+    // to the bus. The runtime's worker holds the session→task
+    // correlation for SESSION_CORRELATION_GRACE_MS past the terminal
+    // event so the lookup here is race-free even though session_run
+    // fast-fails (no AI provider configured).
     tokio::time::sleep(Duration::from_millis(50)).await;
     runtime
         .kernel

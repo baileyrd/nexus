@@ -84,6 +84,25 @@ const SESSION_RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// step the workflow would otherwise have awaited inline.
 const WORKFLOW_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
+/// Grace period the worker holds a session→task correlation entry
+/// past the terminal `AiEvent`. The kernel event bus is async-delivery
+/// (broadcast channel), so an inner `com.nexus.agent.round_*` or
+/// `com.nexus.ai.stream_*` event published from inside `session_run`
+/// just before it returns may still be sitting in the republisher's
+/// channel buffer when the worker emits Failed/Finished and would
+/// otherwise immediately drop the correlation. Without this hold the
+/// republisher's `task_for_session` lookup races the cleanup and
+/// silently drops the in-flight event from the typed
+/// `com.nexus.ai.runtime.*` stream.
+///
+/// 500 ms comfortably covers tokio scheduler latency on contended
+/// runtimes (WSL2, CI). The cost is at most
+/// `peak-sessions-per-second × 500 ms` extra entries in the reverse
+/// map — negligible vs. the cap on concurrent runs the scheduler
+/// already enforces.
+const SESSION_CORRELATION_GRACE: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
 /// Core plugin state. The pool is built lazily in `wire_context` so
 /// `cargo test -p nexus-ai-runtime` doesn't pay the cost when only
 /// the type tests run.
@@ -361,7 +380,15 @@ fn handle_submit(
         // (`inject_session_id_*`); pre-Started returns above already
         // ran their own cancel-emit path, so a no-op forget here is
         // safe even though they don't drop into this branch.
+        //
+        // Hold the correlation for SESSION_CORRELATION_GRACE past the
+        // terminal event so any inner `round_*` / `stream_*` event the
+        // agent published just before session_run returned can still
+        // be translated by the republisher (whose recv() races this
+        // cleanup on the bus). Without the hold, late-arriving events
+        // would silently miss the typed stream.
         if let Some(sid) = allocated_session_id {
+            tokio::time::sleep(SESSION_CORRELATION_GRACE).await;
             store_for_worker.forget_session(&sid);
         }
     });
