@@ -18,8 +18,9 @@
 | B1 | `ipc-handlers.md` counts stale (drift script added) | `53638d3` |
 | B2 | `audit-flags.md` largely stale (drift script added) | `53638d3` |
 | B4 | `settings/README.md` forge layout missing ≥9 paths | `53638d3` |
-| D1 | tokio::spawn orphans in `nexus-remote` server + `nexus-workflow` webhook | _this commit_ |
-| D2 | `Mutex::lock().expect()` poisoning panics in `nexus-collab` relay | _this commit_ |
+| D1 | tokio::spawn orphans in `nexus-remote` server + `nexus-workflow` webhook | `4e989c6` |
+| D2 | `Mutex::lock().expect()` poisoning panics in `nexus-collab` relay | `4e989c6` |
+| D4 | 5 un-flagged tunable constants + workflow digests `IPC_TIMEOUT` shared-const migration | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -165,15 +166,12 @@ Fixed by a two-layer change in `a186308`:
 
 Privacy boundary: forge-relative paths and numeric args are logged; free-text user input (question, query) is logged by length only.
 
-### D4. 5 un-flagged constants that look user-tunable
-Not in `hardcoded-rust.md` but probably should be:
-1. `nexus-workflow/src/webhook.rs:57` — `READ_TIMEOUT_MS: u64 = 5_000` (drops slow payloads)
-2. `nexus-storage/src/watcher.rs:28` — `WATCHER_CHANNEL_BOUND: usize = 1024` (just fixed; should be tunable)
-3. `nexus-terminal/src/core_plugin.rs:1102-1109` — PTY pump tuning (`DRAINER_PUMP_TIMEOUT_MS=5`, `DRAINER_SLEEP_MS=10`, …)
-4. `nexus-terminal/src/memory.rs:38` — `DEFAULT_HISTORY_SAMPLES: usize = 60` (history depth)
-5. `nexus-storage/src/entity_index.rs:865` — `DESCRIPTION_FALLBACK_CAP: usize = 240` (UI-visible)
+### D4. 5 un-flagged constants that look user-tunable — ✅ Closed
+All five constants are now listed in `docs/0.1.2/settings/hardcoded-rust.md` under "Already-named constants worth promoting" (rows 7–11), each annotated with the suggested settings key and rationale. The summary count was bumped from 6 → 11.
 
-Also: `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT = Duration::from_secs(120)` should use the shared `nexus_types::constants::IPC_TIMEOUT_LONG` per the recent P5-01 standardization but doesn't.
+The drive-by `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT = Duration::from_secs(120)` was also migrated to `nexus_types::constants::IPC_TIMEOUT_LONG` per the P5-01 standardisation — same value (120s), same call sites, just routed through the shared constant. The corresponding row in `hardcoded-rust.md`'s IPC-timeouts table was struck through with the migration note.
+
+No `settings.toml` schema work in this PR — promoting a row from "named but hardcoded" to "settings-backed" requires per-subsystem `Config` struct extension + serde defaults + docs, which the hardcoded-rust.md file explicitly tracks as separate downstream work.
 
 ### D5. Theming — 87 inline `style={{` files with hardcoded hex
 Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCycle/DreamCycleInboxView.tsx` (12), `templates/TemplatesView.tsx` (11). Most are defensive `var(--token, #fallback)` fallbacks (acceptable), but the absence of a centralized palette means `#3b82f6` accent, `#888` muted, `#2a2a2a` border, `#ef4444` error are duplicated across 5+ plugins.
@@ -219,3 +217,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — A6 partially drained: the three `invoke('kernel_invoke', …)` calls in `SettingsPanelView.tsx` migrated to `api.kernel.invoke(...)` (the component already had `api` in scope at all three call sites). The two AI files flagged by the audit (`marginApi.ts`, `marginSuggest.ts`) had already been cleaned. Seven sites remain in the `plugin-import-hygiene.test.ts` allowlist as documented shell-internal exceptions; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
 - **2026-05-22** — B1 / B2 / B4 closed: `ipc-handlers.md` counts table + section headers updated against current matrix (332 handlers, 23 plugins); `audit-flags.md` rewritten to list the 4 still-unrestricted handlers (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`) with a separate "Closed since" section for the 14 already-gated ones; `settings/README.md` forge-layout table extended with 9 missing paths plus an explicit note resolving the dual `config.toml` confusion. New `scripts/check_ipc_docs_drift.sh` checks both docs against the matrix and is wired into `scripts/check_ipc_drift.sh` for CI. B3 (`hardcoded-rust.md`) deferred — needs row-by-row code verification.
 - **2026-05-22** — D1 + D2 closed. D1: the per-request spawns in `nexus-remote::server::dispatch_request` and the per-connection spawn in `nexus-workflow::webhook_accept_loop` are now tracked in a `JoinSet` scoped to their owning accept loop / connection; drop of the future cascades aborts. D2: the four `nexus-collab` relay-slot `Mutex::lock().expect()` sites now go through a `lock_relay()` helper that recovers via `into_inner()` on poison and emits a `tracing::warn!`. Three of the audit's five D1 flags (`nexus-kernel/context_impl.rs:960`, `nexus-ai-runtime/core_plugin.rs:863`, `nexus-ai-runtime/scheduler.rs:503`) and both terminal D2 flags were inside test code (the audit's `grep -n` conflated test-only spawns/locks with production code) — left as-is.
+- **2026-05-22** — D4 closed. Five un-flagged tunable constants (`READ_TIMEOUT_MS`, `WATCHER_CHANNEL_BOUND`, `DRAINER_PUMP_TIMEOUT_MS` / `DRAINER_SLEEP_MS`, `DEFAULT_HISTORY_SAMPLES`, `DESCRIPTION_FALLBACK_CAP`) now appear in `hardcoded-rust.md`'s "Already-named constants worth promoting" section with the suggested settings key on each row. The drive-by `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT` was migrated to `nexus_types::constants::IPC_TIMEOUT_LONG` per P5-01.

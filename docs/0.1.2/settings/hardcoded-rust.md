@@ -128,7 +128,7 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-bootstrap/src/crdt_publisher.rs` | 47 | `Duration::from_millis(250)` | `CRDT_PULL_LANDING_TICK_MS` |
 | `crates/nexus-bootstrap/src/{lsp,mcp,dap,acp}_contribution_wiring.rs` | ~28 each | `Duration::from_secs(5)` | shared `PROTO_REGISTER_TIMEOUT_SECS` |
 | `crates/nexus-bootstrap/src/agent.rs` | 27, 32 | `60` / `300` s | `AGENT_DEFAULT_TOOL_TIMEOUT_SECS` / `_CHAT_TIMEOUT_SECS` |
-| `crates/nexus-workflow/src/digests.rs` | 49 | `Duration::from_secs(120)` | `DIGEST_IPC_TIMEOUT_SECS` |
+~~| `crates/nexus-workflow/src/digests.rs` | 49 | `Duration::from_secs(120)` | `DIGEST_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_LONG` (D4 migration).
 
 ### Connection pool backoff
 
@@ -238,6 +238,11 @@ Existing `const` declarations that are good named constants but should be expose
 4. `crates/nexus-collab/src/reconnect_client.rs:69-84` — `ReconnectConfig` — already struct, but constructor values are baked.
 5. `crates/nexus-formats/src/config/ai.rs:78-79` — `default_max_tokens()` / `default_temperature()` — already serde defaults; consolidate in a single config site.
 6. `crates/nexus-ai/src/local_embedding.rs:279-286` — `model_dimension()` hardcoded mapping — move to a model registry table.
+7. `crates/nexus-workflow/src/webhook.rs:57` — `READ_TIMEOUT_MS: u64 = 5_000` — webhook request read deadline. Tight enough that a slow-but-legitimate caller (proxied through a high-latency hop) gets dropped; surface as `[webhooks].read_timeout_ms` so operators can extend per environment. (D4 audit, 2026-05-21.)
+8. `crates/nexus-storage/src/watcher.rs:28` — `WATCHER_CHANNEL_BOUND: usize = 1024` — file-watcher event channel capacity (bounded in commit `0bd9eabe`). Tunable would let operators on very write-heavy forges raise the bound; surface as `[storage].watcher_channel_bound`. (D4 audit.)
+9. `crates/nexus-terminal/src/core_plugin.rs:1102-1103` — `DRAINER_PUMP_TIMEOUT_MS = 5` and `DRAINER_SLEEP_MS = 10` — PTY pump tuning. Hot-path values; the tracing comment at line 1099 already states the calculated worst-case latency. Surface as `[terminal].drainer_pump_timeout_ms` / `[terminal].drainer_sleep_ms` for operators tuning many-session forges. (D4 audit.)
+10. `crates/nexus-terminal/src/memory.rs:38` — `DEFAULT_HISTORY_SAMPLES: usize = 60` — process-monitor sample window (60 readings × poll interval). Affects how far back terminal memory pressure charts reach; surface as `[terminal].memory_history_samples`. (D4 audit.)
+11. `crates/nexus-storage/src/entity_index.rs:865` — `DESCRIPTION_FALLBACK_CAP: usize = 240` — character cap on entity-description fallback text shown in the UI when no explicit description is set. UI-visible — different forges might want a different feel. Surface as `[storage].entity_description_fallback_cap`. (D4 audit.)
 
 ---
 
@@ -247,7 +252,7 @@ Existing `const` declarations that are good named constants but should be expose
 |-------|------:|
 | User Config | ~30 entries |
 | Dev Config | ~100 entries |
-| Already-named, surface as setting | 6 |
+| Already-named, surface as setting | 11 |
 
 ## Cross-references with shell side
 
