@@ -33,6 +33,7 @@ pub mod cron;
 pub mod digests;
 mod executor;
 mod handlers;
+pub mod implied_caps;
 mod interpolate;
 mod parse;
 mod registry;
