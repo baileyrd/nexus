@@ -18,7 +18,8 @@
 | B2 | `audit-flags.md` 14 rows stale; missing `mcp.host::call_tool` | _doc-only_ |
 | B3 | `hardcoded-rust.md` Dev-Config table — 11+ already-promoted rows | _doc-only_ |
 | B4 | `settings/README.md` forge layout missing ≥9 paths | _doc-only_ |
-| D3 | Handler errors silently lost — dispatcher emits no log on failure | _this sweep_ |
+| D3 | Handler errors silently lost — dispatcher emits no log on failure | `3fdea6d8` |
+| D2 | `Mutex::lock().expect()` in long-lived plugins (collab relay) | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -187,11 +188,11 @@ All 63 catalog entries use `activationEvents: ['onStartup']`. No lazy activation
 - `nexus-kernel/src/context_impl.rs:960` — timer-fire CancelToken task
 - `nexus-ai-runtime/src/core_plugin.rs:863`, `scheduler.rs:503`
 
-### D2. `Mutex::lock().expect()` in long-lived plugins
-- `nexus-collab/src/core_plugin.rs:317,370,391,421` (4 sites, all in the relay plugin)
-- `nexus-terminal/src/core_plugin.rs:3008,3067`
+### D2. `Mutex::lock().expect()` in long-lived plugins — ✅ Closed
+- ✅ `nexus-collab/src/core_plugin.rs:317,370,391,421` — all 4 sites now route through a new `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. The relay slot is just an `Option<RunningRelay>`; its invariants are restored on the next `start_relay`/`stop_relay` edge, so recovering and continuing beats killing the plugin.
+- `nexus-terminal/src/core_plugin.rs:3008,3067` — both sites are inside the `#[cfg(test)] mod tests` block (test module starts at line 2016). `.expect("memory lock")` in test code is correct (panic = test failure), not in-scope for D2.
 
-Poisoning will kill the plugin. Either don't `.expect()` or restart-on-poison.
+No remaining production `.expect()` on `Mutex::lock()` in either crate.
 
 ### D3. Handlers don't log on error return — ✅ Closed (dispatcher-level emit)
 The original finding was correct that handlers were silent on the error path, but slightly off on the second clause — the dispatcher *also* emitted no log; it only recorded a metrics counter. A handler-side sweep across ~332 handlers would have been a noisy, low-leverage change. Instead, `KernelPluginContext::ipc_call` (`crates/nexus-kernel/src/context_impl.rs`) now emits a single structured log on every Err exit, tuned by error class:
@@ -241,7 +242,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 4. ~~**A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.~~ Already tracked by the WI-25 allowlist drain in `shell/tests/plugin-import-hygiene.test.ts`; A6 is not a new finding. AA-04 stays open separately.
 5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ Doc refresh landed (this sweep). A drift script is still a useful follow-up.
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
-7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.
+7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; ~~handle `Mutex` poisoning instead of `.expect()`.~~ **D2 closed in this sweep.** D1 still open.
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
 
 None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/observability wins.
@@ -256,3 +257,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21 (later)** — A6 re-classified: every cited file is already on the WI-25 allowlist in `shell/tests/plugin-import-hygiene.test.ts` with a documented rationale; `ai/marginApi.ts` + `marginSuggest.ts` use `api.kernel.invoke` (false positive). A6 points at the existing WI-25 drain, not new violations.
 - **2026-05-21 (later)** — B1–B4 doc refresh landed: `ipc-handlers.md` counts re-derived from `cap_matrix.toml` (332 total, with the six drifted per-plugin counts and section headers corrected); `audit-flags.md` rewritten to reflect the three remaining `# AUDIT:` rows (workflow `run`, workflow `run_digest`, `mcp.host::call_tool`) with the historical promotions moved to their own section; `hardcoded-rust.md` strikethroughs added for ~11 rows whose target consts already exist (vectorstore/rag/enrichment/indexing_daemon/collab/mcp/editor/tui); `settings/README.md` forge layout adds 11 missing paths (`comments/`, `templates/`, `agents/`, `digests/last_fired.json`, `skills/`, `ai-activity.log`, `.audio/models/`, `.editor/undo/`, `.forge/.gitignore`, `.forge/config.toml`, `agents/<agent_id>/`), removes the ghost `acp.toml` row per ADR 0027 §Phase 4, and notes `.gitattributes` is forge-root.
 - **2026-05-21 (later)** — D3 closed: `KernelPluginContext::ipc_call` now emits a structured log on every Err exit (debug for Cancelled, error for PluginCrashedDuringCall, warn for everything else, skipped for CapabilityDenied which is already audited). Single point of emission covers all 332 handlers without churning per-crate code.
+- **2026-05-21 (later)** — D2 closed: collab relay-slot mutex now uses a `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. Terminal sites flagged by the audit were in `#[cfg(test)] mod tests` — not in scope.

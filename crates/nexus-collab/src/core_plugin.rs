@@ -248,6 +248,26 @@ impl CollabCorePlugin {
     fn snapshot_identity(&self) -> Option<LocalPeer> {
         self.identity.read().ok().and_then(|g| g.clone())
     }
+
+    /// Acquire the relay-slot mutex, recovering the inner guard if a
+    /// previous holder panicked. Audit gap D2 — the relay plugin is
+    /// long-lived; `.expect()` on a poisoned mutex would terminate
+    /// the whole plugin process and lose the live `RunningRelay`
+    /// state. The slot is just an `Option<RunningRelay>` whose
+    /// invariants are restored on the next `start_relay`/`stop_relay`
+    /// edge, so recovering and continuing is safe.
+    fn relay_lock(&self) -> std::sync::MutexGuard<'_, Option<RunningRelay>> {
+        match self.relay.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    "relay slot mutex was poisoned; recovering inner guard",
+                );
+                poisoned.into_inner()
+            }
+        }
+    }
 }
 
 impl CorePlugin for CollabCorePlugin {
@@ -314,7 +334,7 @@ impl CollabCorePlugin {
         // Avoids surprising "two listeners on the same port" attempts
         // when the shell renders Share twice (popout + main window).
         {
-            let guard = self.relay.lock().expect("relay slot");
+            let guard = self.relay_lock();
             if let Some(rr) = guard.as_ref() {
                 return ok_reply(&relay_status_from(rr));
             }
@@ -367,7 +387,7 @@ impl CollabCorePlugin {
         let status = relay_status_from(&running);
 
         {
-            let mut guard = self.relay.lock().expect("relay slot");
+            let mut guard = self.relay_lock();
             *guard = Some(running);
         }
 
@@ -388,7 +408,7 @@ impl CollabCorePlugin {
     /// not an error — the reply just reports `running: false`.
     fn dispatch_stop_relay(&self) -> Result<serde_json::Value, PluginError> {
         let taken = {
-            let mut guard = self.relay.lock().expect("relay slot");
+            let mut guard = self.relay_lock();
             guard.take()
         };
         let Some(running) = taken else {
@@ -418,7 +438,7 @@ impl CollabCorePlugin {
     /// succeeds; the reply has `running: false` when there is no
     /// active relay.
     fn dispatch_relay_status(&self) -> Result<serde_json::Value, PluginError> {
-        let guard = self.relay.lock().expect("relay slot");
+        let guard = self.relay_lock();
         let status = guard
             .as_ref()
             .map_or_else(RelayStatus::stopped, relay_status_from);
