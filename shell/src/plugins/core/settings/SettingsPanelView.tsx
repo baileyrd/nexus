@@ -5,7 +5,6 @@
 // file only renders the built-in tabs and per-plugin schema sections.
 
 import { useState, useEffect, useRef, useCallback, useMemo, createElement, type MouseEvent as ReactMouseEvent } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
@@ -420,23 +419,21 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                 // seed a minimal stub if it's missing before routing
                 // through `files:open`.
                 try {
-                  const probe = await invoke<{ bytes: number[] | null }>('kernel_invoke', {
-                    pluginId: 'com.nexus.storage',
-                    commandId: 'read_file',
-                    args: { path: '.forge/app.toml' },
-                    timeoutMs: null,
-                  })
-                  if (probe.bytes === null) {
+                  const probe = await api?.kernel.invoke<{ bytes: number[] | null }>(
+                    'com.nexus.storage',
+                    'read_file',
+                    { path: '.forge/app.toml' },
+                  )
+                  if (probe && probe.bytes === null) {
                     const stub = '# Forge settings (.forge/app.toml)\n\n[settings]\n'
-                    await invoke('kernel_invoke', {
-                      pluginId: 'com.nexus.storage',
-                      commandId: 'write_file',
-                      args: {
+                    await api?.kernel.invoke(
+                      'com.nexus.storage',
+                      'write_file',
+                      {
                         path: '.forge/app.toml',
                         bytes: Array.from(new TextEncoder().encode(stub)),
                       },
-                      timeoutMs: null,
-                    })
+                    )
                   }
                 } catch (err) {
                   // Non-fatal: the editor's session manager will log
@@ -1407,12 +1404,11 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
             type="button"
             onClick={async () => {
               try {
-                await invoke('kernel_invoke', {
-                  pluginId: 'com.nexus.storage',
-                  commandId: 'rebuild_index',
-                  args: {},
-                  timeoutMs: null,
-                })
+                await api?.kernel.invoke(
+                  'com.nexus.storage',
+                  'rebuild_index',
+                  {},
+                )
                 api?.notifications.show({
                   type: 'info',
                   message: 'Forge cache rebuilt.',
@@ -1480,12 +1476,11 @@ function KeychainTab({ api }: { api?: PluginAPI }) {
             )
             if (value === null || value === undefined) return
             try {
-              await invoke('kernel_invoke', {
-                pluginId: 'com.nexus.security',
-                commandId: 'set_secret',
-                args: { plugin_id: pluginId, name, value },
-                timeoutMs: null,
-              })
+              await api?.kernel.invoke(
+                'com.nexus.security',
+                'set_secret',
+                { plugin_id: pluginId, name, value },
+              )
               api?.notifications.show({
                 type: 'info',
                 message: `Secret ${pluginId}:${name} stored.`,

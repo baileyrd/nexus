@@ -13,7 +13,8 @@
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
 | A2 | Silent error swallowing — storage/notifications/mcp/bootstrap remaining sites | `47f582a` |
 | D3 | Handlers don't log on error return (chokepoint + 5 audit-flagged files enriched) | `a186308` |
-| A1 | Shell plugin catalog ↔ on-disk mismatch (incidentally closed; regression guard added) | _this commit_ |
+| A1 | Shell plugin catalog ↔ on-disk mismatch (incidentally closed; regression guard added) | `ef1a163` |
+| A6 | Direct Tauri `invoke()` from non-host code (partial drain — 3 of 10 closed) | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -65,18 +66,21 @@ Three external-process clients held unbounded mpsc channels — a chatty LSP/DAP
 ### A5. Workflow `run`/`run_digest` capability laundering (issue #77 still open)
 `cap_matrix.toml:1625,1631` — both unrestricted. A caller with no caps can compose a workflow that internally chains capability-gated handlers; each step is checked, but the *aggregation* of side effects is not. Track A audit flag still live.
 
-### A6. Direct Tauri `invoke()` from non-host code (≥10 sites)
-Per ADR 0011, only host code may call the Tauri bridge directly; plugins must route through `PluginAPI.kernel`. Bypasses:
-- `shell/src/core/capabilityPrompt/requestConsent.ts:19`
-- `shell/src/core/settings/SettingsPanelView.tsx:8` (3 calls)
-- `shell/src/plugins/nexus/workspace/index.ts:3` + `useConnectionState.ts:7` (also `listen`)
-- `shell/src/plugins/nexus/launcher/launcherState.ts:1`
-- `shell/src/plugins/nexus/pluginsMgmt/index.ts:1`
-- `shell/src/plugins/nexus/notifications/index.ts:12`
-- `shell/src/plugins/nexus/debugger/LaunchConfig.tsx:30`
-- `shell/src/plugins/nexus/ai/marginApi.ts`, `marginSuggest.ts` (multiple)
+### A6. Direct Tauri `invoke()` from non-host code — ⚠️ partially drained
+Per ADR 0011, only host code may call the Tauri bridge directly; plugins must route through `PluginAPI.kernel`. The audit listed ten bypass sites; the project's policy is the per-file allowlist in `shell/tests/plugin-import-hygiene.test.ts`, which fails the test suite on any *new* direct `@tauri-apps/*` import outside that list. Each allowlist entry carries a comment explaining why it stays.
 
-This is the same class as `App.tsx:8` (already flagged in AA-04) but spread further.
+Status of the original ten sites:
+- ✅ `shell/src/plugins/nexus/ai/marginApi.ts` + `marginSuggest.ts` — both files no longer import from `@tauri-apps/*`; all calls route through `api.kernel.invoke`. (Closed before this audit was reviewed.)
+- ✅ `shell/src/plugins/core/settings/SettingsPanelView.tsx` — the three `invoke('kernel_invoke', …)` calls were migrated to `api.kernel.invoke(...)` (`api` was already in scope at all three sites via `props.api` / `FilesLinksTab` / `KeychainTab`). The file stays in the allowlist only because of the unrelated `openDialog` import from `@tauri-apps/plugin-dialog` (theme-file picker — drains when `PlatformDialog.open()` is added).
+- ⚠️ `shell/src/plugins/core/capabilityPrompt/requestConsent.ts` — `get_plugin_granted_capabilities` / `set_plugin_granted_capabilities`. Pre-kernel-boot consent storage; legitimately shell-internal (consent must be resolved before the kernel can be booted with the granted-cap set).
+- ⚠️ `shell/src/plugins/nexus/workspace/index.ts` — `boot_kernel` / `init_forge` / `shutdown_kernel` / `boot_remote`. Shell-lifecycle ops with no kernel equivalent.
+- ⚠️ `shell/src/plugins/nexus/workspace/useConnectionState.ts` — `kernel_connection_state` + `listen('kernel:connection-state')`. State lives in the bridge layer; a kernel IPC wrapper would just forward to the same Tauri command.
+- ⚠️ `shell/src/plugins/nexus/launcher/launcherState.ts` — `get/write/forget_shell_state` for the recents list. Shell-managed metadata; no kernel surface.
+- ⚠️ `shell/src/plugins/nexus/pluginsMgmt/index.ts` — `set_plugin_enabled`. Shell-managed plugin enable/disable; pre-load.
+- ⚠️ `shell/src/plugins/nexus/notifications/index.ts` — `notify_desktop` for OS-level notifications. Could drain when `api.platform.notifications` or equivalent surface is added.
+- ⚠️ `shell/src/plugins/nexus/debugger/LaunchConfig.tsx` — `scan_plugin_directory` + `readTextFile` for resolving launch config schemas. Could drain when `api.plugins.dir` is added.
+
+Two of ten sites closed outright; the remaining seven are documented exceptions enforced by `plugin-import-hygiene.test.ts`. Further drain blocked on adding API surface to `@nexus/extension-api` (PlatformDialog, PlatformNotifications, PluginsDir) — separate design work tracked under WI-25.
 
 ---
 
@@ -214,7 +218,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ ✅ All three closed (A2: `0eb8bcc0` + `47f582a`; A3: `88f990cd`; D3: `a186308`).
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up.~~ ✅ Closed (incidentally fixed by `legacyPluginIds` aliases + renamed imports during the intervening weeks; regression guard added in `shell/tests/catalog-disk-consistency.test.ts`).
-4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
+4. ⚠️ **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Partially drained — `marginApi.ts` + `marginSuggest.ts` cleaned before this audit, `SettingsPanelView.tsx`'s three `kernel_invoke` calls migrated to `api.kernel.invoke` in this PR. Seven sites remain as documented shell-internal exceptions in `shell/tests/plugin-import-hygiene.test.ts`; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
 5. **B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
 7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.
@@ -230,3 +234,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — A2 remaining sites closed in `47f582a` (storage 6, notifications 3, mcp 1, bootstrap 2). A2 is now fully closed.
 - **2026-05-22** — D3 closed in `a186308` via a chokepoint `warn!` in `nexus_plugins::dispatch::exec_err` plus reason-string enrichment in the five audit-flagged files.
 - **2026-05-22** — A1 marked closed: every mismatch in the audit table was reconciled by intervening refactoring (`legacyPluginIds` aliases for `nexus.activityTimeline → nexus.activity` and `nexus.notion → nexus.notionImport`; rename of the `osObservability` import target; addition of `graph/globalIndex.ts`). A regression guard was added at `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back.
+- **2026-05-22** — A6 partially drained: the three `invoke('kernel_invoke', …)` calls in `SettingsPanelView.tsx` migrated to `api.kernel.invoke(...)` (the component already had `api` in scope at all three call sites). The two AI files flagged by the audit (`marginApi.ts`, `marginSuggest.ts`) had already been cleaned. Seven sites remain in the `plugin-import-hygiene.test.ts` allowlist as documented shell-internal exceptions; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
