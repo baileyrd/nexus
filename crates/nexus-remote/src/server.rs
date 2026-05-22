@@ -100,14 +100,27 @@ impl RemoteServer {
         let writer: Arc<Mutex<W>> = Arc::new(Mutex::new(writer));
         let subscriptions: Arc<Mutex<HashMap<String, JoinHandle<()>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        // D1 (2026-05-21 audit) — track per-request handler tasks in a
+        // JoinSet scoped to this connection. Previously each
+        // `dispatch_request` spawned fire-and-forget tasks; if the
+        // serve future was dropped (caller shutdown), in-flight ipc
+        // calls were silently abandoned mid-write. Dropping the
+        // JoinSet aborts every still-pending task on the way out.
+        let mut pending: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
 
         loop {
+            // Reap any completed per-request tasks so the JoinSet
+            // doesn't grow unboundedly under a hot client. `try_join_next`
+            // is non-blocking; we drain whatever is ready.
+            while pending.try_join_next().is_some() {}
+
             let msg = match read_message(&mut reader).await {
                 Ok(m) => m,
                 Err(TransportError::Eof) => break,
                 Err(e) => {
                     // Abort outstanding subscription tasks before
-                    // surfacing the error.
+                    // surfacing the error. `pending` will abort
+                    // automatically when this function returns.
                     abort_all(&subscriptions).await;
                     return Err(RemoteServerError::Transport(e));
                 }
@@ -118,6 +131,7 @@ impl RemoteServer {
                         req,
                         Arc::clone(&writer),
                         Arc::clone(&subscriptions),
+                        &mut pending,
                     )
                     .await;
                 }
@@ -134,16 +148,27 @@ impl RemoteServer {
         }
 
         abort_all(&subscriptions).await;
+        // Give in-flight per-request handlers a brief grace window
+        // to finish writing before the JoinSet's drop aborts them.
+        // 2s mirrors the pre-existing patience window in the kernel
+        // bootstrap shutdown path.
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            while pending.join_next().await.is_some() {}
+        })
+        .await;
         Ok(())
     }
 
     /// Dispatch one inbound request. Spawns a task so a slow `ipc_call`
-    /// doesn't block subsequent requests on the same connection.
+    /// doesn't block subsequent requests on the same connection. The
+    /// spawn is tracked in `pending` so dropping the serve future
+    /// aborts outstanding work (D1 audit fix).
     async fn dispatch_request<W>(
         &self,
         req: JsonRpcRequest,
         writer: Arc<Mutex<W>>,
         subscriptions: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+        pending: &mut tokio::task::JoinSet<()>,
     ) where
         W: AsyncWrite + Unpin + Send + 'static,
     {
@@ -155,7 +180,7 @@ impl RemoteServer {
             "ipc_call" => {
                 let ctx = Arc::clone(&self.context);
                 let default_timeout = self.timeout;
-                tokio::spawn(async move {
+                pending.spawn(async move {
                     let response = handle_ipc_call(&ctx, params, default_timeout, id).await;
                     write_response(&writer, response).await;
                 });
@@ -163,7 +188,7 @@ impl RemoteServer {
             "event_subscribe" => {
                 let bus = Arc::clone(&self.event_bus);
                 let writer_for_task = Arc::clone(&writer);
-                tokio::spawn(async move {
+                pending.spawn(async move {
                     let response = handle_event_subscribe(
                         &bus,
                         params,
@@ -176,7 +201,7 @@ impl RemoteServer {
                 });
             }
             "event_unsubscribe" => {
-                tokio::spawn(async move {
+                pending.spawn(async move {
                     let response = handle_event_unsubscribe(params, id, subscriptions).await;
                     write_response(&writer, response).await;
                 });
