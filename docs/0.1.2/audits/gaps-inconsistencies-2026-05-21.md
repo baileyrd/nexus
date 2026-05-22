@@ -20,7 +20,8 @@
 | B4 | `settings/README.md` forge layout missing ≥9 paths | `53638d3` |
 | D1 | tokio::spawn orphans in `nexus-remote` server + `nexus-workflow` webhook | `4e989c6` |
 | D2 | `Mutex::lock().expect()` poisoning panics in `nexus-collab` relay | `4e989c6` |
-| D4 | 5 un-flagged tunable constants + workflow digests `IPC_TIMEOUT` shared-const migration | _this commit_ |
+| D4 | 5 un-flagged tunable constants + workflow digests `IPC_TIMEOUT` shared-const migration | `501e976` |
+| B3 | `hardcoded-rust.md` Dev-Config stale rows (72 of 100 already promoted) | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -98,15 +99,12 @@ Doc claimed "~280 handlers"; matrix has **332**. Per-plugin counts diverged on `
 ### B2. `docs/0.1.2/reference/audit-flags.md` largely stale — ✅ Closed
 Of 17 candidate rows in the 2026-05-21 doc, only 4 still reflect uncapped handlers in the matrix today (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`). The other 14 are already cap-gated — moved to a new "Closed since the 2026-05-21 audit" section in the same doc so promotion history stays visible. `mcp.host::call_tool` (newly present with an `# AUDIT:` comment) added to the live table. `scripts/check_ipc_docs_drift.sh` enforces: (a) every matrix handler whose row carries `# AUDIT:` or `internal = true` AND `unrestricted = …` appears in the live table; (b) no row in the live table is missing from the matrix's audit set; (c) no row in the closed-since table is still unrestricted in the matrix.
 
-### B3. `docs/0.1.2/settings/hardcoded-rust.md` Dev-Config table is stale
-~15 rows describe constants that are already promoted to named `const`s in code (the "delete the row on promotion" workflow wasn't applied to refactor-driven promotions). Examples:
-- `nexus-mcp/core_plugin.rs:551` → moved to line 570, already named `MAX_TOOL_RESPONSE_BYTES`.
-- `nexus-editor/core_plugin.rs:2220` → moved to `handlers/transaction.rs:25`, already named.
-- `nexus-collab/{client,server}.rs` MAX_FRAME_BYTES / BROADCAST_CAPACITY — already named.
-- `nexus-ai/{vectorstore,rag,enrichment,indexing_daemon}.rs` — all already `pub const`.
-- `nexus-tui/app.rs:1820,1825` — already `AGENT_IPC_TIMEOUT` / `MODAL_AUTO_REJECT_TIMEOUT`.
+### B3. `docs/0.1.2/settings/hardcoded-rust.md` Dev-Config table is stale — ✅ Closed
+Audit estimate was "~15 stale rows". The row-by-row sweep against current code (B3 sweep, 2026-05-22) found the actual count was **72 of ~100 rows** — every stale row is now struck through in the doc with either the actual const name (when an already-named `const` exists at or near the cited line) or a "cite drifted" note (when the cite no longer points at anything meaningful).
 
-The genuinely-still-inline items (4 `for _ in 0..N` loops, the three `term.rs` durations, the `bge` model id) remain valid.
+29 rows remain live — these are the genuinely-still-inline magic literals worth promoting. The summary table at the bottom of `hardcoded-rust.md` was updated to reflect the new split (29 live vs 72 struck) and a sweep-completion note added.
+
+The "delete the row on promotion" workflow was the source of the drift — refactor-driven promotions skipped that step. No automated guard is added in this PR; `cargo clippy` already flags unused literals in some shapes, and the doc itself is a manual artifact.
 
 ### B4. `docs/0.1.2/settings/README.md` forge layout missing ≥9 paths — ✅ Closed
 README now lists the nine missing paths flagged by the audit (`.forge/comments/`, `.forge/templates/`, `.forge/agents/`, `.forge/digests/last_fired.json`, `.forge/skills/`, `.forge/ai-activity.log`, `.forge/.audio/models/`, `.forge/.editor/undo/{sha}.json`, `.forge/.gitignore` + `.gitattributes`) with the owning crate and file noted on each row.
@@ -199,7 +197,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up.~~ ✅ Closed (incidentally fixed by `legacyPluginIds` aliases + renamed imports during the intervening weeks; regression guard added in `shell/tests/catalog-disk-consistency.test.ts`).
 4. ⚠️ **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Partially drained — `marginApi.ts` + `marginSuggest.ts` cleaned before this audit, `SettingsPanelView.tsx`'s three `kernel_invoke` calls migrated to `api.kernel.invoke` in this PR. Seven sites remain as documented shell-internal exceptions in `shell/tests/plugin-import-hygiene.test.ts`; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
-5. ⚠️ ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ B1, B2, B4 closed in this PR; drift script added and wired into `scripts/check_ipc_drift.sh`. B3 (`hardcoded-rust.md`) still open — needs row-by-row code verification (~15 entries).
+5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ ✅ All four closed (B1/B2/B4 in `53638d3`; B3 in this PR — 72 of ~100 Dev-Config rows struck through, 29 remain live).
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
 7. ~~**D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.~~ ✅ Closed in this PR (`nexus-remote` + `nexus-workflow` JoinSets; `nexus-collab` `lock_relay()` helper with poison recovery + tracing).
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
@@ -218,3 +216,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — B1 / B2 / B4 closed: `ipc-handlers.md` counts table + section headers updated against current matrix (332 handlers, 23 plugins); `audit-flags.md` rewritten to list the 4 still-unrestricted handlers (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`) with a separate "Closed since" section for the 14 already-gated ones; `settings/README.md` forge-layout table extended with 9 missing paths plus an explicit note resolving the dual `config.toml` confusion. New `scripts/check_ipc_docs_drift.sh` checks both docs against the matrix and is wired into `scripts/check_ipc_drift.sh` for CI. B3 (`hardcoded-rust.md`) deferred — needs row-by-row code verification.
 - **2026-05-22** — D1 + D2 closed. D1: the per-request spawns in `nexus-remote::server::dispatch_request` and the per-connection spawn in `nexus-workflow::webhook_accept_loop` are now tracked in a `JoinSet` scoped to their owning accept loop / connection; drop of the future cascades aborts. D2: the four `nexus-collab` relay-slot `Mutex::lock().expect()` sites now go through a `lock_relay()` helper that recovers via `into_inner()` on poison and emits a `tracing::warn!`. Three of the audit's five D1 flags (`nexus-kernel/context_impl.rs:960`, `nexus-ai-runtime/core_plugin.rs:863`, `nexus-ai-runtime/scheduler.rs:503`) and both terminal D2 flags were inside test code (the audit's `grep -n` conflated test-only spawns/locks with production code) — left as-is.
 - **2026-05-22** — D4 closed. Five un-flagged tunable constants (`READ_TIMEOUT_MS`, `WATCHER_CHANNEL_BOUND`, `DRAINER_PUMP_TIMEOUT_MS` / `DRAINER_SLEEP_MS`, `DEFAULT_HISTORY_SAMPLES`, `DESCRIPTION_FALLBACK_CAP`) now appear in `hardcoded-rust.md`'s "Already-named constants worth promoting" section with the suggested settings key on each row. The drive-by `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT` was migrated to `nexus_types::constants::IPC_TIMEOUT_LONG` per P5-01.
+- **2026-05-22** — B3 closed: full row-by-row sweep of `hardcoded-rust.md`'s Dev Config tables. 72 of the original ~100 rows are now struck through with the actual const name (where one exists at the cited line) or a "cite drifted" note (where the cite no longer points anywhere meaningful); 29 rows remain live as genuine magic literals worth promoting. The audit's "~15 stale rows" estimate was 5× too low — most refactor-driven promotions skipped the "delete the row" step of the documented workflow.
