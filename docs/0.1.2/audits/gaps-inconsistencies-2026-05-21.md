@@ -11,6 +11,7 @@
 | A2 | Silent error swallowing across event bus (audit plugin) | `0eb8bcc0` |
 | A4 | Unbounded channels in LSP/DAP/ACP protocol clients | `22aa9f88` |
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
+| A2 | Silent error swallowing — storage/notifications/mcp/bootstrap remaining sites | `47f582a` |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -33,14 +34,14 @@ The plugin catalog in `shell/src/plugins/catalog.ts` declares itself the source 
 
 Plus 6 plugins with `index.ts` but only stub content: `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`.
 
-### A2. Silent error swallowing across event bus — ✅ partially closed (`0eb8bcc0`)
+### A2. Silent error swallowing across event bus — ✅ Closed (`0eb8bcc0` + `47f582a`)
 `let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Worst sites:
 - ✅ `crates/nexus-security/src/core_plugin.rs:121,154,166` — **audit events** (fixed in `0eb8bcc0`)
-- `crates/nexus-storage/src/core_plugin.rs:960,972,993,998,1009,1018` — 6 state-change events dropped
-- `crates/nexus-notifications/src/core_plugin.rs:556,679,947` — including `tx.send(res)` whose loss causes caller hangs
-- `crates/nexus-mcp/src/core_plugin.rs:312`
-- `crates/nexus-bootstrap/src/crdt_publisher.rs:293` (tmp-file leakage hidden)
-- `crates/nexus-bootstrap/src/plugins/mod.rs:253`
+- ✅ `crates/nexus-storage/src/core_plugin.rs:960,972,993,998,1009,1018` — 6 state-change events; now routed through `publish_storage_state_event` helper that `warn!`s on failure (`47f582a`).
+- ✅ `crates/nexus-notifications/src/core_plugin.rs:556,679,947` — inbox-appended + ai-runtime republish now warn; the notify-watcher `tx.send` is latched-warn (one log per disconnect episode) so callback storms don't spam (`47f582a`).
+- ✅ `crates/nexus-mcp/src/core_plugin.rs:312` — `mcp.host.started` lifecycle event now warns on publish failure (`47f582a`).
+- ✅ `crates/nexus-bootstrap/src/crdt_publisher.rs:293` — tmp-file cleanup-after-rename-failure now logs the leak instead of swallowing it (`47f582a`).
+- ✅ `crates/nexus-bootstrap/src/plugins/mod.rs:253` — `plugin_lifecycle_timeout` telemetry event publish failure now warns; this is the only out-of-band signal that the kernel degraded its plugin set (`47f582a`).
 
 ### A3. Data-loss `unwrap_or_default()` on serialization — ✅ Closed (`88f990cd`)
 - ✅ `crates/nexus-storage/src/bases/mod.rs:71,85` — now propagate `StorageError::CorruptFile`.
@@ -195,7 +196,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 ## Recommended punchlist (priority order)
 
-1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A3 closed (`88f990cd`); A2 closed for the audit plugin (`0eb8bcc0`); A2 remaining sites + D3 still open.**
+1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 fully closed (`0eb8bcc0` + `47f582a`); A3 closed (`88f990cd`); D3 still open.**
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. **A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.
 4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
@@ -211,3 +212,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 ## Changelog
 
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
+- **2026-05-22** — A2 remaining sites closed in `47f582a` (storage 6, notifications 3, mcp 1, bootstrap 2). A2 is now fully closed.

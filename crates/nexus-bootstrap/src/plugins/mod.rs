@@ -250,7 +250,7 @@ impl RegisterCoreResultExt
                     timeout_secs,
                     "BL-095: plugin lifecycle hook timed out — continuing with degraded plugin set",
                 );
-                let _ = event_bus.publish_plugin(
+                if let Err(err) = event_bus.publish_plugin(
                     "com.nexus.kernel",
                     "com.nexus.kernel.plugin_lifecycle_timeout",
                     serde_json::json!({
@@ -258,7 +258,13 @@ impl RegisterCoreResultExt
                         "hook": format!("{:?}", hook),
                         "timeout_secs": timeout_secs,
                     }),
-                );
+                ) {
+                    tracing::warn!(
+                        %err,
+                        timed_out_plugin = %plugin_id,
+                        "BL-095: lifecycle-timeout telemetry event dropped — bus publish failed",
+                    );
+                }
                 Ok(())
             }
             Err(e) => {

@@ -309,11 +309,17 @@ impl CorePlugin for McpHostPlugin {
             .len();
 
         if let Some(bus) = &self.event_bus {
-            let _ = bus.publish_plugin(
+            if let Err(err) = bus.publish_plugin(
                 PLUGIN_ID,
                 "com.nexus.mcp.host.started",
                 json!({ "configured_servers": server_count }),
-            );
+            ) {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    %err,
+                    "failed to publish mcp.host.started lifecycle event",
+                );
+            }
         }
         tracing::info!(
             plugin_id = PLUGIN_ID,
