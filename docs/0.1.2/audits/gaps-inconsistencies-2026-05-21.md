@@ -23,7 +23,8 @@
 | D1 | `tokio::spawn` orphans in remote/server per-request handlers; rest of audit list was test code | `c23cd2d4` |
 | D4 | 5 un-flagged constants + digests IPC_TIMEOUT not on shared bucket | `af265541` |
 | C4 | workflow/skills error-type convention claim (re-classified: misread; both use thiserror) | _this sweep_ |
-| E | Code-level TODOs worth promoting to issues (catalogued in `reference/todos.md` §9) | _this sweep_ |
+| E | Code-level TODOs worth promoting to issues (catalogued in `reference/todos.md` §9) | `e2f8a7a0` |
+| C3 | AA-04 (shell→plugin dependency inversion) — re-classified: already resolved under P3-03; both audit docs stale | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -168,8 +169,20 @@ Read/write asymmetry: `ai.session.read`/`ai.session.write` and `notifications.in
 ### C2. Storage plugin handler surface (72) is the largest in the system
 `com.nexus.storage` is at 72 handlers vs the next-largest `nexus.git` at 38. Bases (15 verbs) + vector store (4) + entity graph (5) account for most growth. Consider splitting Bases into its own service plugin.
 
-### C3. AA-04 still open (shell→plugin dependency inversion)
-`shell/src/shell/App.tsx:8` still imports from `plugins/nexus/workspace/workspaceStore`. No fix landed.
+### C3. AA-04 (shell→plugin dependency inversion) — ✅ Closed (already landed, doc was stale)
+On re-verification, `shell/src/shell/App.tsx` no longer imports from `plugins/nexus/workspace/workspaceStore`. The fix landed under tag P3-03 — see the in-source comment at `App.tsx:25-34`:
+
+```ts
+// AA-04 / P3-03 — read `rootPath` from the shell-owned ContextKeyService
+// instead of importing `plugins/nexus/workspace/workspaceStore`. The
+// workspace plugin publishes the same value to context key
+// `nexus.workspace.rootPath` whenever its `setRoot` runs, so this is a
+// direct dep-inversion …
+```
+
+The imports at lines 8-9 (`../workspace/WorkspaceRenderer`, `../workspace/workspaceStore`) point at **host** code (`shell/src/workspace/`), not the plugin (`shell/src/plugins/nexus/workspace/`). Host-to-host imports are permitted; the dependency-inversion concern was about reaching into the plugin's internal zustand store from the shell. `App.tsx` is clean on that front.
+
+The stale row in `docs/0.1.2/architecture-adherence.md` is updated in the same commit.
 
 ### C4. `nexus-workflow` and `nexus-skills` don't follow the `thiserror` convention — ✅ Closed (misread)
 On re-verification both claims are wrong:
@@ -281,3 +294,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — D4 closed: 5 un-flagged constants added to `docs/0.1.2/settings/hardcoded-rust.md` (workflow webhook `READ_TIMEOUT_MS`, storage `WATCHER_CHANNEL_BOUND` + `DESCRIPTION_FALLBACK_CAP`, terminal `DRAINER_PUMP_TIMEOUT_MS` + `DRAINER_SLEEP_MS`, terminal memory `DEFAULT_HISTORY_SAMPLES`). Side-fix: `nexus-workflow/src/digests.rs::IPC_TIMEOUT` now sources from `nexus_types::constants::IPC_TIMEOUT_LONG`.
 - **2026-05-22** — C4 re-classified: both `nexus-workflow` and `nexus-skills` already use `thiserror` (5 files each); the "centralized `src/error.rs`" pattern isn't universal (7 of 15 surveyed crates have it; 8 distribute their derives). Both patterns coexist.
 - **2026-05-22** — E closed: all 8 code-level deferred-work sites surfaced in `docs/0.1.2/reference/todos.md` §9 "Phase-named follow-ups". They use named phase markers (e.g. `BL-XXX Phase 3.2`, `WI-25`, `Phase 2b`) but no inline `TODO` token, so they'd otherwise miss a static-scan inventory.
+- **2026-05-22** — C3/AA-04 re-classified: the dep-inversion fix landed under P3-03; `App.tsx` reads `rootPath` from the shell-owned ContextKeyService (`useContextKey('nexus.workspace.rootPath')`) and only imports host-side workspace modules. `architecture-adherence.md` AA-04 row marked resolved in the same commit.
