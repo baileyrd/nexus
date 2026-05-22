@@ -1,6 +1,6 @@
 # Hardcoded Values — Rust Side
 
-> **As of:** 2026-05-17. Companion to [`hardcoded-shell.md`](hardcoded-shell.md) (shell-side) and [`plugin-manifest-defaults.md`](plugin-manifest-defaults.md) (manifest-baked defaults). Items here are candidates for promotion to a setting (**User Config**) or at minimum a named constant (**Dev Config**). Citations are `crate/path/file.rs:line` relative to repo root.
+> **As of:** 2026-05-21. Companion to [`hardcoded-shell.md`](hardcoded-shell.md) (shell-side) and [`plugin-manifest-defaults.md`](plugin-manifest-defaults.md) (manifest-baked defaults). Items here are candidates for promotion to a setting (**User Config**) or at minimum a named constant (**Dev Config**). Citations are `crate/path/file.rs:line` relative to repo root.
 
 Workflow: pick an item from this list, promote it to a config field or named constant, then delete the row.
 
@@ -118,8 +118,8 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-agent/src/handlers/delegate.rs` | 88 | `Duration::from_secs(10_800)` | `AGENT_WAIT_FOR_TIMEOUT_SECS` (3h) |
 | `crates/nexus-agent/src/handlers/shared.rs` | 26 | `Duration::from_secs(60)` | `AGENT_DEFAULT_TOOL_TIMEOUT_SECS` |
 | `crates/nexus-agent/src/handlers/shared.rs` | 29 | `Duration::from_secs(300)` | `AGENT_DEFAULT_CHAT_TIMEOUT_SECS` |
-| `crates/nexus-tui/src/app.rs` | 1820 | `Duration::from_secs(600)` | `TUI_AGENT_IPC_TIMEOUT_SECS` |
-| `crates/nexus-tui/src/app.rs` | 1825 | `Duration::from_secs(1800)` | `TUI_MODAL_AUTO_REJECT_TIMEOUT_SECS` |
+~~| `crates/nexus-tui/src/app.rs` | 1820 | `Duration::from_secs(600)` | `TUI_AGENT_IPC_TIMEOUT_SECS` |~~ → already `nexus_tui::app::AGENT_IPC_TIMEOUT` (`app.rs:1821`).
+~~| `crates/nexus-tui/src/app.rs` | 1825 | `Duration::from_secs(1800)` | `TUI_MODAL_AUTO_REJECT_TIMEOUT_SECS` |~~ → already `nexus_tui::app::MODAL_AUTO_REJECT_TIMEOUT` (`app.rs:1826`).
 | `crates/nexus-ai/src/vectorstore.rs` / `rag.rs` / `tools/functions.rs` / `generate_docs.rs` | various | mostly `Duration::from_secs(30)` | shared `AI_STORAGE_IPC_TIMEOUT_SECS` |
 | `crates/nexus-ai/src/tools/mcp_bridge.rs` | 44 | `Duration::from_secs(5)` | `AI_MCP_DISCOVERY_TIMEOUT_SECS` |
 | `crates/nexus-ai/src/tools/mcp_bridge.rs` | 49 | `Duration::from_secs(60)` | `AI_MCP_CALL_TIMEOUT_SECS` |
@@ -142,9 +142,9 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
-| `crates/nexus-collab/src/client.rs` | 72 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |
-| `crates/nexus-collab/src/server.rs` | 40 | `1024` | `BROADCAST_CAPACITY` |
-| `crates/nexus-collab/src/server.rs` | 45 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |
+~~| `crates/nexus-collab/src/client.rs` | 72 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |~~ → already `nexus_collab::client::MAX_FRAME_BYTES`.
+~~| `crates/nexus-collab/src/server.rs` | 40 | `1024` | `BROADCAST_CAPACITY` |~~ → already `nexus_collab::server::BROADCAST_CAPACITY`.
+~~| `crates/nexus-collab/src/server.rs` | 45 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |~~ → already `nexus_collab::server::MAX_FRAME_BYTES`.
 | `crates/nexus-collab/src/reconnect_client.rs` | 305 | `16 * 1024 * 1024` | (already explicit in ws_config) |
 | `crates/nexus-formats/src/notion/database.rs` | 14 | `256` | `SAMPLE_LIMIT` |
 | `crates/nexus-formats/src/markdown/frontmatter.rs` | 15 | `256 * 1024` | `MAX_FRONTMATTER_BYTES` |
@@ -153,10 +153,10 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-formats/src/util/filename.rs` | 9 | `260` | `MAX_PATH_BYTES` |
 | `crates/nexus-formats/src/canvas/mod.rs` | 20 | `50 * 1024 * 1024` | `MAX_CANVAS_BYTES` |
 | `crates/nexus-formats/src/canvas/mod.rs` | 26 | `100_000` | `MAX_CANVAS_ELEMENTS` |
-| `crates/nexus-mcp/src/core_plugin.rs` | 551 | `4 * 1024 * 1024` | `MAX_TOOL_RESPONSE_BYTES` |
-| `crates/nexus-mcp/src/core_plugin.rs` | 552 | `1024` | `MAX_TOOL_RESPONSE_ITEMS` |
-| `crates/nexus-editor/src/core_plugin.rs` | 2220 | `16 * 1024 * 1024` | `MAX_TRANSACTION_BYTES` |
-| `crates/nexus-editor/src/core_plugin.rs` | 923 | `500` ops | `UNDO_PERSIST_MAX_OPS` |
+~~| `crates/nexus-mcp/src/core_plugin.rs` | 551 | `4 * 1024 * 1024` | `MAX_TOOL_RESPONSE_BYTES` |~~ → already `MAX_TOOL_RESPONSE_BYTES` at `core_plugin.rs:576`.
+~~| `crates/nexus-mcp/src/core_plugin.rs` | 552 | `1024` | `MAX_TOOL_RESPONSE_ITEMS` |~~ → already `MAX_TOOL_RESPONSE_ITEMS` at `core_plugin.rs:577`.
+~~| `crates/nexus-editor/src/core_plugin.rs` | 2220 | `16 * 1024 * 1024` | `MAX_TRANSACTION_BYTES` |~~ → already `MAX_TRANSACTION_BYTES` at `handlers/transaction.rs:25`.
+~~| `crates/nexus-editor/src/core_plugin.rs` | 923 | `500` ops | `UNDO_PERSIST_MAX_OPS` |~~ → already `UNDO_PERSIST_MAX_OPS` at `handlers/session.rs:291`.
 | `crates/nexus-lsp/src/transport.rs` | 127 | `16 * 1024 * 1024` | `MAX_BODY_BYTES` |
 | `crates/nexus-remote/src/transport.rs` | 21 | `16 * 1024 * 1024` | `MAX_LINE_BYTES` |
 | `crates/nexus-acp/src/transport.rs` | 25 | `16 * 1024 * 1024` | `MAX_LINE_BYTES` |
@@ -164,19 +164,19 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-storage/src/code_index.rs` | 147 | `200` | `DEFAULT_QUERY_LIMIT` |
 | `crates/nexus-storage/src/find_replace.rs` | 53 | `200` | `DEFAULT_MAX_FILES` |
 | `crates/nexus-storage/src/find_replace.rs` | 57 | `1_000` | `DEFAULT_MAX_RESULTS` |
-| `crates/nexus-ai/src/vectorstore.rs` | 72 | `4096` | `MAX_CHUNKS_PER_UPSERT` |
-| `crates/nexus-ai/src/vectorstore.rs` | 77 | `256 * 1024` | `MAX_CHUNK_TEXT_BYTES` |
-| `crates/nexus-ai/src/vectorstore.rs` | 83 | `12_288` | `MAX_EMBEDDING_DIM` |
-| `crates/nexus-ai/src/indexing_daemon.rs` | 46 | `32` | `DEFAULT_MAX_BATCH` |
-| `crates/nexus-ai/src/rag.rs` | 29 | `1024` | `DEFAULT_MAX_CHUNK_SIZE` |
-| `crates/nexus-ai/src/rag.rs` | 34 | `200` | `CITATION_EXCERPT_MAX_CHARS` |
+~~| `crates/nexus-ai/src/vectorstore.rs` | 72 | `4096` | `MAX_CHUNKS_PER_UPSERT` |~~ → already `pub const MAX_CHUNKS_PER_UPSERT`.
+~~| `crates/nexus-ai/src/vectorstore.rs` | 77 | `256 * 1024` | `MAX_CHUNK_TEXT_BYTES` |~~ → already `pub const MAX_CHUNK_TEXT_BYTES`.
+~~| `crates/nexus-ai/src/vectorstore.rs` | 83 | `12_288` | `MAX_EMBEDDING_DIM` |~~ → already `pub const MAX_EMBEDDING_DIM`.
+~~| `crates/nexus-ai/src/indexing_daemon.rs` | 46 | `32` | `DEFAULT_MAX_BATCH` |~~ → already `pub const DEFAULT_MAX_BATCH`.
+~~| `crates/nexus-ai/src/rag.rs` | 29 | `1024` | `DEFAULT_MAX_CHUNK_SIZE` |~~ → already `const DEFAULT_MAX_CHUNK_SIZE`.
+~~| `crates/nexus-ai/src/rag.rs` | 34 | `200` | `CITATION_EXCERPT_MAX_CHARS` |~~ → already `const CITATION_EXCERPT_MAX_CHARS`.
 | `crates/nexus-database/src/formula/eval.rs` | 105 | `64` | `MAX_RECURSION_DEPTH` |
 | `crates/nexus-database/src/core_plugin.rs` | 235 | `10 * 1024 * 1024` | `MAX_CSV_IMPORT_BYTES` |
 | `crates/nexus-workflow/src/webhook.rs` | 54 | `16 * 1024` | `MAX_HEADER_BYTES` |
 | `crates/nexus-workflow/src/run_history.rs` | 30 | `200` | `RUN_HISTORY_CAP` |
 | `crates/nexus-bootstrap/src/audit_sqlite.rs` | 14 | `1000` | `DEFAULT_QUERY_LIMIT` |
-| `crates/nexus-ai/src/enrichment.rs` | 63 | `1500` | `MAX_QUERY_CHARS` |
-| `crates/nexus-ai/src/enrichment.rs` | 69 | `200` | `MAX_SUMMARY_CHARS` |
+~~| `crates/nexus-ai/src/enrichment.rs` | 63 | `1500` | `MAX_QUERY_CHARS` |~~ → already `const MAX_QUERY_CHARS`.
+~~| `crates/nexus-ai/src/enrichment.rs` | 69 | `200` | `MAX_SUMMARY_CHARS` |~~ → already `const MAX_SUMMARY_CHARS`.
 
 ### Vector embedding dimensions
 

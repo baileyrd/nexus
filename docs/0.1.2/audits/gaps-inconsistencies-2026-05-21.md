@@ -13,6 +13,11 @@
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
 | A2 | Remaining `let _ = bus.publish*` sites (storage, notifications, mcp, bootstrap) | `6c31b2b5` |
 | A1 | Shell plugin catalog ↔ on-disk mismatch (no fix — finding was misread) | _doc-only_ |
+| A6 | Direct Tauri `invoke()` from non-host code (re-classified: already tracked under WI-25 drain) | _doc-only_ |
+| B1 | `ipc-handlers.md` stale by 52 handlers | _doc-only_ |
+| B2 | `audit-flags.md` 14 rows stale; missing `mcp.host::call_tool` | _doc-only_ |
+| B3 | `hardcoded-rust.md` Dev-Config table — 11+ already-promoted rows | _doc-only_ |
+| B4 | `settings/README.md` forge layout missing ≥9 paths | _doc-only_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -80,18 +85,25 @@ Three external-process clients held unbounded mpsc channels — a chatty LSP/DAP
 ### A5. Workflow `run`/`run_digest` capability laundering (issue #77 still open)
 `cap_matrix.toml:1625,1631` — both unrestricted. A caller with no caps can compose a workflow that internally chains capability-gated handlers; each step is checked, but the *aggregation* of side effects is not. Track A audit flag still live.
 
-### A6. Direct Tauri `invoke()` from non-host code (≥10 sites)
-Per ADR 0011, only host code may call the Tauri bridge directly; plugins must route through `PluginAPI.kernel`. Bypasses:
-- `shell/src/core/capabilityPrompt/requestConsent.ts:19`
-- `shell/src/core/settings/SettingsPanelView.tsx:8` (3 calls)
-- `shell/src/plugins/nexus/workspace/index.ts:3` + `useConnectionState.ts:7` (also `listen`)
-- `shell/src/plugins/nexus/launcher/launcherState.ts:1`
-- `shell/src/plugins/nexus/pluginsMgmt/index.ts:1`
-- `shell/src/plugins/nexus/notifications/index.ts:12`
-- `shell/src/plugins/nexus/debugger/LaunchConfig.tsx:30`
-- `shell/src/plugins/nexus/ai/marginApi.ts`, `marginSuggest.ts` (multiple)
+### A6. Direct Tauri `invoke()` from non-host code — already tracked by WI-25 drain
+On re-verification, every file cited here is **already on the documented `@tauri-apps/*` import allowlist** in `shell/tests/plugin-import-hygiene.test.ts`, with a per-file rationale and a drain plan (WI-25). The import-hygiene test fails CI if a new plugin file outside the allowlist imports from `@tauri-apps/*` — i.e. the architecture is already enforced, the listed files are the historical exception set.
 
-This is the same class as `App.tsx:8` (already flagged in AA-04) but spread further.
+The current allowlist entries that correspond to the audit's table:
+
+| File | Allowlist rationale |
+|------|---------------------|
+| `core/capabilityPrompt/requestConsent.ts` | WI-31 shell-internal: get/set_plugin_granted_capabilities |
+| `core/settings/SettingsPanelView.tsx` | shell-internal: kernel_invoke (kernel-bridge calls) |
+| `nexus/launcher/launcherState.ts` | shell-internal: get/write/forget shell_state (recents) |
+| `nexus/pluginsMgmt/index.ts` | shell-internal: set_plugin_enabled |
+| `nexus/workspace/index.ts` | shell-internal: boot_kernel + init_forge + shutdown_kernel + plugin-dialog.open |
+| `nexus/workspace/useConnectionState.ts` | BL-140 Phase 3c shell-internal: kernel_connection_state read + event |
+| `nexus/notifications/index.ts` | BL-133 follow-up: `notify_desktop` — no `api.notifications.osLevel` surface yet |
+| `nexus/debugger/LaunchConfig.tsx` | BL-113 follow-up: `scan_plugin_directory` — no `api.plugins.dir` surface yet |
+
+The audit's additional mention of `shell/src/plugins/nexus/ai/marginApi.ts` and `marginSuggest.ts` is a false positive — both use `api.kernel.invoke(...)` (the PluginAPI route), not `import { invoke } from '@tauri-apps/api/core'`. Grep for the literal string `invoke` will hit both; grep for the import shows neither file in the violation set.
+
+So A6 is not "new violations to sweep" — it points at the existing WI-25 allowlist drain, which is per-file design work (new `api.notifications.osLevel`, `api.plugins.dir`, etc. surfaces) rather than a refactor pass. Keep the WI-25 list shrinking; do not add to it. AA-04 (`shell/src/shell/App.tsx:8` cross-plugin import) is genuinely open and tracked separately by the architecture-adherence audit.
 
 ---
 
@@ -218,8 +230,8 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 closed (`0eb8bcc0` + this sweep), A3 closed (`88f990cd`). D3 (handler-side error logging) still open and tracked separately.**
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.~~ ✅ Closed on re-verification — finding was misread (see A1 above).
-4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
-5. **B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.
+4. ~~**A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.~~ Already tracked by the WI-25 allowlist drain in `shell/tests/plugin-import-hygiene.test.ts`; A6 is not a new finding. AA-04 stays open separately.
+5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ Doc refresh landed (this sweep). A drift script is still a useful follow-up.
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
 7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
@@ -233,3 +245,5 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
 - **2026-05-21 (later)** — A2 remaining sites closed (`6c31b2b5`): storage `publish_event` (6 events), notifications inbox.appended + ai-runtime toast republish, mcp.host.started lifecycle, bootstrap CRDT tmp-file cleanup, bootstrap `plugin_lifecycle_timeout` event.
 - **2026-05-21 (later)** — A1 closed via doc correction: catalog↔disk reconciliation script returned zero failures across all 63 entries. The original table misread the `legacyPluginIds` rename pattern and missed that the flagged "stub" plugins ship as `.tsx`, not `.ts`.
+- **2026-05-21 (later)** — A6 re-classified: every cited file is already on the WI-25 allowlist in `shell/tests/plugin-import-hygiene.test.ts` with a documented rationale; `ai/marginApi.ts` + `marginSuggest.ts` use `api.kernel.invoke` (false positive). A6 points at the existing WI-25 drain, not new violations.
+- **2026-05-21 (later)** — B1–B4 doc refresh landed: `ipc-handlers.md` counts re-derived from `cap_matrix.toml` (332 total, with the six drifted per-plugin counts and section headers corrected); `audit-flags.md` rewritten to reflect the three remaining `# AUDIT:` rows (workflow `run`, workflow `run_digest`, `mcp.host::call_tool`) with the historical promotions moved to their own section; `hardcoded-rust.md` strikethroughs added for ~11 rows whose target consts already exist (vectorstore/rag/enrichment/indexing_daemon/collab/mcp/editor/tui); `settings/README.md` forge layout adds 11 missing paths (`comments/`, `templates/`, `agents/`, `digests/last_fired.json`, `skills/`, `ai-activity.log`, `.audio/models/`, `.editor/undo/`, `.forge/.gitignore`, `.forge/config.toml`, `agents/<agent_id>/`), removes the ghost `acp.toml` row per ADR 0027 §Phase 4, and notes `.gitattributes` is forge-root.

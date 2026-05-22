@@ -1,6 +1,6 @@
 # Settings Reference
 
-> **As of:** 2026-05-17. Sources: `crates/nexus-formats/src/config/`, `crates/nexus-kernel/src/config.rs`, `crates/nexus-ai/src/config.rs`, `crates/nexus-mcp/src/config.rs`, `crates/nexus-notifications/src/config.rs`, `crates/nexus-lsp,dap,acp/src/config.rs`, `crates/nexus-plugins/src/manifest.rs`, `crates/nexus-plugins/src/settings.rs`, `shell/src-tauri/src/persistence.rs`.
+> **As of:** 2026-05-21. Sources: `crates/nexus-formats/src/config/`, `crates/nexus-kernel/src/config.rs`, `crates/nexus-ai/src/config.rs`, `crates/nexus-mcp/src/config.rs`, `crates/nexus-notifications/src/config.rs`, `crates/nexus-lsp,dap/src/config.rs`, `crates/nexus-plugins/src/manifest.rs`, `crates/nexus-plugins/src/settings.rs`, `shell/src-tauri/src/persistence.rs`. (ACP is greenfield — no config loader per ADR 0027 §Phase 4.)
 
 This directory documents **every** configuration surface in Nexus. The promise: if a setting exists at runtime, it's listed here. If it should be a setting but isn't yet, it's in [`hardcoded-rust.md`](hardcoded-rust.md) or [`hardcoded-shell.md`](hardcoded-shell.md) with a suggested key.
 
@@ -8,7 +8,7 @@ This directory documents **every** configuration surface in Nexus. The promise: 
 
 | File | Scope |
 |------|-------|
-| [`forge-config.md`](forge-config.md) | Per-forge TOML/JSON files under `<forge>/.forge/` — `app.toml`, `workspace.json`, `ai.toml`, `mcp.toml`, `notifications.toml`, `lsp.toml`, `dap.toml`, `acp.toml` |
+| [`forge-config.md`](forge-config.md) | Per-forge TOML/JSON files under `<forge>/.forge/` — `app.toml`, `workspace.json`, `ai.toml`, `mcp.toml`, `notifications.toml`, `lsp.toml`, `dap.toml`, `config.toml` (multi-section: `[audio]` / `[collab]` / `[digests]` / `[notifications.<channel>]` / `[mcp]`) |
 | [`plugin-manifests.md`](plugin-manifests.md) | `plugin.toml` schema for community plugins (and the parallel `plugin.json` shape the shell expects) |
 | [`env-vars.md`](env-vars.md) | Every env var the code reads at runtime |
 | [`hardcoded-rust.md`](hardcoded-rust.md) | Rust-side hardcoded values flagged for promotion to settings or named constants |
@@ -30,7 +30,7 @@ Every TOML/JSON file the code reads at runtime as config (not test fixtures, not
 | **notifications.toml** | `<forge>/.forge/notifications.toml` | `NotificationsConfig` — `nexus-notifications/src/config.rs:272` | `NotificationsConfig::load` — `config.rs:300` |
 | **lsp.toml** | `<forge>/.forge/lsp.toml` | `LspHostConfig` — `nexus-lsp/src/config.rs:106` | `LspHostConfig::load` |
 | **dap.toml** | `<forge>/.forge/dap.toml` | `DapHostConfig` — `nexus-dap/src/config.rs:115` | `DapHostConfig::load` |
-| **acp.toml** | `<forge>/.forge/acp.toml` | `AcpHostConfig` — `nexus-acp/src/config.rs:81` | `AcpHostConfig::load` |
+| **config.toml** | `<forge>/.forge/config.toml` | Multi-section (`[audio]` `nexus-audio/src/config.rs:66`, `[collab]` `nexus-collab/src/core_plugin.rs:75`, `[digests]` `nexus-workflow/src/digests.rs:51`, `[notifications.*]`, `[mcp]`) | Per-section loader on each subsystem |
 | **kernel config.toml** | `<forge>/.nexus/config.toml` | `KernelConfig` — `nexus-kernel/src/config.rs:12` | `KernelConfig::load` — line 79 |
 
 Missing file ⇒ defaults returned (no error). Schemas at [`forge-config.md`](forge-config.md).
@@ -84,20 +84,33 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 | `.forge/mcp.toml` | MCP server registry | user / plugins |
 | `.forge/lsp.toml` | LSP server specs | user |
 | `.forge/dap.toml` | DAP adapter specs | user |
-| `.forge/acp.toml` | ACP agent specs (reserved) | reserved |
 | `.forge/notifications.toml` | Notification channels + routing | user |
+| `.forge/config.toml` | Multi-section TOML for non-standalone subsystems (`[audio]`, `[collab]`, `[digests]`, `[notifications.<channel>]`, `[mcp]`, …) | user / plugins |
 | `.forge/notifications/inbox.db` | SQLite inbox | `nexus-notifications/src/lib.rs:84` |
 | `.forge/procmgr.sqlite` | Terminal process manager | `nexus-bootstrap/src/plugins/terminal.rs:26` |
 | `.forge/sessions.sqlite` | Terminal session scrollback | bootstrap terminal:72 |
 | `.forge/agent/transcripts.sqlite` | Agent conversation transcripts | bootstrap |
+| `.forge/agents/<agent_id>/` | Per-agent memory (history.jsonl etc.) | `nexus-agent/src/memory.rs:40` |
 | `.forge/ai-runtime/runs.db` | AI runtime execution logs (reserved) | bootstrap |
+| `.forge/ai-activity.log` | AI surface activity log (chat, ask, cmd-i, ghost) | `nexus-ai/src/activity_log.rs:42` |
+| `.forge/comments/` | Inline-comment sidecars (`<note>.md.json`) | `nexus-comments/src/store.rs:62` |
+| `.forge/templates/` | User-authored `.template.md` files (recursive) | `nexus-templates/src/registry.rs:61` |
+| `.forge/skills/` | Authored prompt-template skills (surfaced via MCP) | `nexus-mcp/src/server.rs:1180` |
+| `.forge/digests/last_fired.json` | Last-fired timestamps for the digest scheduler | `nexus-workflow/src/digests.rs:131` |
+| `.forge/.audio/models/` | Whisper / local-audio model cache (override via `[audio] local_model_dir`) | `nexus-audio/src/config.rs:138` |
 | `.forge/.editor/crdt/` | CRDT conflict snapshots | `nexus-crdt/src/state.rs:106` |
+| `.forge/.editor/undo/<sha>.json` | Per-file persisted undo stacks | `nexus-editor/src/handlers/session.rs:336` |
 | `.forge/.kernel/audit.db` | Audit log SQLite | `nexus-bootstrap::audit_sqlite` |
 | `.forge/kv.sqlite3` | KV store | `nexus-bootstrap/src/lib.rs:204` |
 | `.forge/plugins/` | Community WASM/JS bundles | manual install |
 | `.forge/logs/` | Runtime logs | bootstrap |
 | `.forge/temp/` | Transient | runtime |
 | `.forge/.lock` | Exclusive forge lock | `StorageEngine` |
+| `.forge/.gitignore` | Default ignore rules for rebuildable indexes / per-machine state | `nexus-cli/src/commands/crdt.rs:208` |
+
+`.gitattributes` (at the forge root, not inside `.forge/`) is also written by `nexus crdt init` per `nexus-cli/src/commands/crdt.rs:133` to register the CRDT merge driver.
+
+> **Removed:** `.forge/acp.toml` was previously listed as reserved. ADR 0027 §Phase 4 keeps ACP greenfield with no flat-TOML loader — see `crates/nexus-acp/src/lib.rs:13` and `crates/nexus-bootstrap/src/acp_contribution_wiring.rs:8`. Do not introduce one.
 
 ## How to add a setting
 

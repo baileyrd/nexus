@@ -1,6 +1,6 @@
 # IPC Handler Reference
 
-> **As of:** 2026-05-17. Sourced verbatim from `crates/nexus-bootstrap/cap_matrix.toml` — every handler is required to appear there (`cap_matrix_complete` integration test). Per-handler descriptions and AUDIT flags are the matrix's own.
+> **As of:** 2026-05-21. Sourced verbatim from `crates/nexus-bootstrap/cap_matrix.toml` — every handler is required to appear there (`cap_matrix_complete` integration test). Per-handler descriptions and AUDIT flags are the matrix's own.
 
 ## Reading the tables
 
@@ -12,22 +12,22 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 60 |
+| `com.nexus.storage` | 72 |
 | `com.nexus.git` | 38 |
-| `com.nexus.ai` | 28 |
-| `com.nexus.terminal` | 32 |
+| `com.nexus.terminal` | 28 |
+| `com.nexus.ai` | 26 |
 | `com.nexus.dap` | 21 |
-| `com.nexus.agent` | 17 |
+| `com.nexus.agent` | 18 |
 | `com.nexus.editor` | 15 |
 | `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
+| `com.nexus.mcp.host` | 12 |
 | `com.nexus.theme` | 11 |
-| `com.nexus.mcp.host` | 11 |
 | `com.nexus.ai.runtime` | 9 |
 | `com.nexus.skills` | 8 |
+| `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.acp` | 7 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -35,13 +35,15 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 2 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **~280** |
+| **Total** | **332** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
+> **Drift note.** The counts above are recomputed from `cap_matrix.toml`. The per-handler tables below may lag individual additions/renames — `cap_matrix.toml` is canonical for the exact handler set, and `cap_matrix_complete` enforces that every registered handler has a row. A future drift script (`scripts/check_ipc_docs_drift.sh`) should compare both directions; until then, treat this page as a guide and the matrix as the source of truth.
+
 ---
 
-## com.nexus.storage (60)
+## com.nexus.storage (72)
 
 ### Read
 
@@ -99,7 +101,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.ai (28)
+## com.nexus.ai (26)
 
 ### Generation (gated by `ai.chat`)
 
@@ -124,7 +126,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.terminal (32)
+## com.nexus.terminal (28)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -153,7 +155,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.agent (17)
+## com.nexus.agent (18)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -211,7 +213,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.mcp.host (11)
+## com.nexus.mcp.host (12)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -266,7 +268,7 @@ All forge-local thread store mutations; downstream `fs.write` gated.
 
 ---
 
-## com.nexus.acp (7)
+## com.nexus.acp (8)
 
 | Command | Caps | Note |
 |---------|------|------|
