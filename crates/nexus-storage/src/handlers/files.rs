@@ -27,7 +27,7 @@ pub(crate) fn read_file(engine: &StorageEngine, args: &Value) -> Result<Value, P
         Err(crate::StorageError::FileNotFound(_)) => {
             Ok(serde_json::json!({ "bytes": null }))
         }
-        Err(e) => Err(exec_err(format!("read_file: {e}"))),
+        Err(e) => Err(exec_err(format!("read_file '{path}': {e}"))),
     }
 }
 
@@ -35,14 +35,14 @@ pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, 
     let path = path_arg(args, "write_file")?;
     let bytes: Vec<u8> = args
         .get("bytes")
-        .ok_or_else(|| exec_err("write_file: missing 'bytes'".to_string()))
+        .ok_or_else(|| exec_err(format!("write_file '{path}': missing 'bytes'")))
         .and_then(|v| {
             serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("write_file: bytes decode: {e}")))
+                .map_err(|e| exec_err(format!("write_file '{path}': bytes decode: {e}")))
         })?;
     let meta = engine
         .write_file(&path, &bytes)
-        .map_err(|e| exec_err(format!("write_file: {e}")))?;
+        .map_err(|e| exec_err(format!("write_file '{path}' ({} bytes): {e}", bytes.len())))?;
     to_value(&meta, "write_file")
 }
 
@@ -50,7 +50,7 @@ pub(crate) fn delete_file(engine: &StorageEngine, args: &Value) -> Result<Value,
     let path = path_arg(args, "delete_file")?;
     engine
         .delete_file(&path)
-        .map_err(|e| exec_err(format!("delete_file: {e}")))?;
+        .map_err(|e| exec_err(format!("delete_file '{path}': {e}")))?;
     Ok(serde_json::json!({}))
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn file_exists(engine: &StorageEngine, args: &Value) -> Result<Value,
     let path = path_arg(args, "file_exists")?;
     let exists = engine
         .file_exists(&path)
-        .map_err(|e| exec_err(format!("file_exists: {e}")))?;
+        .map_err(|e| exec_err(format!("file_exists '{path}': {e}")))?;
     Ok(serde_json::json!({ "exists": exists }))
 }
 
@@ -78,13 +78,13 @@ pub(crate) fn write_vault_file(engine: &StorageEngine, args: &Value) -> Result<V
     }
     let bytes: Vec<u8> = args
         .get("bytes")
-        .ok_or_else(|| exec_err("write_vault_file: missing 'bytes'".to_string()))
+        .ok_or_else(|| exec_err(format!("write_vault_file '{path}': missing 'bytes'")))
         .and_then(|v| {
             serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("write_vault_file: bytes decode: {e}")))
+                .map_err(|e| exec_err(format!("write_vault_file '{path}': bytes decode: {e}")))
         })?;
     engine
         .write_raw(&path, &bytes)
-        .map_err(|e| exec_err(format!("write_vault_file: {e}")))?;
+        .map_err(|e| exec_err(format!("write_vault_file '{path}' ({} bytes): {e}", bytes.len())))?;
     Ok(serde_json::json!({}))
 }

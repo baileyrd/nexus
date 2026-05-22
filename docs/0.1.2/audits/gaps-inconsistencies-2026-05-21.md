@@ -12,6 +12,7 @@
 | A4 | Unbounded channels in LSP/DAP/ACP protocol clients | `22aa9f88` |
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
 | A2 | Silent error swallowing — storage/notifications/mcp/bootstrap remaining sites | `47f582a` |
+| D3 | Handlers don't log on error return (chokepoint + 5 audit-flagged files enriched) | `a186308` |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -161,8 +162,19 @@ All 63 catalog entries use `activationEvents: ['onStartup']`. No lazy activation
 
 Poisoning will kill the plugin. Either don't `.expect()` or restart-on-poison.
 
-### D3. Handlers don't log on error return
+### D3. Handlers don't log on error return — ✅ Closed (`a186308`)
 Spot-checked `crates/nexus-storage/src/handlers/{files,index,notes}.rs` and `nexus-ai/src/handlers/{ask,search}.rs`: **zero** `tracing::error/warn` calls. Errors are `?`-propagated; only the dispatcher logs them, losing handler-specific context.
+
+Fixed by a two-layer change in `a186308`:
+1. **Chokepoint**: added a single `tracing::warn!` to `nexus_plugins::dispatch::exec_err`. Every service crate's `define_dispatch_helpers!`-generated `exec_err` delegates to this — one log line per handler error, workspace-wide (22 crates), carrying `plugin_id` and the reason string (which already includes the command name).
+2. **Reason-string enrichment** in the five flagged files so the central log carries handler-specific context:
+   - ✅ storage/handlers/files.rs — path on all sites, byte count on writes.
+   - ✅ storage/handlers/index.rs — path on `obsidian_base_query`; source path on `import_forge` plan/apply.
+   - ✅ storage/handlers/notes.rs — path on all `note_append` + `write_frontmatter` sites; key on frontmatter writes.
+   - ✅ ai/handlers/ask.rs — question length + limit on rag failure (length only — prompt may be sensitive).
+   - ✅ ai/handlers/search.rs — query length + limit + oversample on `semantic_search` and `entity_recall`.
+
+Privacy boundary: forge-relative paths and numeric args are logged; free-text user input (question, query) is logged by length only.
 
 ### D4. 5 un-flagged constants that look user-tunable
 Not in `hardcoded-rust.md` but probably should be:
@@ -196,7 +208,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 ## Recommended punchlist (priority order)
 
-1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 fully closed (`0eb8bcc0` + `47f582a`); A3 closed (`88f990cd`); D3 still open.**
+1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ ✅ All three closed (A2: `0eb8bcc0` + `47f582a`; A3: `88f990cd`; D3: `a186308`).
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. **A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.
 4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
@@ -213,3 +225,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
 - **2026-05-22** — A2 remaining sites closed in `47f582a` (storage 6, notifications 3, mcp 1, bootstrap 2). A2 is now fully closed.
+- **2026-05-22** — D3 closed in `a186308` via a chokepoint `warn!` in `nexus_plugins::dispatch::exec_err` plus reason-string enrichment in the five audit-flagged files.

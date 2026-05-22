@@ -31,7 +31,7 @@ pub(crate) fn obsidian_base_query(
     let path = path_arg(args, "obsidian_base_query")?;
     let result = engine
         .obsidian_base_query(&path)
-        .map_err(|e| exec_err(format!("obsidian_base_query: {e}")))?;
+        .map_err(|e| exec_err(format!("obsidian_base_query '{path}': {e}")))?;
     to_value(&result, "obsidian_base_query")
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn import_forge(engine: &StorageEngine, args: &Value) -> Result<Value
 
     let plan = engine
         .plan_import(source_path)
-        .map_err(|e| exec_err(format!("import_forge plan: {e}")))?;
+        .map_err(|e| exec_err(format!("import_forge plan from '{source}': {e}")))?;
     if dry_run {
         return to_value(&plan, "import_forge");
     }
@@ -68,7 +68,7 @@ pub(crate) fn import_forge(engine: &StorageEngine, args: &Value) -> Result<Value
             &plan,
             &crate::import::ImportOptions { on_conflict },
         )
-        .map_err(|e| exec_err(format!("import_forge apply: {e}")))?;
+        .map_err(|e| exec_err(format!("import_forge apply from '{source}': {e}")))?;
     // Rebuild the destination index so the imported files surface in
     // search / graph.
     let _ = engine.rebuild_index();
