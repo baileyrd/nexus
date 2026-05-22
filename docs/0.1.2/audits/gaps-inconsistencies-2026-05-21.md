@@ -21,7 +21,9 @@
 | D3 | Handler errors silently lost — dispatcher emits no log on failure | `3fdea6d8` |
 | D2 | `Mutex::lock().expect()` in long-lived plugins (collab relay) | `737f2ee8` |
 | D1 | `tokio::spawn` orphans in remote/server per-request handlers; rest of audit list was test code | `c23cd2d4` |
-| D4 | 5 un-flagged constants + digests IPC_TIMEOUT not on shared bucket | _this sweep_ |
+| D4 | 5 un-flagged constants + digests IPC_TIMEOUT not on shared bucket | `af265541` |
+| C4 | workflow/skills error-type convention claim (re-classified: misread; both use thiserror) | _this sweep_ |
+| E | Code-level TODOs worth promoting to issues (catalogued in `reference/todos.md` §9) | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -169,8 +171,14 @@ Read/write asymmetry: `ai.session.read`/`ai.session.write` and `notifications.in
 ### C3. AA-04 still open (shell→plugin dependency inversion)
 `shell/src/shell/App.tsx:8` still imports from `plugins/nexus/workspace/workspaceStore`. No fix landed.
 
-### C4. `nexus-workflow` and `nexus-skills` don't follow the `thiserror` convention
-Every other service crate has `src/error.rs` with `#[derive(thiserror::Error)]`. These two use ad-hoc error types. Out-of-band.
+### C4. `nexus-workflow` and `nexus-skills` don't follow the `thiserror` convention — ✅ Closed (misread)
+On re-verification both claims are wrong:
+
+- **`nexus-workflow` uses `thiserror`** across 5 files: `parse.rs`, `registry.rs`, `cron.rs`, `condition.rs`, `executor.rs`.
+- **`nexus-skills` uses `thiserror`** across 5 files: `registry_index.rs`, `parse.rs`, `compose.rs`, `substitute.rs`, `registry.rs`.
+- The "every other service crate has `src/error.rs`" premise also doesn't hold. Of 15 surveyed service crates, only 7 have `src/error.rs` (`nexus-ai`, `nexus-git`, `nexus-editor`, `nexus-terminal`, `nexus-database`, `nexus-audio`, `nexus-storage`); 8 distribute their `thiserror::Error` derives across feature-grouped modules (`nexus-mcp`, `nexus-lsp`, `nexus-dap`, `nexus-acp`, `nexus-collab`, `nexus-comments`, `nexus-templates`, `nexus-notifications`, `nexus-agent` — plus `nexus-workflow` and `nexus-skills`). Both patterns coexist and neither is the codebase convention.
+
+If a future refactor wants to standardize on a centralized `error.rs`, that's a project-wide pass — not a workflow/skills-specific gap.
 
 ### C5. Three deferred subsystems explicitly noted in code
 - **Workflow webhook trigger engine** — `nexus-workflow/src/core_plugin.rs:45` ("webhook is not yet wired")
@@ -228,18 +236,20 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 ---
 
-## E. Code-level TODOs worth promoting to issues
+## E. Code-level TODOs worth promoting to issues — ✅ Closed (catalogued in todos.md §9)
 
-| Location | What |
+All 8 entries are now surfaced in [`docs/0.1.2/reference/todos.md` §9 "Phase-named follow-ups"](../reference/todos.md) so they're discoverable from the structured TODO inventory rather than relying on a `grep TODO` of the codebase. The sandbox-context configuration entry is also in §2 (TypeScript SDK TODOs); the other 7 use named phase markers in their surrounding comments (e.g. `BL-XXX Phase 3.2`, `WI-25`, `Phase 2b`) but no inline `TODO` token, so they'd never surface to a static scan — that's the gap the audit was pointing at, and §9 closes it.
+
+| Location | Phase / WI |
 |---|---|
-| `packages/nexus-extension-api/src/sandbox/context.ts:41` | `configuration` API deferred — sandboxed plugins have no config bridge |
-| `shell/src/host/ExtensionHost.ts:124` | BL-XXX Phase 3.2: kernel-tier `dependsOn` not yet distinguished from shell-tier |
-| `shell/src/plugins/nexus/search/index.ts:55` | Ctrl/Cmd+Shift+F → `nexus.searchPanel` not wired |
-| `shell/src/registry/SnippetRegistry.ts:11` | Snippet expansion not triggered (collision detection live) |
-| `shell/tests/plugin-import-hygiene.test.ts:40-50` | 6 core views allowlisted to bypass plugin API (WI-25 open) |
-| `crates/nexus-terminal/src/server.rs:462` | Session restart doesn't preserve pre-command state |
-| `crates/nexus-plugins/src/contributions.rs:7-11` | Legacy flat-TOML migration window still open |
-| `crates/nexus-remote/src/uri.rs` | Phase 2b client tests only — SSH spawn logic gated |
+| `packages/nexus-extension-api/src/sandbox/context.ts:41` | configuration bridge deferred |
+| `shell/src/host/ExtensionHost.ts:124` | BL-XXX Phase 3.2 — kernel-tier `dependsOn` distinction |
+| `shell/src/plugins/nexus/search/index.ts:55` | BL-XXX Phase 4.5 — Ctrl/Cmd+Shift+F binding |
+| `shell/src/registry/SnippetRegistry.ts:11` | snippet expansion path |
+| `shell/tests/plugin-import-hygiene.test.ts:40-77` | WI-25 drain (12 allowlist entries today) |
+| `crates/nexus-terminal/src/server.rs:462` | session-restart pre-command state |
+| `crates/nexus-plugins/src/contributions.rs:7-11` | ADR 0027 §Migration deprecation window |
+| `crates/nexus-remote/src/uri.rs` | BL-140 Phase 2b — SSH spawn |
 
 ---
 
@@ -269,3 +279,5 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21 (later)** — D2 closed: collab relay-slot mutex now uses a `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. Terminal sites flagged by the audit were in `#[cfg(test)] mod tests` — not in scope.
 - **2026-05-22** — D1 closed: `nexus-remote/server.rs::serve` now tracks per-request `ipc_call`/`event_subscribe`/`event_unsubscribe` spawns through an `Arc<Mutex<JoinSet<()>>>`, aborted explicitly on serve return and via `JoinSet::Drop`. Other audit sites were either already tracked (line 289 via subscriptions HashMap), bounded by `READ_TIMEOUT_MS` (workflow webhook), or test code (kernel + ai-runtime).
 - **2026-05-22** — D4 closed: 5 un-flagged constants added to `docs/0.1.2/settings/hardcoded-rust.md` (workflow webhook `READ_TIMEOUT_MS`, storage `WATCHER_CHANNEL_BOUND` + `DESCRIPTION_FALLBACK_CAP`, terminal `DRAINER_PUMP_TIMEOUT_MS` + `DRAINER_SLEEP_MS`, terminal memory `DEFAULT_HISTORY_SAMPLES`). Side-fix: `nexus-workflow/src/digests.rs::IPC_TIMEOUT` now sources from `nexus_types::constants::IPC_TIMEOUT_LONG`.
+- **2026-05-22** — C4 re-classified: both `nexus-workflow` and `nexus-skills` already use `thiserror` (5 files each); the "centralized `src/error.rs`" pattern isn't universal (7 of 15 surveyed crates have it; 8 distribute their derives). Both patterns coexist.
+- **2026-05-22** — E closed: all 8 code-level deferred-work sites surfaced in `docs/0.1.2/reference/todos.md` §9 "Phase-named follow-ups". They use named phase markers (e.g. `BL-XXX Phase 3.2`, `WI-25`, `Phase 2b`) but no inline `TODO` token, so they'd otherwise miss a static-scan inventory.

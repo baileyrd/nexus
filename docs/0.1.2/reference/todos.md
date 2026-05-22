@@ -1,6 +1,6 @@
 # TODOs, Stubs & Coming-Soon
 
-> **As of:** 2026-05-17. Every TODO/FIXME/XXX/HACK marker plus every "coming soon" / "not yet implemented" / stub indicator the code surfaces. Scope: `crates/`, `shell/`, `packages/`. Excludes test sentinel assertions (`panic!("expected X, got Y")` style) which are intentional test scaffolding, not unfinished work.
+> **As of:** 2026-05-22. Every TODO/FIXME/XXX/HACK marker plus every "coming soon" / "not yet implemented" / stub indicator the code surfaces. Scope: `crates/`, `shell/`, `packages/`. Excludes test sentinel assertions (`panic!("expected X, got Y")` style) which are intentional test scaffolding, not unfinished work.
 
 ## TL;DR
 
@@ -13,6 +13,7 @@
 | Shell user-facing "coming soon" (other plugins) | **~15** | Canvas drag sources, editor tab-actions, plugin inspectors |
 | Shell stub plugins (whole plugin = "Not yet implemented" placeholder) | **5** | `allProperties`, `bookmarks`, `fileProperties`, `outgoingLinks`, `tags` |
 | Shell host TODOs | **1** | `defineSlot` API surface not yet implemented |
+| Phase-named follow-ups (audit §E) | **7** | Deferred work with named phases but no inline `TODO` marker — see §9 |
 | Test-code panic sentinels | **380+** | Intentional `assert!`-style scaffolding; not unfinished work |
 
 The codebase is honest about its stubs — every "coming soon" surfaces a toast or a placeholder pane rather than silently doing nothing. **There are zero hidden landmines.** The volume is concentrated in Obsidian-parity settings UI that ships scaffolded but unwired.
@@ -184,6 +185,25 @@ These are compile-time feature stubs, not runtime placeholders.
 - many others
 
 All deliberate — test code uses `panic!()` to fail with a descriptive message when an expected enum variant doesn't match. Not unfinished work.
+
+---
+
+## 9. Phase-named follow-ups (deferred work, no inline `TODO` marker)
+
+The 2026-05-21 gaps audit (§E) called out 8 code-level "deferred work" sites worth surfacing here. The sandbox-context configuration row is also in §2; the rest are unique to this section. Each has a named phase in the surrounding comments so it's traceable without becoming a `// TODO`.
+
+| File | Line | Phase / WI | What |
+|------|------|------------|------|
+| `packages/nexus-extension-api/src/sandbox/context.ts` | 41 | (also in §2) | `configuration` API not surfaced to sandboxed plugins; they persist state via `SandboxedPluginContext.storage` until the bridge lands. |
+| `shell/src/host/ExtensionHost.ts` | 124 | BL-XXX Phase 3.2 | `dependsOn` accepts both shell-plugin ids (`core.*` / `nexus.*` / `community.*`) and kernel-plugin ids (`com.nexus.*`); the kernel-tier ids are currently documentation only — the loader doesn't yet distinguish them from shell-tier deps. |
+| `shell/src/plugins/nexus/search/index.ts` | 55 | BL-XXX Phase 4.5 | Ctrl/Cmd+Shift+F → `nexus.searchPanel` (the richer multi-file find/replace pane) isn't wired. The sidebar overlay stays reachable via the command palette ("Focus Search") and any custom user binding. |
+| `shell/src/registry/SnippetRegistry.ts` | 11 | (snippet expansion) | The snippet registry is intentionally data-only: it stores snippet metadata and detects trigger collisions. Actual editor-side expansion is a separate concern; trigger-key detection on input isn't wired. |
+| `shell/tests/plugin-import-hygiene.test.ts` | 40-77 | WI-25 | 12 plugin files predate the kernel bridge and are allowlisted for `@tauri-apps/*` imports. Each row has a per-file rationale; WI-25 is the inverse work item — drain the list, do not grow it. |
+| `crates/nexus-terminal/src/server.rs` | 462 | (session restart) | `SessionManager` doesn't yet expose the shell string for an existing session, so `restart` can't preserve the pre-command launch state — `SessionInfo.shell` passes through an empty string rather than guessing. |
+| `crates/nexus-plugins/src/contributions.rs` | 7-11 | ADR 0027 §Migration | Phase 0a is pure aggregation; the host crates pick up the new shape in Phase 1+ per protocol. Legacy flat-TOML config still merges in during the deprecation window. |
+| `crates/nexus-remote/src/uri.rs` | (module doc) | BL-140 Phase 2b | The SSH-spawn path (`ssh user@host:port nexus serve`) ships as Phase 2b client tests only; the actual spawn logic is gated until Phase 2b lands. |
+
+Promote any of these to a `// TODO` marker (or a GitHub issue) when work picks up — and delete the row from this table at the same time.
 
 ---
 
