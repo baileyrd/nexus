@@ -11,7 +11,8 @@
 | A2 | Silent error swallowing across event bus (audit plugin) | `0eb8bcc0` |
 | A4 | Unbounded channels in LSP/DAP/ACP protocol clients | `22aa9f88` |
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
-| A2 | Remaining `let _ = bus.publish*` sites (storage, notifications, mcp, bootstrap) | _this sweep_ |
+| A2 | Remaining `let _ = bus.publish*` sites (storage, notifications, mcp, bootstrap) | `6c31b2b5` |
+| A1 | Shell plugin catalog ↔ on-disk mismatch (no fix — finding was misread) | _doc-only_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -19,20 +20,36 @@ Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kern
 
 ## A. High-priority gaps
 
-### A1. Shell plugin catalog ↔ on-disk mismatch (7 entries)
-The plugin catalog in `shell/src/plugins/catalog.ts` declares itself the source of truth, but disk reality diverges:
+### A1. Shell plugin catalog ↔ on-disk mismatch — ✅ Closed (no fix needed; finding was misread)
+On re-verification every entry in `shell/src/plugins/catalog.ts` resolves cleanly. All 63 `load(): () => import('./<path>').then(m => m.<symbol>)` declarations were checked by script: each path resolves to a real `.ts`/`.tsx`/`index.ts`/`index.tsx`, and each named symbol is exported by that file.
 
-| # | Catalog says | Disk says | Effect |
-|---|---|---|---|
-| 1 | `nexus.activity` (no dir) | — | Catalog entry never loads |
-| 2 | `nexus.osObservability` → `./observability/` | folder is `observability/` | Name mismatch |
-| 3 | `nexus.notionImport` → `./notion/` | folder is `notion/` | Name mismatch |
-| 4 | (not listed) | `shell/src/plugins/nexus/activityTimeline/` | Orphaned on disk |
-| 5 | (not listed) | `shell/src/plugins/nexus/notion/` | Orphaned |
-| 6 | (not listed) | `shell/src/plugins/nexus/observability/` | Orphaned |
-| 7 | `graph.global` | not found | Phantom entry |
+The original table conflated the catalog `id` field with the `load()` import path. The flagged "mismatches" are the documented `legacyPluginIds` rename pattern: the canonical id was changed (`nexus.activityTimeline → nexus.activity`, `nexus.notion → nexus.notionImport`) while the on-disk folder kept its original name and the legacy id is migrated at boot by `buildLegacyIdAliases`. The "orphaned" folders the audit listed are simply the load targets for those renamed entries. `nexus.graph.global` loads from `./graph/globalIndex.ts`, which exists and exports `graphGlobalPlugin`.
 
-Plus 6 plugins with `index.ts` but only stub content: `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`.
+The "6 plugins with stub content" claim was also wrong — each of `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar` ships an `index.tsx` (not `.ts`) ranging from 71 to 389 lines with real implementations.
+
+The only directory under `shell/src/plugins/` not referenced from the catalog is `community/hello-world/`. That is intentional: it is a sandboxed example community plugin loaded via its own `plugin.json` manifest, not the curated catalog. `community/mermaid/` ships as a built-in and *is* in the catalog (`community.mermaid`).
+
+Verification script (run from repo root):
+
+```bash
+python3 - <<'PY'
+import re, os
+cat = open('shell/src/plugins/catalog.ts').read()
+pat = re.compile(r"load:\s*\(\)\s*=>\s*import\('([^']+)'\)\.then\(m\s*=>\s*m\.(\w+)\)")
+base = 'shell/src/plugins/'; fails = 0
+for m in pat.finditer(cat):
+    rel, sym = m.group(1), m.group(2)
+    cands = [base + rel.lstrip('./') + ext for ext in ('.ts', '.tsx')] + \
+            [os.path.join(base, rel.lstrip('./'), f'index{ext}') for ext in ('.ts', '.tsx')]
+    f = next((c for c in cands if os.path.exists(c)), None)
+    if not f: print(f"missing: {rel}"); fails += 1; continue
+    if not re.search(rf'\bexport\s+(const|function|class)\s+{re.escape(sym)}\b', open(f).read()):
+        print(f"no export {sym} in {f}"); fails += 1
+print(f"failures={fails}")
+PY
+```
+
+Yielded `failures=0` as of 2026-05-21. A future PR can promote this into a `shell/tests/catalog-resolution.test.ts` regression guard if the rename-vs-folder pattern keeps confusing readers.
 
 ### A2. Silent error swallowing across event bus — ✅ Closed (`0eb8bcc0` + this sweep)
 `let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Sites:
@@ -200,7 +217,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 closed (`0eb8bcc0` + this sweep), A3 closed (`88f990cd`). D3 (handler-side error logging) still open and tracked separately.**
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
-3. **A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.
+3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.~~ ✅ Closed on re-verification — finding was misread (see A1 above).
 4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
 5. **B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
@@ -214,4 +231,5 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 ## Changelog
 
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
-- **2026-05-21 (later)** — A2 remaining sites closed: storage `publish_event` (6 events), notifications inbox.appended + ai-runtime toast republish, mcp.host.started lifecycle, bootstrap CRDT tmp-file cleanup, bootstrap `plugin_lifecycle_timeout` event.
+- **2026-05-21 (later)** — A2 remaining sites closed (`6c31b2b5`): storage `publish_event` (6 events), notifications inbox.appended + ai-runtime toast republish, mcp.host.started lifecycle, bootstrap CRDT tmp-file cleanup, bootstrap `plugin_lifecycle_timeout` event.
+- **2026-05-21 (later)** — A1 closed via doc correction: catalog↔disk reconciliation script returned zero failures across all 63 entries. The original table misread the `legacyPluginIds` rename pattern and missed that the flagged "stub" plugins ship as `.tsx`, not `.ts`.
