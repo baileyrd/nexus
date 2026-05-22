@@ -18,6 +18,7 @@
 | B2 | `audit-flags.md` 14 rows stale; missing `mcp.host::call_tool` | _doc-only_ |
 | B3 | `hardcoded-rust.md` Dev-Config table — 11+ already-promoted rows | _doc-only_ |
 | B4 | `settings/README.md` forge layout missing ≥9 paths | _doc-only_ |
+| D3 | Handler errors silently lost — dispatcher emits no log on failure | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -192,8 +193,15 @@ All 63 catalog entries use `activationEvents: ['onStartup']`. No lazy activation
 
 Poisoning will kill the plugin. Either don't `.expect()` or restart-on-poison.
 
-### D3. Handlers don't log on error return
-Spot-checked `crates/nexus-storage/src/handlers/{files,index,notes}.rs` and `nexus-ai/src/handlers/{ask,search}.rs`: **zero** `tracing::error/warn` calls. Errors are `?`-propagated; only the dispatcher logs them, losing handler-specific context.
+### D3. Handlers don't log on error return — ✅ Closed (dispatcher-level emit)
+The original finding was correct that handlers were silent on the error path, but slightly off on the second clause — the dispatcher *also* emitted no log; it only recorded a metrics counter. A handler-side sweep across ~332 handlers would have been a noisy, low-leverage change. Instead, `KernelPluginContext::ipc_call` (`crates/nexus-kernel/src/context_impl.rs`) now emits a single structured log on every Err exit, tuned by error class:
+
+- `IpcError::CapabilityDenied` — skipped; `audit::log_capability_denied` already emits inside `ipc_call_inner`.
+- `IpcError::Cancelled` — `tracing::debug!`; normal user-initiated tear-down.
+- `IpcError::PluginCrashedDuringCall` — `tracing::error!`; handler panic or blocking-task join failure.
+- everything else (`Timeout`, `CommandNotFound`, `PluginNotFound`, `DispatcherUnavailable`, plugin-returned `PluginError`) — `tracing::warn!`.
+
+Each log line carries `caller` (the calling plugin id), `target`, `command`, `elapsed_ms`, and the error display. Handlers that want richer context (input path, args summary) can still layer `tracing::error!`/`warn!` at their own boundaries; this fix ensures the *baseline* observability for every dispatch.
 
 ### D4. 5 un-flagged constants that look user-tunable
 Not in `hardcoded-rust.md` but probably should be:
@@ -227,7 +235,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 ## Recommended punchlist (priority order)
 
-1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 closed (`0eb8bcc0` + this sweep), A3 closed (`88f990cd`). D3 (handler-side error logging) still open and tracked separately.**
+1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 closed (`0eb8bcc0` + `6c31b2b5`), A3 closed (`88f990cd`), D3 closed via dispatcher-level emit in `KernelPluginContext::ipc_call`.**
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.~~ ✅ Closed on re-verification — finding was misread (see A1 above).
 4. ~~**A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.~~ Already tracked by the WI-25 allowlist drain in `shell/tests/plugin-import-hygiene.test.ts`; A6 is not a new finding. AA-04 stays open separately.
@@ -247,3 +255,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21 (later)** — A1 closed via doc correction: catalog↔disk reconciliation script returned zero failures across all 63 entries. The original table misread the `legacyPluginIds` rename pattern and missed that the flagged "stub" plugins ship as `.tsx`, not `.ts`.
 - **2026-05-21 (later)** — A6 re-classified: every cited file is already on the WI-25 allowlist in `shell/tests/plugin-import-hygiene.test.ts` with a documented rationale; `ai/marginApi.ts` + `marginSuggest.ts` use `api.kernel.invoke` (false positive). A6 points at the existing WI-25 drain, not new violations.
 - **2026-05-21 (later)** — B1–B4 doc refresh landed: `ipc-handlers.md` counts re-derived from `cap_matrix.toml` (332 total, with the six drifted per-plugin counts and section headers corrected); `audit-flags.md` rewritten to reflect the three remaining `# AUDIT:` rows (workflow `run`, workflow `run_digest`, `mcp.host::call_tool`) with the historical promotions moved to their own section; `hardcoded-rust.md` strikethroughs added for ~11 rows whose target consts already exist (vectorstore/rag/enrichment/indexing_daemon/collab/mcp/editor/tui); `settings/README.md` forge layout adds 11 missing paths (`comments/`, `templates/`, `agents/`, `digests/last_fired.json`, `skills/`, `ai-activity.log`, `.audio/models/`, `.editor/undo/`, `.forge/.gitignore`, `.forge/config.toml`, `agents/<agent_id>/`), removes the ghost `acp.toml` row per ADR 0027 §Phase 4, and notes `.gitattributes` is forge-root.
+- **2026-05-21 (later)** — D3 closed: `KernelPluginContext::ipc_call` now emits a structured log on every Err exit (debug for Cancelled, error for PluginCrashedDuringCall, warn for everything else, skipped for CapabilityDenied which is already audited). Single point of emission covers all 332 handlers without churning per-crate code.

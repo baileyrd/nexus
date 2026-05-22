@@ -487,6 +487,7 @@ impl Ipc for KernelPluginContext {
         let started = std::time::Instant::now();
         let result =
             self.ipc_call_inner(target_plugin_id, command_id, args, timeout).await;
+        let elapsed = started.elapsed();
         if let Some(m) = crate::metrics::global() {
             let status = match &result {
                 Ok(_) => crate::metrics::CallStatus::Ok,
@@ -504,8 +505,53 @@ impl Ipc for KernelPluginContext {
                 target_plugin_id,
                 command_id,
                 status,
-                u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX),
             );
+        }
+        // Audit gap D3 (`docs/0.1.2/audits/gaps-inconsistencies-2026-05-21.md`).
+        // The dispatcher is the only common point that sees every IPC failure;
+        // individual handlers used to swallow errors via `?`-propagation with
+        // no log line. Severity is tuned per error class:
+        //   - CapabilityDenied — already audited via `audit::log_capability_denied`
+        //     inside `ipc_call_inner`; skip here to avoid double-logging.
+        //   - Cancelled — normal user-initiated tear-down; debug only.
+        //   - PluginCrashedDuringCall — handler panic / blocking-task join failure;
+        //     elevate to error.
+        //   - Everything else (Timeout, NotFound, plugin-returned PluginError, …) — warn.
+        if let Err(err) = &result {
+            let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            match err {
+                IpcError::CapabilityDenied { .. } => {}
+                IpcError::Cancelled { .. } => {
+                    tracing::debug!(
+                        caller = %self.plugin_id,
+                        target = target_plugin_id,
+                        command = command_id,
+                        elapsed_ms,
+                        "ipc_call cancelled",
+                    );
+                }
+                IpcError::PluginCrashedDuringCall { .. } => {
+                    tracing::error!(
+                        caller = %self.plugin_id,
+                        target = target_plugin_id,
+                        command = command_id,
+                        elapsed_ms,
+                        error = %err,
+                        "ipc_call: plugin crashed during dispatch",
+                    );
+                }
+                _ => {
+                    tracing::warn!(
+                        caller = %self.plugin_id,
+                        target = target_plugin_id,
+                        command = command_id,
+                        elapsed_ms,
+                        error = %err,
+                        "ipc_call failed",
+                    );
+                }
+            }
         }
         result
     }
