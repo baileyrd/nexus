@@ -555,7 +555,7 @@ impl NotificationsCorePlugin {
             }
         };
         if let Some(bus) = self.bus.as_ref() {
-            let _ = bus.publish_plugin(
+            if let Err(err) = bus.publish_plugin(
                 PLUGIN_ID,
                 INBOX_APPENDED_TOPIC,
                 serde_json::json!({
@@ -564,7 +564,14 @@ impl NotificationsCorePlugin {
                     "severity": severity.as_str(),
                     "ts": chrono::Utc::now().timestamp(),
                 }),
-            );
+            ) {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    inbox_entry_id = id,
+                    %err,
+                    "inbox.appended event dropped — bus publish failed",
+                );
+            }
         }
     }
 
@@ -678,11 +685,18 @@ impl CorePlugin for NotificationsCorePlugin {
                                             "title": notif.title.unwrap_or_else(|| "Nexus".to_string()),
                                             "message": notif.message,
                                         });
-                                        let _ = bus.publish_plugin(
+                                        if let Err(err) = bus.publish_plugin(
                                             PLUGIN_ID,
                                             crate::NOTIFICATION_DELIVERED_TOPIC,
                                             body,
-                                        );
+                                        ) {
+                                            tracing::warn!(
+                                                plugin_id = PLUGIN_ID,
+                                                source = SOURCE_AI_RUNTIME,
+                                                %err,
+                                                "ai-runtime translated notification dropped — bus publish failed",
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -944,9 +958,24 @@ fn spawn_config_watcher(
         .name("nexus-notifications-watcher".to_string())
         .spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
+            // `send` fails only after the receiver loop below has
+            // exited (drops `rx`). That's a one-way terminal state for
+            // this watcher thread, so latch the warn — log once when
+            // it first happens, then stay silent for the remaining
+            // callbacks until the watcher itself is dropped.
+            let mut send_warned = false;
             let mut watcher = match notify::recommended_watcher(
                 move |res: notify::Result<notify::Event>| {
-                    let _ = tx.send(res);
+                    if let Err(err) = tx.send(res) {
+                        if !send_warned {
+                            tracing::warn!(
+                                %err,
+                                "notifications.toml: watcher event lost; \
+                                 receiver thread has exited"
+                            );
+                            send_warned = true;
+                        }
+                    }
                 },
             ) {
                 Ok(w) => w,

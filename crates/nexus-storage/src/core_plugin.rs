@@ -957,8 +957,8 @@ fn bridge_loop(
 fn publish_event(event: &StorageEvent, bus: &EventBus) {
     match event {
         StorageEvent::FileCreated { path, content_hash } => {
-            let _ = bus.publish_plugin(
-                PLUGIN_ID,
+            publish_storage_state_event(
+                bus,
                 "com.nexus.storage.file_created",
                 serde_json::json!({
                     "path": path,
@@ -969,8 +969,8 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
         }
 
         StorageEvent::FileModified { path, content_hash } => {
-            let _ = bus.publish_plugin(
-                PLUGIN_ID,
+            publish_storage_state_event(
+                bus,
                 "com.nexus.storage.file_modified",
                 serde_json::json!({
                     "path": path,
@@ -990,13 +990,13 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             // Bracket the indexing window with started/completed events
             // so subscribers can debounce UI refreshes. The actual
             // reconcile is the consumer's responsibility (#84).
-            let _ = bus.publish_plugin(
-                PLUGIN_ID,
+            publish_storage_state_event(
+                bus,
                 "com.nexus.storage.indexing.started",
                 serde_json::json!({}),
             );
-            let _ = bus.publish_plugin(
-                PLUGIN_ID,
+            publish_storage_state_event(
+                bus,
                 "com.nexus.storage.indexing.completed",
                 serde_json::json!({
                     "triggered_by": "git-batch-mode",
@@ -1006,8 +1006,8 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
         }
 
         StorageEvent::FileDeleted { path } => {
-            let _ = bus.publish_plugin(
-                PLUGIN_ID,
+            publish_storage_state_event(
+                bus,
                 "com.nexus.storage.file_deleted",
                 serde_json::json!({ "path": path }),
             );
@@ -1015,8 +1015,8 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
         }
 
         StorageEvent::FileRenamed { from, to, content_hash } => {
-            let _ = bus.publish_plugin(
-                PLUGIN_ID,
+            publish_storage_state_event(
+                bus,
                 "com.nexus.storage.file_renamed",
                 serde_json::json!({
                     "from": from,
@@ -1026,6 +1026,23 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             );
             publish_file_activity(bus, "renamed", to, Some(from));
         }
+    }
+}
+
+/// Publish a `com.nexus.storage.*` state-change event. Logs at
+/// `warn!` on failure so the operator sees dropped telemetry — these
+/// are the canonical storage events consumers depend on (index
+/// invalidation, UI refresh). `publish_plugin` only fails on a
+/// namespace mismatch in practice, so this warn is effectively a
+/// programmer-error tripwire.
+fn publish_storage_state_event(bus: &EventBus, type_id: &str, payload: serde_json::Value) {
+    if let Err(err) = bus.publish_plugin(PLUGIN_ID, type_id, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            event_type = type_id,
+            %err,
+            "storage state-change event dropped — bus publish failed",
+        );
     }
 }
 
