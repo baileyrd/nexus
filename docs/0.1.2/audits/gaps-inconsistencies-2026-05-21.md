@@ -22,7 +22,8 @@
 | D2 | `Mutex::lock().expect()` poisoning panics in `nexus-collab` relay | `4e989c6` |
 | D4 | 5 un-flagged tunable constants + workflow digests `IPC_TIMEOUT` shared-const migration | `501e976` |
 | B3 | `hardcoded-rust.md` Dev-Config stale rows (72 of 100 already promoted) | `ba4ce47` |
-| A5 | Workflow capability laundering — observability + cap-aggregation helper (kernel enforcement remains a residual gap, issue #77) | _this commit_ |
+| A5 | Workflow capability laundering — observability + cap-aggregation helper (kernel enforcement remains a residual gap, issue #77) | `19c7745` |
+| C1 | Capability vocabulary — design-rationale section documenting singletons + read/write asymmetry; capabilities.md refreshed with the 3 missing caps | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -124,10 +125,18 @@ The `.forge/acp.toml` row was struck through with an explicit "intentionally abs
 
 ## C. Architectural smells
 
-### C1. Capability vocabulary has 7 singletons + asymmetric pairs
-Singletons (used by exactly one handler): `ai.config.write`, `ai.activity.write`, `ai.runtime.submit`, `audio.record`, `audio.synthesize`, `network.bind`, `security.audit.write`. Either too narrow (collapse `audio.record`/`audio.synthesize` → `audio.use`) or too late-bound (e.g. `security.audit.write` exists only for `clear_audit_log`). Worth a vocabulary-design pass.
+### C1. Capability vocabulary — singletons + asymmetric pairs — ✅ Closed (design rationale documented)
+The audit framed seven singletons (`ai.config.write`, `ai.activity.write`, `ai.runtime.submit`, `audio.record`, `audio.synthesize`, `network.bind`, `security.audit.write`) and three asymmetric `*.write`/no-`*.read` pairs (`ai.config`, `ai.activity`, `security.audit`) as a vocabulary cleanup opportunity. A row-by-row inspection of the per-cap rationale in `crates/nexus-plugin-api/src/capability.rs` showed both shapes are deliberate, not accidental — but the rationale lived only in doc comments inside the code, not in the operator-facing `capabilities.md`. The fix is to surface it.
 
-Read/write asymmetry: `ai.session.read`/`ai.session.write` and `notifications.inbox.read`/`write` are paired, but `ai.config.write`, `ai.activity.write`, `security.audit.write` have no `.read` peer (reads are unrestricted). Inconsistent shape; either consistently pair or document why.
+Shipped in this PR:
+
+- **`docs/0.1.2/capabilities.md` refreshed.** Total count corrected (30 → 33), the three caps missing from the inventory table added (`security.write`, `security.audit.write`, `network.bind`), risk classification list extended with the three missing entries, and the "Open questions (AUDIT flags)" section rewritten to point at the current 4-entry live list (was claiming several handlers were still uncapped that have since been gated).
+- **New "Design rationale" section** in `capabilities.md`. Two tables:
+   1. **Singletons gate by sensitivity, not by handler count.** Each singleton has a one-row entry explaining the threat model that warrants its own cap. The `audio.record` vs `audio.synthesize` row spells out why the audit's suggested collapse (`audio.use`) would force a worst-case grant for the TTS-only case.
+   2. **Read/write asymmetry: reads stay unrestricted when they don't leak secrets.** Each of the three asymmetric pairs (`ai::set_config`/`config`, `ai::activity_clear`/`activity_list`, `security::clear_audit_log`/`query_audit_log`) gets a row showing why the read side is unrestricted. The test articulated: writes are gated by sensitivity; reads are gated only when the read itself returns sensitive material.
+- **`cap_matrix.toml`** — `security::query_audit_log`'s `unrestricted = "…"` reason string extended with the sibling cross-reference + the asymmetry rationale (matching the existing `ai::activity_list` and `ai::config` rows that already documented their pairs).
+
+No code changes — no caps added, removed, or renamed. The vocabulary was already coherent; the design rationale is now visible at the operator-doc level.
 
 ### C2. Storage plugin handler surface (72) is the largest in the system
 `com.nexus.storage` is at 72 handlers vs the next-largest `nexus.git` at 38. Bases (15 verbs) + vector store (4) + entity graph (5) account for most growth. Consider splitting Bases into its own service plugin.
@@ -209,7 +218,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ ✅ All four closed (B1/B2/B4 in `53638d3`; B3 in this PR — 72 of ~100 Dev-Config rows struck through, 29 remain live).
 6. ⚠️ **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`. Observability + `compute_implied_caps()` + `validate_declared_caps()` helpers shipped in this PR; the audit-tagged `tracing::warn!` at workflow run entry makes the laundering surface visible. Kernel-side enforcement (forge-root-aware cap policy) remains the residual gap.
 7. ~~**D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.~~ ✅ Closed in this PR (`nexus-remote` + `nexus-workflow` JoinSets; `nexus-collab` `lock_relay()` helper with poison recovery + tracing).
-8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
+8. ~~**C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).~~ ✅ Closed in this PR — singletons and asymmetric pairs are deliberate (per-cap rationale was already in code doc-comments); design rationale now surfaced operator-side in `capabilities.md` with a two-table "Singletons gate by sensitivity" + "Reads stay unrestricted when they don't leak secrets" section. Doc also refreshed: count 30→33, missing caps added, stale audit-flags list aligned with the live `audit-flags.md`.
 
 None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/observability wins.
 
@@ -227,3 +236,6 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — D4 closed. Five un-flagged tunable constants (`READ_TIMEOUT_MS`, `WATCHER_CHANNEL_BOUND`, `DRAINER_PUMP_TIMEOUT_MS` / `DRAINER_SLEEP_MS`, `DEFAULT_HISTORY_SAMPLES`, `DESCRIPTION_FALLBACK_CAP`) now appear in `hardcoded-rust.md`'s "Already-named constants worth promoting" section with the suggested settings key on each row. The drive-by `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT` was migrated to `nexus_types::constants::IPC_TIMEOUT_LONG` per P5-01.
 - **2026-05-22** — B3 closed: full row-by-row sweep of `hardcoded-rust.md`'s Dev Config tables. 72 of the original ~100 rows are now struck through with the actual const name (where one exists at the cited line) or a "cite drifted" note (where the cite no longer points anywhere meaningful); 29 rows remain live as genuine magic literals worth promoting. The audit's "~15 stale rows" estimate was 5× too low — most refactor-driven promotions skipped the "delete the row" step of the documented workflow.
 - **2026-05-22** — A5 partially closed (observability shipped; kernel enforcement deferred). New `nexus_workflow::implied_caps` module computes the implied caller-cap set per workflow (`ai_prompt` → `ai.chat`, `terminal` → `process.spawn`, etc.) and the run handler emits an audit-tagged `tracing::warn!` listing the set on every invocation of `workflow::run` and `workflow::run_digest`. `validate_declared_caps()` helper shipped as the building block for a future `[workflow].required_caps` schema field. `cap_matrix.toml` AUDIT comments rewritten to describe the observability path and the residual design gap. Full kernel-level enforcement (caller must hold the union of implied caps) needs `cap_policies` to be forge-root-aware — tracked under issue #77.
+- **2026-05-22** — C1 closed. `capabilities.md` refreshed (count 30→33; three missing caps added: `security.write`, `security.audit.write`, `network.bind`; stale audit-flags list aligned with the live `audit-flags.md`). New "Design rationale: granularity vs aggregation" section documents singletons-by-sensitivity and the reads-stay-unrestricted-when-they-don't-leak-secrets test. `cap_matrix.toml`'s `security::query_audit_log` row gains a sibling cross-reference matching the established pattern on `ai::activity_list` / `ai::config`. No code changes — vocabulary was already coherent; rationale is now visible at the operator-doc level.
+
+**All twelve audit items now have a status entry.** Closed-with-residual-gap items: A5 (observability shipped, kernel enforcement pending issue #77), A6 (3 of 10 sites drained, 7 documented exceptions). Everything else: ✅ Closed. The 2026-05-21 audit is complete.

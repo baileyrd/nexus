@@ -925,7 +925,7 @@ unrestricted = "read-only list of keyring entry names (no values returned)"
 [[handler]]
 plugin = "com.nexus.security"
 command = "query_audit_log"
-unrestricted = "read-only audit log query"
+unrestricted = "read-only audit log query (sibling of clear_audit_log which is gated by security.audit.write — reads return metadata about what happened; truncation is the dangerous direction)"
 
 [[handler]]
 plugin = "com.nexus.security"
