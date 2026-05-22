@@ -14,7 +14,10 @@
 | A2 | Silent error swallowing — storage/notifications/mcp/bootstrap remaining sites | `47f582a` |
 | D3 | Handlers don't log on error return (chokepoint + 5 audit-flagged files enriched) | `a186308` |
 | A1 | Shell plugin catalog ↔ on-disk mismatch (incidentally closed; regression guard added) | `ef1a163` |
-| A6 | Direct Tauri `invoke()` from non-host code (partial drain — 3 of 10 closed) | _this commit_ |
+| A6 | Direct Tauri `invoke()` from non-host code (partial drain — 3 of 10 closed) | `a0da5b0` |
+| B1 | `ipc-handlers.md` counts stale (drift script added) | _this commit_ |
+| B2 | `audit-flags.md` largely stale (drift script added) | _this commit_ |
+| B4 | `settings/README.md` forge layout missing ≥9 paths | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -86,22 +89,11 @@ Two of ten sites closed outright; the remaining seven are documented exceptions 
 
 ## B. Documentation drift
 
-### B1. `docs/0.1.2/ipc-handlers.md` is stale by 52 handlers
-Doc claims "~280 handlers"; `cap_matrix.toml` now has **332** (`grep -c "^\[\[handler\]\]"`).
+### B1. `docs/0.1.2/ipc-handlers.md` is stale by 52 handlers — ✅ Closed
+Doc claimed "~280 handlers"; matrix has **332**. Per-plugin counts diverged on `storage` (+12), `ai` (−2), `terminal` (−4), `agent` (+1), `mcp.host` (+1), `acp` (+1). Doc now reflects the live matrix and `scripts/check_ipc_docs_drift.sh` fails the build on regression (the counts table and every `## com.nexus.<plugin> (N)` section header are both checked). The drift script is wired into `scripts/check_ipc_drift.sh` so CI runs it on every PR.
 
-| Plugin | Doc | Actual | Δ |
-|---|---:|---:|---:|
-| storage | 60 | **72** | +12 |
-| ai | 28 | 26 | -2 |
-| terminal | 32 | 28 | -4 |
-| agent | 17 | 18 | +1 |
-| mcp.host | 11 | 12 | +1 |
-| acp | 7 | 8 | +1 |
-
-The `cap_matrix_complete` test enforces handler→matrix but not matrix→doc; no drift script exists. Suggest extending `scripts/check_ipc_drift.sh` or `cap_matrix_complete` to compare doc counts.
-
-### B2. `docs/0.1.2/reference/audit-flags.md` largely stale
-Of 17 candidate rows, **only 3** still reflect uncapped handlers in `cap_matrix.toml` (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`). The other 14 (e.g. `security::set_secret`, `git::push`, `terminal::send_input`, `collab::start_relay`) are already cap-gated. Delete the stale rows; add `mcp.host::call_tool` (currently has `# AUDIT:` at `cap_matrix.toml:861` but no doc entry).
+### B2. `docs/0.1.2/reference/audit-flags.md` largely stale — ✅ Closed
+Of 17 candidate rows in the 2026-05-21 doc, only 4 still reflect uncapped handlers in the matrix today (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`). The other 14 are already cap-gated — moved to a new "Closed since the 2026-05-21 audit" section in the same doc so promotion history stays visible. `mcp.host::call_tool` (newly present with an `# AUDIT:` comment) added to the live table. `scripts/check_ipc_docs_drift.sh` enforces: (a) every matrix handler whose row carries `# AUDIT:` or `internal = true` AND `unrestricted = …` appears in the live table; (b) no row in the live table is missing from the matrix's audit set; (c) no row in the closed-since table is still unrestricted in the matrix.
 
 ### B3. `docs/0.1.2/settings/hardcoded-rust.md` Dev-Config table is stale
 ~15 rows describe constants that are already promoted to named `const`s in code (the "delete the row on promotion" workflow wasn't applied to refactor-driven promotions). Examples:
@@ -113,19 +105,10 @@ Of 17 candidate rows, **only 3** still reflect uncapped handlers in `cap_matrix.
 
 The genuinely-still-inline items (4 `for _ in 0..N` loops, the three `term.rs` durations, the `bge` model id) remain valid.
 
-### B4. `docs/0.1.2/settings/README.md` forge layout missing ≥9 paths
-Code writes these `.forge/` paths the README doesn't list:
-- `.forge/comments/` (`nexus-comments/src/store.rs:62`)
-- `.forge/templates/` (`nexus-templates/src/registry.rs:61`)
-- `.forge/agents/` (`nexus-agent/src/memory.rs:40`)
-- `.forge/digests/last_fired.json` (`nexus-workflow/src/digests.rs:131`)
-- `.forge/skills/` (referenced from `nexus-mcp/src/server.rs:1180,1536`)
-- `.forge/ai-activity.log` (`nexus-ai/src/activity_log.rs:42`)
-- `.forge/.audio/models/` (`nexus-audio/src/config.rs:138`)
-- `.forge/.editor/undo/{hex}.json` (`nexus-editor/src/handlers/session.rs:336`)
-- `.forge/.gitignore` + `.gitattributes` (`nexus-cli/src/commands/crdt.rs:110,208`)
+### B4. `docs/0.1.2/settings/README.md` forge layout missing ≥9 paths — ✅ Closed
+README now lists the nine missing paths flagged by the audit (`.forge/comments/`, `.forge/templates/`, `.forge/agents/`, `.forge/digests/last_fired.json`, `.forge/skills/`, `.forge/ai-activity.log`, `.forge/.audio/models/`, `.forge/.editor/undo/{sha}.json`, `.forge/.gitignore` + `.gitattributes`) with the owning crate and file noted on each row.
 
-Also: README mentions `.forge/acp.toml` as reserved but `nexus-acp` doesn't appear to load it. Two distinct `config.toml` files exist (`<forge>/.nexus/config.toml` for kernel, `<forge>/.forge/config.toml` for audio) — flag the collision.
+The `.forge/acp.toml` row was struck through with an explicit "intentionally absent — adapters arrive via `com.nexus.acp::register_server` (ADR 0027 §Phase 4)" annotation. The audit's flag about two `config.toml` files was addressed by adding an explicit note in the persistent-config-files table: kernel loads `<forge>/.nexus/config.toml` (`KernelConfig`), audio loads `<forge>/.forge/config.toml` (`AudioConfig`); distinct directories, distinct schemas, intentionally separate.
 
 ---
 
@@ -219,7 +202,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up.~~ ✅ Closed (incidentally fixed by `legacyPluginIds` aliases + renamed imports during the intervening weeks; regression guard added in `shell/tests/catalog-disk-consistency.test.ts`).
 4. ⚠️ **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Partially drained — `marginApi.ts` + `marginSuggest.ts` cleaned before this audit, `SettingsPanelView.tsx`'s three `kernel_invoke` calls migrated to `api.kernel.invoke` in this PR. Seven sites remain as documented shell-internal exceptions in `shell/tests/plugin-import-hygiene.test.ts`; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
-5. **B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.
+5. ⚠️ ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ B1, B2, B4 closed in this PR; drift script added and wired into `scripts/check_ipc_drift.sh`. B3 (`hardcoded-rust.md`) still open — needs row-by-row code verification (~15 entries).
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
 7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
@@ -235,3 +218,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — D3 closed in `a186308` via a chokepoint `warn!` in `nexus_plugins::dispatch::exec_err` plus reason-string enrichment in the five audit-flagged files.
 - **2026-05-22** — A1 marked closed: every mismatch in the audit table was reconciled by intervening refactoring (`legacyPluginIds` aliases for `nexus.activityTimeline → nexus.activity` and `nexus.notion → nexus.notionImport`; rename of the `osObservability` import target; addition of `graph/globalIndex.ts`). A regression guard was added at `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back.
 - **2026-05-22** — A6 partially drained: the three `invoke('kernel_invoke', …)` calls in `SettingsPanelView.tsx` migrated to `api.kernel.invoke(...)` (the component already had `api` in scope at all three call sites). The two AI files flagged by the audit (`marginApi.ts`, `marginSuggest.ts`) had already been cleaned. Seven sites remain in the `plugin-import-hygiene.test.ts` allowlist as documented shell-internal exceptions; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
+- **2026-05-22** — B1 / B2 / B4 closed: `ipc-handlers.md` counts table + section headers updated against current matrix (332 handlers, 23 plugins); `audit-flags.md` rewritten to list the 4 still-unrestricted handlers (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`) with a separate "Closed since" section for the 14 already-gated ones; `settings/README.md` forge-layout table extended with 9 missing paths plus an explicit note resolving the dual `config.toml` confusion. New `scripts/check_ipc_docs_drift.sh` checks both docs against the matrix and is wired into `scripts/check_ipc_drift.sh` for CI. B3 (`hardcoded-rust.md`) deferred — needs row-by-row code verification.
