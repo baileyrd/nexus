@@ -20,7 +20,8 @@
 | B4 | `settings/README.md` forge layout missing ≥9 paths | _doc-only_ |
 | D3 | Handler errors silently lost — dispatcher emits no log on failure | `3fdea6d8` |
 | D2 | `Mutex::lock().expect()` in long-lived plugins (collab relay) | `737f2ee8` |
-| D1 | `tokio::spawn` orphans in remote/server per-request handlers; rest of audit list was test code | _this sweep_ |
+| D1 | `tokio::spawn` orphans in remote/server per-request handlers; rest of audit list was test code | `c23cd2d4` |
+| D4 | 5 un-flagged constants + digests IPC_TIMEOUT not on shared bucket | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -211,15 +212,16 @@ The original finding was correct that handlers were silent on the error path, bu
 
 Each log line carries `caller` (the calling plugin id), `target`, `command`, `elapsed_ms`, and the error display. Handlers that want richer context (input path, args summary) can still layer `tracing::error!`/`warn!` at their own boundaries; this fix ensures the *baseline* observability for every dispatch.
 
-### D4. 5 un-flagged constants that look user-tunable
-Not in `hardcoded-rust.md` but probably should be:
-1. `nexus-workflow/src/webhook.rs:57` — `READ_TIMEOUT_MS: u64 = 5_000` (drops slow payloads)
-2. `nexus-storage/src/watcher.rs:28` — `WATCHER_CHANNEL_BOUND: usize = 1024` (just fixed; should be tunable)
-3. `nexus-terminal/src/core_plugin.rs:1102-1109` — PTY pump tuning (`DRAINER_PUMP_TIMEOUT_MS=5`, `DRAINER_SLEEP_MS=10`, …)
-4. `nexus-terminal/src/memory.rs:38` — `DEFAULT_HISTORY_SAMPLES: usize = 60` (history depth)
-5. `nexus-storage/src/entity_index.rs:865` — `DESCRIPTION_FALLBACK_CAP: usize = 240` (UI-visible)
+### D4. 5 un-flagged constants that look user-tunable — ✅ Closed
+All five are now documented in `docs/0.1.2/settings/hardcoded-rust.md` (`READ_TIMEOUT_MS` and the rest under "Buffer / message size caps"; the two terminal-drainer timings under "IPC + service timeouts" alongside the existing CLI term.rs rows):
 
-Also: `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT = Duration::from_secs(120)` should use the shared `nexus_types::constants::IPC_TIMEOUT_LONG` per the recent P5-01 standardization but doesn't.
+1. ✅ `nexus-workflow/src/webhook.rs:57` — `READ_TIMEOUT_MS: u64 = 5_000`
+2. ✅ `nexus-storage/src/watcher.rs:28` — `WATCHER_CHANNEL_BOUND: usize = 1024`
+3. ✅ `nexus-terminal/src/core_plugin.rs:1102-1103` — `DRAINER_PUMP_TIMEOUT_MS = 5`, `DRAINER_SLEEP_MS = 10`
+4. ✅ `nexus-terminal/src/memory.rs:38` — `DEFAULT_HISTORY_SAMPLES = 60`
+5. ✅ `nexus-storage/src/entity_index.rs:865` — `DESCRIPTION_FALLBACK_CAP = 240`
+
+✅ Side-fix: `nexus-workflow/src/digests.rs:49` no longer hardcodes `Duration::from_secs(120)` — now reads from `nexus_types::constants::IPC_TIMEOUT_LONG` per the P5-01 standardization. Same numeric value, but a workspace-wide adjustment of "long" IPC calls touches the digest pipeline too.
 
 ### D5. Theming — 87 inline `style={{` files with hardcoded hex
 Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCycle/DreamCycleInboxView.tsx` (12), `templates/TemplatesView.tsx` (11). Most are defensive `var(--token, #fallback)` fallbacks (acceptable), but the absence of a centralized palette means `#3b82f6` accent, `#888` muted, `#2a2a2a` border, `#ef4444` error are duplicated across 5+ plugins.
@@ -266,3 +268,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21 (later)** — D3 closed: `KernelPluginContext::ipc_call` now emits a structured log on every Err exit (debug for Cancelled, error for PluginCrashedDuringCall, warn for everything else, skipped for CapabilityDenied which is already audited). Single point of emission covers all 332 handlers without churning per-crate code.
 - **2026-05-21 (later)** — D2 closed: collab relay-slot mutex now uses a `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. Terminal sites flagged by the audit were in `#[cfg(test)] mod tests` — not in scope.
 - **2026-05-22** — D1 closed: `nexus-remote/server.rs::serve` now tracks per-request `ipc_call`/`event_subscribe`/`event_unsubscribe` spawns through an `Arc<Mutex<JoinSet<()>>>`, aborted explicitly on serve return and via `JoinSet::Drop`. Other audit sites were either already tracked (line 289 via subscriptions HashMap), bounded by `READ_TIMEOUT_MS` (workflow webhook), or test code (kernel + ai-runtime).
+- **2026-05-22** — D4 closed: 5 un-flagged constants added to `docs/0.1.2/settings/hardcoded-rust.md` (workflow webhook `READ_TIMEOUT_MS`, storage `WATCHER_CHANNEL_BOUND` + `DESCRIPTION_FALLBACK_CAP`, terminal `DRAINER_PUMP_TIMEOUT_MS` + `DRAINER_SLEEP_MS`, terminal memory `DEFAULT_HISTORY_SAMPLES`). Side-fix: `nexus-workflow/src/digests.rs::IPC_TIMEOUT` now sources from `nexus_types::constants::IPC_TIMEOUT_LONG`.

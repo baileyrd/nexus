@@ -95,6 +95,8 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-cli/src/commands/term.rs` | 80 | `Duration::from_millis(200)` | `TTY_READ_TIMEOUT_MS` |
 | `crates/nexus-cli/src/commands/term.rs` | 99 | `Duration::from_millis(100)` | `TTY_READ_SHORT_TIMEOUT_MS` |
 | `crates/nexus-cli/src/commands/term.rs` | 126 | `Duration::from_millis(500)` | `SHUTDOWN_REQUEST_TIMEOUT_MS` |
+| `crates/nexus-terminal/src/core_plugin.rs` | 1102 | `5` ms | `DRAINER_PUMP_TIMEOUT_MS` — per-session PTY read timeout in the shared drainer loop |
+| `crates/nexus-terminal/src/core_plugin.rs` | 1103 | `10` ms | `DRAINER_SLEEP_MS` — back-off between drainer passes; full cycle ≈ `n_sessions × DRAINER_PUMP_TIMEOUT_MS + DRAINER_SLEEP_MS` |
 | `crates/nexus-editor/src/core_plugin.rs` | 42 | `Duration::from_secs(30)` | `STORAGE_IPC_TIMEOUT_SECS` |
 | `crates/nexus-skills/src/core_plugin.rs` | 188 | `Duration::from_secs(120)` | `INVOKE_AGENT_TIMEOUT_SECS` |
 | `crates/nexus-lsp/src/client.rs` | 118 | `Duration::from_secs(10)` | `LSP_DEFAULT_REQUEST_TIMEOUT_SECS` |
@@ -173,7 +175,11 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-database/src/formula/eval.rs` | 105 | `64` | `MAX_RECURSION_DEPTH` |
 | `crates/nexus-database/src/core_plugin.rs` | 235 | `10 * 1024 * 1024` | `MAX_CSV_IMPORT_BYTES` |
 | `crates/nexus-workflow/src/webhook.rs` | 54 | `16 * 1024` | `MAX_HEADER_BYTES` |
+| `crates/nexus-workflow/src/webhook.rs` | 57 | `5_000` ms | `READ_TIMEOUT_MS` — caps webhook request read window; tighter values drop slow payloads, looser values broaden attack surface |
 | `crates/nexus-workflow/src/run_history.rs` | 30 | `200` | `RUN_HISTORY_CAP` |
+| `crates/nexus-storage/src/watcher.rs` | 28 | `1024` | `WATCHER_CHANNEL_BOUND` — bounded after `0bd9eabe`; queue depth before the watcher falls back to a reconcile pass |
+| `crates/nexus-storage/src/entity_index.rs` | 865 | `240` chars | `DESCRIPTION_FALLBACK_CAP` — UI-visible cap on auto-derived entity descriptions |
+| `crates/nexus-terminal/src/memory.rs` | 38 | `60` samples | `DEFAULT_HISTORY_SAMPLES` — ring-buffer depth for per-session memory rollups |
 | `crates/nexus-bootstrap/src/audit_sqlite.rs` | 14 | `1000` | `DEFAULT_QUERY_LIMIT` |
 ~~| `crates/nexus-ai/src/enrichment.rs` | 63 | `1500` | `MAX_QUERY_CHARS` |~~ → already `const MAX_QUERY_CHARS`.
 ~~| `crates/nexus-ai/src/enrichment.rs` | 69 | `200` | `MAX_SUMMARY_CHARS` |~~ → already `const MAX_SUMMARY_CHARS`.

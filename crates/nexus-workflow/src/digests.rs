@@ -46,7 +46,10 @@ pub const DEFAULT_WEEKLY_CRON: &str = "0 9 * * 1";
 pub const DEFAULT_DIGESTS_DIR: &str = "Digests";
 
 /// Per-IPC timeout when calling storage / AI from the digest pipeline.
-const IPC_TIMEOUT: Duration = Duration::from_secs(120);
+/// Sources the shared P5-01 timeout bucket so a workspace-wide
+/// adjustment of "long" IPC calls touches this pipeline too — see
+/// `nexus_types::constants` for the four standard buckets.
+const IPC_TIMEOUT: Duration = nexus_types::constants::IPC_TIMEOUT_LONG;
 
 /// Configuration loaded from `[digests]` in `<forge>/.forge/config.toml`.
 ///
