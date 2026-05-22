@@ -11,6 +11,7 @@
 | A2 | Silent error swallowing across event bus (audit plugin) | `0eb8bcc0` |
 | A4 | Unbounded channels in LSP/DAP/ACP protocol clients | `22aa9f88` |
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
+| A2 | Remaining `let _ = bus.publish*` sites (storage, notifications, mcp, bootstrap) | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -33,14 +34,16 @@ The plugin catalog in `shell/src/plugins/catalog.ts` declares itself the source 
 
 Plus 6 plugins with `index.ts` but only stub content: `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`.
 
-### A2. Silent error swallowing across event bus — ✅ partially closed (`0eb8bcc0`)
-`let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Worst sites:
+### A2. Silent error swallowing across event bus — ✅ Closed (`0eb8bcc0` + this sweep)
+`let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Sites:
 - ✅ `crates/nexus-security/src/core_plugin.rs:121,154,166` — **audit events** (fixed in `0eb8bcc0`)
-- `crates/nexus-storage/src/core_plugin.rs:960,972,993,998,1009,1018` — 6 state-change events dropped
-- `crates/nexus-notifications/src/core_plugin.rs:556,679,947` — including `tx.send(res)` whose loss causes caller hangs
-- `crates/nexus-mcp/src/core_plugin.rs:312`
-- `crates/nexus-bootstrap/src/crdt_publisher.rs:293` (tmp-file leakage hidden)
-- `crates/nexus-bootstrap/src/plugins/mod.rs:253`
+- ✅ `crates/nexus-storage/src/core_plugin.rs` — 6 state-change events in `publish_event` now routed through a `publish_storage_event` helper that warn-logs on bus failure.
+- ✅ `crates/nexus-notifications/src/core_plugin.rs:558` (inbox.appended) and `:681` (ai-runtime toast republish) — now warn-log on failure with the relevant context (inbox id / source).
+- ✅ `crates/nexus-mcp/src/core_plugin.rs:312` — `mcp.host.started` lifecycle event now warn-logs on failure.
+- ✅ `crates/nexus-bootstrap/src/crdt_publisher.rs:293` — orphan tmp-file `remove_file` failure now warn-logs with the tmp path (was the "tmp-file leakage hidden" case).
+- ✅ `crates/nexus-bootstrap/src/plugins/mod.rs:253` — `plugin_lifecycle_timeout` event now warn-logs on failure so observers know they missed the skip.
+
+The notifications watcher `tx.send(res)` at `:949` is intentionally left as-is: it is a `std::sync::mpsc` send from a `notify` callback to the same thread that owns `rx`; the only failure mode is `rx` having been dropped, which means the watcher thread has already exited. Logging there cannot reach anyone.
 
 ### A3. Data-loss `unwrap_or_default()` on serialization — ✅ Closed (`88f990cd`)
 - ✅ `crates/nexus-storage/src/bases/mod.rs:71,85` — now propagate `StorageError::CorruptFile`.
@@ -195,7 +198,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 ## Recommended punchlist (priority order)
 
-1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A3 closed (`88f990cd`); A2 closed for the audit plugin (`0eb8bcc0`); A2 remaining sites + D3 still open.**
+1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 closed (`0eb8bcc0` + this sweep), A3 closed (`88f990cd`). D3 (handler-side error logging) still open and tracked separately.**
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
 3. **A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.
 4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
@@ -211,3 +214,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 ## Changelog
 
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
+- **2026-05-21 (later)** — A2 remaining sites closed: storage `publish_event` (6 events), notifications inbox.appended + ai-runtime toast republish, mcp.host.started lifecycle, bootstrap CRDT tmp-file cleanup, bootstrap `plugin_lifecycle_timeout` event.

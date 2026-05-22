@@ -555,7 +555,7 @@ impl NotificationsCorePlugin {
             }
         };
         if let Some(bus) = self.bus.as_ref() {
-            let _ = bus.publish_plugin(
+            if let Err(err) = bus.publish_plugin(
                 PLUGIN_ID,
                 INBOX_APPENDED_TOPIC,
                 serde_json::json!({
@@ -564,7 +564,15 @@ impl NotificationsCorePlugin {
                     "severity": severity.as_str(),
                     "ts": chrono::Utc::now().timestamp(),
                 }),
-            );
+            ) {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    event_type = INBOX_APPENDED_TOPIC,
+                    inbox_id = id,
+                    %err,
+                    "inbox.appended event dropped — bus publish failed",
+                );
+            }
         }
     }
 
@@ -678,11 +686,19 @@ impl CorePlugin for NotificationsCorePlugin {
                                             "title": notif.title.unwrap_or_else(|| "Nexus".to_string()),
                                             "message": notif.message,
                                         });
-                                        let _ = bus.publish_plugin(
+                                        if let Err(err) = bus.publish_plugin(
                                             PLUGIN_ID,
                                             crate::NOTIFICATION_DELIVERED_TOPIC,
                                             body,
-                                        );
+                                        ) {
+                                            tracing::warn!(
+                                                plugin_id = PLUGIN_ID,
+                                                event_type = crate::NOTIFICATION_DELIVERED_TOPIC,
+                                                source = SOURCE_AI_RUNTIME,
+                                                %err,
+                                                "ai-runtime toast republish dropped — bus publish failed",
+                                            );
+                                        }
                                     }
                                 }
                             }

@@ -290,7 +290,13 @@ impl CrdtPublisher {
         }
         if let Err(err) = std::fs::rename(&tmp, &path) {
             tracing::warn!(%err, path = %path.display(), "BL-074: rename failed");
-            let _ = std::fs::remove_file(&tmp);
+            if let Err(cleanup_err) = std::fs::remove_file(&tmp) {
+                tracing::warn!(
+                    %cleanup_err,
+                    tmp = %tmp.display(),
+                    "BL-074: failed to remove orphan tmp file after rename failure",
+                );
+            }
             return false;
         }
         true
