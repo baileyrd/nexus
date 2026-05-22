@@ -20,7 +20,7 @@ use nexus_plugin_api::{EventFilter, PublishedEvent};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 use crate::transport::{
     read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification,
@@ -51,9 +51,14 @@ pub enum RemoteServerError {
 /// JSON-RPC stdio server that proxies the full kernel IPC + event bus
 /// surface to a remote frontend.
 ///
-/// Stateless across requests for `ipc_call`. Event subscriptions are
-/// tracked in an internal `HashMap<subscription_id, JoinHandle>` so
-/// `event_unsubscribe` can stop the forwarder task; the map is dropped
+/// Per-request handler spawns (`ipc_call`, `event_subscribe`,
+/// `event_unsubscribe`) are tracked in an internal `JoinSet<()>` so
+/// they get aborted when `serve` returns — without this, a slow
+/// `ipc_call` started just before the client disconnected would
+/// continue running for up to its full timeout against a dead
+/// outbound writer. Event subscriptions are *also* tracked in a
+/// `HashMap<subscription_id, JoinHandle>` so `event_unsubscribe`
+/// can stop the forwarder task individually; the map is dropped
 /// (and every task aborted) when `serve` returns.
 pub struct RemoteServer {
     context: Arc<KernelPluginContext>,
@@ -100,14 +105,25 @@ impl RemoteServer {
         let writer: Arc<Mutex<W>> = Arc::new(Mutex::new(writer));
         let subscriptions: Arc<Mutex<HashMap<String, JoinHandle<()>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        // Audit gap D1. Per-request spawns previously had no lifetime
+        // pin to `serve()`; a client that fired a slow `ipc_call` and
+        // disconnected would leave the spawned task running for up to
+        // its full timeout. Tracking through a `JoinSet` means a
+        // single `abort_all().await` on serve exit terminates them
+        // promptly. `Drop` for `JoinSet` also calls `abort_all`, so
+        // an early `?`-return on a transport error still cleans up.
+        let pending: Arc<Mutex<JoinSet<()>>> = Arc::new(Mutex::new(JoinSet::new()));
 
         loop {
             let msg = match read_message(&mut reader).await {
                 Ok(m) => m,
                 Err(TransportError::Eof) => break,
                 Err(e) => {
-                    // Abort outstanding subscription tasks before
-                    // surfacing the error.
+                    // Abort outstanding per-request + subscription
+                    // tasks before surfacing the error. The JoinSet's
+                    // own Drop would also abort, but doing it
+                    // explicitly keeps the cleanup sequence readable.
+                    pending.lock().await.abort_all();
                     abort_all(&subscriptions).await;
                     return Err(RemoteServerError::Transport(e));
                 }
@@ -118,6 +134,7 @@ impl RemoteServer {
                         req,
                         Arc::clone(&writer),
                         Arc::clone(&subscriptions),
+                        Arc::clone(&pending),
                     )
                     .await;
                 }
@@ -133,17 +150,21 @@ impl RemoteServer {
             }
         }
 
+        pending.lock().await.abort_all();
         abort_all(&subscriptions).await;
         Ok(())
     }
 
     /// Dispatch one inbound request. Spawns a task so a slow `ipc_call`
-    /// doesn't block subsequent requests on the same connection.
+    /// doesn't block subsequent requests on the same connection. The
+    /// spawn is tracked in `pending` so the parent `serve()` loop can
+    /// abort it on connection close (audit D1).
     async fn dispatch_request<W>(
         &self,
         req: JsonRpcRequest,
         writer: Arc<Mutex<W>>,
         subscriptions: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+        pending: Arc<Mutex<JoinSet<()>>>,
     ) where
         W: AsyncWrite + Unpin + Send + 'static,
     {
@@ -155,7 +176,7 @@ impl RemoteServer {
             "ipc_call" => {
                 let ctx = Arc::clone(&self.context);
                 let default_timeout = self.timeout;
-                tokio::spawn(async move {
+                pending.lock().await.spawn(async move {
                     let response = handle_ipc_call(&ctx, params, default_timeout, id).await;
                     write_response(&writer, response).await;
                 });
@@ -163,7 +184,7 @@ impl RemoteServer {
             "event_subscribe" => {
                 let bus = Arc::clone(&self.event_bus);
                 let writer_for_task = Arc::clone(&writer);
-                tokio::spawn(async move {
+                pending.lock().await.spawn(async move {
                     let response = handle_event_subscribe(
                         &bus,
                         params,
@@ -176,7 +197,7 @@ impl RemoteServer {
                 });
             }
             "event_unsubscribe" => {
-                tokio::spawn(async move {
+                pending.lock().await.spawn(async move {
                     let response = handle_event_unsubscribe(params, id, subscriptions).await;
                     write_response(&writer, response).await;
                 });

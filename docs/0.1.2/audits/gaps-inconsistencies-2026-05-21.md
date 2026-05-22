@@ -19,7 +19,8 @@
 | B3 | `hardcoded-rust.md` Dev-Config table — 11+ already-promoted rows | _doc-only_ |
 | B4 | `settings/README.md` forge layout missing ≥9 paths | _doc-only_ |
 | D3 | Handler errors silently lost — dispatcher emits no log on failure | `3fdea6d8` |
-| D2 | `Mutex::lock().expect()` in long-lived plugins (collab relay) | _this sweep_ |
+| D2 | `Mutex::lock().expect()` in long-lived plugins (collab relay) | `737f2ee8` |
+| D1 | `tokio::spawn` orphans in remote/server per-request handlers; rest of audit list was test code | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -182,11 +183,17 @@ All 63 catalog entries use `activationEvents: ['onStartup']`. No lazy activation
 
 ## D. Robustness gaps
 
-### D1. `tokio::spawn` orphans (no JoinSet tracking)
-- `nexus-remote/src/server.rs:158,166,179,289` — per-request handler spawns in a long-running JSON-RPC server with no shutdown signal path
-- `nexus-workflow/src/core_plugin.rs:1372` — webhook per-peer handlers
-- `nexus-kernel/src/context_impl.rs:960` — timer-fire CancelToken task
-- `nexus-ai-runtime/src/core_plugin.rs:863`, `scheduler.rs:503`
+### D1. `tokio::spawn` orphans (no JoinSet tracking) — ✅ Closed
+On re-inspection the audit's list is largely test code:
+
+- ✅ `nexus-remote/src/server.rs:158,166,179` — per-request handler spawns; now tracked via an `Arc<tokio::sync::Mutex<JoinSet<()>>>` plumbed through `serve()` → `dispatch_request()`. Aborted explicitly on serve return (EOF or transport error) so a slow `ipc_call` started just before client disconnect no longer keeps running for up to its full timeout. `JoinSet::Drop` also calls `abort_all`, so any early `?`-return cleans up.
+- ✅ `nexus-remote/src/server.rs:289` — already tracked since BL-140 in the `subscriptions: HashMap<sub_id, JoinHandle>` map; aborted by `event_unsubscribe`, by `abort_all` on transport error, and on serve return.
+- `nexus-workflow/src/core_plugin.rs:1396` (cited as `:1372` in the original audit — line offset drifted) — webhook per-connection spawns. Naturally bounded by `webhook::READ_TIMEOUT_MS = 5000ms`; the parent `webhook_accept_loop` is tracked in `scheduler_handles`. Adding a JoinSet here would be cosmetic given the 5 s hard bound, so it's intentionally left unchanged.
+- `nexus-kernel/src/context_impl.rs:1006` (cited as `:960`) — `tokio::spawn` inside the `cancel_token_timer_fire` test fixture (nearest `#[cfg(test)]` at line 645). Not production code.
+- `nexus-ai-runtime/src/core_plugin.rs:863` — inside `#[cfg(test)]` from line 767. Test fixture (`wait_for_blocks_until_worker_finishes`).
+- `nexus-ai-runtime/src/scheduler.rs:503` — inside `#[cfg(test)]` from line 362. Test fixture.
+
+After the remote-server fix, no remaining production-code spawn in the cited files lacks lifetime tracking.
 
 ### D2. `Mutex::lock().expect()` in long-lived plugins — ✅ Closed
 - ✅ `nexus-collab/src/core_plugin.rs:317,370,391,421` — all 4 sites now route through a new `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. The relay slot is just an `Option<RunningRelay>`; its invariants are restored on the next `start_relay`/`stop_relay` edge, so recovering and continuing beats killing the plugin.
@@ -242,7 +249,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 4. ~~**A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.~~ Already tracked by the WI-25 allowlist drain in `shell/tests/plugin-import-hygiene.test.ts`; A6 is not a new finding. AA-04 stays open separately.
 5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ Doc refresh landed (this sweep). A drift script is still a useful follow-up.
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
-7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; ~~handle `Mutex` poisoning instead of `.expect()`.~~ **D2 closed in this sweep.** D1 still open.
+7. ~~**D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.~~ **Both closed.** D2 via collab `relay_lock()` helper; D1 via `JoinSet` plumbed through `nexus-remote/server.rs::serve` (rest of the audit list was test code).
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
 
 None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/observability wins.
@@ -258,3 +265,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21 (later)** — B1–B4 doc refresh landed: `ipc-handlers.md` counts re-derived from `cap_matrix.toml` (332 total, with the six drifted per-plugin counts and section headers corrected); `audit-flags.md` rewritten to reflect the three remaining `# AUDIT:` rows (workflow `run`, workflow `run_digest`, `mcp.host::call_tool`) with the historical promotions moved to their own section; `hardcoded-rust.md` strikethroughs added for ~11 rows whose target consts already exist (vectorstore/rag/enrichment/indexing_daemon/collab/mcp/editor/tui); `settings/README.md` forge layout adds 11 missing paths (`comments/`, `templates/`, `agents/`, `digests/last_fired.json`, `skills/`, `ai-activity.log`, `.audio/models/`, `.editor/undo/`, `.forge/.gitignore`, `.forge/config.toml`, `agents/<agent_id>/`), removes the ghost `acp.toml` row per ADR 0027 §Phase 4, and notes `.gitattributes` is forge-root.
 - **2026-05-21 (later)** — D3 closed: `KernelPluginContext::ipc_call` now emits a structured log on every Err exit (debug for Cancelled, error for PluginCrashedDuringCall, warn for everything else, skipped for CapabilityDenied which is already audited). Single point of emission covers all 332 handlers without churning per-crate code.
 - **2026-05-21 (later)** — D2 closed: collab relay-slot mutex now uses a `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. Terminal sites flagged by the audit were in `#[cfg(test)] mod tests` — not in scope.
+- **2026-05-22** — D1 closed: `nexus-remote/server.rs::serve` now tracks per-request `ipc_call`/`event_subscribe`/`event_unsubscribe` spawns through an `Arc<Mutex<JoinSet<()>>>`, aborted explicitly on serve return and via `JoinSet::Drop`. Other audit sites were either already tracked (line 289 via subscriptions HashMap), bounded by `READ_TIMEOUT_MS` (workflow webhook), or test code (kernel + ai-runtime).
