@@ -26,7 +26,20 @@ use crate::error::PluginError;
 /// while a bare `impl Into<String>` parameter creates inference
 /// ambiguity when crates like `bytes` / `reqwest` / `winnow` are in
 /// the dep graph (multiple `From<&str>` impls).
+///
+/// Closes D3 of the 2026-05-21 audit. Every handler error in the
+/// workspace flows through this chokepoint, so a single `warn!` here
+/// guarantees handler-specific context surfaces in logs — previously
+/// errors were `?`-propagated to the caller with no log line at all.
+/// Per-handler reason strings (`{command}: {detail}`) carry the
+/// command name; service crates that want richer context (path, key,
+/// etc.) include it in the reason verbatim.
 pub fn exec_err(plugin_id: &str, reason: String) -> PluginError {
+    tracing::warn!(
+        plugin_id = plugin_id,
+        %reason,
+        "handler returned ExecutionFailed",
+    );
     PluginError::ExecutionFailed {
         plugin_id: plugin_id.to_string(),
         reason,
