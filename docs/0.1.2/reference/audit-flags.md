@@ -1,28 +1,38 @@
 # AUDIT-flagged Handlers
 
-> Every `# AUDIT:` row in `crates/nexus-bootstrap/cap_matrix.toml`. These handlers preserve pre-BL-138 behaviour (any caller with `ipc.call` can dispatch) but the security author has flagged them as candidates for cap elevation. Each is a deliberate decision — promoting them is non-trivial because it requires deciding what cap to require and updating every existing caller's capability grant.
+> **As of:** 2026-05-22. Every still-unrestricted handler in `crates/nexus-bootstrap/cap_matrix.toml` that the security author has flagged as a candidate for cap elevation. Each is a deliberate decision — promoting one is non-trivial because it requires deciding what cap to require and updating every existing caller's capability grant.
+>
+> A regression guard (`scripts/check_ipc_docs_drift.sh`) compares this table to the matrix on every CI run and fails the build if either side drifts.
 
 ## Severity table
 
 | Handler | Concern | Suggested cap |
 |---------|---------|---------------|
-| `com.nexus.security::set_secret` | A hostile plugin with `ipc.call` could overwrite stored secrets | new `security.write` (or in-tree-only marker) |
-| `com.nexus.security::delete_secret` | Same — could erase stored secrets | new `security.write` |
-| `com.nexus.security::clear_audit_log` | Destroys audit history — the surface a hostile caller would target to cover its tracks | new `security.audit.write` |
-| `com.nexus.ai::resolve_credentials` | Returns provider keyring material via the agent/audio call paths | in-tree-only marker |
-| `com.nexus.terminal::send_input` | Writes commands into a live PTY (the shell was `process.spawn`-gated but this isn't) | `process.spawn` |
-| `com.nexus.terminal::send_raw_input` | Same byte-level | `process.spawn` |
-| `com.nexus.terminal::run_saved` | Replays a saved command into a live PTY | `process.spawn` |
-| `com.nexus.terminal::adhoc_promote` | Promotes ad-hoc → saved and runs it | `process.spawn` |
-| `com.nexus.terminal::repl_eval` | Writes code into a REPL kernel PTY (BL-142) | `process.spawn` |
-| `com.nexus.git::push` | Outbound network reach to a remote | `net.http` |
-| `com.nexus.git::push_tags` | Same — publishes tags | `net.http` |
-| `com.nexus.linkpreview::fetch` | Outbound HTTP to arbitrary URLs | `net.http` |
-| `com.nexus.workflow::run` | Drives arbitrary plugins via ipc_call — issue #77 "laundering surface" | track per-step gating |
-| `com.nexus.workflow::run_digest` | Same shape, cron-driven | track per-step gating |
-| `com.nexus.agent::delegate` | Drives a chat call internally (same machinery as session_run, which requires `ai.chat`) | `ai.chat` |
-| `com.nexus.agent::plan` | Drives a chat call internally | `ai.chat` |
-| `com.nexus.collab::start_relay` | Binds 0.0.0.0 (Share-this-forge surface) | new `network.bind` |
+| `com.nexus.ai::resolve_credentials` | Returns provider keyring material via the agent/audio call paths. Currently restricted at the trust layer via the matrix's `internal = true` marker (Core-trust callers only); promoting it to an explicit cap is still tracked. | in-tree-only marker (live) → future explicit cap |
+| `com.nexus.mcp.host::call_tool` | Invokes a tool on a previously-connected MCP server whose side effects (file writes, network calls) happen in the MCP server's own process. The `connect` spawn gate already restricts who could attach a server in the first place, so this preserves that posture. | track under MCP scoping work |
+| `com.nexus.workflow::run` | Drives arbitrary plugins via `ipc_call` — issue #77 "laundering surface". Each step it dispatches is still gated by the target handler's caps, but the *aggregation* of side effects across a multi-step workflow is not capped at the workflow boundary. | track per-step aggregation rule (issue #77, BL-134 Phase 3) |
+| `com.nexus.workflow::run_digest` | Same shape as `run`, cron-driven via the digest scheduler. | same as `run` |
+
+## Closed since the 2026-05-21 audit
+
+The following handlers were classified as `unrestricted` on 2026-05-21 and are now properly cap-gated in the matrix. No change to the suggested caps was needed — the migration was a `unrestricted = "…"` → `caps = […]` swap on each row:
+
+| Handler | Gate | When |
+|---------|------|------|
+| `com.nexus.security::set_secret` | `security.write` | pre-2026-05-22 |
+| `com.nexus.security::delete_secret` | `security.write` | pre-2026-05-22 |
+| `com.nexus.security::clear_audit_log` | `security.audit.write` | pre-2026-05-22 |
+| `com.nexus.terminal::send_input` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::send_raw_input` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::run_saved` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::adhoc_promote` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::repl_eval` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.git::push` | `net.http` | pre-2026-05-22 |
+| `com.nexus.git::push_tags` | `net.http` | pre-2026-05-22 |
+| `com.nexus.linkpreview::fetch` | `net.http` | pre-2026-05-22 |
+| `com.nexus.agent::delegate` | `ai.chat` | pre-2026-05-22 |
+| `com.nexus.agent::plan` | `ai.chat` | pre-2026-05-22 |
+| `com.nexus.collab::start_relay` | `network.bind` | pre-2026-05-22 |
 
 ## Tracking issues
 
