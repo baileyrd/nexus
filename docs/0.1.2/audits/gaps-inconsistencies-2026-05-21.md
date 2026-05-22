@@ -15,9 +15,11 @@
 | D3 | Handlers don't log on error return (chokepoint + 5 audit-flagged files enriched) | `a186308` |
 | A1 | Shell plugin catalog ↔ on-disk mismatch (incidentally closed; regression guard added) | `ef1a163` |
 | A6 | Direct Tauri `invoke()` from non-host code (partial drain — 3 of 10 closed) | `a0da5b0` |
-| B1 | `ipc-handlers.md` counts stale (drift script added) | _this commit_ |
-| B2 | `audit-flags.md` largely stale (drift script added) | _this commit_ |
-| B4 | `settings/README.md` forge layout missing ≥9 paths | _this commit_ |
+| B1 | `ipc-handlers.md` counts stale (drift script added) | `53638d3` |
+| B2 | `audit-flags.md` largely stale (drift script added) | `53638d3` |
+| B4 | `settings/README.md` forge layout missing ≥9 paths | `53638d3` |
+| D1 | tokio::spawn orphans in `nexus-remote` server + `nexus-workflow` webhook | _this commit_ |
+| D2 | `Mutex::lock().expect()` poisoning panics in `nexus-collab` relay | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -140,17 +142,14 @@ All 63 catalog entries use `activationEvents: ['onStartup']`. No lazy activation
 
 ## D. Robustness gaps
 
-### D1. `tokio::spawn` orphans (no JoinSet tracking)
-- `nexus-remote/src/server.rs:158,166,179,289` — per-request handler spawns in a long-running JSON-RPC server with no shutdown signal path
-- `nexus-workflow/src/core_plugin.rs:1372` — webhook per-peer handlers
-- `nexus-kernel/src/context_impl.rs:960` — timer-fire CancelToken task
-- `nexus-ai-runtime/src/core_plugin.rs:863`, `scheduler.rs:503`
+### D1. `tokio::spawn` orphans (no JoinSet tracking) — ✅ Closed
+- ✅ `nexus-remote/src/server.rs` — the three per-request `dispatch_request` spawns (`ipc_call`, `event_subscribe`, `event_unsubscribe`) plus the long-lived subscription forwarder (already tracked via `subscriptions` map). The serve loop now owns a `tokio::task::JoinSet` scoped to the connection; `dispatch_request` spawns through it, the loop drains completed tasks each iteration, and shutdown awaits in-flight handlers for up to 2s before letting JoinSet's `Drop` abort the rest.
+- ✅ `nexus-workflow/src/core_plugin.rs` — the `webhook_accept_loop` per-connection spawn now feeds a JoinSet scoped to the accept loop. When the loop's owning `JoinHandle` (in `scheduler_handles`) is aborted on plugin `Drop`, the loop future drops, dropping the JoinSet and aborting every still-pending connection handler.
+- N/A `nexus-kernel/src/context_impl.rs:960`, `nexus-ai-runtime/src/core_plugin.rs:863`, `nexus-ai-runtime/src/scheduler.rs:503` — all three sites are inside `#[test]` / `#[tokio::test]` blocks (the audit conflated test-only spawns with production orphans). Test-local spawns die with the test runtime; no fix needed.
 
-### D2. `Mutex::lock().expect()` in long-lived plugins
-- `nexus-collab/src/core_plugin.rs:317,370,391,421` (4 sites, all in the relay plugin)
-- `nexus-terminal/src/core_plugin.rs:3008,3067`
-
-Poisoning will kill the plugin. Either don't `.expect()` or restart-on-poison.
+### D2. `Mutex::lock().expect()` in long-lived plugins — ✅ Closed
+- ✅ `nexus-collab/src/core_plugin.rs` (4 sites in the relay plugin) — all four now route through a `lock_relay()` helper that recovers via `into_inner()` on poison and emits a `tracing::warn!` so the poisoning is observable. The inner data is just `Option<RunningRelay>` (presence/absence; no cross-field invariants), so continuing on the recovered value is safe.
+- N/A `nexus-terminal/src/core_plugin.rs:3008,3067` — both sites are inside `mod tests { ... }`, where panicking on poison is the correct test-failure behaviour. No production code change needed.
 
 ### D3. Handlers don't log on error return — ✅ Closed (`a186308`)
 Spot-checked `crates/nexus-storage/src/handlers/{files,index,notes}.rs` and `nexus-ai/src/handlers/{ask,search}.rs`: **zero** `tracing::error/warn` calls. Errors are `?`-propagated; only the dispatcher logs them, losing handler-specific context.
@@ -204,7 +203,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 4. ⚠️ **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Partially drained — `marginApi.ts` + `marginSuggest.ts` cleaned before this audit, `SettingsPanelView.tsx`'s three `kernel_invoke` calls migrated to `api.kernel.invoke` in this PR. Seven sites remain as documented shell-internal exceptions in `shell/tests/plugin-import-hygiene.test.ts`; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
 5. ⚠️ ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ B1, B2, B4 closed in this PR; drift script added and wired into `scripts/check_ipc_drift.sh`. B3 (`hardcoded-rust.md`) still open — needs row-by-row code verification (~15 entries).
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
-7. **D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.
+7. ~~**D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.~~ ✅ Closed in this PR (`nexus-remote` + `nexus-workflow` JoinSets; `nexus-collab` `lock_relay()` helper with poison recovery + tracing).
 8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
 
 None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/observability wins.
@@ -219,3 +218,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-22** — A1 marked closed: every mismatch in the audit table was reconciled by intervening refactoring (`legacyPluginIds` aliases for `nexus.activityTimeline → nexus.activity` and `nexus.notion → nexus.notionImport`; rename of the `osObservability` import target; addition of `graph/globalIndex.ts`). A regression guard was added at `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back.
 - **2026-05-22** — A6 partially drained: the three `invoke('kernel_invoke', …)` calls in `SettingsPanelView.tsx` migrated to `api.kernel.invoke(...)` (the component already had `api` in scope at all three call sites). The two AI files flagged by the audit (`marginApi.ts`, `marginSuggest.ts`) had already been cleaned. Seven sites remain in the `plugin-import-hygiene.test.ts` allowlist as documented shell-internal exceptions; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
 - **2026-05-22** — B1 / B2 / B4 closed: `ipc-handlers.md` counts table + section headers updated against current matrix (332 handlers, 23 plugins); `audit-flags.md` rewritten to list the 4 still-unrestricted handlers (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`) with a separate "Closed since" section for the 14 already-gated ones; `settings/README.md` forge-layout table extended with 9 missing paths plus an explicit note resolving the dual `config.toml` confusion. New `scripts/check_ipc_docs_drift.sh` checks both docs against the matrix and is wired into `scripts/check_ipc_drift.sh` for CI. B3 (`hardcoded-rust.md`) deferred — needs row-by-row code verification.
+- **2026-05-22** — D1 + D2 closed. D1: the per-request spawns in `nexus-remote::server::dispatch_request` and the per-connection spawn in `nexus-workflow::webhook_accept_loop` are now tracked in a `JoinSet` scoped to their owning accept loop / connection; drop of the future cascades aborts. D2: the four `nexus-collab` relay-slot `Mutex::lock().expect()` sites now go through a `lock_relay()` helper that recovers via `into_inner()` on poison and emits a `tracing::warn!`. Three of the audit's five D1 flags (`nexus-kernel/context_impl.rs:960`, `nexus-ai-runtime/core_plugin.rs:863`, `nexus-ai-runtime/scheduler.rs:503`) and both terminal D2 flags were inside test code (the audit's `grep -n` conflated test-only spawns/locks with production code) — left as-is.

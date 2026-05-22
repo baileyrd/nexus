@@ -1383,7 +1383,16 @@ async fn webhook_accept_loop(
         );
     }
     tracing::info!(%bind, count = specs.len(), "webhook listener armed");
+    // D1 (2026-05-21 audit) — track per-connection handler tasks in
+    // a JoinSet scoped to this accept loop. When the loop's owning
+    // `JoinHandle` (held in `scheduler_handles`) is aborted on
+    // plugin Drop, the loop's future drops, which drops the JoinSet
+    // and aborts every still-pending connection handler.
+    let mut connections: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
     loop {
+        // Reap completed handlers so the JoinSet doesn't grow.
+        while connections.try_join_next().is_some() {}
+
         let (sock, peer) = match listener.accept().await {
             Ok(p) => p,
             Err(e) => {
@@ -1393,7 +1402,7 @@ async fn webhook_accept_loop(
         };
         let ctx = Arc::clone(&ctx);
         let specs = Arc::clone(&specs);
-        tokio::spawn(async move {
+        connections.spawn(async move {
             handle_webhook_connection(ctx, sock, peer.to_string(), &specs).await;
         });
     }
