@@ -13,6 +13,7 @@
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
 | A2 | Silent error swallowing — storage/notifications/mcp/bootstrap remaining sites | `47f582a` |
 | D3 | Handlers don't log on error return (chokepoint + 5 audit-flagged files enriched) | `a186308` |
+| A1 | Shell plugin catalog ↔ on-disk mismatch (incidentally closed; regression guard added) | _this commit_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -20,20 +21,22 @@ Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kern
 
 ## A. High-priority gaps
 
-### A1. Shell plugin catalog ↔ on-disk mismatch (7 entries)
-The plugin catalog in `shell/src/plugins/catalog.ts` declares itself the source of truth, but disk reality diverges:
+### A1. Shell plugin catalog ↔ on-disk mismatch — ✅ Closed
+The plugin catalog in `shell/src/plugins/catalog.ts` declared itself the source of truth, but disk reality diverged on 2026-05-21:
 
-| # | Catalog says | Disk says | Effect |
+| # | Catalog said | Disk said | Status |
 |---|---|---|---|
-| 1 | `nexus.activity` (no dir) | — | Catalog entry never loads |
-| 2 | `nexus.osObservability` → `./observability/` | folder is `observability/` | Name mismatch |
-| 3 | `nexus.notionImport` → `./notion/` | folder is `notion/` | Name mismatch |
-| 4 | (not listed) | `shell/src/plugins/nexus/activityTimeline/` | Orphaned on disk |
-| 5 | (not listed) | `shell/src/plugins/nexus/notion/` | Orphaned |
-| 6 | (not listed) | `shell/src/plugins/nexus/observability/` | Orphaned |
-| 7 | `graph.global` | not found | Phantom entry |
+| 1 | `nexus.activity` (no dir) | — | ✅ catalog now imports `./nexus/activityTimeline` with `legacyPluginIds: ['nexus.activityTimeline']`. |
+| 2 | `nexus.osObservability` → `./observability/` | folder is `observability/` | ✅ catalog now points at `./nexus/observability`. |
+| 3 | `nexus.notionImport` → `./notion/` | folder is `notion/` | ✅ catalog now imports `./nexus/notion` with `legacyPluginIds: ['nexus.notion']`. |
+| 4 | (not listed) | `shell/src/plugins/nexus/activityTimeline/` | ✅ wired in as the `nexus.activity` entry's module. |
+| 5 | (not listed) | `shell/src/plugins/nexus/notion/` | ✅ wired in as the `nexus.notionImport` entry's module. |
+| 6 | (not listed) | `shell/src/plugins/nexus/observability/` | ✅ wired in as the `nexus.osObservability` entry's module. |
+| 7 | `graph.global` | not found | ✅ catalog now imports `./nexus/graph/globalIndex`, which exists. |
 
-Plus 6 plugins with `index.ts` but only stub content: `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`.
+The six "only stub content" plugins (`bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`) all now have substantial implementations (71–389 lines).
+
+These were closed incidentally by refactoring during the intervening weeks (`legacyPluginIds` aliases, renamed imports). A regression guard was added in `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back: it fails the test suite if any catalog `import()` is phantom or if any `shell/src/plugins/nexus/<dir>/` is orphaned (with the `_lib/` shared-utility namespace excluded).
 
 ### A2. Silent error swallowing across event bus — ✅ Closed (`0eb8bcc0` + `47f582a`)
 `let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Worst sites:
@@ -210,7 +213,7 @@ Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCy
 
 1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ ✅ All three closed (A2: `0eb8bcc0` + `47f582a`; A3: `88f990cd`; D3: `a186308`).
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
-3. **A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.
+3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up.~~ ✅ Closed (incidentally fixed by `legacyPluginIds` aliases + renamed imports during the intervening weeks; regression guard added in `shell/tests/catalog-disk-consistency.test.ts`).
 4. **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.
 5. **B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.
 6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
@@ -226,3 +229,4 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
 - **2026-05-22** — A2 remaining sites closed in `47f582a` (storage 6, notifications 3, mcp 1, bootstrap 2). A2 is now fully closed.
 - **2026-05-22** — D3 closed in `a186308` via a chokepoint `warn!` in `nexus_plugins::dispatch::exec_err` plus reason-string enrichment in the five audit-flagged files.
+- **2026-05-22** — A1 marked closed: every mismatch in the audit table was reconciled by intervening refactoring (`legacyPluginIds` aliases for `nexus.activityTimeline → nexus.activity` and `nexus.notion → nexus.notionImport`; rename of the `osObservability` import target; addition of `graph/globalIndex.ts`). A regression guard was added at `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back.
