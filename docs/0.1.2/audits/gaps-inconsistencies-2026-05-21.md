@@ -11,20 +11,22 @@
 | A2 | Silent error swallowing across event bus (audit plugin) | `0eb8bcc0` |
 | A4 | Unbounded channels in LSP/DAP/ACP protocol clients | `22aa9f88` |
 | A3 | Silent `unwrap_or_default()` on serialization / deserialization / lock-poisoning | `88f990cd` |
-| A2 | Remaining `let _ = bus.publish*` sites (storage, notifications, mcp, bootstrap) | `6c31b2b5` |
-| A1 | Shell plugin catalog ↔ on-disk mismatch (no fix — finding was misread) | _doc-only_ |
-| A6 | Direct Tauri `invoke()` from non-host code (re-classified: already tracked under WI-25 drain) | _doc-only_ |
-| B1 | `ipc-handlers.md` stale by 52 handlers | _doc-only_ |
-| B2 | `audit-flags.md` 14 rows stale; missing `mcp.host::call_tool` | _doc-only_ |
-| B3 | `hardcoded-rust.md` Dev-Config table — 11+ already-promoted rows | _doc-only_ |
-| B4 | `settings/README.md` forge layout missing ≥9 paths | _doc-only_ |
-| D3 | Handler errors silently lost — dispatcher emits no log on failure | `3fdea6d8` |
-| D2 | `Mutex::lock().expect()` in long-lived plugins (collab relay) | `737f2ee8` |
-| D1 | `tokio::spawn` orphans in remote/server per-request handlers; rest of audit list was test code | `c23cd2d4` |
-| D4 | 5 un-flagged constants + digests IPC_TIMEOUT not on shared bucket | `af265541` |
-| C4 | workflow/skills error-type convention claim (re-classified: misread; both use thiserror) | _this sweep_ |
+| A2 | Silent error swallowing — storage/notifications/mcp/bootstrap remaining sites | `47f582a` |
+| D3 | Handlers don't log on error return (chokepoint + 5 audit-flagged files enriched) | `a186308` |
+| A1 | Shell plugin catalog ↔ on-disk mismatch (incidentally closed; regression guard added) | `ef1a163` |
+| A6 | Direct Tauri `invoke()` from non-host code (partial drain — 3 of 10 closed) | `a0da5b0` |
+| B1 | `ipc-handlers.md` counts stale (drift script added) | `53638d3` |
+| B2 | `audit-flags.md` largely stale (drift script added) | `53638d3` |
+| B4 | `settings/README.md` forge layout missing ≥9 paths | `53638d3` |
+| D1 | tokio::spawn orphans in `nexus-remote` server + `nexus-workflow` webhook | `4e989c6` |
+| D2 | `Mutex::lock().expect()` poisoning panics in `nexus-collab` relay | `4e989c6` |
+| D4 | 5 un-flagged tunable constants + workflow digests `IPC_TIMEOUT` shared-const migration | `501e976` |
+| B3 | `hardcoded-rust.md` Dev-Config stale rows (72 of 100 already promoted) | `ba4ce47` |
+| A5 | Workflow capability laundering — observability + cap-aggregation helper (kernel enforcement remains a residual gap, issue #77) | `19c7745` |
+| C1 | Capability vocabulary — design-rationale section documenting singletons + read/write asymmetry; capabilities.md refreshed with the 3 missing caps | _this commit_ |
+| C3 | AA-04 (shell→plugin dependency inversion) — re-classified: already resolved under P3-03; both audit docs stale | `1b6dd27b` |
+| C4 | workflow/skills error-type convention claim (re-classified: misread; both use thiserror) | `e2f8a7a0` |
 | E | Code-level TODOs worth promoting to issues (catalogued in `reference/todos.md` §9) | `e2f8a7a0` |
-| C3 | AA-04 (shell→plugin dependency inversion) — re-classified: already resolved under P3-03; both audit docs stale | _this sweep_ |
 
 Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kernel` (function was added in `64237761` for "future metrics surfaces" but unreachable outside the crate; rustc was flagging it dead-code).
 
@@ -32,47 +34,31 @@ Drive-by in `0eb8bcc0`: re-exported `in_flight_sync_dispatches` from `nexus-kern
 
 ## A. High-priority gaps
 
-### A1. Shell plugin catalog ↔ on-disk mismatch — ✅ Closed (no fix needed; finding was misread)
-On re-verification every entry in `shell/src/plugins/catalog.ts` resolves cleanly. All 63 `load(): () => import('./<path>').then(m => m.<symbol>)` declarations were checked by script: each path resolves to a real `.ts`/`.tsx`/`index.ts`/`index.tsx`, and each named symbol is exported by that file.
+### A1. Shell plugin catalog ↔ on-disk mismatch — ✅ Closed
+The plugin catalog in `shell/src/plugins/catalog.ts` declared itself the source of truth, but disk reality diverged on 2026-05-21:
 
-The original table conflated the catalog `id` field with the `load()` import path. The flagged "mismatches" are the documented `legacyPluginIds` rename pattern: the canonical id was changed (`nexus.activityTimeline → nexus.activity`, `nexus.notion → nexus.notionImport`) while the on-disk folder kept its original name and the legacy id is migrated at boot by `buildLegacyIdAliases`. The "orphaned" folders the audit listed are simply the load targets for those renamed entries. `nexus.graph.global` loads from `./graph/globalIndex.ts`, which exists and exports `graphGlobalPlugin`.
+| # | Catalog said | Disk said | Status |
+|---|---|---|---|
+| 1 | `nexus.activity` (no dir) | — | ✅ catalog now imports `./nexus/activityTimeline` with `legacyPluginIds: ['nexus.activityTimeline']`. |
+| 2 | `nexus.osObservability` → `./observability/` | folder is `observability/` | ✅ catalog now points at `./nexus/observability`. |
+| 3 | `nexus.notionImport` → `./notion/` | folder is `notion/` | ✅ catalog now imports `./nexus/notion` with `legacyPluginIds: ['nexus.notion']`. |
+| 4 | (not listed) | `shell/src/plugins/nexus/activityTimeline/` | ✅ wired in as the `nexus.activity` entry's module. |
+| 5 | (not listed) | `shell/src/plugins/nexus/notion/` | ✅ wired in as the `nexus.notionImport` entry's module. |
+| 6 | (not listed) | `shell/src/plugins/nexus/observability/` | ✅ wired in as the `nexus.osObservability` entry's module. |
+| 7 | `graph.global` | not found | ✅ catalog now imports `./nexus/graph/globalIndex`, which exists. |
 
-The "6 plugins with stub content" claim was also wrong — each of `bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar` ships an `index.tsx` (not `.ts`) ranging from 71 to 389 lines with real implementations.
+The six "only stub content" plugins (`bookmarks`, `debugger`, `fileProperties`, `healthPanel`, `searchPanel`, `statusBar`) all now have substantial implementations (71–389 lines).
 
-The only directory under `shell/src/plugins/` not referenced from the catalog is `community/hello-world/`. That is intentional: it is a sandboxed example community plugin loaded via its own `plugin.json` manifest, not the curated catalog. `community/mermaid/` ships as a built-in and *is* in the catalog (`community.mermaid`).
+These were closed incidentally by refactoring during the intervening weeks (`legacyPluginIds` aliases, renamed imports). A regression guard was added in `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back: it fails the test suite if any catalog `import()` is phantom or if any `shell/src/plugins/nexus/<dir>/` is orphaned (with the `_lib/` shared-utility namespace excluded).
 
-Verification script (run from repo root):
-
-```bash
-python3 - <<'PY'
-import re, os
-cat = open('shell/src/plugins/catalog.ts').read()
-pat = re.compile(r"load:\s*\(\)\s*=>\s*import\('([^']+)'\)\.then\(m\s*=>\s*m\.(\w+)\)")
-base = 'shell/src/plugins/'; fails = 0
-for m in pat.finditer(cat):
-    rel, sym = m.group(1), m.group(2)
-    cands = [base + rel.lstrip('./') + ext for ext in ('.ts', '.tsx')] + \
-            [os.path.join(base, rel.lstrip('./'), f'index{ext}') for ext in ('.ts', '.tsx')]
-    f = next((c for c in cands if os.path.exists(c)), None)
-    if not f: print(f"missing: {rel}"); fails += 1; continue
-    if not re.search(rf'\bexport\s+(const|function|class)\s+{re.escape(sym)}\b', open(f).read()):
-        print(f"no export {sym} in {f}"); fails += 1
-print(f"failures={fails}")
-PY
-```
-
-Yielded `failures=0` as of 2026-05-21. A future PR can promote this into a `shell/tests/catalog-resolution.test.ts` regression guard if the rename-vs-folder pattern keeps confusing readers.
-
-### A2. Silent error swallowing across event bus — ✅ Closed (`0eb8bcc0` + this sweep)
-`let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Sites:
+### A2. Silent error swallowing across event bus — ✅ Closed (`0eb8bcc0` + `47f582a`)
+`let _ = bus.publish_plugin(...)` is the dominant pattern in plugin code. This violates the principle "never silently swallow exceptions". Worst sites:
 - ✅ `crates/nexus-security/src/core_plugin.rs:121,154,166` — **audit events** (fixed in `0eb8bcc0`)
-- ✅ `crates/nexus-storage/src/core_plugin.rs` — 6 state-change events in `publish_event` now routed through a `publish_storage_event` helper that warn-logs on bus failure.
-- ✅ `crates/nexus-notifications/src/core_plugin.rs:558` (inbox.appended) and `:681` (ai-runtime toast republish) — now warn-log on failure with the relevant context (inbox id / source).
-- ✅ `crates/nexus-mcp/src/core_plugin.rs:312` — `mcp.host.started` lifecycle event now warn-logs on failure.
-- ✅ `crates/nexus-bootstrap/src/crdt_publisher.rs:293` — orphan tmp-file `remove_file` failure now warn-logs with the tmp path (was the "tmp-file leakage hidden" case).
-- ✅ `crates/nexus-bootstrap/src/plugins/mod.rs:253` — `plugin_lifecycle_timeout` event now warn-logs on failure so observers know they missed the skip.
-
-The notifications watcher `tx.send(res)` at `:949` is intentionally left as-is: it is a `std::sync::mpsc` send from a `notify` callback to the same thread that owns `rx`; the only failure mode is `rx` having been dropped, which means the watcher thread has already exited. Logging there cannot reach anyone.
+- ✅ `crates/nexus-storage/src/core_plugin.rs:960,972,993,998,1009,1018` — 6 state-change events; now routed through `publish_storage_state_event` helper that `warn!`s on failure (`47f582a`).
+- ✅ `crates/nexus-notifications/src/core_plugin.rs:556,679,947` — inbox-appended + ai-runtime republish now warn; the notify-watcher `tx.send` is latched-warn (one log per disconnect episode) so callback storms don't spam (`47f582a`).
+- ✅ `crates/nexus-mcp/src/core_plugin.rs:312` — `mcp.host.started` lifecycle event now warns on publish failure (`47f582a`).
+- ✅ `crates/nexus-bootstrap/src/crdt_publisher.rs:293` — tmp-file cleanup-after-rename-failure now logs the leak instead of swallowing it (`47f582a`).
+- ✅ `crates/nexus-bootstrap/src/plugins/mod.rs:253` — `plugin_lifecycle_timeout` telemetry event publish failure now warns; this is the only out-of-band signal that the kernel degraded its plugin set (`47f582a`).
 
 ### A3. Data-loss `unwrap_or_default()` on serialization — ✅ Closed (`88f990cd`)
 - ✅ `crates/nexus-storage/src/bases/mod.rs:71,85` — now propagate `StorageError::CorruptFile`.
@@ -89,109 +75,80 @@ Three external-process clients held unbounded mpsc channels — a chatty LSP/DAP
 
 `try_send` over `send().await` chosen deliberately: the reader task also delivers responses through the pending-request map, so an awaited stall would wedge every outstanding request on the client.
 
-### A5. Workflow `run`/`run_digest` capability laundering (issue #77 still open)
-`cap_matrix.toml:1625,1631` — both unrestricted. A caller with no caps can compose a workflow that internally chains capability-gated handlers; each step is checked, but the *aggregation* of side effects is not. Track A audit flag still live.
+### A5. Workflow `run`/`run_digest` capability laundering — ⚠️ observability shipped, kernel enforcement deferred (issue #77 still open)
+Original finding: `cap_matrix.toml:1625,1631` — both unrestricted. A caller with no caps can compose a workflow that internally chains capability-gated handlers; each step is checked against the *workflow plugin's* caps (`IpcCall + AiChat + AiRuntimeSubmit`), not the caller's. The net effect is laundering: a caller with no `ai.chat` can drive an `ai_prompt` step that reaches `com.nexus.ai::ask`, gaining the workflow plugin's `AiChat` cap through composition.
 
-### A6. Direct Tauri `invoke()` from non-host code — already tracked by WI-25 drain
-On re-verification, every file cited here is **already on the documented `@tauri-apps/*` import allowlist** in `shell/tests/plugin-import-hygiene.test.ts`, with a per-file rationale and a drain plan (WI-25). The import-hygiene test fails CI if a new plugin file outside the allowlist imports from `@tauri-apps/*` — i.e. the architecture is already enforced, the listed files are the historical exception set.
+**Shipped in this PR:**
+- A new `nexus_workflow::implied_caps` module computes the **implied caller-cap set** for a parsed workflow by mapping each step type to the caps the target handler would require (`ai_prompt`/`ai_decision` → `ai.chat`; `terminal` → `process.spawn`; `noop`/`notify` → nothing extra; `ipc`/`ipc_call` → free-form target recorded but cap not statically known). Sorted, de-duplicated output.
+- `compute_implied_caps()` runs at the entry of both `workflow::run` (over the workflow file) and `workflow::run_digest` (constant `ai.chat`). The result is logged as `tracing::warn!(audit = true, …)` with the workflow name, step count, implied cap set, and `ipc` targets — so the laundering surface is **observable** in audit/tracing output on every invocation.
+- A `validate_declared_caps()` helper compares an author-declared cap list against the computed implied set and returns the missing caps — shipped as a building block for the follow-up that adds `[workflow].required_caps` to the file schema. Not wired into the run handler yet; only the unit-tested function is shipped.
+- `cap_matrix.toml`'s AUDIT comment for both rows updated to describe the observability path and the residual design gap.
 
-The current allowlist entries that correspond to the audit's table:
+**Residual gap (not in this PR):** kernel-level enforcement that requires the caller of `workflow::run` to hold the union of implied caps. This needs the `cap_policies` mechanism in `nexus-bootstrap::cap_policies` to be made forge-root-aware so a policy closure can read the workflow file on dispatch — a moderate refactor of the policy table architecture. Tracked under issue #77.
 
-| File | Allowlist rationale |
-|------|---------------------|
-| `core/capabilityPrompt/requestConsent.ts` | WI-31 shell-internal: get/set_plugin_granted_capabilities |
-| `core/settings/SettingsPanelView.tsx` | shell-internal: kernel_invoke (kernel-bridge calls) |
-| `nexus/launcher/launcherState.ts` | shell-internal: get/write/forget shell_state (recents) |
-| `nexus/pluginsMgmt/index.ts` | shell-internal: set_plugin_enabled |
-| `nexus/workspace/index.ts` | shell-internal: boot_kernel + init_forge + shutdown_kernel + plugin-dialog.open |
-| `nexus/workspace/useConnectionState.ts` | BL-140 Phase 3c shell-internal: kernel_connection_state read + event |
-| `nexus/notifications/index.ts` | BL-133 follow-up: `notify_desktop` — no `api.notifications.osLevel` surface yet |
-| `nexus/debugger/LaunchConfig.tsx` | BL-113 follow-up: `scan_plugin_directory` — no `api.plugins.dir` surface yet |
+### A6. Direct Tauri `invoke()` from non-host code — ⚠️ partially drained
+Per ADR 0011, only host code may call the Tauri bridge directly; plugins must route through `PluginAPI.kernel`. The audit listed ten bypass sites; the project's policy is the per-file allowlist in `shell/tests/plugin-import-hygiene.test.ts`, which fails the test suite on any *new* direct `@tauri-apps/*` import outside that list. Each allowlist entry carries a comment explaining why it stays.
 
-The audit's additional mention of `shell/src/plugins/nexus/ai/marginApi.ts` and `marginSuggest.ts` is a false positive — both use `api.kernel.invoke(...)` (the PluginAPI route), not `import { invoke } from '@tauri-apps/api/core'`. Grep for the literal string `invoke` will hit both; grep for the import shows neither file in the violation set.
+Status of the original ten sites:
+- ✅ `shell/src/plugins/nexus/ai/marginApi.ts` + `marginSuggest.ts` — both files no longer import from `@tauri-apps/*`; all calls route through `api.kernel.invoke`. (Closed before this audit was reviewed.)
+- ✅ `shell/src/plugins/core/settings/SettingsPanelView.tsx` — the three `invoke('kernel_invoke', …)` calls were migrated to `api.kernel.invoke(...)` (`api` was already in scope at all three sites via `props.api` / `FilesLinksTab` / `KeychainTab`). The file stays in the allowlist only because of the unrelated `openDialog` import from `@tauri-apps/plugin-dialog` (theme-file picker — drains when `PlatformDialog.open()` is added).
+- ⚠️ `shell/src/plugins/core/capabilityPrompt/requestConsent.ts` — `get_plugin_granted_capabilities` / `set_plugin_granted_capabilities`. Pre-kernel-boot consent storage; legitimately shell-internal (consent must be resolved before the kernel can be booted with the granted-cap set).
+- ⚠️ `shell/src/plugins/nexus/workspace/index.ts` — `boot_kernel` / `init_forge` / `shutdown_kernel` / `boot_remote`. Shell-lifecycle ops with no kernel equivalent.
+- ⚠️ `shell/src/plugins/nexus/workspace/useConnectionState.ts` — `kernel_connection_state` + `listen('kernel:connection-state')`. State lives in the bridge layer; a kernel IPC wrapper would just forward to the same Tauri command.
+- ⚠️ `shell/src/plugins/nexus/launcher/launcherState.ts` — `get/write/forget_shell_state` for the recents list. Shell-managed metadata; no kernel surface.
+- ⚠️ `shell/src/plugins/nexus/pluginsMgmt/index.ts` — `set_plugin_enabled`. Shell-managed plugin enable/disable; pre-load.
+- ⚠️ `shell/src/plugins/nexus/notifications/index.ts` — `notify_desktop` for OS-level notifications. Could drain when `api.platform.notifications` or equivalent surface is added.
+- ⚠️ `shell/src/plugins/nexus/debugger/LaunchConfig.tsx` — `scan_plugin_directory` + `readTextFile` for resolving launch config schemas. Could drain when `api.plugins.dir` is added.
 
-So A6 is not "new violations to sweep" — it points at the existing WI-25 allowlist drain, which is per-file design work (new `api.notifications.osLevel`, `api.plugins.dir`, etc. surfaces) rather than a refactor pass. Keep the WI-25 list shrinking; do not add to it. AA-04 (`shell/src/shell/App.tsx:8` cross-plugin import) is genuinely open and tracked separately by the architecture-adherence audit.
+Two of ten sites closed outright; the remaining seven are documented exceptions enforced by `plugin-import-hygiene.test.ts`. Further drain blocked on adding API surface to `@nexus/extension-api` (PlatformDialog, PlatformNotifications, PluginsDir) — separate design work tracked under WI-25.
 
 ---
 
 ## B. Documentation drift
 
-### B1. `docs/0.1.2/ipc-handlers.md` is stale by 52 handlers
-Doc claims "~280 handlers"; `cap_matrix.toml` now has **332** (`grep -c "^\[\[handler\]\]"`).
+### B1. `docs/0.1.2/ipc-handlers.md` is stale by 52 handlers — ✅ Closed
+Doc claimed "~280 handlers"; matrix has **332**. Per-plugin counts diverged on `storage` (+12), `ai` (−2), `terminal` (−4), `agent` (+1), `mcp.host` (+1), `acp` (+1). Doc now reflects the live matrix and `scripts/check_ipc_docs_drift.sh` fails the build on regression (the counts table and every `## com.nexus.<plugin> (N)` section header are both checked). The drift script is wired into `scripts/check_ipc_drift.sh` so CI runs it on every PR.
 
-| Plugin | Doc | Actual | Δ |
-|---|---:|---:|---:|
-| storage | 60 | **72** | +12 |
-| ai | 28 | 26 | -2 |
-| terminal | 32 | 28 | -4 |
-| agent | 17 | 18 | +1 |
-| mcp.host | 11 | 12 | +1 |
-| acp | 7 | 8 | +1 |
+### B2. `docs/0.1.2/reference/audit-flags.md` largely stale — ✅ Closed
+Of 17 candidate rows in the 2026-05-21 doc, only 4 still reflect uncapped handlers in the matrix today (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`). The other 14 are already cap-gated — moved to a new "Closed since the 2026-05-21 audit" section in the same doc so promotion history stays visible. `mcp.host::call_tool` (newly present with an `# AUDIT:` comment) added to the live table. `scripts/check_ipc_docs_drift.sh` enforces: (a) every matrix handler whose row carries `# AUDIT:` or `internal = true` AND `unrestricted = …` appears in the live table; (b) no row in the live table is missing from the matrix's audit set; (c) no row in the closed-since table is still unrestricted in the matrix.
 
-The `cap_matrix_complete` test enforces handler→matrix but not matrix→doc; no drift script exists. Suggest extending `scripts/check_ipc_drift.sh` or `cap_matrix_complete` to compare doc counts.
+### B3. `docs/0.1.2/settings/hardcoded-rust.md` Dev-Config table is stale — ✅ Closed
+Audit estimate was "~15 stale rows". The row-by-row sweep against current code (B3 sweep, 2026-05-22) found the actual count was **72 of ~100 rows** — every stale row is now struck through in the doc with either the actual const name (when an already-named `const` exists at or near the cited line) or a "cite drifted" note (when the cite no longer points at anything meaningful).
 
-### B2. `docs/0.1.2/reference/audit-flags.md` largely stale
-Of 17 candidate rows, **only 3** still reflect uncapped handlers in `cap_matrix.toml` (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`). The other 14 (e.g. `security::set_secret`, `git::push`, `terminal::send_input`, `collab::start_relay`) are already cap-gated. Delete the stale rows; add `mcp.host::call_tool` (currently has `# AUDIT:` at `cap_matrix.toml:861` but no doc entry).
+29 rows remain live — these are the genuinely-still-inline magic literals worth promoting. The summary table at the bottom of `hardcoded-rust.md` was updated to reflect the new split (29 live vs 72 struck) and a sweep-completion note added.
 
-### B3. `docs/0.1.2/settings/hardcoded-rust.md` Dev-Config table is stale
-~15 rows describe constants that are already promoted to named `const`s in code (the "delete the row on promotion" workflow wasn't applied to refactor-driven promotions). Examples:
-- `nexus-mcp/core_plugin.rs:551` → moved to line 570, already named `MAX_TOOL_RESPONSE_BYTES`.
-- `nexus-editor/core_plugin.rs:2220` → moved to `handlers/transaction.rs:25`, already named.
-- `nexus-collab/{client,server}.rs` MAX_FRAME_BYTES / BROADCAST_CAPACITY — already named.
-- `nexus-ai/{vectorstore,rag,enrichment,indexing_daemon}.rs` — all already `pub const`.
-- `nexus-tui/app.rs:1820,1825` — already `AGENT_IPC_TIMEOUT` / `MODAL_AUTO_REJECT_TIMEOUT`.
+The "delete the row on promotion" workflow was the source of the drift — refactor-driven promotions skipped that step. No automated guard is added in this PR; `cargo clippy` already flags unused literals in some shapes, and the doc itself is a manual artifact.
 
-The genuinely-still-inline items (4 `for _ in 0..N` loops, the three `term.rs` durations, the `bge` model id) remain valid.
+### B4. `docs/0.1.2/settings/README.md` forge layout missing ≥9 paths — ✅ Closed
+README now lists the nine missing paths flagged by the audit (`.forge/comments/`, `.forge/templates/`, `.forge/agents/`, `.forge/digests/last_fired.json`, `.forge/skills/`, `.forge/ai-activity.log`, `.forge/.audio/models/`, `.forge/.editor/undo/{sha}.json`, `.forge/.gitignore` + `.gitattributes`) with the owning crate and file noted on each row.
 
-### B4. `docs/0.1.2/settings/README.md` forge layout missing ≥9 paths
-Code writes these `.forge/` paths the README doesn't list:
-- `.forge/comments/` (`nexus-comments/src/store.rs:62`)
-- `.forge/templates/` (`nexus-templates/src/registry.rs:61`)
-- `.forge/agents/` (`nexus-agent/src/memory.rs:40`)
-- `.forge/digests/last_fired.json` (`nexus-workflow/src/digests.rs:131`)
-- `.forge/skills/` (referenced from `nexus-mcp/src/server.rs:1180,1536`)
-- `.forge/ai-activity.log` (`nexus-ai/src/activity_log.rs:42`)
-- `.forge/.audio/models/` (`nexus-audio/src/config.rs:138`)
-- `.forge/.editor/undo/{hex}.json` (`nexus-editor/src/handlers/session.rs:336`)
-- `.forge/.gitignore` + `.gitattributes` (`nexus-cli/src/commands/crdt.rs:110,208`)
-
-Also: README mentions `.forge/acp.toml` as reserved but `nexus-acp` doesn't appear to load it. Two distinct `config.toml` files exist (`<forge>/.nexus/config.toml` for kernel, `<forge>/.forge/config.toml` for audio) — flag the collision.
+The `.forge/acp.toml` row was struck through with an explicit "intentionally absent — adapters arrive via `com.nexus.acp::register_server` (ADR 0027 §Phase 4)" annotation. The audit's flag about two `config.toml` files was addressed by adding an explicit note in the persistent-config-files table: kernel loads `<forge>/.nexus/config.toml` (`KernelConfig`), audio loads `<forge>/.forge/config.toml` (`AudioConfig`); distinct directories, distinct schemas, intentionally separate.
 
 ---
 
 ## C. Architectural smells
 
-### C1. Capability vocabulary has 7 singletons + asymmetric pairs
-Singletons (used by exactly one handler): `ai.config.write`, `ai.activity.write`, `ai.runtime.submit`, `audio.record`, `audio.synthesize`, `network.bind`, `security.audit.write`. Either too narrow (collapse `audio.record`/`audio.synthesize` → `audio.use`) or too late-bound (e.g. `security.audit.write` exists only for `clear_audit_log`). Worth a vocabulary-design pass.
+### C1. Capability vocabulary — singletons + asymmetric pairs — ✅ Closed (design rationale documented)
+The audit framed seven singletons (`ai.config.write`, `ai.activity.write`, `ai.runtime.submit`, `audio.record`, `audio.synthesize`, `network.bind`, `security.audit.write`) and three asymmetric `*.write`/no-`*.read` pairs (`ai.config`, `ai.activity`, `security.audit`) as a vocabulary cleanup opportunity. A row-by-row inspection of the per-cap rationale in `crates/nexus-plugin-api/src/capability.rs` showed both shapes are deliberate, not accidental — but the rationale lived only in doc comments inside the code, not in the operator-facing `capabilities.md`. The fix is to surface it.
 
-Read/write asymmetry: `ai.session.read`/`ai.session.write` and `notifications.inbox.read`/`write` are paired, but `ai.config.write`, `ai.activity.write`, `security.audit.write` have no `.read` peer (reads are unrestricted). Inconsistent shape; either consistently pair or document why.
+Shipped in this PR:
+
+- **`docs/0.1.2/capabilities.md` refreshed.** Total count corrected (30 → 33), the three caps missing from the inventory table added (`security.write`, `security.audit.write`, `network.bind`), risk classification list extended with the three missing entries, and the "Open questions (AUDIT flags)" section rewritten to point at the current 4-entry live list (was claiming several handlers were still uncapped that have since been gated).
+- **New "Design rationale" section** in `capabilities.md`. Two tables:
+   1. **Singletons gate by sensitivity, not by handler count.** Each singleton has a one-row entry explaining the threat model that warrants its own cap. The `audio.record` vs `audio.synthesize` row spells out why the audit's suggested collapse (`audio.use`) would force a worst-case grant for the TTS-only case.
+   2. **Read/write asymmetry: reads stay unrestricted when they don't leak secrets.** Each of the three asymmetric pairs (`ai::set_config`/`config`, `ai::activity_clear`/`activity_list`, `security::clear_audit_log`/`query_audit_log`) gets a row showing why the read side is unrestricted. The test articulated: writes are gated by sensitivity; reads are gated only when the read itself returns sensitive material.
+- **`cap_matrix.toml`** — `security::query_audit_log`'s `unrestricted = "…"` reason string extended with the sibling cross-reference + the asymmetry rationale (matching the existing `ai::activity_list` and `ai::config` rows that already documented their pairs).
+
+No code changes — no caps added, removed, or renamed. The vocabulary was already coherent; the design rationale is now visible at the operator-doc level.
 
 ### C2. Storage plugin handler surface (72) is the largest in the system
 `com.nexus.storage` is at 72 handlers vs the next-largest `nexus.git` at 38. Bases (15 verbs) + vector store (4) + entity graph (5) account for most growth. Consider splitting Bases into its own service plugin.
 
-### C3. AA-04 (shell→plugin dependency inversion) — ✅ Closed (already landed, doc was stale)
-On re-verification, `shell/src/shell/App.tsx` no longer imports from `plugins/nexus/workspace/workspaceStore`. The fix landed under tag P3-03 — see the in-source comment at `App.tsx:25-34`:
+### C3. AA-04 still open (shell→plugin dependency inversion)
+`shell/src/shell/App.tsx:8` still imports from `plugins/nexus/workspace/workspaceStore`. No fix landed.
 
-```ts
-// AA-04 / P3-03 — read `rootPath` from the shell-owned ContextKeyService
-// instead of importing `plugins/nexus/workspace/workspaceStore`. The
-// workspace plugin publishes the same value to context key
-// `nexus.workspace.rootPath` whenever its `setRoot` runs, so this is a
-// direct dep-inversion …
-```
-
-The imports at lines 8-9 (`../workspace/WorkspaceRenderer`, `../workspace/workspaceStore`) point at **host** code (`shell/src/workspace/`), not the plugin (`shell/src/plugins/nexus/workspace/`). Host-to-host imports are permitted; the dependency-inversion concern was about reaching into the plugin's internal zustand store from the shell. `App.tsx` is clean on that front.
-
-The stale row in `docs/0.1.2/architecture-adherence.md` is updated in the same commit.
-
-### C4. `nexus-workflow` and `nexus-skills` don't follow the `thiserror` convention — ✅ Closed (misread)
-On re-verification both claims are wrong:
-
-- **`nexus-workflow` uses `thiserror`** across 5 files: `parse.rs`, `registry.rs`, `cron.rs`, `condition.rs`, `executor.rs`.
-- **`nexus-skills` uses `thiserror`** across 5 files: `registry_index.rs`, `parse.rs`, `compose.rs`, `substitute.rs`, `registry.rs`.
-- The "every other service crate has `src/error.rs`" premise also doesn't hold. Of 15 surveyed service crates, only 7 have `src/error.rs` (`nexus-ai`, `nexus-git`, `nexus-editor`, `nexus-terminal`, `nexus-database`, `nexus-audio`, `nexus-storage`); 8 distribute their `thiserror::Error` derives across feature-grouped modules (`nexus-mcp`, `nexus-lsp`, `nexus-dap`, `nexus-acp`, `nexus-collab`, `nexus-comments`, `nexus-templates`, `nexus-notifications`, `nexus-agent` — plus `nexus-workflow` and `nexus-skills`). Both patterns coexist and neither is the codebase convention.
-
-If a future refactor wants to standardize on a centralized `error.rs`, that's a project-wide pass — not a workflow/skills-specific gap.
+### C4. `nexus-workflow` and `nexus-skills` don't follow the `thiserror` convention
+Every other service crate has `src/error.rs` with `#[derive(thiserror::Error)]`. These two use ad-hoc error types. Out-of-band.
 
 ### C5. Three deferred subsystems explicitly noted in code
 - **Workflow webhook trigger engine** — `nexus-workflow/src/core_plugin.rs:45` ("webhook is not yet wired")
@@ -206,76 +163,65 @@ All 63 catalog entries use `activationEvents: ['onStartup']`. No lazy activation
 ## D. Robustness gaps
 
 ### D1. `tokio::spawn` orphans (no JoinSet tracking) — ✅ Closed
-On re-inspection the audit's list is largely test code:
-
-- ✅ `nexus-remote/src/server.rs:158,166,179` — per-request handler spawns; now tracked via an `Arc<tokio::sync::Mutex<JoinSet<()>>>` plumbed through `serve()` → `dispatch_request()`. Aborted explicitly on serve return (EOF or transport error) so a slow `ipc_call` started just before client disconnect no longer keeps running for up to its full timeout. `JoinSet::Drop` also calls `abort_all`, so any early `?`-return cleans up.
-- ✅ `nexus-remote/src/server.rs:289` — already tracked since BL-140 in the `subscriptions: HashMap<sub_id, JoinHandle>` map; aborted by `event_unsubscribe`, by `abort_all` on transport error, and on serve return.
-- `nexus-workflow/src/core_plugin.rs:1396` (cited as `:1372` in the original audit — line offset drifted) — webhook per-connection spawns. Naturally bounded by `webhook::READ_TIMEOUT_MS = 5000ms`; the parent `webhook_accept_loop` is tracked in `scheduler_handles`. Adding a JoinSet here would be cosmetic given the 5 s hard bound, so it's intentionally left unchanged.
-- `nexus-kernel/src/context_impl.rs:1006` (cited as `:960`) — `tokio::spawn` inside the `cancel_token_timer_fire` test fixture (nearest `#[cfg(test)]` at line 645). Not production code.
-- `nexus-ai-runtime/src/core_plugin.rs:863` — inside `#[cfg(test)]` from line 767. Test fixture (`wait_for_blocks_until_worker_finishes`).
-- `nexus-ai-runtime/src/scheduler.rs:503` — inside `#[cfg(test)]` from line 362. Test fixture.
-
-After the remote-server fix, no remaining production-code spawn in the cited files lacks lifetime tracking.
+- ✅ `nexus-remote/src/server.rs` — the three per-request `dispatch_request` spawns (`ipc_call`, `event_subscribe`, `event_unsubscribe`) plus the long-lived subscription forwarder (already tracked via `subscriptions` map). The serve loop now owns a `tokio::task::JoinSet` scoped to the connection; `dispatch_request` spawns through it, the loop drains completed tasks each iteration, and shutdown awaits in-flight handlers for up to 2s before letting JoinSet's `Drop` abort the rest.
+- ✅ `nexus-workflow/src/core_plugin.rs` — the `webhook_accept_loop` per-connection spawn now feeds a JoinSet scoped to the accept loop. When the loop's owning `JoinHandle` (in `scheduler_handles`) is aborted on plugin `Drop`, the loop future drops, dropping the JoinSet and aborting every still-pending connection handler.
+- N/A `nexus-kernel/src/context_impl.rs:960`, `nexus-ai-runtime/src/core_plugin.rs:863`, `nexus-ai-runtime/src/scheduler.rs:503` — all three sites are inside `#[test]` / `#[tokio::test]` blocks (the audit conflated test-only spawns with production orphans). Test-local spawns die with the test runtime; no fix needed.
 
 ### D2. `Mutex::lock().expect()` in long-lived plugins — ✅ Closed
-- ✅ `nexus-collab/src/core_plugin.rs:317,370,391,421` — all 4 sites now route through a new `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. The relay slot is just an `Option<RunningRelay>`; its invariants are restored on the next `start_relay`/`stop_relay` edge, so recovering and continuing beats killing the plugin.
-- `nexus-terminal/src/core_plugin.rs:3008,3067` — both sites are inside the `#[cfg(test)] mod tests` block (test module starts at line 2016). `.expect("memory lock")` in test code is correct (panic = test failure), not in-scope for D2.
+- ✅ `nexus-collab/src/core_plugin.rs` (4 sites in the relay plugin) — all four now route through a `lock_relay()` helper that recovers via `into_inner()` on poison and emits a `tracing::warn!` so the poisoning is observable. The inner data is just `Option<RunningRelay>` (presence/absence; no cross-field invariants), so continuing on the recovered value is safe.
+- N/A `nexus-terminal/src/core_plugin.rs:3008,3067` — both sites are inside `mod tests { ... }`, where panicking on poison is the correct test-failure behaviour. No production code change needed.
 
-No remaining production `.expect()` on `Mutex::lock()` in either crate.
+### D3. Handlers don't log on error return — ✅ Closed (`a186308`)
+Spot-checked `crates/nexus-storage/src/handlers/{files,index,notes}.rs` and `nexus-ai/src/handlers/{ask,search}.rs`: **zero** `tracing::error/warn` calls. Errors are `?`-propagated; only the dispatcher logs them, losing handler-specific context.
 
-### D3. Handlers don't log on error return — ✅ Closed (dispatcher-level emit)
-The original finding was correct that handlers were silent on the error path, but slightly off on the second clause — the dispatcher *also* emitted no log; it only recorded a metrics counter. A handler-side sweep across ~332 handlers would have been a noisy, low-leverage change. Instead, `KernelPluginContext::ipc_call` (`crates/nexus-kernel/src/context_impl.rs`) now emits a single structured log on every Err exit, tuned by error class:
+Fixed by a two-layer change in `a186308`:
+1. **Chokepoint**: added a single `tracing::warn!` to `nexus_plugins::dispatch::exec_err`. Every service crate's `define_dispatch_helpers!`-generated `exec_err` delegates to this — one log line per handler error, workspace-wide (22 crates), carrying `plugin_id` and the reason string (which already includes the command name).
+2. **Reason-string enrichment** in the five flagged files so the central log carries handler-specific context:
+   - ✅ storage/handlers/files.rs — path on all sites, byte count on writes.
+   - ✅ storage/handlers/index.rs — path on `obsidian_base_query`; source path on `import_forge` plan/apply.
+   - ✅ storage/handlers/notes.rs — path on all `note_append` + `write_frontmatter` sites; key on frontmatter writes.
+   - ✅ ai/handlers/ask.rs — question length + limit on rag failure (length only — prompt may be sensitive).
+   - ✅ ai/handlers/search.rs — query length + limit + oversample on `semantic_search` and `entity_recall`.
 
-- `IpcError::CapabilityDenied` — skipped; `audit::log_capability_denied` already emits inside `ipc_call_inner`.
-- `IpcError::Cancelled` — `tracing::debug!`; normal user-initiated tear-down.
-- `IpcError::PluginCrashedDuringCall` — `tracing::error!`; handler panic or blocking-task join failure.
-- everything else (`Timeout`, `CommandNotFound`, `PluginNotFound`, `DispatcherUnavailable`, plugin-returned `PluginError`) — `tracing::warn!`.
-
-Each log line carries `caller` (the calling plugin id), `target`, `command`, `elapsed_ms`, and the error display. Handlers that want richer context (input path, args summary) can still layer `tracing::error!`/`warn!` at their own boundaries; this fix ensures the *baseline* observability for every dispatch.
+Privacy boundary: forge-relative paths and numeric args are logged; free-text user input (question, query) is logged by length only.
 
 ### D4. 5 un-flagged constants that look user-tunable — ✅ Closed
-All five are now documented in `docs/0.1.2/settings/hardcoded-rust.md` (`READ_TIMEOUT_MS` and the rest under "Buffer / message size caps"; the two terminal-drainer timings under "IPC + service timeouts" alongside the existing CLI term.rs rows):
+All five constants are now listed in `docs/0.1.2/settings/hardcoded-rust.md` under "Already-named constants worth promoting" (rows 7–11), each annotated with the suggested settings key and rationale. The summary count was bumped from 6 → 11.
 
-1. ✅ `nexus-workflow/src/webhook.rs:57` — `READ_TIMEOUT_MS: u64 = 5_000`
-2. ✅ `nexus-storage/src/watcher.rs:28` — `WATCHER_CHANNEL_BOUND: usize = 1024`
-3. ✅ `nexus-terminal/src/core_plugin.rs:1102-1103` — `DRAINER_PUMP_TIMEOUT_MS = 5`, `DRAINER_SLEEP_MS = 10`
-4. ✅ `nexus-terminal/src/memory.rs:38` — `DEFAULT_HISTORY_SAMPLES = 60`
-5. ✅ `nexus-storage/src/entity_index.rs:865` — `DESCRIPTION_FALLBACK_CAP = 240`
+The drive-by `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT = Duration::from_secs(120)` was also migrated to `nexus_types::constants::IPC_TIMEOUT_LONG` per the P5-01 standardisation — same value (120s), same call sites, just routed through the shared constant. The corresponding row in `hardcoded-rust.md`'s IPC-timeouts table was struck through with the migration note.
 
-✅ Side-fix: `nexus-workflow/src/digests.rs:49` no longer hardcodes `Duration::from_secs(120)` — now reads from `nexus_types::constants::IPC_TIMEOUT_LONG` per the P5-01 standardization. Same numeric value, but a workspace-wide adjustment of "long" IPC calls touches the digest pipeline too.
+No `settings.toml` schema work in this PR — promoting a row from "named but hardcoded" to "settings-backed" requires per-subsystem `Config` struct extension + serde defaults + docs, which the hardcoded-rust.md file explicitly tracks as separate downstream work.
 
 ### D5. Theming — 87 inline `style={{` files with hardcoded hex
 Worst offenders: `diagnostics/DiagnosticsPanelView.tsx` (16 hex codes), `dreamCycle/DreamCycleInboxView.tsx` (12), `templates/TemplatesView.tsx` (11). Most are defensive `var(--token, #fallback)` fallbacks (acceptable), but the absence of a centralized palette means `#3b82f6` accent, `#888` muted, `#2a2a2a` border, `#ef4444` error are duplicated across 5+ plugins.
 
 ---
 
-## E. Code-level TODOs worth promoting to issues — ✅ Closed (catalogued in todos.md §9)
+## E. Code-level TODOs worth promoting to issues
 
-All 8 entries are now surfaced in [`docs/0.1.2/reference/todos.md` §9 "Phase-named follow-ups"](../reference/todos.md) so they're discoverable from the structured TODO inventory rather than relying on a `grep TODO` of the codebase. The sandbox-context configuration entry is also in §2 (TypeScript SDK TODOs); the other 7 use named phase markers in their surrounding comments (e.g. `BL-XXX Phase 3.2`, `WI-25`, `Phase 2b`) but no inline `TODO` token, so they'd never surface to a static scan — that's the gap the audit was pointing at, and §9 closes it.
-
-| Location | Phase / WI |
+| Location | What |
 |---|---|
-| `packages/nexus-extension-api/src/sandbox/context.ts:41` | configuration bridge deferred |
-| `shell/src/host/ExtensionHost.ts:124` | BL-XXX Phase 3.2 — kernel-tier `dependsOn` distinction |
-| `shell/src/plugins/nexus/search/index.ts:55` | BL-XXX Phase 4.5 — Ctrl/Cmd+Shift+F binding |
-| `shell/src/registry/SnippetRegistry.ts:11` | snippet expansion path |
-| `shell/tests/plugin-import-hygiene.test.ts:40-77` | WI-25 drain (12 allowlist entries today) |
-| `crates/nexus-terminal/src/server.rs:462` | session-restart pre-command state |
-| `crates/nexus-plugins/src/contributions.rs:7-11` | ADR 0027 §Migration deprecation window |
-| `crates/nexus-remote/src/uri.rs` | BL-140 Phase 2b — SSH spawn |
+| `packages/nexus-extension-api/src/sandbox/context.ts:41` | `configuration` API deferred — sandboxed plugins have no config bridge |
+| `shell/src/host/ExtensionHost.ts:124` | BL-XXX Phase 3.2: kernel-tier `dependsOn` not yet distinguished from shell-tier |
+| `shell/src/plugins/nexus/search/index.ts:55` | Ctrl/Cmd+Shift+F → `nexus.searchPanel` not wired |
+| `shell/src/registry/SnippetRegistry.ts:11` | Snippet expansion not triggered (collision detection live) |
+| `shell/tests/plugin-import-hygiene.test.ts:40-50` | 6 core views allowlisted to bypass plugin API (WI-25 open) |
+| `crates/nexus-terminal/src/server.rs:462` | Session restart doesn't preserve pre-command state |
+| `crates/nexus-plugins/src/contributions.rs:7-11` | Legacy flat-TOML migration window still open |
+| `crates/nexus-remote/src/uri.rs` | Phase 2b client tests only — SSH spawn logic gated |
 
 ---
 
 ## Recommended punchlist (priority order)
 
-1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ **A2 closed (`0eb8bcc0` + `6c31b2b5`), A3 closed (`88f990cd`), D3 closed via dispatcher-level emit in `KernelPluginContext::ipc_call`.**
+1. ~~**A2 / A3 / D3** — sweep `let _ = .publish*` and `.unwrap_or_default()` on serialize/deserialize; add `tracing::warn!` everywhere data loss is currently silent.~~ ✅ All three closed (A2: `0eb8bcc0` + `47f582a`; A3: `88f990cd`; D3: `a186308`).
 2. ~~**A4** — bound the three protocol-client channels; same OOM class as the watcher fix.~~ ✅ Closed (`22aa9f88`).
-3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up. ~7-line fix once decided.~~ ✅ Closed on re-verification — finding was misread (see A1 above).
-4. ~~**A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Bundle with AA-04.~~ Already tracked by the WI-25 allowlist drain in `shell/tests/plugin-import-hygiene.test.ts`; A6 is not a new finding. AA-04 stays open separately.
-5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ Doc refresh landed (this sweep). A drift script is still a useful follow-up.
-6. **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`.
-7. ~~**D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.~~ **Both closed.** D2 via collab `relay_lock()` helper; D1 via `JoinSet` plumbed through `nexus-remote/server.rs::serve` (rest of the audit list was test code).
-8. **C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).
+3. ~~**A1** — reconcile catalog.ts with disk; either delete orphans or wire them up.~~ ✅ Closed (incidentally fixed by `legacyPluginIds` aliases + renamed imports during the intervening weeks; regression guard added in `shell/tests/catalog-disk-consistency.test.ts`).
+4. ⚠️ **A6** — sweep direct `invoke()` calls out of plugin code; route through PluginAPI. Partially drained — `marginApi.ts` + `marginSuggest.ts` cleaned before this audit, `SettingsPanelView.tsx`'s three `kernel_invoke` calls migrated to `api.kernel.invoke` in this PR. Seven sites remain as documented shell-internal exceptions in `shell/tests/plugin-import-hygiene.test.ts`; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
+5. ~~**B1 / B2 / B3 / B4** — refresh the four stale documents; add a `scripts/check_ipc_docs_drift.sh` to prevent regression.~~ ✅ All four closed (B1/B2/B4 in `53638d3`; B3 in this PR — 72 of ~100 Dev-Config rows struck through, 29 remain live).
+6. ⚠️ **A5** — issue #77; per-step caps aren't enough — design an aggregation rule for `workflow::run`. Observability + `compute_implied_caps()` + `validate_declared_caps()` helpers shipped in this PR; the audit-tagged `tracing::warn!` at workflow run entry makes the laundering surface visible. Kernel-side enforcement (forge-root-aware cap policy) remains the residual gap.
+7. ~~**D1 / D2** — wrap orphan spawns in `JoinSet`s; handle `Mutex` poisoning instead of `.expect()`.~~ ✅ Closed in this PR (`nexus-remote` + `nexus-workflow` JoinSets; `nexus-collab` `lock_relay()` helper with poison recovery + tracing).
+8. ~~**C1** — capability-vocabulary cleanup pass (singletons, read/write symmetry).~~ ✅ Closed in this PR — singletons and asymmetric pairs are deliberate (per-cap rationale was already in code doc-comments); design rationale now surfaced operator-side in `capabilities.md` with a two-table "Singletons gate by sensitivity" + "Reads stay unrestricted when they don't leak secrets" section. Doc also refreshed: count 30→33, missing caps added, stale audit-flags list aligned with the live `audit-flags.md`.
 
 None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/observability wins.
 
@@ -284,14 +230,15 @@ None of A–D are release-blocking; A2/A3/D3 are the most direct correctness/obs
 ## Changelog
 
 - **2026-05-21** — initial audit; A2 (audit plugin sites only), A3, and A4 closed in the same session. See `git log --grep "fix(security)\|fix(lsp,dap,acp)\|fix(storage,notifications,workflow)"`.
-- **2026-05-21 (later)** — A2 remaining sites closed (`6c31b2b5`): storage `publish_event` (6 events), notifications inbox.appended + ai-runtime toast republish, mcp.host.started lifecycle, bootstrap CRDT tmp-file cleanup, bootstrap `plugin_lifecycle_timeout` event.
-- **2026-05-21 (later)** — A1 closed via doc correction: catalog↔disk reconciliation script returned zero failures across all 63 entries. The original table misread the `legacyPluginIds` rename pattern and missed that the flagged "stub" plugins ship as `.tsx`, not `.ts`.
-- **2026-05-21 (later)** — A6 re-classified: every cited file is already on the WI-25 allowlist in `shell/tests/plugin-import-hygiene.test.ts` with a documented rationale; `ai/marginApi.ts` + `marginSuggest.ts` use `api.kernel.invoke` (false positive). A6 points at the existing WI-25 drain, not new violations.
-- **2026-05-21 (later)** — B1–B4 doc refresh landed: `ipc-handlers.md` counts re-derived from `cap_matrix.toml` (332 total, with the six drifted per-plugin counts and section headers corrected); `audit-flags.md` rewritten to reflect the three remaining `# AUDIT:` rows (workflow `run`, workflow `run_digest`, `mcp.host::call_tool`) with the historical promotions moved to their own section; `hardcoded-rust.md` strikethroughs added for ~11 rows whose target consts already exist (vectorstore/rag/enrichment/indexing_daemon/collab/mcp/editor/tui); `settings/README.md` forge layout adds 11 missing paths (`comments/`, `templates/`, `agents/`, `digests/last_fired.json`, `skills/`, `ai-activity.log`, `.audio/models/`, `.editor/undo/`, `.forge/.gitignore`, `.forge/config.toml`, `agents/<agent_id>/`), removes the ghost `acp.toml` row per ADR 0027 §Phase 4, and notes `.gitattributes` is forge-root.
-- **2026-05-21 (later)** — D3 closed: `KernelPluginContext::ipc_call` now emits a structured log on every Err exit (debug for Cancelled, error for PluginCrashedDuringCall, warn for everything else, skipped for CapabilityDenied which is already audited). Single point of emission covers all 332 handlers without churning per-crate code.
-- **2026-05-21 (later)** — D2 closed: collab relay-slot mutex now uses a `relay_lock()` helper that recovers via `PoisonError::into_inner` and warn-logs. Terminal sites flagged by the audit were in `#[cfg(test)] mod tests` — not in scope.
-- **2026-05-22** — D1 closed: `nexus-remote/server.rs::serve` now tracks per-request `ipc_call`/`event_subscribe`/`event_unsubscribe` spawns through an `Arc<Mutex<JoinSet<()>>>`, aborted explicitly on serve return and via `JoinSet::Drop`. Other audit sites were either already tracked (line 289 via subscriptions HashMap), bounded by `READ_TIMEOUT_MS` (workflow webhook), or test code (kernel + ai-runtime).
-- **2026-05-22** — D4 closed: 5 un-flagged constants added to `docs/0.1.2/settings/hardcoded-rust.md` (workflow webhook `READ_TIMEOUT_MS`, storage `WATCHER_CHANNEL_BOUND` + `DESCRIPTION_FALLBACK_CAP`, terminal `DRAINER_PUMP_TIMEOUT_MS` + `DRAINER_SLEEP_MS`, terminal memory `DEFAULT_HISTORY_SAMPLES`). Side-fix: `nexus-workflow/src/digests.rs::IPC_TIMEOUT` now sources from `nexus_types::constants::IPC_TIMEOUT_LONG`.
-- **2026-05-22** — C4 re-classified: both `nexus-workflow` and `nexus-skills` already use `thiserror` (5 files each); the "centralized `src/error.rs`" pattern isn't universal (7 of 15 surveyed crates have it; 8 distribute their derives). Both patterns coexist.
-- **2026-05-22** — E closed: all 8 code-level deferred-work sites surfaced in `docs/0.1.2/reference/todos.md` §9 "Phase-named follow-ups". They use named phase markers (e.g. `BL-XXX Phase 3.2`, `WI-25`, `Phase 2b`) but no inline `TODO` token, so they'd otherwise miss a static-scan inventory.
-- **2026-05-22** — C3/AA-04 re-classified: the dep-inversion fix landed under P3-03; `App.tsx` reads `rootPath` from the shell-owned ContextKeyService (`useContextKey('nexus.workspace.rootPath')`) and only imports host-side workspace modules. `architecture-adherence.md` AA-04 row marked resolved in the same commit.
+- **2026-05-22** — A2 remaining sites closed in `47f582a` (storage 6, notifications 3, mcp 1, bootstrap 2). A2 is now fully closed.
+- **2026-05-22** — D3 closed in `a186308` via a chokepoint `warn!` in `nexus_plugins::dispatch::exec_err` plus reason-string enrichment in the five audit-flagged files.
+- **2026-05-22** — A1 marked closed: every mismatch in the audit table was reconciled by intervening refactoring (`legacyPluginIds` aliases for `nexus.activityTimeline → nexus.activity` and `nexus.notion → nexus.notionImport`; rename of the `osObservability` import target; addition of `graph/globalIndex.ts`). A regression guard was added at `shell/tests/catalog-disk-consistency.test.ts` to prevent the catalog and disk from silently drifting back.
+- **2026-05-22** — A6 partially drained: the three `invoke('kernel_invoke', …)` calls in `SettingsPanelView.tsx` migrated to `api.kernel.invoke(...)` (the component already had `api` in scope at all three call sites). The two AI files flagged by the audit (`marginApi.ts`, `marginSuggest.ts`) had already been cleaned. Seven sites remain in the `plugin-import-hygiene.test.ts` allowlist as documented shell-internal exceptions; further drain needs new API surface (PlatformDialog.open, PlatformNotifications, PluginsDir).
+- **2026-05-22** — B1 / B2 / B4 closed: `ipc-handlers.md` counts table + section headers updated against current matrix (332 handlers, 23 plugins); `audit-flags.md` rewritten to list the 4 still-unrestricted handlers (`workflow::run`, `workflow::run_digest`, `ai::resolve_credentials`, `mcp.host::call_tool`) with a separate "Closed since" section for the 14 already-gated ones; `settings/README.md` forge-layout table extended with 9 missing paths plus an explicit note resolving the dual `config.toml` confusion. New `scripts/check_ipc_docs_drift.sh` checks both docs against the matrix and is wired into `scripts/check_ipc_drift.sh` for CI. B3 (`hardcoded-rust.md`) deferred — needs row-by-row code verification.
+- **2026-05-22** — D1 + D2 closed. D1: the per-request spawns in `nexus-remote::server::dispatch_request` and the per-connection spawn in `nexus-workflow::webhook_accept_loop` are now tracked in a `JoinSet` scoped to their owning accept loop / connection; drop of the future cascades aborts. D2: the four `nexus-collab` relay-slot `Mutex::lock().expect()` sites now go through a `lock_relay()` helper that recovers via `into_inner()` on poison and emits a `tracing::warn!`. Three of the audit's five D1 flags (`nexus-kernel/context_impl.rs:960`, `nexus-ai-runtime/core_plugin.rs:863`, `nexus-ai-runtime/scheduler.rs:503`) and both terminal D2 flags were inside test code (the audit's `grep -n` conflated test-only spawns/locks with production code) — left as-is.
+- **2026-05-22** — D4 closed. Five un-flagged tunable constants (`READ_TIMEOUT_MS`, `WATCHER_CHANNEL_BOUND`, `DRAINER_PUMP_TIMEOUT_MS` / `DRAINER_SLEEP_MS`, `DEFAULT_HISTORY_SAMPLES`, `DESCRIPTION_FALLBACK_CAP`) now appear in `hardcoded-rust.md`'s "Already-named constants worth promoting" section with the suggested settings key on each row. The drive-by `nexus-workflow/src/digests.rs:49` `IPC_TIMEOUT` was migrated to `nexus_types::constants::IPC_TIMEOUT_LONG` per P5-01.
+- **2026-05-22** — B3 closed: full row-by-row sweep of `hardcoded-rust.md`'s Dev Config tables. 72 of the original ~100 rows are now struck through with the actual const name (where one exists at the cited line) or a "cite drifted" note (where the cite no longer points anywhere meaningful); 29 rows remain live as genuine magic literals worth promoting. The audit's "~15 stale rows" estimate was 5× too low — most refactor-driven promotions skipped the "delete the row" step of the documented workflow.
+- **2026-05-22** — A5 partially closed (observability shipped; kernel enforcement deferred). New `nexus_workflow::implied_caps` module computes the implied caller-cap set per workflow (`ai_prompt` → `ai.chat`, `terminal` → `process.spawn`, etc.) and the run handler emits an audit-tagged `tracing::warn!` listing the set on every invocation of `workflow::run` and `workflow::run_digest`. `validate_declared_caps()` helper shipped as the building block for a future `[workflow].required_caps` schema field. `cap_matrix.toml` AUDIT comments rewritten to describe the observability path and the residual design gap. Full kernel-level enforcement (caller must hold the union of implied caps) needs `cap_policies` to be forge-root-aware — tracked under issue #77.
+- **2026-05-22** — C1 closed. `capabilities.md` refreshed (count 30→33; three missing caps added: `security.write`, `security.audit.write`, `network.bind`; stale audit-flags list aligned with the live `audit-flags.md`). New "Design rationale: granularity vs aggregation" section documents singletons-by-sensitivity and the reads-stay-unrestricted-when-they-don't-leak-secrets test. `cap_matrix.toml`'s `security::query_audit_log` row gains a sibling cross-reference matching the established pattern on `ai::activity_list` / `ai::config`. No code changes — vocabulary was already coherent; rationale is now visible at the operator-doc level.
+
+**All twelve audit items now have a status entry.** Closed-with-residual-gap items: A5 (observability shipped, kernel enforcement pending issue #77), A6 (3 of 10 sites drained, 7 documented exceptions). Everything else: ✅ Closed. The 2026-05-21 audit is complete.

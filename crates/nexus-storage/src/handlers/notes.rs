@@ -15,7 +15,7 @@ pub(crate) fn note_append(engine: &StorageEngine, args: &Value) -> Result<Value,
     let snippet = args
         .get("snippet")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("note_append: missing 'snippet' string".to_string()))?;
+        .ok_or_else(|| exec_err(format!("note_append '{path}': missing 'snippet' string")))?;
     // Path confinement is enforced by `read_file` and `write_file` via
     // `resolve_within` — absolute paths and `..` traversal are rejected
     // at the engine boundary (see issue #72). The `read_file` call
@@ -25,14 +25,17 @@ pub(crate) fn note_append(engine: &StorageEngine, args: &Value) -> Result<Value,
     let existing = match engine.read_file(&path) {
         Ok(bytes) => bytes,
         Err(crate::StorageError::FileNotFound(_)) => Vec::new(),
-        Err(e) => return Err(exec_err(format!("note_append: read: {e}"))),
+        Err(e) => return Err(exec_err(format!("note_append '{path}' read: {e}"))),
     };
-    let existing_text = std::str::from_utf8(&existing)
-        .map_err(|e| exec_err(format!("note_append: existing file is not valid UTF-8: {e}")))?;
+    let existing_text = std::str::from_utf8(&existing).map_err(|e| {
+        exec_err(format!(
+            "note_append '{path}': existing file is not valid UTF-8: {e}"
+        ))
+    })?;
     let combined = build_appended(existing_text, snippet);
     let meta = engine
         .write_file(&path, combined.as_bytes())
-        .map_err(|e| exec_err(format!("note_append: write: {e}")))?;
+        .map_err(|e| exec_err(format!("note_append '{path}' write: {e}")))?;
     to_value(&meta, "note_append")
 }
 
@@ -90,7 +93,7 @@ pub(crate) fn write_frontmatter(
     let key = args
         .get("key")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("write_frontmatter: missing 'key' string".to_string()))?
+        .ok_or_else(|| exec_err(format!("write_frontmatter '{path}': missing 'key' string")))?
         .to_string();
     // `value: null` removes the key (no-op when absent). Any other
     // type is rejected — we only round-trip scalars through the
@@ -100,15 +103,15 @@ pub(crate) fn write_frontmatter(
         Some(serde_json::Value::String(s)) => Some(s.clone()),
         Some(other) => {
             return Err(exec_err(format!(
-                "write_frontmatter: 'value' must be string or null, got {other:?}"
+                "write_frontmatter '{path}' key='{key}': 'value' must be string or null, got {other:?}"
             )))
         }
     };
     let current = std::fs::read_to_string(forge_root.join(&path))
-        .map_err(|e| exec_err(format!("write_frontmatter: read: {e}")))?;
+        .map_err(|e| exec_err(format!("write_frontmatter '{path}' key='{key}' read: {e}")))?;
     let next = crate::core_plugin::apply_frontmatter_edit(&current, &key, value.as_deref());
     engine
         .write_file(&path, next.as_bytes())
-        .map_err(|e| exec_err(format!("write_frontmatter: write: {e}")))?;
+        .map_err(|e| exec_err(format!("write_frontmatter '{path}' key='{key}' write: {e}")))?;
     Ok(serde_json::json!({ "ok": true }))
 }

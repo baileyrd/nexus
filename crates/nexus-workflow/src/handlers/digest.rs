@@ -26,6 +26,20 @@ pub(crate) async fn handle_run(
         .and_then(|v| v.as_str())
         .ok_or_else(|| exec_err("run_digest: missing 'kind'".into()))?;
     let kind = DigestKind::from_str(kind_str).map_err(exec_err)?;
+    // A5 (2026-05-21 audit) — same laundering tracker as workflow::run.
+    // The digest pipeline is fixed: it always reads
+    // `com.nexus.storage::query_files`/`read_file`, summarises via
+    // `com.nexus.ai::ask` (requires `ai.chat`), and writes the
+    // resulting markdown via `com.nexus.storage::write_file`. The
+    // implied caller-cap surface is therefore constant: `ai.chat`.
+    // Logging it here keeps `run_digest` consistent with
+    // `workflow::run` for the audit-trail story (issue #77).
+    tracing::warn!(
+        audit = true,
+        digest_kind = %kind_str,
+        implied_caps = ?["ai.chat"],
+        "workflow_run_digest: capability aggregation surface (issue #77 laundering tracker)"
+    );
     let cfg = cfg_handle
         .read()
         .map(|g| g.clone())

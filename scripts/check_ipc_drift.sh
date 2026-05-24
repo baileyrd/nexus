@@ -119,6 +119,13 @@ cargo test -p nexus-bootstrap --test ipc_topic_prefix_invariant --quiet
 echo "[drift] regenerating capability inventory (BL-137) …"
 cargo test -p nexus-security --test capability_inventory_emit --quiet
 
+# B1 / B2 of the 2026-05-21 gaps-and-inconsistencies audit: the
+# hand-maintained docs (ipc-handlers.md, audit-flags.md) must stay
+# in sync with cap_matrix.toml. The dedicated script below exits 1
+# on drift; we propagate via set -e.
+echo "[drift] checking IPC docs (ipc-handlers.md, audit-flags.md) against cap_matrix.toml …"
+"$SCRIPT_DIR/check_ipc_docs_drift.sh"
+
 echo "[drift] checking for uncommitted changes in generated trees …"
 TARGETS=(
     "packages/nexus-extension-api/src/generated"

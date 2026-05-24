@@ -33,7 +33,12 @@ pub(crate) async fn handle_semantic_search(
 
     let matches = rag::semantic_search(ctx, embedder.as_ref(), query, limit)
         .await
-        .map_err(|e| exec_err(format!("semantic_search: {e}")))?;
+        .map_err(|e| {
+            exec_err(format!(
+                "semantic_search (query_len={}, limit={limit}): {e}",
+                query.len()
+            ))
+        })?;
     Ok(serde_json::json!({ "matches": matches }))
 }
 
@@ -79,7 +84,12 @@ pub(crate) async fn handle_entity_recall(
     let oversample = limit.saturating_mul(5).max(20);
     let matches = rag::semantic_search(ctx, embedder.as_ref(), query, oversample)
         .await
-        .map_err(|e| exec_err(format!("entity_recall: {e}")))?;
+        .map_err(|e| {
+            exec_err(format!(
+                "entity_recall (query_len={}, limit={limit}, oversample={oversample}): {e}",
+                query.len()
+            ))
+        })?;
 
     let mut by_file: std::collections::BTreeMap<String, f32> = std::collections::BTreeMap::new();
     for hit in matches {

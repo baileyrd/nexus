@@ -80,6 +80,27 @@ pub(crate) fn prepare(
         }
     }
 
+    // A5 (2026-05-21 audit) — surface the workflow's implied
+    // capability set as an audit-tagged warn at run entry. Issue
+    // #77 laundering surface: each step is gated by the workflow
+    // plugin's caps, not the caller's, so a caller with no
+    // `ai.chat` can drive an `ai_prompt` step that reaches
+    // `com.nexus.ai::ask`. Logging the implied set here makes the
+    // laundering observable in audit / tracing output until the
+    // kernel-side enforcement (forge-root-aware cap policy)
+    // lands.
+    let implied = crate::implied_caps::compute_implied_caps(&workflow);
+    if !implied.is_empty() {
+        tracing::warn!(
+            audit = true,
+            workflow = %workflow.workflow.name,
+            step_count = workflow.steps.len(),
+            implied_caps = ?implied.caps,
+            ipc_targets = ?implied.ipc_targets,
+            "workflow_run: capability aggregation surface (issue #77 laundering tracker)"
+        );
+    }
+
     Some(Box::pin(async move {
         let ctx = ctx.ok_or_else(|| {
             exec_err("workflow plugin context not wired (bootstrap incomplete)".into())

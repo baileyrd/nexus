@@ -39,6 +39,11 @@ pub(crate) async fn handle_ask(
         ai_cfg.injection_policy,
     )
     .await
-    .map_err(|e| exec_err(format!("rag query failed: {e}")))?;
+    .map_err(|e| {
+        exec_err(format!(
+            "ask: rag query (question_len={}, limit={limit}): {e}",
+            question.len()
+        ))
+    })?;
     serde_json::to_value(&response).map_err(|e| exec_err(format!("ask: serialize: {e}")))
 }

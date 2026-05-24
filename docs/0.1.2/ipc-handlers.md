@@ -1,6 +1,6 @@
 # IPC Handler Reference
 
-> **As of:** 2026-05-21. Sourced verbatim from `crates/nexus-bootstrap/cap_matrix.toml` — every handler is required to appear there (`cap_matrix_complete` integration test). Per-handler descriptions and AUDIT flags are the matrix's own.
+> **As of:** 2026-05-22. Sourced verbatim from `crates/nexus-bootstrap/cap_matrix.toml` — every handler is required to appear there (`cap_matrix_complete` integration test). Per-handler descriptions and AUDIT flags are the matrix's own. The plugin-level counts in the table below are guarded by `scripts/check_ipc_docs_drift.sh`.
 
 ## Reading the tables
 

@@ -960,9 +960,24 @@ fn spawn_config_watcher(
         .name("nexus-notifications-watcher".to_string())
         .spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
+            // `send` fails only after the receiver loop below has
+            // exited (drops `rx`). That's a one-way terminal state for
+            // this watcher thread, so latch the warn — log once when
+            // it first happens, then stay silent for the remaining
+            // callbacks until the watcher itself is dropped.
+            let mut send_warned = false;
             let mut watcher = match notify::recommended_watcher(
                 move |res: notify::Result<notify::Event>| {
-                    let _ = tx.send(res);
+                    if let Err(err) = tx.send(res) {
+                        if !send_warned {
+                            tracing::warn!(
+                                %err,
+                                "notifications.toml: watcher event lost; \
+                                 receiver thread has exited"
+                            );
+                            send_warned = true;
+                        }
+                    }
                 },
             ) {
                 Ok(w) => w,

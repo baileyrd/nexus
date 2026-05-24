@@ -97,40 +97,40 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 | `crates/nexus-cli/src/commands/term.rs` | 126 | `Duration::from_millis(500)` | `SHUTDOWN_REQUEST_TIMEOUT_MS` |
 | `crates/nexus-terminal/src/core_plugin.rs` | 1102 | `5` ms | `DRAINER_PUMP_TIMEOUT_MS` — per-session PTY read timeout in the shared drainer loop |
 | `crates/nexus-terminal/src/core_plugin.rs` | 1103 | `10` ms | `DRAINER_SLEEP_MS` — back-off between drainer passes; full cycle ≈ `n_sessions × DRAINER_PUMP_TIMEOUT_MS + DRAINER_SLEEP_MS` |
-| `crates/nexus-editor/src/core_plugin.rs` | 42 | `Duration::from_secs(30)` | `STORAGE_IPC_TIMEOUT_SECS` |
-| `crates/nexus-skills/src/core_plugin.rs` | 188 | `Duration::from_secs(120)` | `INVOKE_AGENT_TIMEOUT_SECS` |
+~~| `crates/nexus-editor/src/core_plugin.rs` | 42 | `Duration::from_secs(30)` | `STORAGE_IPC_TIMEOUT_SECS` |~~ → cite drifted; the duration literal was inlined at a call site rather than promoted. Out of date — re-scan to a real magic-literal location before re-adding.
+~~| `crates/nexus-skills/src/core_plugin.rs` | 188 | `Duration::from_secs(120)` | `INVOKE_AGENT_TIMEOUT_SECS` |~~ → cite drifted; file no longer has a literal at this line.
 | `crates/nexus-lsp/src/client.rs` | 118 | `Duration::from_secs(10)` | `LSP_DEFAULT_REQUEST_TIMEOUT_SECS` |
 | `crates/nexus-lsp/src/client.rs` | 121 | `Duration::from_secs(30)` | `LSP_INITIALIZE_TIMEOUT_SECS` |
 | `crates/nexus-lsp/src/core_plugin.rs` | 311 | `Duration::from_secs(5)` | `LSP_SHUTDOWN_DEADLINE_SECS` |
-| `crates/nexus-remote/src/client.rs` | 32 | `Duration::from_secs(600)` | `REMOTE_DEFAULT_CALL_TIMEOUT_SECS` |
-| `crates/nexus-remote/src/server.rs` | 33 | `Duration::from_secs(600)` | `REMOTE_DISPATCH_TIMEOUT_SECS` |
-| `crates/nexus-remote/src/server.rs` | 37 | `Duration::from_secs(3600)` | `REMOTE_MAX_DISPATCH_TIMEOUT_SECS` |
+~~| `crates/nexus-remote/src/client.rs` | 32 | `Duration::from_secs(600)` | `REMOTE_DEFAULT_CALL_TIMEOUT_SECS` |~~ → already a `const DEFAULT_CALL_TIMEOUT` (shorter local name preferred over the doc's qualified suggestion).
+~~| `crates/nexus-remote/src/server.rs` | 33 | `Duration::from_secs(600)` | `REMOTE_DISPATCH_TIMEOUT_SECS` |~~ → already a `const DEFAULT_DISPATCH_TIMEOUT`.
+~~| `crates/nexus-remote/src/server.rs` | 37 | `Duration::from_secs(3600)` | `REMOTE_MAX_DISPATCH_TIMEOUT_SECS` |~~ → already a `const MAX_DISPATCH_TIMEOUT`.
 | `crates/nexus-acp/src/client.rs` | 119 | `Duration::from_secs(60)` | `ACP_REQUEST_TIMEOUT_SECS` |
 | `crates/nexus-acp/src/client.rs` | 122 | `Duration::from_secs(30)` | `ACP_INITIALIZE_TIMEOUT_SECS` |
-| `crates/nexus-acp/src/server.rs` | 44 | `Duration::from_secs(600)` | `ACP_DISPATCH_TIMEOUT_SECS` |
-| `crates/nexus-dap/src/client.rs` | 182 | `Duration::from_secs(10)` | `DAP_REQUEST_TIMEOUT_SECS` |
-| `crates/nexus-dap/src/client.rs` | 185 | `Duration::from_secs(20)` | `DAP_INITIALIZE_TIMEOUT_SECS` |
+~~| `crates/nexus-acp/src/server.rs` | 44 | `Duration::from_secs(600)` | `ACP_DISPATCH_TIMEOUT_SECS` |~~ → already a `const DEFAULT_DISPATCH_TIMEOUT`.
+~~| `crates/nexus-dap/src/client.rs` | 182 | `Duration::from_secs(10)` | `DAP_REQUEST_TIMEOUT_SECS` |~~ → already a `const DEFAULT_REQUEST_TIMEOUT` (cite drifted to L188).
+~~| `crates/nexus-dap/src/client.rs` | 185 | `Duration::from_secs(20)` | `DAP_INITIALIZE_TIMEOUT_SECS` |~~ → already a `const INITIALIZE_TIMEOUT` (cite drifted to L191).
 | `crates/nexus-dap/src/core_plugin.rs` | 342 | `Duration::from_secs(5)` | `DAP_SHUTDOWN_DEADLINE_SECS` |
 | `crates/nexus-mcp/src/core_plugin.rs` | 325 | `Duration::from_secs(5)` | `MCP_SHUTDOWN_DEADLINE_SECS` |
 | `crates/nexus-mcp/src/core_plugin.rs` | 327 | `Duration::from_millis(50)` | `MCP_POLL_INTERVAL_MS` |
 | `crates/nexus-mcp/src/client.rs` | 459 | `Duration::from_millis(500)` | `MCP_SHORT_CONNECT_TIMEOUT_MS` |
 | `crates/nexus-mcp/src/client.rs` | 569 | `Duration::from_millis(2_000)` | `MCP_RETRY_CONNECT_TIMEOUT_MS` |
-| `crates/nexus-agent/src/auto_notify.rs` | 27 | `Duration::from_secs(5)` | `AGENT_NOTIFY_TIMEOUT_SECS` |
-| `crates/nexus-agent/src/handlers/delegate.rs` | 78 | `Duration::from_secs(30)` | `AGENT_SUBMIT_TIMEOUT_SECS` |
-| `crates/nexus-agent/src/handlers/delegate.rs` | 88 | `Duration::from_secs(10_800)` | `AGENT_WAIT_FOR_TIMEOUT_SECS` (3h) |
+~~| `crates/nexus-agent/src/auto_notify.rs` | 27 | `Duration::from_secs(5)` | `AGENT_NOTIFY_TIMEOUT_SECS` |~~ → already a `const NOTIFY_IPC_TIMEOUT`.
+~~| `crates/nexus-agent/src/handlers/delegate.rs` | 78 | `Duration::from_secs(30)` | `AGENT_SUBMIT_TIMEOUT_SECS` |~~ → already a `const SUBMIT_TIMEOUT`.
+~~| `crates/nexus-agent/src/handlers/delegate.rs` | 88 | `Duration::from_secs(10_800)` | `AGENT_WAIT_FOR_TIMEOUT_SECS` (3h) |~~ → already a `const WAIT_FOR_TIMEOUT`.
 | `crates/nexus-agent/src/handlers/shared.rs` | 26 | `Duration::from_secs(60)` | `AGENT_DEFAULT_TOOL_TIMEOUT_SECS` |
 | `crates/nexus-agent/src/handlers/shared.rs` | 29 | `Duration::from_secs(300)` | `AGENT_DEFAULT_CHAT_TIMEOUT_SECS` |
-~~| `crates/nexus-tui/src/app.rs` | 1820 | `Duration::from_secs(600)` | `TUI_AGENT_IPC_TIMEOUT_SECS` |~~ → already `nexus_tui::app::AGENT_IPC_TIMEOUT` (`app.rs:1821`).
-~~| `crates/nexus-tui/src/app.rs` | 1825 | `Duration::from_secs(1800)` | `TUI_MODAL_AUTO_REJECT_TIMEOUT_SECS` |~~ → already `nexus_tui::app::MODAL_AUTO_REJECT_TIMEOUT` (`app.rs:1826`).
+~~| `crates/nexus-tui/src/app.rs` | 1820 | `Duration::from_secs(600)` | `TUI_AGENT_IPC_TIMEOUT_SECS` |~~ → already a `const AGENT_IPC_TIMEOUT` (file-local; line drifted to 1822).
+~~| `crates/nexus-tui/src/app.rs` | 1825 | `Duration::from_secs(1800)` | `TUI_MODAL_AUTO_REJECT_TIMEOUT_SECS` |~~ → already a `const MODAL_AUTO_REJECT_TIMEOUT` (file-local; line drifted to 1828).
 | `crates/nexus-ai/src/vectorstore.rs` / `rag.rs` / `tools/functions.rs` / `generate_docs.rs` | various | mostly `Duration::from_secs(30)` | shared `AI_STORAGE_IPC_TIMEOUT_SECS` |
-| `crates/nexus-ai/src/tools/mcp_bridge.rs` | 44 | `Duration::from_secs(5)` | `AI_MCP_DISCOVERY_TIMEOUT_SECS` |
-| `crates/nexus-ai/src/tools/mcp_bridge.rs` | 49 | `Duration::from_secs(60)` | `AI_MCP_CALL_TIMEOUT_SECS` |
+~~| `crates/nexus-ai/src/tools/mcp_bridge.rs` | 44 | `Duration::from_secs(5)` | `AI_MCP_DISCOVERY_TIMEOUT_SECS` |~~ → already a `const MCP_DISCOVERY_TIMEOUT`.
+~~| `crates/nexus-ai/src/tools/mcp_bridge.rs` | 49 | `Duration::from_secs(60)` | `AI_MCP_CALL_TIMEOUT_SECS` |~~ → already a `const MCP_CALL_TIMEOUT`.
 | `crates/nexus-bootstrap/src/storage.rs` / `terminal.rs` / `database.rs` / `remote.rs` | 25-32 | `Duration::from_secs(30)` | shared `BOOTSTRAP_IPC_TIMEOUT_SECS` |
-| `crates/nexus-bootstrap/src/dream_cycle.rs` | 61 | `Duration::from_secs(120)` | `DREAM_CYCLE_IPC_TIMEOUT_SECS` |
-| `crates/nexus-bootstrap/src/crdt_publisher.rs` | 47 | `Duration::from_millis(250)` | `CRDT_PULL_LANDING_TICK_MS` |
+~~| `crates/nexus-bootstrap/src/dream_cycle.rs` | 61 | `Duration::from_secs(120)` | `DREAM_CYCLE_IPC_TIMEOUT_SECS` |~~ → already a `const IPC_TIMEOUT`; consider migrating to `nexus_types::constants::IPC_TIMEOUT_LONG` per the P5-01 standardisation (matches the D4 digests.rs migration).
+~~| `crates/nexus-bootstrap/src/crdt_publisher.rs` | 47 | `Duration::from_millis(250)` | `CRDT_PULL_LANDING_TICK_MS` |~~ → already a `const PULL_LANDING_TICK`.
 | `crates/nexus-bootstrap/src/{lsp,mcp,dap,acp}_contribution_wiring.rs` | ~28 each | `Duration::from_secs(5)` | shared `PROTO_REGISTER_TIMEOUT_SECS` |
 | `crates/nexus-bootstrap/src/agent.rs` | 27, 32 | `60` / `300` s | `AGENT_DEFAULT_TOOL_TIMEOUT_SECS` / `_CHAT_TIMEOUT_SECS` |
-| `crates/nexus-workflow/src/digests.rs` | 49 | `Duration::from_secs(120)` | `DIGEST_IPC_TIMEOUT_SECS` |
+~~| `crates/nexus-workflow/src/digests.rs` | 49 | `Duration::from_secs(120)` | `DIGEST_IPC_TIMEOUT_SECS` |~~ → `nexus_types::constants::IPC_TIMEOUT_LONG` (D4 migration).
 
 ### Connection pool backoff
 
@@ -142,54 +142,56 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 
 ### Buffer / message size caps
 
+> **B3 sweep (2026-05-22):** rows that already became named `const`s in code are struck through with the actual name noted. The remaining live rows are the ones still inline.
+
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
-~~| `crates/nexus-collab/src/client.rs` | 72 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |~~ → already `nexus_collab::client::MAX_FRAME_BYTES`.
-~~| `crates/nexus-collab/src/server.rs` | 40 | `1024` | `BROADCAST_CAPACITY` |~~ → already `nexus_collab::server::BROADCAST_CAPACITY`.
-~~| `crates/nexus-collab/src/server.rs` | 45 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |~~ → already `nexus_collab::server::MAX_FRAME_BYTES`.
+~~| `crates/nexus-collab/src/client.rs` | 72 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |~~ → already a `const MAX_FRAME_BYTES`.
+~~| `crates/nexus-collab/src/server.rs` | 40 | `1024` | `BROADCAST_CAPACITY` |~~ → already a `const BROADCAST_CAPACITY`.
+~~| `crates/nexus-collab/src/server.rs` | 45 | `16 * 1024 * 1024` | `MAX_FRAME_BYTES` |~~ → already a `const MAX_FRAME_BYTES`.
 | `crates/nexus-collab/src/reconnect_client.rs` | 305 | `16 * 1024 * 1024` | (already explicit in ws_config) |
-| `crates/nexus-formats/src/notion/database.rs` | 14 | `256` | `SAMPLE_LIMIT` |
-| `crates/nexus-formats/src/markdown/frontmatter.rs` | 15 | `256 * 1024` | `MAX_FRONTMATTER_BYTES` |
-| `crates/nexus-formats/src/markdown/embed.rs` | 10 | `10` | `MAX_EMBED_DEPTH` |
-| `crates/nexus-formats/src/util/filename.rs` | 6 | `255` | `MAX_FILENAME_BYTES` |
-| `crates/nexus-formats/src/util/filename.rs` | 9 | `260` | `MAX_PATH_BYTES` |
-| `crates/nexus-formats/src/canvas/mod.rs` | 20 | `50 * 1024 * 1024` | `MAX_CANVAS_BYTES` |
-| `crates/nexus-formats/src/canvas/mod.rs` | 26 | `100_000` | `MAX_CANVAS_ELEMENTS` |
-~~| `crates/nexus-mcp/src/core_plugin.rs` | 551 | `4 * 1024 * 1024` | `MAX_TOOL_RESPONSE_BYTES` |~~ → already `MAX_TOOL_RESPONSE_BYTES` at `core_plugin.rs:576`.
-~~| `crates/nexus-mcp/src/core_plugin.rs` | 552 | `1024` | `MAX_TOOL_RESPONSE_ITEMS` |~~ → already `MAX_TOOL_RESPONSE_ITEMS` at `core_plugin.rs:577`.
-~~| `crates/nexus-editor/src/core_plugin.rs` | 2220 | `16 * 1024 * 1024` | `MAX_TRANSACTION_BYTES` |~~ → already `MAX_TRANSACTION_BYTES` at `handlers/transaction.rs:25`.
-~~| `crates/nexus-editor/src/core_plugin.rs` | 923 | `500` ops | `UNDO_PERSIST_MAX_OPS` |~~ → already `UNDO_PERSIST_MAX_OPS` at `handlers/session.rs:291`.
-| `crates/nexus-lsp/src/transport.rs` | 127 | `16 * 1024 * 1024` | `MAX_BODY_BYTES` |
-| `crates/nexus-remote/src/transport.rs` | 21 | `16 * 1024 * 1024` | `MAX_LINE_BYTES` |
-| `crates/nexus-acp/src/transport.rs` | 25 | `16 * 1024 * 1024` | `MAX_LINE_BYTES` |
-| `crates/nexus-dap/src/transport.rs` | 58 | `16 * 1024 * 1024` | `MAX_BODY_BYTES` |
-| `crates/nexus-storage/src/code_index.rs` | 147 | `200` | `DEFAULT_QUERY_LIMIT` |
-| `crates/nexus-storage/src/find_replace.rs` | 53 | `200` | `DEFAULT_MAX_FILES` |
-| `crates/nexus-storage/src/find_replace.rs` | 57 | `1_000` | `DEFAULT_MAX_RESULTS` |
-~~| `crates/nexus-ai/src/vectorstore.rs` | 72 | `4096` | `MAX_CHUNKS_PER_UPSERT` |~~ → already `pub const MAX_CHUNKS_PER_UPSERT`.
-~~| `crates/nexus-ai/src/vectorstore.rs` | 77 | `256 * 1024` | `MAX_CHUNK_TEXT_BYTES` |~~ → already `pub const MAX_CHUNK_TEXT_BYTES`.
-~~| `crates/nexus-ai/src/vectorstore.rs` | 83 | `12_288` | `MAX_EMBEDDING_DIM` |~~ → already `pub const MAX_EMBEDDING_DIM`.
-~~| `crates/nexus-ai/src/indexing_daemon.rs` | 46 | `32` | `DEFAULT_MAX_BATCH` |~~ → already `pub const DEFAULT_MAX_BATCH`.
-~~| `crates/nexus-ai/src/rag.rs` | 29 | `1024` | `DEFAULT_MAX_CHUNK_SIZE` |~~ → already `const DEFAULT_MAX_CHUNK_SIZE`.
-~~| `crates/nexus-ai/src/rag.rs` | 34 | `200` | `CITATION_EXCERPT_MAX_CHARS` |~~ → already `const CITATION_EXCERPT_MAX_CHARS`.
-| `crates/nexus-database/src/formula/eval.rs` | 105 | `64` | `MAX_RECURSION_DEPTH` |
+~~| `crates/nexus-formats/src/notion/database.rs` | 14 | `256` | `SAMPLE_LIMIT` |~~ → already a `const SAMPLE_LIMIT`.
+~~| `crates/nexus-formats/src/markdown/frontmatter.rs` | 15 | `256 * 1024` | `MAX_FRONTMATTER_BYTES` |~~ → already a `const MAX_FRONTMATTER_BYTES`.
+~~| `crates/nexus-formats/src/markdown/embed.rs` | 10 | `10` | `MAX_EMBED_DEPTH` |~~ → already a `const MAX_EMBED_DEPTH`.
+~~| `crates/nexus-formats/src/util/filename.rs` | 6 | `255` | `MAX_FILENAME_BYTES` |~~ → already a `const MAX_FILENAME_BYTES`.
+~~| `crates/nexus-formats/src/util/filename.rs` | 9 | `260` | `MAX_PATH_BYTES` |~~ → already a `const MAX_PATH_BYTES`.
+~~| `crates/nexus-formats/src/canvas/mod.rs` | 20 | `50 * 1024 * 1024` | `MAX_CANVAS_BYTES` |~~ → already a `const MAX_CANVAS_BYTES`.
+~~| `crates/nexus-formats/src/canvas/mod.rs` | 26 | `100_000` | `MAX_CANVAS_ELEMENTS` |~~ → already a `const MAX_CANVAS_ELEMENTS`.
+~~| `crates/nexus-mcp/src/core_plugin.rs` | 551 | `4 * 1024 * 1024` | `MAX_TOOL_RESPONSE_BYTES` |~~ → already a `const MAX_TOOL_RESPONSE_BYTES` (cite drifted to L576).
+~~| `crates/nexus-mcp/src/core_plugin.rs` | 552 | `1024` | `MAX_TOOL_RESPONSE_ITEMS` |~~ → already a `const MAX_TOOL_RESPONSE_ITEMS` (cite drifted to L577).
+~~| `crates/nexus-editor/src/core_plugin.rs` | 2220 | `16 * 1024 * 1024` | `MAX_TRANSACTION_BYTES` |~~ → moved to `crates/nexus-editor/src/handlers/transaction.rs:25` and already a `const MAX_TRANSACTION_BYTES`.
+~~| `crates/nexus-editor/src/core_plugin.rs` | 923 | `500` ops | `UNDO_PERSIST_MAX_OPS` |~~ → moved to `crates/nexus-editor/src/handlers/session.rs:291` and already a `const UNDO_PERSIST_MAX_OPS`.
+~~| `crates/nexus-lsp/src/transport.rs` | 127 | `16 * 1024 * 1024` | `MAX_BODY_BYTES` |~~ → already a `const MAX_BODY_BYTES`.
+~~| `crates/nexus-remote/src/transport.rs` | 21 | `16 * 1024 * 1024` | `MAX_LINE_BYTES` |~~ → already a `const MAX_LINE_BYTES`.
+~~| `crates/nexus-acp/src/transport.rs` | 25 | `16 * 1024 * 1024` | `MAX_LINE_BYTES` |~~ → already a `const MAX_LINE_BYTES`.
+~~| `crates/nexus-dap/src/transport.rs` | 58 | `16 * 1024 * 1024` | `MAX_BODY_BYTES` |~~ → already a `const MAX_BODY_BYTES`.
+~~| `crates/nexus-storage/src/code_index.rs` | 147 | `200` | `DEFAULT_QUERY_LIMIT` |~~ → already a `const DEFAULT_QUERY_LIMIT`.
+~~| `crates/nexus-storage/src/find_replace.rs` | 53 | `200` | `DEFAULT_MAX_FILES` |~~ → already a `const DEFAULT_MAX_FILES`.
+~~| `crates/nexus-storage/src/find_replace.rs` | 57 | `1_000` | `DEFAULT_MAX_RESULTS` |~~ → already a `const DEFAULT_MAX_RESULTS`.
+~~| `crates/nexus-ai/src/vectorstore.rs` | 72 | `4096` | `MAX_CHUNKS_PER_UPSERT` |~~ → already a `pub const MAX_CHUNKS_PER_UPSERT`.
+~~| `crates/nexus-ai/src/vectorstore.rs` | 77 | `256 * 1024` | `MAX_CHUNK_TEXT_BYTES` |~~ → already a `pub const MAX_CHUNK_TEXT_BYTES`.
+~~| `crates/nexus-ai/src/vectorstore.rs` | 83 | `12_288` | `MAX_EMBEDDING_DIM` |~~ → already a `pub const MAX_EMBEDDING_DIM`.
+~~| `crates/nexus-ai/src/indexing_daemon.rs` | 46 | `32` | `DEFAULT_MAX_BATCH` |~~ → already a `pub const DEFAULT_MAX_BATCH`.
+~~| `crates/nexus-ai/src/rag.rs` | 29 | `1024` | `DEFAULT_MAX_CHUNK_SIZE` |~~ → already a `pub const DEFAULT_MAX_CHUNK_SIZE`.
+~~| `crates/nexus-ai/src/rag.rs` | 34 | `200` | `CITATION_EXCERPT_MAX_CHARS` |~~ → already a `pub const CITATION_EXCERPT_MAX_CHARS`.
+~~| `crates/nexus-database/src/formula/eval.rs` | 105 | `64` | `MAX_RECURSION_DEPTH` |~~ → already a `const MAX_RECURSION_DEPTH`.
 | `crates/nexus-database/src/core_plugin.rs` | 235 | `10 * 1024 * 1024` | `MAX_CSV_IMPORT_BYTES` |
-| `crates/nexus-workflow/src/webhook.rs` | 54 | `16 * 1024` | `MAX_HEADER_BYTES` |
+~~| `crates/nexus-workflow/src/webhook.rs` | 54 | `16 * 1024` | `MAX_HEADER_BYTES` |~~ → already a `const MAX_HEADER_BYTES`.
 | `crates/nexus-workflow/src/webhook.rs` | 57 | `5_000` ms | `READ_TIMEOUT_MS` — caps webhook request read window; tighter values drop slow payloads, looser values broaden attack surface |
-| `crates/nexus-workflow/src/run_history.rs` | 30 | `200` | `RUN_HISTORY_CAP` |
+~~| `crates/nexus-workflow/src/run_history.rs` | 30 | `200` | `RUN_HISTORY_CAP` |~~ → already a `const RUN_HISTORY_CAP`.
 | `crates/nexus-storage/src/watcher.rs` | 28 | `1024` | `WATCHER_CHANNEL_BOUND` — bounded after `0bd9eabe`; queue depth before the watcher falls back to a reconcile pass |
 | `crates/nexus-storage/src/entity_index.rs` | 865 | `240` chars | `DESCRIPTION_FALLBACK_CAP` — UI-visible cap on auto-derived entity descriptions |
 | `crates/nexus-terminal/src/memory.rs` | 38 | `60` samples | `DEFAULT_HISTORY_SAMPLES` — ring-buffer depth for per-session memory rollups |
-| `crates/nexus-bootstrap/src/audit_sqlite.rs` | 14 | `1000` | `DEFAULT_QUERY_LIMIT` |
-~~| `crates/nexus-ai/src/enrichment.rs` | 63 | `1500` | `MAX_QUERY_CHARS` |~~ → already `const MAX_QUERY_CHARS`.
-~~| `crates/nexus-ai/src/enrichment.rs` | 69 | `200` | `MAX_SUMMARY_CHARS` |~~ → already `const MAX_SUMMARY_CHARS`.
+~~| `crates/nexus-bootstrap/src/audit_sqlite.rs` | 14 | `1000` | `DEFAULT_QUERY_LIMIT` |~~ → already a `const DEFAULT_QUERY_LIMIT`.
+~~| `crates/nexus-ai/src/enrichment.rs` | 63 | `1500` | `MAX_QUERY_CHARS` |~~ → already a `const MAX_QUERY_CHARS`.
+~~| `crates/nexus-ai/src/enrichment.rs` | 69 | `200` | `MAX_SUMMARY_CHARS` |~~ → already a `const MAX_SUMMARY_CHARS`.
 
 ### Vector embedding dimensions
 
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
-| `crates/nexus-ai/src/openai.rs` | 20 | `1536` (text-embedding-3-small) | `OPENAI_EMBEDDING_DIM` |
-| `crates/nexus-ai/src/ollama.rs` | 24 | `768` (nomic-embed) | `OLLAMA_EMBEDDING_DIM` |
+~~| `crates/nexus-ai/src/openai.rs` | 20 | `1536` (text-embedding-3-small) | `OPENAI_EMBEDDING_DIM` |~~ → already a `const EMBEDDING_DIMENSION = 1536` (file-local, drifted to ~L22).
+~~| `crates/nexus-ai/src/ollama.rs` | 24 | `768` (nomic-embed) | `OLLAMA_EMBEDDING_DIM` |~~ → cite drifted — that line is now `const DEFAULT_EMBEDDING_MODEL` (the model id), not the dim. Re-scan before re-adding.
 | `crates/nexus-ai/src/local_embedding.rs` | 284 | `768` (bge-base / nomic) | `LOCAL_EMBEDDING_DIM_BASE` |
 | `crates/nexus-ai/src/local_embedding.rs` | 286 | `384` (bge-small) | `LOCAL_EMBEDDING_DIM_SMALL` |
 
@@ -206,19 +208,19 @@ Most CLI subcommands declare their own ipc-call timeout as a per-file local. Man
 
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
-| `crates/nexus-notifications/src/lib.rs` | 84 | `".forge/notifications/inbox.db"` | `INBOX_DB_RELPATH` |
-| `crates/nexus-notifications/src/lib.rs` | 94 | `".forge/notifications.toml"` | `NOTIFICATIONS_CONFIG_RELPATH` |
+~~| `crates/nexus-notifications/src/lib.rs` | 84 | `".forge/notifications/inbox.db"` | `INBOX_DB_RELPATH` |~~ → already a `const INBOX_DB_RELPATH`.
+~~| `crates/nexus-notifications/src/lib.rs` | 94 | `".forge/notifications.toml"` | `NOTIFICATIONS_CONFIG_RELPATH` |~~ → cite line is now blank; the path moved into a constructor call. Re-scan before re-adding.
 | `crates/nexus-crdt/src/state.rs` | 106 | `".forge/.editor/crdt/{hex}.json"` | (computed) — split into `CRDT_STATE_DIR` |
 
 ### IPC plugin name literals
 
-These appear in many places — a shared `PLUGIN_IDS` module would centralize them.
+These appear in many places — a shared `PLUGIN_IDS` module would centralize them. **Note (B3 sweep 2026-05-22):** `crates/nexus-types/src/plugin_ids.rs` now exists and several callers route through it (e.g. `notifications::PLUGIN_ID = plugin_ids::NOTIFICATIONS`). The remaining row below for `nexus-mcp/src/server.rs` is the genuinely-still-inline cluster.
 
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
 | `crates/nexus-mcp/src/server.rs` | 29-41 | `"com.nexus.storage" / "...ai" / "...skills" / "...git" / "...security"` | `STORAGE_PLUGIN` / `AI_PLUGIN` / etc. |
-| `crates/nexus-notifications/src/core_plugin.rs` | 57 | `"com.nexus.notifications"` | `PLUGIN_ID` |
-| `crates/nexus-notifications/src/core_plugin.rs` | 74 | `"com.nexus.ai.runtime."` | `AI_RUNTIME_TOPIC_PREFIX` |
+~~| `crates/nexus-notifications/src/core_plugin.rs` | 57 | `"com.nexus.notifications"` | `PLUGIN_ID` |~~ → already a `pub const PLUGIN_ID = plugin_ids::NOTIFICATIONS`.
+~~| `crates/nexus-notifications/src/core_plugin.rs` | 74 | `"com.nexus.ai.runtime."` | `AI_RUNTIME_TOPIC_PREFIX` |~~ → already a `pub const AI_RUNTIME_TOPIC_PREFIX` (cite drifted to ~L85).
 | `crates/nexus-crdt/src/wire.rs` | 37 | `"com.nexus.editor.ops."` | `OPS_TOPIC_PREFIX` |
 | `crates/nexus-crdt/src/wire.rs` | 44 | `"com.nexus.editor.crdt.conflict."` | `CONFLICT_TOPIC_PREFIX` |
 
@@ -226,11 +228,11 @@ These appear in many places — a shared `PLUGIN_IDS` module would centralize th
 
 | File | Line | Value | Constant name |
 |------|------|-------|---------------|
-| `crates/nexus-plugins/src/host_fns.rs` | 24 | `-1001` | `HOST_CAPABILITY_DENIED` |
-| `crates/nexus-plugins/src/host_fns.rs` | 27 | `-1002` | `HOST_BUFFER_OVERFLOW` |
-| `crates/nexus-plugins/src/manifest.rs` | 1765 | `1024` | `MAX_REGISTRATIONS_PER_KIND` |
+~~| `crates/nexus-plugins/src/host_fns.rs` | 24 | `-1001` | `HOST_CAPABILITY_DENIED` |~~ → already a `const HOST_CAPABILITY_DENIED`.
+~~| `crates/nexus-plugins/src/host_fns.rs` | 27 | `-1002` | `HOST_BUFFER_OVERFLOW` |~~ → already a `const HOST_BUFFER_OVERFLOW`.
+~~| `crates/nexus-plugins/src/manifest.rs` | 1765 | `1024` | `MAX_REGISTRATIONS_PER_KIND` |~~ → already a `const MAX_REGISTRATIONS_PER_KIND`.
 | `crates/nexus-editor/src/block.rs` | 606 | `[0.3, 0.7]` | `DEFAULT_SPLIT_RATIOS` |
-| `crates/nexus-dap/src/core_plugin.rs` | 61 | `6` | `HANDLER_TERMINATE` |
+~~| `crates/nexus-dap/src/core_plugin.rs` | 61 | `6` | `HANDLER_TERMINATE` |~~ → already a `pub const HANDLER_TERMINATE: u32 = 6`.
 
 ---
 
@@ -244,6 +246,11 @@ Existing `const` declarations that are good named constants but should be expose
 4. `crates/nexus-collab/src/reconnect_client.rs:69-84` — `ReconnectConfig` — already struct, but constructor values are baked.
 5. `crates/nexus-formats/src/config/ai.rs:78-79` — `default_max_tokens()` / `default_temperature()` — already serde defaults; consolidate in a single config site.
 6. `crates/nexus-ai/src/local_embedding.rs:279-286` — `model_dimension()` hardcoded mapping — move to a model registry table.
+7. `crates/nexus-workflow/src/webhook.rs:57` — `READ_TIMEOUT_MS: u64 = 5_000` — webhook request read deadline. Tight enough that a slow-but-legitimate caller (proxied through a high-latency hop) gets dropped; surface as `[webhooks].read_timeout_ms` so operators can extend per environment. (D4 audit, 2026-05-21.)
+8. `crates/nexus-storage/src/watcher.rs:28` — `WATCHER_CHANNEL_BOUND: usize = 1024` — file-watcher event channel capacity (bounded in commit `0bd9eabe`). Tunable would let operators on very write-heavy forges raise the bound; surface as `[storage].watcher_channel_bound`. (D4 audit.)
+9. `crates/nexus-terminal/src/core_plugin.rs:1102-1103` — `DRAINER_PUMP_TIMEOUT_MS = 5` and `DRAINER_SLEEP_MS = 10` — PTY pump tuning. Hot-path values; the tracing comment at line 1099 already states the calculated worst-case latency. Surface as `[terminal].drainer_pump_timeout_ms` / `[terminal].drainer_sleep_ms` for operators tuning many-session forges. (D4 audit.)
+10. `crates/nexus-terminal/src/memory.rs:38` — `DEFAULT_HISTORY_SAMPLES: usize = 60` — process-monitor sample window (60 readings × poll interval). Affects how far back terminal memory pressure charts reach; surface as `[terminal].memory_history_samples`. (D4 audit.)
+11. `crates/nexus-storage/src/entity_index.rs:865` — `DESCRIPTION_FALLBACK_CAP: usize = 240` — character cap on entity-description fallback text shown in the UI when no explicit description is set. UI-visible — different forges might want a different feel. Surface as `[storage].entity_description_fallback_cap`. (D4 audit.)
 
 ---
 
@@ -252,8 +259,11 @@ Existing `const` declarations that are good named constants but should be expose
 | Track | Count |
 |-------|------:|
 | User Config | ~30 entries |
-| Dev Config | ~100 entries |
-| Already-named, surface as setting | 6 |
+| Dev Config — live | 29 entries |
+| Dev Config — struck (already a named `const` or cite drifted) | 72 entries |
+| Already-named, surface as setting | 11 |
+
+> **B3 sweep (2026-05-22).** The Dev Config tables were reviewed row-by-row against current code. 72 of the original ~100 rows are now struck through with the actual constant name (or drift note) inline. The 29 live rows are the ones still pointing at real magic literals at the cited line. The 2026-05-21 audit estimated "~15 stale rows"; the actual stale count was 5× that, mostly because refactor-driven promotions skipped the "delete the row" step of the documented workflow.
 
 ## Cross-references with shell side
 

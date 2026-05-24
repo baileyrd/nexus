@@ -925,7 +925,7 @@ unrestricted = "read-only list of keyring entry names (no values returned)"
 [[handler]]
 plugin = "com.nexus.security"
 command = "query_audit_log"
-unrestricted = "read-only audit log query"
+unrestricted = "read-only audit log query (sibling of clear_audit_log which is gated by security.audit.write — reads return metadata about what happened; truncation is the dangerous direction)"
 
 [[handler]]
 plugin = "com.nexus.security"
@@ -1619,19 +1619,27 @@ unrestricted = "rescans the forge for workflow files — read-only fs traversal"
 
 # AUDIT: drives arbitrary plugins via ipc_call (issue #77 laundering
 # surface — workflow's own caps are pinned to ipc.call + minimal
-# direct caps, but each step it dispatches is gated by the target
-# plugin's own cap requirements). Tracked under #77 and BL-134
-# Phase 3 (`async = true` steps).
+# direct caps including `ai.chat`, so a caller with no `ai.chat`
+# can reach `com.nexus.ai::ask` transitively via an `ai_prompt`
+# step). The handler emits an audit-tagged `tracing::warn!` at
+# run entry listing the workflow's implied caller-cap set (see
+# `nexus_workflow::implied_caps::compute_implied_caps`) so the
+# surface is observable even before kernel-level enforcement
+# lands. Full fix requires making the `cap_policies` mechanism
+# forge-root-aware so a policy closure can read the workflow file
+# on dispatch. Tracked under #77 and BL-134 Phase 3.
 [[handler]]
 plugin = "com.nexus.workflow"
 command = "run"
-unrestricted = "executes a workflow on demand — each step is gated by the target handler's caps (see issue #77)"
+unrestricted = "executes a workflow on demand — implied caller-cap set is audit-logged via nexus_workflow::implied_caps (see issue #77)"
 
-# AUDIT: same shape as run; cron-driven digest pipeline.
+# AUDIT: same shape as run; cron-driven digest pipeline. The
+# digest's implied caller-cap set is constant: `ai.chat` (the
+# AI summarisation call). Audit-logged on every run.
 [[handler]]
 plugin = "com.nexus.workflow"
 command = "run_digest"
-unrestricted = "runs the digest pipeline on demand — each step is gated by the target handler's caps (see issue #77)"
+unrestricted = "runs the digest pipeline on demand — fixed implied caller cap is `ai.chat`, audit-logged on every run (see issue #77)"
 
 # ─── com.nexus.dap — debug adapter host (BL-081) ─────────────────────
 

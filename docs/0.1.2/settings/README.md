@@ -31,7 +31,10 @@ Every TOML/JSON file the code reads at runtime as config (not test fixtures, not
 | **lsp.toml** | `<forge>/.forge/lsp.toml` | `LspHostConfig` — `nexus-lsp/src/config.rs:106` | `LspHostConfig::load` |
 | **dap.toml** | `<forge>/.forge/dap.toml` | `DapHostConfig` — `nexus-dap/src/config.rs:115` | `DapHostConfig::load` |
 | **config.toml** | `<forge>/.forge/config.toml` | Multi-section (`[audio]` `nexus-audio/src/config.rs:66`, `[collab]` `nexus-collab/src/core_plugin.rs:75`, `[digests]` `nexus-workflow/src/digests.rs:51`, `[notifications.*]`, `[mcp]`) | Per-section loader on each subsystem |
-| **kernel config.toml** | `<forge>/.nexus/config.toml` | `KernelConfig` — `nexus-kernel/src/config.rs:12` | `KernelConfig::load` — line 79 |
+| ~~**acp.toml**~~ | ~~`<forge>/.forge/acp.toml`~~ | `AcpHostConfig` — `nexus-acp/src/config.rs:81` | _no flat-TOML loader (ADR 0027 §Phase 4 — adapters arrive via `com.nexus.acp::register_server`)_ |
+| **kernel config.toml** | `<forge>/.nexus/config.toml` | `KernelConfig` — `nexus-kernel/src/config.rs:12` | `KernelConfig::load` — line 104 |
+
+> **Note on the two `config.toml` files:** the kernel loads `<forge>/.nexus/config.toml` while non-standalone subsystems (audio, collab, digests, …) load `<forge>/.forge/config.toml`. Distinct directories (`.nexus/` vs `.forge/`), distinct schemas; deliberately separate so the kernel's bootstrap doesn't need to know subsystem shape and vice versa. The duplicated filename is intentional and load-order-safe — keep both intact.
 
 Missing file ⇒ defaults returned (no error). Schemas at [`forge-config.md`](forge-config.md).
 
@@ -84,6 +87,7 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 | `.forge/mcp.toml` | MCP server registry | user / plugins |
 | `.forge/lsp.toml` | LSP server specs | user |
 | `.forge/dap.toml` | DAP adapter specs | user |
+| ~~`.forge/acp.toml`~~ | _intentionally absent — adapters arrive via `com.nexus.acp::register_server` (ADR 0027 §Phase 4)_ | — |
 | `.forge/notifications.toml` | Notification channels + routing | user |
 | `.forge/config.toml` | Multi-section TOML for non-standalone subsystems (`[audio]`, `[collab]`, `[digests]`, `[notifications.<channel>]`, `[mcp]`, …) | user / plugins |
 | `.forge/notifications/inbox.db` | SQLite inbox | `nexus-notifications/src/lib.rs:84` |
@@ -99,10 +103,19 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 | `.forge/digests/last_fired.json` | Last-fired timestamps for the digest scheduler | `nexus-workflow/src/digests.rs:131` |
 | `.forge/.audio/models/` | Whisper / local-audio model cache (override via `[audio] local_model_dir`) | `nexus-audio/src/config.rs:138` |
 | `.forge/.editor/crdt/` | CRDT conflict snapshots | `nexus-crdt/src/state.rs:106` |
-| `.forge/.editor/undo/<sha>.json` | Per-file persisted undo stacks | `nexus-editor/src/handlers/session.rs:336` |
+| `.forge/.editor/undo/{sha}.json` | Per-file editor undo history | `nexus-editor/src/handlers/session.rs:336` |
 | `.forge/.kernel/audit.db` | Audit log SQLite | `nexus-bootstrap::audit_sqlite` |
 | `.forge/kv.sqlite3` | KV store | `nexus-bootstrap/src/lib.rs:204` |
 | `.forge/plugins/` | Community WASM/JS bundles | manual install |
+| `.forge/comments/{relpath}.json` | Inline review comments (ADR 0017) | `nexus-comments/src/store.rs` |
+| `.forge/templates/` | User-authored note templates | `nexus-templates/src/registry.rs` |
+| `.forge/agents/{agent_id}/` | Agent transcript stores + FTS5 history (BL-121) | `nexus-agent/src/transcript_search.rs` |
+| `.forge/digests/last_fired.json` | Per-digest last-fire timestamp (cron persistence) | `nexus-workflow/src/digests.rs` |
+| `.forge/skills/` | Per-forge skill library (PRD-13) | `nexus-skills/src/registry.rs` |
+| `.forge/ai-activity.log` | Cross-surface AI activity log (JSON-lines) | `nexus-ai/src/activity_log.rs` |
+| `.forge/.audio/models/ggml-*.bin` | Local whisper / TTS models | `nexus-audio/src/local_backend.rs` |
+| `.forge/.gitignore` | CRDT/derived-state ignore rules (managed by `nexus crdt init`) | `nexus-cli/src/main.rs:1469` |
+| `.forge/.gitattributes` | CRDT merge driver registration | `nexus-cli/src/main.rs:1443` |
 | `.forge/logs/` | Runtime logs | bootstrap |
 | `.forge/temp/` | Transient | runtime |
 | `.forge/.lock` | Exclusive forge lock | `StorageEngine` |

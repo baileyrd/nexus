@@ -36,6 +36,7 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
+use nexus_types::constants::IPC_TIMEOUT_LONG;
 use serde::{Deserialize, Serialize};
 
 /// Default daily-digest cron — 09:00 UTC every day.
@@ -46,10 +47,10 @@ pub const DEFAULT_WEEKLY_CRON: &str = "0 9 * * 1";
 pub const DEFAULT_DIGESTS_DIR: &str = "Digests";
 
 /// Per-IPC timeout when calling storage / AI from the digest pipeline.
-/// Sources the shared P5-01 timeout bucket so a workspace-wide
-/// adjustment of "long" IPC calls touches this pipeline too — see
-/// `nexus_types::constants` for the four standard buckets.
-const IPC_TIMEOUT: Duration = nexus_types::constants::IPC_TIMEOUT_LONG;
+/// Uses the workspace-wide `IPC_TIMEOUT_LONG` (120s) per the P5-01
+/// IPC-timeout standardisation — operations here can block on model
+/// or large filesystem work.
+const IPC_TIMEOUT: Duration = IPC_TIMEOUT_LONG;
 
 /// Configuration loaded from `[digests]` in `<forge>/.forge/config.toml`.
 ///

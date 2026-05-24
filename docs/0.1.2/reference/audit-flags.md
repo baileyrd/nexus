@@ -1,36 +1,38 @@
 # AUDIT-flagged Handlers
 
-> Every `# AUDIT:` row in `crates/nexus-bootstrap/cap_matrix.toml`. These handlers preserve pre-BL-138 behaviour (any caller with `ipc.call` can dispatch) but the security author has flagged them as candidates for cap elevation. Each is a deliberate decision — promoting them is non-trivial because it requires deciding what cap to require and updating every existing caller's capability grant.
+> **As of:** 2026-05-22. Every still-unrestricted handler in `crates/nexus-bootstrap/cap_matrix.toml` that the security author has flagged as a candidate for cap elevation. Each is a deliberate decision — promoting one is non-trivial because it requires deciding what cap to require and updating every existing caller's capability grant.
+>
+> A regression guard (`scripts/check_ipc_docs_drift.sh`) compares this table to the matrix on every CI run and fails the build if either side drifts.
 
 ## Severity table
 
-| Handler | Concern | Suggested cap | Tracking |
-|---------|---------|---------------|----------|
-| `com.nexus.workflow::run` | Drives arbitrary plugins via `ipc_call` — each step is gated by the target handler's caps but the *aggregation* is not | per-step aggregation rule | issue #77 |
-| `com.nexus.workflow::run_digest` | Same shape as `run`, cron-driven via the digest pipeline | per-step aggregation rule | issue #77 |
-| `com.nexus.mcp.host::call_tool` | Invokes a tool on a previously-connected MCP server; side effects happen in the MCP server's own process. `connect` is `process.spawn`-gated, which restricts who could attach a server in the first place — this row preserves that posture but the host-side cap surface is still worth a second look | new `mcp.tool.call` or stack on `connect` | — |
+| Handler | Concern | Suggested cap |
+|---------|---------|---------------|
+| `com.nexus.ai::resolve_credentials` | Returns provider keyring material via the agent/audio call paths. Currently restricted at the trust layer via the matrix's `internal = true` marker (Core-trust callers only); promoting it to an explicit cap is still tracked. | in-tree-only marker (live) → future explicit cap |
+| `com.nexus.mcp.host::call_tool` | Invokes a tool on a previously-connected MCP server whose side effects (file writes, network calls) happen in the MCP server's own process. The `connect` spawn gate already restricts who could attach a server in the first place, so this preserves that posture. | track under MCP scoping work |
+| `com.nexus.workflow::run` | Drives arbitrary plugins via `ipc_call` — issue #77 "laundering surface". Each step it dispatches is still gated by the target handler's caps, but the *aggregation* of side effects across a multi-step workflow is not capped at the workflow boundary. | track per-step aggregation rule (issue #77, BL-134 Phase 3) |
+| `com.nexus.workflow::run_digest` | Same shape as `run`, cron-driven via the digest scheduler. | same as `run` |
 
-## Historical promotions (`# AUDIT:` removed in current matrix)
+## Closed since the 2026-05-21 audit
 
-| Handler | Now gated by | Removed in |
-|---------|--------------|------------|
-| `com.nexus.security::set_secret` | `caps = ["security.write"]` | P1-01 |
-| `com.nexus.security::delete_secret` | `caps = ["security.write"]` | P1-01 |
-| `com.nexus.security::clear_audit_log` | `caps = ["security.audit.write"]` | P1-01 |
-| `com.nexus.ai::resolve_credentials` | `internal = true` (Core-trust callers only) | P1-02 |
-| `com.nexus.terminal::send_input` | `caps = ["process.spawn"]` | P1-03 |
-| `com.nexus.terminal::send_raw_input` | `caps = ["process.spawn"]` | P1-03 |
-| `com.nexus.terminal::run_saved` | `caps = ["process.spawn"]` | P1-03 |
-| `com.nexus.terminal::adhoc_promote` | `caps = ["process.spawn"]` | P1-03 |
-| `com.nexus.terminal::repl_eval` | `caps = ["process.spawn"]` | P1-03 (BL-142) |
-| `com.nexus.git::push` | `caps = ["net.http"]` | P1-04 |
-| `com.nexus.git::push_tags` | `caps = ["net.http"]` | P1-04 |
-| `com.nexus.linkpreview::fetch` | `caps = ["net.http"]` | P1-05 |
-| `com.nexus.agent::delegate` | `caps = ["ai.chat"]` | P1-06 |
-| `com.nexus.agent::plan` | `caps = ["ai.chat"]` | P1-06 |
-| `com.nexus.collab::start_relay` | `caps = ["network.bind"]` | P1-07 (BL-143 Phase 2.3) |
+The following handlers were classified as `unrestricted` on 2026-05-21 and are now properly cap-gated in the matrix. No change to the suggested caps was needed — the migration was a `unrestricted = "…"` → `caps = […]` swap on each row:
 
-This table is informational — the canonical state is the absence of a `# AUDIT:` comment on the row in `cap_matrix.toml`.
+| Handler | Gate | When |
+|---------|------|------|
+| `com.nexus.security::set_secret` | `security.write` | pre-2026-05-22 |
+| `com.nexus.security::delete_secret` | `security.write` | pre-2026-05-22 |
+| `com.nexus.security::clear_audit_log` | `security.audit.write` | pre-2026-05-22 |
+| `com.nexus.terminal::send_input` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::send_raw_input` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::run_saved` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::adhoc_promote` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.terminal::repl_eval` | `process.spawn` | pre-2026-05-22 |
+| `com.nexus.git::push` | `net.http` | pre-2026-05-22 |
+| `com.nexus.git::push_tags` | `net.http` | pre-2026-05-22 |
+| `com.nexus.linkpreview::fetch` | `net.http` | pre-2026-05-22 |
+| `com.nexus.agent::delegate` | `ai.chat` | pre-2026-05-22 |
+| `com.nexus.agent::plan` | `ai.chat` | pre-2026-05-22 |
+| `com.nexus.collab::start_relay` | `network.bind` | pre-2026-05-22 |
 
 ## Tracking issues
 

@@ -58,7 +58,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   // truly needs a bespoke Tauri command, allow it in `shell/src/src-tauri/`
   // and document." A future WI may migrate some of these to kernel IPC.
   'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // shell-internal (WI-31): get/set_plugin_granted_capabilities
-  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // shell-internal: kernel_invoke (kernel-bridge calls)
+  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // plugin-dialog.open for the "load theme from file" picker (the three `kernel_invoke` calls were migrated to `api.kernel.invoke` in the A6 drain; this entry stays only because PlatformDialog has no `open()` surface yet)
   'shell/src/plugins/nexus/launcher/launcherState.ts',             // shell-internal: get/write/forget shell_state (recents)
   'shell/src/plugins/nexus/memory/index.ts',                       // BL-043: tauri-plugin-global-shortcut — no @nexus/extension-api global-hotkey surface yet
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
