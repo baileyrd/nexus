@@ -6,7 +6,7 @@ The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shel
 
 ## Architecture
 
-Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate. The Cargo workspace has 24 members; the most load-bearing are:
+Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate. The Cargo workspace has 35 members (the `shell/` desktop target is intentionally excluded — see [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for the full inventory); the most load-bearing are:
 
 ```
 nexus-kernel        Event bus, plugin lifecycle, capability enforcement, IPC dispatcher
@@ -24,9 +24,12 @@ nexus-types         Shared type definitions (leaf)
 ```
 
 Service plugins (each a `CorePlugin` registered by `nexus-bootstrap`):
-`nexus-agent`, `nexus-comments`, `nexus-database`, `nexus-editor`, `nexus-formats`,
-`nexus-git`, `nexus-kv`, `nexus-linkpreview`, `nexus-panic-log`, `nexus-skills`,
-`nexus-terminal`, `nexus-workflow`, plus `nexus-plugin-api` (SDK surface).
+`nexus-acp`, `nexus-agent`, `nexus-ai-runtime`, `nexus-audio`, `nexus-collab`,
+`nexus-comments`, `nexus-crdt`, `nexus-dap`, `nexus-database`, `nexus-editor`,
+`nexus-formats`, `nexus-git`, `nexus-kv`, `nexus-linkpreview`, `nexus-lsp`,
+`nexus-notifications`, `nexus-panic-log`, `nexus-remote`, `nexus-skills`,
+`nexus-templates`, `nexus-terminal`, `nexus-workflow`, plus `nexus-plugin-api`
+(SDK surface) and `nexus-fuzz` (fuzzing harness).
 See [`Cargo.toml`](Cargo.toml) for the authoritative list.
 
 The central concept is the **Forge** — a directory of markdown files that Nexus indexes, links, searches, and extends with AI. Files on disk are always the source of truth; the SQLite index is rebuildable.
