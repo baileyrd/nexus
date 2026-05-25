@@ -45,7 +45,7 @@ interface KernelBacklink {
   fragment?: unknown
 }
 
-function basename(relpath: string): string {
+export function basename(relpath: string): string {
   const i = relpath.lastIndexOf('/')
   return i === -1 ? relpath : relpath.slice(i + 1)
 }
@@ -53,7 +53,7 @@ function basename(relpath: string): string {
 /** Decode a kernel `Vec<BacklinkResult>` into our `Backlink[]`,
  *  filtering self-references (a file can in principle link to itself
  *  but the inspector is more useful when those are excluded). */
-function decode(raw: unknown, currentRelpath: string): Backlink[] {
+export function decode(raw: unknown, currentRelpath: string): Backlink[] {
   if (!Array.isArray(raw)) return []
   const out: Backlink[] = []
   for (const item of raw as KernelBacklink[]) {
