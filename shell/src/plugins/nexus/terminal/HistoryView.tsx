@@ -69,7 +69,7 @@ export function HistoryView(props: HistoryViewProps) {
   const rerun = useCallback(
     async (row: AdHocRecord) => {
       setLocalError(null)
-      const sessionId = useTerminalStore.getState().sessionId
+      const sessionId = useTerminalStore.getState().activeSessionId
       if (!sessionId) {
         focusTerminal()
         notifications.show({

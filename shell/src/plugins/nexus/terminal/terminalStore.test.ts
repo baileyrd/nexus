@@ -26,9 +26,9 @@ import {
 
 function reset(): void {
   const s = useTerminalStore.getState()
-  s.setSession(null)
   s.setVisible(false)
   s.setRecoverFn(null)
+  // resetStreams clears tabs, active id, streams and sinks.
   s.resetStreams()
 }
 
@@ -219,6 +219,86 @@ test('resetStreams: clears all per-session bookkeeping and sinks', () => {
   // After reset, a new chunk routes to nobody (sink was cleared).
   useTerminalStore.getState().handleStreamChunk('s1', chunk(1, [2]))
   assert.deepEqual(written, [[1]])
+})
+
+// ── tab management ───────────────────────────────────────────────────────────
+
+test('addTab: appends and activates; duplicate id only re-activates', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'Terminal 1' })
+  s().addTab({ id: 'b', title: 'Terminal 2' })
+  assert.deepEqual(
+    s().tabs.map((t) => t.id),
+    ['a', 'b'],
+  )
+  assert.equal(s().activeSessionId, 'b')
+  // Re-adding an existing id doesn't duplicate the tab; it re-activates.
+  s().addTab({ id: 'a', title: 'Terminal 1' })
+  assert.deepEqual(
+    s().tabs.map((t) => t.id),
+    ['a', 'b'],
+  )
+  assert.equal(s().activeSessionId, 'a')
+})
+
+test('removeTab: activates the left neighbour, then the right, then null', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'A' })
+  s().addTab({ id: 'b', title: 'B' })
+  s().addTab({ id: 'c', title: 'C' })
+  // Active is 'c'. Removing it falls back to the left neighbour 'b'.
+  s().removeTab('c')
+  assert.equal(s().activeSessionId, 'b')
+  assert.deepEqual(
+    s().tabs.map((t) => t.id),
+    ['a', 'b'],
+  )
+  // Remove the first tab while it's NOT active — active stays put.
+  s().setActiveSession('b')
+  s().removeTab('a')
+  assert.equal(s().activeSessionId, 'b')
+  // Removing the last remaining tab clears the active id.
+  s().removeTab('b')
+  assert.deepEqual(s().tabs, [])
+  assert.equal(s().activeSessionId, null)
+})
+
+test('removeTab: removing the leftmost active tab activates the new leftmost', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'A' })
+  s().addTab({ id: 'b', title: 'B' })
+  s().setActiveSession('a')
+  s().removeTab('a')
+  // No left neighbour — fall through to the tab now at that index.
+  assert.equal(s().activeSessionId, 'b')
+})
+
+test('renameTab: updates only the matching tab', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'A' })
+  s().addTab({ id: 'b', title: 'B' })
+  s().renameTab('a', 'renamed')
+  assert.equal(s().tabs.find((t) => t.id === 'a')?.title, 'renamed')
+  assert.equal(s().tabs.find((t) => t.id === 'b')?.title, 'B')
+  // Unknown id is a no-op.
+  s().renameTab('ghost', 'x')
+  assert.deepEqual(
+    s().tabs.map((t) => t.title),
+    ['renamed', 'B'],
+  )
+})
+
+test('resetStreams: clears tabs and active id too', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'A' })
+  s().resetStreams()
+  assert.deepEqual(s().tabs, [])
+  assert.equal(s().activeSessionId, null)
 })
 
 // ── subscribe / unsubscribe via api.kernel.on shape ─────────────────────────
