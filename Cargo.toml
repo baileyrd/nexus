@@ -39,6 +39,7 @@ members = [
     "crates/nexus-collab",
     "crates/nexus-memory",
     "crates/nexus-context",
+    "crates/nexus-protocol",
 ]
 
 [workspace.package]
