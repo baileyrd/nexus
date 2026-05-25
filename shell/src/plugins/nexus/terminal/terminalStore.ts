@@ -40,6 +40,13 @@ export interface OutputStreamPayload {
 export interface TerminalTab {
   id: string
   title: string
+  /**
+   * True once the user has manually renamed the tab. A pinned title is
+   * never overwritten by the auto-naming path (OSC title / cwd), so a
+   * deliberate name survives later shell-driven title changes. Cleared
+   * only by reverting to auto-naming (not currently exposed in the UI).
+   */
+  custom: boolean
 }
 
 /** Function the per-session xterm registers; receives raw PTY bytes. */
@@ -81,8 +88,12 @@ interface TerminalState {
   sinks: Record<string, SessionSink>
   recoverFn: RecoverFn | null
 
-  /** Append a tab and make it active. */
-  addTab(tab: TerminalTab): void
+  /**
+   * Append a tab and make it active. `custom` defaults to `false` (an
+   * auto-named tab) when omitted, so callers that don't care about
+   * pinning can pass just `{ id, title }`.
+   */
+  addTab(tab: Omit<TerminalTab, 'custom'> & { custom?: boolean }): void
   /**
    * Remove a tab. If it was the active one, activate a neighbour
    * (prefer the tab to its left, else to its right, else null).
@@ -90,8 +101,20 @@ interface TerminalState {
   removeTab(id: string): void
   /** Set the active tab. `null` clears it (no terminals open). */
   setActiveSession(id: string | null): void
-  /** Rename a tab's display title; no-op for an unknown id. */
+  /**
+   * Manually rename a tab. Sets the title and pins it (`custom = true`)
+   * so the auto-naming path leaves it alone afterwards. No-op for an
+   * unknown id.
+   */
   renameTab(id: string, title: string): void
+  /**
+   * Apply an auto-derived title (OSC window title or cwd). Ignored when
+   * the tab is pinned by a manual rename, or when `title` is blank, or
+   * when it matches the current title (avoids needless re-renders from a
+   * shell that repaints its title on every prompt). No-op for an unknown
+   * id.
+   */
+  applyAutoTitle(id: string, title: string): void
   setVisible(v: boolean): void
 
   /**
@@ -152,7 +175,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       if (s.tabs.some((t) => t.id === tab.id)) {
         return { activeSessionId: tab.id }
       }
-      return { tabs: [...s.tabs, tab], activeSessionId: tab.id }
+      const full: TerminalTab = { custom: false, ...tab }
+      return { tabs: [...s.tabs, full], activeSessionId: tab.id }
     }),
 
   removeTab: (id) =>
@@ -173,8 +197,24 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   renameTab: (id, title) =>
     set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
+      tabs: s.tabs.map((t) =>
+        t.id === id ? { ...t, title, custom: true } : t,
+      ),
     })),
+
+  applyAutoTitle: (id, title) => {
+    const trimmed = title.trim()
+    if (trimmed.length === 0) return
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === id)
+      if (!tab || tab.custom || tab.title === trimmed) return {}
+      return {
+        tabs: s.tabs.map((t) =>
+          t.id === id ? { ...t, title: trimmed } : t,
+        ),
+      }
+    })
+  },
 
   setVisible: (v) => set({ visible: v }),
 

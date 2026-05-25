@@ -14,7 +14,7 @@
 |--------|---------:|
 | `com.nexus.storage` | 72 |
 | `com.nexus.git` | 38 |
-| `com.nexus.terminal` | 28 |
+| `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 26 |
 | `com.nexus.dap` | 21 |
 | `com.nexus.agent` | 18 |
@@ -126,7 +126,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.terminal (28)
+## com.nexus.terminal (29)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -134,7 +134,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `send_input` / `send_raw_input` | — | **AUDIT** — writes into already-spawned PTY; candidate for `process.spawn` |
 | `run_saved` / `adhoc_promote` / `repl_eval` | — | **AUDIT** — same posture |
 | `repl_stop` / `repl_list` | — | session lifecycle (already-spawned) |
-| `list_sessions` / `get_session_info` / `close_session` / `pump` / `read_output` / `read_raw_since` / `search_output` / `cross_session_search` / `wait_for_pattern` / `suggest` | — | read / session control |
+| `list_sessions` / `get_session_info` / `rename_session` / `close_session` / `pump` / `read_output` / `read_raw_since` / `search_output` / `cross_session_search` / `wait_for_pattern` / `suggest` | — | read / session control |
 | `saved_list` / `saved_create` / `saved_update` / `saved_delete` / `saved_reorder` | — | saved-command CRUD (KV) |
 | `adhoc_list` / `adhoc_get` / `adhoc_delete` | — | ad-hoc history (KV) |
 | `open_in_terminal` | — | host-level invocation |

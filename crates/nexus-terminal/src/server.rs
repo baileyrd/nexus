@@ -158,6 +158,16 @@ pub enum TerminalEvent {
         /// Human-readable label; `None` if unset.
         name: Option<String>,
     },
+    /// A session's display label changed via
+    /// [`TerminalServer::rename_session`]. Lets other frontends / the
+    /// activity bus observe a rename that originated in one surface
+    /// (e.g. the shell's tab-rename UI).
+    SessionRenamed {
+        /// Session id.
+        id: String,
+        /// The new label.
+        name: String,
+    },
     /// One line of output arrived in the session's line buffer.
     OutputReceived {
         /// Session id.
@@ -223,6 +233,7 @@ impl TerminalEvent {
     pub fn session_id(&self) -> &str {
         match self {
             TerminalEvent::SessionCreated { id, .. }
+            | TerminalEvent::SessionRenamed { id, .. }
             | TerminalEvent::OutputReceived { id, .. }
             | TerminalEvent::PatternMatched { id, .. }
             | TerminalEvent::SessionClosed { id, .. }
@@ -346,6 +357,13 @@ pub trait TerminalServer {
         is_regex: bool,
         timeout: Duration,
     ) -> Result<bool, TerminalError>;
+
+    /// Update a session's human-readable label and emit
+    /// [`TerminalEvent::SessionRenamed`] to every live subscriber.
+    ///
+    /// # Errors
+    /// [`TerminalError::NotRunning`] if the id is unknown.
+    fn rename_session(&mut self, id: &SessionId, name: &str) -> Result<(), TerminalError>;
 
     /// Look up a session's metadata surface.
     ///
@@ -674,6 +692,15 @@ impl TerminalServer for InMemoryTerminalServer {
         }
     }
 
+    fn rename_session(&mut self, id: &SessionId, name: &str) -> Result<(), TerminalError> {
+        self.manager.set_name(id, name.to_string())?;
+        self.emit(&TerminalEvent::SessionRenamed {
+            id: id.as_str().to_string(),
+            name: name.to_string(),
+        });
+        Ok(())
+    }
+
     fn get_session_info(&self, id: &SessionId) -> Result<SessionInfo, TerminalError> {
         self.session_info(id)
     }
@@ -766,6 +793,40 @@ mod tests {
         }
         let info = s.get_session_info(&id).expect("info");
         assert_eq!(info.name, "test");
+    }
+
+    #[test]
+    fn rename_session_updates_info_and_emits_event() {
+        if !unix_only("rename_session_updates_info_and_emits_event") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let id = s.create_session(sh_printf("x")).expect("create");
+        let rx = s.subscribe_events();
+        s.rename_session(&id, "build").expect("rename");
+        // The label is reflected in SessionInfo immediately.
+        let info = s.get_session_info(&id).expect("info");
+        assert_eq!(info.name, "build");
+        // And a SessionRenamed event is broadcast to live subscribers.
+        let mut saw_rename = false;
+        while let Ok(evt) = rx.try_recv() {
+            if let TerminalEvent::SessionRenamed { id: eid, name } = evt {
+                assert_eq!(eid, id.as_str());
+                assert_eq!(name, "build");
+                saw_rename = true;
+            }
+        }
+        assert!(saw_rename, "expected a SessionRenamed event");
+    }
+
+    #[test]
+    fn rename_unknown_session_is_not_running() {
+        let mut s = InMemoryTerminalServer::new();
+        let ghost = SessionId::from_string("ghost");
+        assert!(matches!(
+            s.rename_session(&ghost, "nope"),
+            Err(TerminalError::NotRunning(_)),
+        ));
     }
 
     #[test]

@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use crate::core_plugin::{
-    CreateSessionArgs, CreateSessionResponse, ResizeArgs, SessionIdArgs, TerminalCorePlugin,
+    CreateSessionArgs, CreateSessionResponse, RenameSessionArgs, ResizeArgs, SessionIdArgs,
+    TerminalCorePlugin,
 };
 use crate::server::{ServerSpawnConfig, TerminalServer};
 use crate::session::SessionId;
@@ -80,6 +81,20 @@ impl TerminalCorePlugin {
             .lock()
             .map_err(poisoned)?
             .resize(&id, cols, rows)
+            .map_err(crate_err)?;
+        Ok(serde_json::Value::Null)
+    }
+
+    pub(crate) fn dispatch_rename_session(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: RenameSessionArgs = parse_args(args, "rename_session")?;
+        let id = SessionId::from_string(a.id);
+        self.server
+            .lock()
+            .map_err(poisoned)?
+            .rename_session(&id, &a.name)
             .map_err(crate_err)?;
         Ok(serde_json::Value::Null)
     }

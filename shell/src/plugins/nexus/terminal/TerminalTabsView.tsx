@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
 import { useTerminalStore } from './terminalStore'
 import { TerminalInstance } from './TerminalInstance'
@@ -11,6 +12,12 @@ interface TerminalTabsViewProps {
   onNewTab: () => void
   /** Close the session backing `id` and drop its tab. */
   onCloseTab: (id: string) => void
+  /**
+   * Commit a manual tab rename: pins the title in the store and pushes
+   * it to the kernel session label. Trimmed, non-empty names only — the
+   * view drops blank input rather than calling this.
+   */
+  onRenameTab: (id: string, title: string) => void
 }
 
 /**
@@ -25,16 +32,48 @@ export function TerminalTabsView({
   openExternal,
   onNewTab,
   onCloseTab,
+  onRenameTab,
 }: TerminalTabsViewProps) {
   const tabs = useTerminalStore((s) => s.tabs)
   const activeSessionId = useTerminalStore((s) => s.activeSessionId)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
+
+  // Inline-rename state: the id of the tab being edited (or null) plus
+  // the working draft. Double-clicking a tab title enters edit mode;
+  // Enter / blur commits, Escape cancels.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  // Focus + select the field when an edit begins so the user can type
+  // over the old name immediately.
+  useEffect(() => {
+    if (editingId !== null) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editingId])
+
+  const beginEdit = (id: string, current: string) => {
+    setEditingId(id)
+    setDraft(current)
+  }
+  const cancelEdit = () => {
+    setEditingId(null)
+    setDraft('')
+  }
+  const commitEdit = (id: string) => {
+    const next = draft.trim()
+    if (next.length > 0) onRenameTab(id, next)
+    cancelEdit()
+  }
 
   return (
     <div className="nexus-terminal-tabs">
       <div className="nexus-terminal-tabbar" role="tablist">
         {tabs.map((tab) => {
           const isActive = tab.id === activeSessionId
+          const isEditing = tab.id === editingId
           return (
             <div
               key={tab.id}
@@ -44,9 +83,34 @@ export function TerminalTabsView({
                 'nexus-terminal-tab' + (isActive ? ' is-active' : '')
               }
               onClick={() => setActiveSession(tab.id)}
-              title={tab.title}
+              onDoubleClick={() => beginEdit(tab.id, tab.title)}
+              title={isEditing ? undefined : `${tab.title} — double-click to rename`}
             >
-              <span className="nexus-terminal-tab-title">{tab.title}</span>
+              {isEditing ? (
+                <input
+                  ref={inputRef}
+                  className="nexus-terminal-tab-rename"
+                  value={draft}
+                  onChange={(ev) => setDraft(ev.target.value)}
+                  // The input lives inside the tab's click/dblclick
+                  // handlers — stop propagation so typing / clicking in
+                  // the field doesn't re-trigger select or re-enter edit.
+                  onClick={(ev) => ev.stopPropagation()}
+                  onDoubleClick={(ev) => ev.stopPropagation()}
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter') {
+                      ev.preventDefault()
+                      commitEdit(tab.id)
+                    } else if (ev.key === 'Escape') {
+                      ev.preventDefault()
+                      cancelEdit()
+                    }
+                  }}
+                  onBlur={() => commitEdit(tab.id)}
+                />
+              ) : (
+                <span className="nexus-terminal-tab-title">{tab.title}</span>
+              )}
               <button
                 type="button"
                 className="nexus-terminal-tab-close"

@@ -42,6 +42,7 @@
 //! | 23         | `run_saved`          | Spawn session running saved cmd (BL-055)|
 //! | 24         | `suggest`            | LLM-enriched output suggestion (BL-064) |
 //! | 25         | `cross_session_search` | FTS5 search across scrollback (BL-063)|
+//! | 30         | `rename_session`     | Update a session's display label        |
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -271,6 +272,13 @@ pub const HANDLER_REPL_STOP: u32 = 28;
 /// here.
 pub const HANDLER_REPL_LIST: u32 = 29;
 
+/// `rename_session` handler id. Args: [`RenameSessionArgs`]. Updates a
+/// session's human-readable label (the `SessionInfo.name` surface) and
+/// emits [`crate::TerminalEvent::SessionRenamed`] so other frontends /
+/// the activity bus observe the change. Used by the shell when the user
+/// renames a terminal tab; the auto-naming path stays shell-local.
+pub const HANDLER_RENAME_SESSION: u32 = 30;
+
 /// Plugin ids this plugin calls at handler-dispatch time. Soft —
 /// `stream_chat` is only used by the inline-suggest path, which
 /// gracefully degrades when `com.nexus.ai` is absent — but
@@ -310,6 +318,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("repl_eval", HANDLER_REPL_EVAL),
     ("repl_stop", HANDLER_REPL_STOP),
     ("repl_list", HANDLER_REPL_LIST),
+    ("rename_session", HANDLER_RENAME_SESSION),
 ];
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -375,6 +384,24 @@ pub struct CreateSessionResponse {
 pub struct SessionIdArgs {
     /// Session id the handler targets.
     pub id: String,
+}
+
+/// Arguments for `rename_session`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct RenameSessionArgs {
+    /// Session id whose label is being changed.
+    pub id: String,
+    /// New human-readable label.
+    pub name: String,
 }
 
 /// Arguments for `send_input`.
@@ -1787,8 +1814,12 @@ fn build_activity_entry(
             entry.error = Some(format!("memory limit exceeded ({limit_mb}MB)"));
         }
         // Streaming / internal variants don't reach the activity log.
+        // A rename is a UI-label tweak, not a session-boundary event, so
+        // it's intentionally excluded here too — it still flows on the
+        // per-session lifecycle topic via `publish_lifecycle_event`.
         TerminalEvent::OutputReceived { .. }
         | TerminalEvent::PatternMatched { .. }
+        | TerminalEvent::SessionRenamed { .. }
         | TerminalEvent::SessionEvicted { .. } => return None,
     }
     Some(entry)
@@ -1889,6 +1920,7 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_REPL_EVAL => self.dispatch_repl_eval(args),
             HANDLER_REPL_STOP => self.dispatch_repl_stop(args),
             HANDLER_REPL_LIST => self.dispatch_repl_list(),
+            HANDLER_RENAME_SESSION => self.dispatch_rename_session(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
