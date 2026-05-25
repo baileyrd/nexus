@@ -36,6 +36,7 @@ pub mod ipc;
 pub mod log;
 pub mod plugin;
 pub mod session;
+pub mod token;
 
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
 pub use error::{BusError, CapabilityError, IpcError, IpcErrorEnvelope, IpcErrorKind};
@@ -44,6 +45,7 @@ pub use ipc::{IpcDispatcher, IpcFuture};
 pub use log::LogLevel;
 pub use plugin::{PluginInfo, PluginStatus, TrustLevel};
 pub use session::{SessionKind, SessionOutcome};
+pub use token::{CapabilityToken, TokenId};
 
 /// The host's current plugin API major version.
 ///

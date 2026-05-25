@@ -23,6 +23,8 @@ use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
+use nexus_plugin_api::{Capability, CapabilitySet, token::CapabilityToken};
+
 use crate::events::{topic_for, AiEvent};
 use crate::pool::WorkerPool;
 use crate::scheduler::Store;
@@ -283,6 +285,7 @@ fn handle_submit(
     let priority = parsed.priority;
     let session_kind = parsed.kind;
     let parent = parsed.parent;
+    let requested_caps = parsed.capabilities;
     let caller = caller_plugin_id(ctx);
     let ring = store.insert(task_id, &kind_label, priority, parent, &caller);
 
@@ -306,6 +309,21 @@ fn handle_submit(
     // worker drops the correlation entry once the run reaches a
     // terminal state so the reverse map doesn't grow unbounded.
     let (task_kind, allocated_session_id) = inject_session_id(parsed.task, store, task_id);
+
+    // Move 2 — mint the session's capability token from the caller's
+    // requested capability set (dot-string names; unknown strings are
+    // silently dropped). Phase 2 (sub-agent delegation) will intersect
+    // this with the parent token; Phase 1 mints from the raw list.
+    if let Some(ref sid) = allocated_session_id {
+        if let Ok(session_uuid) = uuid::Uuid::parse_str(sid) {
+            let caps: CapabilitySet = requested_caps
+                .iter()
+                .filter_map(|s| Capability::from_str(s).ok())
+                .collect();
+            let token = CapabilityToken::new(session_uuid, caps);
+            store.store_token(task_id, token);
+        }
+    }
 
     // Dispatch the actual work onto the dedicated pool. The worker
     // races the inner ipc_call against the cancel gate so a `cancel`
@@ -585,12 +603,12 @@ fn handle_cancel(
     let reason = parsed.reason.clone().or_else(|| Some("caller".into()));
     let first_signal = gate.request(reason);
     if first_signal {
-        // Publish a synchronous Cancelled-requested breadcrumb so
-        // observers see the signal even before the worker's
-        // select! arm fires. The worker's eventual Cancelled event
-        // is the canonical terminal record; this one is a hint.
-        // (Phase 5 deliberately does NOT split this into its own
-        // AiEvent variant — the variant set stays closed.)
+        // Move 2 — revoke the session's capability token so any
+        // in-flight capability check returns Denied immediately,
+        // before the worker's select! arm has had a chance to
+        // observe the CancellationToken. Child tokens derived via
+        // attenuate() are also invalidated transitively.
+        store.revoke_token(parsed.task_id);
         tracing::info!(
             plugin_id = PLUGIN_ID,
             task_id = %parsed.task_id,

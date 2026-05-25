@@ -212,6 +212,14 @@ pub struct AiRuntimeSubmitArgs {
     /// observability but does not act on it.
     #[serde(default)]
     pub parent: Option<uuid::Uuid>,
+    /// Capabilities to grant the session, expressed as dot-string
+    /// names (e.g. `"fs.read"`, `"ai.chat"`). Unknown strings are
+    /// silently ignored at mint time. Defaults to empty — no
+    /// capabilities beyond those implicit in the session kind. Phase 2
+    /// (sub-agent delegation) intersects this with the parent token's
+    /// capability set; Phase 1 mints directly from this list.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// Reply from `submit`. The caller subscribes to

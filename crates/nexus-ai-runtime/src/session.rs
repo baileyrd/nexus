@@ -27,6 +27,7 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 pub use nexus_plugin_api::session::{SessionKind, SessionOutcome};
+use nexus_plugin_api::token::CapabilityToken;
 
 /// Opaque session identifier — a `Uuid` newtype that prevents accidental
 /// interchange with task IDs or run IDs.
@@ -258,6 +259,11 @@ pub struct Session {
     pub state: SessionState,
     /// Resource envelope — updated by the supervisor as work proceeds.
     pub budget: Budget,
+    /// Live, revocable capability envelope for this session. Minted by
+    /// the Supervisor at submission time; revoking it immediately
+    /// invalidates all capability checks for this session and any
+    /// child tokens derived via [`CapabilityToken::attenuate`].
+    pub capabilities: CapabilityToken,
     /// When the supervisor accepted this session.
     pub submitted_at: DateTime<Utc>,
     /// When a worker first picked it up; `None` while queued.
@@ -269,12 +275,13 @@ pub struct Session {
 impl Session {
     /// Create a new session in [`SessionState::Idle`].
     #[must_use]
-    pub fn new(id: SessionId, kind: SessionKind, budget: Budget) -> Self {
+    pub fn new(id: SessionId, kind: SessionKind, budget: Budget, capabilities: CapabilityToken) -> Self {
         Self {
             id,
             kind,
             state: SessionState::Idle,
             budget,
+            capabilities,
             submitted_at: Utc::now(),
             started_at: None,
             finished_at: None,
@@ -300,17 +307,24 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_plugin_api::CapabilitySet;
+
+    fn test_token(id: &SessionId) -> CapabilityToken {
+        CapabilityToken::new(id.as_uuid(), CapabilitySet::default())
+    }
 
     #[test]
     fn session_starts_idle() {
-        let s = Session::new(SessionId::new(), SessionKind::UserDriven, Budget::default());
+        let id = SessionId::new();
+        let s = Session::new(id, SessionKind::UserDriven, Budget::default(), test_token(&id));
         assert!(matches!(s.state, SessionState::Idle));
         assert!(!s.state.is_terminal());
     }
 
     #[test]
     fn mark_started_transitions_to_perceiving() {
-        let mut s = Session::new(SessionId::new(), SessionKind::Ambient, Budget::default());
+        let id = SessionId::new();
+        let mut s = Session::new(id, SessionKind::Ambient, Budget::default(), test_token(&id));
         s.mark_started();
         assert!(matches!(s.state, SessionState::Perceiving));
         assert!(s.started_at.is_some());
@@ -318,7 +332,8 @@ mod tests {
 
     #[test]
     fn mark_started_is_idempotent_past_idle() {
-        let mut s = Session::new(SessionId::new(), SessionKind::Ambient, Budget::default());
+        let id = SessionId::new();
+        let mut s = Session::new(id, SessionKind::Ambient, Budget::default(), test_token(&id));
         s.mark_started();
         s.state = SessionState::Reasoning {
             call_id: uuid::Uuid::new_v4(),
@@ -329,7 +344,8 @@ mod tests {
 
     #[test]
     fn mark_terminal_sets_finished_at_and_outcome() {
-        let mut s = Session::new(SessionId::new(), SessionKind::UserDriven, Budget::default());
+        let id = SessionId::new();
+        let mut s = Session::new(id, SessionKind::UserDriven, Budget::default(), test_token(&id));
         s.mark_terminal(SessionOutcome::Completed);
         assert!(s.state.is_terminal());
         assert!(s.finished_at.is_some());

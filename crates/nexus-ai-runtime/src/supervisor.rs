@@ -27,6 +27,8 @@
 
 use std::sync::OnceLock;
 
+use nexus_plugin_api::{CapabilitySet, token::CapabilityToken};
+
 use crate::pool::WorkerPool;
 use crate::scheduler::Store;
 use crate::session::SessionKind;
@@ -156,6 +158,30 @@ impl Supervisor {
     /// twice).
     pub fn set_pool(&self, pool: WorkerPool) -> bool {
         self.pool.set(pool).is_ok()
+    }
+
+    /// Mint a fresh [`CapabilityToken`] for a new session. The returned
+    /// token is the live authorization envelope the session carries;
+    /// calling [`CapabilityToken::revoke`] on it immediately invalidates
+    /// the session and any child tokens derived via
+    /// [`Self::attenuate_token`].
+    #[must_use]
+    pub fn mint_token(&self, session_id: uuid::Uuid, caps: CapabilitySet) -> CapabilityToken {
+        CapabilityToken::new(session_id, caps)
+    }
+
+    /// Create an attenuated child token for a sub-session. The child's
+    /// capability set is the intersection of the parent's capabilities
+    /// and `requested`; revoking the parent token also invalidates the
+    /// child (but not vice-versa).
+    #[must_use]
+    pub fn attenuate_token(
+        &self,
+        parent: &CapabilityToken,
+        child_session_id: uuid::Uuid,
+        requested: CapabilitySet,
+    ) -> CapabilityToken {
+        parent.attenuate(child_session_id, requested)
     }
 
     /// Borrow the task store.
