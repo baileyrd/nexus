@@ -30,6 +30,7 @@ use std::sync::OnceLock;
 use nexus_plugin_api::{CapabilitySet, token::CapabilityToken};
 
 use crate::pool::WorkerPool;
+use crate::proposal::ProposalStore;
 use crate::scheduler::Store;
 use crate::session::SessionKind;
 
@@ -94,9 +95,9 @@ impl AdmissionConfig {
 
 // ─── Supervisor ──────────────────────────────────────────────────────────────
 
-/// The AI runtime supervisor: owns the task store and the worker pool,
-/// enforces admission control, and is the single point through which
-/// session lifecycle is managed.
+/// The AI runtime supervisor: owns the task store, the worker pool,
+/// the proposal/snapshot ledger, and enforces admission control. The
+/// single point through which session lifecycle is managed.
 ///
 /// Previously the store and pool lived as separate fields on
 /// [`crate::core_plugin::AiRuntimeCorePlugin`]. This type makes the
@@ -110,6 +111,10 @@ impl AdmissionConfig {
 pub struct Supervisor {
     pub(crate) store: Store,
     pub(crate) pool: OnceLock<WorkerPool>,
+    /// Move 3 — proposal/snapshot ledger shared across all sessions.
+    /// The capability gate lives inside [`ProposalStore::submit`];
+    /// workers call `commit` once the action is executed.
+    pub(crate) proposals: ProposalStore,
     /// Admission policy — consulted at submission time (Phase 5 wires
     /// the actual enforcement; stored here so the configuration is
     /// co-located with the pool that will enforce it).
@@ -121,6 +126,7 @@ impl std::fmt::Debug for Supervisor {
         f.debug_struct("Supervisor")
             .field("store", &"<Store>")
             .field("pool_started", &self.pool.get().is_some())
+            .field("proposals_pending", &self.proposals.pending_count())
             .field("admission", &self.admission)
             .finish()
     }
@@ -140,6 +146,7 @@ impl Supervisor {
         Self {
             store: Store::new(),
             pool: OnceLock::new(),
+            proposals: ProposalStore::new(),
             admission: AdmissionConfig::default(),
         }
     }
@@ -182,6 +189,11 @@ impl Supervisor {
         requested: CapabilitySet,
     ) -> CapabilityToken {
         parent.attenuate(child_session_id, requested)
+    }
+
+    /// Borrow the proposal/snapshot ledger.
+    pub fn proposal_store(&self) -> &ProposalStore {
+        &self.proposals
     }
 
     /// Borrow the task store.

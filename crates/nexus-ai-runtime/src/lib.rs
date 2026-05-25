@@ -54,6 +54,7 @@ use ts_rs::TS;
 pub mod core_plugin;
 pub mod events;
 pub mod pool;
+pub mod proposal;
 pub mod republisher;
 pub mod scheduler;
 pub mod session;
@@ -70,6 +71,12 @@ pub use pool::shared_pool_handle;
 pub use session::{Budget, Session, SessionId, SessionKind, SessionOutcome, SessionState, Step};
 /// Re-export the Supervisor and its admission-control config.
 pub use supervisor::{AdmissionConfig, Supervisor};
+/// Re-export Move 3 proposal/snapshot types for callers that submit
+/// actions through the capability gate or query the rollback ledger.
+pub use proposal::{
+    Proposal, ProposalId, ProposalState, ProposalStore, ProposedAction,
+    Snapshot, SnapshotEntry, SnapshotId,
+};
 
 /// Reverse-DNS plugin id — also the bus-topic prefix the republisher
 /// owns (`com.nexus.ai.runtime.*`).
