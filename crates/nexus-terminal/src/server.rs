@@ -72,6 +72,10 @@ pub struct ServerSpawnConfig {
     /// Secret-masking happens at the UI layer; this field carries the
     /// resolved values.
     pub env: Vec<(String, String)>,
+    /// Resolved env-hygiene policy applied to the inherited environment
+    /// before spawn. Already merged (forge default `tighten` per-call
+    /// arg) by the dispatch layer; `None` inherits the full parent env.
+    pub policy: Option<nexus_types::SpawnPolicy>,
 }
 
 impl ServerSpawnConfig {
@@ -487,6 +491,7 @@ impl TerminalServer for InMemoryTerminalServer {
             working_dir: cfg.working_dir,
             initial_size: None,
             env: cfg.env,
+            policy: cfg.policy,
         };
         // BL-062 — at-cap path: evict the LRU stopped session before
         // spawning. If every session is still running, `spawn_or_evict`
@@ -713,6 +718,7 @@ mod tests {
             }),
             working_dir: None,
             env: vec![],
+            policy: None,
         }
     }
 
@@ -730,6 +736,7 @@ mod tests {
             }),
             working_dir: None,
             env: vec![],
+            policy: None,
         }
     }
 
@@ -812,6 +819,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                policy: None,
             })
             .expect("create");
         let hit = s
@@ -976,6 +984,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                policy: None,
             })
             .expect("create");
 

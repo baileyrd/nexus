@@ -30,6 +30,18 @@
       ],
       "default": null
     },
+    "policy": {
+      "description": "Optional per-call env-hygiene policy. Merged with the forge\ndefault via [`nexus_types::SpawnPolicy::tighten`] — it can only\nmake the resolved policy *more* restrictive, never weaken a\nforge-mandated default. `None` uses the forge default unchanged.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpawnPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "shell": {
       "description": "Absolute path to the shell executable. `None` falls back to\nthe platform-default detection.",
       "type": [
@@ -55,5 +67,35 @@
       "default": null
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "SpawnPolicy": {
+      "description": "Env-hygiene rules applied to a child process's inherited environment.\n\nResolution order applied to the *inherited* parent env (see\n[`SpawnPolicy::filter_inherited`]):\n\n1. If [`clean_env`](Self::clean_env) is set, the inherited env is\n   discarded entirely (start from nothing).\n2. Otherwise, if [`env_allowlist`](Self::env_allowlist) is non-empty,\n   only inherited keys on the allowlist survive.\n3. Any key matching [`env_denylist`](Self::env_denylist) is then\n   removed.\n\nAll key comparisons are case-insensitive. This struct governs only\nthe *inherited* env — a caller's explicit per-spawn variables and\nservice-mandated vars (e.g. `TERM`) are layered on top by the spawn\npath *after* this filter and are not subject to it.",
+      "type": "object",
+      "properties": {
+        "clean_env": {
+          "description": "Discard the inherited parent environment entirely; the child\nstarts from an empty env plus whatever the spawn path layers on\nexplicitly. The strongest hygiene knob.",
+          "type": "boolean",
+          "default": false
+        },
+        "env_allowlist": {
+          "description": "When non-empty, only inherited keys whose name matches an entry\nhere (case-insensitive) survive. Ignored when\n[`clean_env`](Self::clean_env) is set (nothing inherited to\nallow). An empty list means \"no allowlist restriction\".",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "env_denylist": {
+          "description": "Inherited keys matching an entry here (case-insensitive) are\nremoved. Applied after the allowlist, so a key can be allowed in\nbulk and then individually denied.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

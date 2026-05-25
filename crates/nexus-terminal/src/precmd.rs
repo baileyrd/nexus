@@ -366,6 +366,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                policy: None,
             })
             .expect("spawn")
     }

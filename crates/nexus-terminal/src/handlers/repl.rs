@@ -38,6 +38,7 @@ impl TerminalCorePlugin {
             }),
             working_dir: a.working_dir.map(PathBuf::from),
             env: a.env,
+            policy: Some(self.spawn_policy_default.clone()),
         };
         let id = self
             .server

@@ -30,6 +30,7 @@ Every TOML/JSON file the code reads at runtime as config (not test fixtures, not
 | **notifications.toml** | `<forge>/.forge/notifications.toml` | `NotificationsConfig` — `nexus-notifications/src/config.rs:272` | `NotificationsConfig::load` — `config.rs:300` |
 | **lsp.toml** | `<forge>/.forge/lsp.toml` | `LspHostConfig` — `nexus-lsp/src/config.rs:106` | `LspHostConfig::load` |
 | **dap.toml** | `<forge>/.forge/dap.toml` | `DapHostConfig` — `nexus-dap/src/config.rs:115` | `DapHostConfig::load` |
+| **terminal.toml** | `<forge>/.forge/terminal.toml` | `TerminalConfig` — `nexus-terminal/src/config.rs` (`[spawn]` → `nexus_types::SpawnPolicy`) | `TerminalConfig::read_from` — loaded in `nexus-bootstrap/src/plugins/terminal.rs` |
 | **config.toml** | `<forge>/.forge/config.toml` | Multi-section (`[audio]` `nexus-audio/src/config.rs:66`, `[collab]` `nexus-collab/src/core_plugin.rs:75`, `[digests]` `nexus-workflow/src/digests.rs:51`, `[notifications.*]`, `[mcp]`) | Per-section loader on each subsystem |
 | ~~**acp.toml**~~ | ~~`<forge>/.forge/acp.toml`~~ | `AcpHostConfig` — `nexus-acp/src/config.rs:81` | _no flat-TOML loader (ADR 0027 §Phase 4 — adapters arrive via `com.nexus.acp::register_server`)_ |
 | **kernel config.toml** | `<forge>/.nexus/config.toml` | `KernelConfig` — `nexus-kernel/src/config.rs:12` | `KernelConfig::load` — line 104 |
@@ -87,6 +88,7 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 | `.forge/mcp.toml` | MCP server registry | user / plugins |
 | `.forge/lsp.toml` | LSP server specs | user |
 | `.forge/dap.toml` | DAP adapter specs | user |
+| `.forge/terminal.toml` | Terminal spawn env-hygiene policy (`[spawn]`) | user |
 | ~~`.forge/acp.toml`~~ | _intentionally absent — adapters arrive via `com.nexus.acp::register_server` (ADR 0027 §Phase 4)_ | — |
 | `.forge/notifications.toml` | Notification channels + routing | user |
 | `.forge/config.toml` | Multi-section TOML for non-standalone subsystems (`[audio]`, `[collab]`, `[digests]`, `[notifications.<channel>]`, `[mcp]`, …) | user / plugins |

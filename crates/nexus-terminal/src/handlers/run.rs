@@ -64,6 +64,7 @@ impl TerminalCorePlugin {
             }),
             working_dir,
             env,
+            policy: Some(self.spawn_policy_default.clone()),
         };
 
         let id = self

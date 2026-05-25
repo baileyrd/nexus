@@ -56,6 +56,7 @@ mod ai;
 mod ansi;
 mod buffer;
 mod compound;
+mod config;
 mod core_plugin;
 mod env;
 mod error;
@@ -83,6 +84,7 @@ pub use ai::{
 };
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
+pub use config::{TerminalConfig, TerminalConfigError};
 pub use core_plugin::{
     AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CrossSessionSearchArgs, RunSavedArgs,
     SuggestArgs, SuggestResponse,

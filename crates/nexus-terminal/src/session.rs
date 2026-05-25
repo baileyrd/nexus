@@ -154,6 +154,13 @@ pub struct SessionConfig {
     pub initial_size: Option<PtySize>,
     /// Extra env vars merged on top of the inherited environment.
     pub env: Vec<(String, String)>,
+    /// Optional env-hygiene policy. When `Some` and non-no-op, the
+    /// inherited parent environment is filtered through it before the
+    /// child is spawned (clean-env / allowlist / denylist). `None`
+    /// preserves the legacy behaviour of inheriting the full parent env.
+    /// Resolved authority lives in forge config; see
+    /// [`nexus_types::SpawnPolicy`].
+    pub policy: Option<nexus_types::SpawnPolicy>,
 }
 
 /// Live terminal session — a PTY master + a child process we spawned on
@@ -225,6 +232,20 @@ impl Session {
         }
         if let Some(ref wd) = config.working_dir {
             cmd.cwd(wd);
+        }
+        // Env-hygiene policy (resolved authority = forge config). When a
+        // non-no-op policy is present we take control of the child's
+        // environment: clear the inherited set `CommandBuilder` would
+        // otherwise pass through, then re-add only the filtered inherited
+        // vars. `TERM`/`COLORTERM` and the caller's explicit `config.env`
+        // are layered on *after* this and are intentionally exempt — they
+        // are service-mandated / caller-intended, not ambient inheritance.
+        if let Some(policy) = config.policy.as_ref().filter(|p| !p.is_noop()) {
+            cmd.env_clear();
+            let inherited: Vec<(String, String)> = std::env::vars().collect();
+            for (k, v) in policy.filter_inherited(&inherited) {
+                cmd.env(k, v);
+            }
         }
         // Declare a sane terminal type. Without TERM the shell's line editor
         // (readline / zle) falls back to a dumb mode that doesn't echo
@@ -759,6 +780,98 @@ mod tests {
         assert!(
             s.contains("hello from pty"),
             "expected 'hello from pty' in output, got: {s:?}"
+        );
+    }
+
+    /// Drain a session to EOF (or a 2s deadline) and return the decoded
+    /// output. Shared by the env-policy tests below.
+    fn drain_to_string(session: &mut Session) -> String {
+        let mut buf = [0u8; 512];
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut collected = Vec::new();
+        while Instant::now() < deadline {
+            let n = session
+                .read(&mut buf, Duration::from_millis(200))
+                .expect("read");
+            collected.extend_from_slice(&buf[..n]);
+            if session.try_wait_exit().is_some() {
+                let n = session
+                    .read(&mut buf, Duration::from_millis(100))
+                    .expect("drain");
+                collected.extend_from_slice(&buf[..n]);
+                break;
+            }
+            if n == 0 {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&collected).into_owned()
+    }
+
+    #[test]
+    fn clean_env_policy_scrubs_inherited_var_from_child() {
+        if !unix_only("clean_env_policy_scrubs_inherited_var_from_child") {
+            return;
+        }
+        // Unique key so concurrent tests can't observe each other's value.
+        let key = "NEXUS_SPAWNPOLICY_SENTINEL_CLEAN";
+        std::env::set_var(key, "leaked-value");
+
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), format!("printf 'V=[%s]' \"${key}\"")],
+            }),
+            policy: Some(nexus_types::SpawnPolicy {
+                clean_env: true,
+                ..Default::default()
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+
+        let out = drain_to_string(&mut session);
+        std::env::remove_var(key);
+        // clean_env discarded the inherited var, so the shell expands it
+        // to empty.
+        assert!(
+            out.contains("V=[]"),
+            "expected scrubbed empty value, got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn denylist_policy_removes_named_var_but_keeps_others() {
+        if !unix_only("denylist_policy_removes_named_var_but_keeps_others") {
+            return;
+        }
+        let secret = "NEXUS_SPAWNPOLICY_SENTINEL_SECRET";
+        let kept = "NEXUS_SPAWNPOLICY_SENTINEL_KEPT";
+        std::env::set_var(secret, "do-not-leak");
+        std::env::set_var(kept, "survivor");
+
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    format!("printf 'S=[%s] K=[%s]' \"${secret}\" \"${kept}\""),
+                ],
+            }),
+            policy: Some(nexus_types::SpawnPolicy {
+                env_denylist: vec![secret.to_string()],
+                ..Default::default()
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+
+        let out = drain_to_string(&mut session);
+        std::env::remove_var(secret);
+        std::env::remove_var(kept);
+        assert!(
+            out.contains("S=[]") && out.contains("K=[survivor]"),
+            "expected denied var scrubbed and allowed var kept, got: {out:?}"
         );
     }
 

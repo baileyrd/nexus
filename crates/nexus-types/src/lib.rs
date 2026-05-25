@@ -18,5 +18,7 @@ pub mod obsidian_base;
 pub mod path_validator;
 pub mod paths;
 pub mod plugin_ids;
+pub mod spawn_policy;
 
 pub use path_validator::{ForgePathValidator, PathValidationError};
+pub use spawn_policy::SpawnPolicy;

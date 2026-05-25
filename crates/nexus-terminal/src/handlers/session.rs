@@ -24,11 +24,18 @@ impl TerminalCorePlugin {
             program: PathBuf::from(p),
             args: a.shell_args,
         });
+        // Forge default is authoritative; a per-call policy may only
+        // tighten it. `tighten` is monotonic, so an absent or permissive
+        // caller arg can never weaken a forge-mandated restriction.
+        let policy = self
+            .spawn_policy_default
+            .tighten(&a.policy.unwrap_or_default());
         let cfg = ServerSpawnConfig {
             name: a.name,
             shell,
             working_dir: a.working_dir.map(PathBuf::from),
             env: a.env,
+            policy: Some(policy),
         };
         let id = self
             .server

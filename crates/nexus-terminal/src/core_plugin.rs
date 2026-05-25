@@ -342,6 +342,12 @@ pub struct CreateSessionArgs {
     /// Env vars to merge on top of the inherited environment.
     #[serde(default)]
     pub env: Vec<(String, String)>,
+    /// Optional per-call env-hygiene policy. Merged with the forge
+    /// default via [`nexus_types::SpawnPolicy::tighten`] — it can only
+    /// make the resolved policy *more* restrictive, never weaken a
+    /// forge-mandated default. `None` uses the forge default unchanged.
+    #[serde(default)]
+    pub policy: Option<nexus_types::SpawnPolicy>,
 }
 
 /// Response from `create_session`.
@@ -1012,6 +1018,13 @@ pub struct TerminalCorePlugin {
     /// reject calls against regular terminal sessions, and
     /// `repl_list` snapshots the values for shell discovery.
     pub(crate) repls: Arc<Mutex<HashMap<SessionId, ReplInfo>>>,
+    /// Authoritative env-hygiene default loaded from
+    /// `<forge>/.forge/terminal.toml` (`[spawn]`). Applied to every
+    /// spawned session; a per-call `create_session` policy may only
+    /// *tighten* this via [`nexus_types::SpawnPolicy::tighten`], never
+    /// loosen it. Defaults to a permissive (no-op) policy so a forge
+    /// without the file behaves exactly as before.
+    pub(crate) spawn_policy_default: nexus_types::SpawnPolicy,
 }
 
 /// BL-061 — shared memory state held behind a single `Mutex` so the
@@ -1164,6 +1177,7 @@ impl TerminalCorePlugin {
             suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
             session_store: None,
             repls: Arc::new(Mutex::new(HashMap::new())),
+            spawn_policy_default: nexus_types::SpawnPolicy::permissive(),
         }
     }
 
@@ -1187,6 +1201,7 @@ impl TerminalCorePlugin {
             suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
             session_store: None,
             repls: Arc::new(Mutex::new(HashMap::new())),
+            spawn_policy_default: nexus_types::SpawnPolicy::permissive(),
         }
     }
 
@@ -1196,6 +1211,15 @@ impl TerminalCorePlugin {
     #[must_use]
     pub fn with_saved_store(mut self, store: SqliteSavedCommandStore) -> Self {
         self.saved = Some(Mutex::new(store));
+        self
+    }
+
+    /// Set the authoritative env-hygiene default (loaded from
+    /// `<forge>/.forge/terminal.toml`). Applied to every spawned
+    /// session; per-call policies may only tighten it.
+    #[must_use]
+    pub fn with_spawn_policy_default(mut self, policy: nexus_types::SpawnPolicy) -> Self {
+        self.spawn_policy_default = policy;
         self
     }
 

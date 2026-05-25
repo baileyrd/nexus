@@ -23,6 +23,23 @@ pub(super) fn register(
     forge_root: &std::path::Path,
     event_bus: &Arc<EventBus>,
 ) -> Result<()> {
+    // Env-hygiene default (authoritative) from `<forge>/.forge/terminal.toml`.
+    // Missing file → permissive (legacy behaviour). A malformed file is
+    // logged and skipped rather than failing terminal startup — the
+    // service must stay usable.
+    let terminal_toml = forge_root.join(".forge").join("terminal.toml");
+    let spawn_policy_default = match nexus_terminal::TerminalConfig::read_from(&terminal_toml) {
+        Ok(cfg) => cfg.spawn,
+        Err(err) => {
+            tracing::warn!(
+                path = %terminal_toml.display(),
+                err = %err,
+                "com.nexus.terminal: terminal.toml invalid; spawning with a permissive env policy"
+            );
+            nexus_types::SpawnPolicy::permissive()
+        }
+    };
+
     let saved_db = forge_root.join(".forge").join("procmgr.sqlite");
     let terminal_plugin = match nexus_terminal::SqliteSavedCommandStore::open(&saved_db) {
         Ok(store) => TerminalCorePlugin::new().with_saved_store(store),
@@ -35,6 +52,7 @@ pub(super) fn register(
             TerminalCorePlugin::new()
         }
     };
+    let terminal_plugin = terminal_plugin.with_spawn_policy_default(spawn_policy_default);
     let terminal_plugin = match nexus_terminal::SqliteAdHocStore::open(&saved_db) {
         Ok(store) => terminal_plugin.with_adhoc_store(store),
         Err(err) => {

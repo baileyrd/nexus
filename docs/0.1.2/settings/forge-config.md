@@ -115,6 +115,27 @@ Same shape — host config registry of named server/adapter specs + a `contribut
 - DAP: `DapHostConfig` — `crates/nexus-dap/src/config.rs:115`. Each spec carries adapter command/args/env.
 - ACP: `AcpHostConfig` — `crates/nexus-acp/src/config.rs:81`. Each spec carries agent command/args/env.
 
+## `<forge>/.forge/terminal.toml`
+
+`TerminalConfig` — `crates/nexus-terminal/src/config.rs`. Loaded at bootstrap (`crates/nexus-bootstrap/src/plugins/terminal.rs`); a missing file yields a permissive (no-op) policy, so a forge without this file behaves exactly as before.
+
+Today it carries one block, `[spawn]` (`nexus_types::SpawnPolicy`), the **authoritative** env-hygiene default applied to every session the terminal spawns (`create_session`, `run_saved`, `repl_start`).
+
+```toml
+[spawn]
+# Discard the inherited parent environment entirely; the child starts
+# from an empty env plus TERM/COLORTERM and any caller-supplied vars.
+clean_env = false
+# When non-empty, only inherited keys named here survive (case-insensitive).
+env_allowlist = ["PATH", "HOME", "LANG"]
+# Inherited keys named here are removed, applied after the allowlist.
+env_denylist = ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"]
+```
+
+**Authority & precedence.** The forge file is the policy authority. A per-call `create_session` `policy` argument may only ever *tighten* this default via `SpawnPolicy::tighten` (clean_env OR-ed, denylists unioned, allowlists intersected) — an IPC caller can never weaken a forge-mandated restriction. The filter applies to the *inherited* environment only; a session's explicit `env` vars and the service-mandated `TERM`/`COLORTERM` are layered on top afterwards and are exempt.
+
+> **Not a security boundary.** This is env hygiene and resource governance, not isolation: a spawned child can still open sockets and read any file its uid can reach. It exists to stop accidental leakage of parent secrets into child processes and to let a forge mandate a clean environment.
+
 ## `<forge>/.forge/notifications.toml`
 
 `NotificationsConfig` — `crates/nexus-notifications/src/config.rs:272`.
