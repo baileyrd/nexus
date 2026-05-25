@@ -17,7 +17,7 @@
 //! Reserved IDs return a clear "not yet wired" error so a caller that
 //! starts using them ahead of Phase 5 gets a routable failure.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
@@ -26,10 +26,11 @@ use serde::Serialize;
 use crate::events::{topic_for, AiEvent};
 use crate::pool::WorkerPool;
 use crate::scheduler::Store;
+use crate::supervisor::{Supervisor, TOPIC_SESSION_CANCELLED, TOPIC_SESSION_COMPLETED, TOPIC_SESSION_STARTED};
 use crate::{
     AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs,
     AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus,
-    PLUGIN_ID,
+    SessionKind, PLUGIN_ID,
 };
 
 /// `submit` handler id.
@@ -107,8 +108,11 @@ const SESSION_CORRELATION_GRACE: std::time::Duration =
 /// `cargo test -p nexus-ai-runtime` doesn't pay the cost when only
 /// the type tests run.
 pub struct AiRuntimeCorePlugin {
-    store: Store,
-    pool: OnceLock<WorkerPool>,
+    /// Named supervisor — owns the task store, worker pool, and
+    /// admission config. Previously these were two bare fields;
+    /// the Supervisor type is the structural foundation of Move 1
+    /// (AI-native runtime design §5 / §6).
+    supervisor: Supervisor,
     /// Plugin context captured by `wire_context`. `None` until the
     /// bootstrap wires it; the IPC handlers all return a clear error
     /// rather than panic in that window.
@@ -129,8 +133,7 @@ impl AiRuntimeCorePlugin {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            store: Store::new(),
-            pool: OnceLock::new(),
+            supervisor: Supervisor::new(),
             context: Mutex::new(None),
         }
     }
@@ -139,7 +142,7 @@ impl AiRuntimeCorePlugin {
     /// bootstrap wire-up. Returns `false` when a pool is already
     /// installed (each test gets a fresh plugin).
     pub fn wire_pool_for_tests(&self, pool: WorkerPool) -> bool {
-        self.pool.set(pool).is_ok()
+        self.supervisor.set_pool(pool)
     }
 
     fn ctx(&self) -> Option<Arc<KernelPluginContext>> {
@@ -158,10 +161,10 @@ impl CorePlugin for AiRuntimeCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
-        let store = self.store.clone();
+        let store = self.supervisor.store().clone();
         let ctx = self.ctx();
-        let pool_handle = self.pool.get().map(WorkerPool::handle);
-        let pool_metrics = self.pool.get().map(WorkerPool::metrics);
+        let pool_handle = self.supervisor.pool_handle();
+        let pool_metrics = self.supervisor.pool_metrics();
         let args = args.clone();
 
         Some(Box::pin(async move {
@@ -201,7 +204,7 @@ impl CorePlugin for AiRuntimeCorePlugin {
         // Failure is logged + leaves the OnceLock empty so subsequent
         // `submit` calls surface a clear "pool not running" error
         // rather than silently dropping work.
-        if self.pool.get().is_none() {
+        if self.supervisor.pool().is_none() {
             match WorkerPool::start(None) {
                 Ok(pool) => {
                     // BL-134 Phase 4 — publish the pool handle to the
@@ -212,7 +215,7 @@ impl CorePlugin for AiRuntimeCorePlugin {
                     // is observable; the daemon falls back to its own
                     // runtime if the handle isn't published yet.
                     let installed = pool.publish_shared_handle();
-                    let _ = self.pool.set(pool);
+                    self.supervisor.set_pool(pool);
                     tracing::info!(
                         plugin_id = PLUGIN_ID,
                         shared_handle_installed = installed,
@@ -242,8 +245,8 @@ impl CorePlugin for AiRuntimeCorePlugin {
         // runtime; fall back to the ambient runtime via
         // `tokio::spawn` if the pool isn't started yet. The
         // subscriber is process-lifetime — drops at process exit.
-        if let Some(pool) = self.pool.get() {
-            let store = self.store.clone();
+        if let Some(pool) = self.supervisor.pool() {
+            let store = self.supervisor.store().clone();
             let ctx_for_sub = Arc::clone(&ctx);
             pool.handle().spawn(async move {
                 republish_loop(store, ctx_for_sub).await;
@@ -278,6 +281,7 @@ fn handle_submit(
     let task_id = uuid::Uuid::new_v4();
     let kind_label = parsed.task.label().to_string();
     let priority = parsed.priority;
+    let session_kind = parsed.kind;
     let parent = parsed.parent;
     let caller = caller_plugin_id(ctx);
     let ring = store.insert(task_id, &kind_label, priority, parent, &caller);
@@ -322,12 +326,15 @@ fn handle_submit(
                 &store_for_worker,
                 ctx_for_worker.as_ref(),
                 &ring,
-                &AiEvent::Cancelled { task_id, by },
+                &AiEvent::Cancelled { task_id, by: by.clone() },
             );
-            // Drop the correlation entry before bailing so the
-            // session→task map doesn't leak when a task is cancelled
-            // before it ever ran.
+            // Emit session-lifecycle event so bus subscribers tracking
+            // the session_id rather than the task_id see the cancellation.
             if let Some(ref sid) = allocated_session_id {
+                publish_session_cancelled(ctx_for_worker.as_ref(), sid, task_id, Some(&by));
+                // Drop the correlation entry before bailing so the
+                // session→task map doesn't leak when a task is cancelled
+                // before it ever ran.
                 store_for_worker.forget_session(sid);
             }
             return;
@@ -335,6 +342,11 @@ fn handle_submit(
 
         let started = AiEvent::Started { task_id, attempt: 1 };
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &started);
+        // Emit session.started so subscribers tracking session_id see
+        // the transition to Running.
+        if let Some(ref sid) = allocated_session_id {
+            publish_session_started(ctx_for_worker.as_ref(), sid, task_id, session_kind);
+        }
 
         let inner = async {
             match task_kind {
@@ -374,6 +386,30 @@ fn handle_submit(
                 Err(error) => AiEvent::Failed { task_id, error, retriable: false },
             }
         };
+
+        // Emit session-lifecycle bus event before the terminal AiEvent
+        // so subscribers see the semantic outcome (completed/cancelled)
+        // before the raw task event.
+        if let Some(ref sid) = allocated_session_id {
+            match &event {
+                AiEvent::Finished { .. } => {
+                    publish_session_completed(ctx_for_worker.as_ref(), sid, task_id);
+                }
+                AiEvent::Cancelled { by, .. } => {
+                    publish_session_cancelled(
+                        ctx_for_worker.as_ref(),
+                        sid,
+                        task_id,
+                        Some(by.as_str()),
+                    );
+                }
+                AiEvent::Failed { error, .. } => {
+                    publish_session_failed(ctx_for_worker.as_ref(), sid, task_id, error);
+                }
+                _ => {}
+            }
+        }
+
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &event);
         // BL-134 Phase 2b-ii — terminal cleanup of the session→task
         // correlation entry. Tested via the unit suite below
@@ -726,6 +762,106 @@ fn handle_pool_stats(store: &Store, metrics: crate::pool::PoolMetrics) -> serde_
     serde_json::to_value(&stats).unwrap_or(serde_json::Value::Null)
 }
 
+// ─── Session lifecycle bus helpers ──────────────────────────────────────────
+
+/// Emit `com.nexus.ai.runtime.session.started` on the kernel bus.
+/// Keyed on `session_id` (not `task_id`) so subscribers that track the
+/// agent transcript ID rather than the runtime task ID receive the event.
+fn publish_session_started(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    kind: SessionKind,
+) {
+    use nexus_kernel::Events as _;
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "session_kind": kind,
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_STARTED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.started bus publish failed"
+        );
+    }
+}
+
+/// Emit `com.nexus.ai.runtime.session.completed` on the kernel bus.
+fn publish_session_completed(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+) {
+    use nexus_kernel::Events as _;
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "outcome": "completed",
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_COMPLETED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.completed bus publish failed"
+        );
+    }
+}
+
+/// Emit `com.nexus.ai.runtime.session.completed` with a `failed` outcome.
+fn publish_session_failed(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    error: &str,
+) {
+    use nexus_kernel::Events as _;
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "outcome": "failed",
+        "error": error,
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_COMPLETED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.failed bus publish failed"
+        );
+    }
+}
+
+/// Emit `com.nexus.ai.runtime.session.cancelled` on the kernel bus.
+fn publish_session_cancelled(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    reason: Option<&str>,
+) {
+    use nexus_kernel::Events as _;
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "reason": reason,
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_CANCELLED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.cancelled bus publish failed"
+        );
+    }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn record_and_publish(
@@ -839,14 +975,15 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.store.observe_status(&AiEvent::Finished {
+        plugin.supervisor.store().observe_status(&AiEvent::Finished {
             task_id: id,
             outcome: serde_json::json!({"ok": true}),
         });
         let args = serde_json::json!({ "task_id": id });
-        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(!reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Completed);
@@ -857,9 +994,10 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        let store_clone = plugin.store.clone();
+        let store_clone = plugin.supervisor.store().clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             store_clone.observe_status(&AiEvent::Finished {
@@ -869,7 +1007,7 @@ mod tests {
         });
         let args = serde_json::json!({ "task_id": id });
         let started = std::time::Instant::now();
-        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(!reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Completed);
@@ -883,14 +1021,15 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.store.observe_status(&AiEvent::Started {
+        plugin.supervisor.store().observe_status(&AiEvent::Started {
             task_id: id,
             attempt: 1,
         });
         let args = serde_json::json!({ "task_id": id, "timeout_ms": 25 });
-        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Running);
@@ -993,7 +1132,7 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let ctx = test_ctx();
         let err = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": uuid::Uuid::new_v4() }),
         )
@@ -1006,14 +1145,15 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        let gate = plugin.store.cancel_gate(id).unwrap();
+        let gate = plugin.supervisor.store().cancel_gate(id).unwrap();
         assert!(!gate.is_cancelled(), "starts un-cancelled");
 
         let ctx = test_ctx();
         let value = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": id, "reason": "test-shutdown" }),
         )
@@ -1023,7 +1163,7 @@ mod tests {
 
         // Second cancel is a no-op and reports cancelled = false.
         let value2 = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": id }),
         )
@@ -1036,16 +1176,17 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.store.observe_status(&AiEvent::Finished {
+        plugin.supervisor.store().observe_status(&AiEvent::Finished {
             task_id: id,
             outcome: serde_json::Value::Null,
         });
 
         let ctx = test_ctx();
         let err = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": id }),
         )

@@ -56,12 +56,20 @@ pub mod events;
 pub mod pool;
 pub mod republisher;
 pub mod scheduler;
+pub mod session;
+pub mod supervisor;
 
 /// BL-134 Phase 4 — process-wide shared tokio handle accessor.
 /// Re-exported from [`pool::shared_pool_handle`] for ergonomic
 /// `nexus_ai_runtime::shared_pool_handle()` calls from sibling
 /// subsystems (today: `nexus-ai::indexing_daemon`).
 pub use pool::shared_pool_handle;
+
+/// Re-export session identity types so callers only need one `use`
+/// path for the AI-runtime's session surface.
+pub use session::{Budget, Session, SessionId, SessionKind, SessionOutcome, SessionState, Step};
+/// Re-export the Supervisor and its admission-control config.
+pub use supervisor::{AdmissionConfig, Supervisor};
 
 /// Reverse-DNS plugin id — also the bus-topic prefix the republisher
 /// owns (`com.nexus.ai.runtime.*`).
@@ -194,6 +202,11 @@ pub struct AiRuntimeSubmitArgs {
     /// Priority bucket. Defaults to [`TaskPriority::Interactive`].
     #[serde(default)]
     pub priority: TaskPriority,
+    /// Session kind — determines budget tier, latency target, and
+    /// output destination. Defaults to [`SessionKind::UserDriven`].
+    /// Callers that don't supply this field continue to work unchanged.
+    #[serde(default)]
+    pub kind: SessionKind,
     /// Optional parent task id — Phase 2+ uses this for delegate /
     /// fan-out composition. Phase 1 records the value for
     /// observability but does not act on it.
