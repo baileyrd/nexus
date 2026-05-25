@@ -6,6 +6,10 @@
 //! `pool_stats`), the `submit` enqueue path, and reserved Phase-5
 //! placeholders for `cancel` / `pause` / `resume`. These tests pin
 //! the wire-shape contract for each.
+//!
+//! Move 7 adds `register_trigger` / `unregister_trigger` /
+//! `list_triggers` and the trigger watcher loop; tests at the bottom
+//! exercise those through the same `build_cli_runtime` stack.
 
 use std::time::Duration;
 
@@ -295,5 +299,196 @@ async fn republisher_translates_round_proposed_to_typed_ai_event() {
     assert_eq!(
         payload.get("narration").and_then(|v| v.as_str()),
         Some("I'd like to read the file")
+    );
+}
+
+// ─── Move 7: AmbientTrigger IPC tests ────────────────────────────────────────
+
+/// Helper: build the serde_json representation of an AmbientTrigger without
+/// depending on the Rust type directly (keeps this test file light on imports
+/// and exercises the wire shape, not just the Rust API).
+///
+/// `TriggerId` serializes as `{ "0": "<uuid-string>" }` because it's a
+/// newtype tuple struct. We supply a fixed v4 UUID so tests are deterministic.
+fn make_trigger_with_id(
+    id: &str,
+    name: &str,
+    type_id: &str,
+    goal_template: &str,
+) -> serde_json::Value {
+    // TriggerId(Uuid) is a newtype struct — serde serializes it as the bare
+    // UUID string, not as an object.
+    serde_json::json!({
+        "trigger": {
+            "id": id,
+            "name": name,
+            "filter": { "kind": "custom_exact", "type_id": type_id },
+            "goal_template": goal_template,
+            "mode": "new_goal",
+            "enabled": true,
+        }
+    })
+}
+
+fn make_trigger(name: &str, type_id: &str, goal_template: &str) -> serde_json::Value {
+    make_trigger_with_id(
+        "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        name,
+        type_id,
+        goal_template,
+    )
+}
+
+#[tokio::test]
+async fn register_trigger_returns_a_trigger_id() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let resp = call(
+        &runtime,
+        "register_trigger",
+        make_trigger("file-watch", "com.nexus.storage.file_changed", "Handle: {{event.payload}}"),
+    )
+    .await
+    .expect("register_trigger");
+
+    // TriggerId(Uuid) serializes as a bare UUID string.
+    let trigger_id = resp
+        .get("trigger_id")
+        .and_then(|v| v.as_str())
+        .expect("trigger_id should be a UUID string");
+    assert_eq!(trigger_id.len(), 36, "trigger_id should be a formatted UUID, got {trigger_id}");
+}
+
+#[tokio::test]
+async fn list_triggers_empty_on_fresh_runtime() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let resp = call(&runtime, "list_triggers", serde_json::json!({}))
+        .await
+        .expect("list_triggers");
+    assert_eq!(resp, serde_json::json!({ "triggers": [] }));
+}
+
+#[tokio::test]
+async fn register_then_list_then_unregister_round_trip() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // register — use a unique id distinct from the other tests
+    let my_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    let reg_resp = call(
+        &runtime,
+        "register_trigger",
+        make_trigger_with_id(my_id, "my-trigger", "com.test.event", "Do: {{event.type}}"),
+    )
+    .await
+    .expect("register_trigger");
+    let trigger_id = reg_resp
+        .get("trigger_id")
+        .and_then(|v| v.as_str())
+        .expect("trigger_id string")
+        .to_string();
+    assert_eq!(trigger_id, my_id);
+
+    // list should show it
+    let list = call(&runtime, "list_triggers", serde_json::json!({}))
+        .await
+        .expect("list_triggers");
+    let triggers = list.get("triggers").and_then(|v| v.as_array()).expect("triggers array");
+    assert_eq!(triggers.len(), 1);
+    assert_eq!(triggers[0].get("name").and_then(|v| v.as_str()), Some("my-trigger"));
+
+    // unregister — trigger_id is a bare UUID string on the wire
+    let un_resp = call(
+        &runtime,
+        "unregister_trigger",
+        serde_json::json!({ "trigger_id": trigger_id }),
+    )
+    .await
+    .expect("unregister_trigger");
+    assert_eq!(un_resp.get("found").and_then(|v| v.as_bool()), Some(true));
+
+    // list now empty
+    let list2 = call(&runtime, "list_triggers", serde_json::json!({}))
+        .await
+        .expect("list_triggers after unregister");
+    let triggers2 = list2.get("triggers").and_then(|v| v.as_array()).expect("triggers array");
+    assert!(triggers2.is_empty());
+}
+
+#[tokio::test]
+async fn unregister_unknown_trigger_id_returns_found_false() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let fake_id = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    let resp = call(
+        &runtime,
+        "unregister_trigger",
+        serde_json::json!({ "trigger_id": fake_id }),
+    )
+    .await
+    .expect("unregister_trigger");
+    assert_eq!(resp.get("found").and_then(|v| v.as_bool()), Some(false));
+}
+
+#[tokio::test]
+async fn trigger_watcher_spawns_session_when_matching_event_fires() {
+    use nexus_kernel::Events as _;
+
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // Register a trigger that reacts to a specific custom event.
+    let reg_resp = call(
+        &runtime,
+        "register_trigger",
+        make_trigger_with_id(
+            "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "watcher-test",
+            "com.nexus.test.trigger_fire",
+            "Observed event: {{event.payload}}",
+        ),
+    )
+    .await
+    .expect("register_trigger");
+    assert!(reg_resp.get("trigger_id").is_some());
+
+    // Confirm list starts empty (no sessions submitted yet).
+    let pre = call(&runtime, "list", serde_json::json!({})).await.expect("list");
+    assert_eq!(pre["runs"].as_array().unwrap().len(), 0);
+
+    // Give the watcher loop a moment to start before we fire the event.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Publish the matching custom event directly on the kernel bus.
+    runtime
+        .kernel
+        .event_bus()
+        .publish_plugin(
+            "com.nexus.test",
+            "com.nexus.test.trigger_fire",
+            serde_json::json!({ "msg": "hello from the bus" }),
+        )
+        .expect("publish custom event");
+
+    // Poll for up to 2s for the watcher to react and submit a session.
+    let mut found_run = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        let listing = call(&runtime, "list", serde_json::json!({})).await.expect("list");
+        let runs = listing["runs"].as_array().unwrap();
+        if !runs.is_empty() {
+            assert_eq!(runs[0]["kind"], "session", "watcher must submit a session task");
+            found_run = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        found_run,
+        "trigger watcher must submit a SignalTriggered session within 2s of matching event"
     );
 }
