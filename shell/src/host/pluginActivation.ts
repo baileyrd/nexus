@@ -70,6 +70,16 @@ export async function enableBuiltinPlugin(pluginId: string): Promise<EnableResul
     if (seen.has(e.id)) return undefined
     seen.add(e.id)
     for (const depId of e.dependsOn ?? []) {
+      // Kernel-tier deps (`com.nexus.*`) are loaded by the kernel's
+      // `register_all` before the shell mounts — they are never frontend
+      // catalog entries and never appear in the host's active-set. The
+      // shell is booted (a precondition for reaching here), so every
+      // declared kernel dep is already available. Skip them, mirroring
+      // `ExtensionHost.activate`'s dependency walk. Without this, enabling
+      // a default-off plugin that declares a kernel dep (e.g.
+      // `nexus.terminal` → `com.nexus.terminal`) fails mid-session with
+      // "not in the catalog", even though it loads fine at boot.
+      if (depId.startsWith('com.nexus.')) continue
       if (host.isActive(depId)) continue
       const dep = ALL_PLUGINS.find(x => x.id === depId)
       if (!dep) {
