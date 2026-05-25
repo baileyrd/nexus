@@ -38,6 +38,7 @@ members = [
     "crates/nexus-audio",
     "crates/nexus-collab",
     "crates/nexus-memory",
+    "crates/nexus-context",
 ]
 
 [workspace.package]
