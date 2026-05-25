@@ -38,6 +38,13 @@ pub enum TerminalError {
     /// Persistence (`SQLite`, scrollback file) failed (PRD-09 §2.2).
     #[error("persist: {0}")]
     Persist(String),
+
+    /// A spawn was rejected by its [`nexus_types::SpawnPolicy`] — the
+    /// requested working directory escaped the configured `root_dir`, or
+    /// the shell program was not on the `command_allowlist`. Best-effort
+    /// confinement, not a security boundary (see `SpawnPolicy` docs).
+    #[error("spawn policy violation: {0}")]
+    SpawnPolicyViolation(String),
 }
 
 #[cfg(test)]

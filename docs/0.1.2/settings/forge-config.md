@@ -136,7 +136,17 @@ env_denylist = ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"]
 # the deadline. Requires the memory monitor to be running (it is in the
 # default bootstrap).
 timeout_secs = 3600
+# Best-effort confinement of the child's INITIAL working directory: a
+# spawn whose working_dir canonicalizes outside this root is rejected;
+# a session with no working_dir spawns here. Omit for no confinement.
+root_dir = "/srv/forge"
+# Best-effort allowlist of shell programs (matched by exact path or
+# basename). A spawn of any other program is rejected. Omit for no
+# restriction; an empty list denies every spawn.
+command_allowlist = ["bash", "/usr/bin/zsh"]
 ```
+
+> **Confinement and allowlist are best-effort, not enforcement.** `root_dir` constrains only the starting directory — the child can `cd` out immediately, and the check is TOCTOU. `command_allowlist` gates only the immediate program — an allowed shell can still run anything via `sh -c`, `$(...)`, symlinks, or a wrapper. They stop accidents and casual misuse, not a determined process.
 
 **Authority & precedence.** The forge file is the policy authority. A per-call `create_session` `policy` argument may only ever *tighten* this default via `SpawnPolicy::tighten` (clean_env OR-ed, denylists unioned, allowlists intersected, the shorter `timeout_secs` winning) — an IPC caller can never weaken a forge-mandated restriction. The filter applies to the *inherited* environment only; a session's explicit `env` vars and the service-mandated `TERM`/`COLORTERM` are layered on top afterwards and are exempt.
 

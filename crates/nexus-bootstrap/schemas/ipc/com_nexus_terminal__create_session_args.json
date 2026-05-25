@@ -78,6 +78,17 @@
           "type": "boolean",
           "default": false
         },
+        "command_allowlist": {
+          "description": "Best-effort allowlist of shell programs that may be spawned. When\n`Some`, the spawn program must match an entry by exact path or by\nbasename, otherwise the spawn is rejected. `None` imposes no\nrestriction; `Some(empty)` denies every spawn.\n\n**Not a sandbox.** A shell on the allowlist can still launch\nanything via `sh -c`, `$(...)`, symlinks, or a wrapper binary —\nthis only gates the immediate program name.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
         "env_allowlist": {
           "description": "When non-empty, only inherited keys whose name matches an entry\nhere (case-insensitive) survive. Ignored when\n[`clean_env`](Self::clean_env) is set (nothing inherited to\nallow). An empty list means \"no allowlist restriction\".",
           "type": "array",
@@ -93,6 +104,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "root_dir": {
+          "description": "Best-effort confinement of the child's **initial** working\ndirectory: when set, the resolved working dir must canonicalize\nto a path inside this root, otherwise the spawn is rejected. A\nsession spawned with no explicit working dir defaults to this\nroot. `None` imposes no confinement.\n\n**Not a jail.** This constrains only the starting cwd — the child\ncan `cd` elsewhere immediately, and the canonicalize-then-check is\ninherently TOCTOU. It stops accidents, not a determined process.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "timeout_secs": {
           "description": "Wall-clock runtime budget in seconds. When set, the spawning\nservice kills the session once it has been alive longer than this\n(enforced out-of-band by the terminal's memory poller, so the\nkill lands within roughly one poll interval of the deadline).\n`None` means no time limit. Enforcement requires the service's\nbackground monitor to be running.",

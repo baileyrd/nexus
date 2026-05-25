@@ -46,4 +46,27 @@ env_denylist: Array<string>,
  * `None` means no time limit. Enforcement requires the service's
  * background monitor to be running.
  */
-timeout_secs: bigint | null, };
+timeout_secs: bigint | null, 
+/**
+ * Best-effort confinement of the child's **initial** working
+ * directory: when set, the resolved working dir must canonicalize
+ * to a path inside this root, otherwise the spawn is rejected. A
+ * session spawned with no explicit working dir defaults to this
+ * root. `None` imposes no confinement.
+ *
+ * **Not a jail.** This constrains only the starting cwd — the child
+ * can `cd` elsewhere immediately, and the canonicalize-then-check is
+ * inherently TOCTOU. It stops accidents, not a determined process.
+ */
+root_dir: string | null, 
+/**
+ * Best-effort allowlist of shell programs that may be spawned. When
+ * `Some`, the spawn program must match an entry by exact path or by
+ * basename, otherwise the spawn is rejected. `None` imposes no
+ * restriction; `Some(empty)` denies every spawn.
+ *
+ * **Not a sandbox.** A shell on the allowlist can still launch
+ * anything via `sh -c`, `$(...)`, symlinks, or a wrapper binary —
+ * this only gates the immediate program name.
+ */
+command_allowlist: Array<string> | null, };

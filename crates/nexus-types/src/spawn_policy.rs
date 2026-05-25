@@ -84,6 +84,27 @@ pub struct SpawnPolicy {
     /// background monitor to be running.
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    /// Best-effort confinement of the child's **initial** working
+    /// directory: when set, the resolved working dir must canonicalize
+    /// to a path inside this root, otherwise the spawn is rejected. A
+    /// session spawned with no explicit working dir defaults to this
+    /// root. `None` imposes no confinement.
+    ///
+    /// **Not a jail.** This constrains only the starting cwd — the child
+    /// can `cd` elsewhere immediately, and the canonicalize-then-check is
+    /// inherently TOCTOU. It stops accidents, not a determined process.
+    #[serde(default)]
+    pub root_dir: Option<String>,
+    /// Best-effort allowlist of shell programs that may be spawned. When
+    /// `Some`, the spawn program must match an entry by exact path or by
+    /// basename, otherwise the spawn is rejected. `None` imposes no
+    /// restriction; `Some(empty)` denies every spawn.
+    ///
+    /// **Not a sandbox.** A shell on the allowlist can still launch
+    /// anything via `sh -c`, `$(...)`, symlinks, or a wrapper binary —
+    /// this only gates the immediate program name.
+    #[serde(default)]
+    pub command_allowlist: Option<Vec<String>>,
 }
 
 impl SpawnPolicy {
@@ -104,11 +125,31 @@ impl SpawnPolicy {
         self.clean_env || !self.env_allowlist.is_empty() || !self.env_denylist.is_empty()
     }
 
-    /// Does this policy do nothing at all — neither touching the
-    /// environment nor imposing a runtime limit?
+    /// Does this policy do nothing at all — no env changes, no runtime
+    /// limit, no confinement, no command restriction?
     #[must_use]
     pub fn is_noop(&self) -> bool {
-        !self.affects_env() && self.timeout_secs.is_none()
+        !self.affects_env()
+            && self.timeout_secs.is_none()
+            && self.root_dir.is_none()
+            && self.command_allowlist.is_none()
+    }
+
+    /// Is `program` permitted by [`command_allowlist`](Self::command_allowlist)?
+    /// `None` (no allowlist) permits everything. Otherwise the program is
+    /// allowed when an entry equals its full path or its file name.
+    #[must_use]
+    pub fn command_allowed(&self, program: &std::path::Path) -> bool {
+        let Some(allow) = self.command_allowlist.as_ref() else {
+            return true;
+        };
+        let full = program.to_string_lossy();
+        let base = program
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned());
+        allow
+            .iter()
+            .any(|entry| entry.as_str() == full || base.as_deref() == Some(entry.as_str()))
     }
 
     /// Merge `self` (a baseline, e.g. the forge default) with `other`
@@ -128,6 +169,15 @@ impl SpawnPolicy {
             env_allowlist: tighten_allowlist(&self.env_allowlist, &other.env_allowlist),
             env_denylist: union_ci(&self.env_denylist, &other.env_denylist),
             timeout_secs: tighten_timeout(self.timeout_secs, other.timeout_secs),
+            // A forge-mandated confinement root stands; a caller can add
+            // one when the forge sets none, but cannot swap out the
+            // forge's. (A pure merge can't fs-check subpath containment,
+            // so "base wins" is the monotonic-safe choice.)
+            root_dir: self.root_dir.clone().or_else(|| other.root_dir.clone()),
+            command_allowlist: tighten_command_allowlist(
+                self.command_allowlist.as_deref(),
+                other.command_allowlist.as_deref(),
+            ),
         }
     }
 
@@ -176,6 +226,18 @@ fn tighten_timeout(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
+    }
+}
+
+/// Tightening merge for the optional command allowlist: `None` means
+/// unrestricted, so the restricting side wins; when both restrict, the
+/// result is their intersection (permits a subset of both).
+fn tighten_command_allowlist(a: Option<&[String]>, b: Option<&[String]>) -> Option<Vec<String>> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(a), None) => Some(a.to_vec()),
+        (None, Some(b)) => Some(b.to_vec()),
+        (Some(a), Some(b)) => Some(a.iter().filter(|e| b.contains(e)).cloned().collect()),
     }
 }
 
@@ -339,6 +401,80 @@ mod tests {
         let unlimited = SpawnPolicy::permissive();
         assert_eq!(a.tighten(&unlimited).timeout_secs, Some(60));
         assert_eq!(unlimited.tighten(&a).timeout_secs, Some(60));
+    }
+
+    #[test]
+    fn command_allowed_permits_all_when_unset() {
+        let p = SpawnPolicy::permissive();
+        assert!(p.command_allowed(std::path::Path::new("/bin/bash")));
+    }
+
+    #[test]
+    fn command_allowed_matches_basename_or_full_path() {
+        let p = SpawnPolicy {
+            command_allowlist: Some(vec!["bash".into(), "/usr/bin/zsh".into()]),
+            ..Default::default()
+        };
+        assert!(p.command_allowed(std::path::Path::new("/bin/bash"))); // basename
+        assert!(p.command_allowed(std::path::Path::new("/usr/bin/zsh"))); // full path
+        assert!(!p.command_allowed(std::path::Path::new("/usr/local/bin/zsh"))); // wrong path
+        assert!(!p.command_allowed(std::path::Path::new("/bin/sh")));
+    }
+
+    #[test]
+    fn empty_command_allowlist_denies_everything() {
+        let p = SpawnPolicy {
+            command_allowlist: Some(vec![]),
+            ..Default::default()
+        };
+        assert!(!p.command_allowed(std::path::Path::new("/bin/sh")));
+    }
+
+    #[test]
+    fn tighten_command_allowlist_intersects_and_none_does_not_loosen() {
+        let a = SpawnPolicy {
+            command_allowlist: Some(vec!["bash".into(), "sh".into()]),
+            ..Default::default()
+        };
+        let b = SpawnPolicy {
+            command_allowlist: Some(vec!["sh".into(), "zsh".into()]),
+            ..Default::default()
+        };
+        assert_eq!(a.tighten(&b).command_allowlist, Some(vec!["sh".to_string()]));
+        let unrestricted = SpawnPolicy::permissive();
+        assert_eq!(
+            a.tighten(&unrestricted).command_allowlist,
+            Some(vec!["bash".to_string(), "sh".to_string()])
+        );
+    }
+
+    #[test]
+    fn tighten_root_dir_base_wins_when_set() {
+        let base = SpawnPolicy {
+            root_dir: Some("/srv/forge".into()),
+            ..Default::default()
+        };
+        let caller = SpawnPolicy {
+            root_dir: Some("/tmp".into()),
+            ..Default::default()
+        };
+        // A forge-mandated root cannot be swapped out by the caller.
+        assert_eq!(base.tighten(&caller).root_dir, Some("/srv/forge".into()));
+        // But a caller may add confinement when the forge sets none.
+        assert_eq!(
+            SpawnPolicy::permissive().tighten(&caller).root_dir,
+            Some("/tmp".into())
+        );
+    }
+
+    #[test]
+    fn confinement_only_policy_is_not_noop_and_not_env_affecting() {
+        let p = SpawnPolicy {
+            root_dir: Some("/srv".into()),
+            ..Default::default()
+        };
+        assert!(!p.is_noop());
+        assert!(!p.affects_env());
     }
 
     #[test]

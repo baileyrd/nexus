@@ -203,6 +203,46 @@ pub struct Session {
     last_signal: Option<Signal>,
 }
 
+/// Resolve and best-effort-confine the child's initial working
+/// directory against [`nexus_types::SpawnPolicy::root_dir`].
+///
+/// - No `root_dir` set → the requested dir is returned unchanged.
+/// - `root_dir` set, no requested dir → spawn in the root itself.
+/// - `root_dir` set + a requested dir → the requested dir must
+///   canonicalize to a path inside the canonicalized root, else
+///   [`TerminalError::SpawnPolicyViolation`].
+///
+/// Confines only the *starting* cwd; the child can `cd` out, and the
+/// canonicalize-then-check is TOCTOU. Accident-prevention, not a jail.
+fn confine_working_dir(
+    policy: &nexus_types::SpawnPolicy,
+    requested: Option<&std::path::Path>,
+) -> Result<Option<PathBuf>, TerminalError> {
+    let Some(root) = policy.root_dir.as_ref() else {
+        return Ok(requested.map(PathBuf::from));
+    };
+    let root_canon = std::fs::canonicalize(root).map_err(|e| {
+        TerminalError::SpawnPolicyViolation(format!(
+            "root_dir '{root}' cannot be resolved: {e}"
+        ))
+    })?;
+    let target = requested.map_or_else(|| root_canon.clone(), PathBuf::from);
+    let target_canon = std::fs::canonicalize(&target).map_err(|e| {
+        TerminalError::SpawnPolicyViolation(format!(
+            "working_dir '{}' cannot be resolved: {e}",
+            target.display()
+        ))
+    })?;
+    if !target_canon.starts_with(&root_canon) {
+        return Err(TerminalError::SpawnPolicyViolation(format!(
+            "working_dir '{}' is outside the confinement root '{}'",
+            target_canon.display(),
+            root_canon.display()
+        )));
+    }
+    Ok(Some(target_canon))
+}
+
 impl Session {
     /// Spawn a fresh PTY + child shell.
     ///
@@ -213,6 +253,22 @@ impl Session {
     pub fn spawn(config: SessionConfig) -> Result<Self, TerminalError> {
         let shell = config.shell.unwrap_or_else(detect_default_shell);
         let shell_display = shell.program.display().to_string();
+
+        // Best-effort spawn-policy gates (command allowlist + cwd
+        // confinement). Checked before PTY allocation so a rejected
+        // spawn costs nothing. These are accident-prevention, not a
+        // security boundary — see `nexus_types::SpawnPolicy`.
+        let working_dir = match config.policy.as_ref() {
+            Some(policy) => {
+                if !policy.command_allowed(&shell.program) {
+                    return Err(TerminalError::SpawnPolicyViolation(format!(
+                        "program '{shell_display}' is not on the command allowlist"
+                    )));
+                }
+                confine_working_dir(policy, config.working_dir.as_deref())?
+            }
+            None => config.working_dir.clone(),
+        };
 
         let size = config.initial_size.unwrap_or(PtySize {
             rows: 24,
@@ -230,7 +286,7 @@ impl Session {
         for a in &shell.args {
             cmd.arg(a);
         }
-        if let Some(ref wd) = config.working_dir {
+        if let Some(ref wd) = working_dir {
             cmd.cwd(wd);
         }
         // Env-hygiene policy (resolved authority = forge config). When a
@@ -873,6 +929,89 @@ mod tests {
             out.contains("S=[]") && out.contains("K=[survivor]"),
             "expected denied var scrubbed and allowed var kept, got: {out:?}"
         );
+    }
+
+    #[test]
+    fn command_allowlist_rejects_disallowed_program() {
+        let err = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "true".into()],
+            }),
+            policy: Some(nexus_types::SpawnPolicy {
+                command_allowlist: Some(vec!["bash".into()]),
+                ..Default::default()
+            }),
+            ..SessionConfig::default()
+        })
+        .expect_err("spawn should be rejected");
+        assert!(
+            matches!(err, TerminalError::SpawnPolicyViolation(_)),
+            "expected SpawnPolicyViolation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn command_allowlist_permits_listed_program() {
+        if !unix_only("command_allowlist_permits_listed_program") {
+            return;
+        }
+        // `/bin/sh` matches by basename `sh`; spawn should succeed.
+        let session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "true".into()],
+            }),
+            policy: Some(nexus_types::SpawnPolicy {
+                command_allowlist: Some(vec!["sh".into()]),
+                ..Default::default()
+            }),
+            ..SessionConfig::default()
+        });
+        assert!(session.is_ok(), "allowed program should spawn");
+    }
+
+    #[test]
+    fn root_dir_rejects_working_dir_outside_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let err = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "true".into()],
+            }),
+            working_dir: Some(outside.path().to_path_buf()),
+            policy: Some(nexus_types::SpawnPolicy {
+                root_dir: Some(root.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            }),
+            ..SessionConfig::default()
+        })
+        .expect_err("working_dir outside root must be rejected");
+        assert!(matches!(err, TerminalError::SpawnPolicyViolation(_)));
+    }
+
+    #[test]
+    fn root_dir_allows_working_dir_inside_root() {
+        if !unix_only("root_dir_allows_working_dir_inside_root") {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let inside = root.path().join("sub");
+        std::fs::create_dir(&inside).unwrap();
+        let session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "true".into()],
+            }),
+            working_dir: Some(inside),
+            policy: Some(nexus_types::SpawnPolicy {
+                root_dir: Some(root.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            }),
+            ..SessionConfig::default()
+        });
+        assert!(session.is_ok(), "working_dir inside root should spawn");
     }
 
     #[test]
