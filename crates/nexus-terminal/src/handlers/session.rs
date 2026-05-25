@@ -35,7 +35,7 @@ impl TerminalCorePlugin {
             shell,
             working_dir: a.working_dir.map(PathBuf::from),
             env: a.env,
-            policy: Some(policy),
+            policy: Some(policy.clone()),
         };
         let id = self
             .server
@@ -43,6 +43,7 @@ impl TerminalCorePlugin {
             .map_err(poisoned)?
             .create_session(cfg)
             .map_err(crate_err)?;
+        self.stage_session_timeout(&id, &policy);
         to_value(
             &CreateSessionResponse {
                 id: id.as_str().to_string(),

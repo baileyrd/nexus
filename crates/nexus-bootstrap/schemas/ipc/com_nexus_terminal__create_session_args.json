@@ -93,6 +93,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "timeout_secs": {
+          "description": "Wall-clock runtime budget in seconds. When set, the spawning\nservice kills the session once it has been alive longer than this\n(enforced out-of-band by the terminal's memory poller, so the\nkill lands within roughly one poll interval of the deadline).\n`None` means no time limit. Enforcement requires the service's\nbackground monitor to be running.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
         }
       },
       "additionalProperties": false

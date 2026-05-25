@@ -240,7 +240,7 @@ impl Session {
         // vars. `TERM`/`COLORTERM` and the caller's explicit `config.env`
         // are layered on *after* this and are intentionally exempt — they
         // are service-mandated / caller-intended, not ambient inheritance.
-        if let Some(policy) = config.policy.as_ref().filter(|p| !p.is_noop()) {
+        if let Some(policy) = config.policy.as_ref().filter(|p| p.affects_env()) {
             cmd.env_clear();
             let inherited: Vec<(String, String)> = std::env::vars().collect();
             for (k, v) in policy.filter_inherited(&inherited) {

@@ -204,6 +204,20 @@ pub enum TerminalEvent {
         /// Hard threshold (MB) that was crossed.
         limit_mb: u32,
     },
+    /// The session outlived its configured wall-clock budget
+    /// (`SpawnPolicy::timeout_secs`). The poller publishes this
+    /// **before** issuing the kill, mirroring [`Self::MemoryLimitExceeded`]
+    /// so a subscriber sees the breach then the [`Self::SessionClosed`]
+    /// in causal order. `elapsed_secs` is the observed lifetime at the
+    /// kill; `limit_secs` is the configured budget.
+    TimeoutExceeded {
+        /// Session id.
+        id: String,
+        /// Observed lifetime at the kill, in seconds.
+        elapsed_secs: u64,
+        /// Configured wall-clock budget (seconds) that was crossed.
+        limit_secs: u64,
+    },
     /// BL-062 — the session was removed from the manager to make
     /// room for a new spawn (LRU eviction). Only **stopped**
     /// sessions are evicted; a running session is never auto-killed
@@ -231,6 +245,7 @@ impl TerminalEvent {
             | TerminalEvent::PatternMatched { id, .. }
             | TerminalEvent::SessionClosed { id, .. }
             | TerminalEvent::MemoryLimitExceeded { id, .. }
+            | TerminalEvent::TimeoutExceeded { id, .. }
             | TerminalEvent::SessionEvicted { id, .. } => id,
         }
     }

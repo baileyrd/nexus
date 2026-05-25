@@ -1052,6 +1052,15 @@ pub(crate) struct MemoryState {
     /// entries (sessions that never reached the poller's `live` set)
     /// get retained via the per-round live-id sweep.
     pub(crate) pending_overrides: HashMap<String, MemoryLimits>,
+    /// Slice-2 — absolute wall-clock kill deadlines staged by the spawn
+    /// dispatch handlers from `SpawnPolicy::timeout_secs`. The poller
+    /// kills any live session past its deadline (within ~one poll
+    /// interval) and publishes [`TerminalEvent::TimeoutExceeded`].
+    /// Entries for sessions that leave the live set are swept each round,
+    /// mirroring `pending_overrides`. Keyed by session id; the stored
+    /// pair is `(deadline, limit_secs)` so the kill event can report the
+    /// configured budget.
+    pub(crate) deadlines: HashMap<String, (std::time::Instant, u64)>,
 }
 
 impl MemoryState {
@@ -1061,6 +1070,7 @@ impl MemoryState {
             latest_rss: HashMap::new(),
             session_pid: HashMap::new(),
             pending_overrides: HashMap::new(),
+            deadlines: HashMap::new(),
         }
     }
 }
@@ -1221,6 +1231,30 @@ impl TerminalCorePlugin {
     pub fn with_spawn_policy_default(mut self, policy: nexus_types::SpawnPolicy) -> Self {
         self.spawn_policy_default = policy;
         self
+    }
+
+    /// Slice-2 — stage a wall-clock kill deadline for a freshly-spawned
+    /// session from its resolved [`nexus_types::SpawnPolicy::timeout_secs`].
+    /// No-op when the policy sets no timeout or no memory monitor is
+    /// wired (the poller that enforces deadlines only runs alongside a
+    /// monitor + event bus). Mirrors the `pending_overrides` staging in
+    /// `dispatch_run_saved`.
+    pub(crate) fn stage_session_timeout(
+        &self,
+        id: &SessionId,
+        policy: &nexus_types::SpawnPolicy,
+    ) {
+        let Some(secs) = policy.timeout_secs else {
+            return;
+        };
+        let Some(memory) = self.memory.as_ref() else {
+            return;
+        };
+        if let Ok(mut mem) = memory.lock() {
+            let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+            mem.deadlines
+                .insert(id.as_str().to_string(), (deadline, secs));
+        }
     }
 
     /// Attach an ad-hoc history store so the `adhoc_*` handlers
@@ -1572,6 +1606,11 @@ fn memory_poller_round(
             live.iter().map(|(id, _)| id.as_str()).collect();
         mem.pending_overrides
             .retain(|id, _| live_ids.contains(id.as_str()));
+        // Slice-2 — same sweep for wall-clock deadlines: drop any whose
+        // session left the live set so a closed-and-respawned id starts
+        // fresh.
+        mem.deadlines
+            .retain(|id, _| live_ids.contains(id.as_str()));
         // Track newly seen pids. A pending override (BL-061 follow-up)
         // wins over the bootstrap-wide default; the entry is consumed
         // so a closed-and-respawned id starts fresh.
@@ -1589,8 +1628,10 @@ fn memory_poller_round(
         }
     }
 
-    // Sample under the memory lock; collect kill targets without
-    // holding any lock across the kill path.
+    // Wall-clock deadlines and RSS sampling are independent passes over
+    // the live set, each under a brief memory lock. Collected without
+    // holding any lock across the kill path below.
+    let timed_out = collect_timed_out(memory, &live);
     let mut to_kill: Vec<(SessionId, u64, u32)> = Vec::new();
     {
         let Ok(mut mem) = memory.lock() else { return };
@@ -1616,40 +1657,96 @@ fn memory_poller_round(
         }
     }
 
+    // Wall-clock timeouts first, then memory. Both publish the breach
+    // event before closing via the server's SIGTERM→SIGKILL ladder so a
+    // subscriber observes the breach then `SessionClosed` in causal
+    // order.
+    for (id, elapsed_secs, limit_secs) in timed_out {
+        publish_breach_and_close(
+            server,
+            bus,
+            &id,
+            TerminalEvent::TimeoutExceeded {
+                id: id.as_str().to_string(),
+                elapsed_secs,
+                limit_secs,
+            },
+        );
+    }
     for (id, rss_bytes, limit_mb) in to_kill {
-        // Publish first so subscribers see the breach before the
-        // ensuing SessionClosed event.
-        let payload = TerminalEvent::MemoryLimitExceeded {
-            id: id.as_str().to_string(),
-            rss_bytes,
-            limit_mb,
-        };
-        if let Ok(payload_value) = serde_json::to_value(&payload) {
-            let topic = format!("{EVENT_LIFECYCLE_PREFIX}{id}", id = id.as_str());
-            if let Err(err) = bus.publish_plugin(PLUGIN_ID, &topic, payload_value) {
-                tracing::warn!(
-                    plugin = PLUGIN_ID,
-                    %err,
-                    session = id.as_str(),
-                    "memory poller: publish MemoryLimitExceeded failed",
-                );
+        publish_breach_and_close(
+            server,
+            bus,
+            &id,
+            TerminalEvent::MemoryLimitExceeded {
+                id: id.as_str().to_string(),
+                rss_bytes,
+                limit_mb,
+            },
+        );
+    }
+}
+
+/// Slice-2 — collect live sessions past their wall-clock deadline as
+/// `(id, elapsed_secs, limit_secs)`, draining the matched entries from
+/// `MemoryState::deadlines` so they aren't re-killed next round. Only
+/// sessions with a live pid are returned — the close ladder needs a
+/// process to signal. Independent of RSS sampling.
+fn collect_timed_out(
+    memory: &Arc<Mutex<MemoryState>>,
+    live: &[(SessionId, Option<u32>)],
+) -> Vec<(SessionId, u64, u64)> {
+    let Ok(mut mem) = memory.lock() else {
+        return Vec::new();
+    };
+    let now = std::time::Instant::now();
+    let mut timed_out = Vec::new();
+    for (id, pid) in live {
+        if pid.is_none() {
+            continue;
+        }
+        if let Some(&(deadline, limit_secs)) = mem.deadlines.get(id.as_str()) {
+            if now >= deadline {
+                let elapsed = limit_secs
+                    .saturating_add(now.saturating_duration_since(deadline).as_secs());
+                timed_out.push((id.clone(), elapsed, limit_secs));
+                mem.deadlines.remove(id.as_str());
             }
         }
-        // Close via the server's shutdown ladder so the lifecycle
-        // forwarder picks up `SessionClosed` after the breach event
-        // (in causal order). `close_session` issues SIGTERM then
-        // SIGKILL after a short window, which is the right behaviour
-        // for memory exhaustion — give the process a chance to flush
-        // before we yank it.
-        if let Ok(mut server_guard) = server.lock() {
-            if let Err(err) = server_guard.close_session(&id) {
-                tracing::warn!(
-                    plugin = PLUGIN_ID,
-                    %err,
-                    session = id.as_str(),
-                    "memory poller: close_session failed",
-                );
-            }
+    }
+    timed_out
+}
+
+/// Publish a resource-breach [`TerminalEvent`] on the session's
+/// lifecycle topic and then close the session through the server's
+/// shutdown ladder. Shared by the memory and wall-clock kill paths so
+/// both honour the same publish-before-close ordering. Lock/publish
+/// failures are logged and swallowed — the next poller round retries.
+fn publish_breach_and_close(
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    bus: &EventBus,
+    id: &SessionId,
+    payload: TerminalEvent,
+) {
+    if let Ok(payload_value) = serde_json::to_value(&payload) {
+        let topic = format!("{EVENT_LIFECYCLE_PREFIX}{id}", id = id.as_str());
+        if let Err(err) = bus.publish_plugin(PLUGIN_ID, &topic, payload_value) {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                %err,
+                session = id.as_str(),
+                "memory poller: publish breach event failed",
+            );
+        }
+    }
+    if let Ok(mut server_guard) = server.lock() {
+        if let Err(err) = server_guard.close_session(id) {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                %err,
+                session = id.as_str(),
+                "memory poller: close_session failed",
+            );
         }
     }
 }
@@ -1809,6 +1906,17 @@ fn build_activity_entry(
                 "session {id} killed (OOM): rss={rss_bytes} limit={limit_mb}MB"
             );
             entry.error = Some(format!("memory limit exceeded ({limit_mb}MB)"));
+        }
+        TerminalEvent::TimeoutExceeded {
+            id,
+            elapsed_secs,
+            limit_secs,
+        } => {
+            entry.outcome = ActivityOutcome::Error;
+            entry.prompt = format!(
+                "session {id} killed (timeout): elapsed={elapsed_secs}s limit={limit_secs}s"
+            );
+            entry.error = Some(format!("runtime limit exceeded ({limit_secs}s)"));
         }
         // Streaming / internal variants don't reach the activity log.
         TerminalEvent::OutputReceived { .. }
@@ -3305,6 +3413,74 @@ mod tests {
         assert!(
             breach_before_closed,
             "MemoryLimitExceeded must be published before SessionClosed"
+        );
+    }
+
+    #[test]
+    fn poller_publishes_timeout_exceeded_before_kill_unix() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+        if !unix_only("poller_publishes_timeout_exceeded_before_kill_unix") {
+            return;
+        }
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        // Unlimited memory so only the wall-clock budget can kill it; a
+        // zero-second timeout expires on the first poll round after the
+        // child's pid appears.
+        let mut p = TerminalCorePlugin::new()
+            .with_memory_monitor(TestMemoryLimits::unlimited())
+            .with_memory_poll_interval(Duration::from_millis(20))
+            .with_event_bus(Arc::clone(&bus));
+
+        let args = serde_json::json!({
+            "name": "timeout-test",
+            "shell": "/bin/sh",
+            "shell_args": ["-c", "sleep 30"],
+            "policy": { "timeout_secs": 0 },
+        });
+        let resp = p.dispatch(HANDLER_CREATE_SESSION, &args).expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut saw_breach = false;
+        let mut saw_closed = false;
+        let mut breach_before_closed = false;
+        while std::time::Instant::now() < deadline {
+            if let Some(evt) = sub.try_recv().expect("bus alive") {
+                if let NexusEvent::Custom { type_id, payload, .. } = &evt.event {
+                    if !type_id.ends_with(&id) {
+                        continue;
+                    }
+                    if let Some(kind) = payload.get("kind").and_then(|v| v.as_str()) {
+                        match kind {
+                            "timeout_exceeded" => {
+                                saw_breach = true;
+                                assert_eq!(
+                                    payload.get("limit_secs").and_then(|v| v.as_u64()),
+                                    Some(0)
+                                );
+                            }
+                            "session_closed" => {
+                                saw_closed = true;
+                                if saw_breach {
+                                    breach_before_closed = true;
+                                }
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_breach, "TimeoutExceeded never published");
+        assert!(saw_closed, "SessionClosed never published after kill");
+        assert!(
+            breach_before_closed,
+            "TimeoutExceeded must be published before SessionClosed"
         );
     }
 

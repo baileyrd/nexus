@@ -37,4 +37,13 @@ env_allowlist: Array<string>,
  * removed. Applied after the allowlist, so a key can be allowed in
  * bulk and then individually denied.
  */
-env_denylist: Array<string>, };
+env_denylist: Array<string>, 
+/**
+ * Wall-clock runtime budget in seconds. When set, the spawning
+ * service kills the session once it has been alive longer than this
+ * (enforced out-of-band by the terminal's memory poller, so the
+ * kill lands within roughly one poll interval of the deadline).
+ * `None` means no time limit. Enforcement requires the service's
+ * background monitor to be running.
+ */
+timeout_secs: bigint | null, };

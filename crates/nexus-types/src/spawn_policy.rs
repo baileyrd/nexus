@@ -76,6 +76,14 @@ pub struct SpawnPolicy {
     /// bulk and then individually denied.
     #[serde(default)]
     pub env_denylist: Vec<String>,
+    /// Wall-clock runtime budget in seconds. When set, the spawning
+    /// service kills the session once it has been alive longer than this
+    /// (enforced out-of-band by the terminal's memory poller, so the
+    /// kill lands within roughly one poll interval of the deadline).
+    /// `None` means no time limit. Enforcement requires the service's
+    /// background monitor to be running.
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 impl SpawnPolicy {
@@ -87,12 +95,20 @@ impl SpawnPolicy {
         Self::default()
     }
 
-    /// Does this policy leave the inherited env completely untouched?
-    /// A no-op policy can skip the `env_clear` + re-add dance on the
-    /// spawn path.
+    /// Does this policy change the *inherited environment* of a spawned
+    /// child? Drives whether the spawn path performs the `env_clear` +
+    /// filtered re-add. A timeout-only policy returns `false` here — the
+    /// env is untouched even though the policy is not a full no-op.
+    #[must_use]
+    pub fn affects_env(&self) -> bool {
+        self.clean_env || !self.env_allowlist.is_empty() || !self.env_denylist.is_empty()
+    }
+
+    /// Does this policy do nothing at all — neither touching the
+    /// environment nor imposing a runtime limit?
     #[must_use]
     pub fn is_noop(&self) -> bool {
-        !self.clean_env && self.env_allowlist.is_empty() && self.env_denylist.is_empty()
+        !self.affects_env() && self.timeout_secs.is_none()
     }
 
     /// Merge `self` (a baseline, e.g. the forge default) with `other`
@@ -111,6 +127,7 @@ impl SpawnPolicy {
             clean_env: self.clean_env || other.clean_env,
             env_allowlist: tighten_allowlist(&self.env_allowlist, &other.env_allowlist),
             env_denylist: union_ci(&self.env_denylist, &other.env_denylist),
+            timeout_secs: tighten_timeout(self.timeout_secs, other.timeout_secs),
         }
     }
 
@@ -151,6 +168,15 @@ fn union_ci(a: &[String], b: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// Tightening merge for an optional time budget: the shorter limit
+/// wins, and `None` (no limit) never overrides a concrete limit.
+fn tighten_timeout(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Tightening merge for allowlists where an empty list means
@@ -286,6 +312,33 @@ mod tests {
             unrestricted.tighten(&restricted).env_allowlist,
             vec!["A".to_string()]
         );
+    }
+
+    #[test]
+    fn timeout_only_policy_is_not_env_affecting() {
+        let p = SpawnPolicy {
+            timeout_secs: Some(30),
+            ..Default::default()
+        };
+        assert!(!p.affects_env());
+        assert!(!p.is_noop());
+    }
+
+    #[test]
+    fn tighten_timeout_picks_shorter_and_none_does_not_loosen() {
+        let a = SpawnPolicy {
+            timeout_secs: Some(60),
+            ..Default::default()
+        };
+        let b = SpawnPolicy {
+            timeout_secs: Some(10),
+            ..Default::default()
+        };
+        assert_eq!(a.tighten(&b).timeout_secs, Some(10));
+        // A None (unlimited) caller keeps the base limit.
+        let unlimited = SpawnPolicy::permissive();
+        assert_eq!(a.tighten(&unlimited).timeout_secs, Some(60));
+        assert_eq!(unlimited.tighten(&a).timeout_secs, Some(60));
     }
 
     #[test]

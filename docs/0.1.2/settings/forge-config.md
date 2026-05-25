@@ -130,9 +130,15 @@ clean_env = false
 env_allowlist = ["PATH", "HOME", "LANG"]
 # Inherited keys named here are removed, applied after the allowlist.
 env_denylist = ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"]
+# Optional wall-clock runtime budget (seconds). The session is killed
+# once it outlives this; omit for no limit. Enforced by the terminal's
+# memory poller, so the kill lands within ~one poll interval (~1s) of
+# the deadline. Requires the memory monitor to be running (it is in the
+# default bootstrap).
+timeout_secs = 3600
 ```
 
-**Authority & precedence.** The forge file is the policy authority. A per-call `create_session` `policy` argument may only ever *tighten* this default via `SpawnPolicy::tighten` (clean_env OR-ed, denylists unioned, allowlists intersected) — an IPC caller can never weaken a forge-mandated restriction. The filter applies to the *inherited* environment only; a session's explicit `env` vars and the service-mandated `TERM`/`COLORTERM` are layered on top afterwards and are exempt.
+**Authority & precedence.** The forge file is the policy authority. A per-call `create_session` `policy` argument may only ever *tighten* this default via `SpawnPolicy::tighten` (clean_env OR-ed, denylists unioned, allowlists intersected, the shorter `timeout_secs` winning) — an IPC caller can never weaken a forge-mandated restriction. The filter applies to the *inherited* environment only; a session's explicit `env` vars and the service-mandated `TERM`/`COLORTERM` are layered on top afterwards and are exempt.
 
 > **Not a security boundary.** This is env hygiene and resource governance, not isolation: a spawned child can still open sockets and read any file its uid can reach. It exists to stop accidental leakage of parent secrets into child processes and to let a forge mandate a clean environment.
 

@@ -46,6 +46,7 @@ impl TerminalCorePlugin {
             .map_err(poisoned)?
             .create_session(cfg)
             .map_err(crate_err)?;
+        self.stage_session_timeout(&id, &self.spawn_policy_default);
         let info = ReplInfo {
             id: id.as_str().to_string(),
             lang: a.lang.clone(),
