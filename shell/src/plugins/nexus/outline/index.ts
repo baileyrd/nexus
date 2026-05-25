@@ -125,6 +125,16 @@ export const outlinePlugin: Plugin = {
         return
       }
 
+      // Tab failed to load (missing file / no kernel session — e.g. a
+      // restored tab from another vault). There's no session to read a
+      // tree from, so skip the kernel fetch (which would fail with "no
+      // open session" and get logged) and parse whatever content we have.
+      if (tab.error) {
+        useOutlineStore.getState().setHeadings(parseHeadings(tab.content))
+        useOutlineStore.getState().setActiveIndex(null)
+        return
+      }
+
       const runtime = getEditorRuntime()
       if (!runtime) {
         // Editor plugin hasn't finished activating yet. Fall back to

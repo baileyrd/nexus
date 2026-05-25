@@ -111,7 +111,31 @@ test('empty relpath skips publishing entirely', () => {
   assert.equal(calls.length, 0)
 })
 
-test('handler returning "collab not configured" disables further calls', async () => {
+test('handler returning { published: false } disables further calls', async () => {
+  let flushDone: () => void = () => {}
+  const flushed = new Promise<void>((r) => { flushDone = r })
+  const { core, calls, sched } = setup({
+    invoke: async () => {
+      flushDone()
+      // Collab unconfigured: handler succeeds with a no-op reply.
+      return { published: false }
+    },
+  })
+  core.observe({ offset: 5 })
+  sched.fireAll()
+  await flushed
+  // Let the resolved `.then` (which sets `disabled`) run. A macrotask
+  // drains the queue regardless of how many microtask hops it takes.
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(calls.length, 1)
+  assert.equal(core.isDisabled(), true)
+
+  core.observe({ offset: 12 })
+  sched.fireAll()
+  assert.equal(calls.length, 1, 'no more invokes after disable')
+})
+
+test('legacy "collab not configured" error still disables further calls', async () => {
   let flushDone: () => void = () => {}
   const flushed = new Promise<void>((r) => { flushDone = r })
   const { core, calls, sched } = setup({
@@ -123,9 +147,11 @@ test('handler returning "collab not configured" disables further calls', async (
   core.observe({ offset: 5 })
   sched.fireAll()
   await flushed
-  // Give the rejection's .catch a microtask to run.
-  await Promise.resolve()
-  await Promise.resolve()
+  // Drain the microtask queue fully: the rejection routes through
+  // `.then(...).catch(...)`, one hop more than a resolved reply, so a
+  // fixed couple of `Promise.resolve()` awaits can race it. A macrotask
+  // guarantees both the .then pass-through and the .catch have run.
+  await new Promise((r) => setTimeout(r, 0))
   assert.equal(calls.length, 1)
   assert.equal(core.isDisabled(), true)
 

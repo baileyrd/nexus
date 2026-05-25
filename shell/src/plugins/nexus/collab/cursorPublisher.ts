@@ -15,11 +15,13 @@
 // 2. `cursorPublisherExt` — CM6 `ViewPlugin` that observes
 //    `update.selectionSet` and feeds the core.
 //
-// Disable behaviour: the IPC handler returns `"collab not configured"`
-// when no `[collab]` block is present. The core matches that message
-// and stops calling so a misconfigured forge isn't hammered by every
-// keystroke. The flag is process-lifetime; the user must reload after
-// editing `.forge/config.toml`.
+// Disable behaviour: when no `[collab]` block is present the IPC
+// handler returns a successful no-op reply `{ published: false }`. The
+// core reads that flag and stops calling so a misconfigured forge isn't
+// hammered by every keystroke. (A legacy `"collab not configured"`
+// ExecutionFailed error is still honoured as a fallback.) The flag is
+// process-lifetime; the user must reload after editing
+// `.forge/config.toml`.
 
 import { ViewPlugin, type ViewUpdate, type EditorView } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
@@ -117,14 +119,26 @@ export function createCursorPublisherCore(
     if (snap.selectionEnd !== undefined && snap.selectionEnd !== snap.offset) {
       cursor.selection_end = snap.selectionEnd
     }
-    cfg.invoke(COLLAB_PLUGIN_ID, PUBLISH_PRESENCE, { cursor }).catch((err) => {
-      const msg = String(err ?? '')
-      if (msg.includes(NOT_CONFIGURED_HINT)) {
-        disabled = true
-      }
-      // Other errors are silently swallowed — collab is opt-in and
-      // a per-keystroke error toast would be noisy.
-    })
+    cfg.invoke(COLLAB_PLUGIN_ID, PUBLISH_PRESENCE, { cursor })
+      .then((reply) => {
+        // Successful no-op: collab isn't configured, so the handler
+        // returns `{ published: false }`. Stop pinging so a
+        // misconfigured forge isn't hammered on every cursor move.
+        const r = reply as { published?: boolean } | null | undefined
+        if (r && r.published === false) {
+          disabled = true
+        }
+      })
+      .catch((err) => {
+        // Legacy / defensive: older backends signalled "not configured"
+        // via an ExecutionFailed error rather than `published: false`.
+        const msg = String(err ?? '')
+        if (msg.includes(NOT_CONFIGURED_HINT)) {
+          disabled = true
+        }
+        // Other errors are silently swallowed — collab is opt-in and
+        // a per-keystroke error toast would be noisy.
+      })
   }
 
   return {
