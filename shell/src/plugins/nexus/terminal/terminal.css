@@ -29,6 +29,159 @@
 }
 
 /*
+ * Multi-terminal tabs (Zed-style). The panel leaf renders one
+ * `.nexus-terminal-tabs` container: a thin tab strip on top and a body
+ * that stacks every live xterm (only the active one is `display:flex`,
+ * the rest are `display:none` but stay mounted to preserve scrollback).
+ */
+.nexus-terminal-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--background-secondary);
+}
+
+.nexus-terminal-tabbar {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px 4px 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  /* Keep the strip from growing into a second row on overflow. */
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.nexus-terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 3px 6px 3px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nexus-terminal-tab:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.nexus-terminal-tab.is-active {
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border-color: var(--background-modifier-border);
+  border-bottom-color: var(--background-primary);
+}
+
+.nexus-terminal-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nexus-terminal-tab-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  /* Reveal on hover/active so the resting strip stays uncluttered. */
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+}
+
+.nexus-terminal-tab:hover .nexus-terminal-tab-close,
+.nexus-terminal-tab.is-active .nexus-terminal-tab-close {
+  opacity: 1;
+}
+
+.nexus-terminal-tab-close:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+@media (hover: none) {
+  .nexus-terminal-tab-close {
+    opacity: 1;
+  }
+}
+
+.nexus-terminal-tab-new {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  margin: 2px 0;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.nexus-terminal-tab-new:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.nexus-terminal-tabs-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.nexus-terminal-empty {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.nexus-terminal-empty-new {
+  font-size: 12px;
+  padding: 6px 14px;
+  color: var(--text-normal);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.nexus-terminal-empty-new:hover {
+  background: var(--background-modifier-hover);
+}
+
+/*
  * Saved Commands sub-view (WI-05).
  *
  * Sidebar pane: vertical list of user-saved shell commands. Click the

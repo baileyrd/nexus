@@ -1,11 +1,14 @@
 // BL-053 Phases 2/3/4 regression tests for the live-preview
-// `renderMarkdown` pipeline in `nexus/editor`.
+// `renderMarkdown` pipeline in `nexus/editor` — the path that's
+// actually mounted in the running shell. (The legacy
+// `core/editorArea/MarkdownDoc` renderer this pipeline replaced is
+// gone, along with its tests.)
 //
-// The legacy `core/editorArea/MarkdownDoc` path also implements
-// Phase 2/3 but uses different class names + lives behind a
-// detached slot; its own tests at `tests/markdown-doc-bl053.test.ts`
-// cover that path. This file pins the BL-053 behaviour for the
-// path that's actually mounted in the running shell.
+// Also pins the issue #76 XSS regression: `renderMarkdown` feeds its
+// output to `dangerouslySetInnerHTML`, and note content can come from
+// AI responses, MCP tool output, and imported notes — all
+// attacker-controllable — so dangerous link schemes and attribute
+// injection must be neutralized by the DOMPurify pass.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -181,4 +184,72 @@ test('inline `Complete` codespan renders as a pill', () => {
 test('inline `Not started` codespan renders as a muted pill', () => {
   const html = renderMarkdown('Status `Not started`.')
   assert.match(html, /nx-status-pill__chip--muted">Not started<\/span>/)
+})
+
+// ── issue #76 — XSS in markdown links ─────────────────────────────
+//
+// The renderer must neutralize dangerous href schemes and reject
+// attribute-injection payloads. We parse the sanitized HTML with
+// happy-dom (registered by the test setup) and inspect the resulting
+// <a> element — what matters for XSS is whether the browser would
+// parse the payload as a real attribute / executable href, not
+// whether a substring survives in the raw string.
+
+function parseLink(html: string): HTMLAnchorElement | null {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  return container.querySelector('a')
+}
+
+test('javascript: link scheme is stripped from the href', () => {
+  const html = renderMarkdown('[click](javascript:alert(1))')
+  assert.doesNotMatch(html, /href="javascript:/i)
+  const link = parseLink(html)
+  assert.ok(link, `link element must still render, got: ${html}`)
+  const href = link.getAttribute('href') ?? ''
+  assert.ok(
+    !href.toLowerCase().startsWith('javascript:'),
+    `href must not start with javascript:, got: ${href}`,
+  )
+})
+
+test('data: link scheme is stripped from the href', () => {
+  const html = renderMarkdown('[click](data:text/html,<script>alert(1)</script>)')
+  assert.doesNotMatch(html, /href="data:/i)
+})
+
+test('vbscript: link scheme is stripped from the href', () => {
+  const html = renderMarkdown('[click](vbscript:msgbox)')
+  assert.doesNotMatch(html, /href="vbscript:/i)
+})
+
+test('attribute-injection payload cannot add an event handler', () => {
+  // This payload isn't even a valid markdown link — it survives as
+  // inert text content — but assert on the parsed DOM so the test
+  // stays meaningful if marked's link grammar ever loosens: no
+  // element may carry an on*-handler attribute.
+  const html = renderMarkdown('[click](" onmouseover=alert(1) x=")')
+  const container = document.createElement('div')
+  container.innerHTML = html
+  const offenders = Array.from(container.querySelectorAll('*')).filter((el) =>
+    el.getAttributeNames().some((n) => n.toLowerCase().startsWith('on')),
+  )
+  assert.equal(
+    offenders.length,
+    0,
+    `no on*-handler attributes allowed, got: ${offenders
+      .map((el) => el.getAttributeNames().join(','))
+      .join(' | ')}`,
+  )
+})
+
+test('safe http(s)/mailto schemes round-trip unharmed', () => {
+  assert.match(
+    renderMarkdown('[click](https://example.com/path?q=1)'),
+    /href="https:\/\/example\.com\/path\?q=1"/,
+  )
+  assert.match(
+    renderMarkdown('[mail](mailto:foo@bar.com)'),
+    /href="mailto:foo@bar\.com"/,
+  )
 })

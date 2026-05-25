@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
 import { workspace } from '../../../workspace'
-import { TerminalView } from './TerminalView'
+import { TerminalTabsView } from './TerminalTabsView'
 import { terminalPaneViewCreator } from './TerminalPaneView'
 import {
   useTerminalStore,
@@ -50,6 +50,11 @@ const ACTIVITY_ITEM_ID = 'nexus.terminal.activityItem'
 
 const COMMAND_TOGGLE = 'nexus.terminal.toggle'
 const COMMAND_FOCUS = 'nexus.terminal.focus'
+// Multi-terminal tabs (Zed-style): spawn / close / cycle sessions.
+const COMMAND_NEW_TAB = 'nexus.terminal.newTab'
+const COMMAND_CLOSE_TAB = 'nexus.terminal.closeTab'
+const COMMAND_NEXT_TAB = 'nexus.terminal.nextTab'
+const COMMAND_PREV_TAB = 'nexus.terminal.prevTab'
 // WI-05: dedicated command to reveal the Saved Commands sub-view.
 // Listed in the command palette so the user can pull it up without
 // hunting for an activity-bar entry.
@@ -130,6 +135,22 @@ export const terminalPlugin: Plugin = {
       commands: [
         { id: COMMAND_TOGGLE, title: 'Toggle Terminal', category: 'Terminal' },
         { id: COMMAND_FOCUS, title: 'Focus Terminal', category: 'Terminal' },
+        { id: COMMAND_NEW_TAB, title: 'New Terminal', category: 'Terminal' },
+        {
+          id: COMMAND_CLOSE_TAB,
+          title: 'Close Terminal',
+          category: 'Terminal',
+        },
+        {
+          id: COMMAND_NEXT_TAB,
+          title: 'Next Terminal Tab',
+          category: 'Terminal',
+        },
+        {
+          id: COMMAND_PREV_TAB,
+          title: 'Previous Terminal Tab',
+          category: 'Terminal',
+        },
         {
           id: COMMAND_SAVED_SHOW,
           title: 'Show Saved Commands',
@@ -152,6 +173,9 @@ export const terminalPlugin: Plugin = {
         // `'`'` is the literal backquote character produced by that
         // chord on both Windows and macOS default layouts.
         { command: COMMAND_TOGGLE, key: 'ctrl+`', mac: 'cmd+`' },
+        // VS Code convention for spawning an additional integrated
+        // terminal. Ctrl/Cmd-Shift-Backquote opens a fresh tab.
+        { command: COMMAND_NEW_TAB, key: 'ctrl+shift+`', mac: 'cmd+shift+`' },
         // BL-063 — cross-session scrollback search. Originally bound
         // to ⌘⇧F to mirror VS Code's "find in files" — but BL-078
         // ships a workspace-wide find-in-files panel that's a much
@@ -177,15 +201,92 @@ export const terminalPlugin: Plugin = {
   async activate(api: PluginAPI) {
     api.configuration.register(terminalPlugin.manifest.contributes!.configuration!)
 
+    // ── Session lifecycle ───────────────────────────────────────────
+    //
+    // Multi-terminal tabs (Zed-style): the panel hosts one leaf whose
+    // view renders a tab strip plus one live xterm per session. Each
+    // tab is backed by a distinct kernel session. `create_session` with
+    // `working_dir = workspace root` so shells open in the right place;
+    // omitting `shell` lets the kernel pick the platform default
+    // (verified in ServerSpawnConfig — None falls back to
+    // platform-default detection).
+    //
+    // Tabs are numbered sequentially for the life of the workspace; the
+    // counter never reuses a number even after a tab closes, matching
+    // the "Terminal 1 / 2 / 3 …" labelling users expect.
+    let tabCounter = 0
+
+    const createTerminal = async (): Promise<string | null> => {
+      if (!(await api.kernel.available())) return null
+      const workspaceRoot = useWorkspaceStore.getState().rootPath
+      const title = `Terminal ${++tabCounter}`
+      try {
+        const resp = await api.kernel.invoke<CreateSessionResponse>(
+          PLUGIN_ID,
+          HANDLER_CREATE_SESSION,
+          {
+            working_dir: workspaceRoot ?? undefined,
+            name: title,
+          },
+        )
+        useTerminalStore.getState().addTab({ id: resp.id, title })
+        clientLogger.info('[nexus.terminal] session created:', resp.id)
+        return resp.id
+      } catch (err) {
+        clientLogger.warn('[nexus.terminal] create_session failed:', err)
+        return null
+      }
+    }
+
+    // Ensure at least one terminal tab exists (boot / first reveal).
+    const ensureSession = async (): Promise<void> => {
+      if (useTerminalStore.getState().tabs.length > 0) return
+      await createTerminal()
+    }
+
+    const closeTerminal = async (id: string): Promise<void> => {
+      // Drop the tab first so the UI updates immediately; the kernel
+      // close is best-effort (the PTY may already be gone).
+      useTerminalStore.getState().removeTab(id)
+      try {
+        await api.kernel.invoke(PLUGIN_ID, HANDLER_CLOSE_SESSION, { id })
+      } catch (err) {
+        clientLogger.info('[nexus.terminal] close_session skipped:', err)
+      }
+    }
+
+    const destroyAllSessions = async (): Promise<void> => {
+      const ids = useTerminalStore.getState().tabs.map((t) => t.id)
+      useTerminalStore.getState().setActiveSession(null)
+      for (const id of ids) {
+        try {
+          await api.kernel.invoke(PLUGIN_ID, HANDLER_CLOSE_SESSION, { id })
+        } catch (err) {
+          // Kernel may already be shutting down (workspace:closed path
+          // tears it down before this handler runs). Not worth
+          // surfacing.
+          clientLogger.info('[nexus.terminal] close_session skipped:', err)
+        }
+      }
+    }
+
     // Phase 7: legacy SlotRegistry slot:'panelArea' entry removed.
-    // TerminalView now mounts exclusively through the Leaf/View pipeline.
+    // The terminal mounts exclusively through the Leaf/View pipeline.
     api.viewRegistry.register(
       'terminal',
       terminalPaneViewCreator(() =>
-        createElement(TerminalView, {
+        createElement(TerminalTabsView, {
           kernel: api.kernel,
           events: api.events,
           openExternal: (target) => api.platform.shell.openExternal(target),
+          onNewTab: () => {
+            void createTerminal().then(() => {
+              api.events.emit(EVENT_TERMINAL_FOCUS, {})
+            })
+          },
+          onCloseTab: (id: string) => {
+            void closeTerminal(id)
+          },
         }),
       ),
     )
@@ -257,55 +358,13 @@ export const terminalPlugin: Plugin = {
       streamUnsub = null
     }
 
-    // ── Session lifecycle ───────────────────────────────────────────
-    //
-    // Exactly one session per workspace for this first cut. Multi-
-    // session tabs ship later. `create_session` with `working_dir =
-    // workspace root` so shells open in the right place; omitting
-    // `shell` lets the kernel pick the platform default (verified in
-    // ServerSpawnConfig — None falls back to platform-default
-    // detection).
-    const ensureSession = async (): Promise<void> => {
-      if (useTerminalStore.getState().sessionId !== null) return
-      if (!(await api.kernel.available())) return
-      const workspaceRoot = useWorkspaceStore.getState().rootPath
-      try {
-        const resp = await api.kernel.invoke<CreateSessionResponse>(
-          PLUGIN_ID,
-          HANDLER_CREATE_SESSION,
-          {
-            working_dir: workspaceRoot ?? undefined,
-            name: 'terminal',
-          },
-        )
-        useTerminalStore.getState().setSession(resp.id)
-        clientLogger.info('[nexus.terminal] session created:', resp.id)
-      } catch (err) {
-        clientLogger.warn('[nexus.terminal] create_session failed:', err)
-      }
-    }
-
-    const destroySession = async (): Promise<void> => {
-      const id = useTerminalStore.getState().sessionId
-      useTerminalStore.getState().setSession(null)
-      if (id === null) return
-      try {
-        await api.kernel.invoke(PLUGIN_ID, HANDLER_CLOSE_SESSION, { id })
-      } catch (err) {
-        // Kernel may already be shutting down (workspace:closed path
-        // tears it down before this handler runs). Not worth
-        // surfacing.
-        clientLogger.info('[nexus.terminal] close_session skipped:', err)
-      }
-    }
-
     api.events.on(EVENT_WORKSPACE_OPENED, () => {
       void subscribeStream()
       void ensureSession()
     })
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
-      void destroySession()
+      void destroyAllSessions()
       unsubscribeStream()
       useTerminalStore.getState().resetStreams()
       useTerminalStore.getState().setVisible(false)
@@ -351,6 +410,39 @@ export const terminalPlugin: Plugin = {
       await ensureAndReveal()
       api.events.emit(EVENT_TERMINAL_FOCUS, {})
     })
+
+    // ── Multi-terminal tab commands ─────────────────────────────────
+    //
+    // New = reveal the panel and spawn a fresh session regardless of
+    // how many are already open (unlike Focus, which only ensures one
+    // exists). Close = drop the active tab. Next/Prev cycle the active
+    // tab with wrap-around.
+    api.commands.register(COMMAND_NEW_TAB, async () => {
+      const leaf = await workspace.ensureLeafOfType('terminal', 'bottom')
+      workspace.revealLeaf(leaf)
+      useTerminalStore.getState().setVisible(true)
+      api.context.set(CONTEXT_KEY_VISIBLE, true)
+      await createTerminal()
+      api.events.emit(EVENT_TERMINAL_FOCUS, {})
+    })
+
+    api.commands.register(COMMAND_CLOSE_TAB, async () => {
+      const id = useTerminalStore.getState().activeSessionId
+      if (id) await closeTerminal(id)
+    })
+
+    const cycleTab = (delta: number) => {
+      const { tabs, activeSessionId, setActiveSession } =
+        useTerminalStore.getState()
+      if (tabs.length < 2) return
+      const idx = tabs.findIndex((t) => t.id === activeSessionId)
+      if (idx === -1) return
+      const next = (idx + delta + tabs.length) % tabs.length
+      setActiveSession(tabs[next].id)
+      api.events.emit(EVENT_TERMINAL_FOCUS, {})
+    }
+    api.commands.register(COMMAND_NEXT_TAB, () => cycleTab(1))
+    api.commands.register(COMMAND_PREV_TAB, () => cycleTab(-1))
 
     // ── Saved Commands sub-view (WI-05) ─────────────────────────────
     //

@@ -243,7 +243,7 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
   const runCommand = useCallback(
     async (cmd: SavedCommand) => {
       setLocalError(null)
-      const sessionId = useTerminalStore.getState().sessionId
+      const sessionId = useTerminalStore.getState().activeSessionId
       if (!sessionId) {
         // No live session — open the terminal so the workspace handler
         // creates one, then surface a hint. We deliberately don't loop

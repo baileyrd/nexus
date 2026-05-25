@@ -111,7 +111,16 @@ const CMD_RESIZE = 'resize'
 const PTY_POLL_INTERVAL_MS = 5000
 const PTY_PUMP_TIMEOUT_MS = 30
 
-interface TerminalViewProps {
+interface TerminalInstanceProps {
+  /** Kernel session id this xterm is bound to for its entire lifetime. */
+  sessionId: string
+  /**
+   * Whether this instance is the foreground tab. Hidden instances stay
+   * mounted (so their PTY keeps streaming into the scrollback) but are
+   * `display:none`; when this flips true we refit + focus so the grid
+   * matches the now-visible container.
+   */
+  active: boolean
   kernel: KernelAPI
   events: EventsAPI
   /**
@@ -150,17 +159,24 @@ function readCssVar(name: string, fallback: string): string {
   return raw.length > 0 ? raw : fallback
 }
 
-export function TerminalView({ kernel, events, openExternal }: TerminalViewProps) {
+export function TerminalInstance({
+  sessionId,
+  active,
+  kernel,
+  events,
+  openExternal,
+}: TerminalInstanceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   // BL-058: URLs surfaced from the output stream. Per-mount state so a
-  // remount (panel close + reopen) starts fresh; session-change clears
-  // it inline below.
+  // remount starts fresh.
   const [urls, setUrls] = useState<UrlMatch[]>([])
   const dismissUrls = useCallback(() => setUrls([]), [])
-  // BL-064 — mirror the terminal store's sessionId so the suggestion
-  // chip's polling effect re-runs when the user opens / closes the
-  // pane (i.e. when the session id flips).
-  const sessionId = useTerminalStore((s) => s.sessionId)
+
+  // Imperative handles populated on mount; the `active` effect below
+  // needs to refit/focus the live xterm without re-running the heavy
+  // mount effect.
+  const refitRef = useRef<(() => void) | null>(null)
+  const focusRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -199,7 +215,7 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     // never claim it. We return `false` from the custom handler to tell
     // xterm "I handled this, do not treat it as input"; returning
     // `true` would dispatch the chord to onData and the PTY would see
-    // a literal ``, etc.
+    // a literal ``, etc.
     const isMac = typeof navigator !== 'undefined' &&
       navigator.platform.toLowerCase().includes('mac')
     term.attachCustomKeyEventHandler((ev) => {
@@ -265,7 +281,6 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
         webgl = null
       }
     }
-    term.focus()
 
     // Re-apply theme + font when the kernel theme switches. Subscribed
     // to themeStore.resolvedVariables — that field flips after every
@@ -301,18 +316,10 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     let cursor = 0
     let disposed = false
     let pollTimer: number | null = null
-    let lastSessionId: string | null = null
-    // Sink unregister fn for the currently-installed session. Replaced
-    // whenever sessionId flips so a stale sink can't catch chunks
-    // routed to the next session id.
-    let sinkUnsub: (() => void) | null = null
 
     // BL-058: stream-aware URL extractor. Feeds each completed line
     // through the regex set ported from `nexus-terminal/src/urls.rs`
-    // and pushes detected URLs onto the React-state chip strip. The
-    // extractor's UTF-8 decoder runs in `stream: true` mode so a
-    // chunk that ends mid-multibyte-sequence picks up cleanly on the
-    // next call.
+    // and pushes detected URLs onto the React-state chip strip.
     const urlExtractor = createUrlExtractor((m) => {
       if (disposed) return
       setUrls((prev) => pushUrl(prev, m))
@@ -327,38 +334,11 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
       urlExtractor.push(bytes)
     }
 
-    /**
-     * Synchronise local state when the session id changes. Reset the
-     * pump cursor + xterm scrollback, then (re-)register a sink in
-     * the store so stream chunks for the new session route into this
-     * xterm.
-     */
-    const onSessionChange = (id: string | null) => {
-      if (id === lastSessionId) return
-      cursor = 0
-      lastSessionId = id
-      try {
-        term.reset()
-      } catch {
-        // Disposed underneath us; nothing to do.
-      }
-      // BL-058: drop any chips and partial-line buffer left over from
-      // the previous session so URLs can't cross-contaminate.
-      urlExtractor.reset()
-      setUrls([])
-      if (sinkUnsub) {
-        try { sinkUnsub() } catch {}
-        sinkUnsub = null
-      }
-      if (id) {
-        sinkUnsub = useTerminalStore.getState().registerSink(id, writeBytes)
-      }
-    }
-
-    onSessionChange(useTerminalStore.getState().sessionId)
-    const offSessionSub = useTerminalStore.subscribe((s) => {
-      onSessionChange(s.sessionId)
-    })
+    // This instance is bound to one session for its lifetime — register
+    // the sink once so stream chunks for `sessionId` route into this
+    // xterm. The store drops the sink registration if a remount has
+    // since installed a newer one.
+    const sinkUnsub = useTerminalStore.getState().registerSink(sessionId, writeBytes)
 
     /**
      * One pump tick. Reads any PTY bytes the shell-side stream
@@ -372,17 +352,15 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
      */
     const tick = async () => {
       if (disposed) return
-      const id = useTerminalStore.getState().sessionId
-      if (!id) return
       const streamCursor =
-        useTerminalStore.getState().streams[id]?.lastCursor ?? 0
+        useTerminalStore.getState().streams[sessionId]?.lastCursor ?? 0
       if (streamCursor > cursor) cursor = streamCursor
       let resp: ReadRawSinceResponse
       try {
         resp = await kernel.invoke<ReadRawSinceResponse>(
           PLUGIN_ID,
           CMD_READ_RAW_SINCE,
-          { id, cursor, timeout_ms: PTY_PUMP_TIMEOUT_MS },
+          { id: sessionId, cursor, timeout_ms: PTY_PUMP_TIMEOUT_MS },
         )
       } catch {
         return
@@ -392,7 +370,7 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
       if (resp.data.length > 0) {
         term.write(new Uint8Array(resp.data))
       }
-      useTerminalStore.getState().advanceCursor(id, cursor)
+      useTerminalStore.getState().advanceCursor(sessionId, cursor)
     }
 
     // Drain immediately to cover anything that landed before mount,
@@ -407,14 +385,12 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     // tab-completion) reach the shell verbatim. send_input appends a
     // newline which would be wrong for arbitrary keystrokes.
     const sendBytesToPty = (bytes: Uint8Array | number[]) => {
-      const id = useTerminalStore.getState().sessionId
-      if (!id) return
       const arr = Array.isArray(bytes) ? bytes : Array.from(bytes)
       void kernel
-        .invoke(PLUGIN_ID, CMD_SEND_RAW_INPUT, { id, data: arr })
+        .invoke(PLUGIN_ID, CMD_SEND_RAW_INPUT, { id: sessionId, data: arr })
         .catch(() => {
           // PTY closed — ignore. Session lifecycle is driven by the
-          // workspace open/close events in index.ts.
+          // tab open/close events in index.ts.
         })
     }
     const onDataSub = term.onData((data) => {
@@ -524,14 +500,21 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
       if (cols === lastCols && rows === lastRows) return
       lastCols = cols
       lastRows = rows
-      const id = useTerminalStore.getState().sessionId
-      if (!id) return
       void kernel
-        .invoke(PLUGIN_ID, CMD_RESIZE, { id, cols, rows })
+        .invoke(PLUGIN_ID, CMD_RESIZE, { id: sessionId, cols, rows })
         .catch(() => {
           // Session may have closed between fit() and invoke; ignore.
         })
     }
+    // Exposed so the `active` effect can force a refit when this tab
+    // returns to the foreground (it was display:none, so the
+    // ResizeObserver saw 0×0 and skipped).
+    refitRef.current = () => {
+      if (pendingRaf === null) {
+        pendingRaf = window.requestAnimationFrame(refit)
+      }
+    }
+    focusRef.current = focusTerm
     const resizeObs = new ResizeObserver((entries) => {
       let outerChanged = false
       for (const entry of entries) {
@@ -551,13 +534,18 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
 
     // ── Focus command support: focus the embedded xterm when the
     // plugin fires nexus.terminal:focus (emitted by the focus
-    // command in index.ts).
+    // command in index.ts). Only the active tab claims focus so a
+    // background terminal can't steal the cursor.
     const offFocus = events.on('nexus.terminal:focus', () => {
-      term.focus()
+      if (useTerminalStore.getState().activeSessionId === sessionId) {
+        term.focus()
+      }
     })
 
     return () => {
       disposed = true
+      refitRef.current = null
+      focusRef.current = null
       if (pollTimer !== null) {
         window.clearInterval(pollTimer)
       }
@@ -578,10 +566,7 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
         offFocus()
       } catch {}
       try {
-        offSessionSub()
-      } catch {}
-      try {
-        sinkUnsub?.()
+        sinkUnsub()
       } catch {}
       try {
         unsubTheme()
@@ -593,20 +578,29 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
         term.dispose()
       } catch {}
     }
-    // Plugin api refs are stable for the life of the app — safe to
-    // hold across renders without re-running the effect.
+    // `sessionId` is stable for the life of this instance (the parent
+    // keys each TerminalInstance by session id), and the plugin api
+    // refs are stable for the life of the app — safe to hold across
+    // renders without re-running this heavy mount effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // When this tab returns to the foreground, refit (the container went
+  // from display:none → visible, so xterm's grid is stale) and focus.
+  useEffect(() => {
+    if (!active) return
+    refitRef.current?.()
+    focusRef.current?.()
+  }, [active])
 
   return (
     <div
       style={{
-        display: 'flex',
+        // Inactive tabs stay mounted (PTY keeps streaming into
+        // scrollback) but hidden, so switching back is instant and
+        // lossless. The active tab fills the panel as a flex column.
+        display: active ? 'flex' : 'none',
         flexDirection: 'column',
-        // The leaf host element doesn't always force its child to fill
-        // — without explicit `width: 100%` here, this flex column shrinks
-        // to its xterm-canvas content and the terminal renders as a
-        // single-column vertical strip. Same reasoning for height.
         width: '100%',
         height: '100%',
         minHeight: 0,

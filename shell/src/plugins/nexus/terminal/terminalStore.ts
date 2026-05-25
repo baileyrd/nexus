@@ -3,21 +3,24 @@ import { create } from 'zustand'
 /**
  * Shell-side view-model for `nexus.terminal`.
  *
- * Holds the current session id (assigned when the kernel's
- * `com.nexus.terminal::create_session` returns) and a coarse
- * visibility flag mirrored from layoutStore. `visible` is redundant
- * with `layoutStore.panelArea.visible` but kept here so TerminalView
- * can read a single source without subscribing to the whole layout
- * store.
+ * Holds the open terminal tabs (each backed by a kernel session created
+ * via `com.nexus.terminal::create_session`), which one is active, and a
+ * coarse visibility flag mirrored from layoutStore. `visible` is
+ * redundant with `layoutStore.panelArea.visible` but kept here so the
+ * terminal views can read a single source without subscribing to the
+ * whole layout store.
+ *
+ * Multi-terminal tabs (Zed-style): the panel hosts one leaf, and that
+ * leaf renders a tab strip plus one live xterm per tab. Each tab owns a
+ * distinct kernel session id; switching tabs only flips which xterm is
+ * visible, so every terminal keeps its own scrollback and PTY state.
  *
  * WI-12 (TS half) — also owns the per-session stream-bookkeeping for
  * the `com.nexus.terminal.output.<session_id>` kernel event topic. The
  * subscription is wired up in `index.ts::activate`; bytes arrive via
  * `handleStreamChunk` and are routed to the registered xterm sink for
  * that session. Multiple sessions never cross-contaminate because the
- * sink registry is keyed by session id; the current single-session UI
- * still benefits because a stale session id (workspace-switch race)
- * has no sink and its chunks are simply dropped.
+ * sink registry is keyed by session id.
  */
 
 /**
@@ -31,6 +34,12 @@ export interface OutputStreamPayload {
   data: number[]
   seq: number
   ts_ms: number
+}
+
+/** One open terminal tab. `id` is the kernel session id. */
+export interface TerminalTab {
+  id: string
+  title: string
 }
 
 /** Function the per-session xterm registers; receives raw PTY bytes. */
@@ -63,13 +72,26 @@ interface SessionStreamState {
 }
 
 interface TerminalState {
-  sessionId: string | null
+  /** Open tabs, in display order (left → right). */
+  tabs: TerminalTab[]
+  /** Session id of the active (foreground) tab, or null when none. */
+  activeSessionId: string | null
   visible: boolean
   streams: Record<string, SessionStreamState>
   sinks: Record<string, SessionSink>
   recoverFn: RecoverFn | null
 
-  setSession(id: string | null): void
+  /** Append a tab and make it active. */
+  addTab(tab: TerminalTab): void
+  /**
+   * Remove a tab. If it was the active one, activate a neighbour
+   * (prefer the tab to its left, else to its right, else null).
+   */
+  removeTab(id: string): void
+  /** Set the active tab. `null` clears it (no terminals open). */
+  setActiveSession(id: string | null): void
+  /** Rename a tab's display title; no-op for an unknown id. */
+  renameTab(id: string, title: string): void
   setVisible(v: boolean): void
 
   /**
@@ -100,13 +122,16 @@ interface TerminalState {
 
   /**
    * Synchronise `lastCursor` to a value the pump path observed (used
-   * by the 5s defensive heartbeat in TerminalView). Only advances —
-   * never rewinds — so a slow stream chunk arriving after a pump
+   * by the 5s defensive heartbeat in the terminal view). Only advances
+   * — never rewinds — so a slow stream chunk arriving after a pump
    * can't undo the catch-up.
    */
   advanceCursor(sessionId: string, cursor: number): void
 
-  /** Clear all per-session bookkeeping — used on workspace close. */
+  /**
+   * Clear all per-session bookkeeping (tabs, active id, streams,
+   * sinks) — used on workspace close.
+   */
   resetStreams(): void
 }
 
@@ -115,13 +140,42 @@ function emptyStream(): SessionStreamState {
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
-  sessionId: null,
+  tabs: [],
+  activeSessionId: null,
   visible: false,
   streams: {},
   sinks: {},
   recoverFn: null,
 
-  setSession: (id) => set({ sessionId: id }),
+  addTab: (tab) =>
+    set((s) => {
+      if (s.tabs.some((t) => t.id === tab.id)) {
+        return { activeSessionId: tab.id }
+      }
+      return { tabs: [...s.tabs, tab], activeSessionId: tab.id }
+    }),
+
+  removeTab: (id) =>
+    set((s) => {
+      const idx = s.tabs.findIndex((t) => t.id === id)
+      if (idx === -1) return {}
+      const tabs = s.tabs.filter((t) => t.id !== id)
+      let activeSessionId = s.activeSessionId
+      if (s.activeSessionId === id) {
+        // Prefer the left neighbour, then the right, then nothing.
+        const neighbour = tabs[idx - 1] ?? tabs[idx] ?? null
+        activeSessionId = neighbour ? neighbour.id : null
+      }
+      return { tabs, activeSessionId }
+    }),
+
+  setActiveSession: (id) => set({ activeSessionId: id }),
+
+  renameTab: (id, title) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
+    })),
+
   setVisible: (v) => set({ visible: v }),
 
   registerSink: (sessionId, sink) => {
@@ -229,5 +283,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }))
   },
 
-  resetStreams: () => set({ streams: {}, sinks: {} }),
+  resetStreams: () =>
+    set({ streams: {}, sinks: {}, tabs: [], activeSessionId: null }),
 }))

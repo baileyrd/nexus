@@ -1,8 +1,10 @@
 // Unit tests for workspaceStore (Phase 3).
 // Run with: node --experimental-strip-types --test src/workspace/workspaceStore.test.ts
 //
-// String-indirected node:test imports keep tsc happy without @types/node,
-// matching the pattern in ViewRegistry.test.ts / Leaf.test.ts.
+// Static node:test imports (matching ViewRegistry.test.ts / Leaf.test.ts).
+// The top-level `await import(...)` indirection this file used to carry
+// is rejected by esbuild's CJS transform, which kept the wrapper at
+// tests/workspace-workspaceStore.test.ts from ever loading it.
 
 import type {
   Leaf,
@@ -14,12 +16,8 @@ import { viewRegistry } from './ViewRegistry.ts'
 import { ViewBase } from './View.ts'
 import { workspace } from './workspaceStore.ts'
 
-const nodeTest: string = 'node:test'
-const nodeAssert: string = 'node:assert/strict'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { test } = (await import(nodeTest)) as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const assert = ((await import(nodeAssert)) as any).default
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 
 // --- helpers -------------------------------------------------------------
 
