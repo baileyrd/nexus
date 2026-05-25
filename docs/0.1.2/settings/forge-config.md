@@ -153,7 +153,7 @@ command_allowlist = ["bash", "/usr/bin/zsh"]
 
 > **Confinement and allowlist are best-effort, not enforcement.** `root_dir` constrains only the starting directory — the child can `cd` out immediately, and the check is TOCTOU. `command_allowlist` gates only the immediate program — an allowed shell can still run anything via `sh -c`, `$(...)`, symlinks, or a wrapper. They stop accidents and casual misuse, not a determined process.
 
-**Authority & precedence.** The forge file is the policy authority. A per-call `create_session` `policy` argument may only ever *tighten* this default via `SpawnPolicy::tighten` (clean_env OR-ed, denylists unioned, allowlists intersected, the shorter `timeout_secs` winning) — an IPC caller can never weaken a forge-mandated restriction. The filter applies to the *inherited* environment only; a session's explicit `env` vars and the service-mandated `TERM`/`COLORTERM` are layered on top afterwards and are exempt.
+**Authority & precedence.** The forge file is the policy authority. A per-call `create_session` `policy` argument may only ever *tighten* this default via `SpawnPolicy::tighten` (clean_env OR-ed, denylists unioned, allowlists intersected, the shorter `timeout_secs` / `cpu_secs` winning) — an IPC caller can never weaken a forge-mandated restriction. The filter applies to the *inherited* environment only; a session's explicit `env` vars and the service-mandated `TERM`/`COLORTERM` are layered on top afterwards and are exempt.
 
 > **Not a security boundary.** This is env hygiene and resource governance, not isolation: a spawned child can still open sockets and read any file its uid can reach. It exists to stop accidental leakage of parent secrets into child processes and to let a forge mandate a clean environment.
 
