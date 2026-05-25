@@ -1061,6 +1061,12 @@ pub(crate) struct MemoryState {
     /// pair is `(deadline, limit_secs)` so the kill event can report the
     /// configured budget.
     pub(crate) deadlines: HashMap<String, (std::time::Instant, u64)>,
+    /// Slice-4 — per-session CPU-time budgets (seconds) staged from
+    /// `SpawnPolicy::cpu_secs`. The poller samples each live session's
+    /// consumed CPU time and kills any that meet or exceed its budget,
+    /// publishing [`TerminalEvent::CpuLimitExceeded`]. Swept by live id
+    /// each round, mirroring `deadlines` / `pending_overrides`.
+    pub(crate) cpu_limits: HashMap<String, u64>,
 }
 
 impl MemoryState {
@@ -1071,6 +1077,7 @@ impl MemoryState {
             session_pid: HashMap::new(),
             pending_overrides: HashMap::new(),
             deadlines: HashMap::new(),
+            cpu_limits: HashMap::new(),
         }
     }
 }
@@ -1233,27 +1240,33 @@ impl TerminalCorePlugin {
         self
     }
 
-    /// Slice-2 — stage a wall-clock kill deadline for a freshly-spawned
-    /// session from its resolved [`nexus_types::SpawnPolicy::timeout_secs`].
-    /// No-op when the policy sets no timeout or no memory monitor is
-    /// wired (the poller that enforces deadlines only runs alongside a
-    /// monitor + event bus). Mirrors the `pending_overrides` staging in
-    /// `dispatch_run_saved`.
-    pub(crate) fn stage_session_timeout(
+    /// Stage the poller-enforced runtime limits for a freshly-spawned
+    /// session from its resolved policy: the wall-clock deadline
+    /// (`timeout_secs`, Slice-2) and the CPU-time budget (`cpu_secs`,
+    /// Slice-4). No-op for limits the policy leaves unset, or when no
+    /// memory monitor is wired (the poller that enforces these only runs
+    /// alongside a monitor + event bus). Mirrors the `pending_overrides`
+    /// staging in `dispatch_run_saved`.
+    pub(crate) fn stage_session_limits(
         &self,
         id: &SessionId,
         policy: &nexus_types::SpawnPolicy,
     ) {
-        let Some(secs) = policy.timeout_secs else {
+        if policy.timeout_secs.is_none() && policy.cpu_secs.is_none() {
             return;
-        };
+        }
         let Some(memory) = self.memory.as_ref() else {
             return;
         };
         if let Ok(mut mem) = memory.lock() {
-            let deadline = std::time::Instant::now() + Duration::from_secs(secs);
-            mem.deadlines
-                .insert(id.as_str().to_string(), (deadline, secs));
+            if let Some(secs) = policy.timeout_secs {
+                let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+                mem.deadlines
+                    .insert(id.as_str().to_string(), (deadline, secs));
+            }
+            if let Some(secs) = policy.cpu_secs {
+                mem.cpu_limits.insert(id.as_str().to_string(), secs);
+            }
         }
     }
 
@@ -1611,6 +1624,8 @@ fn memory_poller_round(
         // fresh.
         mem.deadlines
             .retain(|id, _| live_ids.contains(id.as_str()));
+        mem.cpu_limits
+            .retain(|id, _| live_ids.contains(id.as_str()));
         // Track newly seen pids. A pending override (BL-061 follow-up)
         // wins over the bootstrap-wide default; the entry is consumed
         // so a closed-and-respawned id starts fresh.
@@ -1628,34 +1643,12 @@ fn memory_poller_round(
         }
     }
 
-    // Wall-clock deadlines and RSS sampling are independent passes over
-    // the live set, each under a brief memory lock. Collected without
-    // holding any lock across the kill path below.
+    // Wall-clock deadlines, CPU-time budgets, and RSS sampling are
+    // independent passes over the live set, each under a brief memory
+    // lock. Collected without holding any lock across the kill path.
     let timed_out = collect_timed_out(memory, &live);
-    let mut to_kill: Vec<(SessionId, u64, u32)> = Vec::new();
-    {
-        let Ok(mut mem) = memory.lock() else { return };
-        for (id, pid) in &live {
-            if stop.load(Ordering::Relaxed) {
-                return;
-            }
-            let Some(pid) = pid else { continue };
-            match mem.monitor.sample(*pid) {
-                Ok(action) => {
-                    let bytes = action.bytes();
-                    mem.latest_rss.insert(id.as_str().to_string(), bytes);
-                    if let MemoryLimitAction::HardExceeded { bytes, limit_mb } = action {
-                        to_kill.push((id.clone(), bytes, limit_mb));
-                    }
-                }
-                Err(_) => {
-                    // Process gone / read failed — drop the cache
-                    // entry so a stale RSS doesn't linger after exit.
-                    mem.latest_rss.remove(id.as_str());
-                }
-            }
-        }
-    }
+    let cpu_exceeded = collect_cpu_exceeded(memory, &live);
+    let to_kill = collect_rss_kills(memory, &live, stop);
 
     // Wall-clock timeouts first, then memory. Both publish the breach
     // event before closing via the server's SIGTERM→SIGKILL ladder so a
@@ -1666,9 +1659,21 @@ fn memory_poller_round(
             server,
             bus,
             &id,
-            TerminalEvent::TimeoutExceeded {
+            &TerminalEvent::TimeoutExceeded {
                 id: id.as_str().to_string(),
                 elapsed_secs,
+                limit_secs,
+            },
+        );
+    }
+    for (id, cpu_secs, limit_secs) in cpu_exceeded {
+        publish_breach_and_close(
+            server,
+            bus,
+            &id,
+            &TerminalEvent::CpuLimitExceeded {
+                id: id.as_str().to_string(),
+                cpu_secs,
                 limit_secs,
             },
         );
@@ -1678,7 +1683,7 @@ fn memory_poller_round(
             server,
             bus,
             &id,
-            TerminalEvent::MemoryLimitExceeded {
+            &TerminalEvent::MemoryLimitExceeded {
                 id: id.as_str().to_string(),
                 rss_bytes,
                 limit_mb,
@@ -1717,6 +1722,68 @@ fn collect_timed_out(
     timed_out
 }
 
+/// Sample each live session's RSS, refresh the `latest_rss` cache, and
+/// collect those over their hard memory limit as `(id, rss_bytes,
+/// limit_mb)`. A read failure (process gone) drops the cache entry so a
+/// stale RSS doesn't linger past exit.
+fn collect_rss_kills(
+    memory: &Arc<Mutex<MemoryState>>,
+    live: &[(SessionId, Option<u32>)],
+    stop: &Arc<AtomicBool>,
+) -> Vec<(SessionId, u64, u32)> {
+    let mut to_kill = Vec::new();
+    let Ok(mut mem) = memory.lock() else {
+        return to_kill;
+    };
+    for (id, pid) in live {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        let Some(pid) = pid else { continue };
+        match mem.monitor.sample(*pid) {
+            Ok(action) => {
+                mem.latest_rss.insert(id.as_str().to_string(), action.bytes());
+                if let MemoryLimitAction::HardExceeded { bytes, limit_mb } = action {
+                    to_kill.push((id.clone(), bytes, limit_mb));
+                }
+            }
+            Err(_) => {
+                mem.latest_rss.remove(id.as_str());
+            }
+        }
+    }
+    to_kill
+}
+
+/// Slice-4 — collect live sessions that have consumed at least their
+/// CPU-time budget as `(id, cpu_secs, limit_secs)`, draining the matched
+/// entries from `MemoryState::cpu_limits` so they aren't re-killed.
+/// Samples per-process CPU time (user + system); a read failure (process
+/// gone) leaves the entry for the next round's stale-sweep. Independent
+/// of RSS sampling and the wall-clock deadline pass.
+fn collect_cpu_exceeded(
+    memory: &Arc<Mutex<MemoryState>>,
+    live: &[(SessionId, Option<u32>)],
+) -> Vec<(SessionId, u64, u64)> {
+    let Ok(mut mem) = memory.lock() else {
+        return Vec::new();
+    };
+    let mut exceeded = Vec::new();
+    for (id, pid) in live {
+        let Some(pid) = pid else { continue };
+        let Some(&limit) = mem.cpu_limits.get(id.as_str()) else {
+            continue;
+        };
+        if let Ok(cpu) = crate::memory::read_process_cpu_secs(*pid) {
+            if cpu >= limit {
+                exceeded.push((id.clone(), cpu, limit));
+                mem.cpu_limits.remove(id.as_str());
+            }
+        }
+    }
+    exceeded
+}
+
 /// Publish a resource-breach [`TerminalEvent`] on the session's
 /// lifecycle topic and then close the session through the server's
 /// shutdown ladder. Shared by the memory and wall-clock kill paths so
@@ -1726,9 +1793,9 @@ fn publish_breach_and_close(
     server: &Arc<Mutex<InMemoryTerminalServer>>,
     bus: &EventBus,
     id: &SessionId,
-    payload: TerminalEvent,
+    payload: &TerminalEvent,
 ) {
-    if let Ok(payload_value) = serde_json::to_value(&payload) {
+    if let Ok(payload_value) = serde_json::to_value(payload) {
         let topic = format!("{EVENT_LIFECYCLE_PREFIX}{id}", id = id.as_str());
         if let Err(err) = bus.publish_plugin(PLUGIN_ID, &topic, payload_value) {
             tracing::warn!(
@@ -1917,6 +1984,17 @@ fn build_activity_entry(
                 "session {id} killed (timeout): elapsed={elapsed_secs}s limit={limit_secs}s"
             );
             entry.error = Some(format!("runtime limit exceeded ({limit_secs}s)"));
+        }
+        TerminalEvent::CpuLimitExceeded {
+            id,
+            cpu_secs,
+            limit_secs,
+        } => {
+            entry.outcome = ActivityOutcome::Error;
+            entry.prompt = format!(
+                "session {id} killed (cpu): cpu={cpu_secs}s limit={limit_secs}s"
+            );
+            entry.error = Some(format!("cpu limit exceeded ({limit_secs}s)"));
         }
         // Streaming / internal variants don't reach the activity log.
         TerminalEvent::OutputReceived { .. }
@@ -3481,6 +3559,74 @@ mod tests {
         assert!(
             breach_before_closed,
             "TimeoutExceeded must be published before SessionClosed"
+        );
+    }
+
+    #[test]
+    fn poller_publishes_cpu_limit_exceeded_before_kill_unix() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+        if !unix_only("poller_publishes_cpu_limit_exceeded_before_kill_unix") {
+            return;
+        }
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        // Unlimited memory so only the CPU budget can kill it; a zero
+        // CPU-second budget trips on the first sample after the child's
+        // pid appears (consumed >= 0).
+        let mut p = TerminalCorePlugin::new()
+            .with_memory_monitor(TestMemoryLimits::unlimited())
+            .with_memory_poll_interval(Duration::from_millis(20))
+            .with_event_bus(Arc::clone(&bus));
+
+        let args = serde_json::json!({
+            "name": "cpu-test",
+            "shell": "/bin/sh",
+            "shell_args": ["-c", "sleep 30"],
+            "policy": { "cpu_secs": 0 },
+        });
+        let resp = p.dispatch(HANDLER_CREATE_SESSION, &args).expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut saw_breach = false;
+        let mut saw_closed = false;
+        let mut breach_before_closed = false;
+        while std::time::Instant::now() < deadline {
+            if let Some(evt) = sub.try_recv().expect("bus alive") {
+                if let NexusEvent::Custom { type_id, payload, .. } = &evt.event {
+                    if !type_id.ends_with(&id) {
+                        continue;
+                    }
+                    if let Some(kind) = payload.get("kind").and_then(|v| v.as_str()) {
+                        match kind {
+                            "cpu_limit_exceeded" => {
+                                saw_breach = true;
+                                assert_eq!(
+                                    payload.get("limit_secs").and_then(|v| v.as_u64()),
+                                    Some(0)
+                                );
+                            }
+                            "session_closed" => {
+                                saw_closed = true;
+                                if saw_breach {
+                                    breach_before_closed = true;
+                                }
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_breach, "CpuLimitExceeded never published");
+        assert!(saw_closed, "SessionClosed never published after kill");
+        assert!(
+            breach_before_closed,
+            "CpuLimitExceeded must be published before SessionClosed"
         );
     }
 

@@ -218,6 +218,19 @@ pub enum TerminalEvent {
         /// Configured wall-clock budget (seconds) that was crossed.
         limit_secs: u64,
     },
+    /// The session consumed its configured CPU-time budget
+    /// (`SpawnPolicy::cpu_secs`). Published **before** the kill, mirroring
+    /// [`Self::MemoryLimitExceeded`] / [`Self::TimeoutExceeded`].
+    /// `cpu_secs` is the observed CPU time at the kill; `limit_secs` is
+    /// the configured budget.
+    CpuLimitExceeded {
+        /// Session id.
+        id: String,
+        /// Observed CPU time (user + system) at the kill, in seconds.
+        cpu_secs: u64,
+        /// Configured CPU-time budget (seconds) that was crossed.
+        limit_secs: u64,
+    },
     /// BL-062 — the session was removed from the manager to make
     /// room for a new spawn (LRU eviction). Only **stopped**
     /// sessions are evicted; a running session is never auto-killed
@@ -246,6 +259,7 @@ impl TerminalEvent {
             | TerminalEvent::SessionClosed { id, .. }
             | TerminalEvent::MemoryLimitExceeded { id, .. }
             | TerminalEvent::TimeoutExceeded { id, .. }
+            | TerminalEvent::CpuLimitExceeded { id, .. }
             | TerminalEvent::SessionEvicted { id, .. } => id,
         }
     }

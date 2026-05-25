@@ -48,6 +48,16 @@ env_denylist: Array<string>,
  */
 timeout_secs: bigint | null, 
 /**
+ * CPU-time budget in seconds — the session is killed once the
+ * child has *consumed* this much CPU time (user + system),
+ * independent of wall-clock. `None` means no limit. Like
+ * `timeout_secs` this is enforced by the terminal's memory poller
+ * (sample-and-kill), so it lands within ~one poll interval of the
+ * breach and observes only the direct child process, not its whole
+ * subtree — the same soft-limit caveat as the RSS memory cap.
+ */
+cpu_secs: bigint | null, 
+/**
  * Best-effort confinement of the child's **initial** working
  * directory: when set, the resolved working dir must canonicalize
  * to a path inside this root, otherwise the spawn is rejected. A

@@ -118,7 +118,8 @@ pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
 pub use memory::{
-    read_process_rss, MemoryLimitAction, MemoryLimits, MemoryMonitor, MemorySample,
+    read_process_cpu_secs, read_process_rss, MemoryLimitAction, MemoryLimits, MemoryMonitor,
+    MemorySample,
     DEFAULT_HISTORY_SAMPLES, RECOMMENDED_POLL_INTERVAL,
 };
 pub use persist::{ScrollbackHit, SessionMetadata, SqliteSessionStore};

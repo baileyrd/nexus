@@ -119,7 +119,7 @@ Same shape — host config registry of named server/adapter specs + a `contribut
 
 `TerminalConfig` — `crates/nexus-terminal/src/config.rs`. Loaded at bootstrap (`crates/nexus-bootstrap/src/plugins/terminal.rs`); a missing file yields a permissive (no-op) policy, so a forge without this file behaves exactly as before.
 
-Today it carries one block, `[spawn]` (`nexus_types::SpawnPolicy`), the **authoritative** env-hygiene default applied to every session the terminal spawns (`create_session`, `run_saved`, `repl_start`).
+Today it carries one block, `[spawn]` (`nexus_types::SpawnPolicy`), the **authoritative** env-hygiene + resource-governance default applied to every session the terminal spawns (`create_session`, `run_saved`, `repl_start`).
 
 ```toml
 [spawn]
@@ -136,6 +136,11 @@ env_denylist = ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"]
 # the deadline. Requires the memory monitor to be running (it is in the
 # default bootstrap).
 timeout_secs = 3600
+# Optional CPU-time budget (seconds) — the session is killed once the
+# child has CONSUMED this much CPU time (user + system), independent of
+# wall-clock. Same poller-based enforcement and single-process caveat as
+# the RSS memory cap. Omit for no limit.
+cpu_secs = 600
 # Best-effort confinement of the child's INITIAL working directory: a
 # spawn whose working_dir canonicalizes outside this root is rejected;
 # a session with no working_dir spawns here. Omit for no confinement.

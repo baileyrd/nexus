@@ -84,6 +84,15 @@ pub struct SpawnPolicy {
     /// background monitor to be running.
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    /// CPU-time budget in seconds — the session is killed once the
+    /// child has *consumed* this much CPU time (user + system),
+    /// independent of wall-clock. `None` means no limit. Like
+    /// `timeout_secs` this is enforced by the terminal's memory poller
+    /// (sample-and-kill), so it lands within ~one poll interval of the
+    /// breach and observes only the direct child process, not its whole
+    /// subtree — the same soft-limit caveat as the RSS memory cap.
+    #[serde(default)]
+    pub cpu_secs: Option<u64>,
     /// Best-effort confinement of the child's **initial** working
     /// directory: when set, the resolved working dir must canonicalize
     /// to a path inside this root, otherwise the spawn is rejected. A
@@ -131,6 +140,7 @@ impl SpawnPolicy {
     pub fn is_noop(&self) -> bool {
         !self.affects_env()
             && self.timeout_secs.is_none()
+            && self.cpu_secs.is_none()
             && self.root_dir.is_none()
             && self.command_allowlist.is_none()
     }
@@ -168,7 +178,8 @@ impl SpawnPolicy {
             clean_env: self.clean_env || other.clean_env,
             env_allowlist: tighten_allowlist(&self.env_allowlist, &other.env_allowlist),
             env_denylist: union_ci(&self.env_denylist, &other.env_denylist),
-            timeout_secs: tighten_timeout(self.timeout_secs, other.timeout_secs),
+            timeout_secs: tighten_min_secs(self.timeout_secs, other.timeout_secs),
+            cpu_secs: tighten_min_secs(self.cpu_secs, other.cpu_secs),
             // A forge-mandated confinement root stands; a caller can add
             // one when the forge sets none, but cannot swap out the
             // forge's. (A pure merge can't fs-check subpath containment,
@@ -220,9 +231,10 @@ fn union_ci(a: &[String], b: &[String]) -> Vec<String> {
     out
 }
 
-/// Tightening merge for an optional time budget: the shorter limit
-/// wins, and `None` (no limit) never overrides a concrete limit.
-fn tighten_timeout(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+/// Tightening merge for an optional second-budget (wall-clock or CPU):
+/// the shorter limit wins, and `None` (no limit) never overrides a
+/// concrete limit.
+fn tighten_min_secs(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -465,6 +477,32 @@ mod tests {
             SpawnPolicy::permissive().tighten(&caller).root_dir,
             Some("/tmp".into())
         );
+    }
+
+    #[test]
+    fn tighten_cpu_secs_picks_shorter_and_none_does_not_loosen() {
+        let a = SpawnPolicy {
+            cpu_secs: Some(120),
+            ..Default::default()
+        };
+        let b = SpawnPolicy {
+            cpu_secs: Some(30),
+            ..Default::default()
+        };
+        assert_eq!(a.tighten(&b).cpu_secs, Some(30));
+        let unlimited = SpawnPolicy::permissive();
+        assert_eq!(a.tighten(&unlimited).cpu_secs, Some(120));
+        assert_eq!(unlimited.tighten(&a).cpu_secs, Some(120));
+    }
+
+    #[test]
+    fn cpu_only_policy_is_not_noop_and_not_env_affecting() {
+        let p = SpawnPolicy {
+            cpu_secs: Some(5),
+            ..Default::default()
+        };
+        assert!(!p.is_noop());
+        assert!(!p.affects_env());
     }
 
     #[test]

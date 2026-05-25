@@ -43,7 +43,7 @@ impl TerminalCorePlugin {
             .map_err(poisoned)?
             .create_session(cfg)
             .map_err(crate_err)?;
-        self.stage_session_timeout(&id, &policy);
+        self.stage_session_limits(&id, &policy);
         to_value(
             &CreateSessionResponse {
                 id: id.as_str().to_string(),

@@ -76,7 +76,7 @@ impl TerminalCorePlugin {
 
         // Slice-2 — apply the forge-default wall-clock budget to the
         // saved-command session.
-        self.stage_session_timeout(&id, &self.spawn_policy_default);
+        self.stage_session_limits(&id, &self.spawn_policy_default);
 
         // BL-061 follow-up — pin the saved command's memory_limit_mb
         // onto this freshly-spawned session before the poller's next

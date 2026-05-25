@@ -315,6 +315,19 @@ pub fn read_process_rss(pid: u32) -> Result<u64, TerminalError> {
     platform::read_rss(pid)
 }
 
+/// Total CPU time (user + system) consumed by `pid` so far, in whole
+/// seconds. Unix reads `utime`+`stime` from `/proc/<pid>/stat` and
+/// divides by the clock tick; Windows sums the user + kernel
+/// `GetProcessTimes` values. Like [`read_process_rss`] this observes
+/// only the named process, not its descendants.
+///
+/// # Errors
+/// - [`TerminalError::Io`] if the process is gone, the `/proc` file is
+///   unreadable / unparseable, or the Win32 API fails.
+pub fn read_process_cpu_secs(pid: u32) -> Result<u64, TerminalError> {
+    platform::read_cpu_secs(pid)
+}
+
 /// Hint for PRD §7.2's polling cadence. Caller's scheduler matches
 /// this if it wants PRD-default behaviour; it's a pure suggestion.
 pub const RECOMMENDED_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -353,6 +366,38 @@ mod platform {
         Err(TerminalError::Io(io::Error::other(format!(
             "VmRSS not found in {path}",
         ))))
+    }
+
+    pub(super) fn read_cpu_secs(pid: u32) -> Result<u64, TerminalError> {
+        // /proc/<pid>/stat: space-separated. Field 2 (comm) is wrapped
+        // in parens and may itself contain spaces/parens, so parse the
+        // tail after the final ')'. In that tail (0-based): index 0 is
+        // `state` (field 3), so utime (field 14) is index 11 and stime
+        // (field 15) is index 12. Both are in clock ticks.
+        let path = format!("/proc/{pid}/stat");
+        let contents = std::fs::read_to_string(&path)?;
+        let tail = contents
+            .rsplit_once(')')
+            .map(|(_, rest)| rest.trim_start())
+            .ok_or_else(|| {
+                TerminalError::Io(io::Error::other(format!("malformed stat: {path}")))
+            })?;
+        let fields: Vec<&str> = tail.split_whitespace().collect();
+        let parse = |idx: usize, name: &str| -> Result<u64, TerminalError> {
+            fields
+                .get(idx)
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    TerminalError::Io(io::Error::other(format!("{name} parse failed in {path}")))
+                })
+        };
+        let utime = parse(11, "utime")?;
+        let stime = parse(12, "stime")?;
+        // SAFETY: sysconf is a pure libc query with no preconditions.
+        let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        // Fall back to the near-universal 100 Hz if sysconf is unhelpful.
+        let ticks = u64::try_from(ticks).ok().filter(|t| *t > 0).unwrap_or(100);
+        Ok((utime + stime) / ticks)
     }
 }
 
@@ -407,6 +452,36 @@ mod platform {
         // initialised. WorkingSetSize is the Win32 analogue of RSS.
         let counters = unsafe { counters.assume_init() };
         Ok(counters.WorkingSetSize as u64)
+    }
+
+    pub(super) fn read_cpu_secs(pid: u32) -> Result<u64, TerminalError> {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::GetProcessTimes;
+
+        let handle = unsafe {
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)
+        };
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+            return Err(TerminalError::Io(io::Error::last_os_error()));
+        }
+        let mut creation = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let mut exit = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let mut kernel = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let mut user = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let rc = unsafe {
+            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
+        };
+        let err = (rc == 0).then(io::Error::last_os_error);
+        unsafe { CloseHandle(handle) };
+        if let Some(e) = err {
+            return Err(TerminalError::Io(e));
+        }
+        // Kernel + user time, each a 64-bit count of 100-ns intervals.
+        let to_100ns = |ft: FILETIME| {
+            (u64::from(ft.dwHighDateTime) << 32) | u64::from(ft.dwLowDateTime)
+        };
+        let total_100ns = to_100ns(kernel) + to_100ns(user);
+        Ok(total_100ns / 10_000_000)
     }
 }
 

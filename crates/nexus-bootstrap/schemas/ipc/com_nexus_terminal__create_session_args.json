@@ -89,6 +89,16 @@
             "type": "string"
           }
         },
+        "cpu_secs": {
+          "description": "CPU-time budget in seconds — the session is killed once the\nchild has *consumed* this much CPU time (user + system),\nindependent of wall-clock. `None` means no limit. Like\n`timeout_secs` this is enforced by the terminal's memory poller\n(sample-and-kill), so it lands within ~one poll interval of the\nbreach and observes only the direct child process, not its whole\nsubtree — the same soft-limit caveat as the RSS memory cap.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "env_allowlist": {
           "description": "When non-empty, only inherited keys whose name matches an entry\nhere (case-insensitive) survive. Ignored when\n[`clean_env`](Self::clean_env) is set (nothing inherited to\nallow). An empty list means \"no allowlist restriction\".",
           "type": "array",
