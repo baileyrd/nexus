@@ -373,7 +373,18 @@ export const editorPlugin: Plugin = {
      *  with a release in the tab-removed subscription below. */
     const loadMarkdownContent = async (relpath: string): Promise<void> => {
       try {
-        await sessionManager.acquire(relpath)
+        const snapshot = await sessionManager.acquire(relpath)
+        if (snapshot === null) {
+          // No kernel session: the file is missing / unreadable (e.g. a
+          // restored tab from another vault) and `acquire` already
+          // degraded to `null`. Calling `getMarkdown` here would just
+          // fail with "no open session" — a doomed IPC round-trip the
+          // kernel logs. Surface the load failure directly instead.
+          useEditorStore
+            .getState()
+            .setTabError(relpath, `cannot open '${relpath}' (no session)`)
+          return
+        }
         const content = await editorClient.getMarkdown(relpath)
         useEditorStore.getState().setTabContent(relpath, content)
       } catch (err) {

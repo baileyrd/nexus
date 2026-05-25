@@ -515,8 +515,15 @@ impl Ipc for KernelPluginContext {
         //   - CapabilityDenied — already audited via `audit::log_capability_denied`
         //     inside `ipc_call_inner`; skip here to avoid double-logging.
         //   - Cancelled — normal user-initiated tear-down; debug only.
-        //   - PluginCrashedDuringCall — handler panic / blocking-task join failure;
-        //     elevate to error.
+        //   - PluginCrashedDuringCall with an EMPTY reason — a true handler
+        //     panic / blocking-task join failure / poisoned lock; elevate to
+        //     error.
+        //   - PluginCrashedDuringCall with a NON-EMPTY reason — the loader wraps
+        //     every handler `Err(PluginError::ExecutionFailed)` in this variant
+        //     too, carrying the handler's message as `reason` (the variant doc:
+        //     "Empty for true panics"). That's an ordinary handled rejection
+        //     (e.g. "no open session", "collab not configured"), not a crash —
+        //     log at warn so routine failures don't masquerade as crashes.
         //   - Everything else (Timeout, NotFound, plugin-returned PluginError, …) — warn.
         if let Err(err) = &result {
             let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
@@ -531,7 +538,7 @@ impl Ipc for KernelPluginContext {
                         "ipc_call cancelled",
                     );
                 }
-                IpcError::PluginCrashedDuringCall { .. } => {
+                IpcError::PluginCrashedDuringCall { reason, .. } if reason.is_empty() => {
                     tracing::error!(
                         caller = %self.plugin_id,
                         target = target_plugin_id,

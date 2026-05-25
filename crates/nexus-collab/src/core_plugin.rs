@@ -112,9 +112,7 @@ pub struct PublishPresenceArgs {
     pub cursor: Option<PresenceCursor>,
 }
 
-/// Reply for `publish_presence` — empty struct so the handler still
-/// has a typed JSON return that can grow additively (e.g. a future
-/// rate-limit signal).
+/// Reply for `publish_presence`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
@@ -124,7 +122,17 @@ pub struct PublishPresenceArgs {
         export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
     )
 )]
-pub struct PublishPresenceReply {}
+pub struct PublishPresenceReply {
+    /// `true` when the presence event was stamped and published to the
+    /// bus. `false` is a *successful no-op*: collab is not configured
+    /// (no `[collab]` identity), so there's nothing to publish. The
+    /// shell's cursor publisher reads this flag to stop pinging on
+    /// every cursor move — without it being treated as an error.
+    /// `#[serde(default)]` keeps the wire shape back-compatible (an
+    /// older `{}` reply decodes as `published: false`).
+    #[serde(default)]
+    pub published: bool,
+}
 
 /// Args for `start_relay`. All fields optional so the caller can
 /// `{ }` for the common case of "pick a port for me".
@@ -294,10 +302,14 @@ impl CollabCorePlugin {
         let a: PublishPresenceArgs = serde_json::from_value(args.clone())
             .map_err(|e| exec_err(format!("publish_presence: invalid args: {e}")))?;
         let Some(identity) = self.snapshot_identity() else {
-            // Surface a stable message so the shell can detect this
-            // condition without a wire-format match. Same shape as
-            // every other "<crate>: <reason>" PluginError message.
-            return Err(exec_err("publish_presence: collab not configured".to_string()));
+            // Collab is opt-in. With no `[collab]` identity there is
+            // nothing to publish — this is an expected steady state,
+            // not a failure. Return a successful no-op (`published:
+            // false`); the shell's cursor publisher reads the flag and
+            // stops pinging. Returning an `Err` here would surface every
+            // cursor move as a failed IPC call (logged per-keystroke).
+            return serde_json::to_value(PublishPresenceReply { published: false })
+                .map_err(|e| exec_err(format!("publish_presence: serialize reply: {e}")));
         };
         let bus = self
             .bus
@@ -312,7 +324,7 @@ impl CollabCorePlugin {
             .map_err(|e| exec_err(format!("publish_presence: serialize: {e}")))?;
         bus.publish_plugin(PLUGIN_ID, PRESENCE_TOPIC, payload)
             .map_err(|e| exec_err(format!("publish_presence: bus publish: {e}")))?;
-        serde_json::to_value(&PublishPresenceReply::default())
+        serde_json::to_value(PublishPresenceReply { published: true })
             .map_err(|e| exec_err(format!("publish_presence: serialize reply: {e}")))
     }
 }
@@ -507,7 +519,7 @@ mod tests {
                 }),
             )
             .expect("handler runs");
-        assert_eq!(v, serde_json::json!({}));
+        assert_eq!(v, serde_json::json!({ "published": true }));
 
         let payload = next_presence(&mut sub).await;
         assert_eq!(payload.user_id, "alice");
@@ -531,16 +543,17 @@ mod tests {
     }
 
     #[test]
-    fn publish_presence_rejects_when_identity_missing() {
+    fn publish_presence_noop_when_identity_missing() {
+        // Collab unconfigured (no identity) is an expected steady state:
+        // the handler returns a successful no-op with `published: false`
+        // rather than an error, so the shell stops pinging without each
+        // cursor move being logged as a failed IPC call.
         let bus = Arc::new(EventBus::new(8));
         let mut plugin = CollabCorePlugin::new(Some(bus), None);
-        let err = plugin
+        let v = plugin
             .dispatch(HANDLER_PUBLISH_PRESENCE, &serde_json::json!({}))
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("collab not configured"),
-            "stable error message: {err}"
-        );
+            .expect("no-op succeeds when collab unconfigured");
+        assert_eq!(v, serde_json::json!({ "published": false }));
     }
 
     #[test]
