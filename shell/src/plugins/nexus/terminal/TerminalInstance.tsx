@@ -159,6 +159,47 @@ function readCssVar(name: string, fallback: string): string {
   return raw.length > 0 ? raw : fallback
 }
 
+/** Longest auto-derived tab title we keep — a runaway OSC title (some
+ *  shells stuff the whole command line in there) shouldn't blow out the
+ *  tab strip. The store trims; this caps. */
+const AUTO_TITLE_MAX = 40
+
+/**
+ * Normalise a shell-emitted OSC window title into a tab label: collapse
+ * internal whitespace, strip a leading shell-prompt host prefix
+ * (`user@host: `) that adds no signal in a single-host app, and cap the
+ * length. Returns an empty string for input that's all whitespace so the
+ * store's `applyAutoTitle` no-ops on it.
+ */
+function cleanOscTitle(raw: string): string {
+  let t = raw.replace(/\s+/g, ' ').trim()
+  // `user@host: ~/path` → `~/path` — the host segment is noise here.
+  const m = /^[^@\s]+@[^:\s]+:\s*(.+)$/.exec(t)
+  if (m) t = m[1]
+  if (t.length > AUTO_TITLE_MAX) t = `…${t.slice(t.length - AUTO_TITLE_MAX + 1)}`
+  return t
+}
+
+/**
+ * Derive a tab label from an OSC 7 cwd report (`file://host/abs/path`).
+ * Returns the final path segment (percent-decoded), or an empty string
+ * when the payload doesn't parse — the cwd fallback only fires when the
+ * shell emits no window title of its own.
+ */
+function cwdLabelFromOsc7(data: string): string {
+  try {
+    // OSC 7 payload is a file URI; the path may be percent-encoded.
+    const url = new URL(data)
+    if (url.protocol !== 'file:') return ''
+    const path = decodeURIComponent(url.pathname).replace(/\/+$/, '')
+    if (path.length === 0 || path === '/') return '/'
+    const base = path.slice(path.lastIndexOf('/') + 1)
+    return base.length > AUTO_TITLE_MAX ? base.slice(0, AUTO_TITLE_MAX) : base
+  } catch {
+    return ''
+  }
+}
+
 export function TerminalInstance({
   sessionId,
   active,
@@ -296,6 +337,34 @@ export function TerminalInstance({
         'ui-monospace, SFMono-Regular, Menlo, monospace',
       )
     })
+    // ── Auto-naming (OSC window title + cwd) ────────────────────────
+    //
+    // Two signals feed the tab's auto-title, with OSC 0/2 preferred:
+    //   • onTitleChange — fires on OSC 0/2 (`ESC ] 0;…` / `2;…`), the
+    //     window-title sequence most shells emit per prompt.
+    //   • OSC 7 — the cwd-report sequence (`ESC ] 7;file://…`). Used only
+    //     as a fallback when the shell never sets a window title, so a
+    //     bare `sh` still gets a directory-named tab.
+    // The store's `applyAutoTitle` ignores both once the user has
+    // manually renamed the tab (pinned), so deliberate names stick.
+    let sawOscTitle = false
+    const titleSub = term.onTitleChange((raw) => {
+      const clean = cleanOscTitle(raw)
+      if (clean.length === 0) return
+      sawOscTitle = true
+      useTerminalStore.getState().applyAutoTitle(sessionId, clean)
+    })
+    const osc7Sub = term.parser.registerOscHandler(7, (data) => {
+      if (!sawOscTitle) {
+        const label = cwdLabelFromOsc7(data)
+        if (label.length > 0) {
+          useTerminalStore.getState().applyAutoTitle(sessionId, label)
+        }
+      }
+      // Return false so xterm still runs any built-in OSC 7 handling.
+      return false
+    })
+
     const focusTerm = () => {
       term.textarea?.focus()
     }
@@ -564,6 +633,12 @@ export function TerminalInstance({
       }
       try {
         offFocus()
+      } catch {}
+      try {
+        titleSub.dispose()
+      } catch {}
+      try {
+        osc7Sub.dispose()
       } catch {}
       try {
         sinkUnsub()

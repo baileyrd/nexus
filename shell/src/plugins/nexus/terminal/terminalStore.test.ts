@@ -292,6 +292,37 @@ test('renameTab: updates only the matching tab', () => {
   )
 })
 
+test('renameTab: pins the tab so auto-titles stop overriding it', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'auto' })
+  assert.equal(s().tabs[0].custom, false)
+  s().renameTab('a', 'my-build')
+  assert.equal(s().tabs[0].title, 'my-build')
+  assert.equal(s().tabs[0].custom, true)
+  // A subsequent auto-title is ignored once pinned.
+  s().applyAutoTitle('a', 'src')
+  assert.equal(s().tabs[0].title, 'my-build')
+})
+
+test('applyAutoTitle: updates unpinned tabs, trims, and no-ops on blank/unknown/same', () => {
+  reset()
+  const s = () => useTerminalStore.getState()
+  s().addTab({ id: 'a', title: 'old' })
+  // Trims surrounding whitespace.
+  s().applyAutoTitle('a', '  nexus  ')
+  assert.equal(s().tabs[0].title, 'nexus')
+  // Blank input is ignored.
+  s().applyAutoTitle('a', '   ')
+  assert.equal(s().tabs[0].title, 'nexus')
+  // Unknown id is a no-op (no throw).
+  s().applyAutoTitle('ghost', 'x')
+  assert.deepEqual(
+    s().tabs.map((t) => t.title),
+    ['nexus'],
+  )
+})
+
 test('resetStreams: clears tabs and active id too', () => {
   reset()
   const s = () => useTerminalStore.getState()

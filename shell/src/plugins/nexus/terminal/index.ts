@@ -31,6 +31,9 @@ import { useWorkspaceStore } from '../workspace/workspaceStore'
 const PLUGIN_ID = 'com.nexus.terminal'
 const HANDLER_CREATE_SESSION = 'create_session'
 const HANDLER_CLOSE_SESSION = 'close_session'
+// Update a session's display label so list_sessions / AI consumers see
+// the user's manual rename, not just the shell-local tab title.
+const HANDLER_RENAME_SESSION = 'rename_session'
 // WI-12: kernel publishes one event per session at this prefix; the
 // session id is the suffix. Subscribing on the prefix gives us a
 // single forwarder + one Tauri listener that fans out to all
@@ -216,10 +219,81 @@ export const terminalPlugin: Plugin = {
     // the "Terminal 1 / 2 / 3 …" labelling users expect.
     let tabCounter = 0
 
-    const createTerminal = async (): Promise<string | null> => {
+    // ── Tab persistence ─────────────────────────────────────────────
+    //
+    // Terminal sessions themselves are ephemeral (a fresh PTY + id is
+    // minted every boot), but the user's tab layout — how many tabs and
+    // any names they pinned — is worth restoring. We persist an ordered
+    // list of `{ title, custom }` keyed by vault root (one workspace's
+    // tabs shouldn't leak into another) via the plugin's localStorage-
+    // backed `api.storage`. On open we recreate that many sessions and
+    // re-apply each saved title; auto-named tabs re-derive their label
+    // from the new shell's OSC/cwd, while pinned ones keep the saved
+    // name. We never persist an empty list, so the workspace:closed
+    // teardown (which clears the store) can't wipe saved state.
+    interface PersistedTab {
+      title: string
+      custom: boolean
+    }
+    const tabsStorageKey = (): string | null => {
+      const root = useWorkspaceStore.getState().rootPath
+      return root ? `tabs:${root}` : null
+    }
+    const persistTabs = (): void => {
+      const key = tabsStorageKey()
+      if (!key) return
+      const tabs = useTerminalStore.getState().tabs
+      if (tabs.length === 0) return
+      const payload: PersistedTab[] = tabs.map((t) => ({
+        title: t.title,
+        custom: t.custom,
+      }))
+      try {
+        api.storage.set(key, JSON.stringify(payload))
+      } catch (err) {
+        clientLogger.warn('[nexus.terminal] persistTabs failed:', err)
+      }
+    }
+    const loadPersistedTabs = (): PersistedTab[] => {
+      const key = tabsStorageKey()
+      if (!key) return []
+      const raw = api.storage.get(key)
+      if (!raw) return []
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (!Array.isArray(parsed)) return []
+        return parsed
+          .filter(
+            (e): e is PersistedTab =>
+              typeof e === 'object' &&
+              e !== null &&
+              typeof (e as PersistedTab).title === 'string' &&
+              typeof (e as PersistedTab).custom === 'boolean',
+          )
+          .map((e) => ({ title: e.title, custom: e.custom }))
+      } catch {
+        return []
+      }
+    }
+
+    /**
+     * Spawn one kernel session + tab. `seed` supplies the initial label
+     * and pin state when restoring; for a fresh tab we derive an
+     * auto-title from the workspace folder name (the cwd fallback before
+     * the shell emits its own OSC title), or `Terminal N` when there's
+     * no workspace root.
+     */
+    const createTerminal = async (
+      seed?: PersistedTab,
+    ): Promise<string | null> => {
       if (!(await api.kernel.available())) return null
       const workspaceRoot = useWorkspaceStore.getState().rootPath
-      const title = `Terminal ${++tabCounter}`
+      const folder = workspaceRoot
+        ? workspaceRoot.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? ''
+        : ''
+      const title =
+        seed?.title ?? (folder.length > 0 ? folder : `Terminal ${++tabCounter}`)
+      const custom = seed?.custom ?? false
       try {
         const resp = await api.kernel.invoke<CreateSessionResponse>(
           PLUGIN_ID,
@@ -229,7 +303,8 @@ export const terminalPlugin: Plugin = {
             name: title,
           },
         )
-        useTerminalStore.getState().addTab({ id: resp.id, title })
+        useTerminalStore.getState().addTab({ id: resp.id, title, custom })
+        persistTabs()
         clientLogger.info('[nexus.terminal] session created:', resp.id)
         return resp.id
       } catch (err) {
@@ -238,16 +313,39 @@ export const terminalPlugin: Plugin = {
       }
     }
 
-    // Ensure at least one terminal tab exists (boot / first reveal).
+    // Ensure terminal tabs exist (boot / first reveal): restore the
+    // persisted layout when present, else open a single default tab.
     const ensureSession = async (): Promise<void> => {
       if (useTerminalStore.getState().tabs.length > 0) return
+      const saved = loadPersistedTabs()
+      if (saved.length > 0) {
+        for (const seed of saved) {
+          await createTerminal(seed)
+        }
+        return
+      }
       await createTerminal()
+    }
+
+    // Push a manual rename to the kernel session label (so list_sessions
+    // / AI consumers see it too) and pin it in the store. The store
+    // update is synchronous so the tab relabels immediately; the IPC
+    // call is best-effort.
+    const renameTerminal = (id: string, title: string): void => {
+      useTerminalStore.getState().renameTab(id, title)
+      persistTabs()
+      void api.kernel
+        .invoke(PLUGIN_ID, HANDLER_RENAME_SESSION, { id, name: title })
+        .catch((err) => {
+          clientLogger.info('[nexus.terminal] rename_session skipped:', err)
+        })
     }
 
     const closeTerminal = async (id: string): Promise<void> => {
       // Drop the tab first so the UI updates immediately; the kernel
       // close is best-effort (the PTY may already be gone).
       useTerminalStore.getState().removeTab(id)
+      persistTabs()
       try {
         await api.kernel.invoke(PLUGIN_ID, HANDLER_CLOSE_SESSION, { id })
       } catch (err) {
@@ -286,6 +384,9 @@ export const terminalPlugin: Plugin = {
           },
           onCloseTab: (id: string) => {
             void closeTerminal(id)
+          },
+          onRenameTab: (id: string, title: string) => {
+            renameTerminal(id, title)
           },
         }),
       ),
@@ -330,6 +431,20 @@ export const terminalPlugin: Plugin = {
       }
     }
     useTerminalStore.getState().setRecoverFn(recoverFn)
+
+    // Persist auto-title changes. createTerminal / renameTerminal /
+    // closeTerminal persist their own mutations synchronously; this
+    // subscription catches the remaining path — `applyAutoTitle` fired
+    // from TerminalInstance when the shell emits an OSC title or cwd.
+    // We diff a title+pin signature so active-tab switches (which don't
+    // change labels) don't trigger redundant writes.
+    let lastTabSig = ''
+    useTerminalStore.subscribe((state) => {
+      const sig = state.tabs.map((t) => `${t.title} ${t.custom}`).join('')
+      if (sig === lastTabSig) return
+      lastTabSig = sig
+      persistTabs()
+    })
 
     let streamUnsub: (() => void) | null = null
     const subscribeStream = async () => {

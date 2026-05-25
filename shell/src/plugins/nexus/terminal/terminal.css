@@ -94,6 +94,20 @@
   white-space: nowrap;
 }
 
+/* Inline rename field — sized to roughly match the title span so the
+   tab doesn't jump when entering edit mode. Inherits the tab's font. */
+.nexus-terminal-tab-rename {
+  min-width: 0;
+  width: 9ch;
+  padding: 0 2px;
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 3px;
+  outline: none;
+}
+
 .nexus-terminal-tab-close {
   flex: 0 0 auto;
   display: inline-flex;

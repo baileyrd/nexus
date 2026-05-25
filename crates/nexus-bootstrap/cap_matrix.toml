@@ -1385,6 +1385,11 @@ unrestricted = "read-only metadata for a session"
 
 [[handler]]
 plugin = "com.nexus.terminal"
+command = "rename_session"
+unrestricted = "updates a session's display label only — no process control"
+
+[[handler]]
+plugin = "com.nexus.terminal"
 command = "close_session"
 unrestricted = "tears down a session previously spawned via create_session (which is process.spawn gated)"
 
