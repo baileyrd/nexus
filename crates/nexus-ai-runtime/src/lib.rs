@@ -52,6 +52,7 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 pub mod core_plugin;
+pub mod event_input;
 pub mod events;
 pub mod pool;
 pub mod proposal;
@@ -76,6 +77,13 @@ pub use supervisor::{AdmissionConfig, Supervisor};
 pub use proposal::{
     Proposal, ProposalId, ProposalState, ProposalStore, ProposedAction,
     Snapshot, SnapshotEntry, SnapshotId,
+};
+/// Re-export Move 7 event-input types so callers can register ambient
+/// triggers and work with the perception unit without reaching into the
+/// `event_input` module directly.
+pub use event_input::{
+    AmbientTrigger, EventInput, EventInputMode, TriggerFilter, TriggerId,
+    TriggerRegistry,
 };
 
 /// Reverse-DNS plugin id — also the bus-topic prefix the republisher
@@ -476,6 +484,46 @@ pub struct AiRuntimeWaitForReply {
     /// `true` when the wait expired before the run reached a terminal
     /// status; `false` when the run reached a terminal state.
     pub timed_out: bool,
+}
+
+/// `register_trigger` arg envelope — Move 7.
+///
+/// Registers an [`AmbientTrigger`] with the runtime. On the next matching
+/// bus event the trigger watcher spawns a [`SessionKind::SignalTriggered`]
+/// session with the rendered goal template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRuntimeRegisterTriggerArgs {
+    /// The trigger to register.
+    pub trigger: AmbientTrigger,
+}
+
+/// `register_trigger` reply — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRuntimeRegisterTriggerReply {
+    /// The assigned (or pre-assigned) trigger id.
+    pub trigger_id: TriggerId,
+}
+
+/// `unregister_trigger` arg envelope — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRuntimeUnregisterTriggerArgs {
+    /// Id of the trigger to remove.
+    pub trigger_id: TriggerId,
+}
+
+/// `unregister_trigger` reply — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRuntimeUnregisterTriggerReply {
+    /// `true` if the trigger was found and removed; `false` if it was
+    /// already absent (idempotent, not an error).
+    pub found: bool,
+}
+
+/// `list_triggers` reply — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRuntimeListTriggersReply {
+    /// All registered triggers (enabled and disabled), sorted by name.
+    pub triggers: Vec<AmbientTrigger>,
 }
 
 /// `pool_stats` reply shape — exposed so a shell observability panel

@@ -29,6 +29,7 @@ use std::sync::OnceLock;
 
 use nexus_plugin_api::{CapabilitySet, token::CapabilityToken};
 
+use crate::event_input::TriggerRegistry;
 use crate::pool::WorkerPool;
 use crate::proposal::ProposalStore;
 use crate::scheduler::Store;
@@ -115,6 +116,10 @@ pub struct Supervisor {
     /// The capability gate lives inside [`ProposalStore::submit`];
     /// workers call `commit` once the action is executed.
     pub(crate) proposals: ProposalStore,
+    /// Move 7 — ambient trigger registry. The trigger watcher loop
+    /// (started in `wire_context`) holds a clone and polls it against
+    /// every bus event to spawn `SignalTriggered` sessions.
+    pub(crate) triggers: TriggerRegistry,
     /// Admission policy — consulted at submission time (Phase 5 wires
     /// the actual enforcement; stored here so the configuration is
     /// co-located with the pool that will enforce it).
@@ -127,6 +132,7 @@ impl std::fmt::Debug for Supervisor {
             .field("store", &"<Store>")
             .field("pool_started", &self.pool.get().is_some())
             .field("proposals_pending", &self.proposals.pending_count())
+            .field("triggers_registered", &self.triggers.len())
             .field("admission", &self.admission)
             .finish()
     }
@@ -147,6 +153,7 @@ impl Supervisor {
             store: Store::new(),
             pool: OnceLock::new(),
             proposals: ProposalStore::new(),
+            triggers: TriggerRegistry::new(),
             admission: AdmissionConfig::default(),
         }
     }
@@ -194,6 +201,13 @@ impl Supervisor {
     /// Borrow the proposal/snapshot ledger.
     pub fn proposal_store(&self) -> &ProposalStore {
         &self.proposals
+    }
+
+    /// Borrow the trigger registry. Callers that need to share the registry
+    /// with a long-running task should call `.clone()` on the returned
+    /// reference — the clone shares the same `Arc` backing store.
+    pub fn trigger_registry(&self) -> &TriggerRegistry {
+        &self.triggers
     }
 
     /// Borrow the task store.

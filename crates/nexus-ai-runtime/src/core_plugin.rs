@@ -30,9 +30,9 @@ use crate::pool::WorkerPool;
 use crate::scheduler::Store;
 use crate::supervisor::{Supervisor, TOPIC_SESSION_CANCELLED, TOPIC_SESSION_COMPLETED, TOPIC_SESSION_STARTED};
 use crate::{
-    AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs,
-    AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus,
-    SessionKind, PLUGIN_ID,
+    AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs,
+    AiRuntimeSubmitArgs, AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply,
+    PoolStats, RunStatus, SessionKind, PLUGIN_ID,
 };
 
 /// `submit` handler id.
@@ -53,6 +53,12 @@ pub const HANDLER_EVENTS: u32 = 7;
 pub const HANDLER_POOL_STATS: u32 = 8;
 /// `wait_for` handler id — BL-134 Phase 2 sync-wait primitive.
 pub const HANDLER_WAIT_FOR: u32 = 9;
+/// `register_trigger` handler id — Move 7 (ambient event triggers).
+pub const HANDLER_REGISTER_TRIGGER: u32 = 10;
+/// `unregister_trigger` handler id — Move 7.
+pub const HANDLER_UNREGISTER_TRIGGER: u32 = 11;
+/// `list_triggers` handler id — Move 7.
+pub const HANDLER_LIST_TRIGGERS: u32 = 12;
 
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::ai_runtime::register`.
@@ -67,6 +73,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("events", HANDLER_EVENTS),
     ("pool_stats", HANDLER_POOL_STATS),
     ("wait_for", HANDLER_WAIT_FOR),
+    ("register_trigger", HANDLER_REGISTER_TRIGGER),
+    ("unregister_trigger", HANDLER_UNREGISTER_TRIGGER),
+    ("list_triggers", HANDLER_LIST_TRIGGERS),
 ];
 
 /// Default plugin id used as the `caller_plugin_id` when the
@@ -167,6 +176,7 @@ impl CorePlugin for AiRuntimeCorePlugin {
         let ctx = self.ctx();
         let pool_handle = self.supervisor.pool_handle();
         let pool_metrics = self.supervisor.pool_metrics();
+        let triggers = self.supervisor.trigger_registry().clone();
         let args = args.clone();
 
         Some(Box::pin(async move {
@@ -188,6 +198,9 @@ impl CorePlugin for AiRuntimeCorePlugin {
                     let ctx = ctx.ok_or_else(ctx_unwired)?;
                     handle_cancel(&store, ctx.as_ref(), &args)
                 }
+                HANDLER_REGISTER_TRIGGER => handle_register_trigger(&triggers, &args),
+                HANDLER_UNREGISTER_TRIGGER => handle_unregister_trigger(&triggers, &args),
+                HANDLER_LIST_TRIGGERS => handle_list_triggers(&triggers),
                 HANDLER_PAUSE | HANDLER_RESUME => Err(exec_err(format!(
                     "handler {handler_id}: pause/resume are not supported in BL-134 Phase 5 — \
                      a Session task is a single ipc_call with no resumable midpoint; \
@@ -252,6 +265,25 @@ impl CorePlugin for AiRuntimeCorePlugin {
             let ctx_for_sub = Arc::clone(&ctx);
             pool.handle().spawn(async move {
                 republish_loop(store, ctx_for_sub).await;
+            });
+
+            // Move 7 — trigger watcher. Subscribes to every bus event and
+            // spawns `SignalTriggered` sessions for each registered
+            // `AmbientTrigger` that matches. The registry is Arc-backed so
+            // triggers registered after startup are picked up immediately.
+            let triggers = self.supervisor.trigger_registry().clone();
+            let store_for_watcher = self.supervisor.store().clone();
+            let ctx_for_watcher = Arc::clone(&ctx);
+            let pool_handle_for_watcher = pool.handle();
+            let watcher_pool_handle = pool.handle();
+            watcher_pool_handle.spawn(async move {
+                trigger_watcher_loop(
+                    triggers,
+                    store_for_watcher,
+                    ctx_for_watcher,
+                    pool_handle_for_watcher,
+                )
+                .await;
             });
         }
     }
@@ -778,6 +810,128 @@ fn handle_pool_stats(store: &Store, metrics: crate::pool::PoolMetrics) -> serde_
         max: metrics.workers,
     };
     serde_json::to_value(&stats).unwrap_or(serde_json::Value::Null)
+}
+
+// ─── Move 7 handlers ─────────────────────────────────────────────────────────
+
+fn handle_register_trigger(
+    triggers: &crate::event_input::TriggerRegistry,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::AiRuntimeRegisterTriggerArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("register_trigger: invalid args: {e}")))?;
+    let id = triggers.register(parsed.trigger);
+    serde_json::to_value(&crate::AiRuntimeRegisterTriggerReply { trigger_id: id })
+        .map_err(|e| exec_err(format!("register_trigger: serialize: {e}")))
+}
+
+fn handle_unregister_trigger(
+    triggers: &crate::event_input::TriggerRegistry,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::AiRuntimeUnregisterTriggerArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("unregister_trigger: invalid args: {e}")))?;
+    let found = triggers.unregister(&parsed.trigger_id);
+    serde_json::to_value(&crate::AiRuntimeUnregisterTriggerReply { found })
+        .map_err(|e| exec_err(format!("unregister_trigger: serialize: {e}")))
+}
+
+fn handle_list_triggers(
+    triggers: &crate::event_input::TriggerRegistry,
+) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(&crate::AiRuntimeListTriggersReply {
+        triggers: triggers.list(),
+    })
+    .map_err(|e| exec_err(format!("list_triggers: serialize: {e}")))
+}
+
+/// Move 7 — trigger watcher loop. Subscribes to every bus event and, for
+/// each enabled [`AmbientTrigger`] that matches, submits a
+/// `SignalTriggered` session with the rendered goal template as the task
+/// description.
+///
+/// The loop is process-lifetime (terminates only when the bus subscription
+/// closes at shutdown). Triggers registered after startup are picked up
+/// immediately — the registry is `Arc`-backed so the watcher and IPC
+/// handlers share live state.
+async fn trigger_watcher_loop(
+    triggers: crate::event_input::TriggerRegistry,
+    store: Store,
+    ctx: Arc<KernelPluginContext>,
+    pool_handle: tokio::runtime::Handle,
+) {
+    use crate::event_input::EventInput;
+    use nexus_kernel::{EventFilter, Events as _};
+
+    let mut sub = ctx.subscribe(EventFilter::All);
+
+    tracing::info!(
+        plugin_id = PLUGIN_ID,
+        "Move 7: trigger watcher started — every bus event is now a potential agent input",
+    );
+
+    loop {
+        match sub.recv().await {
+            Ok(published) => {
+                let matching = triggers.matching(&published.event);
+                for trigger in matching {
+                    let input = EventInput::from_published(&published, trigger.mode);
+                    let goal = trigger.render_goal(&published);
+
+                    tracing::info!(
+                        plugin_id = PLUGIN_ID,
+                        trigger_name = %trigger.name,
+                        trigger_id = %trigger.id,
+                        event_type = %input.event_type,
+                        "Move 7: trigger matched — spawning SignalTriggered session",
+                    );
+
+                    // Build a SignalTriggered submit args. The session args
+                    // carry both the rendered goal and the typed EventInput so
+                    // the agent handler can expose the structured observation.
+                    let session_args = serde_json::json!({
+                        "goal": goal,
+                        "trigger_id": trigger.id.0.to_string(),
+                        "event_input": input,
+                    });
+                    let submit_args = crate::AiRuntimeSubmitArgs {
+                        task: crate::AgentTaskKind::Session { args: session_args },
+                        priority: crate::TaskPriority::Background,
+                        kind: crate::SessionKind::SignalTriggered,
+                        parent: None,
+                        capabilities: vec![],
+                    };
+                    let args_value = match serde_json::to_value(&submit_args) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(
+                                plugin_id = PLUGIN_ID,
+                                trigger_name = %trigger.name,
+                                ?e,
+                                "Move 7: failed to serialize trigger session args"
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(e) = handle_submit(&store, &ctx, &pool_handle, &args_value) {
+                        tracing::warn!(
+                            plugin_id = PLUGIN_ID,
+                            trigger_name = %trigger.name,
+                            ?e,
+                            "Move 7: trigger session spawn failed"
+                        );
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::info!(
+                    plugin_id = PLUGIN_ID,
+                    "Move 7: trigger watcher stopped (bus subscription closed)"
+                );
+                break;
+            }
+        }
+    }
 }
 
 // ─── Session lifecycle bus helpers ──────────────────────────────────────────
