@@ -40,8 +40,6 @@ import {
   setKernel,
   requestFocus,
   hydrateConfig,
-  pushUserConfig,
-  type AiUserConfig,
   subscribeStream,
   submitQuestion,
   cancelInFlight,
@@ -93,72 +91,6 @@ export const aiPlugin: Plugin = {
         // values to the kernel via `set_config` on activate and on
         // every change — no restart needed.
         schema: [
-          {
-            key: 'ai.provider',
-            title: 'Chat provider',
-            description:
-              'AI provider used for chat. Leave blank to fall back to environment variables (ANTHROPIC_API_KEY / OPENAI_API_KEY / OLLAMA_BASE_URL).',
-            type: 'select' as const,
-            default: '',
-            options: ['', 'anthropic', 'openai', 'ollama'],
-          },
-          {
-            key: 'ai.model',
-            title: 'Chat model',
-            description:
-              'Optional model override (e.g. claude-sonnet-4-5, gpt-4o-mini, llama3.1). Leave blank for the provider default.',
-            type: 'string' as const,
-            default: '',
-          },
-          {
-            key: 'ai.apiKey',
-            title: 'API key',
-            description:
-              'Required for Anthropic and OpenAI. Stored locally in this workspace; never sent anywhere except the provider you choose.',
-            type: 'password' as const,
-            default: '',
-          },
-          {
-            key: 'ai.baseUrl',
-            title: 'Base URL',
-            description:
-              'Override the provider endpoint. For Ollama this points at your local server (default http://localhost:11434).',
-            type: 'string' as const,
-            default: '',
-          },
-          {
-            key: 'ai.embedProvider',
-            title: 'Embedding provider',
-            description:
-              'Provider for the RAG retrieval embeddings. OpenAI gives higher quality; Ollama runs locally with a model server; "local" uses the in-process fastembed-rs backend (no network, requires the local-embeddings build feature). Leave blank to share the chat provider where supported.',
-            type: 'select' as const,
-            default: '',
-            options: ['', 'openai', 'ollama', 'local'],
-          },
-          {
-            key: 'ai.embedModel',
-            title: 'Embedding model',
-            description:
-              'For Ollama: the embedding model name (nomic-embed-text, mxbai-embed-large). For "local": the fastembed identifier (bge-small-en-v1.5-int8 default, also bge-small/base/large-en-v1.5, mxbai-embed-large-v1, nomic-embed-text-v1.5, all-mini-lm-l6-v2). First use of a local model downloads ~33–500 MB to ~/.cache/fastembed/. Leave blank for the provider default.',
-            type: 'string' as const,
-            default: '',
-          },
-          {
-            key: 'ai.embedApiKey',
-            title: 'Embedding API key',
-            description:
-              'Only required when the embedding provider differs from the chat provider. Otherwise the chat key is reused.',
-            type: 'password' as const,
-            default: '',
-          },
-          {
-            key: 'ai.embedBaseUrl',
-            title: 'Embedding base URL',
-            description:
-              'Override the embedding endpoint (used for self-hosted Ollama or OpenAI-compatible proxies).',
-            type: 'string' as const,
-            default: '',
-          },
           {
             key: 'ui.copiedNotificationMs',
             title: 'Copy notification duration',
@@ -415,26 +347,6 @@ export const aiPlugin: Plugin = {
       lastDoneCount = doneCount
     })
 
-    // ── AI provider settings ─────────────────────────────────────────────
-    //
-    // Read user-saved provider settings out of the shell config store
-    // and push them to the kernel. The kernel falls back to env-var
-    // detection if every field is blank, so a fresh install with
-    // ANTHROPIC_API_KEY set keeps working.
-    const readUserConfig = (): AiUserConfig => {
-      const cfg = useConfigStore.getState()
-      return {
-        provider: cfg.get<string>('ai.provider', ''),
-        model: cfg.get<string>('ai.model', ''),
-        apiKey: cfg.get<string>('ai.apiKey', ''),
-        baseUrl: cfg.get<string>('ai.baseUrl', ''),
-        embedProvider: cfg.get<string>('ai.embedProvider', ''),
-        embedModel: cfg.get<string>('ai.embedModel', ''),
-        embedApiKey: cfg.get<string>('ai.embedApiKey', ''),
-        embedBaseUrl: cfg.get<string>('ai.embedBaseUrl', ''),
-      }
-    }
-
     // Open the settings panel and route directly to the AI section.
     // Wired into the chat view's empty state so a fresh user with no
     // provider lands one click from a working chat.
@@ -447,24 +359,6 @@ export const aiPlugin: Plugin = {
       // user lands in the AI section instead of whatever was open.
       eventBus.emit('settings:focusSection', 'nexus.ai')
     })
-
-    // Re-push whenever any of the seven keys change. EventBus emits
-    // `config:changed:<key>` from the configStore set() action.
-    const aiKeys = [
-      'ai.provider',
-      'ai.model',
-      'ai.apiKey',
-      'ai.baseUrl',
-      'ai.embedProvider',
-      'ai.embedModel',
-      'ai.embedApiKey',
-      'ai.embedBaseUrl',
-    ]
-    for (const key of aiKeys) {
-      api.events.on(`config:changed:${key}`, () => {
-        void pushUserConfig(api, readUserConfig())
-      })
-    }
 
     // ── BL-032 — Cmd+I overlay ────────────────────────────────────────────
     //
@@ -551,13 +445,12 @@ export const aiPlugin: Plugin = {
     // registry.
     registerBuiltinAiActions(api)
 
-    // Fan out four awaits: subscription must be live before any submit
-    // could fire (otherwise we'd miss the first chunks); the config
-    // push lands the user's saved provider before hydrate reads it
-    // back; sessions hydration is best-effort and non-blocking.
+    // Fan out three awaits: subscription must be live before any submit
+    // could fire (otherwise we'd miss the first chunks); sessions
+    // hydration is best-effort and non-blocking. Provider config push
+    // is handled by the always-on nexus.aiSettings plugin.
     await subscribeStream(api)
     await cmdISubPromise
-    await pushUserConfig(api, readUserConfig())
     void hydrateConfig(api)
     void loadSessions(api)
   },

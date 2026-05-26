@@ -321,6 +321,21 @@ fn handle_submit(
     let caller = caller_plugin_id(ctx);
     let ring = store.insert(task_id, &kind_label, priority, parent, &caller);
 
+    // Extract the goal from the task BEFORE inject_session_id consumes it.
+    let goal: String = match &parsed.task {
+        AgentTaskKind::Session { args } => args
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .chars()
+            .take(256)
+            .collect(),
+        AgentTaskKind::WorkflowAiStep { workflow, step, .. } => {
+            format!("workflow {} step {}", workflow, step)
+        }
+        AgentTaskKind::AiStream { .. } => "ai_stream".into(),
+    };
+
     // Record + republish the Submitted event before returning to the
     // caller so a sufficiently-fast subscriber sees it before the
     // submit reply.
@@ -363,6 +378,7 @@ fn handle_submit(
     // Finished/Failed event and emits `Cancelled` instead.
     let store_for_worker = store.clone();
     let ctx_for_worker = Arc::clone(ctx);
+    let goal_for_worker = goal.clone();
     let cancel = store
         .cancel_gate(task_id)
         .expect("cancel gate present after insert");
@@ -381,7 +397,7 @@ fn handle_submit(
             // Emit session-lifecycle event so bus subscribers tracking
             // the session_id rather than the task_id see the cancellation.
             if let Some(ref sid) = allocated_session_id {
-                publish_session_cancelled(ctx_for_worker.as_ref(), sid, task_id, Some(&by));
+                publish_session_cancelled(ctx_for_worker.as_ref(), sid, task_id, Some(&by), &goal_for_worker, None);
                 // Drop the correlation entry before bailing so the
                 // session→task map doesn't leak when a task is cancelled
                 // before it ever ran.
@@ -395,9 +411,10 @@ fn handle_submit(
         // Emit session.started so subscribers tracking session_id see
         // the transition to Running.
         if let Some(ref sid) = allocated_session_id {
-            publish_session_started(ctx_for_worker.as_ref(), sid, task_id, session_kind);
+            publish_session_started(ctx_for_worker.as_ref(), sid, task_id, session_kind, &goal_for_worker);
         }
 
+        let task_start = std::time::Instant::now();
         let inner = async {
             match task_kind {
                 AgentTaskKind::Session { args } => run_session(&ctx_for_worker, args).await,
@@ -440,10 +457,11 @@ fn handle_submit(
         // Emit session-lifecycle bus event before the terminal AiEvent
         // so subscribers see the semantic outcome (completed/cancelled)
         // before the raw task event.
+        let elapsed_ms = task_start.elapsed().as_millis() as u64;
         if let Some(ref sid) = allocated_session_id {
             match &event {
                 AiEvent::Finished { .. } => {
-                    publish_session_completed(ctx_for_worker.as_ref(), sid, task_id);
+                    publish_session_completed(ctx_for_worker.as_ref(), sid, task_id, &goal_for_worker, elapsed_ms);
                 }
                 AiEvent::Cancelled { by, .. } => {
                     publish_session_cancelled(
@@ -451,10 +469,12 @@ fn handle_submit(
                         sid,
                         task_id,
                         Some(by.as_str()),
+                        &goal_for_worker,
+                        Some(elapsed_ms),
                     );
                 }
                 AiEvent::Failed { error, .. } => {
-                    publish_session_failed(ctx_for_worker.as_ref(), sid, task_id, error);
+                    publish_session_failed(ctx_for_worker.as_ref(), sid, task_id, error, &goal_for_worker, elapsed_ms);
                 }
                 _ => {}
             }
@@ -944,8 +964,10 @@ fn publish_session_started(
     session_id: &str,
     task_id: uuid::Uuid,
     kind: SessionKind,
+    goal: &str,
 ) {
     use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
     let payload = serde_json::json!({
         "session_id": session_id,
         "session_kind": kind,
@@ -960,6 +982,18 @@ fn publish_session_started(
             "session.started bus publish failed"
         );
     }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Ok;
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
 }
 
 /// Emit `com.nexus.ai.runtime.session.completed` on the kernel bus.
@@ -967,8 +1001,11 @@ fn publish_session_completed(
     ctx: &KernelPluginContext,
     session_id: &str,
     task_id: uuid::Uuid,
+    goal: &str,
+    duration_ms: u64,
 ) {
     use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
     let payload = serde_json::json!({
         "session_id": session_id,
         "outcome": "completed",
@@ -983,6 +1020,19 @@ fn publish_session_completed(
             "session.completed bus publish failed"
         );
     }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Ok;
+    activity.duration_ms = Some(duration_ms);
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
 }
 
 /// Emit `com.nexus.ai.runtime.session.completed` with a `failed` outcome.
@@ -991,8 +1041,11 @@ fn publish_session_failed(
     session_id: &str,
     task_id: uuid::Uuid,
     error: &str,
+    goal: &str,
+    duration_ms: u64,
 ) {
     use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
     let payload = serde_json::json!({
         "session_id": session_id,
         "outcome": "failed",
@@ -1008,6 +1061,20 @@ fn publish_session_failed(
             "session.failed bus publish failed"
         );
     }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Error;
+    activity.error = Some(error.to_string());
+    activity.duration_ms = Some(duration_ms);
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
 }
 
 /// Emit `com.nexus.ai.runtime.session.cancelled` on the kernel bus.
@@ -1016,8 +1083,11 @@ fn publish_session_cancelled(
     session_id: &str,
     task_id: uuid::Uuid,
     reason: Option<&str>,
+    goal: &str,
+    duration_ms: Option<u64>,
 ) {
     use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
     let payload = serde_json::json!({
         "session_id": session_id,
         "reason": reason,
@@ -1031,6 +1101,19 @@ fn publish_session_cancelled(
             ?e,
             "session.cancelled bus publish failed"
         );
+    }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Cancelled;
+    activity.duration_ms = duration_ms;
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
     }
 }
 

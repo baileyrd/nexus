@@ -35,6 +35,7 @@ export type ActivitySurface =
   | 'git'
   | 'workflow'
   | 'capability'
+  | 'agent'
   | 'other'
 
 export type ActivityOutcome = 'ok' | 'error' | 'cancelled'
