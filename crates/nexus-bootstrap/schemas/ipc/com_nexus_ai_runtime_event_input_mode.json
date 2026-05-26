@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EventInputMode",
+  "description": "How an event input should be consumed by the receiving session.",
+  "oneOf": [
+    {
+      "description": "Append the event as additional context to the current session round.",
+      "type": "string",
+      "const": "augment"
+    },
+    {
+      "description": "Treat the event as a new top-level goal — replaces the current task\ndescription in the next spawned session.",
+      "type": "string",
+      "const": "new_goal"
+    },
+    {
+      "description": "The event signals an interrupt — the receiving session should abort\nits current approach and replan.",
+      "type": "string",
+      "const": "interrupt"
+    }
+  ]
+}

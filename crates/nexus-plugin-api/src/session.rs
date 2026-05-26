@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+
 /// Classifies the driver behind a perceive-reason-act-observe session.
 ///
 /// The kind determines the session's default budget tier, latency
@@ -14,7 +17,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Matches the taxonomy in the AI-native runtime design (§6.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
     ts(
@@ -49,7 +52,7 @@ pub enum SessionKind {
 /// clean completion from policy aborts and hard failures without
 /// parsing the full agent transcript.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
     ts(

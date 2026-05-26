@@ -242,6 +242,22 @@ plugin = "com.nexus.ai.runtime"
 command = "wait_for"
 caps = ["ai.runtime.observe"]
 
+# Move 7 — ambient trigger management (BL-134 Phase 7)
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "register_trigger"
+caps = ["ai.runtime.control"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "unregister_trigger"
+caps = ["ai.runtime.control"]
+
+[[handler]]
+plugin = "com.nexus.ai.runtime"
+command = "list_triggers"
+caps = ["ai.runtime.observe"]
+
 # ─── com.nexus.notifications — inbox surface (BL-136, ADR 0029) ──────
 
 [[handler]]

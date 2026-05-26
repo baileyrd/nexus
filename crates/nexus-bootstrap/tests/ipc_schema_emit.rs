@@ -67,8 +67,13 @@ use nexus_notifications::Channel as NotificationsChannel;
 use nexus_ai_runtime::events::AiEvent as AiRuntimeEvent;
 use nexus_ai_runtime::{
     AgentRun, AgentRunSummary, AgentTaskKind, AiRuntimeControlArgs, AiRuntimeEventsArgs,
-    AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs, AiRuntimeSubmitReply,
-    AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus, TaskPriority,
+    AiRuntimeGetArgs, AiRuntimeListArgs,
+    AiRuntimeListTriggersReply, AiRuntimeRegisterTriggerArgs, AiRuntimeRegisterTriggerReply,
+    AiRuntimeSubmitArgs, AiRuntimeSubmitReply,
+    AiRuntimeUnregisterTriggerArgs, AiRuntimeUnregisterTriggerReply,
+    AiRuntimeWaitForArgs, AiRuntimeWaitForReply,
+    AmbientTrigger, EventInput, EventInputMode, TriggerFilter, TriggerId,
+    PoolStats, RunStatus, TaskPriority,
 };
 // nexus-git uses a wire-mirror module — handlers emit ad-hoc
 // `serde_json::json!` and the impl types in `nexus_git::types`
@@ -407,6 +412,17 @@ fn emit_all_schemas_impl() {
     write_schema::<PoolStats>("com_nexus_ai_runtime__pool_stats", "result");
     write_schema::<RunStatus>("com_nexus_ai_runtime", "run_status");
     write_schema::<TaskPriority>("com_nexus_ai_runtime", "task_priority");
+    // Move 7 — AmbientTrigger / trigger watcher IPC surface.
+    write_schema::<AiRuntimeRegisterTriggerArgs>("com_nexus_ai_runtime__register_trigger", "args");
+    write_schema::<AiRuntimeRegisterTriggerReply>("com_nexus_ai_runtime__register_trigger", "reply");
+    write_schema::<AiRuntimeUnregisterTriggerArgs>("com_nexus_ai_runtime__unregister_trigger", "args");
+    write_schema::<AiRuntimeUnregisterTriggerReply>("com_nexus_ai_runtime__unregister_trigger", "reply");
+    write_schema::<AiRuntimeListTriggersReply>("com_nexus_ai_runtime__list_triggers", "reply");
+    write_schema::<AmbientTrigger>("com_nexus_ai_runtime", "ambient_trigger");
+    write_schema::<TriggerFilter>("com_nexus_ai_runtime", "trigger_filter");
+    write_schema::<EventInput>("com_nexus_ai_runtime", "event_input");
+    write_schema::<EventInputMode>("com_nexus_ai_runtime", "event_input_mode");
+    write_schema::<TriggerId>("com_nexus_ai_runtime", "trigger_id");
 
     // ── com.nexus.git (P1-3 #113) ────────────────────────────────────────
     // Wire-mirror types — impl emits ad-hoc `serde_json::json!`.

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeUnregisterTriggerArgs",
+  "description": "`unregister_trigger` arg envelope — Move 7.",
+  "type": "object",
+  "properties": {
+    "trigger_id": {
+      "description": "Id of the trigger to remove.",
+      "$ref": "#/$defs/TriggerId"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "trigger_id"
+  ],
+  "$defs": {
+    "TriggerId": {
+      "description": "Unique identifier for an [`AmbientTrigger`].",
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

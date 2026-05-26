@@ -492,6 +492,15 @@ pub struct AiRuntimeWaitForReply {
 /// bus event the trigger watcher spawns a [`SessionKind::SignalTriggered`]
 /// session with the rendered goal template.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct AiRuntimeRegisterTriggerArgs {
     /// The trigger to register.
     pub trigger: AmbientTrigger,
@@ -499,6 +508,15 @@ pub struct AiRuntimeRegisterTriggerArgs {
 
 /// `register_trigger` reply — Move 7.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct AiRuntimeRegisterTriggerReply {
     /// The assigned (or pre-assigned) trigger id.
     pub trigger_id: TriggerId,
@@ -506,6 +524,15 @@ pub struct AiRuntimeRegisterTriggerReply {
 
 /// `unregister_trigger` arg envelope — Move 7.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct AiRuntimeUnregisterTriggerArgs {
     /// Id of the trigger to remove.
     pub trigger_id: TriggerId,
@@ -513,6 +540,15 @@ pub struct AiRuntimeUnregisterTriggerArgs {
 
 /// `unregister_trigger` reply — Move 7.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct AiRuntimeUnregisterTriggerReply {
     /// `true` if the trigger was found and removed; `false` if it was
     /// already absent (idempotent, not an error).
@@ -521,6 +557,15 @@ pub struct AiRuntimeUnregisterTriggerReply {
 
 /// `list_triggers` reply — Move 7.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct AiRuntimeListTriggersReply {
     /// All registered triggers (enabled and disabled), sorted by name.
     pub triggers: Vec<AmbientTrigger>,

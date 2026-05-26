@@ -17,12 +17,25 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use nexus_plugin_api::event::{NexusEvent, PublishedEvent};
 
 // ─── TriggerId ───────────────────────────────────────────────────────────────
 
 /// Unique identifier for an [`AmbientTrigger`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct TriggerId(pub Uuid);
 
 impl TriggerId {
@@ -49,6 +62,14 @@ impl std::fmt::Display for TriggerId {
 
 /// How an event input should be consumed by the receiving session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(rename_all = "snake_case")]
 pub enum EventInputMode {
     /// Append the event as additional context to the current session round.
@@ -70,6 +91,15 @@ pub enum EventInputMode {
 /// these; the agent session receives one in its goal context when the trigger
 /// fires.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct EventInput {
     /// Unique id of the source [`PublishedEvent`] — used for dedup / tracing.
     pub event_id: Uuid,
@@ -109,7 +139,15 @@ impl EventInput {
 /// [`nexus_plugin_api::event::EventFilter`] but derives `Serialize /
 /// Deserialize` so it can be stored and transmitted over IPC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerFilter {
     /// Match every event on the bus. High-traffic — intended for broad ambient
     /// watchers; prefer a narrower filter for production triggers.
@@ -184,6 +222,15 @@ impl TriggerFilter {
 /// | `{{event.payload}}` | The event's JSON payload (compact) |
 /// | `{{event.source}}` | The emitting plugin id |
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct AmbientTrigger {
     /// Unique trigger id — assigned at construction, stable across
     /// enable/disable cycles.
