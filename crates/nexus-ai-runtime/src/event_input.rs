@@ -107,6 +107,7 @@ pub struct EventInput {
     /// (`"PluginLoaded"`, etc.) or the `type_id` string for `Custom` events.
     pub event_type: String,
     /// JSON payload extracted from the event.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub payload: serde_json::Value,
     /// Plugin that emitted the event (`"kernel"` for lifecycle events).
     pub source_plugin: String,
