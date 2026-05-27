@@ -42,3 +42,18 @@ export type { AiStreamAskSource } from './AiStreamAskSource';
 export type { AiStreamChatArgs } from './AiStreamChatArgs';
 export type { AiStreamChatMode } from './AiStreamChatMode';
 export type { AiToolPolicy } from './AiToolPolicy';
+
+// com.nexus.ai.runtime — Move 7 ambient trigger management (BL-134 Phase 7)
+export type { AiRuntimeRegisterTriggerArgs } from './AiRuntimeRegisterTriggerArgs';
+export type { AiRuntimeRegisterTriggerReply } from './AiRuntimeRegisterTriggerReply';
+export type { AiRuntimeUnregisterTriggerArgs } from './AiRuntimeUnregisterTriggerArgs';
+export type { AiRuntimeUnregisterTriggerReply } from './AiRuntimeUnregisterTriggerReply';
+export type { AiRuntimeListTriggersReply } from './AiRuntimeListTriggersReply';
+export type { AmbientTrigger } from './AmbientTrigger';
+export type { TriggerFilter } from './TriggerFilter';
+export type { TriggerId } from './TriggerId';
+export type { EventInput } from './EventInput';
+export type { EventInputMode } from './EventInputMode';
+export type { Budget } from './Budget';
+export type { SessionId } from './SessionId';
+export type { SessionState } from './SessionState';

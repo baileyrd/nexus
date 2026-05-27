@@ -8,9 +8,9 @@ description = "Stable plugin contract for Nexus — capability types, IPC abstra
 
 [features]
 # Emit TypeScript bindings into `packages/nexus-extension-api/src/generated/`.
-# Off by default so normal Rust builds don't pull ts-rs. Enable with
+# Off by default so normal Rust builds don't pull ts-rs / schemars. Enable with
 # `cargo test -p nexus-plugin-api --features ts-export` when regenerating bindings.
-ts-export = ["dep:ts-rs"]
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dependencies]
 serde = { workspace = true }
@@ -20,6 +20,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
+schemars = { workspace = true, optional = true, features = ["chrono04", "uuid1"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeUnregisterTriggerReply",
+  "description": "`unregister_trigger` reply — Move 7.",
+  "type": "object",
+  "properties": {
+    "found": {
+      "description": "`true` if the trigger was found and removed; `false` if it was\nalready absent (idempotent, not an error).",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "found"
+  ]
+}

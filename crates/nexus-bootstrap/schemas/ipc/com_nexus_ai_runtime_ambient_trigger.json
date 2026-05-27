@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AmbientTrigger",
+  "description": "Binds an event filter to a session template so that matching events\nautomatically spawn [`crate::session::SessionKind::SignalTriggered`]\nsessions.\n\nThe trigger watcher loop (started in `wire_context`) polls all registered\ntriggers against every bus event and submits a new `SignalTriggered`\nsession for each match, with the rendered `goal_template` as the task\ndescription.\n\n# Goal template tokens\n\n| Token | Replaced with |\n|---|---|\n| `{{event.type}}` | The event's type string |\n| `{{event.payload}}` | The event's JSON payload (compact) |\n| `{{event.source}}` | The emitting plugin id |",
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "description": "Disabled triggers are retained in the registry but silently\nignored by the watcher loop.",
+      "type": "boolean"
+    },
+    "filter": {
+      "description": "Which events to react to.",
+      "$ref": "#/$defs/TriggerFilter"
+    },
+    "goal_template": {
+      "description": "Goal string for the spawned session. Supports the interpolation\ntokens documented on the struct.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Unique trigger id — assigned at construction, stable across\nenable/disable cycles.",
+      "$ref": "#/$defs/TriggerId"
+    },
+    "mode": {
+      "description": "How the event should be presented to the spawned session.",
+      "$ref": "#/$defs/EventInputMode"
+    },
+    "name": {
+      "description": "Human-readable name for observability panels.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "filter",
+    "goal_template",
+    "mode",
+    "enabled"
+  ],
+  "$defs": {
+    "EventInputMode": {
+      "description": "How an event input should be consumed by the receiving session.",
+      "oneOf": [
+        {
+          "description": "Append the event as additional context to the current session round.",
+          "type": "string",
+          "const": "augment"
+        },
+        {
+          "description": "Treat the event as a new top-level goal — replaces the current task\ndescription in the next spawned session.",
+          "type": "string",
+          "const": "new_goal"
+        },
+        {
+          "description": "The event signals an interrupt — the receiving session should abort\nits current approach and replan.",
+          "type": "string",
+          "const": "interrupt"
+        }
+      ]
+    },
+    "TriggerFilter": {
+      "description": "Serializable event-bus filter spec for an [`AmbientTrigger`]. Mirrors\n[`nexus_plugin_api::event::EventFilter`] but derives `Serialize /\nDeserialize` so it can be stored and transmitted over IPC.",
+      "oneOf": [
+        {
+          "description": "Match every event on the bus. High-traffic — intended for broad ambient\nwatchers; prefer a narrower filter for production triggers.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Match a kernel-owned event variant by its name (e.g. `\"PluginLoaded\"`).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "kernel_variant"
+            },
+            "name": {
+              "description": "Variant name to match, e.g. `\"PluginLoaded\"`.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "description": "Match `Custom` events whose `type_id` starts with `prefix`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "custom_prefix"
+            },
+            "prefix": {
+              "description": "Type-id prefix to match against, e.g. `\"com.nexus.storage.\"`.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "prefix"
+          ]
+        },
+        {
+          "description": "Match exactly one `Custom` event `type_id`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "custom_exact"
+            },
+            "type_id": {
+              "description": "Exact type-id to match, e.g. `\"com.nexus.storage.file_changed\"`.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "type_id"
+          ]
+        }
+      ]
+    },
+    "TriggerId": {
+      "description": "Unique identifier for an [`AmbientTrigger`].",
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

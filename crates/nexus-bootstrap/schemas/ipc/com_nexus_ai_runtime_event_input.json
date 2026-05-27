@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EventInput",
+  "description": "A bus event converted into agent-perceptible input.\n\n`EventInput` is the typed perception unit that crosses the bus-to-agent\nboundary.  [`TriggerRegistry::matching`] drives how the watcher produces\nthese; the agent session receives one in its goal context when the trigger\nfires.",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "description": "Unique id of the source [`PublishedEvent`] — used for dedup / tracing.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "description": "Namespaced event type: the variant name for kernel events\n(`\"PluginLoaded\"`, etc.) or the `type_id` string for `Custom` events.",
+      "type": "string"
+    },
+    "mode": {
+      "description": "How the receiving session should consume this input.",
+      "$ref": "#/$defs/EventInputMode"
+    },
+    "payload": {
+      "description": "JSON payload extracted from the event."
+    },
+    "source_plugin": {
+      "description": "Plugin that emitted the event (`\"kernel\"` for lifecycle events).",
+      "type": "string"
+    },
+    "timestamp": {
+      "description": "UTC timestamp from the event metadata.",
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "payload",
+    "source_plugin",
+    "timestamp",
+    "mode"
+  ],
+  "$defs": {
+    "EventInputMode": {
+      "description": "How an event input should be consumed by the receiving session.",
+      "oneOf": [
+        {
+          "description": "Append the event as additional context to the current session round.",
+          "type": "string",
+          "const": "augment"
+        },
+        {
+          "description": "Treat the event as a new top-level goal — replaces the current task\ndescription in the next spawned session.",
+          "type": "string",
+          "const": "new_goal"
+        },
+        {
+          "description": "The event signals an interrupt — the receiving session should abort\nits current approach and replan.",
+          "type": "string",
+          "const": "interrupt"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TriggerFilter",
+  "description": "Serializable event-bus filter spec for an [`AmbientTrigger`]. Mirrors\n[`nexus_plugin_api::event::EventFilter`] but derives `Serialize /\nDeserialize` so it can be stored and transmitted over IPC.",
+  "oneOf": [
+    {
+      "description": "Match every event on the bus. High-traffic — intended for broad ambient\nwatchers; prefer a narrower filter for production triggers.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "all"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    {
+      "description": "Match a kernel-owned event variant by its name (e.g. `\"PluginLoaded\"`).",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "kernel_variant"
+        },
+        "name": {
+          "description": "Variant name to match, e.g. `\"PluginLoaded\"`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ]
+    },
+    {
+      "description": "Match `Custom` events whose `type_id` starts with `prefix`.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "custom_prefix"
+        },
+        "prefix": {
+          "description": "Type-id prefix to match against, e.g. `\"com.nexus.storage.\"`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "prefix"
+      ]
+    },
+    {
+      "description": "Match exactly one `Custom` event `type_id`.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "custom_exact"
+        },
+        "type_id": {
+          "description": "Exact type-id to match, e.g. `\"com.nexus.storage.file_changed\"`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "type_id"
+      ]
+    }
+  ]
+}

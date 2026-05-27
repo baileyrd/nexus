@@ -17,19 +17,22 @@
 //! Reserved IDs return a clear "not yet wired" error so a caller that
 //! starts using them ahead of Phase 5 gets a routable failure.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
+use nexus_plugin_api::{Capability, CapabilitySet, token::CapabilityToken};
+
 use crate::events::{topic_for, AiEvent};
 use crate::pool::WorkerPool;
 use crate::scheduler::Store;
+use crate::supervisor::{Supervisor, TOPIC_SESSION_CANCELLED, TOPIC_SESSION_COMPLETED, TOPIC_SESSION_STARTED};
 use crate::{
-    AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs,
-    AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus,
-    PLUGIN_ID,
+    AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs,
+    AiRuntimeSubmitArgs, AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply,
+    PoolStats, RunStatus, SessionKind, PLUGIN_ID,
 };
 
 /// `submit` handler id.
@@ -50,6 +53,12 @@ pub const HANDLER_EVENTS: u32 = 7;
 pub const HANDLER_POOL_STATS: u32 = 8;
 /// `wait_for` handler id — BL-134 Phase 2 sync-wait primitive.
 pub const HANDLER_WAIT_FOR: u32 = 9;
+/// `register_trigger` handler id — Move 7 (ambient event triggers).
+pub const HANDLER_REGISTER_TRIGGER: u32 = 10;
+/// `unregister_trigger` handler id — Move 7.
+pub const HANDLER_UNREGISTER_TRIGGER: u32 = 11;
+/// `list_triggers` handler id — Move 7.
+pub const HANDLER_LIST_TRIGGERS: u32 = 12;
 
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::ai_runtime::register`.
@@ -64,6 +73,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("events", HANDLER_EVENTS),
     ("pool_stats", HANDLER_POOL_STATS),
     ("wait_for", HANDLER_WAIT_FOR),
+    ("register_trigger", HANDLER_REGISTER_TRIGGER),
+    ("unregister_trigger", HANDLER_UNREGISTER_TRIGGER),
+    ("list_triggers", HANDLER_LIST_TRIGGERS),
 ];
 
 /// Default plugin id used as the `caller_plugin_id` when the
@@ -107,8 +119,11 @@ const SESSION_CORRELATION_GRACE: std::time::Duration =
 /// `cargo test -p nexus-ai-runtime` doesn't pay the cost when only
 /// the type tests run.
 pub struct AiRuntimeCorePlugin {
-    store: Store,
-    pool: OnceLock<WorkerPool>,
+    /// Named supervisor — owns the task store, worker pool, and
+    /// admission config. Previously these were two bare fields;
+    /// the Supervisor type is the structural foundation of Move 1
+    /// (AI-native runtime design §5 / §6).
+    supervisor: Supervisor,
     /// Plugin context captured by `wire_context`. `None` until the
     /// bootstrap wires it; the IPC handlers all return a clear error
     /// rather than panic in that window.
@@ -129,8 +144,7 @@ impl AiRuntimeCorePlugin {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            store: Store::new(),
-            pool: OnceLock::new(),
+            supervisor: Supervisor::new(),
             context: Mutex::new(None),
         }
     }
@@ -139,7 +153,7 @@ impl AiRuntimeCorePlugin {
     /// bootstrap wire-up. Returns `false` when a pool is already
     /// installed (each test gets a fresh plugin).
     pub fn wire_pool_for_tests(&self, pool: WorkerPool) -> bool {
-        self.pool.set(pool).is_ok()
+        self.supervisor.set_pool(pool)
     }
 
     fn ctx(&self) -> Option<Arc<KernelPluginContext>> {
@@ -158,10 +172,11 @@ impl CorePlugin for AiRuntimeCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
-        let store = self.store.clone();
+        let store = self.supervisor.store().clone();
         let ctx = self.ctx();
-        let pool_handle = self.pool.get().map(WorkerPool::handle);
-        let pool_metrics = self.pool.get().map(WorkerPool::metrics);
+        let pool_handle = self.supervisor.pool_handle();
+        let pool_metrics = self.supervisor.pool_metrics();
+        let triggers = self.supervisor.trigger_registry().clone();
         let args = args.clone();
 
         Some(Box::pin(async move {
@@ -183,6 +198,9 @@ impl CorePlugin for AiRuntimeCorePlugin {
                     let ctx = ctx.ok_or_else(ctx_unwired)?;
                     handle_cancel(&store, ctx.as_ref(), &args)
                 }
+                HANDLER_REGISTER_TRIGGER => handle_register_trigger(&triggers, &args),
+                HANDLER_UNREGISTER_TRIGGER => handle_unregister_trigger(&triggers, &args),
+                HANDLER_LIST_TRIGGERS => handle_list_triggers(&triggers),
                 HANDLER_PAUSE | HANDLER_RESUME => Err(exec_err(format!(
                     "handler {handler_id}: pause/resume are not supported in BL-134 Phase 5 — \
                      a Session task is a single ipc_call with no resumable midpoint; \
@@ -201,7 +219,7 @@ impl CorePlugin for AiRuntimeCorePlugin {
         // Failure is logged + leaves the OnceLock empty so subsequent
         // `submit` calls surface a clear "pool not running" error
         // rather than silently dropping work.
-        if self.pool.get().is_none() {
+        if self.supervisor.pool().is_none() {
             match WorkerPool::start(None) {
                 Ok(pool) => {
                     // BL-134 Phase 4 — publish the pool handle to the
@@ -212,7 +230,7 @@ impl CorePlugin for AiRuntimeCorePlugin {
                     // is observable; the daemon falls back to its own
                     // runtime if the handle isn't published yet.
                     let installed = pool.publish_shared_handle();
-                    let _ = self.pool.set(pool);
+                    self.supervisor.set_pool(pool);
                     tracing::info!(
                         plugin_id = PLUGIN_ID,
                         shared_handle_installed = installed,
@@ -242,11 +260,30 @@ impl CorePlugin for AiRuntimeCorePlugin {
         // runtime; fall back to the ambient runtime via
         // `tokio::spawn` if the pool isn't started yet. The
         // subscriber is process-lifetime — drops at process exit.
-        if let Some(pool) = self.pool.get() {
-            let store = self.store.clone();
+        if let Some(pool) = self.supervisor.pool() {
+            let store = self.supervisor.store().clone();
             let ctx_for_sub = Arc::clone(&ctx);
             pool.handle().spawn(async move {
                 republish_loop(store, ctx_for_sub).await;
+            });
+
+            // Move 7 — trigger watcher. Subscribes to every bus event and
+            // spawns `SignalTriggered` sessions for each registered
+            // `AmbientTrigger` that matches. The registry is Arc-backed so
+            // triggers registered after startup are picked up immediately.
+            let triggers = self.supervisor.trigger_registry().clone();
+            let store_for_watcher = self.supervisor.store().clone();
+            let ctx_for_watcher = Arc::clone(&ctx);
+            let pool_handle_for_watcher = pool.handle();
+            let watcher_pool_handle = pool.handle();
+            watcher_pool_handle.spawn(async move {
+                trigger_watcher_loop(
+                    triggers,
+                    store_for_watcher,
+                    ctx_for_watcher,
+                    pool_handle_for_watcher,
+                )
+                .await;
             });
         }
     }
@@ -278,9 +315,26 @@ fn handle_submit(
     let task_id = uuid::Uuid::new_v4();
     let kind_label = parsed.task.label().to_string();
     let priority = parsed.priority;
+    let session_kind = parsed.kind;
     let parent = parsed.parent;
+    let requested_caps = parsed.capabilities;
     let caller = caller_plugin_id(ctx);
     let ring = store.insert(task_id, &kind_label, priority, parent, &caller);
+
+    // Extract the goal from the task BEFORE inject_session_id consumes it.
+    let goal: String = match &parsed.task {
+        AgentTaskKind::Session { args } => args
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .chars()
+            .take(256)
+            .collect(),
+        AgentTaskKind::WorkflowAiStep { workflow, step, .. } => {
+            format!("workflow {} step {}", workflow, step)
+        }
+        AgentTaskKind::AiStream { .. } => "ai_stream".into(),
+    };
 
     // Record + republish the Submitted event before returning to the
     // caller so a sufficiently-fast subscriber sees it before the
@@ -303,12 +357,28 @@ fn handle_submit(
     // terminal state so the reverse map doesn't grow unbounded.
     let (task_kind, allocated_session_id) = inject_session_id(parsed.task, store, task_id);
 
+    // Move 2 — mint the session's capability token from the caller's
+    // requested capability set (dot-string names; unknown strings are
+    // silently dropped). Phase 2 (sub-agent delegation) will intersect
+    // this with the parent token; Phase 1 mints from the raw list.
+    if let Some(ref sid) = allocated_session_id {
+        if let Ok(session_uuid) = uuid::Uuid::parse_str(sid) {
+            let caps: CapabilitySet = requested_caps
+                .iter()
+                .filter_map(|s| Capability::from_str(s).ok())
+                .collect();
+            let token = CapabilityToken::new(session_uuid, caps);
+            store.store_token(task_id, token);
+        }
+    }
+
     // Dispatch the actual work onto the dedicated pool. The worker
     // races the inner ipc_call against the cancel gate so a `cancel`
     // IPC call (BL-134 Phase 5) suppresses the underlying
     // Finished/Failed event and emits `Cancelled` instead.
     let store_for_worker = store.clone();
     let ctx_for_worker = Arc::clone(ctx);
+    let goal_for_worker = goal.clone();
     let cancel = store
         .cancel_gate(task_id)
         .expect("cancel gate present after insert");
@@ -322,12 +392,15 @@ fn handle_submit(
                 &store_for_worker,
                 ctx_for_worker.as_ref(),
                 &ring,
-                &AiEvent::Cancelled { task_id, by },
+                &AiEvent::Cancelled { task_id, by: by.clone() },
             );
-            // Drop the correlation entry before bailing so the
-            // session→task map doesn't leak when a task is cancelled
-            // before it ever ran.
+            // Emit session-lifecycle event so bus subscribers tracking
+            // the session_id rather than the task_id see the cancellation.
             if let Some(ref sid) = allocated_session_id {
+                publish_session_cancelled(ctx_for_worker.as_ref(), sid, task_id, Some(&by), &goal_for_worker, None);
+                // Drop the correlation entry before bailing so the
+                // session→task map doesn't leak when a task is cancelled
+                // before it ever ran.
                 store_for_worker.forget_session(sid);
             }
             return;
@@ -335,7 +408,13 @@ fn handle_submit(
 
         let started = AiEvent::Started { task_id, attempt: 1 };
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &started);
+        // Emit session.started so subscribers tracking session_id see
+        // the transition to Running.
+        if let Some(ref sid) = allocated_session_id {
+            publish_session_started(ctx_for_worker.as_ref(), sid, task_id, session_kind, &goal_for_worker);
+        }
 
+        let task_start = std::time::Instant::now();
         let inner = async {
             match task_kind {
                 AgentTaskKind::Session { args } => run_session(&ctx_for_worker, args).await,
@@ -374,6 +453,33 @@ fn handle_submit(
                 Err(error) => AiEvent::Failed { task_id, error, retriable: false },
             }
         };
+
+        // Emit session-lifecycle bus event before the terminal AiEvent
+        // so subscribers see the semantic outcome (completed/cancelled)
+        // before the raw task event.
+        let elapsed_ms = task_start.elapsed().as_millis() as u64;
+        if let Some(ref sid) = allocated_session_id {
+            match &event {
+                AiEvent::Finished { .. } => {
+                    publish_session_completed(ctx_for_worker.as_ref(), sid, task_id, &goal_for_worker, elapsed_ms);
+                }
+                AiEvent::Cancelled { by, .. } => {
+                    publish_session_cancelled(
+                        ctx_for_worker.as_ref(),
+                        sid,
+                        task_id,
+                        Some(by.as_str()),
+                        &goal_for_worker,
+                        Some(elapsed_ms),
+                    );
+                }
+                AiEvent::Failed { error, .. } => {
+                    publish_session_failed(ctx_for_worker.as_ref(), sid, task_id, error, &goal_for_worker, elapsed_ms);
+                }
+                _ => {}
+            }
+        }
+
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &event);
         // BL-134 Phase 2b-ii — terminal cleanup of the session→task
         // correlation entry. Tested via the unit suite below
@@ -549,12 +655,12 @@ fn handle_cancel(
     let reason = parsed.reason.clone().or_else(|| Some("caller".into()));
     let first_signal = gate.request(reason);
     if first_signal {
-        // Publish a synchronous Cancelled-requested breadcrumb so
-        // observers see the signal even before the worker's
-        // select! arm fires. The worker's eventual Cancelled event
-        // is the canonical terminal record; this one is a hint.
-        // (Phase 5 deliberately does NOT split this into its own
-        // AiEvent variant — the variant set stays closed.)
+        // Move 2 — revoke the session's capability token so any
+        // in-flight capability check returns Denied immediately,
+        // before the worker's select! arm has had a chance to
+        // observe the CancellationToken. Child tokens derived via
+        // attenuate() are also invalidated transitively.
+        store.revoke_token(parsed.task_id);
         tracing::info!(
             plugin_id = PLUGIN_ID,
             task_id = %parsed.task_id,
@@ -726,6 +832,291 @@ fn handle_pool_stats(store: &Store, metrics: crate::pool::PoolMetrics) -> serde_
     serde_json::to_value(&stats).unwrap_or(serde_json::Value::Null)
 }
 
+// ─── Move 7 handlers ─────────────────────────────────────────────────────────
+
+fn handle_register_trigger(
+    triggers: &crate::event_input::TriggerRegistry,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::AiRuntimeRegisterTriggerArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("register_trigger: invalid args: {e}")))?;
+    let id = triggers.register(parsed.trigger);
+    serde_json::to_value(&crate::AiRuntimeRegisterTriggerReply { trigger_id: id })
+        .map_err(|e| exec_err(format!("register_trigger: serialize: {e}")))
+}
+
+fn handle_unregister_trigger(
+    triggers: &crate::event_input::TriggerRegistry,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: crate::AiRuntimeUnregisterTriggerArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("unregister_trigger: invalid args: {e}")))?;
+    let found = triggers.unregister(&parsed.trigger_id);
+    serde_json::to_value(&crate::AiRuntimeUnregisterTriggerReply { found })
+        .map_err(|e| exec_err(format!("unregister_trigger: serialize: {e}")))
+}
+
+fn handle_list_triggers(
+    triggers: &crate::event_input::TriggerRegistry,
+) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(&crate::AiRuntimeListTriggersReply {
+        triggers: triggers.list(),
+    })
+    .map_err(|e| exec_err(format!("list_triggers: serialize: {e}")))
+}
+
+/// Move 7 — trigger watcher loop. Subscribes to every bus event and, for
+/// each enabled [`AmbientTrigger`] that matches, submits a
+/// `SignalTriggered` session with the rendered goal template as the task
+/// description.
+///
+/// The loop is process-lifetime (terminates only when the bus subscription
+/// closes at shutdown). Triggers registered after startup are picked up
+/// immediately — the registry is `Arc`-backed so the watcher and IPC
+/// handlers share live state.
+async fn trigger_watcher_loop(
+    triggers: crate::event_input::TriggerRegistry,
+    store: Store,
+    ctx: Arc<KernelPluginContext>,
+    pool_handle: tokio::runtime::Handle,
+) {
+    use crate::event_input::EventInput;
+    use nexus_kernel::{EventFilter, Events as _};
+
+    let mut sub = ctx.subscribe(EventFilter::All);
+
+    tracing::info!(
+        plugin_id = PLUGIN_ID,
+        "Move 7: trigger watcher started — every bus event is now a potential agent input",
+    );
+
+    loop {
+        match sub.recv().await {
+            Ok(published) => {
+                let matching = triggers.matching(&published.event);
+                for trigger in matching {
+                    let input = EventInput::from_published(&published, trigger.mode);
+                    let goal = trigger.render_goal(&published);
+
+                    tracing::info!(
+                        plugin_id = PLUGIN_ID,
+                        trigger_name = %trigger.name,
+                        trigger_id = %trigger.id,
+                        event_type = %input.event_type,
+                        "Move 7: trigger matched — spawning SignalTriggered session",
+                    );
+
+                    // Build a SignalTriggered submit args. The session args
+                    // carry both the rendered goal and the typed EventInput so
+                    // the agent handler can expose the structured observation.
+                    let session_args = serde_json::json!({
+                        "goal": goal,
+                        "trigger_id": trigger.id.0.to_string(),
+                        "event_input": input,
+                    });
+                    let submit_args = crate::AiRuntimeSubmitArgs {
+                        task: crate::AgentTaskKind::Session { args: session_args },
+                        priority: crate::TaskPriority::Background,
+                        kind: crate::SessionKind::SignalTriggered,
+                        parent: None,
+                        capabilities: vec![],
+                    };
+                    let args_value = match serde_json::to_value(&submit_args) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(
+                                plugin_id = PLUGIN_ID,
+                                trigger_name = %trigger.name,
+                                ?e,
+                                "Move 7: failed to serialize trigger session args"
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(e) = handle_submit(&store, &ctx, &pool_handle, &args_value) {
+                        tracing::warn!(
+                            plugin_id = PLUGIN_ID,
+                            trigger_name = %trigger.name,
+                            ?e,
+                            "Move 7: trigger session spawn failed"
+                        );
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::info!(
+                    plugin_id = PLUGIN_ID,
+                    "Move 7: trigger watcher stopped (bus subscription closed)"
+                );
+                break;
+            }
+        }
+    }
+}
+
+// ─── Session lifecycle bus helpers ──────────────────────────────────────────
+
+/// Emit `com.nexus.ai.runtime.session.started` on the kernel bus.
+/// Keyed on `session_id` (not `task_id`) so subscribers that track the
+/// agent transcript ID rather than the runtime task ID receive the event.
+fn publish_session_started(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    kind: SessionKind,
+    goal: &str,
+) {
+    use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "session_kind": kind,
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_STARTED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.started bus publish failed"
+        );
+    }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Ok;
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
+}
+
+/// Emit `com.nexus.ai.runtime.session.completed` on the kernel bus.
+fn publish_session_completed(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    goal: &str,
+    duration_ms: u64,
+) {
+    use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "outcome": "completed",
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_COMPLETED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.completed bus publish failed"
+        );
+    }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Ok;
+    activity.duration_ms = Some(duration_ms);
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
+}
+
+/// Emit `com.nexus.ai.runtime.session.completed` with a `failed` outcome.
+fn publish_session_failed(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    error: &str,
+    goal: &str,
+    duration_ms: u64,
+) {
+    use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "outcome": "failed",
+        "error": error,
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_COMPLETED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.failed bus publish failed"
+        );
+    }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Error;
+    activity.error = Some(error.to_string());
+    activity.duration_ms = Some(duration_ms);
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
+}
+
+/// Emit `com.nexus.ai.runtime.session.cancelled` on the kernel bus.
+fn publish_session_cancelled(
+    ctx: &KernelPluginContext,
+    session_id: &str,
+    task_id: uuid::Uuid,
+    reason: Option<&str>,
+    goal: &str,
+    duration_ms: Option<u64>,
+) {
+    use nexus_kernel::Events as _;
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    let payload = serde_json::json!({
+        "session_id": session_id,
+        "reason": reason,
+        "task_id": task_id,
+    });
+    if let Err(e) = ctx.publish(TOPIC_SESSION_CANCELLED, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            session_id,
+            %task_id,
+            ?e,
+            "session.cancelled bus publish failed"
+        );
+    }
+    let mut activity = ActivityEntry::now(
+        session_id.to_string(),
+        ActivitySurface::Other,
+        ActivityOrigin::Agent(session_id.to_string()),
+    );
+    activity.prompt = goal.chars().take(256).collect();
+    activity.outcome = ActivityOutcome::Cancelled;
+    activity.duration_ms = duration_ms;
+    if let Ok(activity_payload) = serde_json::to_value(&activity) {
+        if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
+            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+        }
+    }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn record_and_publish(
@@ -839,14 +1230,15 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.store.observe_status(&AiEvent::Finished {
+        plugin.supervisor.store().observe_status(&AiEvent::Finished {
             task_id: id,
             outcome: serde_json::json!({"ok": true}),
         });
         let args = serde_json::json!({ "task_id": id });
-        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(!reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Completed);
@@ -857,9 +1249,10 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        let store_clone = plugin.store.clone();
+        let store_clone = plugin.supervisor.store().clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             store_clone.observe_status(&AiEvent::Finished {
@@ -869,7 +1262,7 @@ mod tests {
         });
         let args = serde_json::json!({ "task_id": id });
         let started = std::time::Instant::now();
-        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(!reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Completed);
@@ -883,14 +1276,15 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.store.observe_status(&AiEvent::Started {
+        plugin.supervisor.store().observe_status(&AiEvent::Started {
             task_id: id,
             attempt: 1,
         });
         let args = serde_json::json!({ "task_id": id, "timeout_ms": 25 });
-        let value = handle_wait_for(&plugin.store, &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Running);
@@ -993,7 +1387,7 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let ctx = test_ctx();
         let err = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": uuid::Uuid::new_v4() }),
         )
@@ -1006,14 +1400,15 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        let gate = plugin.store.cancel_gate(id).unwrap();
+        let gate = plugin.supervisor.store().cancel_gate(id).unwrap();
         assert!(!gate.is_cancelled(), "starts un-cancelled");
 
         let ctx = test_ctx();
         let value = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": id, "reason": "test-shutdown" }),
         )
@@ -1023,7 +1418,7 @@ mod tests {
 
         // Second cancel is a no-op and reports cancelled = false.
         let value2 = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": id }),
         )
@@ -1036,16 +1431,17 @@ mod tests {
         let plugin = AiRuntimeCorePlugin::new();
         let id = uuid::Uuid::new_v4();
         plugin
-            .store
+            .supervisor
+            .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.store.observe_status(&AiEvent::Finished {
+        plugin.supervisor.store().observe_status(&AiEvent::Finished {
             task_id: id,
             outcome: serde_json::Value::Null,
         });
 
         let ctx = test_ctx();
         let err = handle_cancel(
-            &plugin.store,
+            plugin.supervisor.store(),
             &ctx,
             &serde_json::json!({ "task_id": id }),
         )

@@ -52,16 +52,39 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 pub mod core_plugin;
+pub mod event_input;
 pub mod events;
 pub mod pool;
+pub mod proposal;
 pub mod republisher;
 pub mod scheduler;
+pub mod session;
+pub mod supervisor;
 
 /// BL-134 Phase 4 — process-wide shared tokio handle accessor.
 /// Re-exported from [`pool::shared_pool_handle`] for ergonomic
 /// `nexus_ai_runtime::shared_pool_handle()` calls from sibling
 /// subsystems (today: `nexus-ai::indexing_daemon`).
 pub use pool::shared_pool_handle;
+
+/// Re-export session identity types so callers only need one `use`
+/// path for the AI-runtime's session surface.
+pub use session::{Budget, Session, SessionId, SessionKind, SessionOutcome, SessionState, Step};
+/// Re-export the Supervisor and its admission-control config.
+pub use supervisor::{AdmissionConfig, Supervisor};
+/// Re-export Move 3 proposal/snapshot types for callers that submit
+/// actions through the capability gate or query the rollback ledger.
+pub use proposal::{
+    Proposal, ProposalId, ProposalState, ProposalStore, ProposedAction,
+    Snapshot, SnapshotEntry, SnapshotId,
+};
+/// Re-export Move 7 event-input types so callers can register ambient
+/// triggers and work with the perception unit without reaching into the
+/// `event_input` module directly.
+pub use event_input::{
+    AmbientTrigger, EventInput, EventInputMode, TriggerFilter, TriggerId,
+    TriggerRegistry,
+};
 
 /// Reverse-DNS plugin id — also the bus-topic prefix the republisher
 /// owns (`com.nexus.ai.runtime.*`).
@@ -194,11 +217,24 @@ pub struct AiRuntimeSubmitArgs {
     /// Priority bucket. Defaults to [`TaskPriority::Interactive`].
     #[serde(default)]
     pub priority: TaskPriority,
+    /// Session kind — determines budget tier, latency target, and
+    /// output destination. Defaults to [`SessionKind::UserDriven`].
+    /// Callers that don't supply this field continue to work unchanged.
+    #[serde(default)]
+    pub kind: SessionKind,
     /// Optional parent task id — Phase 2+ uses this for delegate /
     /// fan-out composition. Phase 1 records the value for
     /// observability but does not act on it.
     #[serde(default)]
     pub parent: Option<uuid::Uuid>,
+    /// Capabilities to grant the session, expressed as dot-string
+    /// names (e.g. `"fs.read"`, `"ai.chat"`). Unknown strings are
+    /// silently ignored at mint time. Defaults to empty — no
+    /// capabilities beyond those implicit in the session kind. Phase 2
+    /// (sub-agent delegation) intersects this with the parent token's
+    /// capability set; Phase 1 mints directly from this list.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// Reply from `submit`. The caller subscribes to
@@ -448,6 +484,91 @@ pub struct AiRuntimeWaitForReply {
     /// `true` when the wait expired before the run reached a terminal
     /// status; `false` when the run reached a terminal state.
     pub timed_out: bool,
+}
+
+/// `register_trigger` arg envelope — Move 7.
+///
+/// Registers an [`AmbientTrigger`] with the runtime. On the next matching
+/// bus event the trigger watcher spawns a [`SessionKind::SignalTriggered`]
+/// session with the rendered goal template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeRegisterTriggerArgs {
+    /// The trigger to register.
+    pub trigger: AmbientTrigger,
+}
+
+/// `register_trigger` reply — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeRegisterTriggerReply {
+    /// The assigned (or pre-assigned) trigger id.
+    pub trigger_id: TriggerId,
+}
+
+/// `unregister_trigger` arg envelope — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeUnregisterTriggerArgs {
+    /// Id of the trigger to remove.
+    pub trigger_id: TriggerId,
+}
+
+/// `unregister_trigger` reply — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeUnregisterTriggerReply {
+    /// `true` if the trigger was found and removed; `false` if it was
+    /// already absent (idempotent, not an error).
+    pub found: bool,
+}
+
+/// `list_triggers` reply — Move 7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiRuntimeListTriggersReply {
+    /// All registered triggers (enabled and disabled), sorted by name.
+    pub triggers: Vec<AmbientTrigger>,
 }
 
 /// `pool_stats` reply shape — exposed so a shell observability panel

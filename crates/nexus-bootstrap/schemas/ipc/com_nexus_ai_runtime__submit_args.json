@@ -4,6 +4,19 @@
   "description": "Submission envelope. The IPC `submit` handler accepts this shape\ndirectly; `task_id` is generated server-side and returned in the\nreply (callers MAY pre-supply one but the Phase-1 server ignores\nit to keep id allocation centralised).",
   "type": "object",
   "properties": {
+    "capabilities": {
+      "description": "Capabilities to grant the session, expressed as dot-string\nnames (e.g. `\"fs.read\"`, `\"ai.chat\"`). Unknown strings are\nsilently ignored at mint time. Defaults to empty — no\ncapabilities beyond those implicit in the session kind. Phase 2\n(sub-agent delegation) intersects this with the parent token's\ncapability set; Phase 1 mints directly from this list.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind": {
+      "description": "Session kind — determines budget tier, latency target, and\noutput destination. Defaults to [`SessionKind::UserDriven`].\nCallers that don't supply this field continue to work unchanged.",
+      "$ref": "#/$defs/SessionKind",
+      "default": "user_driven"
+    },
     "parent": {
       "description": "Optional parent task id — Phase 2+ uses this for delegate /\nfan-out composition. Phase 1 records the value for\nobservability but does not act on it.",
       "type": [
@@ -106,6 +119,31 @@
             "workflow",
             "step"
           ]
+        }
+      ]
+    },
+    "SessionKind": {
+      "description": "Classifies the driver behind a perceive-reason-act-observe session.\n\nThe kind determines the session's default budget tier, latency\ntarget, and output destination. The supervisor enforces per-kind\nconcurrency limits via [`crate`]-level admission control.\n\nMatches the taxonomy in the AI-native runtime design (§6.4).",
+      "oneOf": [
+        {
+          "description": "Driven by an explicit user prompt or action. Generous budget,\nlow-latency target; result surfaces in the UI as a live\ntranscript.",
+          "type": "string",
+          "const": "user_driven"
+        },
+        {
+          "description": "Background maintenance work (wiki sync, index refresh). Strict\nbudget, runs at background priority; writes results to memory\nrather than producing an interactive transcript.",
+          "type": "string",
+          "const": "ambient"
+        },
+        {
+          "description": "Spawned by an external signal (file change, webhook, schedule).\nShort-lived, one-shot; deposits a proposal in the user's inbox\non completion.",
+          "type": "string",
+          "const": "signal_triggered"
+        },
+        {
+          "description": "Delegated sub-task from a parent session. Budget is an\nattenuated slice of the parent's remaining budget; result is\nreturned to the parent, not surfaced directly.",
+          "type": "string",
+          "const": "sub_agent"
         }
       ]
     },

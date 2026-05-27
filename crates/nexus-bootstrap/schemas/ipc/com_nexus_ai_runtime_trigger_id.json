@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TriggerId",
+  "description": "Unique identifier for an [`AmbientTrigger`].",
+  "type": "string",
+  "format": "uuid"
+}

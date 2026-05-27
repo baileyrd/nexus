@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
+use nexus_plugin_api::token::CapabilityToken;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -57,6 +58,13 @@ pub(crate) struct RunRow {
     /// (cancel-before-spawn race) and once inside the arm (cancel-
     /// during-execution).
     pub cancel: Arc<CancelGate>,
+    /// Move 2 — live capability token for this run's session. `None`
+    /// for non-session task kinds (WorkflowAiStep, AiStream) until
+    /// those task kinds grow their own capability envelopes. Set via
+    /// [`Store::store_token`] after the session id is allocated;
+    /// revoked via [`Store::revoke_token`] when the session is
+    /// cancelled so all subsequent capability checks return `Denied`.
+    pub token: Option<CapabilityToken>,
 }
 
 /// BL-134 Phase 5 — task-scoped cancel signal with a reason string
@@ -223,10 +231,36 @@ impl Store {
             events: Arc::clone(&ring),
             terminal: Arc::new(Notify::new()),
             cancel: Arc::new(CancelGate::new()),
+            token: None,
         };
         let mut g = self.inner.lock().expect("store poisoned");
         g.insert(task_id, row);
         ring
+    }
+
+    /// Move 2 — attach a minted [`CapabilityToken`] to the run after
+    /// the session id has been allocated. Called from `handle_submit`
+    /// for `Session` task kinds. Silently a no-op if the task id is
+    /// unknown (defensive; the insert always precedes the token mint).
+    pub(crate) fn store_token(&self, task_id: Uuid, token: CapabilityToken) {
+        let mut g = self.inner.lock().expect("store poisoned");
+        if let Some(row) = g.get_mut(&task_id) {
+            row.token = Some(token);
+        }
+    }
+
+    /// Move 2 — revoke the capability token for a run. Called from
+    /// `handle_cancel` so cancelling a session immediately invalidates
+    /// all capability checks the session (and any child tokens it
+    /// spawned via `attenuate`) may attempt after the cancel signal is
+    /// received. Idempotent; no-op when no token is stored.
+    pub(crate) fn revoke_token(&self, task_id: Uuid) {
+        let g = self.inner.lock().expect("store poisoned");
+        if let Some(row) = g.get(&task_id) {
+            if let Some(token) = &row.token {
+                token.revoke();
+            }
+        }
     }
 
     /// Grab the cancel gate for a run. Used by the worker (which

@@ -25,7 +25,7 @@ schemars = { workspace = true, optional = true, features = ["chrono04", "uuid1"]
 [features]
 # Emit TypeScript + JSON Schema bindings for the IPC handler types.
 # Off by default — enabled by `nexus-bootstrap`'s schema-emit binary.
-ts-export = ["dep:ts-rs", "dep:schemars"]
+ts-export = ["dep:ts-rs", "dep:schemars", "nexus-plugin-api/ts-export"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

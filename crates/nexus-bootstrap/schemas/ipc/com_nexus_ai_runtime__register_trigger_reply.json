@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiRuntimeRegisterTriggerReply",
+  "description": "`register_trigger` reply — Move 7.",
+  "type": "object",
+  "properties": {
+    "trigger_id": {
+      "description": "The assigned (or pre-assigned) trigger id.",
+      "$ref": "#/$defs/TriggerId"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "trigger_id"
+  ],
+  "$defs": {
+    "TriggerId": {
+      "description": "Unique identifier for an [`AmbientTrigger`].",
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

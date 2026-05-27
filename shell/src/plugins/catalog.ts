@@ -270,6 +270,12 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
       'BL-133 follow-up — Settings → Notifications tab. Per-channel credential entry (Discord/Telegram/SMTP) backed by the OS keyring + "Send test" buttons that dispatch com.nexus.notifications::send directly.',
     load: () => import('./nexus/notificationsSettings').then(m => m.notificationsSettingsPlugin),
   },
+  {
+    id: 'nexus.aiSettings', name: 'AI Settings',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'AI provider configuration — chat + embedding provider, API key, model and base URL. Available even when the AI chat plugin is disabled.',
+    load: () => import('./nexus/aiSettings').then(m => m.aiSettingsPlugin),
+  },
   // ── UX primitives ──────────────────────────────────────────────────────────
   {
     id: 'nexus.commandPalette', name: 'Command Palette',

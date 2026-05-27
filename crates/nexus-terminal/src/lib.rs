@@ -51,6 +51,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod activity;
 mod adhoc;
 mod ai;
 mod ansi;
