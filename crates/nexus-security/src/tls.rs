@@ -98,8 +98,13 @@ impl ServerCertVerifier for PinnedServerCertVerifier {
     ) -> Result<ServerCertVerified, Error> {
         // Standard webpki chain validation first — pinning is in
         // *addition to* CA trust, never a replacement for it.
-        self.inner
-            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)?;
+        self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        )?;
 
         let host = match server_name {
             ServerName::DnsName(d) => d.as_ref().to_string(),

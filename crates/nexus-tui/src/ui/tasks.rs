@@ -4,11 +4,11 @@
 //! Shows all tasks with completion status, content, and file location.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem},
+    Frame,
 };
 
 use crate::app::TuiApp;
@@ -20,7 +20,12 @@ use crate::app::TuiApp;
 /// and total counts.
 pub fn render(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
     let total = app.task_view.entries.len();
-    let pending = app.task_view.entries.iter().filter(|t| !t.completed).count();
+    let pending = app
+        .task_view
+        .entries
+        .iter()
+        .filter(|t| !t.completed)
+        .count();
     let title = format!(" Tasks ({pending} pending, {total} total) ");
 
     let block = Block::default()
@@ -59,10 +64,7 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(
-            Style::default()
-                .add_modifier(Modifier::REVERSED),
-        );
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(list, area, &mut app.task_view.list_state);
 }

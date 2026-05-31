@@ -83,9 +83,7 @@ impl CommentStore {
                     source,
                 }
             }),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                Ok(CommentFile::empty(normalized))
-            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(CommentFile::empty(normalized)),
             Err(err) => Err(CommentStoreError::Io(err)),
         }
     }
@@ -109,12 +107,11 @@ impl CommentStore {
             if let Some(parent) = sidecar.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let body = serde_json::to_vec_pretty(file).map_err(|source| {
-                CommentStoreError::Malformed {
+            let body =
+                serde_json::to_vec_pretty(file).map_err(|source| CommentStoreError::Malformed {
                     path: sidecar.clone(),
                     source,
-                }
-            })?;
+                })?;
             fs::write(&sidecar, body)?;
             Ok(())
         }
@@ -347,9 +344,7 @@ fn normalize_relpath(input: &str) -> Result<String, CommentStoreError> {
                 let s = seg
                     .to_str()
                     .ok_or_else(|| {
-                        CommentStoreError::InvalidFilePath(format!(
-                            "non-utf8 segment in {input}"
-                        ))
+                        CommentStoreError::InvalidFilePath(format!("non-utf8 segment in {input}"))
                     })?
                     .to_string();
                 if s.is_empty() {
@@ -494,9 +489,7 @@ mod tests {
         let t = s
             .create_thread("foo.md", Uuid::new_v4(), "first".into(), None)
             .unwrap();
-        let reply = s
-            .add_reply("foo.md", t.id, "second".into(), None)
-            .unwrap();
+        let reply = s.add_reply("foo.md", t.id, "second".into(), None).unwrap();
         s.delete_comment("foo.md", t.id, reply.id).unwrap();
         let listed = s.list_threads("foo.md").unwrap();
         assert_eq!(listed[0].comments.len(), 1);
@@ -575,8 +568,7 @@ mod tests {
 
     #[test]
     fn extract_mentions_dedupes_and_skips_emails() {
-        let mentions =
-            extract_mentions("hi @alice and @alice and @bob; not foo@example.com");
+        let mentions = extract_mentions("hi @alice and @alice and @bob; not foo@example.com");
         assert_eq!(mentions, vec!["alice".to_string(), "bob".to_string()]);
     }
 

@@ -16,7 +16,9 @@ use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 use nexus_terminal::TerminalCorePlugin;
 
-use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{
+    core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt,
+};
 
 pub(super) fn register(
     loader: &mut PluginLoader,
@@ -79,11 +81,11 @@ pub(super) fn register(
             let store = Arc::new(std::sync::Mutex::new(store));
             let persister_store = Arc::clone(&store);
             let persister: nexus_terminal::EvictionPersister = Box::new(move |id, bytes| {
-                let g = persister_store
-                    .lock()
-                    .map_err(|_| nexus_terminal::TerminalError::Persist(
+                let g = persister_store.lock().map_err(|_| {
+                    nexus_terminal::TerminalError::Persist(
                         "eviction persister: store mutex poisoned".into(),
-                    ))?;
+                    )
+                })?;
                 g.save_scrollback(id, bytes)
             });
             terminal_plugin

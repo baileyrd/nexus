@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use nexus_kernel::{Ipc as _, EventBus, KernelPluginContext};
+use nexus_kernel::{EventBus, Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::Deserialize;
 use serde_json::Value;
@@ -50,8 +50,9 @@ pub(crate) async fn execute_database_view(
         records: Vec<nexus_types::bases::BaseRecord>,
     }
 
-    let parsed: crate::database_view::ExecuteDatabaseViewArgs = serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("execute_database_view: invalid args: {e}")))?;
+    let parsed: crate::database_view::ExecuteDatabaseViewArgs =
+        serde_json::from_value(args.clone())
+            .map_err(|e| exec_err(format!("execute_database_view: invalid args: {e}")))?;
 
     let ctx = ctx.ok_or_else(|| {
         exec_err(
@@ -332,8 +333,9 @@ pub(crate) async fn open_excerpts(
         if sources.contains_key(&item.relpath) {
             continue;
         }
-        let source = super::save::read_source_for_excerpts(forge_root, ctx.as_deref(), &item.relpath)
-            .await?;
+        let source =
+            super::save::read_source_for_excerpts(forge_root, ctx.as_deref(), &item.relpath)
+                .await?;
         sources.insert(item.relpath.clone(), source);
     }
 
@@ -593,8 +595,12 @@ mod excerpt_sources_tests {
     #[test]
     fn excerpt_sources_skips_non_excerpt_root_blocks() {
         let mut tree = BlockTree::default();
-        tree.insert(Block::new(BlockType::Paragraph).with_content("nope"), None, 0)
-            .unwrap();
+        tree.insert(
+            Block::new(BlockType::Paragraph).with_content("nope"),
+            None,
+            0,
+        )
+        .unwrap();
         tree.insert(excerpt("only.md", 1, 5), None, 1).unwrap();
         assert_eq!(excerpt_sources(&tree), vec!["only.md"]);
     }

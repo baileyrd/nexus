@@ -112,9 +112,7 @@ pub const DEFAULT_BACKOFF: [Duration; 5] = [
 pub trait ConnectionFactory: Send + Sync {
     /// Build a fresh runtime. Called on the very first `invoker()`
     /// dispatch and on every reconnect attempt.
-    fn build<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>>;
+    fn build<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>>;
 }
 
 /// SSH-backed factory — spawns `ssh ... nexus serve --stdio` on each
@@ -133,9 +131,7 @@ impl SshConnectionFactory {
 }
 
 impl ConnectionFactory for SshConnectionFactory {
-    fn build<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
+    fn build<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
         Box::pin(async move { build_remote_runtime_ssh(&self.uri) })
     }
 }
@@ -316,10 +312,7 @@ impl ReconnectingRuntime {
     /// `false` if the registry knew the id but the server didn't, or
     /// no client is connected. Safe to call twice — second call returns
     /// `Ok(false)` instead of erroring on an unknown id.
-    pub async fn unsubscribe(
-        &self,
-        subscription_id: &str,
-    ) -> Result<bool, IpcInvokerError> {
+    pub async fn unsubscribe(&self, subscription_id: &str) -> Result<bool, IpcInvokerError> {
         let removed = {
             let mut reg = self.subscriptions.lock().await;
             reg.remove(subscription_id).is_some()
@@ -386,9 +379,7 @@ impl ReconnectingRuntime {
     /// Panics if a successful build doesn't end up populating the
     /// slot (would indicate an internal logic bug, not a runtime
     /// condition).
-    pub async fn ensure_client(
-        &self,
-    ) -> Result<Arc<nexus_remote::RemoteClient>, IpcInvokerError> {
+    pub async fn ensure_client(&self) -> Result<Arc<nexus_remote::RemoteClient>, IpcInvokerError> {
         let mut slot = self.current.lock().await;
         if slot.is_none() {
             match self.factory.build().await {
@@ -481,9 +472,7 @@ impl ReconnectingInvoker {
     /// Capture an `Arc<dyn IpcInvoker>` for the current runtime so the
     /// caller can dispatch a single call without holding the mutex
     /// across an `await` on the underlying ipc layer.
-    async fn snapshot_invoker(
-        &self,
-    ) -> Option<Arc<dyn IpcInvoker + Send + Sync>> {
+    async fn snapshot_invoker(&self) -> Option<Arc<dyn IpcInvoker + Send + Sync>> {
         let slot = self.current.lock().await;
         slot.as_ref().map(RemoteRuntime::invoker)
     }
@@ -803,9 +792,7 @@ mod tests {
     }
 
     impl ConnectionFactory for AlwaysFailFactory {
-        fn build<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
+        fn build<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
             let attempts = Arc::clone(&self.attempts);
             Box::pin(async move {
                 attempts.fetch_add(1, Ordering::SeqCst);

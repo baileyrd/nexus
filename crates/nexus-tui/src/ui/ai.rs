@@ -7,11 +7,11 @@
 //! with a one-line status header showing the configured provider.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{AiRole, Mode, TuiApp};
@@ -43,22 +43,26 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
 }
 
 fn make_title(app: &TuiApp) -> Line<'static> {
-    let provider = app
-        .ai
-        .provider_status
-        .as_deref()
-        .unwrap_or("(loading…)");
+    let provider = app.ai.provider_status.as_deref().unwrap_or("(loading…)");
     let mode_hint = if app.mode == Mode::AiInput {
         " — Esc: leave input · Enter: submit"
     } else {
         " — i: input · a: close"
     };
     Line::from(vec![
-        Span::styled(" AI ", Style::default().bg(Color::Blue).fg(Color::Black).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " AI ",
+            Style::default()
+                .bg(Color::Blue)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
         Span::styled(
             provider.to_string(),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(mode_hint, Style::default().fg(Color::DarkGray)),
         Span::raw(" "),
@@ -77,11 +81,15 @@ fn render_transcript(frame: &mut Frame, app: &TuiApp, area: Rect) {
             let prefix = match msg.role {
                 AiRole::User => Span::styled(
                     "you",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 AiRole::Assistant => Span::styled(
                     "nexus",
-                    Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
                 ),
             };
             lines.push(Line::from(vec![prefix, Span::raw(":")]));
@@ -127,10 +135,7 @@ fn render_status_line(frame: &mut Frame, app: &TuiApp, area: Rect) {
             Style::default().bg(Color::Red).fg(Color::White),
         ))
     } else {
-        Line::from(Span::styled(
-            "",
-            Style::default(),
-        ))
+        Line::from(Span::styled("", Style::default()))
     };
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -138,12 +143,11 @@ fn render_status_line(frame: &mut Frame, app: &TuiApp, area: Rect) {
 fn render_prompt(frame: &mut Frame, app: &TuiApp, area: Rect) {
     let prefix = Span::styled(
         " > ",
-        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Blue)
+            .add_modifier(Modifier::BOLD),
     );
-    let text = Span::styled(
-        app.ai.input.clone(),
-        Style::default().fg(Color::White),
-    );
+    let text = Span::styled(app.ai.input.clone(), Style::default().fg(Color::White));
     let cursor = if app.mode == Mode::AiInput {
         Span::styled("█", Style::default().fg(Color::Blue))
     } else {

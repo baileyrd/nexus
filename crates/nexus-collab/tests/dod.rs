@@ -33,9 +33,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_collab::core_plugin::{
-    CollabCorePlugin, LocalPeer, HANDLER_PUBLISH_PRESENCE,
-};
+use nexus_collab::core_plugin::{CollabCorePlugin, LocalPeer, HANDLER_PUBLISH_PRESENCE};
 use nexus_collab::{
     CollabClient, CollabClientConfig, ConnectParams, PresenceEvent, RelayServer, Token,
     COLLAB_PLUGIN_ID, EDITOR_PLUGIN_ID, PRESENCE_TOPIC,
@@ -83,7 +81,10 @@ async fn recv_next_on(bus: &EventBus, topic: &str) -> serde_json::Value {
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let event = sub.recv().await.expect("recv");
-            if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+            if let NexusEvent::Custom {
+                type_id, payload, ..
+            } = &event.event
+            {
                 if type_id == topic {
                     return payload.clone();
                 }
@@ -125,7 +126,9 @@ async fn dod_two_runtimes_exchange_editor_ops_over_relay() {
         .expect("relay routed within timeout")
         .expect("non-error");
     let NexusEvent::Custom {
-        type_id, payload: got, ..
+        type_id,
+        payload: got,
+        ..
     } = &event.event
     else {
         panic!("expected Custom event, got {:?}", event.event);
@@ -253,9 +256,7 @@ async fn dod_disconnect_is_observable_on_bus_via_connection_topic() {
     let bus = Arc::new(EventBus::new(64));
     // Subscribe *before* start so we don't miss the initial
     // `connecting`/`connected` transitions.
-    let mut sub = bus.subscribe(EventFilter::CustomExact(
-        CONNECTION_STATE_TOPIC.to_string(),
-    ));
+    let mut sub = bus.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
     let _supervisor = ReconnectingClient::start(
         ConnectParams {
             host: "127.0.0.1".into(),
@@ -280,7 +281,10 @@ async fn dod_disconnect_is_observable_on_bus_via_connection_topic() {
             .await
             .expect("connection state surfaced within timeout")
             .expect("non-error");
-        if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+        if let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &event.event
+        {
             if type_id == CONNECTION_STATE_TOPIC {
                 if let Some(state) = payload.get("state").and_then(|v| v.as_str()) {
                     seen.push(state.to_string());

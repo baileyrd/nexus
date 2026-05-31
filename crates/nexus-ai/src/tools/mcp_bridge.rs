@@ -33,7 +33,7 @@ use futures::future::join_all;
 use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::Deserialize;
 
-use super::registry::{ToolExecutor, ToolError, ToolRegistry, ToolSchema};
+use super::registry::{ToolError, ToolExecutor, ToolRegistry, ToolSchema};
 
 /// Plugin id of the MCP host.
 const MCP_PLUGIN: &str = "com.nexus.mcp.host";
@@ -250,7 +250,8 @@ fn mcp_tool_name(server: &str, tool: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
+    use nexus_kernel::{
+        CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
         KernelPluginContext, KvStore,
     };
     use std::sync::Mutex;
@@ -360,18 +361,16 @@ mod tests {
                 { "name": "alpha", "disabled": false },
                 { "name": "beta", "disabled": true },
             ]),
-            tools_by_server: [
-                (
-                    "alpha".to_string(),
-                    serde_json::json!([
-                        {
-                            "name": "fetch",
-                            "description": "fetch a URL",
-                            "input_schema": { "type": "object" }
-                        },
-                    ]),
-                ),
-            ]
+            tools_by_server: [(
+                "alpha".to_string(),
+                serde_json::json!([
+                    {
+                        "name": "fetch",
+                        "description": "fetch a URL",
+                        "input_schema": { "type": "object" }
+                    },
+                ]),
+            )]
             .into_iter()
             .collect(),
             seen: Mutex::new(Vec::new()),

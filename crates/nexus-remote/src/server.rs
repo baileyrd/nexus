@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{Ipc as _, EventBus, KernelPluginContext};
+use nexus_kernel::{EventBus, Ipc as _, KernelPluginContext};
 use nexus_plugin_api::{EventFilter, PublishedEvent};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
@@ -23,8 +23,8 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::transport::{
-    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification,
-    JsonRpcRequest, JsonRpcResponse, TransportError,
+    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, TransportError,
 };
 
 /// Default per-`ipc_call` timeout when the client doesn't override it.
@@ -87,11 +87,7 @@ impl RemoteServer {
     /// - [`RemoteServerError::Transport`] when the reader fails
     ///   irrecoverably (EOF returns `Ok(())`).
     /// - [`RemoteServerError::Write`] when the outbound writer breaks.
-    pub async fn serve<R, W>(
-        &self,
-        reader: R,
-        writer: W,
-    ) -> Result<(), RemoteServerError>
+    pub async fn serve<R, W>(&self, reader: R, writer: W) -> Result<(), RemoteServerError>
     where
         R: AsyncRead + Unpin + Send,
         W: AsyncWrite + Unpin + Send + 'static,
@@ -140,9 +136,7 @@ impl RemoteServer {
                     // notifications today — silently ignore.
                 }
                 JsonRpcMessage::Response(_) => {
-                    tracing::warn!(
-                        "nexus-remote server: unexpected response on inbound stream"
-                    );
+                    tracing::warn!("nexus-remote server: unexpected response on inbound stream");
                 }
             }
         }
@@ -189,14 +183,9 @@ impl RemoteServer {
                 let bus = Arc::clone(&self.event_bus);
                 let writer_for_task = Arc::clone(&writer);
                 pending.spawn(async move {
-                    let response = handle_event_subscribe(
-                        &bus,
-                        params,
-                        id,
-                        writer_for_task,
-                        subscriptions,
-                    )
-                    .await;
+                    let response =
+                        handle_event_subscribe(&bus, params, id, writer_for_task, subscriptions)
+                            .await;
                     write_response(&writer, response).await;
                 });
             }
@@ -207,8 +196,7 @@ impl RemoteServer {
                 });
             }
             _ => {
-                let response =
-                    error_response(id, -32601, format!("method not found: {method}"));
+                let response = error_response(id, -32601, format!("method not found: {method}"));
                 write_response(&writer, response).await;
             }
         }
@@ -249,10 +237,7 @@ async fn handle_ipc_call(
 }
 
 /// Parse the optional `timeout_ms` field. Caps at [`MAX_DISPATCH_TIMEOUT`].
-fn parse_timeout_ms(
-    value: Option<&Value>,
-    default: Duration,
-) -> Result<Duration, String> {
+fn parse_timeout_ms(value: Option<&Value>, default: Duration) -> Result<Duration, String> {
     let Some(v) = value else { return Ok(default) };
     if v.is_null() {
         return Ok(default);
@@ -282,11 +267,10 @@ async fn handle_event_subscribe<W>(
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let subscription_id =
-        match params.get("subscription_id").and_then(Value::as_str) {
-            Some(s) if !s.is_empty() => s.to_string(),
-            _ => return invalid_params(id, "missing or empty 'subscription_id'"),
-        };
+    let subscription_id = match params.get("subscription_id").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return invalid_params(id, "missing or empty 'subscription_id'"),
+    };
     let filter = match params.get("filter") {
         Some(f) => match parse_filter(f) {
             Ok(f) => f,
@@ -369,9 +353,10 @@ fn parse_filter(v: &Value) -> Result<EventFilter, String> {
             Ok(EventFilter::CustomPrefix(prefix.to_string()))
         }
         "custom_exact" => {
-            let type_id = v.get("type_id").and_then(Value::as_str).ok_or_else(|| {
-                "filter kind=custom_exact requires 'type_id'".to_string()
-            })?;
+            let type_id = v
+                .get("type_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "filter kind=custom_exact requires 'type_id'".to_string())?;
             Ok(EventFilter::CustomExact(type_id.to_string()))
         }
         other => Err(format!("unknown filter kind: {other}")),
@@ -388,8 +373,7 @@ fn build_event_notification(
     subscription_id: &str,
     event: &Arc<PublishedEvent>,
 ) -> JsonRpcNotification {
-    let event_value =
-        serde_json::to_value(event.as_ref()).unwrap_or(Value::Null);
+    let event_value = serde_json::to_value(event.as_ref()).unwrap_or(Value::Null);
     JsonRpcNotification {
         jsonrpc: "2.0".to_string(),
         method: "event".to_string(),
@@ -407,11 +391,10 @@ async fn handle_event_unsubscribe(
     id: Value,
     subscriptions: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 ) -> JsonRpcResponse {
-    let subscription_id =
-        match params.get("subscription_id").and_then(Value::as_str) {
-            Some(s) if !s.is_empty() => s.to_string(),
-            _ => return invalid_params(id, "missing or empty 'subscription_id'"),
-        };
+    let subscription_id = match params.get("subscription_id").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return invalid_params(id, "missing or empty 'subscription_id'"),
+    };
     let mut map = subscriptions.lock().await;
     let removed = map.remove(&subscription_id);
     let result = if let Some(handle) = removed {
@@ -435,16 +418,12 @@ where
     W: AsyncWrite + Unpin + Send,
 {
     let mut w = writer.lock().await;
-    if let Err(e) =
-        write_message(&mut *w, &JsonRpcMessage::Response(response)).await
-    {
+    if let Err(e) = write_message(&mut *w, &JsonRpcMessage::Response(response)).await {
         tracing::warn!(error = %e, "nexus-remote: failed to write response");
     }
 }
 
-async fn abort_all(
-    subscriptions: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
-) {
+async fn abort_all(subscriptions: &Arc<Mutex<HashMap<String, JoinHandle<()>>>>) {
     let mut map = subscriptions.lock().await;
     for (_, handle) in map.drain() {
         handle.abort();
@@ -494,8 +473,7 @@ mod tests {
 
     #[test]
     fn parse_filter_custom_prefix() {
-        let f = parse_filter(&json!({"kind": "custom_prefix", "prefix": "com.nexus."}))
-            .unwrap();
+        let f = parse_filter(&json!({"kind": "custom_prefix", "prefix": "com.nexus."})).unwrap();
         match f {
             EventFilter::CustomPrefix(p) => assert_eq!(p, "com.nexus."),
             other => panic!("expected CustomPrefix, got {other:?}"),
@@ -549,8 +527,7 @@ mod tests {
 
     #[test]
     fn parse_timeout_ms_caps_at_max() {
-        let cap_ms =
-            u64::try_from(MAX_DISPATCH_TIMEOUT.as_millis()).expect("cap fits in u64");
+        let cap_ms = u64::try_from(MAX_DISPATCH_TIMEOUT.as_millis()).expect("cap fits in u64");
         let huge = cap_ms.saturating_mul(10);
         let d = parse_timeout_ms(Some(&json!(huge)), Duration::from_secs(7)).unwrap();
         assert_eq!(d, MAX_DISPATCH_TIMEOUT);
@@ -564,8 +541,7 @@ mod tests {
 
     #[test]
     fn parse_timeout_ms_rejects_non_numeric() {
-        let err = parse_timeout_ms(Some(&json!("oops")), Duration::from_secs(7))
-            .unwrap_err();
+        let err = parse_timeout_ms(Some(&json!("oops")), Duration::from_secs(7)).unwrap_err();
         assert!(err.contains("non-negative integer"));
     }
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nexus_bootstrap::build_cli_runtime;
 use nexus_editor::{ApplyTransactionResponse, EditorSnapshot, EDITOR_PLUGIN_ID};
-use nexus_kernel::{Ipc as _, EventFilter, IpcError, NexusEvent};
+use nexus_kernel::{EventFilter, Ipc as _, IpcError, NexusEvent};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -245,7 +245,10 @@ async fn save_routes_through_storage_and_updates_index() {
     // Storage bootstrap runs a reconcile pass that picks up the fixture
     // file — so the pre-save size is 6 ("hello\n").
     let before = index_size(&runtime, "indexed.md").await;
-    assert_eq!(before, 6, "sanity: bootstrap reconcile should index the fixture");
+    assert_eq!(
+        before, 6,
+        "sanity: bootstrap reconcile should index the fixture"
+    );
 
     // Open, mutate, save.
     let snap: EditorSnapshot = serde_json::from_value(
@@ -477,7 +480,10 @@ async fn apply_transaction_emits_changed_event_on_kernel_bus() {
             assert_eq!(type_id, "com.nexus.editor.changed.notes/e.md");
             assert_eq!(payload["relpath"], "notes/e.md");
             assert_eq!(payload["revision"], 1);
-            assert_eq!(payload["transaction_id"].as_str().unwrap(), tx_id.to_string());
+            assert_eq!(
+                payload["transaction_id"].as_str().unwrap(),
+                tx_id.to_string()
+            );
         }
         other => panic!("expected Custom, got {other:?}"),
     }
@@ -553,7 +559,10 @@ async fn bl072_undo_history_persists_across_close_and_reopen() {
     )
     .unwrap();
     assert_eq!(snap.undo_len, 1, "persisted undo restored on reopen");
-    assert!(snap.can_undo, "restored history is at the executed position");
+    assert!(
+        snap.can_undo,
+        "restored history is at the executed position"
+    );
     let restored_para = snap.tree.root_blocks[0];
     assert_eq!(snap.tree.blocks[&restored_para].content, "Hello world");
 

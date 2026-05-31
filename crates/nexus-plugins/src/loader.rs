@@ -178,7 +178,8 @@ pub trait CorePlugin: Send + Sync {
 /// Mirrors [`nexus_kernel::IpcFuture`] but carries the crate-native
 /// [`PluginError`]; the loader converts to [`IpcError`] before handing the
 /// future back to the kernel.
-pub type CorePluginFuture = Pin<Box<dyn Future<Output = Result<serde_json::Value, PluginError>> + Send>>;
+pub type CorePluginFuture =
+    Pin<Box<dyn Future<Output = Result<serde_json::Value, PluginError>> + Send>>;
 
 // ─── PluginBackend ────────────────────────────────────────────────────────────
 
@@ -455,10 +456,7 @@ impl PluginLoader {
     /// `None` disables clamping (the historical behaviour); the
     /// bootstrap path passes
     /// [`KernelConfig::wasm_caps`](nexus_kernel::KernelConfig::wasm_caps).
-    pub fn set_wasm_caps_ceiling(
-        &mut self,
-        ceiling: Option<nexus_kernel::WasmCapsCeiling>,
-    ) {
+    pub fn set_wasm_caps_ceiling(&mut self, ceiling: Option<nexus_kernel::WasmCapsCeiling>) {
         self.wasm_caps_ceiling = ceiling;
     }
 
@@ -476,7 +474,11 @@ impl PluginLoader {
         // plugin trying to escape metering — force it up to the
         // ceiling. Validate elsewhere already rejects this for
         // community plugins, but defence in depth is cheap.
-        let raw_fuel = if declared.fuel == 0 { u64::MAX } else { declared.fuel };
+        let raw_fuel = if declared.fuel == 0 {
+            u64::MAX
+        } else {
+            declared.fuel
+        };
         let clamped_fuel = raw_fuel.min(ceiling.max_fuel);
         let raw_exec = if declared.max_execution_ms == 0 {
             u64::MAX
@@ -550,12 +552,12 @@ impl PluginLoader {
                     Some(v) => Arc::clone(v),
                     None => Arc::new(crate::signing::PluginSignatureVerifier::from_user_home()),
                 };
-                verifier
-                    .verify(canonical.as_bytes(), sig)
-                    .map_err(|e| PluginError::ManifestInvalid {
+                verifier.verify(canonical.as_bytes(), sig).map_err(|e| {
+                    PluginError::ManifestInvalid {
                         path: manifest_path.display().to_string(),
                         reason: format!("BL-099: signature verification failed: {e}"),
-                    })
+                    }
+                })
             }
         }
     }
@@ -578,12 +580,10 @@ impl PluginLoader {
     /// When the streak reaches `max_timeout_streak` the plugin is
     /// quarantined and its persistent crash counter is bumped so the
     /// quarantine survives restart.
-    fn record_dispatch_result<T>(
-        &self,
-        plugin_id: &str,
-        result: &Result<T, PluginError>,
-    ) {
-        let Some(lp) = self.loaded.get(plugin_id) else { return };
+    fn record_dispatch_result<T>(&self, plugin_id: &str, result: &Result<T, PluginError>) {
+        let Some(lp) = self.loaded.get(plugin_id) else {
+            return;
+        };
         match result {
             Err(PluginError::ExecutionTimeout { .. }) => {
                 let next = lp.timeout_streak.fetch_add(1, Ordering::AcqRel) + 1;
@@ -786,9 +786,7 @@ impl PluginLoader {
                 settings_json: Some(settings_cache.clone()),
                 ..Default::default()
             };
-            PluginBackend::Community(
-                WasmSandbox::new(&wasm_bytes, wasm_cfg, plugin_data)?,
-            )
+            PluginBackend::Community(WasmSandbox::new(&wasm_bytes, wasm_cfg, plugin_data)?)
         };
 
         // Step 7: Call lifecycle hooks (no-ops for Script plugins)
@@ -862,22 +860,16 @@ impl PluginLoader {
         // panics to surface, and where the spawn_thread overhead is
         // measurable).
         if manifest.lifecycle.on_init {
-            plugin = run_hook_with_timeout(
-                plugin,
-                &plugin_id,
-                "init",
-                self.lifecycle_timeout,
-                |p| p.on_init(),
-            )?;
+            plugin =
+                run_hook_with_timeout(plugin, &plugin_id, "init", self.lifecycle_timeout, |p| {
+                    p.on_init()
+                })?;
         }
         if manifest.lifecycle.on_start {
-            plugin = run_hook_with_timeout(
-                plugin,
-                &plugin_id,
-                "start",
-                self.lifecycle_timeout,
-                |p| p.on_start(),
-            )?;
+            plugin =
+                run_hook_with_timeout(plugin, &plugin_id, "start", self.lifecycle_timeout, |p| {
+                    p.on_start()
+                })?;
         }
 
         let capabilities = build_capabilities(&manifest, plugin_dir);
@@ -902,10 +894,7 @@ impl PluginLoader {
             if let Some(existing_plugin) = self.cli_registry.get(&sub.id) {
                 return Err(PluginError::DuplicateCliSubcommand {
                     plugin_id: plugin_id.clone(),
-                    subcommand: format!(
-                        "{} (already registered by {})",
-                        sub.id, existing_plugin
-                    ),
+                    subcommand: format!("{} (already registered by {})", sub.id, existing_plugin),
                 });
             }
         }
@@ -1052,9 +1041,11 @@ impl PluginLoader {
         self.loaded
             .values()
             .flat_map(|lp| {
-                lp.manifest.registrations.cli_subcommands.iter().map(|r| {
-                    (r.id.clone(), r.description.clone())
-                })
+                lp.manifest
+                    .registrations
+                    .cli_subcommands
+                    .iter()
+                    .map(|r| (r.id.clone(), r.description.clone()))
             })
             .collect()
     }
@@ -1305,7 +1296,8 @@ impl PluginLoader {
             .plugin_dir(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?
             .to_path_buf();
-        self.settings.save_settings(plugin_id, &plugin_dir, settings)?;
+        self.settings
+            .save_settings(plugin_id, &plugin_dir, settings)?;
         let lp = self
             .loaded
             .get_mut(plugin_id)
@@ -1313,8 +1305,8 @@ impl PluginLoader {
         // Refresh the shared settings cache so the next `host::get_settings`
         // call from the sandbox reads the new values. Poisoned-lock
         // failures are logged; the file on disk is already authoritative.
-        let serialized = serde_json::to_string_pretty(settings)
-            .unwrap_or_else(|_| "{}".to_string());
+        let serialized =
+            serde_json::to_string_pretty(settings).unwrap_or_else(|_| "{}".to_string());
         if let Ok(mut guard) = lp.settings_cache.write() {
             *guard = serialized;
         } else {
@@ -1374,9 +1366,7 @@ impl PluginLoader {
     /// # Errors
     /// Returns the first dispatch error encountered; subscriptions that lag or
     /// are closed are silently skipped so they don't block other plugins.
-    pub fn poll_events(
-        &mut self,
-    ) -> Result<Vec<(String, serde_json::Value)>, PluginError> {
+    pub fn poll_events(&mut self) -> Result<Vec<(String, serde_json::Value)>, PluginError> {
         // Collect (plugin_id, handler_id, event_json) tuples to dispatch.
         let mut pending: Vec<(String, u32, serde_json::Value)> = Vec::new();
 
@@ -1387,8 +1377,7 @@ impl PluginLoader {
                 };
                 // Drain until no more events or the subscription is lagged/closed.
                 while let Ok(Some(evt)) = subscription.try_recv() {
-                    let payload = serde_json::to_value(&*evt)
-                        .unwrap_or(serde_json::Value::Null);
+                    let payload = serde_json::to_value(&*evt).unwrap_or(serde_json::Value::Null);
                     pending.push((plugin_id.clone(), sub.handler_id, payload));
                 }
             }
@@ -1422,9 +1411,7 @@ impl PluginLoader {
     /// Return the plugin directory for `plugin_id`, if it is loaded.
     #[must_use]
     pub fn plugin_dir(&self, plugin_id: &str) -> Option<&Path> {
-        self.loaded
-            .get(plugin_id)
-            .map(|lp| lp.plugin_dir.as_path())
+        self.loaded.get(plugin_id).map(|lp| lp.plugin_dir.as_path())
     }
 
     /// Persist an install-time user consent for a HIGH-risk capability on
@@ -1439,11 +1426,7 @@ impl PluginLoader {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if `plugin_id` is not loaded,
     /// or a generic `io`-backed error if the grants file cannot be written.
-    pub fn grant_capability(
-        &self,
-        plugin_id: &str,
-        cap: Capability,
-    ) -> Result<(), PluginError> {
+    pub fn grant_capability(&self, plugin_id: &str, cap: Capability) -> Result<(), PluginError> {
         let Some(lp) = self.loaded.get(plugin_id) else {
             return Err(PluginError::PluginNotFound(plugin_id.to_string()));
         };
@@ -1487,11 +1470,7 @@ impl PluginLoader {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if `plugin_id` is not loaded,
     /// or an `io`-backed error if the grants file cannot be rewritten.
-    pub fn revoke_capability(
-        &self,
-        plugin_id: &str,
-        cap: Capability,
-    ) -> Result<(), PluginError> {
+    pub fn revoke_capability(&self, plugin_id: &str, cap: Capability) -> Result<(), PluginError> {
         let Some(lp) = self.loaded.get(plugin_id) else {
             return Err(PluginError::PluginNotFound(plugin_id.to_string()));
         };
@@ -1601,7 +1580,9 @@ impl PluginLoader {
     /// to hand the new sandbox the same `Arc` the old one saw, so user
     /// edits that happened before the reload remain visible afterwards.
     pub(crate) fn settings_cache(&self, plugin_id: &str) -> Option<Arc<RwLock<String>>> {
-        self.loaded.get(plugin_id).map(|lp| lp.settings_cache.clone())
+        self.loaded
+            .get(plugin_id)
+            .map(|lp| lp.settings_cache.clone())
     }
 
     /// Update the [`PluginStatus`] for `plugin_id`.
@@ -1739,10 +1720,7 @@ impl PluginLoader {
     /// Return the event subscriptions for `plugin_id` as
     /// `(id, filter, enabled)` tuples.
     #[must_use]
-    pub fn event_subscriptions(
-        &self,
-        plugin_id: &str,
-    ) -> Vec<(String, String, bool)> {
+    pub fn event_subscriptions(&self, plugin_id: &str) -> Vec<(String, String, bool)> {
         self.loaded
             .get(plugin_id)
             .map(|lp| {
@@ -1779,9 +1757,7 @@ impl PluginLoader {
             .event_subs
             .iter_mut()
             .find(|s| s.id == subscription_id)
-            .ok_or_else(|| PluginError::PluginNotFound(
-                format!("{plugin_id}:{subscription_id}"),
-            ))?;
+            .ok_or_else(|| PluginError::PluginNotFound(format!("{plugin_id}:{subscription_id}")))?;
 
         if enabled {
             if sub.subscription.is_none() {
@@ -1819,12 +1795,8 @@ impl PluginLoader {
 fn parse_event_filter(filter: &str) -> EventFilter {
     match filter {
         "" | "*" => EventFilter::All,
-        "PluginLoaded"
-        | "PluginStarted"
-        | "PluginStopped"
-        | "PluginCrashed"
-        | "CapabilityGranted"
-        | "CapabilityDenied" => EventFilter::Variant(filter.to_string()),
+        "PluginLoaded" | "PluginStarted" | "PluginStopped" | "PluginCrashed"
+        | "CapabilityGranted" | "CapabilityDenied" => EventFilter::Variant(filter.to_string()),
         f if f.ends_with(".*") => {
             EventFilter::CustomPrefix(f[..f.len() - 1].to_string()) // strip "*", keep "."
         }
@@ -1908,22 +1880,18 @@ where
     match rx.recv_timeout(timeout) {
         Ok((p, Ok(()))) => Ok(p),
         Ok((_p, Err(e))) => Err(e),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err(PluginError::LifecycleTimeout {
-                plugin_id: plugin_id.to_string(),
-                hook: hook.to_string(),
-                timeout_secs: timeout.as_secs(),
-            })
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err(PluginError::LifecycleError {
-                plugin_id: plugin_id.to_string(),
-                hook: hook.to_string(),
-                reason: "lifecycle worker disconnected before sending result \
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(PluginError::LifecycleTimeout {
+            plugin_id: plugin_id.to_string(),
+            hook: hook.to_string(),
+            timeout_secs: timeout.as_secs(),
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(PluginError::LifecycleError {
+            plugin_id: plugin_id.to_string(),
+            hook: hook.to_string(),
+            reason: "lifecycle worker disconnected before sending result \
                     (likely panicked inside the hook)"
-                    .to_string(),
-            })
-        }
+                .to_string(),
+        }),
     }
 }
 
@@ -2053,8 +2021,7 @@ fn publish_capability_activity(
     capability: &str,
 ) {
     use nexus_types::activity::{
-        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
-        ACTIVITY_APPENDED_TOPIC,
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
     };
     let mut entry = ActivityEntry::now(
         format!("cap:{plugin_id}:{capability}"),
@@ -2064,11 +2031,7 @@ fn publish_capability_activity(
     entry.outcome = ActivityOutcome::Ok;
     entry.prompt = format!("{kind} {capability} for {plugin_id}");
     if let Ok(payload) = serde_json::to_value(&entry) {
-        if let Err(err) = bus.publish_plugin(
-            "com.nexus.kernel",
-            ACTIVITY_APPENDED_TOPIC,
-            payload,
-        ) {
+        if let Err(err) = bus.publish_plugin("com.nexus.kernel", ACTIVITY_APPENDED_TOPIC, payload) {
             tracing::debug!(
                 %err,
                 kind,
@@ -2164,8 +2127,7 @@ fn build_capabilities(manifest: &PluginManifest, plugin_dir: &Path) -> Capabilit
             Capability::ALL.iter().copied().collect::<CapabilitySet>()
         }
         TrustLevel::Community => {
-            let granted =
-                load_granted_high_risk_caps(&manifest.id, plugin_dir, &manifest.version);
+            let granted = load_granted_high_risk_caps(&manifest.id, plugin_dir, &manifest.version);
             let mut denied: Vec<Capability> = Vec::new();
             let caps: Vec<Capability> = manifest
                 .capabilities
@@ -2254,8 +2216,14 @@ fn save_disabled_subscriptions(plugin_dir: &Path, disabled: &[String]) {
         return;
     }
     let json = serde_json::json!({ "disabled": disabled });
-    if let Err(e) = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default()) {
-        tracing::warn!("failed to persist subscription state to {}: {e}", path.display());
+    if let Err(e) = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).unwrap_or_default(),
+    ) {
+        tracing::warn!(
+            "failed to persist subscription state to {}: {e}",
+            path.display()
+        );
     }
 }
 
@@ -2280,8 +2248,7 @@ fn plugin_info_from(
 /// registered by [`SharedPluginLoader::add_cap_requirement_fn`]
 /// (ADR 0022 Phase 2). Returned caps are summed with any caps from
 /// the static [`SharedPluginLoader::add_cap_requirement`] table.
-pub type CapRequirementFn =
-    Arc<dyn Fn(&serde_json::Value) -> Vec<Capability> + Send + Sync>;
+pub type CapRequirementFn = Arc<dyn Fn(&serde_json::Value) -> Vec<Capability> + Send + Sync>;
 
 /// BL-138 — explicit classification recorded by bootstrap for every
 /// IPC handler. The cap table (`cap_requirements`) only stores the
@@ -2332,8 +2299,7 @@ pub struct SharedPluginLoader {
     /// based on call payload (e.g. `tools=auto_with_mcp` requires
     /// `ai.tools.mcp`). Both maps are consulted on each call and
     /// their results are unioned.
-    cap_requirement_fns:
-        std::sync::RwLock<HashMap<(String, String), CapRequirementFn>>,
+    cap_requirement_fns: std::sync::RwLock<HashMap<(String, String), CapRequirementFn>>,
     /// BL-138 — explicit per-handler classification, populated by
     /// bootstrap (via [`Self::register_handler_caps`] /
     /// [`Self::register_handler_unrestricted`]) when the cap matrix
@@ -2345,8 +2311,7 @@ pub struct SharedPluginLoader {
     /// the `cap_matrix_complete` integration test, not at runtime,
     /// so an unclassified handler is a CI failure rather than a
     /// production reject.
-    classifications:
-        std::sync::RwLock<HashMap<(String, String), HandlerClassification>>,
+    classifications: std::sync::RwLock<HashMap<(String, String), HandlerClassification>>,
     /// P1-02 — set of `(target_plugin_id, command_id)` pairs marked
     /// `internal = true` in `cap_matrix.toml`. The kernel context
     /// rejects calls into these handlers from callers whose
@@ -2409,11 +2374,7 @@ impl SharedPluginLoader {
     ///
     /// # Panics
     /// Panics if the inner mutex is poisoned.
-    pub fn revoke_capability(
-        &self,
-        plugin_id: &str,
-        cap: Capability,
-    ) -> Result<(), PluginError> {
+    pub fn revoke_capability(&self, plugin_id: &str, cap: Capability) -> Result<(), PluginError> {
         self.inner
             .lock()
             .expect("plugin loader mutex poisoned")
@@ -2552,11 +2513,7 @@ impl SharedPluginLoader {
     /// # Panics
     /// Panics if the classifications lock is poisoned.
     #[must_use]
-    pub fn is_handler_classified(
-        &self,
-        target_plugin_id: &str,
-        command_id: &str,
-    ) -> bool {
+    pub fn is_handler_classified(&self, target_plugin_id: &str, command_id: &str) -> bool {
         let map = self
             .classifications
             .read()
@@ -2571,16 +2528,12 @@ impl SharedPluginLoader {
     /// # Panics
     /// Panics if the classifications lock is poisoned.
     #[must_use]
-    pub fn handler_classifications(
-        &self,
-    ) -> Vec<((String, String), HandlerClassification)> {
+    pub fn handler_classifications(&self) -> Vec<((String, String), HandlerClassification)> {
         let map = self
             .classifications
             .read()
             .expect("handler classifications lock poisoned");
-        map.iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+        map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 }
 
@@ -2604,8 +2557,9 @@ impl IpcDispatcher for SharedPluginLoader {
                     reason: String::new(),
                 })?;
 
-            loader.resolve_ipc(target_plugin_id, command_id).map_err(
-                |e| match e {
+            loader
+                .resolve_ipc(target_plugin_id, command_id)
+                .map_err(|e| match e {
                     PluginError::PluginNotFound(id) => {
                         // Could be the plugin ID or the command ID — check.
                         if id == target_plugin_id {
@@ -2622,8 +2576,7 @@ impl IpcDispatcher for SharedPluginLoader {
                         command: command_id.to_string(),
                         reason: String::new(),
                     },
-                },
-            )?
+                })?
         };
         // Loader lock released. Detect genuine reentrancy (same thread
         // already dispatching this plugin — would deadlock on `lock()`)
@@ -2667,10 +2620,9 @@ impl IpcDispatcher for SharedPluginLoader {
                 command_id,
                 lock_wait_ms = u64::try_from(lock_wait.as_millis()).unwrap_or(u64::MAX),
                 handler_ms = u64::try_from(handler_elapsed.as_millis()).unwrap_or(u64::MAX),
-                threshold_ms = u64::try_from(
-                    nexus_types::constants::SLOW_SYNC_DISPATCH_WARN.as_millis()
-                )
-                .unwrap_or(u64::MAX),
+                threshold_ms =
+                    u64::try_from(nexus_types::constants::SLOW_SYNC_DISPATCH_WARN.as_millis())
+                        .unwrap_or(u64::MAX),
                 "sync IPC dispatch held the backend mutex past the slow-dispatch \
                  threshold. All concurrent sync calls to this plugin queued behind \
                  it. Consider converting the handler to dispatch_async."
@@ -2720,11 +2672,7 @@ impl IpcDispatcher for SharedPluginLoader {
         }))
     }
 
-    fn required_caller_caps(
-        &self,
-        target_plugin_id: &str,
-        command_id: &str,
-    ) -> Vec<Capability> {
+    fn required_caller_caps(&self, target_plugin_id: &str, command_id: &str) -> Vec<Capability> {
         // Read-locked map populated by `add_cap_requirement` at bootstrap.
         // Empty result is the default (no extra caps beyond `IpcCall`).
         // See issue #77.
@@ -2764,11 +2712,7 @@ impl IpcDispatcher for SharedPluginLoader {
         caps
     }
 
-    fn is_handler_internal_only(
-        &self,
-        target_plugin_id: &str,
-        command_id: &str,
-    ) -> bool {
+    fn is_handler_internal_only(&self, target_plugin_id: &str, command_id: &str) -> bool {
         let Ok(map) = self.internal_only_handlers.read() else {
             return false;
         };
@@ -2970,7 +2914,10 @@ mod unit_tests {
         let dir = tempfile::tempdir().unwrap();
         let manifest = community_manifest(&["fs.read", "net.http", "process.spawn"]);
         let caps = build_capabilities(&manifest, dir.path());
-        assert!(caps.contains(Capability::FsRead), "low-risk cap must be granted");
+        assert!(
+            caps.contains(Capability::FsRead),
+            "low-risk cap must be granted"
+        );
         assert!(
             !caps.contains(Capability::NetHttp),
             "HIGH-risk net.http must be denied without grants file"
@@ -2991,7 +2938,10 @@ mod unit_tests {
         .unwrap();
         let manifest = community_manifest(&["net.http", "process.spawn"]);
         let caps = build_capabilities(&manifest, dir.path());
-        assert!(caps.contains(Capability::NetHttp), "granted cap must be present");
+        assert!(
+            caps.contains(Capability::NetHttp),
+            "granted cap must be present"
+        );
         assert!(
             !caps.contains(Capability::ProcessSpawn),
             "non-granted HIGH-risk cap must still be denied"
@@ -3038,7 +2988,9 @@ mod unit_tests {
         // each other's env. We accept that — every test in this file
         // already assumes plaintext, and the variable is set once at
         // the top.
-        unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
+        unsafe {
+            std::env::set_var("NEXUS_NO_KEYRING", "1");
+        }
         let dir = tempfile::tempdir().unwrap();
         let pid = "dev.test.grants";
         write_grant(pid, dir.path(), "1.0.0", Capability::NetHttp, true).unwrap();
@@ -3069,11 +3021,7 @@ mod unit_tests {
         blob.extend_from_slice(&[0u8; 32]); // bogus ciphertext + tag
         std::fs::write(&path, &blob).unwrap();
 
-        let granted = load_granted_high_risk_caps(
-            "dev.test.tampered",
-            dir.path(),
-            "1.0.0",
-        );
+        let granted = load_granted_high_risk_caps("dev.test.tampered", dir.path(), "1.0.0");
         assert!(
             granted.is_empty(),
             "tampered/unauthenticated blob must reset grants to deny-all",
@@ -3173,11 +3121,7 @@ module = "test.wasm"
 
     #[test]
     fn load_rejects_missing_dependency() {
-        let tmp = setup_plugin_dir_with_dep(
-            "com.test.needs-dep",
-            "com.test.provider",
-            "^1.0.0",
-        );
+        let tmp = setup_plugin_dir_with_dep("com.test.needs-dep", "com.test.provider", "^1.0.0");
         let plugin_dir = tmp.path().join("com.test.needs-dep");
         let mut loader = PluginLoader::new(tmp.path());
         let err = loader.load(&plugin_dir).unwrap_err();
@@ -3198,11 +3142,8 @@ module = "test.wasm"
         let provider_tmp = setup_plugin_dir("com.test.provider.v1");
         let provider_dir = provider_tmp.path().join("com.test.provider.v1");
 
-        let dependent_tmp = setup_plugin_dir_with_dep(
-            "com.test.needs-v2",
-            "com.test.provider.v1",
-            "^2.0.0",
-        );
+        let dependent_tmp =
+            setup_plugin_dir_with_dep("com.test.needs-v2", "com.test.provider.v1", "^2.0.0");
         let dependent_dir = dependent_tmp.path().join("com.test.needs-v2");
 
         let mut loader = PluginLoader::new(provider_tmp.path());
@@ -3304,11 +3245,8 @@ module = "test.wasm"
         let provider_tmp = setup_plugin_dir("com.test.dep.provider");
         let provider_dir = provider_tmp.path().join("com.test.dep.provider");
 
-        let dependent_tmp = setup_plugin_dir_with_dep(
-            "com.test.dep.dependent",
-            "com.test.dep.provider",
-            "^1.0.0",
-        );
+        let dependent_tmp =
+            setup_plugin_dir_with_dep("com.test.dep.dependent", "com.test.dep.provider", "^1.0.0");
         let dependent_dir = dependent_tmp.path().join("com.test.dep.dependent");
 
         let mut loader = PluginLoader::new(provider_tmp.path());

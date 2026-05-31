@@ -239,9 +239,7 @@ impl PropertyValue {
         match value {
             serde_json::Value::Null => Self::Null,
             serde_json::Value::Bool(b) => Self::Boolean(*b),
-            serde_json::Value::Number(n) => {
-                Self::Number(n.as_f64().unwrap_or(0.0))
-            }
+            serde_json::Value::Number(n) => Self::Number(n.as_f64().unwrap_or(0.0)),
             serde_json::Value::String(s) => Self::Text(s.clone()),
             serde_json::Value::Array(arr) => {
                 let strings: Vec<String> = arr
@@ -382,9 +380,7 @@ mod tests {
 
     #[test]
     fn property_value_from_json_array() {
-        let config = PropertyConfig::MultiSelect {
-            options: vec![],
-        };
+        let config = PropertyConfig::MultiSelect { options: vec![] };
         let val = PropertyValue::from_json(&serde_json::json!(["a", "b"]), &config);
         assert_eq!(
             val,

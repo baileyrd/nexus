@@ -44,8 +44,7 @@ use std::process::Command;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::backend::{
-    AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput, TranscriptionOutput,
-    TtsProvider,
+    AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput, TranscriptionOutput, TtsProvider,
 };
 use crate::config::AudioConfig;
 use crate::AudioError;
@@ -149,10 +148,7 @@ impl SttProvider for LocalWhisperStt {
         STT_NAME
     }
 
-    fn transcribe(
-        &mut self,
-        input: TranscriptionInput,
-    ) -> Result<TranscriptionOutput, AudioError> {
+    fn transcribe(&mut self, input: TranscriptionInput) -> Result<TranscriptionOutput, AudioError> {
         if input.format != AudioFormat::Wav {
             return Err(AudioError::InvalidAudio(format!(
                 "local Whisper backend only accepts WAV input; got {}. \
@@ -175,10 +171,12 @@ impl SttProvider for LocalWhisperStt {
         if let Some(lang) = language.as_deref() {
             params.set_language(Some(lang));
         }
-        state.full(params, &samples).map_err(|e| AudioError::Backend {
-            backend: STT_NAME.to_string(),
-            reason: format!("whisper inference: {e}"),
-        })?;
+        state
+            .full(params, &samples)
+            .map_err(|e| AudioError::Backend {
+                backend: STT_NAME.to_string(),
+                reason: format!("whisper inference: {e}"),
+            })?;
         let n = state.full_n_segments();
         let mut text = String::new();
         for i in 0..n {
@@ -204,10 +202,8 @@ impl SttProvider for LocalWhisperStt {
 /// resampler. Tell the user to re-record rather than silently giving
 /// them garbage transcripts.
 fn decode_wav_to_mono16k(bytes: &[u8]) -> Result<Vec<f32>, AudioError> {
-    let mut reader =
-        hound::WavReader::new(std::io::Cursor::new(bytes)).map_err(|e| {
-            AudioError::InvalidAudio(format!("wav decode header: {e}"))
-        })?;
+    let mut reader = hound::WavReader::new(std::io::Cursor::new(bytes))
+        .map_err(|e| AudioError::InvalidAudio(format!("wav decode header: {e}")))?;
     let spec = reader.spec();
     if spec.sample_rate != 16_000 {
         return Err(AudioError::InvalidAudio(format!(
@@ -217,7 +213,9 @@ fn decode_wav_to_mono16k(bytes: &[u8]) -> Result<Vec<f32>, AudioError> {
     }
     let channels = spec.channels;
     if channels == 0 {
-        return Err(AudioError::InvalidAudio("wav has zero channels".to_string()));
+        return Err(AudioError::InvalidAudio(
+            "wav has zero channels".to_string(),
+        ));
     }
     // Convert to f32 in [-1, 1].
     let mut samples_f32: Vec<f32> = match spec.sample_format {

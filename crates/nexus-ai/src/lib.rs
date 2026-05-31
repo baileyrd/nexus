@@ -16,15 +16,15 @@ mod anthropic;
 mod chunker;
 mod config;
 pub mod core_plugin;
-mod handlers;
 mod embedding;
+pub mod enrichment;
+mod error;
 /// BL-116 — `com.nexus.ai::generate_docs` implementation. Lives in
 /// its own module so the prompt-building + doc-comment-wrapping
 /// logic stays unit-testable without firing a real provider.
 mod generate_docs;
-pub mod enrichment;
+mod handlers;
 mod http_client;
-mod error;
 pub mod indexing_daemon;
 #[cfg(feature = "local-embeddings")]
 pub mod local_embedding;
@@ -43,10 +43,6 @@ pub use activity_log::{ActivityRecorder, ACTIVITY_LOG_PATH};
 // emitters (terminal, git, storage, etc.) can publish without
 // depending on `nexus-ai`. Re-exported here so existing call sites
 // (`use nexus_ai::ActivityEntry`) keep compiling.
-pub use nexus_types::activity::{
-    ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ActivityToolCall,
-    ACTIVITY_APPENDED_TOPIC, AI_ACTIVITY_APPENDED_TOPIC,
-};
 pub use anthropic::AnthropicProvider;
 pub use chunker::{chunks_from_blocks, Chunk};
 pub use config::{detect_embedding_provider, detect_local_embedding, detect_provider, AiConfig};
@@ -56,8 +52,12 @@ pub use enrichment::{body_hash, merge_frontmatter, strip_frontmatter, Enrichment
 pub use error::AiError;
 #[cfg(feature = "local-embeddings")]
 pub use local_embedding::{
-    dimension_for as local_embedding_dimension_for, LocalEmbedding,
-    BATCH_CACHE_BYPASS_THRESHOLD, DEFAULT_CACHE_MAX_ENTRIES, DEFAULT_LOCAL_MODEL,
+    dimension_for as local_embedding_dimension_for, LocalEmbedding, BATCH_CACHE_BYPASS_THRESHOLD,
+    DEFAULT_CACHE_MAX_ENTRIES, DEFAULT_LOCAL_MODEL,
+};
+pub use nexus_types::activity::{
+    ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ActivityToolCall,
+    ACTIVITY_APPENDED_TOPIC, AI_ACTIVITY_APPENDED_TOPIC,
 };
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;

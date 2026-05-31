@@ -127,9 +127,7 @@ mod tests {
         // Git-for-Windows ships `bash.exe` — we should source the rc
         // file regardless of the `.exe` suffix.
         assert_eq!(
-            profile_path_for_shell(&ShellSpec::bare(
-                "C:/Program Files/Git/usr/bin/bash.exe",
-            )),
+            profile_path_for_shell(&ShellSpec::bare("C:/Program Files/Git/usr/bin/bash.exe",)),
             Some("~/.bashrc"),
         );
     }

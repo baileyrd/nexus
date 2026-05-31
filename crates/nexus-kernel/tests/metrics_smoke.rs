@@ -19,7 +19,12 @@ fn install_then_record_then_snapshot_round_trips() {
 
     // Exercise every recording surface.
     m.record_ipc_call("com.test.target", "echo", CallStatus::Ok, 50_000);
-    m.record_ipc_call("com.test.target", "echo", CallStatus::Timeout, 5_000_000_000);
+    m.record_ipc_call(
+        "com.test.target",
+        "echo",
+        CallStatus::Timeout,
+        5_000_000_000,
+    );
     m.record_event_publish("com.test.publisher");
     m.record_capability_check("com.test.caller", "fs.read", true);
     m.record_capability_check("com.test.caller", "process.spawn", false);

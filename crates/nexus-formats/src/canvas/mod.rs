@@ -39,9 +39,7 @@ fn enforce_caps(json: &str, parsed: &CanvasFile, path: &str) -> Result<(), Canva
     if total > MAX_CANVAS_ELEMENTS {
         return Err(CanvasError::InvalidJson {
             path: path.to_string(),
-            reason: format!(
-                "canvas has {total} nodes+edges; max is {MAX_CANVAS_ELEMENTS}"
-            ),
+            reason: format!("canvas has {total} nodes+edges; max is {MAX_CANVAS_ELEMENTS}"),
         });
     }
     Ok(())
@@ -236,15 +234,28 @@ mod tests {
             nodes: vec![CanvasNode {
                 id: "n1".to_string(),
                 node_type: CanvasNodeType::Text,
-                x: 10.0, y: 20.0, width: 300.0, height: 200.0,
-                color: None, label: None, collapsed: false,
-                file: None, text: Some("Hello".into()), url: None, source: None, command: None, extra: serde_json::Map::new(),
+                x: 10.0,
+                y: 20.0,
+                width: 300.0,
+                height: 200.0,
+                color: None,
+                label: None,
+                collapsed: false,
+                file: None,
+                text: Some("Hello".into()),
+                url: None,
+                source: None,
+                command: None,
+                extra: serde_json::Map::new(),
             }],
             edges: vec![CanvasEdge {
                 id: "e1".to_string(),
-                from_node: "n1".into(), to_node: "n2".into(),
+                from_node: "n1".into(),
+                to_node: "n2".into(),
                 edge_type: CanvasEdgeType::Dashed,
-                label: Some("links to".into()), color: None, extra: serde_json::Map::new(),
+                label: Some("links to".into()),
+                color: None,
+                extra: serde_json::Map::new(),
             }],
             background: None,
             extra: serde_json::Map::new(),

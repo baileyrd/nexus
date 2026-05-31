@@ -360,7 +360,10 @@ mod tests {
         assert_eq!(tree.root_blocks.len(), 1);
         let b = tree.get(tree.root_blocks[0]).unwrap();
         match &b.ty {
-            BlockType::DatabaseView { database_path, view_config } => {
+            BlockType::DatabaseView {
+                database_path,
+                view_config,
+            } => {
                 assert_eq!(database_path, "Tasks.bases");
                 assert_eq!(view_config.view_type, DatabaseViewType::Table);
                 assert!(view_config.filters.is_empty());

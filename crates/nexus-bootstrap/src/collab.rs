@@ -162,9 +162,7 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
         return None;
     };
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        tracing::debug!(
-            "no ambient tokio runtime; skipping BL-143 collab spawn (CLI single-shot)"
-        );
+        tracing::debug!("no ambient tokio runtime; skipping BL-143 collab spawn (CLI single-shot)");
         return None;
     };
     let reconnect_cfg = ReconnectConfig {

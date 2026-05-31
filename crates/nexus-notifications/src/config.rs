@@ -100,8 +100,10 @@ impl QuietHours {
         let (a, b) = trimmed
             .split_once('-')
             .ok_or_else(|| ConfigError::QuietHours(raw.to_string()))?;
-        let start_min = parse_hhmm(a.trim()).ok_or_else(|| ConfigError::QuietHours(raw.to_string()))?;
-        let end_min = parse_hhmm(b.trim()).ok_or_else(|| ConfigError::QuietHours(raw.to_string()))?;
+        let start_min =
+            parse_hhmm(a.trim()).ok_or_else(|| ConfigError::QuietHours(raw.to_string()))?;
+        let end_min =
+            parse_hhmm(b.trim()).ok_or_else(|| ConfigError::QuietHours(raw.to_string()))?;
         Ok(Self { start_min, end_min })
     }
 
@@ -429,7 +431,10 @@ max_age_days = 30
         assert_eq!(wf.route, vec!["desktop", "discord"]);
         assert_eq!(wf.min_severity, Severity::Warn);
         assert_eq!(wf.quiet_hours.as_deref(), Some("22:00-08:00"));
-        assert_eq!(cfg.channels.discord.webhook_url, "https://discord.example/webhook");
+        assert_eq!(
+            cfg.channels.discord.webhook_url,
+            "https://discord.example/webhook"
+        );
         assert_eq!(cfg.channels.email.port, 587);
         assert_eq!(cfg.inbox.max_rows, Some(1000));
     }
@@ -485,13 +490,13 @@ quiet_hours = "nope"
     #[test]
     fn quiet_hours_overnight_window() {
         let qh = QuietHours::parse("22:00-08:00").unwrap();
-        assert!(qh.contains(22 * 60));       // 22:00 — inside
-        assert!(qh.contains(23 * 60 + 30));  // 23:30 — inside
-        assert!(qh.contains(0));             // 00:00 — inside
-        assert!(qh.contains(7 * 60 + 59));   // 07:59 — inside
-        assert!(!qh.contains(8 * 60));       // 08:00 — outside
-        assert!(!qh.contains(12 * 60));      // 12:00 — outside
-        assert!(!qh.contains(21 * 60));      // 21:00 — outside
+        assert!(qh.contains(22 * 60)); // 22:00 — inside
+        assert!(qh.contains(23 * 60 + 30)); // 23:30 — inside
+        assert!(qh.contains(0)); // 00:00 — inside
+        assert!(qh.contains(7 * 60 + 59)); // 07:59 — inside
+        assert!(!qh.contains(8 * 60)); // 08:00 — outside
+        assert!(!qh.contains(12 * 60)); // 12:00 — outside
+        assert!(!qh.contains(21 * 60)); // 21:00 — outside
     }
 
     #[test]

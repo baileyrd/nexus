@@ -236,10 +236,7 @@ pub async fn query_tags(
 /// Read a file's bytes by forge-relative path. Returns an error when the
 /// file does not exist — callers that want a typed "missing" signal should
 /// use [`read_file_optional`].
-pub async fn read_file(
-    invoker: &(dyn IpcInvoker + Send + Sync),
-    path: &str,
-) -> Result<Vec<u8>> {
+pub async fn read_file(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -> Result<Vec<u8>> {
     read_file_optional(invoker, path)
         .await?
         .with_context(|| format!("read_file: file not found: {path}"))
@@ -318,37 +315,24 @@ pub async fn write_file(
 
 /// Delete the file at `path`.
 pub async fn delete_file(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -> Result<()> {
-    let _: serde_json::Value = call(
-        invoker,
-        "delete_file",
-        serde_json::json!({ "path": path }),
-    )
-    .await?;
+    let _: serde_json::Value =
+        call(invoker, "delete_file", serde_json::json!({ "path": path })).await?;
     Ok(())
 }
 
 /// Check whether a file at `path` exists in the forge.
-pub async fn file_exists(
-    invoker: &(dyn IpcInvoker + Send + Sync),
-    path: &str,
-) -> Result<bool> {
+pub async fn file_exists(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -> Result<bool> {
     #[derive(Deserialize)]
     struct Resp {
         exists: bool,
     }
-    let resp: Resp = call(
-        invoker,
-        "file_exists",
-        serde_json::json!({ "path": path }),
-    )
-    .await?;
+    let resp: Resp = call(invoker, "file_exists", serde_json::json!({ "path": path })).await?;
     Ok(resp.exists)
 }
 
 /// Rebuild the full-text search index from the current file set.
 pub async fn rebuild_search_index(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<()> {
-    let _: serde_json::Value =
-        call(invoker, "rebuild_search_index", serde_json::json!({})).await?;
+    let _: serde_json::Value = call(invoker, "rebuild_search_index", serde_json::json!({})).await?;
     Ok(())
 }
 
@@ -417,12 +401,7 @@ pub async fn base_index(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) ->
     struct Resp {
         base_id: i64,
     }
-    let resp: Resp = call(
-        invoker,
-        "base_index",
-        serde_json::json!({ "path": path }),
-    )
-    .await?;
+    let resp: Resp = call(invoker, "base_index", serde_json::json!({ "path": path })).await?;
     Ok(resp.base_id)
 }
 
@@ -472,24 +451,15 @@ pub async fn config_read(
     invoker: &(dyn IpcInvoker + Send + Sync),
     kind: &str,
 ) -> Result<ConfigPayload> {
-    call(
-        invoker,
-        "config_read",
-        serde_json::json!({ "kind": kind }),
-    )
-    .await
+    call(invoker, "config_read", serde_json::json!({ "kind": kind })).await
 }
 
 /// Reset one of the four forge config files to its defaults.
 ///
 /// `kind` must be `"app"`, `"workspace"`, `"mcp"`, or `"ai"`.
 pub async fn config_reset(invoker: &(dyn IpcInvoker + Send + Sync), kind: &str) -> Result<()> {
-    let _: serde_json::Value = call(
-        invoker,
-        "config_reset",
-        serde_json::json!({ "kind": kind }),
-    )
-    .await?;
+    let _: serde_json::Value =
+        call(invoker, "config_reset", serde_json::json!({ "kind": kind })).await?;
     Ok(())
 }
 
@@ -502,19 +472,12 @@ pub async fn config_reset(invoker: &(dyn IpcInvoker + Send + Sync), kind: &str) 
 /// BL-007 shipped get the gitignore policy that lets the CRDT state
 /// files at `.forge/.editor/crdt/*.json` ride through to peers via
 /// git while rebuildable / per-machine state stays excluded.
-pub async fn write_default_gitignore(
-    invoker: &(dyn IpcInvoker + Send + Sync),
-) -> Result<bool> {
+pub async fn write_default_gitignore(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<bool> {
     #[derive(Deserialize)]
     struct Resp {
         wrote: bool,
     }
-    let resp: Resp = call(
-        invoker,
-        "write_default_gitignore",
-        serde_json::json!({}),
-    )
-    .await?;
+    let resp: Resp = call(invoker, "write_default_gitignore", serde_json::json!({})).await?;
     Ok(resp.wrote)
 }
 

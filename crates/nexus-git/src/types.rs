@@ -72,7 +72,7 @@ pub enum FileStatus {
 
 impl FileStatus {
     /// Single-character status marker for display.
-    #[must_use] 
+    #[must_use]
     pub fn marker(self) -> &'static str {
         match self {
             Self::Untracked => "?",

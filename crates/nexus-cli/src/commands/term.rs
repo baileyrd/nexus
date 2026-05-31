@@ -33,9 +33,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use nexus_terminal::{
-    detect_default_shell, LineBuffer, Session, SessionConfig, ShellSpec,
-};
+use nexus_terminal::{detect_default_shell, LineBuffer, Session, SessionConfig, ShellSpec};
 
 /// `nexus term env` — print the detected default shell.
 pub fn env() -> Result<()> {
@@ -162,7 +160,10 @@ pub fn run(cmd: &str, max_secs: u64) -> Result<i32> {
 pub fn shell() -> Result<i32> {
     let mut session = Session::spawn(SessionConfig::default())
         .context("spawn default shell for `nexus term shell`")?;
-    println!("[nexus-term] attached to {}; Ctrl-C to exit", session.shell_display());
+    println!(
+        "[nexus-term] attached to {}; Ctrl-C to exit",
+        session.shell_display()
+    );
 
     // Trap Ctrl-C so a real user can shut down the session cleanly
     // instead of ripping the CLI process out from under the PTY. We

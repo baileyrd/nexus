@@ -54,12 +54,18 @@ fn register_core_aborts_when_on_init_exceeds_deadline() {
     let result = loader.register_core(
         manifest_with_init("dev.test.hang"),
         plugins_dir.path(),
-        Box::new(HangPlugin { sleep_for: Duration::from_secs(60) }),
+        Box::new(HangPlugin {
+            sleep_for: Duration::from_secs(60),
+        }),
     );
     let elapsed = started.elapsed();
 
     match result {
-        Err(PluginError::LifecycleTimeout { plugin_id, hook, timeout_secs: _ }) => {
+        Err(PluginError::LifecycleTimeout {
+            plugin_id,
+            hook,
+            timeout_secs: _,
+        }) => {
             assert_eq!(plugin_id, "dev.test.hang");
             assert_eq!(hook, "init");
         }
@@ -85,7 +91,9 @@ fn register_core_succeeds_when_on_init_is_fast() {
         .register_core(
             manifest_with_init("dev.test.fast"),
             plugins_dir.path(),
-            Box::new(HangPlugin { sleep_for: Duration::from_millis(10) }),
+            Box::new(HangPlugin {
+                sleep_for: Duration::from_millis(10),
+            }),
         )
         .expect("fast on_init should not time out");
 }
@@ -102,7 +110,9 @@ fn zero_timeout_disables_watchdog_and_runs_inline() {
         .register_core(
             manifest_with_init("dev.test.inline"),
             plugins_dir.path(),
-            Box::new(HangPlugin { sleep_for: Duration::from_millis(50) }),
+            Box::new(HangPlugin {
+                sleep_for: Duration::from_millis(50),
+            }),
         )
         .expect("inline path should still complete");
 }

@@ -7,11 +7,11 @@
 //! shell's health panel; both read the same IPC handler.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::TuiApp;
@@ -51,18 +51,39 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
     .areas(inner);
 
     // ── Gauge line ────────────────────────────────────────────────
-    let queue_depth = snap.get("event_bus_queue_depth").and_then(|v| v.as_u64()).unwrap_or(0);
-    let dropped = snap.get("metrics_dropped_total").and_then(|v| v.as_u64()).unwrap_or(0);
+    let queue_depth = snap
+        .get("event_bus_queue_depth")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let dropped = snap
+        .get("metrics_dropped_total")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let gauge_line = Line::from(vec![
-        Span::styled("event_bus_queue_depth: ", Style::default().fg(Color::Yellow)),
-        Span::styled(format!("{queue_depth}"), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "event_bus_queue_depth: ",
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!("{queue_depth}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
         Span::raw("    "),
-        Span::styled("metrics_dropped_total: ", Style::default().fg(Color::Yellow)),
-        Span::styled(format!("{dropped}"), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "metrics_dropped_total: ",
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!("{dropped}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
     ]);
     frame.render_widget(
-        Paragraph::new(gauge_line)
-            .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray))),
+        Paragraph::new(gauge_line).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        ),
         gauge_area,
     );
 
@@ -70,13 +91,19 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
     let mut ipc_rows: Vec<(String, u64)> = snap
         .get("ipc_calls_total")
         .and_then(|v| v.as_object())
-        .map(|m| m.iter().filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n))).collect())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n)))
+                .collect()
+        })
         .unwrap_or_default();
     ipc_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let ipc_total: u64 = ipc_rows.iter().map(|(_, n)| n).sum();
     let ipc_top: Vec<Line> = std::iter::once(Line::from(Span::styled(
         format!("IPC calls (total {ipc_total}, top 10):"),
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )))
     .chain(ipc_rows.iter().take(10).map(|(k, n)| {
         Line::from(vec![
@@ -85,22 +112,25 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         ])
     }))
     .collect();
-    frame.render_widget(
-        Paragraph::new(ipc_top).wrap(Wrap { trim: false }),
-        ipc_area,
-    );
+    frame.render_widget(Paragraph::new(ipc_top).wrap(Wrap { trim: false }), ipc_area);
 
     // ── Event-bus top-N ───────────────────────────────────────────
     let mut bus_rows: Vec<(String, u64)> = snap
         .get("event_bus_published_total")
         .and_then(|v| v.as_object())
-        .map(|m| m.iter().filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n))).collect())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n)))
+                .collect()
+        })
         .unwrap_or_default();
     bus_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let bus_total: u64 = bus_rows.iter().map(|(_, n)| n).sum();
     let bus_top: Vec<Line> = std::iter::once(Line::from(Span::styled(
         format!("event_bus publishes (total {bus_total}, top 10):"),
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )))
     .chain(bus_rows.iter().take(10).map(|(k, n)| {
         Line::from(vec![
@@ -109,21 +139,24 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         ])
     }))
     .collect();
-    frame.render_widget(
-        Paragraph::new(bus_top).wrap(Wrap { trim: false }),
-        bus_area,
-    );
+    frame.render_widget(Paragraph::new(bus_top).wrap(Wrap { trim: false }), bus_area);
 
     // ── Capability checks ─────────────────────────────────────────
     let mut cap_rows: Vec<(String, u64)> = snap
         .get("capability_checks_total")
         .and_then(|v| v.as_object())
-        .map(|m| m.iter().filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n))).collect())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n)))
+                .collect()
+        })
         .unwrap_or_default();
     cap_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let cap_lines: Vec<Line> = std::iter::once(Line::from(Span::styled(
         "capability checks (top 10):",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )))
     .chain(cap_rows.iter().take(10).map(|(k, n)| {
         let denied = k.ends_with("::denied");

@@ -30,7 +30,11 @@ pub fn serve(app: &App) -> Result<()> {
 
     // Destructure Runtime so we can move `context` into an Arc while keeping
     // the kernel and loader alive for the server's lifetime.
-    let Runtime { kernel: _kernel, context, loader: _loader } = runtime;
+    let Runtime {
+        kernel: _kernel,
+        context,
+        loader: _loader,
+    } = runtime;
     let context = Arc::new(context);
 
     let server = nexus_mcp::NexusMcpServer::new(Arc::clone(&context));
@@ -63,7 +67,8 @@ pub fn host_servers(app: &mut App) -> Result<()> {
         .max(4);
     println!(
         "{:<name_w$}  {:<8}  COMMAND",
-        "NAME", "STATE",
+        "NAME",
+        "STATE",
         name_w = name_w
     );
     for server in servers {
@@ -119,7 +124,10 @@ pub fn host_tools(app: &mut App, server: &str) -> Result<()> {
     println!("{:<name_w$}  DESCRIPTION", "NAME", name_w = name_w);
     for tool in tools {
         let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
-        let desc = tool.get("description").and_then(Value::as_str).unwrap_or("");
+        let desc = tool
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         println!("{:<name_w$}  {}", name, desc, name_w = name_w);
     }
     Ok(())

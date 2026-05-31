@@ -26,9 +26,8 @@ use crate::app::App;
 /// build, or the server's read/write loop fails irrecoverably.
 pub fn serve(app: &App) -> Result<()> {
     let forge_root = app.forge_root().to_path_buf();
-    let runtime = build_cli_runtime(forge_root.clone()).with_context(|| {
-        format!("failed to build runtime at {}", forge_root.display())
-    })?;
+    let runtime = build_cli_runtime(forge_root.clone())
+        .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
     let Runtime {
         kernel,
         context,

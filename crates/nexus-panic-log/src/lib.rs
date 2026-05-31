@@ -143,8 +143,14 @@ mod tests {
 
         assert!(result.is_err(), "panic should have occurred");
         let contents = fs::read_to_string(&log_path).expect("log file written");
-        assert!(contents.contains("binary:    nexus-test"), "contents: {contents}");
-        assert!(contents.contains("smoke-test panic"), "contents: {contents}");
+        assert!(
+            contents.contains("binary:    nexus-test"),
+            "contents: {contents}"
+        );
+        assert!(
+            contents.contains("smoke-test panic"),
+            "contents: {contents}"
+        );
         assert!(contents.contains("timestamp:"), "contents: {contents}");
     }
 

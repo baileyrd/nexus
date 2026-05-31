@@ -17,11 +17,11 @@ use std::sync::Arc;
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 use nexus_storage::{
-    StorageConfig, StorageCorePlugin, StorageEngine,
     core_plugin::{
-        HANDLER_DELETE_FILE, HANDLER_NOTE_APPEND, HANDLER_READ_FILE,
-        HANDLER_WRITE_FILE, HANDLER_WRITE_VAULT_FILE,
+        HANDLER_DELETE_FILE, HANDLER_NOTE_APPEND, HANDLER_READ_FILE, HANDLER_WRITE_FILE,
+        HANDLER_WRITE_VAULT_FILE,
     },
+    StorageConfig, StorageCorePlugin, StorageEngine,
 };
 
 fn boot_plugin(forge_root: &std::path::Path) -> StorageCorePlugin {
@@ -92,10 +92,7 @@ fn write_vault_file_rejects_traversal() {
     // pinned on the traversal layer specifically, use payloads that
     // start with `.forge/` (passing the prefix gate) but contain
     // `..` to exercise resolve_within.
-    let evil_traversals_under_forge = [
-        ".forge/../escape.txt",
-        ".forge/sub/../../escape.txt",
-    ];
+    let evil_traversals_under_forge = [".forge/../escape.txt", ".forge/sub/../../escape.txt"];
     for evil in evil_traversals_under_forge {
         let args = serde_json::json!({ "path": evil, "bytes": [0u8] });
         let err = plugin
@@ -116,10 +113,7 @@ fn read_file_rejects_traversal() {
     let mut plugin = boot_plugin(dir.path());
 
     let attempts = [
-        format!(
-            "../{}",
-            outside.file_name().unwrap().to_string_lossy()
-        ),
+        format!("../{}", outside.file_name().unwrap().to_string_lossy()),
         "../../etc/passwd".to_string(),
         "/etc/passwd".to_string(),
     ];
@@ -143,10 +137,7 @@ fn delete_file_rejects_traversal() {
     std::fs::write(&outside, b"do not delete").expect("seed outside file");
     let mut plugin = boot_plugin(dir.path());
 
-    let evil_path = format!(
-        "../{}",
-        outside.file_name().unwrap().to_string_lossy()
-    );
+    let evil_path = format!("../{}", outside.file_name().unwrap().to_string_lossy());
     let args = serde_json::json!({ "path": evil_path });
     let err = plugin
         .dispatch(HANDLER_DELETE_FILE, &args)

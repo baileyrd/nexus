@@ -10,8 +10,7 @@ use crate::PluginError;
 // ─── Plugin ID validation regex ───────────────────────────────────────────────
 
 /// Pattern: `<segment>.<segment>` where each segment is `[a-z0-9]+([-._][a-z0-9]+)*`.
-const PLUGIN_ID_PATTERN: &str =
-    r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$";
+const PLUGIN_ID_PATTERN: &str = r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -326,10 +325,7 @@ fn scaffold_wasm(
 /// Emit the script (sandboxed JS/TS) project: plugin.json, index.ts, README.md,
 /// package.json, tsconfig.json. No `src/` subdirectory — authors edit
 /// `index.ts` at the project root.
-fn scaffold_script(
-    output_dir: &Path,
-    config: &ScaffoldConfig,
-) -> Result<(), PluginError> {
+fn scaffold_script(output_dir: &Path, config: &ScaffoldConfig) -> Result<(), PluginError> {
     std::fs::create_dir_all(output_dir)?;
 
     write_file(
@@ -395,7 +391,10 @@ mod tests {
 
         assert!(out.join("Cargo.toml").exists(), "Cargo.toml missing");
         assert!(out.join("manifest.toml").exists(), "manifest.toml missing");
-        assert!(out.join("src").join("lib.rs").exists(), "src/lib.rs missing");
+        assert!(
+            out.join("src").join("lib.rs").exists(),
+            "src/lib.rs missing"
+        );
     }
 
     #[test]
@@ -482,11 +481,14 @@ mod tests {
         let out = tmp.path().join("script-plugin");
         scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
 
-        for f in ["plugin.json", "index.ts", "README.md", "package.json", "tsconfig.json"] {
-            assert!(
-                out.join(f).exists(),
-                "script template missing file: {f}"
-            );
+        for f in [
+            "plugin.json",
+            "index.ts",
+            "README.md",
+            "package.json",
+            "tsconfig.json",
+        ] {
+            assert!(out.join(f).exists(), "script template missing file: {f}");
         }
         // Script projects do not have a `src/` subdirectory — authors edit
         // `index.ts` at the project root.
@@ -495,8 +497,14 @@ mod tests {
             "script template should not emit src/ directory"
         );
         // And none of the WASM-template outputs.
-        assert!(!out.join("Cargo.toml").exists(), "Cargo.toml leaked into script scaffold");
-        assert!(!out.join("manifest.toml").exists(), "manifest.toml leaked into script scaffold");
+        assert!(
+            !out.join("Cargo.toml").exists(),
+            "Cargo.toml leaked into script scaffold"
+        );
+        assert!(
+            !out.join("manifest.toml").exists(),
+            "manifest.toml leaked into script scaffold"
+        );
     }
 
     #[test]
@@ -506,8 +514,8 @@ mod tests {
         scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
 
         let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&manifest)
-            .expect("plugin.json must parse as JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&manifest).expect("plugin.json must parse as JSON");
         assert_eq!(parsed["id"], "com.example.my-plugin");
         assert_eq!(parsed["name"], "My Plugin");
         assert_eq!(parsed["apiVersion"], 1);
@@ -554,8 +562,8 @@ mod tests {
         scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
 
         let pkg_str = std::fs::read_to_string(out.join("package.json")).unwrap();
-        let pkg: serde_json::Value = serde_json::from_str(&pkg_str)
-            .expect("package.json must parse as JSON");
+        let pkg: serde_json::Value =
+            serde_json::from_str(&pkg_str).expect("package.json must parse as JSON");
 
         assert_eq!(pkg["name"], "com.example.my-plugin");
         let api_pin = pkg["devDependencies"]["@nexus/extension-api"]
@@ -576,7 +584,10 @@ mod tests {
         // esbuild + typescript must be present for `pnpm build`.
         assert!(pkg["devDependencies"]["esbuild"].is_string());
         assert!(pkg["devDependencies"]["typescript"].is_string());
-        assert!(pkg["scripts"]["build"].as_str().unwrap().contains("esbuild"));
+        assert!(pkg["scripts"]["build"]
+            .as_str()
+            .unwrap()
+            .contains("esbuild"));
     }
 
     #[test]
@@ -586,8 +597,8 @@ mod tests {
         scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
 
         let raw = std::fs::read_to_string(out.join("tsconfig.json")).unwrap();
-        let cfg: serde_json::Value = serde_json::from_str(&raw)
-            .expect("tsconfig.json must parse as JSON");
+        let cfg: serde_json::Value =
+            serde_json::from_str(&raw).expect("tsconfig.json must parse as JSON");
         assert_eq!(cfg["compilerOptions"]["target"], "ES2020");
         assert_eq!(cfg["compilerOptions"]["module"], "esnext");
         assert_eq!(cfg["compilerOptions"]["strict"], true);

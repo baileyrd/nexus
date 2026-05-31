@@ -148,7 +148,9 @@ impl AiConfig {
 /// error.
 #[must_use]
 pub fn detect_local_embedding() -> Option<AiConfig> {
-    let flag = env::var("NEXUS_LOCAL_EMBEDDINGS").ok()?.to_ascii_lowercase();
+    let flag = env::var("NEXUS_LOCAL_EMBEDDINGS")
+        .ok()?
+        .to_ascii_lowercase();
     if !matches!(flag.as_str(), "1" | "true" | "yes" | "on") {
         return None;
     }

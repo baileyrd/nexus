@@ -64,9 +64,8 @@ impl CodeLanguage {
 /// override (`nexus.editor.codeFileExtensions`) widens this set at
 /// runtime; the Rust default ships the same out-of-the-box list so a
 /// fresh forge builds an index without further configuration.
-pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &[
-    "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go",
-];
+pub const DEFAULT_CODE_EXTENSIONS: &[&str] =
+    &["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go"];
 
 /// Detect the language for a forge-relative path. Returns `None` for
 /// non-code files (markdown, JSON, attachments, etc.).
@@ -230,9 +229,7 @@ pub fn upsert_file_symbols_in_tx(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, unixepoch())",
         )?;
         for sym in symbols {
-            let parent_row_id = sym
-                .parent_idx
-                .and_then(|idx| row_ids.get(idx).copied());
+            let parent_row_id = sym.parent_idx.and_then(|idx| row_ids.get(idx).copied());
             stmt.execute(rusqlite::params![
                 path,
                 language.as_str(),
@@ -293,8 +290,7 @@ pub fn query_symbols(
     params.push(Box::new(i64::from(limit)));
 
     let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> =
-        params.iter().map(AsRef::as_ref).collect();
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(AsRef::as_ref).collect();
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
         Ok(SymbolRecord {
             id: row.get(0)?,
@@ -321,11 +317,7 @@ pub fn query_symbols(
 /// # Errors
 /// Returns [`StorageError::Database`] on any SQLite failure.
 pub fn count_symbols(conn: &Connection) -> Result<usize, StorageError> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM code_symbols",
-        [],
-        |r| r.get(0),
-    )?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM code_symbols", [], |r| r.get(0))?;
     Ok(usize::try_from(n).unwrap_or(0))
 }
 
@@ -337,11 +329,15 @@ fn child_text(node: Node<'_>, field: &str, src: &[u8]) -> Option<String> {
 }
 
 fn line_start(node: Node<'_>) -> u32 {
-    u32::try_from(node.start_position().row).unwrap_or(u32::MAX).saturating_add(1)
+    u32::try_from(node.start_position().row)
+        .unwrap_or(u32::MAX)
+        .saturating_add(1)
 }
 
 fn line_end(node: Node<'_>) -> u32 {
-    u32::try_from(node.end_position().row).unwrap_or(u32::MAX).saturating_add(1)
+    u32::try_from(node.end_position().row)
+        .unwrap_or(u32::MAX)
+        .saturating_add(1)
 }
 
 /// Collect a run of leading line / block comments preceding `node`.
@@ -351,12 +347,7 @@ fn line_end(node: Node<'_>) -> u32 {
 /// JSDoc keeps only `/** */` blocks. When `is_doc` returns false the
 /// comment is treated as separator, halting the walk so a stray `//
 /// TODO` doesn't accidentally become the doc.
-fn leading_doc<F>(
-    node: Node<'_>,
-    src: &[u8],
-    comment_kinds: &[&str],
-    is_doc: F,
-) -> Option<String>
+fn leading_doc<F>(node: Node<'_>, src: &[u8], comment_kinds: &[&str], is_doc: F) -> Option<String>
 where
     F: Fn(&str) -> bool,
 {
@@ -633,9 +624,9 @@ fn walk_python(node: Node<'_>, src: &[u8], out: &mut Vec<ExtractedSymbol>, paren
         "decorated_definition" => {
             // Find the inner def / class for the actual name.
             let mut cursor = node.walk();
-            let inner = node.named_children(&mut cursor).find(|c| {
-                matches!(c.kind(), "function_definition" | "class_definition")
-            });
+            let inner = node
+                .named_children(&mut cursor)
+                .find(|c| matches!(c.kind(), "function_definition" | "class_definition"));
             if let Some(inner) = inner {
                 let k = if inner.kind() == "class_definition" {
                     "class"
@@ -844,7 +835,11 @@ export const arrowFn = (x: number) => x + 1;
         assert!(names.contains(&"Id"));
         assert!(names.contains(&"arrowFn"));
         let foo = syms.iter().find(|s| s.name == "foo").unwrap();
-        assert!(foo.doc_comment.as_deref().unwrap().contains("JSDoc for foo"));
+        assert!(foo
+            .doc_comment
+            .as_deref()
+            .unwrap()
+            .contains("JSDoc for foo"));
         let class_idx = syms.iter().position(|s| s.name == "Bar").unwrap();
         let greet = syms.iter().find(|s| s.name == "greet").unwrap();
         assert_eq!(greet.parent_idx, Some(class_idx));
@@ -902,7 +897,11 @@ type Greeter interface { Greet() string }
         let greeter = syms.iter().find(|s| s.name == "Greeter").unwrap();
         assert_eq!(greeter.kind, "interface");
         let greet = syms.iter().find(|s| s.name == "Greet").unwrap();
-        assert!(greet.doc_comment.as_deref().unwrap().contains("Greet says hi"));
+        assert!(greet
+            .doc_comment
+            .as_deref()
+            .unwrap()
+            .contains("Greet says hi"));
     }
 
     #[test]
@@ -922,9 +921,15 @@ type Greeter interface { Greet() string }
     #[test]
     fn query_filters_by_name_and_path() {
         let conn = db();
-        let rust_syms = extract_symbols(CodeLanguage::Rust, "pub fn shared() {}\npub fn only_a() {}\n");
+        let rust_syms = extract_symbols(
+            CodeLanguage::Rust,
+            "pub fn shared() {}\npub fn only_a() {}\n",
+        );
         upsert_file_symbols(&conn, "a.rs", CodeLanguage::Rust, &rust_syms).unwrap();
-        let other = extract_symbols(CodeLanguage::Rust, "pub fn shared() {}\npub fn only_b() {}\n");
+        let other = extract_symbols(
+            CodeLanguage::Rust,
+            "pub fn shared() {}\npub fn only_b() {}\n",
+        );
         upsert_file_symbols(&conn, "b.rs", CodeLanguage::Rust, &other).unwrap();
 
         let by_name = query_symbols(

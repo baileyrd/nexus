@@ -13,7 +13,12 @@ use clap_complete::{generate, Shell};
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(name = "nexus", about = "Nexus IDE — headless CLI", version, allow_external_subcommands = true)]
+#[command(
+    name = "nexus",
+    about = "Nexus IDE — headless CLI",
+    version,
+    allow_external_subcommands = true
+)]
 struct Cli {
     /// Path to the forge directory (overrides NEXUS_FORGE_PATH env var)
     #[arg(long, global = true, env = "NEXUS_FORGE_PATH")]
@@ -83,7 +88,6 @@ enum Commands {
     // -----------------------------------------------------------------------
     // Stub commands — implemented in later milestones
     // -----------------------------------------------------------------------
-
     /// Canvas file operations
     Canvas(CanvasArgs),
     /// Configuration management
@@ -1709,7 +1713,6 @@ enum StashCommand {
     },
 }
 
-
 // ---------------------------------------------------------------------------
 // Stub — used for not-yet-implemented command groups
 // ---------------------------------------------------------------------------
@@ -1841,21 +1844,25 @@ fn main() {
             ForgeCommand::Status => commands::forge::status(&mut app),
             ForgeCommand::Reindex => commands::forge::reindex(&mut app),
             ForgeCommand::Doctor { fix } => commands::forge::doctor(&mut app, fix),
-            ForgeCommand::Import { source, dry_run, on_conflict } => {
-                commands::forge::import(&mut app, &source, dry_run, &on_conflict)
-            }
+            ForgeCommand::Import {
+                source,
+                dry_run,
+                on_conflict,
+            } => commands::forge::import(&mut app, &source, dry_run, &on_conflict),
         },
 
         Commands::Content(args) => match args.command {
-            ContentCommand::Create { path, content, stdin } => {
-                commands::content::create(&mut app, &path, content.as_deref(), stdin)
-            }
-            ContentCommand::Update { path, content, stdin } => {
-                commands::content::update(&mut app, &path, content.as_deref(), stdin)
-            }
-            ContentCommand::List { prefix } => {
-                commands::content::list(&mut app, prefix.as_deref())
-            }
+            ContentCommand::Create {
+                path,
+                content,
+                stdin,
+            } => commands::content::create(&mut app, &path, content.as_deref(), stdin),
+            ContentCommand::Update {
+                path,
+                content,
+                stdin,
+            } => commands::content::update(&mut app, &path, content.as_deref(), stdin),
+            ContentCommand::List { prefix } => commands::content::list(&mut app, prefix.as_deref()),
             ContentCommand::Read { path, raw } => commands::content::read(&mut app, &path, raw),
             ContentCommand::Delete { path, force } => {
                 commands::content::delete(&mut app, &path, force)
@@ -1863,17 +1870,15 @@ fn main() {
             ContentCommand::Search { query, limit } => {
                 commands::content::search(&mut app, &query, limit)
             }
-            ContentCommand::Tasks { completed, all, file } => {
-                commands::content::tasks(&mut app, completed, all, file.as_deref())
-            }
-            ContentCommand::TaskToggle { id } => {
-                commands::content::task_toggle(&mut app, id)
-            }
+            ContentCommand::Tasks {
+                completed,
+                all,
+                file,
+            } => commands::content::tasks(&mut app, completed, all, file.as_deref()),
+            ContentCommand::TaskToggle { id } => commands::content::task_toggle(&mut app, id),
             ContentCommand::Links { path } => commands::content::links(&mut app, &path),
             ContentCommand::Backlinks { path } => commands::content::backlinks(&mut app, &path),
-            ContentCommand::Daily { date } => {
-                commands::content::daily(&mut app, date.as_deref())
-            }
+            ContentCommand::Daily { date } => commands::content::daily(&mut app, date.as_deref()),
             ContentCommand::Export { path, output } => {
                 commands::content::export(&mut app, &path, output.as_deref())
             }
@@ -1890,40 +1895,43 @@ fn main() {
                     commands::plugin::list(&mut app)
                 }
             }
-            PluginCommand::Remove { id, yes } => {
-                commands::plugin::remove_shell_plugin(&id, yes)
-            }
-            PluginCommand::Call { plugin_id, command, args } => {
+            PluginCommand::Remove { id, yes } => commands::plugin::remove_shell_plugin(&id, yes),
+            PluginCommand::Call {
+                plugin_id,
+                command,
+                args,
+            } => {
                 let args_json = args.as_deref().unwrap_or("{}");
                 commands::plugin::call(&mut app, &plugin_id, &command, args_json)
             }
             PluginCommand::Uninstall { plugin_id } => {
                 commands::plugin::uninstall(&mut app, &plugin_id)
             }
-            PluginCommand::Scaffold { plugin_type, id, name, author, output } => {
-                commands::plugin::scaffold(
-                    &plugin_type,
-                    Some(&id),
-                    Some(&name),
-                    Some(&author),
-                    output.as_deref(),
-                )
-            }
-            PluginCommand::Enable { plugin_id } => {
-                commands::plugin::enable(&mut app, &plugin_id)
-            }
-            PluginCommand::Disable { plugin_id } => {
-                commands::plugin::disable(&mut app, &plugin_id)
-            }
+            PluginCommand::Scaffold {
+                plugin_type,
+                id,
+                name,
+                author,
+                output,
+            } => commands::plugin::scaffold(
+                &plugin_type,
+                Some(&id),
+                Some(&name),
+                Some(&author),
+                output.as_deref(),
+            ),
+            PluginCommand::Enable { plugin_id } => commands::plugin::enable(&mut app, &plugin_id),
+            PluginCommand::Disable { plugin_id } => commands::plugin::disable(&mut app, &plugin_id),
             PluginCommand::Reset { plugin_id } => {
                 commands::plugin::reset_crash(&mut app, &plugin_id)
             }
             PluginCommand::Settings { plugin_id, set } => {
                 commands::plugin::settings(&mut app, &plugin_id, set.as_deref())
             }
-            PluginCommand::Revoke { plugin_id, capability } => {
-                commands::plugin::revoke(&mut app, &plugin_id, &capability)
-            }
+            PluginCommand::Revoke {
+                plugin_id,
+                capability,
+            } => commands::plugin::revoke(&mut app, &plugin_id, &capability),
             PluginCommand::Verify { path, keys_dir } => {
                 commands::plugin::verify(&path, keys_dir.as_deref())
             }
@@ -1932,20 +1940,19 @@ fn main() {
         Commands::Watch(args) => commands::watch::run(&mut app, &args.glob),
 
         Commands::Logs(args) => match args.command {
-            LogsCommand::Tail { level, lines } => {
-                commands::logs::tail(&app, Some(&level), lines)
-            }
+            LogsCommand::Tail { level, lines } => commands::logs::tail(&app, Some(&level), lines),
             LogsCommand::Show { date } => commands::logs::show(&app, &date),
             LogsCommand::Path => commands::logs::path(&app),
-            LogsCommand::List { plugin, event_type, since, limit } => {
-                commands::logs::audit_list(&mut app, plugin, event_type, since, limit)
-            }
+            LogsCommand::List {
+                plugin,
+                event_type,
+                since,
+                limit,
+            } => commands::logs::audit_list(&mut app, plugin, event_type, since, limit),
             LogsCommand::Export { start, end, format } => {
                 commands::logs::audit_export(&mut app, start, end, &format)
             }
-            LogsCommand::Clear { older_than } => {
-                commands::logs::audit_clear(&mut app, older_than)
-            }
+            LogsCommand::Clear { older_than } => commands::logs::audit_clear(&mut app, older_than),
         },
 
         Commands::Graph(args) => match args.command {
@@ -1999,14 +2006,39 @@ fn main() {
             CanvasCommand::Create { path } => commands::canvas::create(&mut app, &path),
             CanvasCommand::Show { path } => commands::canvas::show(&mut app, &path),
             CanvasCommand::AddNode {
-                path, node_type, x, y, width, height, content, label,
+                path,
+                node_type,
+                x,
+                y,
+                width,
+                height,
+                content,
+                label,
             } => commands::canvas::add_node(
-                &mut app, &path, &node_type, x, y, width, height,
-                content.as_deref(), label.as_deref(),
+                &mut app,
+                &path,
+                &node_type,
+                x,
+                y,
+                width,
+                height,
+                content.as_deref(),
+                label.as_deref(),
             ),
-            CanvasCommand::AddEdge { path, from, to, edge_type, label } => {
-                commands::canvas::add_edge(&mut app, &path, &from, &to, &edge_type, label.as_deref())
-            }
+            CanvasCommand::AddEdge {
+                path,
+                from,
+                to,
+                edge_type,
+                label,
+            } => commands::canvas::add_edge(
+                &mut app,
+                &path,
+                &from,
+                &to,
+                &edge_type,
+                label.as_deref(),
+            ),
         },
 
         Commands::Config(args) => match args.command {
@@ -2030,19 +2062,13 @@ fn main() {
                 limit,
                 offset,
             } => commands::bases::query(&mut app, &path, &filter, &sort, limit, offset),
-            BasesCommand::Import {
-                path,
-                file,
-                header,
-            } => commands::bases::import(&mut app, &path, &file, header),
-            BasesCommand::Export { path, file } => {
-                commands::bases::export(&mut app, &path, &file)
+            BasesCommand::Import { path, file, header } => {
+                commands::bases::import(&mut app, &path, &file, header)
             }
-            BasesCommand::Formula {
-                path,
-                record,
-                expr,
-            } => commands::bases::formula(&mut app, &path, &record, &expr),
+            BasesCommand::Export { path, file } => commands::bases::export(&mut app, &path, &file),
+            BasesCommand::Formula { path, record, expr } => {
+                commands::bases::formula(&mut app, &path, &record, &expr)
+            }
         },
 
         Commands::Db { cmd } => commands::db::run(&mut app, cmd),
@@ -2092,9 +2118,7 @@ fn main() {
         },
 
         Commands::Tool(args) => match args.command {
-            ToolCommand::List { capabilities } => {
-                commands::tool::list(&mut app, &capabilities)
-            }
+            ToolCommand::List { capabilities } => commands::tool::list(&mut app, &capabilities),
         },
 
         Commands::Migrate(args) => match args.command {
@@ -2108,9 +2132,7 @@ fn main() {
             SkillCommand::Context { context } => commands::skill::context(&mut app, &context),
             SkillCommand::Triggered { text } => commands::skill::triggered(&mut app, &text),
             SkillCommand::Reload => commands::skill::reload(&mut app),
-            SkillCommand::Render { id, params } => {
-                commands::skill::render(&mut app, &id, &params)
-            }
+            SkillCommand::Render { id, params } => commands::skill::render(&mut app, &id, &params),
         },
 
         Commands::Workflow(args) => match args.command {
@@ -2149,12 +2171,8 @@ fn main() {
                 cwd,
             } => commands::proc::add(&mut app, &name, &command, shell.as_deref(), cwd.as_deref()),
             ProcCommand::Delete { slug } => commands::proc::delete(&mut app, &slug),
-            ProcCommand::Reorder { slug, order } => {
-                commands::proc::reorder(&mut app, &slug, order)
-            }
-            ProcCommand::History { limit, json } => {
-                commands::proc::history(&mut app, limit, json)
-            }
+            ProcCommand::Reorder { slug, order } => commands::proc::reorder(&mut app, &slug, order),
+            ProcCommand::History { limit, json } => commands::proc::history(&mut app, limit, json),
         },
 
         // Stub commands — implemented in later milestones.
@@ -2195,14 +2213,7 @@ fn main() {
                 peer_id,
                 display_name,
                 save_token,
-            } => commands::collab::join(
-                &app,
-                &url,
-                token,
-                peer_id,
-                display_name,
-                save_token,
-            ),
+            } => commands::collab::join(&app, &url, token, peer_id, display_name, save_token),
             CollabCommand::Token { command } => match command {
                 CollabTokenCommand::Set { value } => commands::collab::token_set(&value),
                 CollabTokenCommand::Clear => commands::collab::token_clear(),
@@ -2217,7 +2228,11 @@ fn main() {
                 ))
             }
         }
-        Commands::Sync { remote, branch, no_push } => (|| -> anyhow::Result<()> {
+        Commands::Sync {
+            remote,
+            branch,
+            no_push,
+        } => (|| -> anyhow::Result<()> {
             commands::git::fetch(&app, &remote)?;
             commands::git::pull(&app, &remote, branch.as_deref())?;
             if !no_push {
@@ -2234,22 +2249,43 @@ fn main() {
             GitCommand::Stage { path, all } => commands::git::stage(&app, path.as_deref(), all),
             GitCommand::Unstage { path, all } => commands::git::unstage(&app, path.as_deref(), all),
             GitCommand::StageHunk { path, hunks } => commands::git::stage_hunk(&app, &path, &hunks),
-            GitCommand::UnstageHunk { path, hunks } => commands::git::unstage_hunk(&app, &path, &hunks),
+            GitCommand::UnstageHunk { path, hunks } => {
+                commands::git::unstage_hunk(&app, &path, &hunks)
+            }
             GitCommand::Commit { message } => commands::git::commit(&app, &message),
             GitCommand::Branch { command } => commands::git::branch(&app, command),
             GitCommand::Stash { command } => commands::git::stash(&app, command),
-            GitCommand::Tag { name, message, delete, push } => {
-                commands::git::tag(&app, name.as_deref(), message.as_deref(), delete.as_deref(), push.as_deref())
-            }
+            GitCommand::Tag {
+                name,
+                message,
+                delete,
+                push,
+            } => commands::git::tag(
+                &app,
+                name.as_deref(),
+                message.as_deref(),
+                delete.as_deref(),
+                push.as_deref(),
+            ),
             GitCommand::Fetch { remote } => commands::git::fetch(&app, &remote),
-            GitCommand::Push { remote, branch } => commands::git::push(&app, &remote, branch.as_deref()),
-            GitCommand::Pull { remote, branch } => commands::git::pull(&app, &remote, branch.as_deref()),
-            GitCommand::Merge { branch, abort } => commands::git::merge(&app, branch.as_deref(), abort),
+            GitCommand::Push { remote, branch } => {
+                commands::git::push(&app, &remote, branch.as_deref())
+            }
+            GitCommand::Pull { remote, branch } => {
+                commands::git::pull(&app, &remote, branch.as_deref())
+            }
+            GitCommand::Merge { branch, abort } => {
+                commands::git::merge(&app, branch.as_deref(), abort)
+            }
             GitCommand::Conflicts => commands::git::conflicts(&app),
             GitCommand::Remotes => commands::git::remotes(&app),
-            GitCommand::AutoCommit { enable, disable, watch, interval, debounce } => {
-                commands::git::auto_commit(&app, enable, disable, watch, interval, debounce)
-            }
+            GitCommand::AutoCommit {
+                enable,
+                disable,
+                watch,
+                interval,
+                debounce,
+            } => commands::git::auto_commit(&app, enable, disable, watch, interval, debounce),
             GitCommand::SetPassphrase { key } => commands::git::set_passphrase(&key),
             GitCommand::ClearPassphrase { key } => commands::git::clear_passphrase(&key),
             GitCommand::LfsStatus => commands::git::lfs_status(&mut app),
@@ -2270,16 +2306,20 @@ fn main() {
         }
 
         Commands::Notify(args) => match args.command {
-            NotifyCommand::Send { channel, source, severity, message, title } => {
-                commands::notify::send(
-                    &mut app,
-                    channel.as_deref(),
-                    source.as_deref(),
-                    severity.as_deref(),
-                    &message,
-                    title.as_deref(),
-                )
-            }
+            NotifyCommand::Send {
+                channel,
+                source,
+                severity,
+                message,
+                title,
+            } => commands::notify::send(
+                &mut app,
+                channel.as_deref(),
+                source.as_deref(),
+                severity.as_deref(),
+                &message,
+                title.as_deref(),
+            ),
         },
 
         Commands::Import(args) => match args.command {
@@ -2312,9 +2352,7 @@ fn main() {
             CrdtCommand::InstallMergeDriver { apply } => {
                 commands::crdt::install_merge_driver(apply)
             }
-            CrdtCommand::EnableTransport => {
-                commands::crdt::enable_transport(&mut app)
-            }
+            CrdtCommand::EnableTransport => commands::crdt::enable_transport(&mut app),
         },
 
         // Dispatch to a plugin-registered CLI subcommand: `nexus <subcommand> [args…]`
@@ -2350,7 +2388,11 @@ mod tests {
             .expect("parse content update --stdin");
         match cli.command {
             Commands::Content(args) => match args.command {
-                ContentCommand::Update { path, content, stdin } => {
+                ContentCommand::Update {
+                    path,
+                    content,
+                    stdin,
+                } => {
                     assert_eq!(path, "foo.md");
                     assert!(content.is_none());
                     assert!(stdin);
@@ -2364,12 +2406,21 @@ mod tests {
     #[test]
     fn parse_content_update_with_content_flag() {
         let cli = Cli::try_parse_from([
-            "nexus", "content", "update", "notes/a.md", "--content", "hello",
+            "nexus",
+            "content",
+            "update",
+            "notes/a.md",
+            "--content",
+            "hello",
         ])
         .expect("parse content update --content");
         match cli.command {
             Commands::Content(args) => match args.command {
-                ContentCommand::Update { path, content, stdin } => {
+                ContentCommand::Update {
+                    path,
+                    content,
+                    stdin,
+                } => {
                     assert_eq!(path, "notes/a.md");
                     assert_eq!(content.as_deref(), Some("hello"));
                     assert!(!stdin);
@@ -2426,7 +2477,10 @@ mod tests {
 
         // Top-level: `nexus tags` subtree must exist.
         let top = cmd.render_long_help().to_string();
-        assert!(top.contains("tags"), "top-level help missing 'tags':\n{top}");
+        assert!(
+            top.contains("tags"),
+            "top-level help missing 'tags':\n{top}"
+        );
 
         // `nexus content --help` must list Update and List.
         let content = cmd
@@ -2434,8 +2488,14 @@ mod tests {
             .expect("content subcommand registered")
             .render_long_help()
             .to_string();
-        assert!(content.contains("update"), "content help missing 'update':\n{content}");
-        assert!(content.contains("list"), "content help missing 'list':\n{content}");
+        assert!(
+            content.contains("update"),
+            "content help missing 'update':\n{content}"
+        );
+        assert!(
+            content.contains("list"),
+            "content help missing 'list':\n{content}"
+        );
 
         // `nexus tags --help` must list list.
         let tags = cmd

@@ -161,8 +161,10 @@ pub fn compute_rollup(
 
     // Count variants are special — they operate on the relation as
     // a whole (or the projected raw values), not on numeric coercion.
-    let raw_values: Vec<&serde_json::Value> =
-        related.iter().filter_map(|r| r.fields.get(aggregate_field)).collect();
+    let raw_values: Vec<&serde_json::Value> = related
+        .iter()
+        .filter_map(|r| r.fields.get(aggregate_field))
+        .collect();
 
     Ok(match aggregation {
         RollupAggregation::Count => serde_json::json!(related.len()),
@@ -305,16 +307,16 @@ mod tests {
             record("t2", json!({ "label": "second" })),
         ];
         let resolved = resolve_relation(&src, &relation("tags", "id"), &targets).unwrap();
-        assert_eq!(resolved.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["t2", "t1"]);
+        assert_eq!(
+            resolved.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["t2", "t1"]
+        );
     }
 
     #[test]
     fn resolve_filters_out_soft_deleted_targets() {
         let src = record("p1", json!({ "owner": "u1" }));
-        let mut targets = vec![
-            record("u1", json!({})),
-            record("u1", json!({})),
-        ];
+        let mut targets = vec![record("u1", json!({})), record("u1", json!({}))];
         targets[0].deleted_at = Some(123);
         let resolved = resolve_relation(&src, &relation("owner", "id"), &targets).unwrap();
         // Only the second (live) record at id "u1" matches.
@@ -354,7 +356,10 @@ mod tests {
         ];
         let resolved =
             resolve_relation(&src, &relation("category", "category_name"), &targets).unwrap();
-        assert_eq!(resolved.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["t1", "t3"]);
+        assert_eq!(
+            resolved.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["t1", "t3"]
+        );
     }
 
     #[test]

@@ -87,13 +87,16 @@ impl ConnectionPool {
         if let Some(entry) = self.entries.read().await.get(adapter_name) {
             return Ok(Arc::clone(&entry.client));
         }
-        let spec = cfg.adapters.get(adapter_name).ok_or_else(|| DapClientError::Spawn {
-            command: adapter_name.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("adapter '{adapter_name}' not in dap.toml"),
-            ),
-        })?;
+        let spec = cfg
+            .adapters
+            .get(adapter_name)
+            .ok_or_else(|| DapClientError::Spawn {
+                command: adapter_name.to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("adapter '{adapter_name}' not in dap.toml"),
+                ),
+            })?;
         if spec.disabled {
             return Err(DapClientError::Spawn {
                 command: spec.command.clone(),
@@ -130,8 +133,9 @@ impl ConnectionPool {
     where
         F: for<'a> FnMut(
             &'a Mutex<DapClient>,
-        )
-            -> Pin<Box<dyn std::future::Future<Output = Result<T, DapClientError>> + Send + 'a>>,
+        ) -> Pin<
+            Box<dyn std::future::Future<Output = Result<T, DapClientError>> + Send + 'a>,
+        >,
     {
         let mut last_err: Option<DapClientError> = None;
         let mut pending_resync: Option<HashMap<String, Vec<SourceBreakpointSpec>>> = None;

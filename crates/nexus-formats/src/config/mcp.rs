@@ -22,10 +22,10 @@ pub struct McpConfig {
 impl Default for McpConfig {
     fn default() -> Self {
         Self {
-            enabled:       true,
-            transport:     "stdio".into(),
+            enabled: true,
+            transport: "stdio".into(),
             allowed_tools: Vec::new(),
-            mcp:           BTreeMap::new(),
+            mcp: BTreeMap::new(),
         }
     }
 }

@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use notify::RecursiveMode;
-use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
 
 use crate::PluginError;
 
@@ -48,17 +48,14 @@ impl HotReloader {
         let (raw_tx, raw_rx) = mpsc::channel::<DebounceEventResult>();
 
         let duration = Duration::from_millis(debounce_ms);
-        let mut debouncer = new_debouncer(duration, raw_tx).map_err(|e| {
-            PluginError::Io(std::io::Error::other(e.to_string()))
-        })?;
+        let mut debouncer = new_debouncer(duration, raw_tx)
+            .map_err(|e| PluginError::Io(std::io::Error::other(e.to_string())))?;
 
         if plugins_dir.exists() {
             debouncer
                 .watcher()
                 .watch(plugins_dir, RecursiveMode::Recursive)
-                .map_err(|e| {
-                    PluginError::Io(std::io::Error::other(e.to_string()))
-                })?;
+                .map_err(|e| PluginError::Io(std::io::Error::other(e.to_string())))?;
         }
 
         let plugins_dir_owned = plugins_dir.to_path_buf();

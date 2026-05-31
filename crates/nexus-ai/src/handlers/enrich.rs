@@ -20,9 +20,10 @@ pub(crate) async fn handle_enrich_file(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| exec_err("enrich_file: missing 'path' string".to_string()))?;
 
-    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("enrich_file: no AI chat provider configured".to_string()))?;
-    let embed_cfg =
-        embed_cfg.ok_or_else(|| exec_err("enrich_file: no AI embedding provider configured".to_string()))?;
+    let ai_cfg = ai_cfg
+        .ok_or_else(|| exec_err("enrich_file: no AI chat provider configured".to_string()))?;
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("enrich_file: no AI embedding provider configured".to_string()))?;
 
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
@@ -30,8 +31,7 @@ pub(crate) async fn handle_enrich_file(
     let proposal = crate::enrichment::propose(ctx, ai.as_ref(), embedder.as_ref(), path)
         .await
         .map_err(|e| exec_err(format!("enrich_file: {e}")))?;
-    serde_json::to_value(&proposal)
-        .map_err(|e| exec_err(format!("enrich_file: serialize: {e}")))
+    serde_json::to_value(&proposal).map_err(|e| exec_err(format!("enrich_file: serialize: {e}")))
 }
 
 /// BL-045 — `enrich_apply`: merge a previously-returned proposal back

@@ -120,7 +120,11 @@ impl RunHistoryStore {
                 Vec::new()
             }
         };
-        Self { path, cap, inner: Mutex::new(entries) }
+        Self {
+            path,
+            cap,
+            inner: Mutex::new(entries),
+        }
     }
 
     /// Append a row. Newest-first ordering on disk; entries past
@@ -131,9 +135,7 @@ impl RunHistoryStore {
         let mut guard = match self.inner.lock() {
             Ok(g) => g,
             Err(poison) => {
-                tracing::warn!(
-                    "workflow run_history: mutex poisoned; recovering",
-                );
+                tracing::warn!("workflow run_history: mutex poisoned; recovering",);
                 poison.into_inner()
             }
         };
@@ -141,7 +143,9 @@ impl RunHistoryStore {
         if guard.len() > self.cap {
             guard.truncate(self.cap);
         }
-        let snapshot = OnDisk { entries: guard.clone() };
+        let snapshot = OnDisk {
+            entries: guard.clone(),
+        };
         drop(guard);
         if let Err(err) = self.write_to_disk(&snapshot) {
             tracing::warn!(
@@ -199,7 +203,11 @@ mod tests {
             success,
             condition_skipped: false,
             step_count: 1,
-            error: if success { None } else { Some("boom".to_string()) },
+            error: if success {
+                None
+            } else {
+                Some("boom".to_string())
+            },
         }
     }
 

@@ -31,21 +31,19 @@ use nexus_ai::ipc::{
 // contract over the wire.
 // BL-052 — activity types now live in `nexus_types::activity`.
 use nexus_ai::{Citation, RagResponse};
-use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
-    EntityDecayRelationsArgs, EntityDecayRelationsResult, EntityDuplicatePairRow,
-    EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs, EntityMergeArgs,
-    EntityMergeResult,
-    EntityGetResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
+    DraftRelationRow, EntityDecayRelationsArgs, EntityDecayRelationsResult, EntityDuplicatePairRow,
+    EntityFindDuplicatesArgs, EntityFindDuplicatesResult, EntityGetArgs, EntityGetResult,
+    EntityMergeArgs, EntityMergeResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
-    DraftRelationRow, ListDraftRelationsArgs, ListDraftRelationsResult,
-    ReadFrontmatterResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
-    StorageNoteAppendArgs, StorageNoteAppendResult, StorageQuerySymbolArgs,
-    StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
+    ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult, StorageListDirArgs,
+    StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs, StorageNoteAppendResult,
+    StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
     StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
     StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
 };
+use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
 // brought into the schema generator outside the original storage / ai
 // pilot.
@@ -67,13 +65,11 @@ use nexus_notifications::Channel as NotificationsChannel;
 use nexus_ai_runtime::events::AiEvent as AiRuntimeEvent;
 use nexus_ai_runtime::{
     AgentRun, AgentRunSummary, AgentTaskKind, AiRuntimeControlArgs, AiRuntimeEventsArgs,
-    AiRuntimeGetArgs, AiRuntimeListArgs,
-    AiRuntimeListTriggersReply, AiRuntimeRegisterTriggerArgs, AiRuntimeRegisterTriggerReply,
-    AiRuntimeSubmitArgs, AiRuntimeSubmitReply,
-    AiRuntimeUnregisterTriggerArgs, AiRuntimeUnregisterTriggerReply,
-    AiRuntimeWaitForArgs, AiRuntimeWaitForReply,
-    AmbientTrigger, EventInput, EventInputMode, TriggerFilter, TriggerId,
-    PoolStats, RunStatus, TaskPriority,
+    AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeListTriggersReply, AiRuntimeRegisterTriggerArgs,
+    AiRuntimeRegisterTriggerReply, AiRuntimeSubmitArgs, AiRuntimeSubmitReply,
+    AiRuntimeUnregisterTriggerArgs, AiRuntimeUnregisterTriggerReply, AiRuntimeWaitForArgs,
+    AiRuntimeWaitForReply, AmbientTrigger, EventInput, EventInputMode, PoolStats, RunStatus,
+    TaskPriority, TriggerFilter, TriggerId,
 };
 // nexus-git uses a wire-mirror module — handlers emit ad-hoc
 // `serde_json::json!` and the impl types in `nexus_git::types`
@@ -85,18 +81,17 @@ use nexus_git::ipc::{
 // nexus-mcp uses a wire-mirror module (`nexus_mcp::ipc`) — the
 // existing handlers construct ad-hoc JSON via `serde_json::json!`.
 use nexus_mcp::ipc::{
-    McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply,
-    McpPromptEntry, McpRegisterServerArgs, McpRegisterServerReply, McpResourceEntry,
-    McpServerArgs, McpServerEntry, McpToolEntry, McpUnregisterServerArgs,
-    McpUnregisterServerReply,
+    McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply, McpPromptEntry,
+    McpRegisterServerArgs, McpRegisterServerReply, McpResourceEntry, McpServerArgs, McpServerEntry,
+    McpToolEntry, McpUnregisterServerArgs, McpUnregisterServerReply,
 };
 // nexus-lsp uses a wire-mirror module — the handlers emit ad-hoc
 // `serde_json::json!` and accept `Value` in (BL-076).
 use nexus_lsp::ipc::{
     LspChangeFileArgs, LspCodeActionsArgs, LspExecuteCommandArgs, LspOk, LspOpenFileArgs,
-    LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs,
-    LspRegisterServerArgs, LspRegisterServerReply, LspRenameArgs, LspServerEntry,
-    LspUnregisterServerArgs, LspUnregisterServerReply,
+    LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRegisterServerArgs,
+    LspRegisterServerReply, LspRenameArgs, LspServerEntry, LspUnregisterServerArgs,
+    LspUnregisterServerReply,
 };
 // nexus-dap (BL-081) — wire-mirror types; handlers emit ad-hoc
 // `serde_json::json!` like nexus-lsp.
@@ -140,15 +135,15 @@ use nexus_skills::core_plugin::{
 // Step / DigestConfig use `#[serde(flatten)] extra: BTreeMap<String,
 // toml::Value>` for forward-compat, which is incompatible with
 // `deny_unknown_fields` (the P0-2 gate's invariant).
+use nexus_terminal::{
+    CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
+    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ReplEvalArgs, ReplInfo, ReplStartArgs,
+    ReplStartResponse, ResizeArgs, SearchOutputArgs, SendInputArgs, SendRawInputArgs,
+    SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
+};
 use nexus_workflow::core_plugin::{
     GetTemplateArgs, GetWorkflowArgs, InitTemplateArgs, NextFireArgs, RunHistoryArgs,
     RunWorkflowArgs, ValidateWorkflowArgs,
-};
-use nexus_terminal::{
-    CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
-    ReplEvalArgs, ReplInfo, ReplStartArgs, ReplStartResponse,
-    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
-    SendInputArgs, SendRawInputArgs, SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
 };
 // nexus-database — only the 4 args/responses that don't reference
 // `nexus_types::bases::BaseRecord` are wired in. BaseRecord uses
@@ -160,9 +155,7 @@ use nexus_database::core_plugin::{
 // nexus-templates: the four args types for the page-template subsystem.
 // Note `GetTemplateArgs` collides with the workflow-templates type, so
 // we alias on import.
-use nexus_templates::core_plugin::{
-    ApplyTemplateArgs, GetPageTemplateArgs, RenderTemplateArgs,
-};
+use nexus_templates::core_plugin::{ApplyTemplateArgs, GetPageTemplateArgs, RenderTemplateArgs};
 // nexus-formats: Notion zip-import / format-export args.
 use nexus_formats::core_plugin::{ExportNotionArgs, ImportNotionArgs};
 // nexus-audio (BL-117): STT + TTS IPC types.
@@ -183,9 +176,7 @@ use nexus_editor::ipc::{
 /// handler (args/result/hit/…) land next to each other alphabetically.
 fn write_schema<T: JsonSchema>(handler_slug: &str, role: &str) {
     let schema = schema_for!(T);
-    let pretty = serde_json::to_string_pretty(&schema)
-        .expect("schema serializes to JSON")
-        + "\n";
+    let pretty = serde_json::to_string_pretty(&schema).expect("schema serializes to JSON") + "\n";
     let out = out_dir().join(format!("{handler_slug}_{role}.json"));
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent).expect("mkdir -p schemas/ipc");
@@ -270,42 +261,21 @@ fn emit_all_schemas_impl() {
         "com_nexus_storage__entity_find_duplicates",
         "result",
     );
-    write_schema::<EntityDecayRelationsArgs>(
-        "com_nexus_storage__entity_decay_relations",
-        "args",
-    );
+    write_schema::<EntityDecayRelationsArgs>("com_nexus_storage__entity_decay_relations", "args");
     write_schema::<EntityDecayRelationsResult>(
         "com_nexus_storage__entity_decay_relations",
         "result",
     );
     write_schema::<EntityMergeArgs>("com_nexus_storage__entity_merge", "args");
     write_schema::<EntityMergeResult>("com_nexus_storage__entity_merge", "result");
-    write_schema::<ListDraftRelationsArgs>(
-        "com_nexus_storage__list_draft_relations",
-        "args",
-    );
-    write_schema::<DraftRelationRow>(
-        "com_nexus_storage__list_draft_relations",
-        "row",
-    );
-    write_schema::<ListDraftRelationsResult>(
-        "com_nexus_storage__list_draft_relations",
-        "result",
-    );
+    write_schema::<ListDraftRelationsArgs>("com_nexus_storage__list_draft_relations", "args");
+    write_schema::<DraftRelationRow>("com_nexus_storage__list_draft_relations", "row");
+    write_schema::<ListDraftRelationsResult>("com_nexus_storage__list_draft_relations", "result");
     write_schema::<EnrichEntityArgs>("com_nexus_ai__enrich_entity", "args");
     write_schema::<EnrichEntityResult>("com_nexus_ai__enrich_entity", "result");
-    write_schema::<InferEntityRelationsArgs>(
-        "com_nexus_ai__infer_entity_relations",
-        "args",
-    );
-    write_schema::<InferredRelationRow>(
-        "com_nexus_ai__infer_entity_relations",
-        "row",
-    );
-    write_schema::<InferEntityRelationsResult>(
-        "com_nexus_ai__infer_entity_relations",
-        "result",
-    );
+    write_schema::<InferEntityRelationsArgs>("com_nexus_ai__infer_entity_relations", "args");
+    write_schema::<InferredRelationRow>("com_nexus_ai__infer_entity_relations", "row");
+    write_schema::<InferEntityRelationsResult>("com_nexus_ai__infer_entity_relations", "result");
 
     // ── com.nexus.ai::stream_ask ─────────────────────────────────────────
     write_schema::<AiStreamAskArgs>("com_nexus_ai__stream_ask", "args");
@@ -414,9 +384,18 @@ fn emit_all_schemas_impl() {
     write_schema::<TaskPriority>("com_nexus_ai_runtime", "task_priority");
     // Move 7 — AmbientTrigger / trigger watcher IPC surface.
     write_schema::<AiRuntimeRegisterTriggerArgs>("com_nexus_ai_runtime__register_trigger", "args");
-    write_schema::<AiRuntimeRegisterTriggerReply>("com_nexus_ai_runtime__register_trigger", "reply");
-    write_schema::<AiRuntimeUnregisterTriggerArgs>("com_nexus_ai_runtime__unregister_trigger", "args");
-    write_schema::<AiRuntimeUnregisterTriggerReply>("com_nexus_ai_runtime__unregister_trigger", "reply");
+    write_schema::<AiRuntimeRegisterTriggerReply>(
+        "com_nexus_ai_runtime__register_trigger",
+        "reply",
+    );
+    write_schema::<AiRuntimeUnregisterTriggerArgs>(
+        "com_nexus_ai_runtime__unregister_trigger",
+        "args",
+    );
+    write_schema::<AiRuntimeUnregisterTriggerReply>(
+        "com_nexus_ai_runtime__unregister_trigger",
+        "reply",
+    );
     write_schema::<AiRuntimeListTriggersReply>("com_nexus_ai_runtime__list_triggers", "reply");
     write_schema::<AmbientTrigger>("com_nexus_ai_runtime", "ambient_trigger");
     write_schema::<TriggerFilter>("com_nexus_ai_runtime", "trigger_filter");
@@ -667,10 +646,10 @@ fn every_object_schema_denies_additional_properties() {
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let text = fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let value: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+        let text =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let value: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
         let label = path
             .file_name()
             .and_then(|n| n.to_str())

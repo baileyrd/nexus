@@ -260,7 +260,9 @@ impl ContextBuilder {
     /// Add a system instruction. Always included regardless of budget.
     #[must_use]
     pub fn system(mut self, content: impl Into<String>) -> Self {
-        let entry = ContextEntry::System { content: content.into() };
+        let entry = ContextEntry::System {
+            content: content.into(),
+        };
         // System entries are mandatory — bypass budget check.
         self.token_count += entry.estimated_tokens();
         self.entries.push(entry);
@@ -347,12 +349,7 @@ impl ContextBuilder {
     /// Search `store` for facts matching `query` and inject the top
     /// `limit` results as [`ContextEntry::MemoryInjection`] entries.
     #[must_use]
-    pub fn inject_semantic(
-        mut self,
-        store: &SemanticStore,
-        query: &str,
-        limit: usize,
-    ) -> Self {
+    pub fn inject_semantic(mut self, store: &SemanticStore, query: &str, limit: usize) -> Self {
         for fact in store.search(query, limit) {
             let content = format!("[fact: {}] {}", fact.key, fact.content);
             let memory = ContextEntry::MemoryInjection {
@@ -485,7 +482,8 @@ mod tests {
     fn inject_semantic_includes_matching_facts() {
         let mem = MemoryStore::new();
         mem.semantic.store(SemanticEntry::new("user.lang", "Rust"));
-        mem.semantic.store(SemanticEntry::new("project.desc", "A CLI tool"));
+        mem.semantic
+            .store(SemanticEntry::new("project.desc", "A CLI tool"));
         let ctx = ContextBuilder::new(ContextBudget::default())
             .inject_semantic(&mem.semantic, "rust", 5)
             .build();

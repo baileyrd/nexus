@@ -166,7 +166,10 @@ mod tests {
             return;
         }
         let tmp = TempDir::new().expect("tmp");
-        init_repo(tmp.path(), Some("*.png filter=lfs diff=lfs merge=lfs -text\n"));
+        init_repo(
+            tmp.path(),
+            Some("*.png filter=lfs diff=lfs merge=lfs -text\n"),
+        );
         fs::write(tmp.path().join("a.png"), b"fake png").expect("write");
         assert!(is_lfs_tracked(tmp.path(), Path::new("a.png")));
     }
@@ -177,7 +180,10 @@ mod tests {
             return;
         }
         let tmp = TempDir::new().expect("tmp");
-        init_repo(tmp.path(), Some("*.png filter=lfs diff=lfs merge=lfs -text\n"));
+        init_repo(
+            tmp.path(),
+            Some("*.png filter=lfs diff=lfs merge=lfs -text\n"),
+        );
         fs::write(tmp.path().join("README.md"), b"# hi").expect("write");
         assert!(!is_lfs_tracked(tmp.path(), Path::new("README.md")));
     }
@@ -233,7 +239,10 @@ mod tests {
             .expect("git diff");
         assert!(out.status.success());
         let text = String::from_utf8_lossy(&out.stdout);
-        assert!(text.lines().any(|l| l == "a.txt"), "expected a.txt staged; got: {text:?}");
+        assert!(
+            text.lines().any(|l| l == "a.txt"),
+            "expected a.txt staged; got: {text:?}"
+        );
     }
 
     #[test]

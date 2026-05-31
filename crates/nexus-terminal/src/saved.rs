@@ -130,8 +130,8 @@ impl SqliteSavedCommandStore {
     /// # Errors
     /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn in_memory() -> Result<Self, TerminalError> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| TerminalError::Persist(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| TerminalError::Persist(e.to_string()))?;
         Self::migrate(&conn)?;
         Ok(Self { conn })
     }
@@ -649,14 +649,9 @@ mod tests {
     fn promote_with_unknown_adhoc_id_errors() {
         let adhoc = SqliteAdHocStore::in_memory().expect("adhoc");
         let saved = SqliteSavedCommandStore::in_memory().expect("saved");
-        let err = promote_adhoc_to_saved(
-            &adhoc,
-            &saved,
-            "ghost",
-            "Name",
-            PromoteOptions::default(),
-        )
-        .unwrap_err();
+        let err =
+            promote_adhoc_to_saved(&adhoc, &saved, "ghost", "Name", PromoteOptions::default())
+                .unwrap_err();
         assert!(matches!(err, TerminalError::Persist(_)));
     }
 
@@ -671,14 +666,8 @@ mod tests {
         let id_b = adhoc.record("ls /b", None, Some(0), 10).expect("b");
         promote_adhoc_to_saved(&adhoc, &saved, &id_a, "Build", PromoteOptions::default())
             .expect("first");
-        let err = promote_adhoc_to_saved(
-            &adhoc,
-            &saved,
-            &id_b,
-            "Build",
-            PromoteOptions::default(),
-        )
-        .unwrap_err();
+        let err = promote_adhoc_to_saved(&adhoc, &saved, &id_b, "Build", PromoteOptions::default())
+            .unwrap_err();
         assert!(matches!(err, TerminalError::Persist(_)));
     }
 }

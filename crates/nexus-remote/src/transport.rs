@@ -116,9 +116,7 @@ pub enum TransportError {
 ///   [`MAX_LINE_BYTES`].
 /// - [`TransportError::BadBody`] when the line is not valid JSON-RPC.
 /// - [`TransportError::Io`] for read failures.
-pub async fn read_message<R>(
-    reader: &mut BufReader<R>,
-) -> Result<JsonRpcMessage, TransportError>
+pub async fn read_message<R>(reader: &mut BufReader<R>) -> Result<JsonRpcMessage, TransportError>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -147,10 +145,7 @@ where
 /// - [`TransportError::BadBody`] if serialisation fails (mostly
 ///   defensive).
 /// - [`TransportError::Io`] on write failure.
-pub async fn write_message<W>(
-    writer: &mut W,
-    msg: &JsonRpcMessage,
-) -> Result<(), TransportError>
+pub async fn write_message<W>(writer: &mut W, msg: &JsonRpcMessage) -> Result<(), TransportError>
 where
     W: AsyncWrite + Unpin,
 {
@@ -217,9 +212,7 @@ mod tests {
     async fn skips_blank_lines_between_messages() {
         let mut buf = Vec::new();
         buf.extend_from_slice(b"\n\r\n   \n");
-        buf.extend_from_slice(
-            b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"x\",\"params\":null}\n",
-        );
+        buf.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"x\",\"params\":null}\n");
         let mut reader = BufReader::new(buf.as_slice());
         let parsed = read_message(&mut reader).await.unwrap();
         assert!(matches!(parsed, JsonRpcMessage::Request(_)));

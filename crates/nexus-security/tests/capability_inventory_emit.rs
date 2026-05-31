@@ -38,7 +38,10 @@ fn capability_inventory_table_is_in_sync() {
     // we just wrote (e.g. permissions issue). Real drift is caught by
     // `check_ipc_drift.sh`.
     let on_disk = fs::read_to_string(&out_path).unwrap();
-    assert_eq!(on_disk, generated, "wrote-vs-read mismatch (filesystem issue?)");
+    assert_eq!(
+        on_disk, generated,
+        "wrote-vs-read mismatch (filesystem issue?)"
+    );
 }
 
 fn generate() -> String {
@@ -50,7 +53,9 @@ fn generate() -> String {
          regenerate via `scripts/check_ipc_drift.sh`.\n\n",
     );
     out.push_str("Filed under [BL-137](../PRDs/backlog/BL-137.md).\n\n");
-    out.push_str("This is the canonical surface used at install time and at every kernel-mediated\n");
+    out.push_str(
+        "This is the canonical surface used at install time and at every kernel-mediated\n",
+    );
     out.push_str("operation. ADR 0002 and ADR 0022 carry the rationale; this file is the live\n");
     out.push_str("mirror.\n\n");
     out.push_str("| String | Variant | Risk |\n");
@@ -71,7 +76,10 @@ fn generate() -> String {
         ));
     }
 
-    out.push_str(&format!("\n_Total: {} capabilities._\n", Capability::ALL.len()));
+    out.push_str(&format!(
+        "\n_Total: {} capabilities._\n",
+        Capability::ALL.len()
+    ));
     out
 }
 
@@ -87,7 +95,10 @@ fn workspace_root() -> PathBuf {
             }
         }
         if !dir.pop() {
-            panic!("failed to locate workspace root from {}", env!("CARGO_MANIFEST_DIR"));
+            panic!(
+                "failed to locate workspace root from {}",
+                env!("CARGO_MANIFEST_DIR")
+            );
         }
     }
 }

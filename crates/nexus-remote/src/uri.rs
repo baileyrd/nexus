@@ -89,8 +89,7 @@ impl fmt::Display for ForgeUri {
                 }
                 // Re-bracket the host on output if it looks like an
                 // IPv6 literal (contains a colon and no brackets).
-                let needs_brackets =
-                    s.host.contains(':') && !s.host.starts_with('[');
+                let needs_brackets = s.host.contains(':') && !s.host.starts_with('[');
                 if needs_brackets {
                     write!(f, "[{}]", s.host)?;
                 } else {

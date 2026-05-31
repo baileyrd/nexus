@@ -103,11 +103,7 @@ fn eval_node(node: &FilterNode, facts: &NoteFacts, unsupported: &mut Vec<String>
 #[derive(Debug, Clone)]
 enum Expr {
     /// `lhs op literal`
-    Binary {
-        lhs: Lhs,
-        op: BinOp,
-        rhs: Literal,
-    },
+    Binary { lhs: Lhs, op: BinOp, rhs: Literal },
     /// `lhs.method(literal)` or `!lhs.method(literal)`
     Method {
         negated: bool,
@@ -465,9 +461,7 @@ fn values_equal(left: &Value, right: &Literal) -> bool {
         // mirroring how Obsidian treats `tags == "book"` against a
         // list of tags. Strict array equality is rarely what users
         // want in `.base` filters.
-        (Value::Array(items), _) => items
-            .iter()
-            .any(|item| values_equal(item, right)),
+        (Value::Array(items), _) => items.iter().any(|item| values_equal(item, right)),
         _ => false,
     }
 }
@@ -698,10 +692,7 @@ mod tests {
             and: vec![
                 expr_node(r#"type == "literature""#),
                 FilterNode::Or {
-                    or: vec![
-                        expr_node("year < 1900"),
-                        expr_node("year >= 1965"),
-                    ],
+                    or: vec![expr_node("year < 1900"), expr_node("year >= 1965")],
                 },
                 FilterNode::Not {
                     not: Box::new(expr_node("archived == true")),
@@ -733,10 +724,7 @@ mod tests {
     #[test]
     fn unsupported_deduplicated_across_or_branches() {
         let node = FilterNode::Or {
-            or: vec![
-                expr_node("formula(x) > 1"),
-                expr_node("formula(x) > 1"),
-            ],
+            or: vec![expr_node("formula(x) > 1"), expr_node("formula(x) > 1")],
         };
         let report = evaluate(Some(&node), &facts());
         assert_eq!(report.unsupported.len(), 1);

@@ -27,7 +27,7 @@
 
 use std::sync::OnceLock;
 
-use nexus_plugin_api::{CapabilitySet, token::CapabilityToken};
+use nexus_plugin_api::{token::CapabilityToken, CapabilitySet};
 
 use crate::event_input::TriggerRegistry;
 use crate::pool::WorkerPool;

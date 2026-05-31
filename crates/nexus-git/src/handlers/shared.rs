@@ -41,9 +41,7 @@ pub(crate) fn path_arg(
 }
 
 /// Extract the `hunk_indices` array from IPC args as `Vec<usize>`.
-pub(crate) fn hunk_indices_arg(
-    args: &serde_json::Value,
-) -> Result<Vec<usize>, PluginError> {
+pub(crate) fn hunk_indices_arg(args: &serde_json::Value) -> Result<Vec<usize>, PluginError> {
     let arr = args
         .get("hunk_indices")
         .and_then(serde_json::Value::as_array)
@@ -53,9 +51,7 @@ pub(crate) fn hunk_indices_arg(
             v.as_u64()
                 .and_then(|n| usize::try_from(n).ok())
                 .ok_or_else(|| {
-                    exec_err(
-                        "hunk_indices entries must be non-negative integers".to_string(),
-                    )
+                    exec_err("hunk_indices entries must be non-negative integers".to_string())
                 })
         })
         .collect()
@@ -67,10 +63,7 @@ pub(crate) fn hunk_indices_arg(
 /// which requires a command name for error messages. Keeping the
 /// historical two-arg shape here means existing call sites don't have
 /// to thread a command label.
-pub(crate) fn key_string(
-    args: &serde_json::Value,
-    key: &str,
-) -> Result<String, PluginError> {
+pub(crate) fn key_string(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
     args.get(key)
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)

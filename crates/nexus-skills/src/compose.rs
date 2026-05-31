@@ -492,7 +492,11 @@ mod tests {
             .conflicts
             .iter()
             .any(|c| matches!(c, ComposeConflict::ParameterClash { parameter, .. } if parameter == "tone"));
-        assert!(has_clash, "expected ParameterClash, got {:?}", out.conflicts);
+        assert!(
+            has_clash,
+            "expected ParameterClash, got {:?}",
+            out.conflicts
+        );
     }
 
     #[test]

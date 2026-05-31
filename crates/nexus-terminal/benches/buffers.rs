@@ -87,5 +87,9 @@ fn bench_memory_per_10k_line_buffer(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_push_100k_lines, bench_memory_per_10k_line_buffer);
+criterion_group!(
+    benches,
+    bench_push_100k_lines,
+    bench_memory_per_10k_line_buffer
+);
 criterion_main!(benches);

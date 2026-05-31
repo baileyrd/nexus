@@ -17,7 +17,10 @@ use ts_rs::TS;
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct AudioTranscribeArgs {
@@ -40,7 +43,10 @@ pub struct AudioTranscribeArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct AudioTranscribeResult {
@@ -60,7 +66,10 @@ pub struct AudioTranscribeResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct AudioSynthesizeArgs {
@@ -84,7 +93,10 @@ pub struct AudioSynthesizeArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct AudioSynthesizeResult {
@@ -106,7 +118,10 @@ pub struct AudioSynthesizeResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct AudioStatusResult {

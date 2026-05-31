@@ -110,7 +110,9 @@ impl WebhookSpec {
             .ok_or_else(|| "webhook trigger missing `path` string".to_string())?
             .to_string();
         if !path.starts_with('/') {
-            return Err(format!("webhook trigger `path` must start with '/': {path:?}"));
+            return Err(format!(
+                "webhook trigger `path` must start with '/': {path:?}"
+            ));
         }
         if path.contains(['?', '#']) {
             return Err("webhook trigger `path` must not contain '?' or '#'".into());
@@ -318,7 +320,10 @@ pub fn route_request<'a>(specs: &'a [WebhookSpec], req: &ParsedRequest) -> Route
 pub fn build_trigger_vars(req: &ParsedRequest, remote_addr: &str) -> serde_json::Value {
     let mut t = serde_json::Map::new();
     t.insert("path".into(), serde_json::Value::String(req.path.clone()));
-    t.insert("method".into(), serde_json::Value::String(req.method.clone()));
+    t.insert(
+        "method".into(),
+        serde_json::Value::String(req.method.clone()),
+    );
     t.insert(
         "remote_addr".into(),
         serde_json::Value::String(remote_addr.to_string()),

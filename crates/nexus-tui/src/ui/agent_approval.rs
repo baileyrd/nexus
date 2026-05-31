@@ -10,11 +10,11 @@
 use std::time::Instant;
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{PendingApproval, ProposedToolCall, TuiApp};
@@ -38,11 +38,8 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
     frame.render_widget(block, popup);
 
     // body / footer split
-    let [body_area, footer_area] = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(2),
-    ])
-    .areas(inner);
+    let [body_area, footer_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).areas(inner);
 
     let lines = build_body_lines(pending);
     let body = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -56,10 +53,7 @@ fn build_body_lines(pending: &PendingApproval) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     if !pending.text.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled(
-                "model: ",
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled("model: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 first_line(&pending.text).to_string(),
                 Style::default().fg(Color::White),
@@ -75,7 +69,9 @@ fn build_body_lines(pending: &PendingApproval) -> Vec<Line<'static>> {
     } else {
         for (i, call) in pending.calls.iter().enumerate() {
             lines.push(render_call_header(i + 1, call));
-            if let (Some(target), Some(cmd)) = (call.target_plugin_id.as_deref(), call.command_id.as_deref()) {
+            if let (Some(target), Some(cmd)) =
+                (call.target_plugin_id.as_deref(), call.command_id.as_deref())
+            {
                 lines.push(Line::from(Span::styled(
                     format!("       → {target}::{cmd}"),
                     Style::default().fg(Color::DarkGray),
@@ -90,25 +86,30 @@ fn render_call_header(idx: usize, call: &ProposedToolCall) -> Line<'static> {
     let (badge, badge_style) = match (call.requires_approval, call.registered) {
         (true, true) => (
             " DESTRUCTIVE ",
-            Style::default().bg(Color::Red).fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .bg(Color::Red)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ),
         (true, false) => (
             " UNREGISTERED ",
-            Style::default().bg(Color::Yellow).fg(Color::Black).add_modifier(Modifier::BOLD),
+            Style::default()
+                .bg(Color::Yellow)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
         ),
-        (false, _) => (
-            " safe ",
-            Style::default().bg(Color::Green).fg(Color::Black),
-        ),
+        (false, _) => (" safe ", Style::default().bg(Color::Green).fg(Color::Black)),
     };
     Line::from(vec![
-        Span::styled(
-            format!("  {idx}. "),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("  {idx}. "), Style::default().fg(Color::DarkGray)),
         Span::styled(badge, badge_style),
         Span::raw(" "),
-        Span::styled(call.name.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            call.name.clone(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
     ])
 }
 

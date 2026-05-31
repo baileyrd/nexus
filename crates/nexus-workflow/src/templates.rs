@@ -137,7 +137,8 @@ mod tests {
         // parser without panicking — this is the shipped-template
         // shape contract.
         for t in CATALOG {
-            let wf = parse(t).unwrap_or_else(|e| panic!("template `{}` failed to parse: {e}", t.slug));
+            let wf =
+                parse(t).unwrap_or_else(|e| panic!("template `{}` failed to parse: {e}", t.slug));
             assert!(!wf.workflow.name.trim().is_empty());
             assert!(!wf.trigger.trigger_type.trim().is_empty());
         }

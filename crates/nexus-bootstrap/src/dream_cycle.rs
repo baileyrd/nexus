@@ -73,7 +73,7 @@ const DISABLED_POLL_SECS: u64 = 60;
 pub struct DreamCycleScheduler {
     stop_tx: mpsc::SyncSender<()>,
     stopped: Arc<AtomicBool>,
-    thread:  Option<JoinHandle<()>>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl DreamCycleScheduler {
@@ -245,25 +245,28 @@ fn run_loop(
 
 /// Returns `true` when a stop signal was received during the wait.
 fn wait(stop_rx: &mpsc::Receiver<()>, dur: Duration) -> bool {
-    matches!(stop_rx.recv_timeout(dur), Ok(()) | Err(RecvTimeoutError::Disconnected))
+    matches!(
+        stop_rx.recv_timeout(dur),
+        Ok(()) | Err(RecvTimeoutError::Disconnected)
+    )
 }
 
 fn load_settings(
     forge_root: &std::path::Path,
 ) -> Result<nexus_formats::config::DreamCycleSettings> {
-    let cfg = nexus_formats::config::load_app_config(forge_root)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let cfg =
+        nexus_formats::config::load_app_config(forge_root).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(cfg.dream_cycle)
 }
 
 /// Per-cycle summary, surfaced via tracing.
 #[derive(Debug, Default)]
 struct CycleReport {
-    merged:             u32,
-    review:             u32,
-    relations_decayed:  u32,
-    entities_enriched:  u32,
-    proposals_total:    u32,
+    merged: u32,
+    review: u32,
+    relations_decayed: u32,
+    entities_enriched: u32,
+    proposals_total: u32,
 }
 
 async fn run_cycle(
@@ -292,8 +295,14 @@ async fn run_cycle(
                 .get("similarity")
                 .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0) as f32;
-            let a = pair.get("a").and_then(serde_json::Value::as_str).unwrap_or("");
-            let b = pair.get("b").and_then(serde_json::Value::as_str).unwrap_or("");
+            let a = pair
+                .get("a")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let b = pair
+                .get("b")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
             if a.is_empty() || b.is_empty() {
                 continue;
             }
@@ -337,7 +346,10 @@ async fn run_cycle(
         )
         .await
         .map_err(|e| anyhow::anyhow!("entity_decay_relations: {e}"))?;
-    if let Some(n) = decay_resp.get("relations_decayed").and_then(serde_json::Value::as_u64) {
+    if let Some(n) = decay_resp
+        .get("relations_decayed")
+        .and_then(serde_json::Value::as_u64)
+    {
         report.relations_decayed = u32::try_from(n).unwrap_or(u32::MAX);
     }
 
@@ -354,7 +366,10 @@ async fn run_cycle(
         )
         .await
         .map_err(|e| anyhow::anyhow!("entity_search: {e}"))?;
-    if let Some(results) = entities_resp.get("results").and_then(serde_json::Value::as_array) {
+    if let Some(results) = entities_resp
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+    {
         for hit in results {
             let id = match hit.get("id").and_then(serde_json::Value::as_str) {
                 Some(id) if !id.is_empty() => id.to_string(),
@@ -369,7 +384,11 @@ async fn run_cycle(
                 )
                 .await
             {
-                if reply.get("applied").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                if reply
+                    .get("applied")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                {
                     report.entities_enriched += 1;
                 }
             }

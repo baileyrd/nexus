@@ -206,10 +206,9 @@ impl PresetRegistry {
     pub fn with_core_presets() -> Self {
         let mut registry = Self::default();
         for (id, toml) in core_presets::ALL {
-            registry.sources.insert(
-                (*id).to_string(),
-                PresetSource::Embedded { id, toml },
-            );
+            registry
+                .sources
+                .insert((*id).to_string(), PresetSource::Embedded { id, toml });
         }
         registry
     }
@@ -262,8 +261,7 @@ impl PresetRegistry {
                 continue;
             }
             let id = preset_id_from_path(&path)?;
-            self.sources
-                .insert(id, PresetSource::File { kind, path });
+            self.sources.insert(id, PresetSource::File { kind, path });
             count += 1;
         }
         Ok(count)

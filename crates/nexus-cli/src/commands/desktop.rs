@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 
 /// Binary name we're looking for. Windows adds `.exe` automatically via the
 /// sibling-directory path join; PATH lookup also handles the extension.

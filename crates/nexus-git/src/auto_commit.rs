@@ -35,7 +35,7 @@ pub struct AutoCommitResult {
 
 impl AutoCommitter {
     /// Create a new auto-committer for the given repository root.
-    #[must_use] 
+    #[must_use]
     pub fn new(repo_root: &Path, debounce_secs: u64) -> Self {
         Self {
             repo_root: repo_root.to_path_buf(),
@@ -123,8 +123,10 @@ fn generate_message(statuses: &[crate::types::StatusEntry]) -> String {
         .iter()
         .take(5)
         .map(|s| {
-            s.path
-                .file_name().map_or_else(|| s.path.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string())
+            s.path.file_name().map_or_else(
+                || s.path.to_string_lossy().to_string(),
+                |n| n.to_string_lossy().to_string(),
+            )
         })
         .collect();
 
@@ -134,7 +136,11 @@ fn generate_message(statuses: &[crate::types::StatusEntry]) -> String {
         String::new()
     };
 
-    format!("auto: {}{}\n\n{count} file(s) changed", file_list.join(", "), suffix)
+    format!(
+        "auto: {}{}\n\n{count} file(s) changed",
+        file_list.join(", "),
+        suffix
+    )
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -218,20 +224,33 @@ mod tests {
 
         let result = committer.check_and_commit().unwrap();
         let msg = result.message.unwrap();
-        assert!(msg.starts_with("auto:"), "message should start with 'auto:', got: {msg}");
-        assert!(msg.contains("2 file(s) changed"), "message should contain file count, got: {msg}");
+        assert!(
+            msg.starts_with("auto:"),
+            "message should start with 'auto:', got: {msg}"
+        );
+        assert!(
+            msg.contains("2 file(s) changed"),
+            "message should contain file count, got: {msg}"
+        );
     }
 
     #[test]
     fn auto_commit_message_truncates_long_list() {
         let (dir, mut committer) = init_repo();
         for i in 0..8 {
-            fs::write(dir.path().join(format!("file{i}.txt")), format!("content {i}")).unwrap();
+            fs::write(
+                dir.path().join(format!("file{i}.txt")),
+                format!("content {i}"),
+            )
+            .unwrap();
         }
 
         let result = committer.check_and_commit().unwrap();
         let msg = result.message.unwrap();
-        assert!(msg.contains("(+3 more)"), "should truncate after 5 files, got: {msg}");
+        assert!(
+            msg.contains("(+3 more)"),
+            "should truncate after 5 files, got: {msg}"
+        );
     }
 
     #[test]

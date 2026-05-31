@@ -20,15 +20,19 @@ pub fn resolve_relation(
         return Ok(Vec::new());
     }
 
-    let placeholders: Vec<String> = record_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 2)).collect();
+    let placeholders: Vec<String> = record_ids
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 2))
+        .collect();
     let sql = format!(
         "SELECT data_json FROM bases_records WHERE base_id = ?1 AND record_id IN ({})",
         placeholders.join(", ")
     );
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| {
-        DatabaseError::RelationError(format!("prepare failed: {e}"))
-    })?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| DatabaseError::RelationError(format!("prepare failed: {e}")))?;
 
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(target_base_id)];
     for id in record_ids {
@@ -47,13 +51,10 @@ pub fn resolve_relation(
 
     let mut records = Vec::new();
     for row in rows {
-        let json_str = row.map_err(|e| {
-            DatabaseError::RelationError(format!("row read failed: {e}"))
-        })?;
-        let record: nexus_types::bases::BaseRecord =
-            serde_json::from_str(&json_str).map_err(|e| {
-                DatabaseError::RelationError(format!("deserialize failed: {e}"))
-            })?;
+        let json_str =
+            row.map_err(|e| DatabaseError::RelationError(format!("row read failed: {e}")))?;
+        let record: nexus_types::bases::BaseRecord = serde_json::from_str(&json_str)
+            .map_err(|e| DatabaseError::RelationError(format!("deserialize failed: {e}")))?;
         records.push(record);
     }
 
@@ -101,9 +102,7 @@ pub fn compute_rollup(
     // Apply aggregation.
     #[allow(clippy::cast_precision_loss)]
     match aggregation {
-        RollupAggregation::Count => {
-            Ok(FormulaValue::Number(values.len() as f64))
-        }
+        RollupAggregation::Count => Ok(FormulaValue::Number(values.len() as f64)),
         RollupAggregation::CountValues | RollupAggregation::CountNotEmpty => {
             let count = values.iter().filter(|v| !is_empty_value(**v)).count();
             Ok(FormulaValue::Number(count as f64))
@@ -120,11 +119,17 @@ pub fn compute_rollup(
             Ok(FormulaValue::Number(unique.len() as f64))
         }
         RollupAggregation::Sum => {
-            let sum: f64 = values.iter().filter_map(|v| v.and_then(serde_json::Value::as_f64)).sum();
+            let sum: f64 = values
+                .iter()
+                .filter_map(|v| v.and_then(serde_json::Value::as_f64))
+                .sum();
             Ok(FormulaValue::Number(sum))
         }
         RollupAggregation::Average => {
-            let nums: Vec<f64> = values.iter().filter_map(|v| v.and_then(serde_json::Value::as_f64)).collect();
+            let nums: Vec<f64> = values
+                .iter()
+                .filter_map(|v| v.and_then(serde_json::Value::as_f64))
+                .collect();
             if nums.is_empty() {
                 return Ok(FormulaValue::Null);
             }
@@ -234,7 +239,15 @@ mod tests {
             deleted_at: None,
             fields,
         };
-        let result = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Sum).unwrap();
+        let result = compute_rollup(
+            &conn,
+            &record,
+            "related",
+            1,
+            "score",
+            RollupAggregation::Sum,
+        )
+        .unwrap();
         assert_eq!(result, FormulaValue::Number(60.0));
     }
 
@@ -248,7 +261,15 @@ mod tests {
             deleted_at: None,
             fields,
         };
-        let result = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Average).unwrap();
+        let result = compute_rollup(
+            &conn,
+            &record,
+            "related",
+            1,
+            "score",
+            RollupAggregation::Average,
+        )
+        .unwrap();
         assert_eq!(result, FormulaValue::Number(20.0));
     }
 
@@ -262,7 +283,15 @@ mod tests {
             deleted_at: None,
             fields,
         };
-        let result = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Count).unwrap();
+        let result = compute_rollup(
+            &conn,
+            &record,
+            "related",
+            1,
+            "score",
+            RollupAggregation::Count,
+        )
+        .unwrap();
         assert_eq!(result, FormulaValue::Number(2.0));
     }
 
@@ -276,8 +305,24 @@ mod tests {
             deleted_at: None,
             fields,
         };
-        let min = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Min).unwrap();
-        let max = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Max).unwrap();
+        let min = compute_rollup(
+            &conn,
+            &record,
+            "related",
+            1,
+            "score",
+            RollupAggregation::Min,
+        )
+        .unwrap();
+        let max = compute_rollup(
+            &conn,
+            &record,
+            "related",
+            1,
+            "score",
+            RollupAggregation::Max,
+        )
+        .unwrap();
         assert_eq!(min, FormulaValue::Number(10.0));
         assert_eq!(max, FormulaValue::Number(30.0));
     }
@@ -290,7 +335,15 @@ mod tests {
             deleted_at: None,
             fields: serde_json::Map::new(),
         };
-        let result = compute_rollup(&conn, &record, "missing", 1, "score", RollupAggregation::Sum).unwrap();
+        let result = compute_rollup(
+            &conn,
+            &record,
+            "missing",
+            1,
+            "score",
+            RollupAggregation::Sum,
+        )
+        .unwrap();
         assert!(matches!(result, FormulaValue::Null));
     }
 }

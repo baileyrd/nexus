@@ -142,10 +142,7 @@ impl ThemeEngine {
     /// # Errors
     /// Returns an error if either directory exists but fails to read for
     /// reasons other than "not found".
-    pub fn with_dirs(
-        themes_dir: impl AsRef<Path>,
-        snippets_dir: impl AsRef<Path>,
-    ) -> Result<Self> {
+    pub fn with_dirs(themes_dir: impl AsRef<Path>, snippets_dir: impl AsRef<Path>) -> Result<Self> {
         let mut engine = Self::new();
         engine.themes_dir = Some(themes_dir.as_ref().to_path_buf());
         engine.snippets_dir = Some(snippets_dir.as_ref().to_path_buf());
@@ -241,11 +238,7 @@ impl ThemeEngine {
         self.mode = mode;
         let resolved = self.compute();
         AppliedTheme {
-            name: self.themes[&resolved.theme_id]
-                .manifest
-                .theme
-                .name
-                .clone(),
+            name: self.themes[&resolved.theme_id].manifest.theme.name.clone(),
             id: resolved.theme_id,
             variables: resolved.variables,
         }
@@ -478,9 +471,7 @@ mod tests {
     #[test]
     fn reorder_snippets_validates_ids() {
         let mut engine = ThemeEngine::new();
-        let err = engine
-            .reorder_snippets(vec!["ghost".into()])
-            .unwrap_err();
+        let err = engine.reorder_snippets(vec!["ghost".into()]).unwrap_err();
         assert!(matches!(err, ThemeError::SnippetNotFound(_)));
     }
 

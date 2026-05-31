@@ -134,8 +134,7 @@ pub enum MigrationError {
 /// post-migration content. Migrations are expected to be **idempotent
 /// on already-migrated input** — re-running v1.0→v2.0 on a v2.0 file
 /// should be a no-op (or fail loudly), per PRD-06 §9.3.
-pub type MigrationFn =
-    Box<dyn Fn(&str) -> Result<String, MigrationError> + Send + Sync + 'static>;
+pub type MigrationFn = Box<dyn Fn(&str) -> Result<String, MigrationError> + Send + Sync + 'static>;
 
 /// Registry of migrations keyed by `(from, to)`.
 ///
@@ -226,8 +225,8 @@ impl std::fmt::Debug for MigrationRegistry {
 /// malformed; [`MigrationError::InvalidVersion`] when the `version:`
 /// value is present but unparseable.
 pub fn detect_version(content: &str) -> Result<FormatVersion, MigrationError> {
-    let (fm, _body) = extract_frontmatter(content)
-        .map_err(|e| MigrationError::Frontmatter(e.to_string()))?;
+    let (fm, _body) =
+        extract_frontmatter(content).map_err(|e| MigrationError::Frontmatter(e.to_string()))?;
     match fm.version {
         Some(v) => FormatVersion::parse(&v),
         None => FormatVersion::parse(DEFAULT_VERSION),
@@ -316,8 +315,14 @@ mod tests {
 
     #[test]
     fn parse_major_minor() {
-        assert_eq!(FormatVersion::parse("1.0").unwrap(), FormatVersion::new(1, 0));
-        assert_eq!(FormatVersion::parse("2.5").unwrap(), FormatVersion::new(2, 5));
+        assert_eq!(
+            FormatVersion::parse("1.0").unwrap(),
+            FormatVersion::new(1, 0)
+        );
+        assert_eq!(
+            FormatVersion::parse("2.5").unwrap(),
+            FormatVersion::new(2, 5)
+        );
     }
 
     #[test]
@@ -387,7 +392,11 @@ mod tests {
             Box::new(|c| Ok(c.replace("v1", "v2"))),
         );
         let out = reg
-            .migrate(FormatVersion::new(1, 0), FormatVersion::new(2, 0), "hello v1")
+            .migrate(
+                FormatVersion::new(1, 0),
+                FormatVersion::new(2, 0),
+                "hello v1",
+            )
             .unwrap();
         assert_eq!(out, "hello v2");
     }
@@ -413,11 +422,13 @@ mod tests {
         reg.register(
             FormatVersion::new(1, 0),
             FormatVersion::new(2, 0),
-            Box::new(|_| Err(MigrationError::MigrationFailed {
-                from: FormatVersion::new(1, 0),
-                to: FormatVersion::new(2, 0),
-                reason: "boom".to_string(),
-            })),
+            Box::new(|_| {
+                Err(MigrationError::MigrationFailed {
+                    from: FormatVersion::new(1, 0),
+                    to: FormatVersion::new(2, 0),
+                    reason: "boom".to_string(),
+                })
+            }),
         );
         let err = reg
             .migrate(FormatVersion::new(1, 0), FormatVersion::new(2, 0), "x")
@@ -435,11 +446,7 @@ mod tests {
         std::fs::create_dir_all(tmp.join("notes")).unwrap();
         std::fs::create_dir_all(tmp.join(".forge")).unwrap();
         std::fs::write(tmp.join("notes/a.md"), "# untagged\n").unwrap();
-        std::fs::write(
-            tmp.join("notes/b.md"),
-            "---\nversion: 2.0\n---\n# body\n",
-        )
-        .unwrap();
+        std::fs::write(tmp.join("notes/b.md"), "---\nversion: 2.0\n---\n# body\n").unwrap();
         std::fs::write(tmp.join("notes/c.md"), "---\nversion: 1.0\n---\n# body\n").unwrap();
         std::fs::write(tmp.join("notes/skip.txt"), "not markdown\n").unwrap();
         std::fs::write(tmp.join(".forge/internal.md"), "# hidden\n").unwrap();
@@ -465,8 +472,11 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("bad.md"), "---\nversion: not-a-version\n---\n# body\n")
-            .unwrap();
+        std::fs::write(
+            tmp.join("bad.md"),
+            "---\nversion: not-a-version\n---\n# body\n",
+        )
+        .unwrap();
         let tally = scan_versions(&tmp).unwrap();
         assert_eq!(tally.len(), 1);
         assert_eq!(tally[0].version, "unknown");

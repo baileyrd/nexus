@@ -106,8 +106,7 @@ pub trait SttProvider: Send {
     ///
     /// # Errors
     /// Implementations return [`AudioError`] for any failure mode.
-    fn transcribe(&mut self, input: TranscriptionInput)
-        -> Result<TranscriptionOutput, AudioError>;
+    fn transcribe(&mut self, input: TranscriptionInput) -> Result<TranscriptionOutput, AudioError>;
 }
 
 /// Text-to-speech trait. Mirrors [`SttProvider`] in shape.

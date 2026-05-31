@@ -118,8 +118,7 @@ pub fn resolve_env(
     // Preserve first-sighting order with a separate `order` vector.
     let mut order: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut map: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     let layers = [nexus_injected, shell_env, env_file, command_env];
     for layer in layers {
@@ -182,10 +181,7 @@ pub fn interpolate_env(env: &[(String, String)]) -> Vec<(String, String)> {
 
 /// One-pass expansion of `$NAME` / `${NAME}` references in `value`.
 /// Unknown names are preserved as-is so a typo is visible in the output.
-fn expand_refs(
-    value: &str,
-    lookup: &std::collections::HashMap<&str, &str>,
-) -> String {
+fn expand_refs(value: &str, lookup: &std::collections::HashMap<&str, &str>) -> String {
     let bytes = value.as_bytes();
     let mut out = String::with_capacity(value.len());
     let mut i = 0;
@@ -288,10 +284,10 @@ mod tests {
     #[test]
     fn parse_basic_key_value_pairs() {
         let env = parse_env_text("FOO=bar\nBAZ=qux");
-        assert_eq!(env, vec![
-            ("FOO".into(), "bar".into()),
-            ("BAZ".into(), "qux".into()),
-        ]);
+        assert_eq!(
+            env,
+            vec![("FOO".into(), "bar".into()), ("BAZ".into(), "qux".into()),]
+        );
     }
 
     #[test]
@@ -316,9 +312,7 @@ mod tests {
 
     #[test]
     fn parse_skips_comments_and_blank_lines() {
-        let env = parse_env_text(
-            "# top comment\n\n  # indented comment\n\nFOO=bar\n\n",
-        );
+        let env = parse_env_text("# top comment\n\n  # indented comment\n\nFOO=bar\n\n");
         assert_eq!(env, vec![("FOO".into(), "bar".into())]);
     }
 
@@ -339,11 +333,14 @@ mod tests {
     #[test]
     fn parse_preserves_order_and_duplicates() {
         let env = parse_env_text("A=1\nB=2\nA=3");
-        assert_eq!(env, vec![
-            ("A".into(), "1".into()),
-            ("B".into(), "2".into()),
-            ("A".into(), "3".into()),
-        ]);
+        assert_eq!(
+            env,
+            vec![
+                ("A".into(), "1".into()),
+                ("B".into(), "2".into()),
+                ("A".into(), "3".into()),
+            ]
+        );
     }
 
     #[test]
@@ -458,10 +455,7 @@ mod tests {
         // A refers to B, B refers to A — after the iteration cap we
         // should simply stop expanding. Whatever we land on is fine as
         // long as the function terminates.
-        let env = vec![
-            ("A".into(), "${B}".into()),
-            ("B".into(), "${A}".into()),
-        ];
+        let env = vec![("A".into(), "${B}".into()), ("B".into(), "${A}".into())];
         let _ = interpolate_env(&env);
     }
 

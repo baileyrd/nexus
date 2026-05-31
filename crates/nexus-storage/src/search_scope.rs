@@ -255,11 +255,7 @@ pub fn filter_results(
 }
 
 /// Check if a search result passes all scope filters.
-fn passes_all_filters(
-    conn: &Connection,
-    result: &SearchResult,
-    filters: &[ScopeFilter],
-) -> bool {
+fn passes_all_filters(conn: &Connection, result: &SearchResult, filters: &[ScopeFilter]) -> bool {
     let file_path = result.file_path.as_str();
     for filter in filters {
         match filter {
@@ -323,11 +319,9 @@ fn property_matches(conn: &Connection, file_path: &str, key: &str, op: &Property
                 )",
                 cmp.sql()
             );
-            conn.query_row(
-                &sql,
-                rusqlite::params![file_path, key, n],
-                |row| row.get::<_, bool>(0),
-            )
+            conn.query_row(&sql, rusqlite::params![file_path, key, n], |row| {
+                row.get::<_, bool>(0)
+            })
             .unwrap_or(false)
         }
         PropertyOp::DateCmp(cmp, ts) => {
@@ -340,11 +334,9 @@ fn property_matches(conn: &Connection, file_path: &str, key: &str, op: &Property
                 )",
                 cmp.sql()
             );
-            conn.query_row(
-                &sql,
-                rusqlite::params![file_path, key, ts],
-                |row| row.get::<_, bool>(0),
-            )
+            conn.query_row(&sql, rusqlite::params![file_path, key, ts], |row| {
+                row.get::<_, bool>(0)
+            })
             .unwrap_or(false)
         }
         PropertyOp::BoolEq(b) => conn
@@ -527,25 +519,41 @@ mod tests {
             "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
              VALUES ('notes/a.md', 'markdown', 'h1', 10, 0, 0);",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let fid = conn.last_insert_rowid();
         conn.execute(
             "INSERT INTO tags (name, file_id, source) VALUES ('rust', ?1, 'inline');",
             rusqlite::params![fid],
-        ).unwrap();
+        )
+        .unwrap();
 
         conn.execute(
             "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
              VALUES ('notes/b.md', 'markdown', 'h2', 10, 0, 0);",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         let results = vec![
-            SearchResult { file_path: "notes/a.md".to_string(), block_id: 1, block_type: "paragraph".to_string(), excerpt: String::new(), score: 1.0 },
-            SearchResult { file_path: "notes/b.md".to_string(), block_id: 2, block_type: "paragraph".to_string(), excerpt: String::new(), score: 0.5 },
+            SearchResult {
+                file_path: "notes/a.md".to_string(),
+                block_id: 1,
+                block_type: "paragraph".to_string(),
+                excerpt: String::new(),
+                score: 1.0,
+            },
+            SearchResult {
+                file_path: "notes/b.md".to_string(),
+                block_id: 2,
+                block_type: "paragraph".to_string(),
+                excerpt: String::new(),
+                score: 0.5,
+            },
         ];
 
-        let filtered = filter_results(&conn, results, &[ScopeFilter::Tag("rust".to_string())]).unwrap();
+        let filtered =
+            filter_results(&conn, results, &[ScopeFilter::Tag("rust".to_string())]).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].file_path, "notes/a.md");
     }
@@ -553,21 +561,38 @@ mod tests {
     #[test]
     fn filter_results_with_path() {
         let results = vec![
-            SearchResult { file_path: "notes/a.md".to_string(), block_id: 1, block_type: "paragraph".to_string(), excerpt: String::new(), score: 1.0 },
-            SearchResult { file_path: "docs/b.md".to_string(), block_id: 2, block_type: "paragraph".to_string(), excerpt: String::new(), score: 0.5 },
+            SearchResult {
+                file_path: "notes/a.md".to_string(),
+                block_id: 1,
+                block_type: "paragraph".to_string(),
+                excerpt: String::new(),
+                score: 1.0,
+            },
+            SearchResult {
+                file_path: "docs/b.md".to_string(),
+                block_id: 2,
+                block_type: "paragraph".to_string(),
+                excerpt: String::new(),
+                score: 0.5,
+            },
         ];
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let filtered = filter_results(&conn, results, &[ScopeFilter::Path("notes/".to_string())]).unwrap();
+        let filtered =
+            filter_results(&conn, results, &[ScopeFilter::Path("notes/".to_string())]).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].file_path, "notes/a.md");
     }
 
     #[test]
     fn filter_results_no_filters_returns_all() {
-        let results = vec![
-            SearchResult { file_path: "notes/a.md".to_string(), block_id: 1, block_type: "paragraph".to_string(), excerpt: String::new(), score: 1.0 },
-        ];
+        let results = vec![SearchResult {
+            file_path: "notes/a.md".to_string(),
+            block_id: 1,
+            block_type: "paragraph".to_string(),
+            excerpt: String::new(),
+            score: 1.0,
+        }];
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let filtered = filter_results(&conn, results, &[]).unwrap();
@@ -593,12 +618,25 @@ mod tests {
     #[test]
     fn filter_results_with_type() {
         let results = vec![
-            SearchResult { file_path: "notes/a.md".to_string(), block_id: 1, block_type: "heading".to_string(), excerpt: String::new(), score: 1.0 },
-            SearchResult { file_path: "notes/b.md".to_string(), block_id: 2, block_type: "paragraph".to_string(), excerpt: String::new(), score: 0.5 },
+            SearchResult {
+                file_path: "notes/a.md".to_string(),
+                block_id: 1,
+                block_type: "heading".to_string(),
+                excerpt: String::new(),
+                score: 1.0,
+            },
+            SearchResult {
+                file_path: "notes/b.md".to_string(),
+                block_id: 2,
+                block_type: "paragraph".to_string(),
+                excerpt: String::new(),
+                score: 0.5,
+            },
         ];
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let filtered = filter_results(&conn, results, &[ScopeFilter::Type("heading".to_string())]).unwrap();
+        let filtered =
+            filter_results(&conn, results, &[ScopeFilter::Type("heading".to_string())]).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].block_type, "heading");
     }
@@ -616,7 +654,8 @@ mod tests {
             "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
              VALUES ('notes/typed.md', 'markdown', 'h', 10, 0, 0);",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let fid = conn.last_insert_rowid();
 
         // priority = 5 (number)

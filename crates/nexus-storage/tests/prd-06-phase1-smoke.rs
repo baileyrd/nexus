@@ -12,9 +12,15 @@ fn engine() -> (tempfile::TempDir, StorageEngine) {
 fn backlinks_and_outgoing_links() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"# A\n\nLink to [[notes/b.md]]\n").unwrap();
-    engine.write_file("notes/b.md", b"# B\n\nLink to [[notes/a.md]]\n").unwrap();
-    engine.write_file("notes/c.md", b"# C\n\nLink to [[notes/b.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"# A\n\nLink to [[notes/b.md]]\n")
+        .unwrap();
+    engine
+        .write_file("notes/b.md", b"# B\n\nLink to [[notes/a.md]]\n")
+        .unwrap();
+    engine
+        .write_file("notes/c.md", b"# C\n\nLink to [[notes/b.md]]\n")
+        .unwrap();
 
     let bl = engine.backlinks("notes/b.md").unwrap();
     assert_eq!(bl.len(), 2, "b should have 2 backlinks, got {}", bl.len());
@@ -32,19 +38,25 @@ fn backlinks_and_outgoing_links() {
 fn unresolved_links_detected() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"See [[notes/missing.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"See [[notes/missing.md]]\n")
+        .unwrap();
 
     let unresolved = engine.unresolved_links().unwrap();
     assert_eq!(unresolved.len(), 1);
     assert_eq!(unresolved[0].target_path, "notes/missing.md");
-    assert!(unresolved[0].referenced_by.contains(&"notes/a.md".to_string()));
+    assert!(unresolved[0]
+        .referenced_by
+        .contains(&"notes/a.md".to_string()));
 }
 
 #[test]
 fn adding_file_resolves_phantom() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"See [[notes/b.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"See [[notes/b.md]]\n")
+        .unwrap();
     assert_eq!(engine.unresolved_links().unwrap().len(), 1);
 
     engine.write_file("notes/b.md", b"# B\n").unwrap();
@@ -58,7 +70,9 @@ fn adding_file_resolves_phantom() {
 fn deleting_file_updates_graph() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"Link to [[notes/b.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"Link to [[notes/b.md]]\n")
+        .unwrap();
     engine.write_file("notes/b.md", b"# B\n").unwrap();
 
     assert_eq!(engine.backlinks("notes/b.md").unwrap().len(), 1);
@@ -72,7 +86,9 @@ fn deleting_file_updates_graph() {
 fn graph_stats_correct() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"[[notes/b.md]] and [[notes/c.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"[[notes/b.md]] and [[notes/c.md]]\n")
+        .unwrap();
     engine.write_file("notes/b.md", b"# B\n").unwrap();
 
     let stats = engine.graph_stats().unwrap();
@@ -85,8 +101,12 @@ fn graph_stats_correct() {
 fn graph_neighbors_traversal() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"[[notes/b.md]]\n").unwrap();
-    engine.write_file("notes/b.md", b"[[notes/c.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"[[notes/b.md]]\n")
+        .unwrap();
+    engine
+        .write_file("notes/b.md", b"[[notes/c.md]]\n")
+        .unwrap();
     engine.write_file("notes/c.md", b"# C\n").unwrap();
 
     let n1 = engine.graph_neighbors("notes/a.md", 1).unwrap();
@@ -103,12 +123,16 @@ fn graph_neighbors_traversal() {
 fn rewrite_file_updates_graph() {
     let (_dir, engine) = engine();
 
-    engine.write_file("notes/a.md", b"[[notes/b.md]]\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"[[notes/b.md]]\n")
+        .unwrap();
     engine.write_file("notes/b.md", b"# B\n").unwrap();
 
     assert_eq!(engine.backlinks("notes/b.md").unwrap().len(), 1);
 
-    engine.write_file("notes/a.md", b"# A\n\nNo links here.\n").unwrap();
+    engine
+        .write_file("notes/a.md", b"# A\n\nNo links here.\n")
+        .unwrap();
 
     assert_eq!(engine.backlinks("notes/b.md").unwrap().len(), 0);
 }

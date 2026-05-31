@@ -6,7 +6,13 @@
 /// Errors from IPC calls between plugins. Stable across kernel versions.
 #[derive(Debug, Clone, thiserror::Error)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub enum IpcError {
     /// The target plugin is not loaded.
     #[error("target plugin '{plugin_id}' not found")]
@@ -106,7 +112,13 @@ pub enum IpcError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub enum IpcErrorKind {
     /// IPC call exceeded its deadline.
     Timeout,
@@ -136,7 +148,13 @@ pub enum IpcErrorKind {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub struct IpcErrorEnvelope {
     /// Coarse error category — see [`IpcErrorKind`].
     pub kind: IpcErrorKind,
@@ -187,7 +205,9 @@ impl IpcErrorEnvelope {
                 message,
                 retryable: false,
             },
-            IpcError::PluginCrashedDuringCall { plugin_id, command, .. } => Self {
+            IpcError::PluginCrashedDuringCall {
+                plugin_id, command, ..
+            } => Self {
                 kind: IpcErrorKind::PluginCrashed,
                 plugin_id: plugin_id.clone(),
                 command: command.clone(),
@@ -257,7 +277,13 @@ impl IpcErrorEnvelope {
 /// Event bus errors visible to plugins.
 #[derive(Debug, thiserror::Error)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub enum BusError {
     /// Reserved for a future event-bus implementation that surfaces
     /// shutdown explicitly to publishers. The current implementation
@@ -281,14 +307,22 @@ pub enum BusError {
     },
 
     /// A plugin tried to publish a kernel-owned event variant.
-    #[error("plugins cannot publish kernel events; only NexusEvent::Custom is allowed from plugins")]
+    #[error(
+        "plugins cannot publish kernel events; only NexusEvent::Custom is allowed from plugins"
+    )]
     PluginPublishingKernelEvent,
 }
 
 /// Capability system errors visible to plugins.
 #[derive(Debug, thiserror::Error)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub enum CapabilityError {
     /// A plugin requested a capability it was not granted.
     #[error("capability '{cap:?}' denied to plugin '{plugin_id}'")]

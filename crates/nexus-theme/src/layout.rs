@@ -156,7 +156,11 @@ pub struct Tab {
 /// Serializes with a `"type"` discriminator matching the TypeScript union
 /// in PRD §5.1 (`"split"` or `"leaf"`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum LayoutNode {
     /// Internal node: two or more children arranged in [`Direction`].
     Split {
@@ -564,9 +568,7 @@ impl LayoutNode {
         match self {
             Self::Leaf { id, .. } if id == pane_id => Some(self),
             Self::Leaf { .. } => None,
-            Self::Split { children, .. } => {
-                children.iter().find_map(|c| c.find_leaf(pane_id))
-            }
+            Self::Split { children, .. } => children.iter().find_map(|c| c.find_leaf(pane_id)),
         }
     }
 
@@ -638,11 +640,7 @@ impl WorkspaceLayout {
     /// Returns [`ThemeError::PaneNotFound`] if `pane_id` doesn't identify a
     /// leaf anywhere in the tree, or [`ThemeError::NodeKindMismatch`] if it
     /// identifies a split instead.
-    pub fn split_pane(
-        &mut self,
-        pane_id: &PaneId,
-        direction: Direction,
-    ) -> Result<PaneId> {
+    pub fn split_pane(&mut self, pane_id: &PaneId, direction: Direction) -> Result<PaneId> {
         if let Some(node) = self.root.find_leaf(pane_id) {
             debug_assert!(node.is_leaf());
         } else {
@@ -708,11 +706,7 @@ impl WorkspaceLayout {
     /// Returns [`ThemeError::PaneNotFound`] if `split_id` is unknown,
     /// [`ThemeError::NodeKindMismatch`] if it identifies a leaf, or
     /// [`ThemeError::InvalidSplitSizes`] if the length or sum is wrong.
-    pub fn set_split_sizes(
-        &mut self,
-        split_id: &PaneId,
-        sizes: Vec<f32>,
-    ) -> Result<()> {
+    pub fn set_split_sizes(&mut self, split_id: &PaneId, sizes: Vec<f32>) -> Result<()> {
         // Disambiguate id kind first so we return a precise error for leaves.
         if self.root.find_split_mut(split_id).is_none() {
             return Err(if self.root.find_leaf(split_id).is_some() {
@@ -856,9 +850,7 @@ impl WorkspaceLayout {
             .find_leaf_with_tab_mut(tab_id)
             .ok_or_else(|| ThemeError::TabNotFound(tab_id.0.clone()))?;
         let LayoutNode::Leaf {
-            id,
-            active_tab_id,
-            ..
+            id, active_tab_id, ..
         } = leaf
         else {
             unreachable!();
@@ -955,11 +947,9 @@ impl WorkspaceLayout {
     /// [`ThemeError::LayoutJson`] on serialize failure.
     pub fn save_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let json = serde_json::to_string_pretty(self).map_err(|e| {
-            ThemeError::LayoutJson {
-                path: path.to_path_buf(),
-                source: e,
-            }
+        let json = serde_json::to_string_pretty(self).map_err(|e| ThemeError::LayoutJson {
+            path: path.to_path_buf(),
+            source: e,
         })?;
         fs::write(path, json).map_err(|e| ThemeError::io(path, e))
     }
@@ -1174,9 +1164,7 @@ mod tests {
     fn split_pane_creates_split_with_two_leaves() {
         let mut layout = WorkspaceLayout::default();
         let root_id = layout.root.id().clone();
-        let new_id = layout
-            .split_pane(&root_id, Direction::Row)
-            .unwrap();
+        let new_id = layout.split_pane(&root_id, Direction::Row).unwrap();
 
         match &layout.root {
             LayoutNode::Split {
@@ -1209,9 +1197,7 @@ mod tests {
     fn close_pane_collapses_single_child_split() {
         let mut layout = WorkspaceLayout::default();
         let root_id = layout.root.id().clone();
-        let other = layout
-            .split_pane(&root_id, Direction::Column)
-            .unwrap();
+        let other = layout.split_pane(&root_id, Direction::Column).unwrap();
         // After split, root is a split with 2 children. Close one.
         layout.close_pane(&other).unwrap();
         // Root should be back to a single leaf.
@@ -1232,9 +1218,7 @@ mod tests {
     #[test]
     fn close_pane_unknown_errors() {
         let mut layout = WorkspaceLayout::default();
-        let err = layout
-            .close_pane(&PaneId::from("ghost"))
-            .unwrap_err();
+        let err = layout.close_pane(&PaneId::from("ghost")).unwrap_err();
         assert!(matches!(err, ThemeError::PaneNotFound(_)));
     }
 
@@ -1288,9 +1272,7 @@ mod tests {
         layout.split_pane(&root_leaf, Direction::Row).unwrap();
         let split_id = layout.root.id().clone();
 
-        layout
-            .set_split_sizes(&split_id, vec![0.3, 0.7])
-            .unwrap();
+        layout.set_split_sizes(&split_id, vec![0.3, 0.7]).unwrap();
         match &layout.root {
             LayoutNode::Split { sizes, .. } => {
                 assert_eq!(sizes, &vec![0.3, 0.7]);
@@ -1298,9 +1280,7 @@ mod tests {
             LayoutNode::Leaf { .. } => panic!(),
         }
 
-        let err = layout
-            .set_split_sizes(&split_id, vec![0.5])
-            .unwrap_err();
+        let err = layout.set_split_sizes(&split_id, vec![0.5]).unwrap_err();
         assert!(matches!(err, ThemeError::InvalidSplitSizes { .. }));
 
         let err = layout
@@ -1321,9 +1301,7 @@ mod tests {
         layout.focus_pane(&leaf).unwrap();
         assert_eq!(layout.focused_pane_id.as_ref(), Some(&leaf));
 
-        let err = layout
-            .focus_pane(&PaneId::from("nope"))
-            .unwrap_err();
+        let err = layout.focus_pane(&PaneId::from("nope")).unwrap_err();
         assert!(matches!(err, ThemeError::PaneNotFound(_)));
     }
 

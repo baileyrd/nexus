@@ -27,8 +27,9 @@ pub(crate) async fn handle_semantic_search(
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(10);
 
-    let embed_cfg = embed_cfg
-        .ok_or_else(|| exec_err("semantic_search: no AI embedding provider configured".to_string()))?;
+    let embed_cfg = embed_cfg.ok_or_else(|| {
+        exec_err("semantic_search: no AI embedding provider configured".to_string())
+    })?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
     let matches = rag::semantic_search(ctx, embedder.as_ref(), query, limit)
@@ -69,7 +70,9 @@ pub(crate) async fn handle_entity_recall(
         .map_err(|e| exec_err(format!("entity_recall: parse args: {e}")))?;
     let query = parsed.query.trim();
     if query.is_empty() {
-        return Ok(serde_json::json!(EntityRecallResult { results: Vec::new() }));
+        return Ok(serde_json::json!(EntityRecallResult {
+            results: Vec::new()
+        }));
     }
     let limit = parsed
         .limit
@@ -77,8 +80,9 @@ pub(crate) async fn handle_entity_recall(
         .unwrap_or(5)
         .max(1);
 
-    let embed_cfg = embed_cfg
-        .ok_or_else(|| exec_err("entity_recall: no AI embedding provider configured".to_string()))?;
+    let embed_cfg = embed_cfg.ok_or_else(|| {
+        exec_err("entity_recall: no AI embedding provider configured".to_string())
+    })?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
     let oversample = limit.saturating_mul(5).max(20);

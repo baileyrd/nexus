@@ -107,9 +107,7 @@ impl From<&Line> for OutputLine {
         let ms = l
             .timestamp
             .duration_since(UNIX_EPOCH)
-            .map(|d| {
-                u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
-            })
+            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
             .unwrap_or(0);
         Self {
             timestamp_ms: ms,
@@ -489,7 +487,6 @@ impl InMemoryTerminalServer {
             rss_bytes: None,
         })
     }
-
 }
 
 impl Default for InMemoryTerminalServer {
@@ -930,7 +927,10 @@ mod tests {
         let all = s.read_output(&id, None, None).expect("all");
         let contents: Vec<String> = all.iter().map(|l| l.content.clone()).collect();
         for marker in ["a", "b", "c", "d"] {
-            assert!(contents.iter().any(|s| s == marker), "missing {marker}: {contents:?}");
+            assert!(
+                contents.iter().any(|s| s == marker),
+                "missing {marker}: {contents:?}"
+            );
         }
 
         let first_two = s.read_output(&id, Some(0), Some(2)).expect("window");
@@ -1013,7 +1013,10 @@ mod tests {
             }
         }
         let (cursor, bytes) = last;
-        assert!(bytes.windows(3).any(|w| w == b"zap"), "never saw marker: {bytes:?}");
+        assert!(
+            bytes.windows(3).any(|w| w == b"zap"),
+            "never saw marker: {bytes:?}"
+        );
         assert_eq!(cursor, bytes.len() as u64, "cursor should equal bytes seen");
     }
 
@@ -1116,8 +1119,8 @@ mod tests {
         let mut buf = OutputBuffer::with_capacity(4);
         buf.push(b"abcd"); // fills ring, dropped=0, len=4
         buf.push(b"ef"); // evicts "ab", dropped=2, len=4, contents "cdef"
-        // Total bytes written = 6. Cursor=0 is stale (oldest retained
-        // offset is 2). Should clamp and return everything in the ring.
+                         // Total bytes written = 6. Cursor=0 is stale (oldest retained
+                         // offset is 2). Should clamp and return everything in the ring.
         let dropped = buf.dropped();
         let next_cursor_expected = dropped + buf.len() as u64;
         let (head, tail) = buf.slices();

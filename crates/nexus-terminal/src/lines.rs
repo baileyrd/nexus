@@ -139,8 +139,7 @@ impl LineBuffer {
                     let slice = &bytes[start..=idx];
                     self.ingest_complete_line(slice);
                 } else {
-                    let mut stitched =
-                        Vec::with_capacity(self.pending.len() + (idx - start) + 1);
+                    let mut stitched = Vec::with_capacity(self.pending.len() + (idx - start) + 1);
                     stitched.extend_from_slice(&self.pending);
                     stitched.extend_from_slice(&bytes[start..=idx]);
                     self.pending.clear();

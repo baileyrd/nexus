@@ -23,8 +23,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::MinimalForge;
-use nexus_kernel::{Ipc as _, 
-    Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError,
+use nexus_kernel::{
+    Capability, CapabilitySet, EventBus, InMemoryKvStore, Ipc as _, IpcDispatcher, IpcError,
     KernelPluginContext, KvStore,
 };
 
@@ -51,7 +51,9 @@ async fn assert_denied(forge: &MinimalForge, target: &str, command: &str) {
     let err = ctx
         .ipc_call(target, command, serde_json::json!({}), CALL_TIMEOUT)
         .await
-        .expect_err(&format!("{target}::{command} must reject ipc.call-only callers"));
+        .expect_err(&format!(
+            "{target}::{command} must reject ipc.call-only callers"
+        ));
     assert!(
         matches!(err, IpcError::CapabilityDenied { ref plugin_id } if plugin_id == "community.evil"),
         "{target}::{command} returned {err:?} (expected CapabilityDenied)"

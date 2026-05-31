@@ -60,13 +60,15 @@ pub(crate) fn handle_set_config(
 /// empty `provider` both mean "clear this side" — that's the path the
 /// shell uses when the user blanks out the provider dropdown in
 /// Settings → AI.
-pub(crate) fn parse_config_field(value: &serde_json::Value) -> Result<Option<AiConfig>, PluginError> {
+pub(crate) fn parse_config_field(
+    value: &serde_json::Value,
+) -> Result<Option<AiConfig>, PluginError> {
     if value.is_null() {
         return Ok(None);
     }
-    let obj = value
-        .as_object()
-        .ok_or_else(|| exec_err("set_config: provider config must be object or null".to_string()))?;
+    let obj = value.as_object().ok_or_else(|| {
+        exec_err("set_config: provider config must be object or null".to_string())
+    })?;
     let provider = obj
         .get("provider")
         .and_then(serde_json::Value::as_str)

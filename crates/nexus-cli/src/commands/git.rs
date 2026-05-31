@@ -163,19 +163,25 @@ pub fn tag(
     let engine = open_engine(app)?;
 
     if let Some(remote) = push {
-        engine.push_tags(remote).map_err(|e| anyhow::anyhow!("{e}"))?;
+        engine
+            .push_tags(remote)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("Pushed all tags to '{remote}'.");
         return Ok(());
     }
 
     if let Some(tag_name) = delete {
-        engine.delete_tag(tag_name).map_err(|e| anyhow::anyhow!("{e}"))?;
+        engine
+            .delete_tag(tag_name)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("Deleted tag '{tag_name}'.");
         return Ok(());
     }
 
     if let Some(tag_name) = name {
-        engine.create_tag(tag_name, message).map_err(|e| anyhow::anyhow!("{e}"))?;
+        engine
+            .create_tag(tag_name, message)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         if message.is_some() {
             println!("Created annotated tag '{tag_name}'.");
         } else {
@@ -190,9 +196,19 @@ pub fn tag(
         println!("No tags.");
     } else {
         for t in &tags {
-            let kind = if t.is_annotated { "annotated" } else { "lightweight" };
+            let kind = if t.is_annotated {
+                "annotated"
+            } else {
+                "lightweight"
+            };
             if let Some(msg) = &t.message {
-                println!("{} ({}) {} — {}", t.name, t.target_hash, kind, msg.lines().next().unwrap_or(""));
+                println!(
+                    "{} ({}) {} — {}",
+                    t.name,
+                    t.target_hash,
+                    kind,
+                    msg.lines().next().unwrap_or("")
+                );
             } else {
                 println!("{} ({}) {}", t.name, t.target_hash, kind);
             }
@@ -219,7 +235,10 @@ pub fn unstage_hunk(app: &App, path: &str, hunk_indices: &[usize]) -> Result<()>
         .unstage_hunks(std::path::Path::new(path), hunk_indices)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let n = hunk_indices.len();
-    println!("Unstaged {n} hunk{} in {path}", if n == 1 { "" } else { "s" });
+    println!(
+        "Unstaged {n} hunk{} in {path}",
+        if n == 1 { "" } else { "s" }
+    );
     Ok(())
 }
 
@@ -257,7 +276,9 @@ pub fn branch(app: &App, command: Option<crate::BranchCommand>) -> Result<()> {
         }
         Some(crate::BranchCommand::Switch { name, stash }) => {
             if stash {
-                engine.stash_push(None).map_err(|e| anyhow::anyhow!("{e}"))?;
+                engine
+                    .stash_push(None)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 println!("Stashed uncommitted changes.");
             }
             engine
@@ -282,7 +303,9 @@ pub fn stash(app: &App, command: Option<crate::StashCommand>) -> Result<()> {
     match command {
         // Default (no subcommand): push current dirty state.
         None => {
-            let idx = engine.stash_push(None).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let idx = engine
+                .stash_push(None)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Stashed working tree changes as stash@{{{idx}}}.");
         }
         Some(crate::StashCommand::List) => {
@@ -296,11 +319,15 @@ pub fn stash(app: &App, command: Option<crate::StashCommand>) -> Result<()> {
             }
         }
         Some(crate::StashCommand::Pop { index }) => {
-            engine.stash_pop(index).map_err(|e| anyhow::anyhow!("{e}"))?;
+            engine
+                .stash_pop(index)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Applied and dropped stash@{{{index}}}.");
         }
         Some(crate::StashCommand::Drop { index }) => {
-            engine.stash_drop(index).map_err(|e| anyhow::anyhow!("{e}"))?;
+            engine
+                .stash_drop(index)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Dropped stash@{{{index}}}.");
         }
     }
@@ -349,13 +376,20 @@ pub fn pull(app: &App, remote: &str, branch: Option<&str>) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if !result.conflicts.is_empty() {
-        println!("Pull completed with {} conflict(s):", result.conflicts.len());
+        println!(
+            "Pull completed with {} conflict(s):",
+            result.conflicts.len()
+        );
         for f in &result.conflicts {
             println!("  C {f}");
         }
         println!("Resolve conflicts then commit, or run: nexus git merge --abort");
     } else if let Some(hash) = &result.commit_hash {
-        let kind = if result.fast_forward { "fast-forward" } else { "merge" };
+        let kind = if result.fast_forward {
+            "fast-forward"
+        } else {
+            "merge"
+        };
         println!("Pulled {branch} from {remote} ({kind}, {hash}).");
     } else {
         println!("Already up to date.");
@@ -374,9 +408,7 @@ pub fn merge(app: &App, branch: Option<&str>, abort: bool) -> Result<()> {
     }
 
     let branch = branch.ok_or_else(|| anyhow::anyhow!("specify a branch to merge"))?;
-    let result = engine
-        .merge(branch)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = engine.merge(branch).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if !result.conflicts.is_empty() {
         println!("Merge produced {} conflict(s):", result.conflicts.len());
@@ -385,7 +417,11 @@ pub fn merge(app: &App, branch: Option<&str>, abort: bool) -> Result<()> {
         }
         println!("Resolve conflicts then commit, or run: nexus git merge --abort");
     } else if let Some(hash) = &result.commit_hash {
-        let kind = if result.fast_forward { "Fast-forward" } else { "Merge commit" };
+        let kind = if result.fast_forward {
+            "Fast-forward"
+        } else {
+            "Merge commit"
+        };
         println!("{kind}: {hash}");
     } else {
         println!("Already up to date.");
@@ -412,9 +448,7 @@ pub fn conflicts(app: &App) -> Result<()> {
 /// List configured remotes.
 pub fn remotes(app: &App) -> Result<()> {
     let engine = open_engine(app)?;
-    let remotes = engine
-        .remotes()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let remotes = engine.remotes().map_err(|e| anyhow::anyhow!("{e}"))?;
     if remotes.is_empty() {
         println!("No remotes configured.");
     } else {
@@ -519,9 +553,8 @@ pub fn rebase(app: &App, onto: Option<&str>, abort: bool) -> Result<()> {
         println!("Rebase aborted.");
         return Ok(());
     }
-    let onto = onto.ok_or_else(|| {
-        anyhow::anyhow!("'nexus git rebase' requires <onto> branch (or --abort)")
-    })?;
+    let onto = onto
+        .ok_or_else(|| anyhow::anyhow!("'nexus git rebase' requires <onto> branch (or --abort)"))?;
     let result = engine.rebase(onto).map_err(|e| anyhow::anyhow!("{e}"))?;
     if !result.conflicts.is_empty() {
         println!(
@@ -548,14 +581,18 @@ pub fn rebase(app: &App, onto: Option<&str>, abort: bool) -> Result<()> {
 pub fn cherry_pick(app: &App, commit: Option<&str>, abort: bool) -> Result<()> {
     let engine = open_engine(app)?;
     if abort {
-        engine.abort_cherry_pick().map_err(|e| anyhow::anyhow!("{e}"))?;
+        engine
+            .abort_cherry_pick()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("Cherry-pick aborted.");
         return Ok(());
     }
     let commit = commit.ok_or_else(|| {
         anyhow::anyhow!("'nexus git cherry-pick' requires <commit> hash (or --abort)")
     })?;
-    let result = engine.cherry_pick(commit).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = engine
+        .cherry_pick(commit)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     if !result.conflicts.is_empty() {
         println!("Cherry-pick paused — conflicts in:");
         for f in &result.conflicts {
@@ -598,10 +635,17 @@ pub fn lfs_status(app: &mut App) -> Result<()> {
 
     println!(
         "git-lfs binary : {}",
-        if installed { "installed" } else { "NOT FOUND on PATH" }
+        if installed {
+            "installed"
+        } else {
+            "NOT FOUND on PATH"
+        }
     );
 
-    println!("\nTracked patterns from .gitattributes ({}):", patterns.len());
+    println!(
+        "\nTracked patterns from .gitattributes ({}):",
+        patterns.len()
+    );
     if patterns.is_empty() {
         println!("  (none — `filter=lfs` not declared anywhere)");
     } else {

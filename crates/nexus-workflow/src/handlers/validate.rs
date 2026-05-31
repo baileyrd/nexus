@@ -16,9 +16,7 @@ use crate::parse_workflow_text;
 
 use super::shared::{exec_err, parse_args, to_value, DEFAULT_STEP_TIMEOUT};
 
-pub(crate) fn handle_sync(
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
+pub(crate) fn handle_sync(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
     let a: ValidateWorkflowArgs = parse_args(args, "validate")?;
     match parse_workflow_text(&a.text) {
         Ok(w) => to_value(&w, "validate"),
@@ -43,8 +41,8 @@ pub(crate) async fn handle_async(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: ValidateWorkflowArgs = parse_args(args, "validate")?;
-    let workflow = parse_workflow_text(&a.text)
-        .map_err(|err| exec_err(format!("invalid workflow: {err}")))?;
+    let workflow =
+        parse_workflow_text(&a.text).map_err(|err| exec_err(format!("invalid workflow: {err}")))?;
 
     // Collect all slugs referenced by terminal steps. The vast
     // majority of validate calls have none, in which case we skip the

@@ -138,7 +138,11 @@ mod tests {
     #[test]
     fn theme_overrides_defaults() {
         let theme = dark_theme();
-        let resolved = resolve(&ResolverInput::new(&theme, ThemeMode::Dark, Platform::Linux));
+        let resolved = resolve(&ResolverInput::new(
+            &theme,
+            ThemeMode::Dark,
+            Platform::Linux,
+        ));
         // Dark theme sets bg-primary to #1A1A1A, overriding the #FFFFFF default.
         assert_eq!(resolved.variables["--nx-bg-primary"], "#1A1A1A");
     }
@@ -146,8 +150,16 @@ mod tests {
     #[test]
     fn platform_overrides_win_over_theme_variables() {
         let theme = light_theme();
-        let resolved_linux = resolve(&ResolverInput::new(&theme, ThemeMode::Light, Platform::Linux));
-        let resolved_macos = resolve(&ResolverInput::new(&theme, ThemeMode::Light, Platform::Macos));
+        let resolved_linux = resolve(&ResolverInput::new(
+            &theme,
+            ThemeMode::Light,
+            Platform::Linux,
+        ));
+        let resolved_macos = resolve(&ResolverInput::new(
+            &theme,
+            ThemeMode::Light,
+            Platform::Macos,
+        ));
         assert_eq!(resolved_linux.variables["--nx-color-primary"], "#4A90E2");
         assert_eq!(resolved_macos.variables["--nx-color-primary"], "#006AFF");
     }
@@ -213,7 +225,11 @@ mod tests {
     #[test]
     fn resolved_theme_records_provenance() {
         let theme = dark_theme();
-        let resolved = resolve(&ResolverInput::new(&theme, ThemeMode::Dark, Platform::Macos));
+        let resolved = resolve(&ResolverInput::new(
+            &theme,
+            ThemeMode::Dark,
+            Platform::Macos,
+        ));
         assert_eq!(resolved.theme_id, "nexus-dark");
         assert_eq!(resolved.mode, ThemeMode::Dark);
         assert_eq!(resolved.platform, Platform::Macos);

@@ -4,7 +4,9 @@ use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 
 use crate::config::AiConfig;
-use crate::handlers::shared::{build_ai_provider, build_embedding_provider, exec_err, extract_json_array};
+use crate::handlers::shared::{
+    build_ai_provider, build_embedding_provider, exec_err, extract_json_array,
+};
 use crate::rag;
 
 const ENRICH_ENTITY_MAX_RAG_HITS: usize = 4;
@@ -24,7 +26,9 @@ pub(crate) async fn handle_enrich_entity(
         .map_err(|e| exec_err(format!("enrich_entity: parse args: {e}")))?;
     let entity_arg = parsed.entity_id.trim();
     if entity_arg.is_empty() {
-        return Err(exec_err("enrich_entity: 'entity_id' must be non-empty".to_string()));
+        return Err(exec_err(
+            "enrich_entity: 'entity_id' must be non-empty".to_string(),
+        ));
     }
     let min_chars = parsed.min_description_chars.unwrap_or(80) as usize;
     let dry_run = parsed.dry_run.unwrap_or(false);
@@ -127,9 +131,8 @@ pub(crate) async fn handle_enrich_entity(
     }
 
     // ── 3. AI call — require a chat provider ─────────────────────────────
-    let ai_cfg = ai_cfg.ok_or_else(|| {
-        exec_err("enrich_entity: no AI chat provider configured".to_string())
-    })?;
+    let ai_cfg = ai_cfg
+        .ok_or_else(|| exec_err("enrich_entity: no AI chat provider configured".to_string()))?;
     let provider = build_ai_provider(&ai_cfg).map_err(exec_err)?;
 
     let mut prompt = String::new();
@@ -141,7 +144,11 @@ pub(crate) async fn handle_enrich_entity(
     }
     prompt.push_str(&format!(
         "Existing description: {}\n",
-        if original_description.is_empty() { "(none)" } else { &original_description }
+        if original_description.is_empty() {
+            "(none)"
+        } else {
+            &original_description
+        }
     ));
     if !existing_relations.is_empty() {
         prompt.push_str("Existing relations:\n");
@@ -239,9 +246,7 @@ pub(crate) async fn handle_infer_entity_relations(
     embed_cfg: Option<AiConfig>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    use crate::ipc::{
-        InferEntityRelationsArgs, InferEntityRelationsResult, InferredRelationRow,
-    };
+    use crate::ipc::{InferEntityRelationsArgs, InferEntityRelationsResult, InferredRelationRow};
     use crate::provider::{ChatMessage, Role};
 
     let parsed: InferEntityRelationsArgs = serde_json::from_value(args.clone())
@@ -271,11 +276,7 @@ pub(crate) async fn handle_infer_entity_relations(
     let entity_obj = entity_resp
         .get("entity")
         .and_then(serde_json::Value::as_object)
-        .ok_or_else(|| {
-            exec_err(format!(
-                "infer_entity_relations: '{entity_arg}' not found"
-            ))
-        })?;
+        .ok_or_else(|| exec_err(format!("infer_entity_relations: '{entity_arg}' not found")))?;
     let entity_id = entity_obj
         .get("id")
         .and_then(serde_json::Value::as_str)
@@ -346,7 +347,8 @@ pub(crate) async fn handle_infer_entity_relations(
                         )
                         .await
                     {
-                        if let Some(obj) = resp.get("entity").and_then(serde_json::Value::as_object) {
+                        if let Some(obj) = resp.get("entity").and_then(serde_json::Value::as_object)
+                        {
                             let id = obj
                                 .get("id")
                                 .and_then(serde_json::Value::as_str)
@@ -429,7 +431,11 @@ pub(crate) async fn handle_infer_entity_relations(
     prompt.push_str("You propose new typed relations between knowledge-graph entities.\n\n");
     prompt.push_str(&format!(
         "Source entity:\n  id: {entity_id}\n  type: {entity_type}\n  description: {desc}\n",
-        desc = if description.is_empty() { "(none)".to_string() } else { description.clone() },
+        desc = if description.is_empty() {
+            "(none)".to_string()
+        } else {
+            description.clone()
+        },
     ));
     if !existing_relations.is_empty() {
         prompt.push_str("  existing relations:\n");
@@ -441,7 +447,11 @@ pub(crate) async fn handle_infer_entity_relations(
     for (id, etype, edesc) in &neighbours {
         prompt.push_str(&format!(
             "  - id: {id}\n    type: {etype}\n    description: {}\n",
-            if edesc.is_empty() { "(none)".to_string() } else { edesc.clone() },
+            if edesc.is_empty() {
+                "(none)".to_string()
+            } else {
+                edesc.clone()
+            },
         ));
     }
     prompt.push_str(&format!(
@@ -462,8 +472,7 @@ pub(crate) async fn handle_infer_entity_relations(
     let valid_targets: std::collections::BTreeSet<&str> =
         neighbours.iter().map(|(id, _, _)| id.as_str()).collect();
     let mut proposals: Vec<InferredRelationRow> = Vec::new();
-    let mut chosen_keys: std::collections::BTreeSet<(String, String)> =
-        existing_keys.clone();
+    let mut chosen_keys: std::collections::BTreeSet<(String, String)> = existing_keys.clone();
     for item in parsed_array {
         let target = match item.get("target").and_then(serde_json::Value::as_str) {
             Some(t) => t.trim(),
@@ -476,16 +485,14 @@ pub(crate) async fn handle_infer_entity_relations(
         if !valid_targets.contains(target) || target == entity_id || kind.is_empty() {
             continue;
         }
-        let canonical = kind
-            .to_ascii_lowercase()
-            .replace([' ', '-'], "_");
+        let canonical = kind.to_ascii_lowercase().replace([' ', '-'], "_");
         let key = (target.to_string(), canonical.clone());
         if !chosen_keys.insert(key.clone()) {
             continue;
         }
         proposals.push(InferredRelationRow {
-            target:     target.to_string(),
-            kind:       canonical,
+            target: target.to_string(),
+            kind: canonical,
             confidence: INFER_DRAFT_CONFIDENCE,
         });
         if proposals.len() >= max_proposals {

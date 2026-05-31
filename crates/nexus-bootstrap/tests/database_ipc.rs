@@ -77,8 +77,8 @@ async fn csv_export_roundtrips_records_through_ipc() {
     .expect("csv_export dispatches cleanly");
 
     assert_eq!(value["count"], 2);
-    let bytes: Vec<u8> = serde_json::from_value(value["csv_bytes"].clone())
-        .expect("csv_bytes is Vec<u8>");
+    let bytes: Vec<u8> =
+        serde_json::from_value(value["csv_bytes"].clone()).expect("csv_bytes is Vec<u8>");
     let text = String::from_utf8(bytes).unwrap();
     assert!(text.contains("name,score"), "got: {text}");
     assert!(text.contains("Alice,95"), "got: {text}");

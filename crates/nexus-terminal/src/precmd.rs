@@ -216,7 +216,10 @@ impl PreCommandOutcome {
     /// Whether the whole chain finished cleanly.
     #[must_use]
     pub const fn is_success(&self) -> bool {
-        matches!(self, PreCommandOutcome::AllSucceeded | PreCommandOutcome::Skipped)
+        matches!(
+            self,
+            PreCommandOutcome::AllSucceeded | PreCommandOutcome::Skipped
+        )
     }
 }
 
@@ -249,9 +252,7 @@ pub fn run_pre_commands<S: TerminalServer>(
     let run_tag = uuid::Uuid::new_v4().simple().to_string();
 
     for (idx, cmd) in steps.iter().enumerate() {
-        process
-            .mark_pre_command(idx)
-            .map_err(transition_err)?;
+        process.mark_pre_command(idx).map_err(transition_err)?;
 
         let sentinel = format!("__nexus_precmd_{run_tag}_{idx}");
         // BL-065 — pick the right wrapper for the configured shell
@@ -464,7 +465,10 @@ mod tests {
     #[test]
     fn parse_sentinel_exit_code_handles_common_shell_output_shapes() {
         assert_eq!(parse_sentinel_exit_code("__x 0", "__x"), Some(0));
-        assert_eq!(parse_sentinel_exit_code("prompt> __x 127", "__x"), Some(127));
+        assert_eq!(
+            parse_sentinel_exit_code("prompt> __x 127", "__x"),
+            Some(127)
+        );
         // Trailing garbage after the code is ignored.
         assert_eq!(parse_sentinel_exit_code("__x 2 extra", "__x"), Some(2));
         // No sentinel → None.
@@ -479,9 +483,11 @@ mod tests {
     fn outcome_is_success_covers_all_passing_variants() {
         assert!(PreCommandOutcome::AllSucceeded.is_success());
         assert!(PreCommandOutcome::Skipped.is_success());
-        assert!(
-            !PreCommandOutcome::StepFailed { step: 0, exit_code: 1 }.is_success(),
-        );
+        assert!(!PreCommandOutcome::StepFailed {
+            step: 0,
+            exit_code: 1
+        }
+        .is_success(),);
         assert!(!PreCommandOutcome::StepTimedOut { step: 0 }.is_success());
     }
 

@@ -161,8 +161,8 @@ impl SqliteSessionStore {
     pub fn in_memory(scrollback_dir: impl Into<PathBuf>) -> Result<Self, TerminalError> {
         let scrollback_dir = scrollback_dir.into();
         std::fs::create_dir_all(&scrollback_dir)?;
-        let conn = Connection::open_in_memory()
-            .map_err(|e| TerminalError::Persist(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| TerminalError::Persist(e.to_string()))?;
         Self::migrate(&conn)?;
         Ok(Self {
             conn,
@@ -379,12 +379,7 @@ impl SqliteSessionStore {
             tx.execute(
                 "INSERT INTO scrollback_fts (session_id, line_text, ts_ms, line_index)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    id,
-                    trimmed,
-                    now_ms,
-                    i64::try_from(idx).unwrap_or(i64::MAX),
-                ],
+                params![id, trimmed, now_ms, i64::try_from(idx).unwrap_or(i64::MAX),],
             )
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
         }
@@ -632,18 +627,14 @@ mod tests {
     #[test]
     fn open_creates_schema_and_scrollback_dir() {
         let tmp = tempdir().expect("tempdir");
-        let store = SqliteSessionStore::open(
-            tmp.path().join("nexus.sqlite"),
-            tmp.path().join("sessions"),
-        )
-        .expect("open");
+        let store =
+            SqliteSessionStore::open(tmp.path().join("nexus.sqlite"), tmp.path().join("sessions"))
+                .expect("open");
         // Schema creation is idempotent.
         drop(store);
-        let _store = SqliteSessionStore::open(
-            tmp.path().join("nexus.sqlite"),
-            tmp.path().join("sessions"),
-        )
-        .expect("reopen");
+        let _store =
+            SqliteSessionStore::open(tmp.path().join("nexus.sqlite"), tmp.path().join("sessions"))
+                .expect("reopen");
     }
 
     #[test]
@@ -766,13 +757,7 @@ mod tests {
             .save_scrollback("b", b"shared keyword\n")
             .expect("save b");
         let just_a = store
-            .cross_session_search(
-                "keyword",
-                false,
-                Some(&["a".to_string()]),
-                None,
-                50,
-            )
+            .cross_session_search("keyword", false, Some(&["a".to_string()]), None, 50)
             .expect("search a");
         assert_eq!(just_a.len(), 1);
         assert_eq!(just_a[0].session_id, "a");

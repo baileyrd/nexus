@@ -17,9 +17,7 @@ use std::time::Duration;
 use anyhow::Result;
 use nexus_bootstrap::invoker::IpcInvokerError;
 use nexus_bootstrap::reconnect::{ConnectionFactory, ConnectionState, ReconnectingRuntime};
-use nexus_bootstrap::remote::{
-    build_remote_runtime_over_pipes, NoopTransportGuard, RemoteRuntime,
-};
+use nexus_bootstrap::remote::{build_remote_runtime_over_pipes, NoopTransportGuard, RemoteRuntime};
 use nexus_bootstrap::{build_cli_runtime, init_forge, Runtime};
 use nexus_remote::RemoteServer;
 use serde_json::{json, Value};
@@ -44,8 +42,8 @@ fn boot_one() -> (
     let event_bus = kernel.event_bus();
     Box::leak(Box::new(kernel));
 
-    let server = RemoteServer::new(Arc::new(context), event_bus)
-        .with_timeout(Duration::from_secs(30));
+    let server =
+        RemoteServer::new(Arc::new(context), event_bus).with_timeout(Duration::from_secs(30));
 
     let (client_writer, server_reader) = tokio::io::duplex(64 * 1024);
     let (server_writer, client_reader) = tokio::io::duplex(64 * 1024);
@@ -58,11 +56,8 @@ fn boot_one() -> (
     });
 
     let writer_boxed: Box<dyn AsyncWrite + Unpin + Send> = Box::new(client_writer);
-    let runtime = build_remote_runtime_over_pipes(
-        client_reader,
-        writer_boxed,
-        Box::new(NoopTransportGuard),
-    );
+    let runtime =
+        build_remote_runtime_over_pipes(client_reader, writer_boxed, Box::new(NoopTransportGuard));
     (runtime, forge, server_handle)
 }
 
@@ -80,9 +75,7 @@ struct StackedFactory {
 }
 
 impl ConnectionFactory for StackedFactory {
-    fn build<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
+    fn build<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
         Box::pin(async move {
             self.builds
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -113,10 +106,8 @@ async fn invoker_recovers_after_first_transport_dies() {
         _servers: vec![server1, server2],
     };
     let builds = Arc::clone(&factory.builds);
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(10),
-        Duration::from_millis(20),
-    ]);
+    let runtime = ReconnectingRuntime::new(Arc::new(factory))
+        .with_backoff(vec![Duration::from_millis(10), Duration::from_millis(20)]);
 
     let invoker = runtime.invoker();
 
@@ -199,10 +190,8 @@ async fn schedule_exhaustion_surfaces_final_transport_error() {
         _servers: vec![server1],
     };
     let builds = Arc::clone(&factory.builds);
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(5),
-        Duration::from_millis(5),
-    ]);
+    let runtime = ReconnectingRuntime::new(Arc::new(factory))
+        .with_backoff(vec![Duration::from_millis(5), Duration::from_millis(5)]);
     let invoker = runtime.invoker();
 
     // First call: build #1, succeeds.
@@ -258,9 +247,8 @@ async fn state_transitions_emit_on_reconnect_lifecycle() {
         _guards: vec![forge1, forge2],
         _servers: vec![server1, server2],
     };
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(5),
-    ]);
+    let runtime =
+        ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![Duration::from_millis(5)]);
 
     let mut state_rx = runtime.subscribe_state();
     let invoker = runtime.invoker();
@@ -300,8 +288,7 @@ async fn state_transitions_emit_on_reconnect_lifecycle() {
     // Connected. Drain everything we got, asserting the final state
     // is Connected.
     let mut last: Option<ConnectionState> = None;
-    while let Ok(Ok(state)) =
-        tokio::time::timeout(Duration::from_millis(50), state_rx.recv()).await
+    while let Ok(Ok(state)) = tokio::time::timeout(Duration::from_millis(50), state_rx.recv()).await
     {
         last = Some(state);
     }
@@ -317,10 +304,8 @@ async fn schedule_exhaustion_emits_disconnected() {
         _guards: vec![forge1],
         _servers: vec![server1],
     };
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(5),
-        Duration::from_millis(5),
-    ]);
+    let runtime = ReconnectingRuntime::new(Arc::new(factory))
+        .with_backoff(vec![Duration::from_millis(5), Duration::from_millis(5)]);
 
     let mut state_rx = runtime.subscribe_state();
     let invoker = runtime.invoker();
@@ -352,8 +337,7 @@ async fn schedule_exhaustion_emits_disconnected() {
         .unwrap_err();
 
     let mut saw_disconnected = false;
-    while let Ok(Ok(state)) =
-        tokio::time::timeout(Duration::from_millis(50), state_rx.recv()).await
+    while let Ok(Ok(state)) = tokio::time::timeout(Duration::from_millis(50), state_rx.recv()).await
     {
         if state == ConnectionState::Disconnected {
             saw_disconnected = true;

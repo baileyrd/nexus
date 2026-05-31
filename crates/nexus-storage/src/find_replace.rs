@@ -388,8 +388,7 @@ impl Matcher {
             Matcher::Regex(re) => {
                 // `replace_all` doesn't tell us the count directly;
                 // probe via `find_iter` first.
-                let count = u32::try_from(re.find_iter(text).count())
-                    .unwrap_or(u32::MAX);
+                let count = u32::try_from(re.find_iter(text).count()).unwrap_or(u32::MAX);
                 let new = re.replace_all(text, replacement).into_owned();
                 (new, count)
             }
@@ -591,11 +590,7 @@ fn collect_text_files(forge_root: &Path) -> Result<Vec<PathBuf>, StorageError> {
     Ok(out)
 }
 
-fn walk_into(
-    dir: &Path,
-    forge_root: &Path,
-    out: &mut Vec<PathBuf>,
-) -> Result<(), StorageError> {
+fn walk_into(dir: &Path, forge_root: &Path, out: &mut Vec<PathBuf>) -> Result<(), StorageError> {
     let entries = match std::fs::read_dir(dir) {
         Ok(it) => it,
         Err(_) => return Ok(()),
@@ -900,7 +895,10 @@ mod tests {
         .unwrap();
         assert_eq!(report.files_changed, 0);
         assert_eq!(report.replacements_applied, 0);
-        assert_eq!(fs::read_to_string(forge.join("a.md")).unwrap(), "no hits here");
+        assert_eq!(
+            fs::read_to_string(forge.join("a.md")).unwrap(),
+            "no hits here"
+        );
     }
 
     #[test]

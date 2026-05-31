@@ -24,9 +24,7 @@ use std::thread;
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
-use nexus_storage::core_plugin::{
-    HANDLER_QUERY_FILES, HANDLER_WRITE_VAULT_FILE,
-};
+use nexus_storage::core_plugin::{HANDLER_QUERY_FILES, HANDLER_WRITE_VAULT_FILE};
 use nexus_storage::{StorageConfig, StorageCorePlugin, StorageEngine};
 
 /// Static assertion that `StorageEngine` is `Send + Sync`. If a
@@ -64,9 +62,8 @@ fn engine_methods_run_concurrently_without_locking() {
     //      complete successfully and return identical results.
     let dir = tempfile::tempdir().expect("tempdir");
     drop(StorageEngine::init(dir.path()).expect("init forge"));
-    let engine = Arc::new(
-        StorageEngine::open(dir.path(), &StorageConfig::default()).expect("open forge"),
-    );
+    let engine =
+        Arc::new(StorageEngine::open(dir.path(), &StorageConfig::default()).expect("open forge"));
 
     let n = 32;
     let mut handles = Vec::with_capacity(n);
@@ -149,7 +146,9 @@ fn write_vault_file_accepts_forge_metadata_paths() {
         let args = serde_json::json!({ "path": path, "bytes": [0u8, 1u8, 2u8] });
         plugin
             .dispatch(HANDLER_WRITE_VAULT_FILE, &args)
-            .unwrap_or_else(|e| panic!(".forge/-prefixed path {path:?} must still work; got: {e:?}"));
+            .unwrap_or_else(|e| {
+                panic!(".forge/-prefixed path {path:?} must still work; got: {e:?}")
+            });
         assert!(
             dir.path().join(path).exists(),
             "{path}: file must exist after write_vault_file"

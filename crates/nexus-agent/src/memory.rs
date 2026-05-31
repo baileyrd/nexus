@@ -285,10 +285,7 @@ pub fn events_from_session(
     // Compactions first — they ran before the final rounds and
     // carry their own timestamp from the compressor.
     for c in &session.compactions {
-        let rounds_compressed = c
-            .last_round
-            .saturating_sub(c.first_round)
-            .saturating_add(1);
+        let rounds_compressed = c.last_round.saturating_sub(c.first_round).saturating_add(1);
         if rounds_compressed == 0 {
             // Defensive — invariant says >= 1, but a future bug in
             // the compressor shouldn't poison the memory log.
@@ -418,7 +415,9 @@ pub fn format_memory_preamble(
         out.push_str("\n### Recent activity\n");
         for e in &recent {
             match e {
-                MemoryEntry::Error { message, step_id, .. } => {
+                MemoryEntry::Error {
+                    message, step_id, ..
+                } => {
                     if let Some(sid) = step_id {
                         let _ = writeln!(out, "- ERROR [{sid}]: {message}");
                     } else {
@@ -430,10 +429,7 @@ pub fn format_memory_preamble(
                     summary,
                     ..
                 } => {
-                    let _ = writeln!(
-                        out,
-                        "- COMPACTED {rounds_compressed} rounds: {summary}",
-                    );
+                    let _ = writeln!(out, "- COMPACTED {rounds_compressed} rounds: {summary}",);
                 }
                 MemoryEntry::ToolCall {
                     tool,
@@ -443,20 +439,30 @@ pub fn format_memory_preamble(
                 } => {
                     let marker = if *success { "ok" } else { "FAILED" };
                     if *duration_ms > 0 {
-                        let _ =
-                            writeln!(out, "- {marker} tool `{tool}` ({duration_ms}ms)");
+                        let _ = writeln!(out, "- {marker} tool `{tool}` ({duration_ms}ms)");
                     } else {
                         let _ = writeln!(out, "- {marker} tool `{tool}`");
                     }
                 }
-                MemoryEntry::StepExecution { step_id, success, summary, .. } => {
+                MemoryEntry::StepExecution {
+                    step_id,
+                    success,
+                    summary,
+                    ..
+                } => {
                     let marker = if *success { "ok" } else { "FAILED" };
                     let _ = writeln!(out, "- {marker} step `{step_id}`: {summary}");
                 }
-                MemoryEntry::Artifact { path, description, .. } => {
+                MemoryEntry::Artifact {
+                    path, description, ..
+                } => {
                     let _ = writeln!(out, "- ARTIFACT `{path}`: {description}");
                 }
-                MemoryEntry::AgentPlan { plan_id, step_count, .. } => {
+                MemoryEntry::AgentPlan {
+                    plan_id,
+                    step_count,
+                    ..
+                } => {
                     let _ = writeln!(out, "- PLAN `{plan_id}` ({step_count} steps)");
                 }
                 MemoryEntry::UserGoal { text, .. } => {
@@ -642,11 +648,7 @@ pub fn read_entries_from_path(path: &Path) -> Result<Vec<MemoryEntry>, MemoryErr
 /// principal text field (goal / feedback text, summary, error
 /// message, decision summary + rationale, artifact description).
 /// Case-insensitive.
-pub fn query_entries(
-    entries: &[MemoryEntry],
-    pattern: &str,
-    limit: usize,
-) -> Vec<MemoryEntry> {
+pub fn query_entries(entries: &[MemoryEntry], pattern: &str, limit: usize) -> Vec<MemoryEntry> {
     let needle = pattern.to_ascii_lowercase();
     let mut out = Vec::new();
     // Newest-first when surfacing recent context to the planner.
@@ -681,7 +683,11 @@ pub fn query_entries(
 /// preserved unconditionally per PRD-15 §5 ("All decisions retained
 /// indefinitely"). Returns the count pruned.
 #[must_use]
-pub fn prune_entries(entries: Vec<MemoryEntry>, now_ms: u64, retention_ms: u64) -> (Vec<MemoryEntry>, usize) {
+pub fn prune_entries(
+    entries: Vec<MemoryEntry>,
+    now_ms: u64,
+    retention_ms: u64,
+) -> (Vec<MemoryEntry>, usize) {
     let cutoff = now_ms.saturating_sub(retention_ms);
     let original_len = entries.len();
     let kept: Vec<MemoryEntry> = entries
@@ -708,7 +714,9 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
                 writeln!(out, "- [{ts}] **goal:** {text}").unwrap();
             }
             MemoryEntry::AgentPlan {
-                plan_id, step_count, ..
+                plan_id,
+                step_count,
+                ..
             } => {
                 writeln!(out, "- [{ts}] plan `{plan_id}` ({step_count} steps)").unwrap();
             }
@@ -722,7 +730,10 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
                 writeln!(out, "- [{ts}] {ok} step `{step_id}` — {summary}").unwrap();
             }
             MemoryEntry::ToolCall {
-                tool, success, duration_ms, ..
+                tool,
+                success,
+                duration_ms,
+                ..
             } => {
                 let ok = if *success { "✓" } else { "✗" };
                 writeln!(out, "- [{ts}] {ok} tool `{tool}` ({duration_ms}ms)").unwrap();
@@ -730,7 +741,9 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
             MemoryEntry::UserFeedback { text, .. } => {
                 writeln!(out, "- [{ts}] **feedback:** {text}").unwrap();
             }
-            MemoryEntry::Error { message, step_id, .. } => {
+            MemoryEntry::Error {
+                message, step_id, ..
+            } => {
                 let s = step_id.as_deref().unwrap_or("-");
                 writeln!(out, "- [{ts}] ✗ error in step `{s}`: {message}").unwrap();
             }
@@ -976,9 +989,7 @@ mod tests {
 
     use crate::compression::CompactionEvent;
     use crate::llm::ProposedToolCall;
-    use crate::session::{
-        AgentSession, RoundRecord, SessionOutcome, ToolCallRecord,
-    };
+    use crate::session::{AgentSession, RoundRecord, SessionOutcome, ToolCallRecord};
     use crate::ToolCall;
 
     fn record_with_duration(
@@ -1148,7 +1159,9 @@ mod tests {
             other => panic!("expected ToolCall, got {other:?}"),
         }
         match &entries[1] {
-            MemoryEntry::Error { message, step_id, .. } => {
+            MemoryEntry::Error {
+                message, step_id, ..
+            } => {
                 assert!(message.contains("write_file"));
                 assert!(message.contains("ENOSPC"));
                 assert_eq!(step_id.as_deref(), Some("a"));
@@ -1215,7 +1228,9 @@ mod tests {
         let entries = events_from_session(&s, 1_700_000_000_000);
         assert_eq!(entries.len(), 1);
         match &entries[0] {
-            MemoryEntry::Error { message, step_id, .. } => {
+            MemoryEntry::Error {
+                message, step_id, ..
+            } => {
                 assert!(message.contains("sess-1"));
                 assert!(message.contains("Errored"));
                 assert!(step_id.is_none());
@@ -1318,10 +1333,7 @@ mod tests {
         }
         let out = format_memory_preamble(&entries, 3, 2).unwrap();
         // Only the most-recent 3 decisions (d-29 / d-28 / d-27).
-        let decisions_line_count = out
-            .lines()
-            .filter(|l| l.starts_with("- d-"))
-            .count();
+        let decisions_line_count = out.lines().filter(|l| l.starts_with("- d-")).count();
         assert_eq!(decisions_line_count, 3);
         // Only the most-recent 2 tool calls.
         let tool_lines = out.lines().filter(|l| l.contains("tool `t-")).count();

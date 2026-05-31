@@ -382,8 +382,10 @@ impl FileSystem for KernelPluginContext {
         let relative_view = path
             .strip_prefix(&self.forge_root_canonical)
             .unwrap_or(path);
-        let target = self.path_validator.validate_for_write(relative_view).map_err(|e| {
-            match e {
+        let target = self
+            .path_validator
+            .validate_for_write(relative_view)
+            .map_err(|e| match e {
                 PathValidationError::PathTraversal(ref bad) => {
                     audit::log_path_traversal_denied(
                         &self.plugin_id,
@@ -398,12 +400,10 @@ impl FileSystem for KernelPluginContext {
                         ),
                     ))
                 }
-                PathValidationError::InvalidPath(msg) => Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    msg,
-                )),
-            }
-        })?;
+                PathValidationError::InvalidPath(msg) => {
+                    Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg))
+                }
+            })?;
         tokio::fs::write(&target, contents).await.map_err(Error::Io)
     }
 
@@ -429,23 +429,17 @@ impl FileSystem for KernelPluginContext {
 impl KvAccess for KernelPluginContext {
     async fn kv_get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         self.require_capability(Capability::KvRead)?;
-        self.kv
-            .get(&self.plugin_id, key)
-            .map_err(Error::Kv)
+        self.kv.get(&self.plugin_id, key).map_err(Error::Kv)
     }
 
     async fn kv_set(&self, key: &str, value: &[u8]) -> Result<()> {
         self.require_capability(Capability::KvWrite)?;
-        self.kv
-            .set(&self.plugin_id, key, value)
-            .map_err(Error::Kv)
+        self.kv.set(&self.plugin_id, key, value).map_err(Error::Kv)
     }
 
     async fn kv_delete(&self, key: &str) -> Result<()> {
         self.require_capability(Capability::KvWrite)?;
-        self.kv
-            .delete(&self.plugin_id, key)
-            .map_err(Error::Kv)
+        self.kv.delete(&self.plugin_id, key).map_err(Error::Kv)
     }
 }
 
@@ -485,8 +479,9 @@ impl Ipc for KernelPluginContext {
         // BL-093: bracket the entire dispatch with a timer so every
         // exit path records `ipc_calls_total` + `ipc_call_duration`.
         let started = std::time::Instant::now();
-        let result =
-            self.ipc_call_inner(target_plugin_id, command_id, args, timeout).await;
+        let result = self
+            .ipc_call_inner(target_plugin_id, command_id, args, timeout)
+            .await;
         let elapsed = started.elapsed();
         if let Some(m) = crate::metrics::global() {
             let status = match &result {
@@ -569,8 +564,8 @@ impl LogTrait for KernelPluginContext {
         match level {
             LogLevel::Trace => tracing::trace!(plugin_id = %self.plugin_id, "{message}"),
             LogLevel::Debug => tracing::debug!(plugin_id = %self.plugin_id, "{message}"),
-            LogLevel::Info  => tracing::info!(plugin_id = %self.plugin_id, "{message}"),
-            LogLevel::Warn  => tracing::warn!(plugin_id = %self.plugin_id, "{message}"),
+            LogLevel::Info => tracing::info!(plugin_id = %self.plugin_id, "{message}"),
+            LogLevel::Warn => tracing::warn!(plugin_id = %self.plugin_id, "{message}"),
             LogLevel::Error => tracing::error!(plugin_id = %self.plugin_id, "{message}"),
         }
     }
@@ -617,8 +612,7 @@ where
     R: Send + 'static,
 {
     let depth = IN_FLIGHT_SYNC_DISPATCHES.fetch_add(1, Ordering::Relaxed) + 1;
-    if depth >= KERNEL_BLOCKING_POOL_WARN_DEPTH
-        && !HIGH_WATER_WARNED.swap(true, Ordering::Relaxed)
+    if depth >= KERNEL_BLOCKING_POOL_WARN_DEPTH && !HIGH_WATER_WARNED.swap(true, Ordering::Relaxed)
     {
         tracing::warn!(
             audit = true,
@@ -726,8 +720,7 @@ mod tests {
         // Same-prefix-different-namespace: shares the `com.test.plugin`
         // characters but `-evil` breaks the dotted boundary, so the
         // strict check rejects it.
-        let result =
-            ctx.publish("com.test.plugin-evil.event", serde_json::json!({}));
+        let result = ctx.publish("com.test.plugin-evil.event", serde_json::json!({}));
         assert!(
             result.is_err(),
             "com.test.plugin must NOT be allowed to publish com.test.plugin-evil.event",
@@ -748,7 +741,8 @@ mod tests {
         let ctx = make_context(dir.path(), &[]);
         let mut sub = ctx.subscribe(EventFilter::All);
 
-        ctx.publish("com.test.plugin.ping", serde_json::json!({"x": 1})).unwrap();
+        ctx.publish("com.test.plugin.ping", serde_json::json!({"x": 1}))
+            .unwrap();
 
         let evt = sub.recv().await.unwrap();
         match &evt.event {
@@ -797,7 +791,10 @@ mod tests {
             .iter()
             .find(|e| e.contains("audit=true") && e.contains("path traversal denied"))
             .unwrap_or_else(|| panic!("no audit traversal event emitted; got: {events:?}"));
-        assert!(traversal.contains("plugin_id=com.test.plugin"), "{traversal}");
+        assert!(
+            traversal.contains("plugin_id=com.test.plugin"),
+            "{traversal}"
+        );
     }
 
     #[tokio::test]

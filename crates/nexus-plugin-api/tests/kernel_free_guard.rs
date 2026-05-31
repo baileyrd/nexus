@@ -55,8 +55,8 @@ fn cargo_toml_has_no_kernel_internal_dependencies() {
     let path = manifest_path();
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let parsed: toml::Value = toml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
+    let parsed: toml::Value =
+        toml::from_str(&raw).unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
 
     let mut all_deps: BTreeSet<String> = BTreeSet::new();
     all_deps.extend(collect_dep_names(parsed.get("dependencies")));

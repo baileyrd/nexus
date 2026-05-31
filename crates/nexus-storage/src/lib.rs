@@ -8,40 +8,40 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-mod error;
-mod forge;
 mod atomic;
-pub mod schema;
-mod parser;
-mod index;
-mod search;
-mod find_replace;
-mod watcher;
-mod reconcile;
-mod tasks;
-mod graph;
-mod search_scope;
-mod export;
-pub mod mdx;
-mod canvas;
-pub mod config;
 pub mod bases;
-pub mod obsidian_base;
-mod handlers;
-pub mod core_plugin;
-/// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
-pub mod lfs;
-/// BL-083: forge-to-forge import / migration planning + apply.
-pub mod import;
-pub mod vectorstore;
+mod canvas;
 /// BL-114: tree-sitter code-symbol index. Populated from the storage
 /// engine's `write_file` / `rebuild_index` paths and the
 /// `com.nexus.git.commit` subscription in [`core_plugin`].
 pub mod code_index;
+pub mod config;
+pub mod core_plugin;
 /// BL-128 thin slice: file-backed personal entity index. Lives under
 /// `<forge>/entities/` and powers the agent's `entity_search` /
 /// `entity_get` / `entity_relations` IPC handlers.
 pub mod entity_index;
+mod error;
+mod export;
+mod find_replace;
+mod forge;
+mod graph;
+mod handlers;
+/// BL-083: forge-to-forge import / migration planning + apply.
+pub mod import;
+mod index;
+/// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
+pub mod lfs;
+pub mod mdx;
+pub mod obsidian_base;
+mod parser;
+mod reconcile;
+pub mod schema;
+mod search;
+mod search_scope;
+mod tasks;
+pub mod vectorstore;
+mod watcher;
 
 pub mod ipc;
 
@@ -72,28 +72,36 @@ pub struct TreeEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_ms: Option<i64>,
 }
-pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
-pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, toggle_task, toggle_task_in_file};
-pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
-pub use index::{insert_file, query_files, query_blocks, query_links, query_backlinks, query_tags, delete_file, soft_delete_file, file_by_path};
-pub use search::{SearchIndex, SearchResult};
-pub use find_replace::{
-    find_in_files, replace_in_files, FileMatches, FindInFilesArgs, LineMatch,
-    ReplaceError, ReplaceInFilesArgs, ReplaceReport,
-};
-pub use search_scope::{CmpOp, PropertyOp, ScopeFilter, parse_scoped_query};
-pub use reconcile::{ReconcileDelta, reconcile};
-pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
-pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
-pub use export::export_to_html;
-pub use mdx::{ParsedJsxComponent, MdxParseResult, parse_mdx};
-pub use index::{JsxRecord, insert_jsx_components, query_jsx_components};
 pub use canvas::{
-    CanvasFile, CanvasNode, CanvasNodeType, CanvasEdge, CanvasEdgeType,
-    CanvasNodeRecord, CanvasEdgeRecord,
-    CanvasPatchOp, CanvasPatchError,
-    parse_canvas, serialize_canvas, apply_patch, extract_file_links,
+    apply_patch, extract_file_links, parse_canvas, serialize_canvas, CanvasEdge, CanvasEdgeRecord,
+    CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeRecord, CanvasNodeType, CanvasPatchError,
+    CanvasPatchOp,
 };
+pub use export::export_to_html;
+pub use find_replace::{
+    find_in_files, replace_in_files, FileMatches, FindInFilesArgs, LineMatch, ReplaceError,
+    ReplaceInFilesArgs, ReplaceReport,
+};
+pub use graph::{
+    BacklinkResult, EdgeData, GraphStats, KnowledgeGraph, OutgoingLink, UnresolvedLink,
+};
+pub use index::{
+    delete_file, file_by_path, insert_file, query_backlinks, query_blocks, query_files,
+    query_links, query_tags, soft_delete_file,
+};
+pub use index::{insert_jsx_components, query_jsx_components, JsxRecord};
+pub use index::{
+    BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult,
+};
+pub use mdx::{parse_mdx, MdxParseResult, ParsedJsxComponent};
+pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
+pub use reconcile::{reconcile, ReconcileDelta};
+pub use search::{SearchIndex, SearchResult};
+pub use search_scope::{parse_scoped_query, CmpOp, PropertyOp, ScopeFilter};
+pub use tasks::{
+    insert_tasks, query_tasks, toggle_task, toggle_task_in_file, ParsedTask, TaskFilter, TaskRecord,
+};
+pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
@@ -258,11 +266,15 @@ impl StorageEngine {
                 g.add_note(path);
                 g.remove_links_from(path);
                 for target in canvas_link_targets {
-                    g.add_link(path, &target, graph::EdgeData {
-                        link_type: "canvas-embed".to_string(),
-                        link_text: target.clone(),
-                        fragment: None,
-                    });
+                    g.add_link(
+                        path,
+                        &target,
+                        graph::EdgeData {
+                            link_type: "canvas-embed".to_string(),
+                            link_text: target.clone(),
+                            fragment: None,
+                        },
+                    );
                 }
             }
 
@@ -316,13 +328,16 @@ impl StorageEngine {
                 g.add_note(path);
                 g.remove_links_from(path);
                 for link in &parsed.links {
-                    let target = link.target_path.as_deref()
-                        .unwrap_or(&link.link_text);
-                    g.add_link(path, target, graph::EdgeData {
-                        link_type: link.link_type.clone(),
-                        link_text: link.link_text.clone(),
-                        fragment: link.fragment.clone(),
-                    });
+                    let target = link.target_path.as_deref().unwrap_or(&link.link_text);
+                    g.add_link(
+                        path,
+                        target,
+                        graph::EdgeData {
+                            link_type: link.link_type.clone(),
+                            link_text: link.link_text.clone(),
+                            fragment: link.fragment.clone(),
+                        },
+                    );
                 }
             }
 
@@ -415,9 +430,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn canvas_nodes(&self, file_id: i64) -> Result<Vec<CanvasNodeRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         canvas::query_canvas_nodes(&conn, file_id)
     }
 
@@ -427,9 +442,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn canvas_edges(&self, file_id: i64) -> Result<Vec<CanvasEdgeRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         canvas::query_canvas_edges(&conn, file_id)
     }
 
@@ -442,9 +457,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn canvas_nodes_by_path(&self, path: &str) -> Result<Vec<CanvasNodeRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         let Some(record) = file_by_path(&conn, path)? else {
             return Ok(Vec::new());
         };
@@ -459,9 +474,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn canvas_edges_by_path(&self, path: &str) -> Result<Vec<CanvasEdgeRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         let Some(record) = file_by_path(&conn, path)? else {
             return Ok(Vec::new());
         };
@@ -474,7 +489,11 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] on serialize, I/O, or database failure.
-    pub fn write_canvas(&self, path: &str, canvas: &CanvasFile) -> Result<FileMetadata, StorageError> {
+    pub fn write_canvas(
+        &self,
+        path: &str,
+        canvas: &CanvasFile,
+    ) -> Result<FileMetadata, StorageError> {
         let json = canvas::serialize_canvas(canvas)?;
         self.write_file(path, json.as_bytes())
     }
@@ -526,9 +545,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn list_bases(&self) -> Result<Vec<bases::BaseSummary>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         bases::query_bases(&conn)
     }
 
@@ -633,9 +652,7 @@ impl StorageEngine {
             .records
             .iter_mut()
             .find(|r| r.id == record_id)
-            .ok_or_else(|| {
-                StorageError::FileNotFound(format!("record {record_id} in {path}"))
-            })?;
+            .ok_or_else(|| StorageError::FileNotFound(format!("record {record_id} in {path}")))?;
 
         for (k, v) in fields {
             if k == "id" {
@@ -700,10 +717,15 @@ impl StorageEngine {
     ) -> Result<(), StorageError> {
         let abs_dir = self.forge.root().join(path);
         let mut base = nexus_types::bases::load_base(&abs_dir)?;
-        let old_def = base.schema.fields.get(name).cloned().ok_or_else(|| {
-            StorageError::FileNotFound(format!("property {name} in {path}"))
-        })?;
-        base.schema.fields.insert(name.to_string(), definition.clone());
+        let old_def = base
+            .schema
+            .fields
+            .get(name)
+            .cloned()
+            .ok_or_else(|| StorageError::FileNotFound(format!("property {name} in {path}")))?;
+        base.schema
+            .fields
+            .insert(name.to_string(), definition.clone());
         if migrate_values {
             let old_type = property_type(&old_def);
             let new_type = property_type(definition);
@@ -747,9 +769,10 @@ impl StorageEngine {
                 reason: format!("property '{new_name}' already exists"),
             });
         }
-        let def = base.schema.fields.remove(old_name).ok_or_else(|| {
-            StorageError::FileNotFound(format!("property {old_name} in {path}"))
-        })?;
+        let def =
+            base.schema.fields.remove(old_name).ok_or_else(|| {
+                StorageError::FileNotFound(format!("property {old_name} in {path}"))
+            })?;
         base.schema.fields.insert(new_name.to_string(), def);
         for record in &mut base.records {
             if let Some(v) = record.fields.remove(old_name) {
@@ -828,9 +851,7 @@ impl StorageEngine {
             .views
             .iter_mut()
             .find(|v| v.name == view.name)
-            .ok_or_else(|| {
-                StorageError::FileNotFound(format!("view {} in {path}", view.name))
-            })?;
+            .ok_or_else(|| StorageError::FileNotFound(format!("view {} in {path}", view.name)))?;
         *slot = view;
         nexus_types::bases::save_base(&abs_dir, &base)?;
         self.index_base(path, &base)?;
@@ -991,9 +1012,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn list_files(&self, prefix: &str) -> Result<Vec<FileMetadata>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         let filter = FileFilter {
             prefix: if prefix.is_empty() {
                 None
@@ -1020,9 +1041,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn file_exists(&self, path: &str) -> Result<bool, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         Ok(file_by_path(&conn, path)?.is_some())
     }
 
@@ -1075,7 +1096,10 @@ impl StorageEngine {
                 format!("{}/{}", relpath.trim_end_matches('/'), name)
             };
             let (modified_ms, created_ms) = match entry.metadata() {
-                Ok(md) => (system_time_to_ms(md.modified().ok()), system_time_to_ms(md.created().ok())),
+                Ok(md) => (
+                    system_time_to_ms(md.modified().ok()),
+                    system_time_to_ms(md.created().ok()),
+                ),
                 Err(_) => (None, None),
             };
             entries.push(TreeEntry {
@@ -1249,9 +1273,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_files(&self, filter: &FileFilter) -> Result<Vec<FileRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         query_files(&conn, filter)
     }
 
@@ -1276,9 +1300,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_blocks(&self, file_id: u64) -> Result<Vec<BlockRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         query_blocks(&conn, file_id)
     }
 
@@ -1290,9 +1314,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_blocks_by_path(&self, path: &str) -> Result<Vec<BlockRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         let Some(file) = file_by_path(&conn, path)? else {
             return Ok(Vec::new());
         };
@@ -1305,9 +1329,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_links(&self, file_id: u64) -> Result<Vec<LinkRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         query_links(&conn, file_id)
     }
 
@@ -1317,9 +1341,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_backlinks(&self, file_id: u64) -> Result<Vec<LinkRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         query_backlinks(&conn, file_id)
     }
 
@@ -1329,9 +1353,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_tags(&self, name: &str) -> Result<Vec<TagResult>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         query_tags(&conn, name)
     }
 
@@ -1343,7 +1367,10 @@ impl StorageEngine {
     ///
     /// # Errors
     /// Returns [`StorageError::Io`] for any IO failure inside the walk.
-    pub fn plan_import(&self, source_root: &Path) -> Result<crate::import::ImportPlan, StorageError> {
+    pub fn plan_import(
+        &self,
+        source_root: &Path,
+    ) -> Result<crate::import::ImportPlan, StorageError> {
         crate::import::plan_import(source_root, self.forge.root())
     }
 
@@ -1582,9 +1609,9 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn query_tasks(&self, filter: &TaskFilter) -> Result<Vec<TaskRecord>, StorageError> {
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         tasks::query_tasks(&conn, filter)
     }
 
@@ -1625,15 +1652,15 @@ impl StorageEngine {
         // Run Tantivy on the plain-text portion.
         let results = if text.is_empty() {
             // Scope-only query: return all blocks up to limit (unscored).
-            let conn = self.pool.get().map_err(|e| StorageError::Database(
-                rusqlite::Error::InvalidParameterName(e.to_string()),
-            ))?;
+            let conn = self.pool.get().map_err(|e| {
+                StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
             let mut stmt = conn.prepare(
                 "SELECT f.path, b.id, b.block_type, b.content
                  FROM blocks b JOIN files f ON f.id = b.file_id
                  WHERE f.is_deleted = 0
                  ORDER BY f.path, b.start_line
-                 LIMIT ?1;"
+                 LIMIT ?1;",
             )?;
             let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
             let rows = stmt.query_map(rusqlite::params![limit_i64], |row| {
@@ -1654,9 +1681,9 @@ impl StorageEngine {
         if filters.is_empty() {
             Ok(results)
         } else {
-            let conn = self.pool.get().map_err(|e| StorageError::Database(
-                rusqlite::Error::InvalidParameterName(e.to_string()),
-            ))?;
+            let conn = self.pool.get().map_err(|e| {
+                StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
             search_scope::filter_results(&conn, results, &filters)
         }
     }
@@ -1672,9 +1699,9 @@ impl StorageEngine {
     pub fn rebuild_search_index(&self) -> Result<(), StorageError> {
         self.search_index.clear()?;
 
-        let conn = self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
 
         // Iterate all blocks joined with files.
         let mut stmt = conn.prepare(
@@ -1741,10 +1768,12 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError::Database`] if the pool is exhausted.
-    pub fn pool_connection(&self) -> Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>, StorageError> {
-        self.pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))
+    pub fn pool_connection(
+        &self,
+    ) -> Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>, StorageError> {
+        self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })
     }
 
     // ── Vector store ──────────────────────────────────────────────────────────
@@ -1826,13 +1855,15 @@ fn open_internal(
     let pool = r2d2::Pool::builder()
         .max_size(config.pool_size)
         .build(manager)
-        .map_err(|e| StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        .map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
 
     // 4. Configure pragmas and run migrations on a pool connection.
     {
-        let conn = pool.get().map_err(|e| StorageError::Database(
-            rusqlite::Error::InvalidParameterName(e.to_string()),
-        ))?;
+        let conn = pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         schema::configure_pragmas(&conn)?;
         schema::migrate(&conn)?;
     }
@@ -1890,9 +1921,7 @@ fn resolve_within(root: &Path, relpath: &str) -> Result<std::path::PathBuf, Stor
 /// plus a requirement that `relpath` name a file (non-empty filename).
 fn resolve_target(root: &Path, relpath: &str) -> Result<std::path::PathBuf, StorageError> {
     if relpath.is_empty() {
-        return Err(StorageError::PermissionDenied(
-            "empty relpath".to_string(),
-        ));
+        return Err(StorageError::PermissionDenied("empty relpath".to_string()));
     }
     let resolved = resolve_within(root, relpath)?;
     if resolved.file_name().is_none() {
@@ -1916,7 +1945,10 @@ fn resolve_target(root: &Path, relpath: &str) -> Result<std::path::PathBuf, Stor
 /// directory-based rule.
 fn infer_file_type(path: &str) -> String {
     let p = Path::new(path);
-    let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
 
     // Specific text-shaped extensions classify regardless of where
     // the file lives.
@@ -2019,9 +2051,7 @@ fn system_time_to_ms(t: Option<std::time::SystemTime>) -> Option<i64> {
 
 /// Pull the `"type"` string out of a property definition JSON value.
 fn property_type(def: &serde_json::Value) -> Option<String> {
-    def.get("type")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
+    def.get("type").and_then(|v| v.as_str()).map(str::to_string)
 }
 
 /// Best-effort coercion of a record value to the target property
@@ -2029,12 +2059,11 @@ fn property_type(def: &serde_json::Value) -> Option<String> {
 /// producing garbage. The rules mirror the shell's cell editor
 /// `coerce()` helper so round-trips (edit → migrate → edit) stay
 /// stable.
-fn coerce_property_value(
-    value: &serde_json::Value,
-    new_type: Option<&str>,
-) -> serde_json::Value {
+fn coerce_property_value(value: &serde_json::Value, new_type: Option<&str>) -> serde_json::Value {
     use serde_json::Value;
-    let Some(kind) = new_type else { return value.clone() };
+    let Some(kind) = new_type else {
+        return value.clone();
+    };
     if value.is_null() {
         return Value::Null;
     }
@@ -2074,8 +2103,8 @@ fn coerce_property_value(
             Value::Null => Value::Array(Vec::new()),
             _ => Value::Array(vec![value.clone()]),
         },
-        "text" | "long-text" | "title" | "url" | "email" | "phone" | "select"
-        | "date" | "time" | "datetime" => match value {
+        "text" | "long-text" | "title" | "url" | "email" | "phone" | "select" | "date" | "time"
+        | "datetime" => match value {
             Value::String(_) => value.clone(),
             Value::Null => Value::Null,
             Value::Bool(b) => Value::String(b.to_string()),
@@ -2115,10 +2144,7 @@ mod tests {
             engine.forge().forge_dir().join("index.db").exists(),
             ".forge/index.db should exist"
         );
-        assert!(
-            engine.forge().notes_dir().exists(),
-            "notes/ should exist"
-        );
+        assert!(engine.forge().notes_dir().exists(), "notes/ should exist");
     }
 
     // ── 2. write_and_read_file ────────────────────────────────────────────────
@@ -2269,7 +2295,12 @@ mod tests {
             .expect("write");
 
         let tags = engine.query_tags("rust").expect("query_tags");
-        assert_eq!(tags.len(), 1, "expected 1 tag result for 'rust', got {}", tags.len());
+        assert_eq!(
+            tags.len(),
+            1,
+            "expected 1 tag result for 'rust', got {}",
+            tags.len()
+        );
     }
 
     // ── BL-114: code-symbol index — write_file path ───────────────────────────
@@ -2530,32 +2561,51 @@ mod tests {
         initial.nodes.push(CanvasNode {
             id: "a".to_string(),
             node_type: CanvasNodeType::Text,
-            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
-            color: None, label: None, collapsed: false,
-            file: None, text: Some("hi".to_string()),
-            url: None, source: None, command: None, extra: serde_json::Map::new(),
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+            color: None,
+            label: None,
+            collapsed: false,
+            file: None,
+            text: Some("hi".to_string()),
+            url: None,
+            source: None,
+            command: None,
+            extra: serde_json::Map::new(),
         });
 
         engine
             .write_canvas("boards/one.canvas", &initial)
             .expect("write_canvas");
 
-        let nodes = engine.canvas_nodes_by_path("boards/one.canvas").expect("nodes");
+        let nodes = engine
+            .canvas_nodes_by_path("boards/one.canvas")
+            .expect("nodes");
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].node_id, "a");
 
         engine
             .patch_canvas(
                 "boards/one.canvas",
-                &[CanvasPatchOp::NodeMove { id: "a".to_string(), x: 42.0, y: 7.0 }],
+                &[CanvasPatchOp::NodeMove {
+                    id: "a".to_string(),
+                    x: 42.0,
+                    y: 7.0,
+                }],
             )
             .expect("patch_canvas");
 
-        let parsed = engine.read_canvas("boards/one.canvas").expect("read_canvas");
+        let parsed = engine
+            .read_canvas("boards/one.canvas")
+            .expect("read_canvas");
         assert!((parsed.nodes[0].x - 42.0).abs() < f64::EPSILON);
         assert!((parsed.nodes[0].y - 7.0).abs() < f64::EPSILON);
 
-        let after = engine.canvas_nodes_by_path("boards/one.canvas").expect("nodes2");
+        let after = engine
+            .canvas_nodes_by_path("boards/one.canvas")
+            .expect("nodes2");
         assert_eq!(after.len(), 1);
         assert!((after[0].x - 42.0).abs() < f64::EPSILON);
     }
@@ -2566,15 +2616,21 @@ mod tests {
     fn canvas_queries_by_path_on_missing_return_empty() {
         let dir = tmp();
         let engine = StorageEngine::init(dir.path()).expect("init");
-        assert!(engine.canvas_nodes_by_path("nope.canvas").expect("nodes").is_empty());
-        assert!(engine.canvas_edges_by_path("nope.canvas").expect("edges").is_empty());
+        assert!(engine
+            .canvas_nodes_by_path("nope.canvas")
+            .expect("nodes")
+            .is_empty());
+        assert!(engine
+            .canvas_edges_by_path("nope.canvas")
+            .expect("edges")
+            .is_empty());
     }
 
     // ── 12. base_record_crud_roundtrip ────────────────────────────────────────
 
     #[test]
     fn base_record_crud_roundtrip() {
-        use nexus_types::bases::{Base, BaseRecord, BaseSchema, BaseMetadata};
+        use nexus_types::bases::{Base, BaseMetadata, BaseRecord, BaseSchema};
 
         let dir = tmp();
         let engine = StorageEngine::init(dir.path()).expect("init");
@@ -2588,7 +2644,10 @@ mod tests {
         );
         let seed = Base {
             name: "Tasks".to_string(),
-            schema: BaseSchema { version: "1.0".to_string(), fields },
+            schema: BaseSchema {
+                version: "1.0".to_string(),
+                fields,
+            },
             records: Vec::new(),
             views: Vec::new(),
             relations: Vec::new(),
@@ -2629,22 +2688,29 @@ mod tests {
         // Re-read from disk to confirm round-trip.
         let reloaded = nexus_types::bases::load_base(&abs).expect("load");
         assert_eq!(reloaded.records.len(), 1);
-        assert_eq!(reloaded.records[0].fields.get("title").unwrap(), "Buy oat milk");
+        assert_eq!(
+            reloaded.records[0].fields.get("title").unwrap(),
+            "Buy oat milk"
+        );
 
         // Delete.
-        engine.base_record_delete(base_rel, &created_id).expect("delete");
+        engine
+            .base_record_delete(base_rel, &created_id)
+            .expect("delete");
         let reloaded = nexus_types::bases::load_base(&abs).expect("load2");
         assert!(reloaded.records.is_empty());
 
         // Delete again — idempotent no-op.
-        engine.base_record_delete(base_rel, &created_id).expect("delete noop");
+        engine
+            .base_record_delete(base_rel, &created_id)
+            .expect("delete noop");
     }
 
     // ── 13. base_record_create_rejects_duplicate_id ───────────────────────────
 
     #[test]
     fn base_record_create_rejects_duplicate_id() {
-        use nexus_types::bases::{Base, BaseRecord, BaseSchema, BaseMetadata};
+        use nexus_types::bases::{Base, BaseMetadata, BaseRecord, BaseSchema};
 
         let dir = tmp();
         let engine = StorageEngine::init(dir.path()).expect("init");
@@ -2652,8 +2718,15 @@ mod tests {
         let base_rel = "d.bases";
         let seed = Base {
             name: "D".to_string(),
-            schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
-            records: vec![BaseRecord { id: "r1".into(), deleted_at: None, fields: serde_json::Map::new() }],
+            schema: BaseSchema {
+                version: "1.0".to_string(),
+                fields: serde_json::Map::new(),
+            },
+            records: vec![BaseRecord {
+                id: "r1".into(),
+                deleted_at: None,
+                fields: serde_json::Map::new(),
+            }],
             views: Vec::new(),
             relations: Vec::new(),
             metadata: BaseMetadata::default(),
@@ -2664,7 +2737,11 @@ mod tests {
         let err = engine
             .base_record_create(
                 base_rel,
-                BaseRecord { id: "r1".into(), deleted_at: None, fields: serde_json::Map::new() },
+                BaseRecord {
+                    id: "r1".into(),
+                    deleted_at: None,
+                    fields: serde_json::Map::new(),
+                },
             )
             .expect_err("duplicate should fail");
         assert!(matches!(err, StorageError::CorruptFile { .. }));
@@ -2674,7 +2751,7 @@ mod tests {
 
     #[test]
     fn base_record_update_unknown_id_errors() {
-        use nexus_types::bases::{Base, BaseSchema, BaseMetadata};
+        use nexus_types::bases::{Base, BaseMetadata, BaseSchema};
 
         let dir = tmp();
         let engine = StorageEngine::init(dir.path()).expect("init");
@@ -2682,7 +2759,10 @@ mod tests {
         let base_rel = "u.bases";
         let seed = Base {
             name: "U".to_string(),
-            schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
+            schema: BaseSchema {
+                version: "1.0".to_string(),
+                fields: serde_json::Map::new(),
+            },
             records: Vec::new(),
             views: Vec::new(),
             relations: Vec::new(),
@@ -2701,7 +2781,7 @@ mod tests {
 
     #[test]
     fn base_property_crud() {
-        use nexus_types::bases::{Base, BaseRecord, BaseSchema, BaseMetadata};
+        use nexus_types::bases::{Base, BaseMetadata, BaseRecord, BaseSchema};
 
         let dir = tmp();
         let engine = StorageEngine::init(dir.path()).expect("init");
@@ -2748,7 +2828,12 @@ mod tests {
 
         // Update.
         engine
-            .base_property_update(base_rel, "title", &serde_json::json!({ "type": "text", "required": true }), false)
+            .base_property_update(
+                base_rel,
+                "title",
+                &serde_json::json!({ "type": "text", "required": true }),
+                false,
+            )
             .expect("update");
         let loaded = nexus_types::bases::load_base(&abs).expect("load2");
         assert_eq!(
@@ -2763,12 +2848,16 @@ mod tests {
         assert!(matches!(err, StorageError::FileNotFound(_)));
 
         // Delete drops record key.
-        engine.base_property_delete(base_rel, "legacy").expect("delete legacy");
+        engine
+            .base_property_delete(base_rel, "legacy")
+            .expect("delete legacy");
         let loaded = nexus_types::bases::load_base(&abs).expect("load3");
         assert!(!loaded.records[0].fields.contains_key("legacy"));
 
         // Delete unknown → no-op.
-        engine.base_property_delete(base_rel, "ghost").expect("delete ghost");
+        engine
+            .base_property_delete(base_rel, "ghost")
+            .expect("delete ghost");
     }
 
     // ── 15a. base_record_soft_delete + restore ────────────────────────────────
@@ -2812,7 +2901,11 @@ mod tests {
             .expect("soft delete");
         let abs = dir.path().join(base_rel);
         let loaded = nexus_types::bases::load_base(&abs).expect("load1");
-        assert_eq!(loaded.records.len(), 1, "soft-delete keeps the record on disk");
+        assert_eq!(
+            loaded.records.len(),
+            1,
+            "soft-delete keeps the record on disk"
+        );
         assert!(
             loaded.records[0].deleted_at.is_some(),
             "deleted_at should be set after soft delete",
@@ -2921,7 +3014,7 @@ mod tests {
 
     #[test]
     fn base_view_crud() {
-        use nexus_types::bases::{Base, BaseSchema, BaseMetadata, BaseView, ViewType};
+        use nexus_types::bases::{Base, BaseMetadata, BaseSchema, BaseView, ViewType};
 
         let dir = tmp();
         let engine = StorageEngine::init(dir.path()).expect("init");
@@ -2929,7 +3022,10 @@ mod tests {
         let abs = dir.path().join(base_rel);
         let seed = Base {
             name: "V".to_string(),
-            schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
+            schema: BaseSchema {
+                version: "1.0".to_string(),
+                fields: serde_json::Map::new(),
+            },
             records: Vec::new(),
             views: Vec::new(),
             relations: Vec::new(),
@@ -2948,12 +3044,16 @@ mod tests {
             date_field: None,
             end_field: None,
         };
-        engine.base_view_create(base_rel, board.clone()).expect("create");
+        engine
+            .base_view_create(base_rel, board.clone())
+            .expect("create");
         let loaded = nexus_types::bases::load_base(&abs).expect("load");
         assert_eq!(loaded.views.len(), 1);
         assert_eq!(loaded.views[0].name, "Board");
 
-        let err = engine.base_view_create(base_rel, board.clone()).expect_err("dup");
+        let err = engine
+            .base_view_create(base_rel, board.clone())
+            .expect_err("dup");
         assert!(matches!(err, StorageError::CorruptFile { .. }));
 
         let mut updated = board.clone();
@@ -2962,15 +3062,22 @@ mod tests {
         let loaded = nexus_types::bases::load_base(&abs).expect("load2");
         assert_eq!(loaded.views[0].group_field.as_deref(), Some("priority"));
 
-        let ghost = BaseView { name: "Ghost".to_string(), ..board };
-        let err = engine.base_view_update(base_rel, ghost).expect_err("unknown");
+        let ghost = BaseView {
+            name: "Ghost".to_string(),
+            ..board
+        };
+        let err = engine
+            .base_view_update(base_rel, ghost)
+            .expect_err("unknown");
         assert!(matches!(err, StorageError::FileNotFound(_)));
 
         engine.base_view_delete(base_rel, "Board").expect("delete");
         let loaded = nexus_types::bases::load_base(&abs).expect("load3");
         assert!(loaded.views.is_empty());
 
-        engine.base_view_delete(base_rel, "noop").expect("noop delete");
+        engine
+            .base_view_delete(base_rel, "noop")
+            .expect("noop delete");
     }
 
     // ── 17. open_nonexistent_forge_returns_error ──────────────────────────────

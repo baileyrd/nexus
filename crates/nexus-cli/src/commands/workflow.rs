@@ -4,7 +4,9 @@
 //! direct `nexus-workflow` linkage.
 
 use anyhow::{Context, Result};
-use nexus_types::constants::{IPC_TIMEOUT_EXTENDED as RUN_TIMEOUT, IPC_TIMEOUT_SHORT as IPC_TIMEOUT};
+use nexus_types::constants::{
+    IPC_TIMEOUT_EXTENDED as RUN_TIMEOUT, IPC_TIMEOUT_SHORT as IPC_TIMEOUT,
+};
 use nexus_types::plugin_ids;
 use serde_json::Value;
 
@@ -46,10 +48,7 @@ fn print_run(run: &Value) {
         .get("workflow_name")
         .and_then(Value::as_str)
         .unwrap_or("?");
-    let success = run
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let success = run.get("success").and_then(Value::as_bool).unwrap_or(false);
     let steps = run
         .get("steps")
         .and_then(Value::as_array)
@@ -93,8 +92,8 @@ pub fn reload(app: &mut App) -> Result<()> {
 
 /// `nexus workflow validate <file>` — parse + validate a TOML file.
 pub fn validate(app: &mut App, path: &str) -> Result<()> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading workflow from {path}"))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading workflow from {path}"))?;
     match call(app, "validate", serde_json::json!({ "text": text })) {
         Ok(value) => {
             let name = value
@@ -138,14 +137,22 @@ fn print_summary_table(response: &Value) {
     }
     let name_w = workflows
         .iter()
-        .filter_map(|w| w.get("workflow").and_then(|m| m.get("name")).and_then(Value::as_str))
+        .filter_map(|w| {
+            w.get("workflow")
+                .and_then(|m| m.get("name"))
+                .and_then(Value::as_str)
+        })
         .map(str::len)
         .max()
         .unwrap_or(4)
         .max(4);
     let trig_w = workflows
         .iter()
-        .filter_map(|w| w.get("trigger").and_then(|m| m.get("type")).and_then(Value::as_str))
+        .filter_map(|w| {
+            w.get("trigger")
+                .and_then(|m| m.get("type"))
+                .and_then(Value::as_str)
+        })
         .map(str::len)
         .max()
         .unwrap_or(7)

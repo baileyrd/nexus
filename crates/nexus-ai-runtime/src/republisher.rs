@@ -119,8 +119,14 @@ mod tests {
     #[test]
     fn extract_session_id_handles_missing_and_empty() {
         assert_eq!(extract_session_id(&serde_json::json!({})), None);
-        assert_eq!(extract_session_id(&serde_json::json!({"session_id": ""})), None);
-        assert_eq!(extract_session_id(&serde_json::json!({"session_id": 42})), None);
+        assert_eq!(
+            extract_session_id(&serde_json::json!({"session_id": ""})),
+            None
+        );
+        assert_eq!(
+            extract_session_id(&serde_json::json!({"session_id": 42})),
+            None
+        );
         assert_eq!(
             extract_session_id(&serde_json::json!({"session_id": "abc"})),
             Some("abc".to_string())
@@ -170,7 +176,9 @@ mod tests {
     #[test]
     fn translate_unknown_topic_returns_none() {
         let payload = serde_json::json!({ "session_id": "s1" });
-        assert!(translate_bus_event("com.nexus.theme.reloaded", &payload, Uuid::new_v4()).is_none());
+        assert!(
+            translate_bus_event("com.nexus.theme.reloaded", &payload, Uuid::new_v4()).is_none()
+        );
         // stream_start / stream_done aren't translated today — they
         // don't add information beyond the runtime's own Finished/
         // Failed envelope.

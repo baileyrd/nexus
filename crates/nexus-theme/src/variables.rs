@@ -60,7 +60,10 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     // --- Interactive states -------------------------------------------
     ("--nx-interactive-hover", "rgba(74, 144, 226, 0.08)"),
     ("--nx-interactive-active", "rgba(74, 144, 226, 0.16)"),
-    ("--nx-interactive-focus-ring", "2px solid var(--nx-color-primary)"),
+    (
+        "--nx-interactive-focus-ring",
+        "2px solid var(--nx-color-primary)",
+    ),
     ("--nx-interactive-disabled", "rgba(0, 0, 0, 0.38)"),
     // --- Typography ---------------------------------------------------
     (
@@ -325,7 +328,10 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     ("--nx-easing-in", "cubic-bezier(0.4, 0, 1, 1)"),
     ("--nx-easing-out", "cubic-bezier(0, 0, 0.2, 1)"),
     ("--nx-easing-in-out", "cubic-bezier(0.4, 0, 0.2, 1)"),
-    ("--nx-easing-bounce", "cubic-bezier(0.68, -0.55, 0.27, 1.55)"),
+    (
+        "--nx-easing-bounce",
+        "cubic-bezier(0.68, -0.55, 0.27, 1.55)",
+    ),
     ("--nx-easing-smooth", "cubic-bezier(0.25, 0.1, 0.25, 1)"),
     // === Extended effects =============================================
     ("--nx-shadow-xs", "0 1px 1px rgba(0, 0, 0, 0.04)"),
@@ -346,35 +352,71 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     ("--nx-button-padding-md", "8px 14px"),
     ("--nx-button-padding-lg", "12px 20px"),
     ("--nx-button-primary-bg", "var(--nx-color-primary)"),
-    ("--nx-button-primary-bg-hover", "var(--nx-color-primary-light)"),
-    ("--nx-button-primary-bg-active", "var(--nx-color-primary-dark)"),
-    ("--nx-button-primary-bg-disabled", "var(--nx-color-primary-200)"),
+    (
+        "--nx-button-primary-bg-hover",
+        "var(--nx-color-primary-light)",
+    ),
+    (
+        "--nx-button-primary-bg-active",
+        "var(--nx-color-primary-dark)",
+    ),
+    (
+        "--nx-button-primary-bg-disabled",
+        "var(--nx-color-primary-200)",
+    ),
     ("--nx-button-primary-text", "var(--nx-text-on-primary)"),
-    ("--nx-button-primary-text-disabled", "rgba(255, 255, 255, 0.7)"),
+    (
+        "--nx-button-primary-text-disabled",
+        "rgba(255, 255, 255, 0.7)",
+    ),
     ("--nx-button-primary-border", "transparent"),
     ("--nx-button-primary-border-hover", "transparent"),
     ("--nx-button-primary-shadow", "var(--nx-shadow-sm)"),
     ("--nx-button-secondary-bg", "var(--nx-bg-tertiary)"),
-    ("--nx-button-secondary-bg-hover", "var(--nx-color-neutral-300)"),
-    ("--nx-button-secondary-bg-active", "var(--nx-color-neutral-400)"),
-    ("--nx-button-secondary-bg-disabled", "var(--nx-color-neutral-100)"),
+    (
+        "--nx-button-secondary-bg-hover",
+        "var(--nx-color-neutral-300)",
+    ),
+    (
+        "--nx-button-secondary-bg-active",
+        "var(--nx-color-neutral-400)",
+    ),
+    (
+        "--nx-button-secondary-bg-disabled",
+        "var(--nx-color-neutral-100)",
+    ),
     ("--nx-button-secondary-text", "var(--nx-text-primary)"),
-    ("--nx-button-secondary-text-disabled", "var(--nx-text-disabled)"),
+    (
+        "--nx-button-secondary-text-disabled",
+        "var(--nx-text-disabled)",
+    ),
     ("--nx-button-secondary-border", "var(--nx-border-default)"),
-    ("--nx-button-secondary-border-hover", "var(--nx-border-strong)"),
+    (
+        "--nx-button-secondary-border-hover",
+        "var(--nx-border-strong)",
+    ),
     ("--nx-button-secondary-shadow", "none"),
     ("--nx-button-danger-bg", "var(--nx-color-error)"),
     ("--nx-button-danger-bg-hover", "var(--nx-color-error-400)"),
     ("--nx-button-danger-bg-active", "var(--nx-color-error-700)"),
-    ("--nx-button-danger-bg-disabled", "var(--nx-color-error-200)"),
+    (
+        "--nx-button-danger-bg-disabled",
+        "var(--nx-color-error-200)",
+    ),
     ("--nx-button-danger-text", "var(--nx-text-on-error)"),
-    ("--nx-button-danger-text-disabled", "rgba(255, 255, 255, 0.7)"),
+    (
+        "--nx-button-danger-text-disabled",
+        "rgba(255, 255, 255, 0.7)",
+    ),
     ("--nx-button-danger-border", "transparent"),
     ("--nx-button-danger-border-hover", "transparent"),
     ("--nx-button-danger-shadow", "var(--nx-shadow-sm)"),
     ("--nx-button-ghost-bg", "transparent"),
     ("--nx-button-ghost-bg-hover", "var(--nx-interactive-hover)"),
-    ("--nx-button-ghost-bg-active", "var(--nx-interactive-active)"),
+    (
+        "--nx-button-ghost-bg-active",
+        "var(--nx-interactive-active)",
+    ),
     ("--nx-button-ghost-bg-disabled", "transparent"),
     ("--nx-button-ghost-text", "var(--nx-text-primary)"),
     ("--nx-button-ghost-text-disabled", "var(--nx-text-disabled)"),
@@ -383,7 +425,10 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     ("--nx-button-ghost-shadow", "none"),
     ("--nx-button-link-text", "var(--nx-text-link)"),
     ("--nx-button-link-text-hover", "var(--nx-text-link-hover)"),
-    ("--nx-button-link-text-active", "var(--nx-color-primary-dark)"),
+    (
+        "--nx-button-link-text-active",
+        "var(--nx-color-primary-dark)",
+    ),
     // === Inputs =======================================================
     ("--nx-input-bg", "var(--nx-bg-primary)"),
     ("--nx-input-bg-disabled", "var(--nx-bg-disabled)"),
@@ -503,12 +548,21 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     ("--nx-code-block-text", "var(--nx-text-code)"),
     ("--nx-code-block-border", "var(--nx-border-subtle)"),
     ("--nx-code-block-line-number", "var(--nx-text-tertiary)"),
-    ("--nx-code-block-line-highlight", "var(--nx-editor-line-highlight)"),
+    (
+        "--nx-code-block-line-highlight",
+        "var(--nx-editor-line-highlight)",
+    ),
     // === Graph & canvas (extended) ====================================
     ("--nx-graph-node-bg-hover", "var(--nx-color-primary-50)"),
     ("--nx-graph-node-bg-selected", "var(--nx-color-primary-100)"),
-    ("--nx-graph-node-border-hover", "var(--nx-color-primary-light)"),
-    ("--nx-graph-node-border-selected", "var(--nx-color-primary-dark)"),
+    (
+        "--nx-graph-node-border-hover",
+        "var(--nx-color-primary-light)",
+    ),
+    (
+        "--nx-graph-node-border-selected",
+        "var(--nx-color-primary-dark)",
+    ),
     ("--nx-graph-edge-stroke-hover", "var(--nx-text-secondary)"),
     ("--nx-graph-edge-stroke-selected", "var(--nx-color-primary)"),
     ("--nx-graph-edge-arrow", "var(--nx-text-tertiary)"),
@@ -521,7 +575,10 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     ("--nx-editor-selection", "rgba(74, 144, 226, 0.3)"),
     ("--nx-editor-active-line", "rgba(74, 144, 226, 0.08)"),
     ("--nx-editor-find-match", "rgba(243, 156, 18, 0.35)"),
-    ("--nx-editor-find-match-highlight", "rgba(243, 156, 18, 0.2)"),
+    (
+        "--nx-editor-find-match-highlight",
+        "rgba(243, 156, 18, 0.2)",
+    ),
     ("--nx-editor-gutter-border", "var(--nx-border-subtle)"),
     ("--nx-editor-gutter-active-line", "var(--nx-text-primary)"),
     ("--nx-editor-indent-guide", "rgba(0, 0, 0, 0.06)"),
@@ -570,64 +627,64 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     // === Density presets (cozy / compact / spacious) ==================
     // Three row-density tiers the user can switch between at runtime.
     // Themes may retune these; the active tier is applied by the shell.
-    ("--nx-density-cozy-ui-size",               "13px"),
-    ("--nx-density-cozy-row-h",                 "26px"),
-    ("--nx-density-cozy-body-size",             "16px"),
-    ("--nx-density-cozy-chrome-row-height",     "36px"),
-    ("--nx-density-cozy-chrome-icon-size",      "24px"),
-    ("--nx-density-compact-ui-size",            "12px"),
-    ("--nx-density-compact-row-h",              "22px"),
-    ("--nx-density-compact-body-size",          "15px"),
-    ("--nx-density-compact-chrome-row-height",  "30px"),
-    ("--nx-density-compact-chrome-icon-size",   "20px"),
-    ("--nx-density-spacious-ui-size",           "14px"),
-    ("--nx-density-spacious-row-h",             "30px"),
-    ("--nx-density-spacious-body-size",         "17px"),
+    ("--nx-density-cozy-ui-size", "13px"),
+    ("--nx-density-cozy-row-h", "26px"),
+    ("--nx-density-cozy-body-size", "16px"),
+    ("--nx-density-cozy-chrome-row-height", "36px"),
+    ("--nx-density-cozy-chrome-icon-size", "24px"),
+    ("--nx-density-compact-ui-size", "12px"),
+    ("--nx-density-compact-row-h", "22px"),
+    ("--nx-density-compact-body-size", "15px"),
+    ("--nx-density-compact-chrome-row-height", "30px"),
+    ("--nx-density-compact-chrome-icon-size", "20px"),
+    ("--nx-density-spacious-ui-size", "14px"),
+    ("--nx-density-spacious-row-h", "30px"),
+    ("--nx-density-spacious-body-size", "17px"),
     ("--nx-density-spacious-chrome-row-height", "40px"),
-    ("--nx-density-spacious-chrome-icon-size",  "28px"),
+    ("--nx-density-spacious-chrome-icon-size", "28px"),
     // === Editor canvas ================================================
     // Separate from --nx-type-sans so themes can use serif/mono on the
     // document canvas without changing the chrome UI typeface.
-    ("--nx-editor-font-family",         "var(--nx-type-sans)"),
-    ("--nx-editor-content-max-width",   "72ch"),
-    ("--nx-editor-content-padding-x",   "48px"),
+    ("--nx-editor-font-family", "var(--nx-type-sans)"),
+    ("--nx-editor-content-max-width", "72ch"),
+    ("--nx-editor-content-padding-x", "48px"),
     ("--nx-editor-content-padding-top", "40px"),
     // === Prose (rendered markdown document) ==========================
-    ("--nx-prose-heading-color",     "var(--nx-text-primary)"),
-    ("--nx-prose-body-color",        "var(--nx-text-primary)"),
-    ("--nx-prose-blockquote-bg",     "var(--nx-bg-secondary)"),
+    ("--nx-prose-heading-color", "var(--nx-text-primary)"),
+    ("--nx-prose-body-color", "var(--nx-text-primary)"),
+    ("--nx-prose-blockquote-bg", "var(--nx-bg-secondary)"),
     ("--nx-prose-blockquote-border", "var(--nx-color-primary)"),
-    ("--nx-prose-hr-color",          "var(--nx-border-default)"),
-    ("--nx-prose-table-header-bg",   "var(--nx-bg-secondary)"),
-    ("--nx-prose-table-border",      "var(--nx-border-subtle)"),
-    ("--nx-prose-table-stripe",      "var(--nx-bg-secondary)"),
-    ("--nx-prose-link-color",        "var(--nx-text-link)"),
-    ("--nx-prose-link-hover",        "var(--nx-text-link-hover)"),
+    ("--nx-prose-hr-color", "var(--nx-border-default)"),
+    ("--nx-prose-table-header-bg", "var(--nx-bg-secondary)"),
+    ("--nx-prose-table-border", "var(--nx-border-subtle)"),
+    ("--nx-prose-table-stripe", "var(--nx-bg-secondary)"),
+    ("--nx-prose-link-color", "var(--nx-text-link)"),
+    ("--nx-prose-link-hover", "var(--nx-text-link-hover)"),
     // === Callout blocks ===============================================
-    ("--nx-callout-bg",          "var(--nx-bg-secondary)"),
-    ("--nx-callout-border",      "var(--nx-color-primary)"),
+    ("--nx-callout-bg", "var(--nx-bg-secondary)"),
+    ("--nx-callout-border", "var(--nx-color-primary)"),
     ("--nx-callout-title-color", "var(--nx-text-primary)"),
-    ("--nx-callout-body-color",  "var(--nx-text-secondary)"),
-    ("--nx-callout-radius",      "var(--nx-radius-md)"),
-    ("--nx-callout-padding",     "12px 16px"),
+    ("--nx-callout-body-color", "var(--nx-text-secondary)"),
+    ("--nx-callout-radius", "var(--nx-radius-md)"),
+    ("--nx-callout-padding", "12px 16px"),
     // === Inspector panel ==============================================
-    ("--nx-inspector-bg",              "var(--nx-bg-secondary)"),
-    ("--nx-inspector-border",          "var(--nx-border-subtle)"),
-    ("--nx-inspector-header-bg",       "var(--nx-bg-secondary)"),
-    ("--nx-inspector-tab-active-bg",   "var(--nx-bg-primary)"),
+    ("--nx-inspector-bg", "var(--nx-bg-secondary)"),
+    ("--nx-inspector-border", "var(--nx-border-subtle)"),
+    ("--nx-inspector-header-bg", "var(--nx-bg-secondary)"),
+    ("--nx-inspector-tab-active-bg", "var(--nx-bg-primary)"),
     ("--nx-inspector-tab-active-text", "var(--nx-text-primary)"),
-    ("--nx-inspector-section-header",  "var(--nx-text-tertiary)"),
-    ("--nx-inspector-width",           "280px"),
+    ("--nx-inspector-section-header", "var(--nx-text-tertiary)"),
+    ("--nx-inspector-width", "280px"),
     // === Forge metadata bar ===========================================
-    ("--nx-forge-meta-bg",     "transparent"),
-    ("--nx-forge-meta-text",   "var(--nx-text-muted)"),
+    ("--nx-forge-meta-bg", "transparent"),
+    ("--nx-forge-meta-text", "var(--nx-text-muted)"),
     ("--nx-forge-meta-border", "var(--nx-border-subtle)"),
     // === File tree ====================================================
-    ("--nx-file-tree-indent-width",  "16px"),
-    ("--nx-file-tree-indent-guide",  "var(--nx-border-subtle)"),
-    ("--nx-file-tree-folder-color",  "var(--nx-text-secondary)"),
-    ("--nx-file-tree-file-color",    "var(--nx-text-primary)"),
-    ("--nx-file-tree-icon-color",    "var(--nx-icon-secondary)"),
+    ("--nx-file-tree-indent-width", "16px"),
+    ("--nx-file-tree-indent-guide", "var(--nx-border-subtle)"),
+    ("--nx-file-tree-folder-color", "var(--nx-text-secondary)"),
+    ("--nx-file-tree-file-color", "var(--nx-text-primary)"),
+    ("--nx-file-tree-icon-color", "var(--nx-icon-secondary)"),
 ];
 
 /// Returns the default variables as a fresh owned [`VariableMap`].
@@ -761,10 +818,7 @@ mod tests {
         // overwrite. Guard against accidental collisions during expansion.
         let mut seen = std::collections::HashSet::new();
         for (name, _) in DEFAULT_VARIABLES {
-            assert!(
-                seen.insert(*name),
-                "duplicate default variable: {name}"
-            );
+            assert!(seen.insert(*name), "duplicate default variable: {name}");
         }
     }
 
@@ -775,9 +829,8 @@ mod tests {
         let vars = default_variables();
         for (name, value) in &vars {
             if value.contains("var(") {
-                substitute(value, &vars).unwrap_or_else(|e| {
-                    panic!("failed to resolve {name} = {value}: {e:?}")
-                });
+                substitute(value, &vars)
+                    .unwrap_or_else(|e| panic!("failed to resolve {name} = {value}: {e:?}"));
             }
         }
     }
@@ -792,10 +845,7 @@ mod tests {
     #[test]
     fn substitute_resolves_nested_references() {
         let mut vars = default_variables();
-        vars.insert(
-            "--nx-editor-bg".into(),
-            "var(--nx-bg-primary)".into(),
-        );
+        vars.insert("--nx-editor-bg".into(), "var(--nx-bg-primary)".into());
         let resolved = substitute("var(--nx-editor-bg)", &vars).unwrap();
         assert_eq!(resolved, "#FFFFFF");
     }

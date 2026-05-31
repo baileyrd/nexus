@@ -21,7 +21,7 @@
 use std::time::Duration;
 
 use nexus_bootstrap::{build_cli_runtime, init_forge};
-use nexus_kernel::{Ipc as _, EventFilter, NexusEvent};
+use nexus_kernel::{EventFilter, Ipc as _, NexusEvent};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
@@ -97,7 +97,10 @@ async fn phase1_smoke_boot_invoke_storage_event_shutdown() {
     for _ in 0..20 {
         match sub.try_recv() {
             Ok(Some(published)) => {
-                if let NexusEvent::Custom { type_id, payload, .. } = &published.event {
+                if let NexusEvent::Custom {
+                    type_id, payload, ..
+                } = &published.event
+                {
                     if type_id.starts_with("com.nexus.storage.") {
                         // Sanity-check the payload shape so a future refactor
                         // that changes the event surface is forced through

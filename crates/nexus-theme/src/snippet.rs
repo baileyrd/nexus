@@ -108,12 +108,11 @@ impl CssSnippet {
     /// missing, malformed, or missing required fields.
     pub fn parse(id: impl Into<String>, source: &str) -> Result<Self> {
         let id = id.into();
-        let (header_fields, body) = split_header(source).ok_or_else(|| {
-            ThemeError::SnippetHeader {
+        let (header_fields, body) =
+            split_header(source).ok_or_else(|| ThemeError::SnippetHeader {
                 path: PathBuf::from(&id),
                 reason: "missing `/* ... */` header block".into(),
-            }
-        })?;
+            })?;
 
         let mut name = None;
         let mut description = None;
@@ -248,10 +247,7 @@ fn split_header(source: &str) -> Option<(Vec<(String, String)>, &str)> {
 
     let mut fields = Vec::new();
     for line in header_body.lines() {
-        let line = line
-            .trim()
-            .trim_start_matches('*')
-            .trim();
+        let line = line.trim().trim_start_matches('*').trim();
         if line.is_empty() {
             continue;
         }

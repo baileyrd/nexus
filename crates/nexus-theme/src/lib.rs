@@ -48,12 +48,12 @@ pub use layout::{
     RibbonAction, RibbonItem, SidePanel, SidePanelFooter, SidePanelSide, StatusBarItem, Surface,
     Tab, TabId, WorkspaceLayout,
 };
+pub use layout_manager::{LayoutManager, SavedLayoutInfo};
 pub use manifest::ThemeManifest;
 pub use preset::{LayoutPreset, PresetInfo, PresetRegistry, PresetSourceKind};
 pub use resolver::{ResolvedTheme, ResolverInput};
 pub use snippet::CssSnippet;
 pub use theme::{Theme, ThemeCategory, ThemeMode};
-pub use layout_manager::{LayoutManager, SavedLayoutInfo};
 pub use variables::VariableMap;
 pub use watcher::{ThemeReloadEvent, ThemeWatcher};
 

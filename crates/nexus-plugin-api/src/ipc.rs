@@ -57,11 +57,7 @@ pub trait IpcDispatcher: Send + Sync {
     /// [`Self::required_caller_caps_for_args`] (which defaults to this
     /// method) **before** dispatch, so handlers themselves don't need
     /// to re-check.
-    fn required_caller_caps(
-        &self,
-        target_plugin_id: &str,
-        command_id: &str,
-    ) -> Vec<Capability> {
+    fn required_caller_caps(&self, target_plugin_id: &str, command_id: &str) -> Vec<Capability> {
         let _ = (target_plugin_id, command_id);
         Vec::new()
     }
@@ -99,11 +95,7 @@ pub trait IpcDispatcher: Send + Sync {
     /// (`com.nexus.ai::resolve_credentials` is the seed caller).
     ///
     /// Default `false` — the historical contract is "cap-gated only".
-    fn is_handler_internal_only(
-        &self,
-        target_plugin_id: &str,
-        command_id: &str,
-    ) -> bool {
+    fn is_handler_internal_only(&self, target_plugin_id: &str, command_id: &str) -> bool {
         let _ = (target_plugin_id, command_id);
         false
     }

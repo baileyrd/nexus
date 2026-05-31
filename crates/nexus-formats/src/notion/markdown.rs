@@ -284,8 +284,7 @@ mod tests {
     #[test]
     fn leaves_external_links_alone() {
         let r = HashMap::new();
-        let out =
-            convert_notion_markdown("Visit [example](https://example.com) today.", &r);
+        let out = convert_notion_markdown("Visit [example](https://example.com) today.", &r);
         assert_eq!(out, "Visit [example](https://example.com) today.");
     }
 

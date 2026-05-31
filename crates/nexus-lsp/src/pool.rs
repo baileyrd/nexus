@@ -96,13 +96,16 @@ impl ConnectionPool {
             return Ok(Arc::clone(&entry.client));
         }
         // Cache miss — connect.
-        let spec = cfg.servers.get(server_name).ok_or_else(|| LspClientError::Spawn {
-            command: server_name.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("server '{server_name}' not in lsp.toml"),
-            ),
-        })?;
+        let spec = cfg
+            .servers
+            .get(server_name)
+            .ok_or_else(|| LspClientError::Spawn {
+                command: server_name.to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("server '{server_name}' not in lsp.toml"),
+                ),
+            })?;
         if spec.disabled {
             return Err(LspClientError::Spawn {
                 command: spec.command.clone(),
@@ -144,8 +147,9 @@ impl ConnectionPool {
     where
         F: for<'a> FnMut(
             &'a Mutex<LspClient>,
-        )
-            -> Pin<Box<dyn std::future::Future<Output = Result<T, LspClientError>> + Send + 'a>>,
+        ) -> Pin<
+            Box<dyn std::future::Future<Output = Result<T, LspClientError>> + Send + 'a>,
+        >,
     {
         let mut last_err: Option<LspClientError> = None;
         // Documents to replay against the next freshly-connected

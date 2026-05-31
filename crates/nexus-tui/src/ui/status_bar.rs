@@ -4,11 +4,11 @@
 //! open file, scroll position, file count, and a help hint.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::{Focus, Mode, TuiApp};
@@ -78,20 +78,23 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         Focus::Viewer if app.mode == Mode::Normal => "Tab: return to tree | Ctrl+? help",
         _ => "Ctrl+? help",
     };
-    let help_span = Span::styled(
-        help_text,
-        Style::default().fg(Color::DarkGray),
-    );
+    let help_span = Span::styled(help_text, Style::default().fg(Color::DarkGray));
 
     let mut spans = vec![mode_span, sep.clone()];
     if !git_span.content.is_empty() {
         spans.push(git_span);
         spans.push(sep.clone());
     }
-    spans.extend([file_span, scroll_span, sep.clone(), stats_span, sep, help_span]);
+    spans.extend([
+        file_span,
+        scroll_span,
+        sep.clone(),
+        stats_span,
+        sep,
+        help_span,
+    ]);
     let line = Line::from(spans);
 
-    let bar = Paragraph::new(line)
-        .style(Style::default().bg(Color::Rgb(30, 30, 40)));
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 40)));
     frame.render_widget(bar, area);
 }

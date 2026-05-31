@@ -38,9 +38,9 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ts-export")]
 use schemars::JsonSchema;
+use thiserror::Error;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
-use thiserror::Error;
 
 mod agents;
 mod archetypes;
@@ -73,16 +73,16 @@ pub use custom_agent::{
     ManifestToolPolicy, MemorySection, SystemPromptSection, ToolsSection, AGENTS_DIR,
     MANIFEST_FILE_NAME,
 };
-pub use tool_registry::{
-    default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,
-    AgentToolError, AgentToolRegistry, AgentToolSpec, Capability,
-};
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use session::{
     run_session, run_session_with_config, run_session_with_id, AgentSession, AutoApproveAll,
-    ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionConfig,
-    SessionOutcome, SessionPolicy, ToolCallRecord, DEFAULT_MAX_ITERATIONS,
-    DEFAULT_MAX_TOOL_CALLS_PER_ITERATION, LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
+    ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionConfig, SessionOutcome,
+    SessionPolicy, ToolCallRecord, DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
+    LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
+};
+pub use tool_registry::{
+    default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,
+    AgentToolError, AgentToolRegistry, AgentToolSpec, Capability,
 };
 
 /// BL-121 — FTS5-backed search over agent `history.jsonl` logs.

@@ -28,7 +28,11 @@ pub fn show(app: &mut App, id: &str) -> Result<()> {
 
 /// `nexus skill context <ctx>` — skills auto-activating in `ctx`.
 pub fn context(app: &mut App, ctx: &str) -> Result<()> {
-    let response = call(app, "list_by_context", serde_json::json!({ "context": ctx }))?;
+    let response = call(
+        app,
+        "list_by_context",
+        serde_json::json!({ "context": ctx }),
+    )?;
     print_summary_table(&response);
     Ok(())
 }
@@ -66,10 +70,7 @@ pub fn render(app: &mut App, id: &str, params: &[String]) -> Result<()> {
 /// `nexus skill reload` — re-scan the skills directory.
 pub fn reload(app: &mut App) -> Result<()> {
     let response = call(app, "reload", serde_json::json!({}))?;
-    let n = response
-        .get("loaded")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let n = response.get("loaded").and_then(Value::as_u64).unwrap_or(0);
     println!("Reloaded {n} skill(s).");
     Ok(())
 }
@@ -136,10 +137,7 @@ fn print_summary_table(response: &Value) {
 fn print_full(skill: &Value) {
     let id = skill.get("id").and_then(Value::as_str).unwrap_or("?");
     let name = skill.get("name").and_then(Value::as_str).unwrap_or("?");
-    let version = skill
-        .get("version")
-        .and_then(Value::as_str)
-        .unwrap_or("?");
+    let version = skill.get("version").and_then(Value::as_str).unwrap_or("?");
     let author = skill.get("author").and_then(Value::as_str).unwrap_or("?");
     let description = skill
         .get("description")
@@ -162,10 +160,7 @@ fn print_full(skill: &Value) {
             println!("Tags : {joined}");
         }
     }
-    if let Some(contexts) = skill
-        .get("applicable_contexts")
-        .and_then(Value::as_array)
-    {
+    if let Some(contexts) = skill.get("applicable_contexts").and_then(Value::as_array) {
         let joined = contexts
             .iter()
             .filter_map(Value::as_str)

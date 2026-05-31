@@ -356,8 +356,8 @@ impl CollabCorePlugin {
         // bits of entropy — plenty for a "type this into a peer's
         // join box" scenario.
         let token_value = uuid::Uuid::new_v4().simple().to_string();
-        let token = Token::new(&token_value)
-            .map_err(|e| exec_err(format!("start_relay: token: {e}")))?;
+        let token =
+            Token::new(&token_value).map_err(|e| exec_err(format!("start_relay: token: {e}")))?;
 
         // Sync bind on a std listener so this works inside the sync
         // dispatch. We hand the listener to tokio via from_std after
@@ -385,7 +385,8 @@ impl CollabCorePlugin {
 
         let server = Arc::new(RelayServer::new(token));
         let server_for_task = Arc::clone(&server);
-        let accept_task = handle.spawn(async move { server_for_task.serve_listener(listener).await });
+        let accept_task =
+            handle.spawn(async move { server_for_task.serve_listener(listener).await });
 
         let host = detect_lan_ip();
         let port = bound.port();
@@ -470,8 +471,7 @@ fn relay_status_from(rr: &RunningRelay) -> RelayStatus {
 }
 
 fn ok_reply<T: Serialize>(value: &T) -> Result<serde_json::Value, PluginError> {
-    serde_json::to_value(value)
-        .map_err(|e| exec_err(format!("serialize reply: {e}")))
+    serde_json::to_value(value).map_err(|e| exec_err(format!("serialize reply: {e}")))
 }
 
 nexus_plugins::define_dispatch_helpers!();
@@ -495,7 +495,10 @@ mod tests {
     /// frame is a regression.
     async fn next_presence(sub: &mut EventSubscription) -> PresenceEvent {
         let pe = sub.recv().await.expect("non-error event");
-        let NexusEvent::Custom { type_id, payload, .. } = &pe.event else {
+        let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &pe.event
+        else {
             panic!("expected Custom event, got {:?}", pe.event);
         };
         assert_eq!(type_id, PRESENCE_TOPIC);
@@ -572,9 +575,7 @@ mod tests {
     #[test]
     fn dispatch_unknown_handler_fails() {
         let mut plugin = CollabCorePlugin::new(None, None);
-        let err = plugin
-            .dispatch(99, &serde_json::json!({}))
-            .unwrap_err();
+        let err = plugin.dispatch(99, &serde_json::json!({})).unwrap_err();
         assert!(err.to_string().contains("unknown handler id 99"));
     }
 

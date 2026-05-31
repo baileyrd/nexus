@@ -195,9 +195,7 @@ impl AgentCorePlugin {
     pub fn new() -> Self {
         Self {
             context: None,
-            pending_approvals: Arc::new(std::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
+            pending_approvals: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             forge_root: None,
         }
     }
@@ -209,9 +207,7 @@ impl AgentCorePlugin {
     pub fn new_with_forge(forge_root: std::path::PathBuf) -> Self {
         Self {
             context: None,
-            pending_approvals: Arc::new(std::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
+            pending_approvals: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             forge_root: Some(forge_root),
         }
     }
@@ -282,9 +278,7 @@ impl CorePlugin for AgentCorePlugin {
             match handler_id {
                 HANDLER_PLAN => handlers::plan::handle_plan(ctx, &args).await,
                 HANDLER_HISTORY_LIST => handlers::history::handle_history_list(ctx).await,
-                HANDLER_HISTORY_GET => {
-                    handlers::history::handle_history_get(ctx, &args).await
-                }
+                HANDLER_HISTORY_GET => handlers::history::handle_history_get(ctx, &args).await,
                 HANDLER_HISTORY_DELETE => {
                     handlers::history::handle_history_delete(ctx, &args).await
                 }
@@ -292,9 +286,7 @@ impl CorePlugin for AgentCorePlugin {
                     handlers::session::handle_session_run(ctx, pending_approvals, &args).await
                 }
                 HANDLER_SESSION_LIST => handlers::session::handle_session_list(ctx).await,
-                HANDLER_SESSION_GET => {
-                    handlers::session::handle_session_get(ctx, &args).await
-                }
+                HANDLER_SESSION_GET => handlers::session::handle_session_get(ctx, &args).await,
                 HANDLER_SESSION_DELETE => {
                     handlers::session::handle_session_delete(ctx, &args).await
                 }
@@ -302,18 +294,10 @@ impl CorePlugin for AgentCorePlugin {
                     handlers::round::handle_round_decide(pending_approvals, &args).await
                 }
                 HANDLER_LIST_CUSTOM => handlers::custom::handle_list_custom(ctx).await,
-                HANDLER_MEMORY_RECORD => {
-                    handlers::memory::handle_memory_record(ctx, &args).await
-                }
-                HANDLER_MEMORY_QUERY => {
-                    handlers::memory::handle_memory_query(ctx, &args).await
-                }
-                HANDLER_MEMORY_PRUNE => {
-                    handlers::memory::handle_memory_prune(ctx, &args).await
-                }
-                HANDLER_MEMORY_EXPORT => {
-                    handlers::memory::handle_memory_export(ctx, &args).await
-                }
+                HANDLER_MEMORY_RECORD => handlers::memory::handle_memory_record(ctx, &args).await,
+                HANDLER_MEMORY_QUERY => handlers::memory::handle_memory_query(ctx, &args).await,
+                HANDLER_MEMORY_PRUNE => handlers::memory::handle_memory_prune(ctx, &args).await,
+                HANDLER_MEMORY_EXPORT => handlers::memory::handle_memory_export(ctx, &args).await,
                 HANDLER_DELEGATE => {
                     // BL-134 Phase 2b — delegate routes through the
                     // ai-runtime; `pending_approvals` no longer needed
@@ -578,7 +562,14 @@ mod tests {
         let names: Vec<String> = serde_json::from_value(v).expect("decode");
         assert_eq!(
             names,
-            vec!["writer", "coder", "researcher", "auditor", "librarian", "coach"]
+            vec![
+                "writer",
+                "coder",
+                "researcher",
+                "auditor",
+                "librarian",
+                "coach"
+            ]
         );
     }
 
@@ -587,7 +578,10 @@ mod tests {
     fn dispatch_async_yields_to_sync_for_list_archetypes() {
         let mut plugin = AgentCorePlugin::new();
         let fut = plugin.dispatch_async(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null);
-        assert!(fut.is_none(), "list_archetypes must not return an async future");
+        assert!(
+            fut.is_none(),
+            "list_archetypes must not return an async future"
+        );
     }
 
     /// DG-32 — `list_tools` returns the agent tool registry's seeded catalogue.
@@ -738,9 +732,6 @@ mod tests {
 
         let args = serde_json::json!({ "session_id": "sess-2", "kind": "approve_all" });
         let err = handle_round_decide(pending, &args).await.unwrap_err();
-        assert!(
-            format!("{err:?}").contains("no longer awaiting"),
-            "{err:?}"
-        );
+        assert!(format!("{err:?}").contains("no longer awaiting"), "{err:?}");
     }
 }

@@ -129,12 +129,10 @@ fn loader_rejects_signed_manifest_with_untrusted_key() {
     let mut loader = PluginLoader::new(plugins_dir.path());
     // Install an explicit empty verifier so we don't depend on the
     // user's home directory in CI.
-    loader.set_signature_verifier(Some(Arc::new(
-        PluginSignatureVerifier::from_inline_keys(
-            KeyringFile::default(),
-            RevocationList::default(),
-        ),
-    )));
+    loader.set_signature_verifier(Some(Arc::new(PluginSignatureVerifier::from_inline_keys(
+        KeyringFile::default(),
+        RevocationList::default(),
+    ))));
 
     let err = loader
         .load(&plugin_dir)
@@ -156,12 +154,10 @@ fn loader_accepts_signed_manifest_with_trusted_key() {
     write_signed_manifest(&plugin_dir, "com.example.trusted.plugin", key_id, &sk);
 
     let mut loader = PluginLoader::new(plugins_dir.path());
-    loader.set_signature_verifier(Some(Arc::new(
-        PluginSignatureVerifier::from_inline_keys(
-            make_keyring(key_id, &sk),
-            RevocationList::default(),
-        ),
-    )));
+    loader.set_signature_verifier(Some(Arc::new(PluginSignatureVerifier::from_inline_keys(
+        make_keyring(key_id, &sk),
+        RevocationList::default(),
+    ))));
 
     // We expect signature verification to PASS. The load may still
     // fail downstream (wasm bytes are empty) but that error must be

@@ -206,11 +206,7 @@ pub(crate) trait RegisterCoreResultExt {
     /// Optional-plugin policy: a lifecycle hook timeout is swallowed
     /// (the runtime continues with a degraded plugin set), every
     /// other init error aborts boot.
-    fn or_lifecycle_skip(
-        self,
-        event_bus: &EventBus,
-        label: &str,
-    ) -> Result<()>;
+    fn or_lifecycle_skip(self, event_bus: &EventBus, label: &str) -> Result<()>;
 
     /// Critical-plugin policy: ANY init failure aborts boot, including
     /// a lifecycle hook timeout that [`or_lifecycle_skip`] would have
@@ -229,14 +225,8 @@ pub(crate) trait RegisterCoreResultExt {
     fn or_critical(self, label: &str) -> Result<()>;
 }
 
-impl RegisterCoreResultExt
-    for std::result::Result<nexus_plugins::PluginInfo, PluginError>
-{
-    fn or_lifecycle_skip(
-        self,
-        event_bus: &EventBus,
-        label: &str,
-    ) -> Result<()> {
+impl RegisterCoreResultExt for std::result::Result<nexus_plugins::PluginInfo, PluginError> {
+    fn or_lifecycle_skip(self, event_bus: &EventBus, label: &str) -> Result<()> {
         match self {
             Ok(_) => Ok(()),
             Err(PluginError::LifecycleTimeout {
@@ -268,9 +258,7 @@ impl RegisterCoreResultExt
                 }
                 Ok(())
             }
-            Err(e) => {
-                Err(anyhow::Error::new(e).context(format!("failed to register {label}")))
-            }
+            Err(e) => Err(anyhow::Error::new(e).context(format!("failed to register {label}"))),
         }
     }
 
@@ -296,9 +284,7 @@ impl RegisterCoreResultExt
                 )
                 .context(format!("failed to register {label}")))
             }
-            Err(e) => {
-                Err(anyhow::Error::new(e).context(format!("failed to register {label}")))
-            }
+            Err(e) => Err(anyhow::Error::new(e).context(format!("failed to register {label}"))),
         }
     }
 }
@@ -357,9 +343,7 @@ mod or_lifecycle_skip_tests {
     #[test]
     fn lifecycle_timeout_skips_and_publishes_bus_event() {
         let bus = Arc::new(EventBus::new(16));
-        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
-            "com.nexus.kernel.".to_string(),
-        ));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix("com.nexus.kernel.".to_string()));
         let result: Result<nexus_plugins::PluginInfo, PluginError> =
             Err(PluginError::LifecycleTimeout {
                 plugin_id: "com.nexus.test".to_string(),
@@ -367,13 +351,18 @@ mod or_lifecycle_skip_tests {
                 timeout_secs: 30,
             });
         let outcome = result.or_lifecycle_skip(&bus, "com.nexus.test");
-        assert!(outcome.is_ok(), "lifecycle timeout should be swallowed, got {outcome:?}");
+        assert!(
+            outcome.is_ok(),
+            "lifecycle timeout should be swallowed, got {outcome:?}"
+        );
         let ev = sub
             .try_recv()
             .expect("bus alive")
             .expect("expected one published event");
         match &ev.event {
-            NexusEvent::Custom { type_id, payload, .. } => {
+            NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, "com.nexus.kernel.plugin_lifecycle_timeout");
                 assert_eq!(payload["plugin_id"], "com.nexus.test");
                 assert_eq!(payload["hook"], "\"init\"");
@@ -428,8 +417,7 @@ mod or_critical_tests {
                 timeout_secs: 30,
             });
         let outcome = result.or_critical("com.nexus.storage");
-        let err = outcome
-            .expect_err("critical plugin lifecycle timeout must abort boot");
+        let err = outcome.expect_err("critical plugin lifecycle timeout must abort boot");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("failed to register com.nexus.storage"),
@@ -447,8 +435,9 @@ mod or_critical_tests {
     /// programming bugs (DuplicatePlugin) either.
     #[test]
     fn non_timeout_errors_still_propagate_for_critical_plugins() {
-        let result: Result<nexus_plugins::PluginInfo, PluginError> =
-            Err(PluginError::DuplicatePlugin("com.nexus.security".to_string()));
+        let result: Result<nexus_plugins::PluginInfo, PluginError> = Err(
+            PluginError::DuplicatePlugin("com.nexus.security".to_string()),
+        );
         let outcome = result.or_critical("com.nexus.security");
         let err = outcome.expect_err("duplicate-id should propagate");
         let msg = err.to_string();

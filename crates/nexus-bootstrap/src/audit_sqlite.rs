@@ -46,13 +46,14 @@ impl SqliteAuditStore {
         }
         let conn = rusqlite::Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
-        let cutoff = chrono::Utc::now().timestamp_millis()
-            - RETENTION_DAYS * 86_400 * 1_000;
+        let cutoff = chrono::Utc::now().timestamp_millis() - RETENTION_DAYS * 86_400 * 1_000;
         let _ = conn.execute(
             "DELETE FROM audit_events WHERE ts_ms < ?1",
             rusqlite::params![cutoff],
         );
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 }
 
@@ -171,8 +172,16 @@ mod tests {
     #[test]
     fn append_then_query_round_trips() {
         let (_dir, store) = temp_store();
-        store.append("capability_granted", Some("nexus.test"), &json!({"capability": "FsRead"}));
-        store.append("capability_denied", Some("nexus.test"), &json!({"capability": "Net"}));
+        store.append(
+            "capability_granted",
+            Some("nexus.test"),
+            &json!({"capability": "FsRead"}),
+        );
+        store.append(
+            "capability_denied",
+            Some("nexus.test"),
+            &json!({"capability": "Net"}),
+        );
         let all = store.query(&AuditQuery::default());
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].event_type, "capability_denied");

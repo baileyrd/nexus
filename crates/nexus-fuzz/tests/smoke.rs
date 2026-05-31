@@ -16,8 +16,8 @@
 use std::fs;
 use std::path::Path;
 
-use rand::{Rng, RngCore, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 
 use nexus_fuzz::{
     fuzz_capability_set, fuzz_event_type_id, fuzz_manifest_parse, fuzz_path_validator,

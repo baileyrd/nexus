@@ -18,8 +18,8 @@ use crate::app::App;
 /// or the walk hits an I/O failure.
 pub fn scan(app: &mut App) -> Result<()> {
     let forge_root = app.forge_root();
-    let tally = scan_versions(forge_root)
-        .with_context(|| format!("scanning {}", forge_root.display()))?;
+    let tally =
+        scan_versions(forge_root).with_context(|| format!("scanning {}", forge_root.display()))?;
     if tally.is_empty() {
         println!("(no markdown files under {})", forge_root.display());
         return Ok(());
@@ -33,7 +33,12 @@ pub fn scan(app: &mut App) -> Result<()> {
         .max("VERSION".len());
     println!("{:width$}  COUNT", "VERSION", width = version_w);
     for entry in tally {
-        println!("{:width$}  {}", entry.version, entry.count, width = version_w);
+        println!(
+            "{:width$}  {}",
+            entry.version,
+            entry.count,
+            width = version_w
+        );
     }
     println!("\nTotal markdown files: {total}");
     Ok(())

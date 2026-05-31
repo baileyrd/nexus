@@ -127,8 +127,7 @@ impl ToolRegistry {
         executor: Arc<dyn ToolExecutor>,
     ) {
         let name = name.into();
-        self.tools
-            .insert(name, RegisteredTool { schema, executor });
+        self.tools.insert(name, RegisteredTool { schema, executor });
     }
 
     /// Snapshot every registered schema, in registration order is
@@ -162,11 +161,7 @@ impl ToolRegistry {
     /// # Errors
     /// - [`ToolError::NotFound`] if no tool with `name` is registered.
     /// - Whatever the executor returns otherwise.
-    pub async fn execute(
-        &self,
-        name: &str,
-        input: serde_json::Value,
-    ) -> Result<String, ToolError> {
+    pub async fn execute(&self, name: &str, input: serde_json::Value) -> Result<String, ToolError> {
         let tool = self
             .tools
             .get(name)

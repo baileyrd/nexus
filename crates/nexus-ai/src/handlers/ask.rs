@@ -23,9 +23,10 @@ pub(crate) async fn handle_ask(
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(5);
 
-    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("ask: no AI chat provider configured".to_string()))?;
-    let embed_cfg =
-        embed_cfg.ok_or_else(|| exec_err("ask: no AI embedding provider configured".to_string()))?;
+    let ai_cfg =
+        ai_cfg.ok_or_else(|| exec_err("ask: no AI chat provider configured".to_string()))?;
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("ask: no AI embedding provider configured".to_string()))?;
 
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;

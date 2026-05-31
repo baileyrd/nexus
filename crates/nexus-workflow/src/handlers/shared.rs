@@ -27,8 +27,7 @@ pub(crate) async fn publish_workflow_activity(
     error: Option<String>,
 ) {
     use nexus_types::activity::{
-        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
-        ACTIVITY_APPENDED_TOPIC,
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
     };
     let mut entry = ActivityEntry::now(
         workflow_name.to_string(),
@@ -54,5 +53,4 @@ pub(crate) async fn publish_workflow_activity(
 /// Default per-step tool-call timeout for IPC dispatches initiated by
 /// the workflow plugin. Workflow steps often span multiple plugins;
 /// give them enough headroom.
-pub(crate) const DEFAULT_STEP_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(60);
+pub(crate) const DEFAULT_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);

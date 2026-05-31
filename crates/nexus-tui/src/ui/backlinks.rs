@@ -4,11 +4,11 @@
 //! to the currently viewed file.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem},
+    Frame,
 };
 
 use crate::app::TuiApp;
@@ -32,10 +32,7 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
         .iter()
         .map(|(source_path, link_text)| {
             let line = Line::from(vec![
-                Span::styled(
-                    source_path.clone(),
-                    Style::default().fg(Color::Cyan),
-                ),
+                Span::styled(source_path.clone(), Style::default().fg(Color::Cyan)),
                 Span::styled(
                     format!("  {link_text}"),
                     Style::default().fg(Color::DarkGray),
@@ -47,10 +44,7 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(
-            Style::default()
-                .add_modifier(Modifier::REVERSED),
-        );
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(list, area, &mut app.backlinks.list_state);
 }

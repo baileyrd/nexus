@@ -6,8 +6,9 @@
 
 use std::sync::Arc;
 
-use nexus_kernel::{Identity as _,
-    Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+use nexus_kernel::{
+    Capability, CapabilitySet, EventBus, Identity as _, InMemoryKvStore, KernelPluginContext,
+    KvStore,
 };
 use nexus_plugins::{parse_manifest, CorePlugin, PluginError, PluginLoader};
 
@@ -106,7 +107,9 @@ fn revoke_persists_to_granted_caps_json() {
     // var here can be observed by other concurrent tests in this
     // binary, but every test in the file is intentionally
     // plaintext-mode.
-    unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
+    unsafe {
+        std::env::set_var("NEXUS_NO_KEYRING", "1");
+    }
 
     let plugins_dir = tempfile::tempdir().expect("plugins tempdir");
     let plugin_id = "dev.test.persist";
@@ -173,7 +176,9 @@ fn revoke_capability_publishes_bus_event_and_activity_entry() {
     use nexus_kernel::{EventFilter, NexusEvent};
     use nexus_types::activity::ACTIVITY_APPENDED_TOPIC;
 
-    unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
+    unsafe {
+        std::env::set_var("NEXUS_NO_KEYRING", "1");
+    }
 
     let plugins_dir = tempfile::tempdir().expect("plugins tempdir");
     let plugin_id = "dev.test.revoke.emit";
@@ -181,9 +186,8 @@ fn revoke_capability_publishes_bus_event_and_activity_entry() {
     let mut loader = PluginLoader::new(plugins_dir.path());
     let event_bus = Arc::new(EventBus::new(64));
     loader.set_event_bus(Arc::clone(&event_bus));
-    let mut sub_kernel = event_bus.subscribe(EventFilter::CustomPrefix(
-        "com.nexus.kernel.".to_string(),
-    ));
+    let mut sub_kernel =
+        event_bus.subscribe(EventFilter::CustomPrefix("com.nexus.kernel.".to_string()));
     let mut sub_activity = event_bus.subscribe(EventFilter::CustomPrefix(
         ACTIVITY_APPENDED_TOPIC.to_string(),
     ));
@@ -203,7 +207,10 @@ fn revoke_capability_publishes_bus_event_and_activity_entry() {
     // capability fields.
     let mut saw_revoke = false;
     while let Some(ev) = sub_kernel.try_recv().expect("bus alive") {
-        if let NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+        if let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &ev.event
+        {
             if type_id == "com.nexus.kernel.capability_revoked" {
                 assert_eq!(payload["plugin_id"], plugin_id);
                 assert_eq!(payload["capability"], "net.http");
@@ -216,7 +223,10 @@ fn revoke_capability_publishes_bus_event_and_activity_entry() {
     // Universal-activity entry fires with kind=revoked in the prompt.
     let mut saw_activity = false;
     while let Some(ev) = sub_activity.try_recv().expect("bus alive") {
-        if let NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+        if let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &ev.event
+        {
             if type_id == ACTIVITY_APPENDED_TOPIC {
                 let prompt = payload["prompt"].as_str().unwrap_or("");
                 if prompt.starts_with("revoked net.http for ") {
@@ -225,7 +235,10 @@ fn revoke_capability_publishes_bus_event_and_activity_entry() {
             }
         }
     }
-    assert!(saw_activity, "expected universal-activity entry for the revoke");
+    assert!(
+        saw_activity,
+        "expected universal-activity entry for the revoke"
+    );
 }
 
 #[test]
@@ -233,7 +246,9 @@ fn grant_capability_publishes_bus_event_and_activity_entry() {
     use nexus_kernel::{EventFilter, NexusEvent};
     use nexus_types::activity::ACTIVITY_APPENDED_TOPIC;
 
-    unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
+    unsafe {
+        std::env::set_var("NEXUS_NO_KEYRING", "1");
+    }
 
     let plugins_dir = tempfile::tempdir().expect("plugins tempdir");
     let plugin_id = "dev.test.grant.emit";
@@ -241,9 +256,8 @@ fn grant_capability_publishes_bus_event_and_activity_entry() {
     let mut loader = PluginLoader::new(plugins_dir.path());
     let event_bus = Arc::new(EventBus::new(64));
     loader.set_event_bus(Arc::clone(&event_bus));
-    let mut sub_kernel = event_bus.subscribe(EventFilter::CustomPrefix(
-        "com.nexus.kernel.".to_string(),
-    ));
+    let mut sub_kernel =
+        event_bus.subscribe(EventFilter::CustomPrefix("com.nexus.kernel.".to_string()));
     let mut sub_activity = event_bus.subscribe(EventFilter::CustomPrefix(
         ACTIVITY_APPENDED_TOPIC.to_string(),
     ));
@@ -261,7 +275,10 @@ fn grant_capability_publishes_bus_event_and_activity_entry() {
 
     let mut saw_grant = false;
     while let Some(ev) = sub_kernel.try_recv().expect("bus alive") {
-        if let NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+        if let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &ev.event
+        {
             if type_id == "com.nexus.kernel.capability_granted" {
                 assert_eq!(payload["plugin_id"], plugin_id);
                 assert_eq!(payload["capability"], "net.http");
@@ -273,7 +290,10 @@ fn grant_capability_publishes_bus_event_and_activity_entry() {
 
     let mut saw_activity = false;
     while let Some(ev) = sub_activity.try_recv().expect("bus alive") {
-        if let NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+        if let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &ev.event
+        {
             if type_id == ACTIVITY_APPENDED_TOPIC {
                 let prompt = payload["prompt"].as_str().unwrap_or("");
                 if prompt.starts_with("granted net.http for ") {
@@ -282,14 +302,19 @@ fn grant_capability_publishes_bus_event_and_activity_entry() {
             }
         }
     }
-    assert!(saw_activity, "expected universal-activity entry for the grant");
+    assert!(
+        saw_activity,
+        "expected universal-activity entry for the grant"
+    );
 }
 
 #[test]
 fn non_high_risk_grant_emits_nothing() {
     use nexus_kernel::EventFilter;
 
-    unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
+    unsafe {
+        std::env::set_var("NEXUS_NO_KEYRING", "1");
+    }
 
     let plugins_dir = tempfile::tempdir().expect("plugins tempdir");
     let plugin_id = "dev.test.grant.lowrisk";
@@ -297,9 +322,7 @@ fn non_high_risk_grant_emits_nothing() {
     let mut loader = PluginLoader::new(plugins_dir.path());
     let event_bus = Arc::new(EventBus::new(8));
     loader.set_event_bus(Arc::clone(&event_bus));
-    let mut sub = event_bus.subscribe(EventFilter::CustomPrefix(
-        "com.nexus.kernel.".to_string(),
-    ));
+    let mut sub = event_bus.subscribe(EventFilter::CustomPrefix("com.nexus.kernel.".to_string()));
     loader
         .register_core(
             core_manifest(plugin_id),

@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use notify::RecursiveMode;
-use notify_debouncer_mini::{DebounceEventResult, DebouncedEventKind, new_debouncer};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, DebouncedEventKind};
 
 use crate::StorageError;
 
@@ -168,8 +168,7 @@ impl Watcher {
     /// Returns [`StorageError::Watcher`] if the underlying notify watcher
     /// cannot be created or a directory cannot be watched.
     pub fn start(forge_root: &Path, debounce_ms: u64) -> Result<Self, StorageError> {
-        let (storage_tx, storage_rx) =
-            mpsc::sync_channel::<StorageEvent>(WATCHER_CHANNEL_BOUND);
+        let (storage_tx, storage_rx) = mpsc::sync_channel::<StorageEvent>(WATCHER_CHANNEL_BOUND);
         let (raw_tx, raw_rx) = mpsc::channel::<DebounceEventResult>();
 
         let duration = Duration::from_millis(debounce_ms);
@@ -180,7 +179,9 @@ impl Watcher {
         for dir in &dirs {
             let dir_path = forge_root.join(dir);
             if dir_path.exists() {
-                debouncer.watcher().watch(&dir_path, RecursiveMode::Recursive)?;
+                debouncer
+                    .watcher()
+                    .watch(&dir_path, RecursiveMode::Recursive)?;
             }
         }
 
@@ -518,7 +519,10 @@ mod tests {
         // should flush ReconcileRequested FIRST, then attempt the new
         // event. Capacity 1 means the new event itself overflows again
         // (and re-sets the flag), but the reconcile signal made it in.
-        assert!(matches!(rx.try_recv().unwrap(), StorageEvent::FileModified { .. }));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            StorageEvent::FileModified { .. }
+        ));
         assert!(enqueue(&tx, mod_evt("c"), &mut pending));
         // Reconcile took the only slot, so c overflowed and pending is set again.
         assert!(pending);
@@ -566,7 +570,9 @@ mod tests {
     #[test]
     fn should_not_ignore_markdown() {
         assert!(!should_ignore(Path::new("/forge/notes/my-note.md")));
-        assert!(!should_ignore(Path::new("/forge/notes/daily/2026-04-12.md")));
+        assert!(!should_ignore(Path::new(
+            "/forge/notes/daily/2026-04-12.md"
+        )));
     }
 
     /// Issue #84. Pre-fix the substring matcher (`path.contains(".git")`)
@@ -580,7 +586,9 @@ mod tests {
             "substring matching falsely ignored a legitimate note (#84 regression)"
         );
         assert!(!should_ignore(Path::new("/forge/notes/.forgetnot.md")));
-        assert!(!should_ignore(Path::new("/forge/notes/node_modules-rant.md")));
+        assert!(!should_ignore(Path::new(
+            "/forge/notes/node_modules-rant.md"
+        )));
         assert!(!should_ignore(Path::new("/forge/notes/target-list.md")));
     }
 

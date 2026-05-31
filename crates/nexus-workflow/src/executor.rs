@@ -180,9 +180,8 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
             while end < n && workflow.steps[end].parallel {
                 end += 1;
             }
-            let branches = (start..end).map(|idx| {
-                run_step(workflow, &workflow.steps[idx], idx, dispatcher, variables)
-            });
+            let branches = (start..end)
+                .map(|idx| run_step(workflow, &workflow.steps[idx], idx, dispatcher, variables));
             let group = futures::future::join_all(branches).await;
             for (offset, outcome) in group.into_iter().enumerate() {
                 let idx = start + offset;
@@ -206,9 +205,7 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
         }
     }
 
-    let success = outcomes
-        .iter()
-        .all(|o| o.status == StepOutcomeStatus::Ok);
+    let success = outcomes.iter().all(|o| o.status == StepOutcomeStatus::Ok);
     Ok(WorkflowRun {
         workflow_name: workflow.workflow.name.clone(),
         steps: outcomes,
@@ -226,10 +223,7 @@ async fn run_step<D: ActionDispatcher>(
     dispatcher: &D,
     variables: &VariableMap,
 ) -> StepOutcome {
-    let step_id = step
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("step-{index}"));
+    let step_id = step.name.clone().unwrap_or_else(|| format!("step-{index}"));
     let mut resolved = step.clone();
     if !variables.is_empty() {
         interpolate_step(&mut resolved, variables);
@@ -256,10 +250,7 @@ async fn run_step<D: ActionDispatcher>(
 
 fn skipped_outcome(step: &Step, index: usize) -> StepOutcome {
     StepOutcome {
-        step_id: step
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("step-{index}")),
+        step_id: step.name.clone().unwrap_or_else(|| format!("step-{index}")),
         step_type: step.step_type.clone(),
         response: None,
         status: StepOutcomeStatus::Skipped,

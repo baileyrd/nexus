@@ -122,9 +122,7 @@ impl Walker<'_, '_> {
         let mut i = 0;
         while i < nodes.len() {
             // Peek next sibling for a block-level stamp marker.
-            let stamp = nodes
-                .get(i + 1)
-                .and_then(|n| extract_html_block_marker(n));
+            let stamp = nodes.get(i + 1).and_then(|n| extract_html_block_marker(n));
             self.pending_stamp = stamp;
             self.visit_block(nodes[i], parent);
             i += if stamp.is_some() { 2 } else { 1 };
@@ -705,7 +703,10 @@ mod fence_info_tests {
 
     #[test]
     fn language_with_repl() {
-        assert_eq!(parse_code_fence_info("python repl"), ("python".to_string(), true));
+        assert_eq!(
+            parse_code_fence_info("python repl"),
+            ("python".to_string(), true)
+        );
     }
 
     #[test]

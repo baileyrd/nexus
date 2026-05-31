@@ -27,8 +27,7 @@ pub(crate) fn search(engine: &StorageEngine, args: &Value) -> Result<Value, Plug
 }
 
 pub(crate) fn query_symbol(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let filter: crate::code_index::SymbolFilter =
-        super::shared::parse_args(args, "query_symbol")?;
+    let filter: crate::code_index::SymbolFilter = super::shared::parse_args(args, "query_symbol")?;
     let symbols = engine
         .query_symbols(&filter)
         .map_err(|e| exec_err(format!("query_symbol: {e}")))?;

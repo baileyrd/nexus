@@ -69,13 +69,9 @@ pub fn import_notion_zip(zip_path: &Path, dest: &Path) -> Result<ImportReport> {
 ///
 /// # Errors
 /// See [`import_notion_zip`].
-pub fn import_notion_archive<R: Read + Seek>(
-    reader: R,
-    dest: &Path,
-) -> Result<ImportReport> {
-    let mut archive = zip::ZipArchive::new(reader).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("zip: {e}"))
-    })?;
+pub fn import_notion_archive<R: Read + Seek>(reader: R, dest: &Path) -> Result<ImportReport> {
+    let mut archive = zip::ZipArchive::new(reader)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("zip: {e}")))?;
 
     std::fs::create_dir_all(dest)?;
 
@@ -128,9 +124,12 @@ pub fn import_notion_archive<R: Read + Seek>(
                     let bases_path = unique_path(&bases_path);
                     std::fs::write(&bases_path, bases_toml)?;
                     report.bases_written += 1;
-                    report
-                        .written
-                        .push(bases_path.strip_prefix(dest).unwrap_or(&bases_path).to_path_buf());
+                    report.written.push(
+                        bases_path
+                            .strip_prefix(dest)
+                            .unwrap_or(&bases_path)
+                            .to_path_buf(),
+                    );
 
                     // Also keep the raw CSV as an attachment so users can
                     // re-derive the base if column inference was wrong.
@@ -150,9 +149,12 @@ pub fn import_notion_archive<R: Read + Seek>(
             report.attachments_copied += 1;
         }
 
-        report
-            .written
-            .push(target_abs.strip_prefix(dest).unwrap_or(&target_abs).to_path_buf());
+        report.written.push(
+            target_abs
+                .strip_prefix(dest)
+                .unwrap_or(&target_abs)
+                .to_path_buf(),
+        );
     }
 
     Ok(report)
@@ -172,8 +174,7 @@ fn convert_page(
     let (props, body_after_props) = property::extract_property_table(raw);
 
     // 2. Markdown body conversions (links, callouts).
-    let body_converted =
-        markdown::convert_notion_markdown(&body_after_props, &index.link_rewrites);
+    let body_converted = markdown::convert_notion_markdown(&body_after_props, &index.link_rewrites);
 
     // 3. Synthesize frontmatter.
     let notion_id = filename::extract_uuid(source_name);
@@ -183,7 +184,8 @@ fn convert_page(
     }
     // Provenance — lets graph/search filter "everything that came from
     // Notion" without re-deriving it from the (now-absent) UUID suffix.
-    fm.entry("source".to_string()).or_insert_with(|| "notion".to_string());
+    fm.entry("source".to_string())
+        .or_insert_with(|| "notion".to_string());
 
     if markdown::has_unconverted_warning_marker(&body_converted) {
         report
@@ -303,9 +305,7 @@ impl LinkIndex {
     }
 }
 
-fn build_link_index<R: Read + Seek>(
-    archive: &mut zip::ZipArchive<R>,
-) -> Result<LinkIndex> {
+fn build_link_index<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<LinkIndex> {
     let mut entries: HashMap<String, PathBuf> = HashMap::new();
     let mut link_rewrites: HashMap<String, String> = HashMap::new();
 
@@ -350,14 +350,9 @@ pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~'
-            | b'/' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -396,8 +391,8 @@ mod tests {
         let mut buf = Vec::new();
         {
             let mut zw = zip::ZipWriter::new(Cursor::new(&mut buf));
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             for (name, body) in files {
                 zw.start_file(*name, opts).unwrap();
                 zw.write_all(body.as_bytes()).unwrap();
@@ -414,8 +409,7 @@ mod tests {
             "# Page Title\n\nHello, world.\n",
         )]);
         let dest = tempfile::tempdir().unwrap();
-        let report =
-            import_notion_archive(Cursor::new(zip), dest.path()).expect("import ok");
+        let report = import_notion_archive(Cursor::new(zip), dest.path()).expect("import ok");
 
         assert_eq!(report.pages_written, 1);
         let page = std::fs::read_to_string(dest.path().join("Page Title.md")).unwrap();
@@ -425,8 +419,7 @@ mod tests {
 
     #[test]
     fn import_rewrites_internal_mention_links() {
-        let body_a =
-            "# A\n\nSee [B](B%20bbb111bbb222bbb333bbb444bbb55555.md) for context.\n";
+        let body_a = "# A\n\nSee [B](B%20bbb111bbb222bbb333bbb444bbb55555.md) for context.\n";
         let body_b = "# B\n\nThe second page.\n";
         let zip = make_zip(&[
             ("Export/A aaa111aaa222aaa333aaa444aaa55555.md", body_a),
@@ -455,10 +448,7 @@ mod tests {
     #[test]
     fn import_extracts_property_table() {
         let body = "# Tasks\n\n| Status | In Progress |\n| --- | --- |\n| Owner | Alex |\n| Due | 2026-06-01 |\n\nBody starts here.\n";
-        let zip = make_zip(&[(
-            "Export/Tasks aaaa1111aaaa1111aaaa1111aaaa1111.md",
-            body,
-        )]);
+        let zip = make_zip(&[("Export/Tasks aaaa1111aaaa1111aaaa1111aaaa1111.md", body)]);
         let dest = tempfile::tempdir().unwrap();
         import_notion_archive(Cursor::new(zip), dest.path()).expect("import ok");
         let page = std::fs::read_to_string(dest.path().join("Tasks.md")).unwrap();
@@ -472,13 +462,9 @@ mod tests {
     #[test]
     fn import_converts_csv_to_bases_and_keeps_csv() {
         let csv = "Name,Status,Priority\nAlpha,Done,1\nBeta,WIP,2\n";
-        let zip = make_zip(&[(
-            "Export/My DB aaaa1111aaaa1111aaaa1111aaaa1111.csv",
-            csv,
-        )]);
+        let zip = make_zip(&[("Export/My DB aaaa1111aaaa1111aaaa1111aaaa1111.csv", csv)]);
         let dest = tempfile::tempdir().unwrap();
-        let report =
-            import_notion_archive(Cursor::new(zip), dest.path()).expect("import ok");
+        let report = import_notion_archive(Cursor::new(zip), dest.path()).expect("import ok");
         assert_eq!(report.bases_written, 1);
         let bases = std::fs::read_to_string(dest.path().join("My DB.bases")).unwrap();
         assert!(bases.contains("[[fields]]"), "{bases}");

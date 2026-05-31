@@ -53,7 +53,9 @@ struct AutoCommitGitSettings {
     auto_commit_tick_secs: Option<u64>,
 }
 
-fn default_interval() -> u64 { 1800 }
+fn default_interval() -> u64 {
+    1800
+}
 
 impl Default for AutoCommitGitSettings {
     fn default() -> Self {
@@ -96,7 +98,6 @@ fn read_git_settings(forge_root: &Path) -> GitTiming {
             .unwrap_or(DEFAULT_AUTO_COMMIT_TICK),
     }
 }
-
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.git";
@@ -348,9 +349,9 @@ impl CorePlugin for GitCorePlugin {
         if timing.auto_commit {
             let ac_interval = timing.auto_commit_interval_secs;
             let ac_tick = timing.auto_commit_tick;
-            let ac_root  = self.forge_root.clone();
-            let ac_bus   = self.event_bus.clone();
-            let ac_stop  = Arc::new(AtomicBool::new(false));
+            let ac_root = self.forge_root.clone();
+            let ac_bus = self.event_bus.clone();
+            let ac_stop = Arc::new(AtomicBool::new(false));
             let ac_clone = Arc::clone(&ac_stop);
             let ac_thread = thread::Builder::new()
                 .name("nexus-git-auto-commit".to_string())
@@ -362,7 +363,11 @@ impl CorePlugin for GitCorePlugin {
                 })?;
             self.auto_commit_stop = Some(ac_stop);
             self.auto_commit_thread = Some(ac_thread);
-            tracing::info!(plugin_id = PLUGIN_ID, interval_secs = ac_interval, "auto-commit thread started");
+            tracing::info!(
+                plugin_id = PLUGIN_ID,
+                interval_secs = ac_interval,
+                "auto-commit thread started"
+            );
         }
 
         Ok(())
@@ -551,12 +556,7 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
         // BL-052 — detected HEAD change reaches the universal activity
         // timeline as a commit-class entry. Branch / dirty events stay
         // out — branch-only churn isn't audit-worthy.
-        publish_git_activity(
-            bus,
-            "commit",
-            &curr.head_oid,
-            curr.branch.as_deref(),
-        );
+        publish_git_activity(bus, "commit", &curr.head_oid, curr.branch.as_deref());
     }
 
     if prev.is_dirty != curr.is_dirty {
@@ -614,14 +614,9 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
 /// name. Best-effort — bus failures are logged at debug and swallowed.
 fn publish_git_activity(bus: &EventBus, kind: &str, head: &str, branch: Option<&str>) {
     use nexus_types::activity::{
-        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
-        ACTIVITY_APPENDED_TOPIC,
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
     };
-    let mut entry = ActivityEntry::now(
-        head.to_string(),
-        ActivitySurface::Git,
-        ActivityOrigin::Git,
-    );
+    let mut entry = ActivityEntry::now(head.to_string(), ActivitySurface::Git, ActivityOrigin::Git);
     entry.outcome = ActivityOutcome::Ok;
     let head_short: String = head.chars().take(7).collect();
     entry.prompt = match branch {
@@ -661,17 +656,23 @@ fn run_auto_committer(
     let mut last_modified: Option<Instant> = None;
 
     let mut sub = bus.as_ref().map(|b| {
-        b.subscribe(EventFilter::CustomPrefix("com.nexus.storage.file_modified".to_string()))
+        b.subscribe(EventFilter::CustomPrefix(
+            "com.nexus.storage.file_modified".to_string(),
+        ))
     });
 
     loop {
-        if stop.load(Ordering::Relaxed) { break; }
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
 
         // Drain file-modified events — each one refreshes the idle timer.
         if let Some(ref mut s) = sub {
             loop {
                 match s.try_recv() {
-                    Ok(Some(_)) => { last_modified = Some(Instant::now()); }
+                    Ok(Some(_)) => {
+                        last_modified = Some(Instant::now());
+                    }
                     Ok(None) | Err(_) => break,
                 }
             }
@@ -699,9 +700,8 @@ fn run_auto_committer(
                             // mirrored into `tool_calls` (one synthetic
                             // entry) so the UI can display "N files".
                             use nexus_types::activity::{
-                                ActivityEntry, ActivityOrigin, ActivityOutcome,
-                                ActivitySurface, ActivityToolCall,
-                                ACTIVITY_APPENDED_TOPIC,
+                                ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
+                                ActivityToolCall, ACTIVITY_APPENDED_TOPIC,
                             };
                             let mut entry = ActivityEntry::now(
                                 r.commit_hash.clone().unwrap_or_default(),
@@ -723,11 +723,8 @@ fn run_auto_committer(
                                 ok: true,
                             });
                             if let Ok(payload) = serde_json::to_value(&entry) {
-                                let _ = b.publish_plugin(
-                                    PLUGIN_ID,
-                                    ACTIVITY_APPENDED_TOPIC,
-                                    payload,
-                                );
+                                let _ =
+                                    b.publish_plugin(PLUGIN_ID, ACTIVITY_APPENDED_TOPIC, payload);
                             }
                         }
                         last_modified = None;
@@ -743,7 +740,9 @@ fn run_auto_committer(
         // Sleep in small ticks so the stop flag is checked promptly.
         let mut waited = Duration::ZERO;
         while waited < tick {
-            if stop.load(Ordering::Relaxed) { return; }
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
             thread::sleep(POLL_TICK);
             waited += POLL_TICK;
         }
@@ -903,7 +902,9 @@ mod tests {
         publish_changes(&bus, Some(&prev), &curr);
         let ev = sub.try_recv().unwrap().unwrap();
         match &ev.event {
-            nexus_kernel::NexusEvent::Custom { type_id, payload, .. } => {
+            nexus_kernel::NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, "com.nexus.git.branch_changed");
                 assert_eq!(payload["to"], "feature");
             }
@@ -947,7 +948,10 @@ mod tests {
         // remote_changed event with prev + curr tracking SHAs.
         let mut saw_remote_changed = false;
         while let Ok(Some(ev)) = sub_git.try_recv() {
-            if let nexus_kernel::NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+            if let nexus_kernel::NexusEvent::Custom {
+                type_id, payload, ..
+            } = &ev.event
+            {
                 if type_id == "com.nexus.git.remote_changed" {
                     saw_remote_changed = true;
                     assert_eq!(payload["upstream"], "origin/main");
@@ -961,7 +965,10 @@ mod tests {
         // Activity entry with kind "remote_changed".
         let mut saw_activity = false;
         while let Ok(Some(ev)) = sub_activity.try_recv() {
-            if let nexus_kernel::NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+            if let nexus_kernel::NexusEvent::Custom {
+                type_id, payload, ..
+            } = &ev.event
+            {
                 if type_id == ACTIVITY_APPENDED_TOPIC {
                     let prompt = payload["prompt"].as_str().unwrap_or("");
                     assert!(prompt.starts_with("remote_changed"), "got: {prompt}");

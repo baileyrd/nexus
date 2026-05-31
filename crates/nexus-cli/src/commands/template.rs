@@ -12,8 +12,8 @@ use crate::output::{print_success, OutputFormat};
 
 /// `nexus template list` — show every template available in the active forge.
 pub fn list(app: &App) -> Result<()> {
-    let registry = TemplateRegistry::load(app.forge_root())
-        .context("failed to load template registry")?;
+    let registry =
+        TemplateRegistry::load(app.forge_root()).context("failed to load template registry")?;
 
     let entries = registry.list();
 
@@ -49,8 +49,8 @@ pub fn apply(
     overwrite: bool,
     dry_run: bool,
 ) -> Result<()> {
-    let registry = TemplateRegistry::load(app.forge_root())
-        .context("failed to load template registry")?;
+    let registry =
+        TemplateRegistry::load(app.forge_root()).context("failed to load template registry")?;
 
     let tpl = registry
         .get(name)

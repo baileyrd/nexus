@@ -31,10 +31,10 @@ mod imp {
 
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-        TerminateJobObject, JobObjectExtendedLimitInformation,
-        JOBOBJECT_BASIC_LIMIT_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_LIMIT_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_ALL_ACCESS};
 
@@ -73,8 +73,7 @@ mod imp {
             }
             let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
                 BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
-                    LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                        | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+                    LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
                     ..unsafe { std::mem::zeroed() }
                 },
                 ..unsafe { std::mem::zeroed() }

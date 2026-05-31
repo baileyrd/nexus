@@ -31,8 +31,8 @@ use tokio::time::{timeout, Duration};
 
 use crate::config::LspServerSpec;
 use crate::transport::{
-    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification,
-    JsonRpcRequest, JsonRpcResponse, TransportError,
+    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, TransportError,
 };
 
 /// Bound on the server-pushed notification channel. A chatty server
@@ -154,7 +154,8 @@ pub struct OpenDocument {
     pub text: String,
 }
 
-type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>>>;
+type PendingMap =
+    Arc<Mutex<HashMap<i64, oneshot::Sender<Result<serde_json::Value, JsonRpcError>>>>>;
 
 /// Live connection to one LSP server.
 pub struct LspClient {
@@ -317,7 +318,11 @@ impl LspClient {
                         // don't hang; unknown methods get a
                         // method-not-found error so the server can
                         // adapt its capability set.
-                        let resp_msg = build_server_request_reply(&req.method, req.params.as_ref(), req.id.clone());
+                        let resp_msg = build_server_request_reply(
+                            &req.method,
+                            req.params.as_ref(),
+                            req.id.clone(),
+                        );
                         // Acquire stdin briefly to write the response.
                         // Must NOT hold across await points other than
                         // the write itself — the same mutex is used
@@ -500,8 +505,7 @@ impl LspClient {
                     // u128 → u64: 10 s fits trivially. The try_from is
                     // here so the cast is checked rather than silently
                     // truncating; the saturate is unreachable.
-                    ms: u64::try_from(DEFAULT_REQUEST_TIMEOUT.as_millis())
-                        .unwrap_or(u64::MAX),
+                    ms: u64::try_from(DEFAULT_REQUEST_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
                 })
             }
         }
@@ -845,7 +849,10 @@ fn build_known_reply(
             // Match the count exactly. A zero-length items array
             // (which some servers emit defensively) yields an empty
             // array; rust-analyzer treats `null` as a hard failure.
-            Some(serde_json::Value::Array(vec![serde_json::Value::Null; count]))
+            Some(serde_json::Value::Array(vec![
+                serde_json::Value::Null;
+                count
+            ]))
         }
         // Single-root workspace — null is the spec-compliant "no
         // additional folders" reply.
@@ -907,17 +914,21 @@ mod tests {
         let JsonRpcMessage::Response(resp) = msg else {
             panic!("expected Response, got {msg:?}")
         };
-        assert_eq!(resp.id, serde_json::json!(42), "id must round-trip verbatim");
-        assert!(resp.error.is_none(), "expected success result, got error: {:?}", resp.error);
+        assert_eq!(
+            resp.id,
+            serde_json::json!(42),
+            "id must round-trip verbatim"
+        );
+        assert!(
+            resp.error.is_none(),
+            "expected success result, got error: {:?}",
+            resp.error
+        );
         resp.result.expect("success result")
     }
 
     fn reply_error_for(method: &str) -> JsonRpcError {
-        let msg = build_server_request_reply(
-            method,
-            None,
-            serde_json::json!(7),
-        );
+        let msg = build_server_request_reply(method, None, serde_json::json!(7));
         let JsonRpcMessage::Response(resp) = msg else {
             panic!("expected Response")
         };
@@ -955,19 +966,13 @@ mod tests {
     fn workspace_configuration_handles_missing_items_field() {
         // Defensive — a malformed request gets back a zero-length
         // array rather than a server-killing protocol error.
-        let result = reply_result_for(
-            "workspace/configuration",
-            serde_json::json!({}),
-        );
+        let result = reply_result_for("workspace/configuration", serde_json::json!({}));
         assert_eq!(result, serde_json::json!([]));
     }
 
     #[test]
     fn workspace_workspace_folders_returns_null() {
-        let result = reply_result_for(
-            "workspace/workspaceFolders",
-            serde_json::json!({}),
-        );
+        let result = reply_result_for("workspace/workspaceFolders", serde_json::json!({}));
         assert_eq!(result, serde_json::Value::Null);
     }
 
@@ -1057,7 +1062,11 @@ mod tests {
         // based on this; they MUST NOT hang waiting.
         let err = reply_error_for("totally/made/up");
         assert_eq!(err.code, -32601);
-        assert!(err.message.contains("totally/made/up"), "got: {}", err.message);
+        assert!(
+            err.message.contains("totally/made/up"),
+            "got: {}",
+            err.message
+        );
     }
 
     #[test]

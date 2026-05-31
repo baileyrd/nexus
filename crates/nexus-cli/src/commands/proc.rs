@@ -29,7 +29,10 @@ pub fn list(app: &mut App) -> Result<()> {
 pub fn show(app: &mut App, slug: &str) -> Result<()> {
     let response = call(app, "saved_list", serde_json::json!({}))?;
     let arr = response.as_array().cloned().unwrap_or_default();
-    match arr.iter().find(|v| v.get("slug").and_then(Value::as_str) == Some(slug)) {
+    match arr
+        .iter()
+        .find(|v| v.get("slug").and_then(Value::as_str) == Some(slug))
+    {
         Some(record) => print_full(record),
         None => {
             eprintln!("no saved command with slug '{slug}'");
@@ -149,10 +152,7 @@ fn print_list(response: &Value) {
     for v in arr {
         let slug = v.get("slug").and_then(Value::as_str).unwrap_or("?");
         let name = v.get("name").and_then(Value::as_str).unwrap_or("?");
-        let cmd = v
-            .get("shell_cmd")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let cmd = v.get("shell_cmd").and_then(Value::as_str).unwrap_or("");
         println!(
             "{:<slug_w$}  {:<name_w$}  {}",
             slug,
@@ -185,7 +185,10 @@ fn print_history(response: &Value) {
         .clamp(7, 60);
     println!(
         "{:<19}  {:<6}  {:>4}  {:<cmd_w$}  CWD",
-        "WHEN", "STATUS", "RUNS", "COMMAND",
+        "WHEN",
+        "STATUS",
+        "RUNS",
+        "COMMAND",
         cmd_w = cmd_w,
     );
     for v in arr {
@@ -201,7 +204,11 @@ fn print_history(response: &Value) {
         let cwd = v.get("working_dir").and_then(Value::as_str).unwrap_or("");
         println!(
             "{:<19}  {:<6}  {:>4}  {:<cmd_w$}  {}",
-            when, status, runs, cmd, cwd,
+            when,
+            status,
+            runs,
+            cmd,
+            cwd,
             cmd_w = cmd_w,
         );
     }

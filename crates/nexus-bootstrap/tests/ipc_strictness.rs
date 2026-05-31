@@ -73,12 +73,12 @@ async fn comments_list_rejects_payload_with_unknown_field() {
         .expect_err("unknown field must be rejected");
 
     match err {
-        IpcError::PluginCrashedDuringCall { plugin_id, command, .. } => {
+        IpcError::PluginCrashedDuringCall {
+            plugin_id, command, ..
+        } => {
             assert_eq!(plugin_id, COMMENTS_PLUGIN_ID);
             assert_eq!(command, "list");
         }
-        other => panic!(
-            "expected PluginCrashedDuringCall on unknown field, got {other:?}"
-        ),
+        other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
     }
 }

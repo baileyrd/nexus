@@ -203,11 +203,13 @@ fn head_trim_bytes(bytes: Vec<u8>, cap: usize) -> Vec<u8> {
     // the buffer as-is — better to overshoot the cap by one line than
     // lose the most recent entry.
     let drop_at = bytes.len() - cap;
-    let cut = bytes
-        .iter()
-        .enumerate()
-        .skip(drop_at)
-        .find_map(|(i, &b)| if b == b'\n' { Some(i + 1) } else { None });
+    let cut = bytes.iter().enumerate().skip(drop_at).find_map(|(i, &b)| {
+        if b == b'\n' {
+            Some(i + 1)
+        } else {
+            None
+        }
+    });
     match cut {
         Some(idx) if idx < bytes.len() => bytes[idx..].to_vec(),
         _ => bytes,

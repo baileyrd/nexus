@@ -121,7 +121,9 @@ fn ipc_consumers_do_not_direct_dep_on_forbidden_subsystems() {
         // closes the loophole before it lands.
         if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
             for (cfg_key, cfg_block) in target {
-                if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table)
+                if let Some(deps) = cfg_block
+                    .get("dependencies")
+                    .and_then(toml::Value::as_table)
                 {
                     if deps.contains_key(*forbidden_dep) {
                         violations.push(format!(
@@ -228,7 +230,10 @@ fn ipc_proxies_only_link_allowed_in_tree_crates() {
         }
         if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
             for (cfg_key, cfg_block) in target {
-                if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table) {
+                if let Some(deps) = cfg_block
+                    .get("dependencies")
+                    .and_then(toml::Value::as_table)
+                {
                     check_block(&format!("target.'{cfg_key}'.dependencies"), deps);
                 }
             }
@@ -260,7 +265,10 @@ nexus-storage = { path = "../nexus-storage" }
     let mut hit = false;
     if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
         for (_cfg, cfg_block) in target {
-            if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table) {
+            if let Some(deps) = cfg_block
+                .get("dependencies")
+                .and_then(toml::Value::as_table)
+            {
                 if deps.contains_key("nexus-storage") {
                     hit = true;
                 }

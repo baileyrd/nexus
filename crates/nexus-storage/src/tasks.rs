@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::StorageError;
@@ -130,8 +130,10 @@ pub fn query_tasks(
          ORDER BY f.path, t.line_number;"
     );
 
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(std::convert::AsRef::as_ref).collect();
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+        .iter()
+        .map(std::convert::AsRef::as_ref)
+        .collect();
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_refs.as_slice(), map_task_record)?;
@@ -152,10 +154,7 @@ pub fn query_tasks(
 ///
 /// Returns [`StorageError::Database`] on any `SQLite` failure, including
 /// when no row matches `task_id`.
-pub fn toggle_task(
-    conn: &Connection,
-    task_id: u64,
-) -> Result<TaskRecord, StorageError> {
+pub fn toggle_task(conn: &Connection, task_id: u64) -> Result<TaskRecord, StorageError> {
     let now = now_unix();
 
     conn.execute(
@@ -215,9 +214,7 @@ pub fn toggle_task_in_file(
             format!("- [x] {rest}")
         } else {
             return Err(StorageError::IndexInconsistency {
-                details: format!(
-                    "expected '- [ ] ' at line {line_number}, found: {line}"
-                ),
+                details: format!("expected '- [ ] ' at line {line_number}, found: {line}"),
             });
         }
     } else {
@@ -226,9 +223,7 @@ pub fn toggle_task_in_file(
             format!("- [ ] {rest}")
         } else {
             return Err(StorageError::IndexInconsistency {
-                details: format!(
-                    "expected '- [x] ' at line {line_number}, found: {line}"
-                ),
+                details: format!("expected '- [x] ' at line {line_number}, found: {line}"),
             });
         }
     };
@@ -352,7 +347,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(done.len(), 1, "expected 1 completed task, got {}", done.len());
+        assert_eq!(
+            done.len(),
+            1,
+            "expected 1 completed task, got {}",
+            done.len()
+        );
         assert!(done[0].completed);
 
         // Filter for pending only.
@@ -364,7 +364,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(pending.len(), 1, "expected 1 pending task, got {}", pending.len());
+        assert_eq!(
+            pending.len(),
+            1,
+            "expected 1 pending task, got {}",
+            pending.len()
+        );
         assert!(!pending[0].completed);
     }
 
@@ -392,7 +397,10 @@ mod tests {
 
         // Toggle: true -> false.
         let toggled_back = toggle_task(&conn, task_id).unwrap();
-        assert!(!toggled_back.completed, "expected uncompleted after second toggle");
+        assert!(
+            !toggled_back.completed,
+            "expected uncompleted after second toggle"
+        );
     }
 
     // ── 4. insert_tasks_replaces_existing ────────────────────────────────────

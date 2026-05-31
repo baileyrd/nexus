@@ -133,7 +133,10 @@ mod tests {
             file: "notes/y.md".to_string(),
             error: "unterminated frontmatter".to_string(),
         };
-        assert_eq!(err.to_string(), "parse error in notes/y.md: unterminated frontmatter");
+        assert_eq!(
+            err.to_string(),
+            "parse error in notes/y.md: unterminated frontmatter"
+        );
     }
 
     #[test]

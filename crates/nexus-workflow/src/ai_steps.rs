@@ -121,7 +121,8 @@ impl AiDecisionArgs {
 /// [`pick_choice`] robust without elaborate parsing.
 #[must_use]
 pub fn build_decision_prompt(prompt: &str, choices: &[String]) -> String {
-    let mut s = String::with_capacity(prompt.len() + choices.iter().map(String::len).sum::<usize>() + 64);
+    let mut s =
+        String::with_capacity(prompt.len() + choices.iter().map(String::len).sum::<usize>() + 64);
     s.push_str(prompt.trim());
     s.push_str("\n\nChoose exactly one of these options. Reply with only the chosen label, no other text:\n");
     for choice in choices {
@@ -178,7 +179,12 @@ mod tests {
     use crate::parse_workflow_text;
 
     fn step_from(toml_src: &str) -> Step {
-        parse_workflow_text(toml_src).unwrap().steps.into_iter().next().unwrap()
+        parse_workflow_text(toml_src)
+            .unwrap()
+            .steps
+            .into_iter()
+            .next()
+            .unwrap()
     }
 
     #[test]

@@ -47,10 +47,7 @@ fn properties_to_yaml(props: &HashMap<String, PropertyValue>) -> serde_yml::Valu
 
     for key in RESERVED {
         if let Some(v) = props.get(*key) {
-            mapping.insert(
-                serde_yml::Value::String((*key).into()),
-                property_to_yaml(v),
-            );
+            mapping.insert(serde_yml::Value::String((*key).into()), property_to_yaml(v));
         }
     }
     let mut other_keys: Vec<&String> = props
@@ -147,7 +144,10 @@ fn serialize_block(tree: &BlockTree, id: BlockId, out: &mut String) {
         // with `MarkdownParser::parse`'s paragraph-promotion path
         // so the editor's undo tree captures `view_config` edits as
         // block-level transactions instead of free-text replacements.
-        BlockType::DatabaseView { database_path, view_config } => {
+        BlockType::DatabaseView {
+            database_path,
+            view_config,
+        } => {
             out.push_str(&serialize_database_view_spec(database_path, view_config));
             out.push('\n');
             push_block_stamp_line(block, out);

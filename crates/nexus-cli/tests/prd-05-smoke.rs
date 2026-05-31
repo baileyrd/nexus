@@ -10,7 +10,9 @@ fn walking_skeleton_forge_content_lifecycle() {
     assert!(forge.join(".forge/index.db").exists());
 
     // Create
-    let meta = engine.write_file("notes/welcome.md", b"# Welcome\n\nHello from Nexus.").unwrap();
+    let meta = engine
+        .write_file("notes/welcome.md", b"# Welcome\n\nHello from Nexus.")
+        .unwrap();
     assert_eq!(meta.path, "notes/welcome.md");
 
     // Exists
@@ -26,7 +28,9 @@ fn walking_skeleton_forge_content_lifecycle() {
     assert!(!results.is_empty());
 
     // Index queries
-    let files = engine.query_files(&nexus_storage::FileFilter::default()).unwrap();
+    let files = engine
+        .query_files(&nexus_storage::FileFilter::default())
+        .unwrap();
     assert_eq!(files.len(), 1);
     let blocks = engine.query_blocks(files[0].id).unwrap();
     assert!(!blocks.is_empty());
@@ -40,14 +44,18 @@ fn walking_skeleton_forge_content_lifecycle() {
 fn walking_skeleton_plugin_lifecycle() {
     let wasm_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../nexus-plugins/tests/fixtures/minimal-plugin.wasm");
-    if !wasm_src.exists() { return; }
+    if !wasm_src.exists() {
+        return;
+    }
 
     let tmp = tempfile::tempdir().unwrap();
     let plugin_dir = tmp.path().join("com.test.smoke");
     std::fs::create_dir_all(&plugin_dir).unwrap();
     std::fs::copy(&wasm_src, plugin_dir.join("test.wasm")).unwrap();
 
-    std::fs::write(plugin_dir.join("manifest.toml"), r#"
+    std::fs::write(
+        plugin_dir.join("manifest.toml"),
+        r#"
 [plugin]
 id = "com.test.smoke"
 name = "Smoke"
@@ -69,9 +77,14 @@ handler_id = 100
 on_init = true
 on_start = true
 on_stop = true
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    let config = nexus_plugins::PluginManagerConfig { hot_reload: false, ..Default::default() };
+    let config = nexus_plugins::PluginManagerConfig {
+        hot_reload: false,
+        ..Default::default()
+    };
     let mut mgr = nexus_plugins::PluginManager::new(tmp.path(), &config).unwrap();
 
     let info = mgr.load(&plugin_dir).unwrap();

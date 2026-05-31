@@ -46,7 +46,9 @@ async fn connect_client(
         peer_id: peer_id.to_string(),
         display_name: display_name.to_string(),
     };
-    CollabClient::connect(params, bus, config).await.expect("connect")
+    CollabClient::connect(params, bus, config)
+        .await
+        .expect("connect")
 }
 
 /// Wait for the next custom event matching the given topic on the bus.
@@ -55,7 +57,10 @@ async fn recv_topic(bus: &EventBus, topic: &str) -> serde_json::Value {
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let event = sub.recv().await.expect("recv");
-            if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+            if let NexusEvent::Custom {
+                type_id, payload, ..
+            } = &event.event
+            {
                 if type_id == topic {
                     return payload.clone();
                 }
@@ -72,7 +77,15 @@ async fn recv_topic(bus: &EventBus, topic: &str) -> serde_json::Value {
 async fn handshake_succeeds_and_peer_id_echoed() {
     let addr = start_relay("t").await;
     let bus = Arc::new(EventBus::new(64));
-    let client = connect_client(addr, bus, "t", "alice", "Alice", CollabClientConfig::default()).await;
+    let client = connect_client(
+        addr,
+        bus,
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
     assert_eq!(client.peer_id(), "alice");
     assert!(client.initial_peers().is_empty());
 }
@@ -81,9 +94,25 @@ async fn handshake_succeeds_and_peer_id_echoed() {
 async fn handshake_initial_peers_lists_existing_connections() {
     let addr = start_relay("t").await;
     let bus_a = Arc::new(EventBus::new(64));
-    let _a = connect_client(addr, bus_a, "t", "alice", "Alice", CollabClientConfig::default()).await;
+    let _a = connect_client(
+        addr,
+        bus_a,
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
     let bus_b = Arc::new(EventBus::new(64));
-    let b = connect_client(addr, bus_b, "t", "bob", "Bob", CollabClientConfig::default()).await;
+    let b = connect_client(
+        addr,
+        bus_b,
+        "t",
+        "bob",
+        "Bob",
+        CollabClientConfig::default(),
+    )
+    .await;
     assert_eq!(b.initial_peers().len(), 1);
     assert_eq!(b.initial_peers()[0].peer_id, "alice");
     assert_eq!(b.initial_peers()[0].display_name, "Alice");
@@ -94,8 +123,24 @@ async fn outbound_editor_op_reaches_other_peer_bus() {
     let addr = start_relay("t").await;
     let bus_a = Arc::new(EventBus::new(64));
     let bus_b = Arc::new(EventBus::new(64));
-    let _a = connect_client(addr, Arc::clone(&bus_a), "t", "alice", "Alice", CollabClientConfig::default()).await;
-    let _b = connect_client(addr, Arc::clone(&bus_b), "t", "bob", "Bob", CollabClientConfig::default()).await;
+    let _a = connect_client(
+        addr,
+        Arc::clone(&bus_a),
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
+    let _b = connect_client(
+        addr,
+        Arc::clone(&bus_b),
+        "t",
+        "bob",
+        "Bob",
+        CollabClientConfig::default(),
+    )
+    .await;
 
     // Subscribe on B's bus before A publishes.
     let mut sub_b = bus_b.subscribe(EventFilter::CustomExact(
@@ -135,7 +180,15 @@ async fn self_echo_by_site_id_is_dropped_on_inbound() {
     let addr = start_relay("t").await;
     let bus_a = Arc::new(EventBus::new(64));
     let bus_b = Arc::new(EventBus::new(64));
-    let _a = connect_client(addr, Arc::clone(&bus_a), "t", "alice", "Alice", CollabClientConfig::default()).await;
+    let _a = connect_client(
+        addr,
+        Arc::clone(&bus_a),
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
     let cfg_b = CollabClientConfig {
         local_site_id: Some("site-A".into()),
         ..CollabClientConfig::default()
@@ -149,7 +202,11 @@ async fn self_echo_by_site_id_is_dropped_on_inbound() {
 
     let payload = json!({"op": {"id": {"site": "site-A", "lamport": 1}}});
     bus_a
-        .publish_plugin(EDITOR_PLUGIN_ID, "com.nexus.editor.ops.notes/today.md", payload)
+        .publish_plugin(
+            EDITOR_PLUGIN_ID,
+            "com.nexus.editor.ops.notes/today.md",
+            payload,
+        )
         .expect("publish on A");
 
     let res = tokio::time::timeout(Duration::from_millis(300), sub_b.recv()).await;
@@ -163,7 +220,15 @@ async fn op_from_other_site_is_published_on_inbound() {
     let addr = start_relay("t").await;
     let bus_a = Arc::new(EventBus::new(64));
     let bus_b = Arc::new(EventBus::new(64));
-    let _a = connect_client(addr, Arc::clone(&bus_a), "t", "alice", "Alice", CollabClientConfig::default()).await;
+    let _a = connect_client(
+        addr,
+        Arc::clone(&bus_a),
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
     let cfg_b = CollabClientConfig {
         local_site_id: Some("site-B".into()),
         ..CollabClientConfig::default()
@@ -174,7 +239,11 @@ async fn op_from_other_site_is_published_on_inbound() {
 
     let payload = json!({"op": {"id": {"site": "site-A", "lamport": 1}}});
     bus_a
-        .publish_plugin(EDITOR_PLUGIN_ID, "com.nexus.editor.ops.notes/today.md", payload.clone())
+        .publish_plugin(
+            EDITOR_PLUGIN_ID,
+            "com.nexus.editor.ops.notes/today.md",
+            payload.clone(),
+        )
         .expect("publish on A");
 
     let received = recv_topic(&bus_b, "com.nexus.editor.ops.notes/today.md").await;
@@ -188,8 +257,24 @@ async fn outbound_filter_scope_is_respected() {
     let addr = start_relay("t").await;
     let bus_a = Arc::new(EventBus::new(64));
     let bus_b = Arc::new(EventBus::new(64));
-    let _a = connect_client(addr, Arc::clone(&bus_a), "t", "alice", "Alice", CollabClientConfig::default()).await;
-    let _b = connect_client(addr, Arc::clone(&bus_b), "t", "bob", "Bob", CollabClientConfig::default()).await;
+    let _a = connect_client(
+        addr,
+        Arc::clone(&bus_a),
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
+    let _b = connect_client(
+        addr,
+        Arc::clone(&bus_b),
+        "t",
+        "bob",
+        "Bob",
+        CollabClientConfig::default(),
+    )
+    .await;
 
     let mut sub_b = bus_b.subscribe(EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.into()));
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -215,8 +300,15 @@ async fn outbound_filter_scope_is_respected() {
 async fn shutdown_cleanly_tears_down_tasks() {
     let addr = start_relay("t").await;
     let bus = Arc::new(EventBus::new(64));
-    let client =
-        connect_client(addr, Arc::clone(&bus), "t", "alice", "Alice", CollabClientConfig::default()).await;
+    let client = connect_client(
+        addr,
+        Arc::clone(&bus),
+        "t",
+        "alice",
+        "Alice",
+        CollabClientConfig::default(),
+    )
+    .await;
     client.shutdown().await;
     // Re-publishing on the bus after shutdown is a no-op for the
     // bridge; no panic or hang implies shutdown completed.

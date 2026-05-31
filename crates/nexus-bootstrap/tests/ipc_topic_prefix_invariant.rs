@@ -166,7 +166,9 @@ fn every_publish_call_emits_in_namespace() {
         let dynamic_report = if dynamic.is_empty() {
             String::new()
         } else {
-            let mut s = String::from("\n\nDynamic publish sites (skipped by the static check — visual review only):\n");
+            let mut s = String::from(
+                "\n\nDynamic publish sites (skipped by the static check — visual review only):\n",
+            );
             for (k, v) in &dynamic {
                 s.push_str(&format!("  {k}\n"));
                 for line in v {
@@ -223,7 +225,11 @@ fn owners_table_matches_plugin_id_constants() {
         }
     }
 
-    assert!(errors.is_empty(), "OWNERS table is stale:\n{}", errors.join("\n"));
+    assert!(
+        errors.is_empty(),
+        "OWNERS table is stale:\n{}",
+        errors.join("\n")
+    );
 }
 
 fn file_contains(path: &Path, needle: &str) -> bool {
@@ -317,9 +323,7 @@ where
                     }
                     k += 1;
                 }
-                let snippet = source[j..k.min(source.len())]
-                    .trim()
-                    .replace('\n', " ");
+                let snippet = source[j..k.min(source.len())].trim().replace('\n', " ");
                 if !snippet.is_empty() {
                     on_dynamic(&snippet, local_line);
                 }
@@ -364,7 +368,10 @@ fn workspace_root() -> PathBuf {
             }
         }
         if !dir.pop() {
-            panic!("failed to locate workspace root from {}", env!("CARGO_MANIFEST_DIR"));
+            panic!(
+                "failed to locate workspace root from {}",
+                env!("CARGO_MANIFEST_DIR")
+            );
         }
     }
 }

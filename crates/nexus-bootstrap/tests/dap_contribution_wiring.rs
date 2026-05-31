@@ -266,11 +266,6 @@ async fn first_party_dap_python_plugin_wires_and_surfaces_metadata() {
     // applies to this workspace" without a second IPC.
     assert_eq!(
         metadata["root_markers"],
-        serde_json::json!([
-            "pyproject.toml",
-            "setup.py",
-            "requirements.txt",
-            ".git",
-        ]),
+        serde_json::json!(["pyproject.toml", "setup.py", "requirements.txt", ".git",]),
     );
 }

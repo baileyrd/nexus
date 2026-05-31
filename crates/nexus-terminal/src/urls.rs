@@ -186,9 +186,7 @@ fn http_regex() -> &'static Regex {
 
 fn file_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"file://[^\s()\[\]<>"']+"#).expect("file regex compiles")
-    })
+    RE.get_or_init(|| Regex::new(r#"file://[^\s()\[\]<>"']+"#).expect("file regex compiles"))
 }
 
 fn localhost_regex() -> &'static Regex {
@@ -235,8 +233,7 @@ mod tests {
 
     #[test]
     fn multiple_urls_surface_in_order() {
-        let hits =
-            detect_urls("first https://a.example then https://b.example end");
+        let hits = detect_urls("first https://a.example then https://b.example end");
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].raw, "https://a.example");
         assert_eq!(hits[1].raw, "https://b.example");
@@ -290,8 +287,7 @@ mod tests {
 
     #[test]
     fn url_with_query_string_and_fragment_survives() {
-        let hits =
-            detect_urls("go https://example.com/path?x=1&y=2#frag now");
+        let hits = detect_urls("go https://example.com/path?x=1&y=2#frag now");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].raw, "https://example.com/path?x=1&y=2#frag");
     }
@@ -329,10 +325,7 @@ mod tests {
             resolve_url("localhost:3000/api"),
             "http://127.0.0.1:3000/api"
         );
-        assert_eq!(
-            resolve_url("127.0.0.1:8080"),
-            "http://127.0.0.1:8080"
-        );
+        assert_eq!(resolve_url("127.0.0.1:8080"), "http://127.0.0.1:8080");
     }
 
     #[test]

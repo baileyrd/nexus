@@ -18,10 +18,14 @@ fn block_ref_round_trip() {
     let files = engine.query_files(&FileFilter::default()).unwrap();
     let blocks = engine.query_blocks(files[0].id).unwrap();
 
-    let intro = blocks.iter().find(|b| b.block_ref_id == Some("intro".to_string()));
+    let intro = blocks
+        .iter()
+        .find(|b| b.block_ref_id == Some("intro".to_string()));
     assert!(intro.is_some(), "heading should have block_ref_id 'intro'");
 
-    let body = blocks.iter().find(|b| b.block_ref_id == Some("body".to_string()));
+    let body = blocks
+        .iter()
+        .find(|b| b.block_ref_id == Some("body".to_string()));
     assert!(body.is_some(), "paragraph should have block_ref_id 'body'");
 }
 
@@ -29,13 +33,18 @@ fn block_ref_round_trip() {
 fn callout_round_trip() {
     let (_dir, engine) = engine();
     engine
-        .write_file("notes/callouts.md", b"> [!warning] Watch out\n> Be careful here\n")
+        .write_file(
+            "notes/callouts.md",
+            b"> [!warning] Watch out\n> Be careful here\n",
+        )
         .unwrap();
 
     let files = engine.query_files(&FileFilter::default()).unwrap();
     let blocks = engine.query_blocks(files[0].id).unwrap();
 
-    let callout = blocks.iter().find(|b| b.callout_type == Some("warning".to_string()));
+    let callout = blocks
+        .iter()
+        .find(|b| b.callout_type == Some("warning".to_string()));
     assert!(callout.is_some(), "should have a warning callout block");
     assert_eq!(callout.unwrap().block_type, "callout");
 }
@@ -44,17 +53,24 @@ fn callout_round_trip() {
 fn link_fragment_round_trip() {
     let (_dir, engine) = engine();
     engine
-        .write_file("notes/links.md", b"See [[other#^ref1]] and [[other#Heading]]\n")
+        .write_file(
+            "notes/links.md",
+            b"See [[other#^ref1]] and [[other#Heading]]\n",
+        )
         .unwrap();
 
     let files = engine.query_files(&FileFilter::default()).unwrap();
     let links = engine.query_links(files[0].id).unwrap();
 
     assert_eq!(links.len(), 2);
-    let ref_link = links.iter().find(|l| l.fragment == Some("^ref1".to_string()));
+    let ref_link = links
+        .iter()
+        .find(|l| l.fragment == Some("^ref1".to_string()));
     assert!(ref_link.is_some(), "should have fragment ^ref1");
 
-    let heading_link = links.iter().find(|l| l.fragment == Some("Heading".to_string()));
+    let heading_link = links
+        .iter()
+        .find(|l| l.fragment == Some("Heading".to_string()));
     assert!(heading_link.is_some(), "should have fragment Heading");
 }
 
@@ -135,7 +151,10 @@ fn alias_link_resolution() {
 
     assert_eq!(links.len(), 1);
     assert!(links[0].is_resolved, "link via alias should be resolved");
-    assert!(links[0].target_file_id.is_some(), "target_file_id should be set");
+    assert!(
+        links[0].target_file_id.is_some(),
+        "target_file_id should be set"
+    );
 }
 
 #[test]
@@ -151,15 +170,29 @@ fn combined_markdown_features() {
     let pf = parse_markdown(md).unwrap();
 
     // Tags: 1 frontmatter + 1 inline
-    assert!(pf.tags.iter().any(|t| t.name == "test" && t.source == "frontmatter"));
-    assert!(pf.tags.iter().any(|t| t.name == "inline-tag" && t.source == "inline"));
+    assert!(pf
+        .tags
+        .iter()
+        .any(|t| t.name == "test" && t.source == "frontmatter"));
+    assert!(pf
+        .tags
+        .iter()
+        .any(|t| t.name == "inline-tag" && t.source == "inline"));
 
     // Block ref on heading
-    let title = pf.blocks.iter().find(|b| b.block_type == "heading").unwrap();
+    let title = pf
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "heading")
+        .unwrap();
     assert_eq!(title.block_ref_id, Some("title".to_string()));
 
     // Callout
-    let callout = pf.blocks.iter().find(|b| b.block_type == "callout").unwrap();
+    let callout = pf
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "callout")
+        .unwrap();
     assert_eq!(callout.callout_type, Some("note".to_string()));
 
     // Tasks
@@ -175,19 +208,34 @@ fn search_with_tag_scope() {
     let (_dir, engine) = engine();
 
     engine
-        .write_file("notes/rust.md", b"---\ntags:\n  - rust\n---\n# Rust Guide\n\nAsync programming in Rust.\n")
+        .write_file(
+            "notes/rust.md",
+            b"---\ntags:\n  - rust\n---\n# Rust Guide\n\nAsync programming in Rust.\n",
+        )
         .unwrap();
     engine
-        .write_file("notes/python.md", b"---\ntags:\n  - python\n---\n# Python Guide\n\nAsync programming in Python.\n")
+        .write_file(
+            "notes/python.md",
+            b"---\ntags:\n  - python\n---\n# Python Guide\n\nAsync programming in Python.\n",
+        )
         .unwrap();
 
     engine.rebuild_search_index().unwrap();
 
     let all = engine.search("programming", 10).unwrap();
-    assert!(all.len() >= 2, "expected at least 2 results, got {}", all.len());
+    assert!(
+        all.len() >= 2,
+        "expected at least 2 results, got {}",
+        all.len()
+    );
 
     let scoped = engine.search("tag:rust programming", 10).unwrap();
-    assert_eq!(scoped.len(), 1, "expected 1 result for tag:rust, got {}", scoped.len());
+    assert_eq!(
+        scoped.len(),
+        1,
+        "expected 1 result for tag:rust, got {}",
+        scoped.len()
+    );
     assert_eq!(scoped[0].file_path, "notes/rust.md");
 }
 
@@ -252,7 +300,9 @@ fn search_with_combined_scopes() {
 
     engine.rebuild_search_index().unwrap();
 
-    let scoped = engine.search("tag:rust path:notes/ programming", 10).unwrap();
+    let scoped = engine
+        .search("tag:rust path:notes/ programming", 10)
+        .unwrap();
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0].file_path, "notes/match.md");
 }
@@ -326,11 +376,8 @@ fn mdx_write_file_persists_components() {
     assert_eq!(files[0].file_type, "mdx");
 
     // JSX components persisted
-    let jsx = nexus_storage::query_jsx_components(
-        &engine.pool_connection().unwrap(),
-        files[0].id,
-    )
-    .unwrap();
+    let jsx = nexus_storage::query_jsx_components(&engine.pool_connection().unwrap(), files[0].id)
+        .unwrap();
     assert_eq!(jsx.len(), 2);
     assert_eq!(jsx[0].name, "Widget");
     assert!(jsx[0].self_closing);
@@ -362,23 +409,16 @@ fn mdx_rewrite_replaces_components() {
         .write_file("notes/comp.mdx", b"<Alpha />\n<Beta />\n")
         .unwrap();
     let files = engine.query_files(&FileFilter::default()).unwrap();
-    let jsx1 = nexus_storage::query_jsx_components(
-        &engine.pool_connection().unwrap(),
-        files[0].id,
-    )
-    .unwrap();
+    let jsx1 = nexus_storage::query_jsx_components(&engine.pool_connection().unwrap(), files[0].id)
+        .unwrap();
     assert_eq!(jsx1.len(), 2);
 
     // Rewrite with different components
-    engine
-        .write_file("notes/comp.mdx", b"<Gamma />\n")
-        .unwrap();
+    engine.write_file("notes/comp.mdx", b"<Gamma />\n").unwrap();
     let files2 = engine.query_files(&FileFilter::default()).unwrap();
-    let jsx2 = nexus_storage::query_jsx_components(
-        &engine.pool_connection().unwrap(),
-        files2[0].id,
-    )
-    .unwrap();
+    let jsx2 =
+        nexus_storage::query_jsx_components(&engine.pool_connection().unwrap(), files2[0].id)
+            .unwrap();
     assert_eq!(jsx2.len(), 1);
     assert_eq!(jsx2[0].name, "Gamma");
 }

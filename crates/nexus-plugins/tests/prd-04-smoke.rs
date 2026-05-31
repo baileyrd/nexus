@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use nexus_plugins::{
-    HotReloader, PluginError, PluginLoader, PluginManager, PluginManagerConfig, ReloadEvent,
-    SettingsManager, WasmConfig, WasmSandbox, PluginData,
+    HotReloader, PluginData, PluginError, PluginLoader, PluginManager, PluginManagerConfig,
+    ReloadEvent, SettingsManager, WasmConfig, WasmSandbox,
 };
 
 // ─── Shared helper ────────────────────────────────────────────────────────────
@@ -15,8 +15,7 @@ fn setup_smoke_plugin(plugin_id: &str) -> (tempfile::TempDir, std::path::PathBuf
     let plugin_dir = tmp.path().join(plugin_id);
     std::fs::create_dir_all(&plugin_dir).unwrap();
 
-    let wasm_src = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/minimal-plugin.wasm");
+    let wasm_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimal-plugin.wasm");
     std::fs::copy(&wasm_src, plugin_dir.join("test.wasm")).unwrap();
 
     let manifest = format!(
@@ -91,7 +90,10 @@ fn manifest_parse_and_validate_roundtrip() {
     assert_eq!(manifest.version, "1.0.0");
     assert_eq!(manifest.api_version, "1");
     assert_eq!(manifest.registrations.cli_subcommands.len(), 1);
-    assert_eq!(manifest.registrations.cli_subcommands[0].id, "com.smoke.manifest.echo");
+    assert_eq!(
+        manifest.registrations.cli_subcommands[0].id,
+        "com.smoke.manifest.echo"
+    );
     assert!(manifest.lifecycle.on_init);
     assert!(manifest.lifecycle.on_start);
     assert!(manifest.lifecycle.on_stop);
@@ -130,7 +132,8 @@ fn settings_schema_validation_works() {
     }"#;
 
     let mut mgr = SettingsManager::new();
-    mgr.register_schema("com.smoke.settings", schema_json).unwrap();
+    mgr.register_schema("com.smoke.settings", schema_json)
+        .unwrap();
 
     // Valid settings should pass.
     mgr.validate("com.smoke.settings", &serde_json::json!({"threshold": 5}))
@@ -147,7 +150,10 @@ fn settings_schema_validation_works() {
 
     // Wrong type should fail.
     let err = mgr
-        .validate("com.smoke.settings", &serde_json::json!({"threshold": "not-a-number"}))
+        .validate(
+            "com.smoke.settings",
+            &serde_json::json!({"threshold": "not-a-number"}),
+        )
         .unwrap_err();
     assert!(
         matches!(err, PluginError::SettingsInvalid { .. }),
@@ -166,9 +172,7 @@ fn full_plugin_lifecycle() {
 
     // Dispatch CLI (echo handler returns args unchanged)
     let args = serde_json::json!({"smoke": "test"});
-    let result = mgr
-        .dispatch_cli("com.smoke.lifecycle.echo", &args)
-        .unwrap();
+    let result = mgr.dispatch_cli("com.smoke.lifecycle.echo", &args).unwrap();
     assert_eq!(result, args, "echo handler should return args unchanged");
 
     // List
@@ -191,7 +195,11 @@ fn load_all_scans_directory() {
     let mut mgr = PluginManager::new(tmp.path(), &no_reload_config()).unwrap();
 
     let infos = mgr.load_all().unwrap();
-    assert_eq!(infos.len(), 1, "expected exactly one plugin, got: {infos:?}");
+    assert_eq!(
+        infos.len(),
+        1,
+        "expected exactly one plugin, got: {infos:?}"
+    );
     assert_eq!(infos[0].id, "com.smoke.scanme");
 }
 
@@ -217,10 +225,7 @@ fn plugin_error_variants_display_correctly() {
 
     for err in &errors {
         let msg = err.to_string();
-        assert!(
-            !msg.is_empty(),
-            "Display for {err:?} should be non-empty"
-        );
+        assert!(!msg.is_empty(), "Display for {err:?} should be non-empty");
     }
 }
 

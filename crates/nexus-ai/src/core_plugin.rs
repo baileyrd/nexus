@@ -24,11 +24,10 @@ use crate::activity_log::ActivityRecorder;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::generate_docs::handle_generate_docs;
 use crate::indexing_daemon::{self, DaemonMsg, EmbedderFactory, IndexingDaemon, SharedStatus};
-use tokio::sync::mpsc::UnboundedSender;
 use crate::tools::{
-    register_extended_builtins, register_storage_builtins, register_terminal_builtins,
-    ToolRegistry,
+    register_extended_builtins, register_storage_builtins, register_terminal_builtins, ToolRegistry,
 };
+use tokio::sync::mpsc::UnboundedSender;
 
 // Re-export shared helpers so the in-file test modules (which use
 // `super::*`) keep seeing the same symbols they did pre-split.
@@ -53,9 +52,6 @@ use crate::handlers::stream_chat::handle_stream_chat;
 // in-file `#[cfg(test)]` modules below. These previously lived in
 // this file — keep them in-scope (via `use`) so the test modules'
 // `use super::*;` continues to resolve.
-use crate::handlers::shared::{
-    build_embedding_provider, config_snapshot, resolve_credentials_payload,
-};
 #[cfg(test)]
 use crate::handlers::config::parse_config_field;
 #[cfg(test)]
@@ -63,9 +59,11 @@ use crate::handlers::session::{session_path, validate_session_id};
 #[cfg(test)]
 use crate::handlers::shared::{
     apply_stop, compose_chat_system, filter_to_read_only, messages_to_turns,
-    resolve_embedding_dimension, resolve_embedding_model, run_complete,
-    run_tool_dispatch_loop, tls_pinning_effective, HOST_SYSTEM_PROMPT_FLOOR,
-    MAX_TOOL_ROUNDS,
+    resolve_embedding_dimension, resolve_embedding_model, run_complete, run_tool_dispatch_loop,
+    tls_pinning_effective, HOST_SYSTEM_PROMPT_FLOOR, MAX_TOOL_ROUNDS,
+};
+use crate::handlers::shared::{
+    build_embedding_provider, config_snapshot, resolve_credentials_payload,
 };
 
 // Re-exports for callers outside `core_plugin` that historically
@@ -473,9 +471,9 @@ impl CorePlugin for AiCorePlugin {
         }
         if handler_id == HANDLER_ACTIVITY_CLEAR {
             let activity = self.activity.clone();
-            return Some(Box::pin(async move {
-                handle_activity_clear(activity).await
-            }));
+            return Some(Box::pin(
+                async move { handle_activity_clear(activity).await },
+            ));
         }
 
         // BL-139 — `predict` doesn't need the kernel context (no tool
@@ -485,9 +483,7 @@ impl CorePlugin for AiCorePlugin {
         if handler_id == HANDLER_PREDICT {
             let ai_cfg = self.ai_config.read().ok().and_then(|g| g.clone());
             let args = args.clone();
-            return Some(Box::pin(async move {
-                handle_predict(ai_cfg, &args).await
-            }));
+            return Some(Box::pin(async move { handle_predict(ai_cfg, &args).await }));
         }
 
         let ctx = self.context.clone();
@@ -498,8 +494,9 @@ impl CorePlugin for AiCorePlugin {
         let args = args.clone();
 
         Some(Box::pin(async move {
-            let ctx =
-                ctx.ok_or_else(|| exec_err("AI plugin context not wired (bootstrap incomplete)".to_string()))?;
+            let ctx = ctx.ok_or_else(|| {
+                exec_err("AI plugin context not wired (bootstrap incomplete)".to_string())
+            })?;
             match handler_id {
                 HANDLER_ASK => handle_ask(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,
@@ -515,21 +512,15 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
-                HANDLER_SEMANTIC_SEARCH => {
-                    handle_semantic_search(&ctx, embed_cfg, &args).await
-                }
+                HANDLER_SEMANTIC_SEARCH => handle_semantic_search(&ctx, embed_cfg, &args).await,
                 HANDLER_ENRICH_FILE => handle_enrich_file(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_ENRICH_APPLY => handle_enrich_apply(&ctx, &args).await,
                 HANDLER_PROPOSE_TOOL_CALLS => {
                     handle_propose_tool_calls(ctx, ai_cfg, tools, &args).await
                 }
                 HANDLER_GENERATE_DOCS => handle_generate_docs(ctx, ai_cfg, &args).await,
-                HANDLER_ENTITY_RECALL => {
-                    handle_entity_recall(&ctx, embed_cfg, &args).await
-                }
-                HANDLER_ENRICH_ENTITY => {
-                    handle_enrich_entity(&ctx, ai_cfg, embed_cfg, &args).await
-                }
+                HANDLER_ENTITY_RECALL => handle_entity_recall(&ctx, embed_cfg, &args).await,
+                HANDLER_ENRICH_ENTITY => handle_enrich_entity(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_INFER_ENTITY_RELATIONS => {
                     handle_infer_entity_relations(&ctx, ai_cfg, embed_cfg, &args).await
                 }
@@ -760,7 +751,8 @@ mod read_only_filter_tests {
     use crate::tools::{
         register_extended_builtins, register_storage_builtins, register_terminal_builtins,
     };
-    use nexus_kernel::{Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+    use nexus_kernel::{
+        Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
     };
 
     fn ctx_for_test() -> std::sync::Arc<KernelPluginContext> {
@@ -993,15 +985,10 @@ mod tool_dispatch_tests {
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
 
-        let outcome = run_tool_dispatch_loop(
-            &provider,
-            &registry,
-            vec![user_msg("hi")],
-            None,
-            &on_chunk,
-        )
-        .await
-        .expect("dispatch");
+        let outcome =
+            run_tool_dispatch_loop(&provider, &registry, vec![user_msg("hi")], None, &on_chunk)
+                .await
+                .expect("dispatch");
         assert_eq!(outcome.text, "hello");
         assert!(outcome.tool_calls.is_empty());
         assert!(outcome.files.is_empty());
@@ -1357,15 +1344,10 @@ mod tool_dispatch_tests {
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
 
-        let outcome = run_tool_dispatch_loop(
-            &provider,
-            &registry,
-            vec![user_msg("hi")],
-            None,
-            &on_chunk,
-        )
-        .await
-        .expect("dispatch");
+        let outcome =
+            run_tool_dispatch_loop(&provider, &registry, vec![user_msg("hi")], None, &on_chunk)
+                .await
+                .expect("dispatch");
         assert_eq!(outcome.text, "hello");
         assert_eq!(chunks.lock().unwrap().as_slice(), &["hello"]);
         // The dispatch-loop path was the one that ran (turns_seen
@@ -1382,8 +1364,7 @@ mod semantic_search_dispatch_tests {
     //! tries to embed, so we can drive both code paths cheaply by
     //! arranging for one of those checks to fire.
     use super::*;
-    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
-    };
+    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore};
     use std::sync::Arc;
 
     fn wired_plugin() -> AiCorePlugin {
@@ -1407,16 +1388,8 @@ mod semantic_search_dispatch_tests {
         std::mem::forget(dir);
         let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
         let bus = Arc::new(EventBus::new(16));
-        let ctx = KernelPluginContext::new(
-            "com.nexus.ai",
-            "0.0.1",
-            caps,
-            kv,
-            bus,
-            &dir_path,
-            None,
-        )
-        .unwrap();
+        let ctx = KernelPluginContext::new("com.nexus.ai", "0.0.1", caps, kv, bus, &dir_path, None)
+            .unwrap();
         plugin.wire_context(Arc::new(ctx));
         plugin
     }
@@ -1583,10 +1556,8 @@ mod semantic_search_dispatch_tests {
         entry1.prompt = "first prompt".into();
         recorder.append(entry1.clone()).await;
 
-        let mut entry2 = ActivityEntry::now_ai(
-            "sess-2".into(),
-            nexus_types::activity::ActivitySurface::Ask,
-        );
+        let mut entry2 =
+            ActivityEntry::now_ai("sess-2".into(), nexus_types::activity::ActivitySurface::Ask);
         entry2.prompt = "second prompt".into();
         entry2.files = vec!["notes/a.md".into(), "notes/b.md".into()];
         recorder.append(entry2.clone()).await;
@@ -1648,10 +1619,7 @@ mod semantic_search_dispatch_tests {
         use nexus_types::activity::ActivityEntry;
         let plugin = wired_plugin_with_caps(fs_caps());
         let recorder = plugin.activity.clone().expect("recorder wired");
-        let mut e = ActivityEntry::now_ai(
-            "s".into(),
-            nexus_types::activity::ActivitySurface::Chat,
-        );
+        let mut e = ActivityEntry::now_ai("s".into(), nexus_types::activity::ActivitySurface::Chat);
         e.prompt = "to be wiped".into();
         recorder.append(e).await;
 

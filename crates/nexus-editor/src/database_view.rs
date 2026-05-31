@@ -74,14 +74,9 @@ impl std::error::Error for TranslateError {}
 ///
 /// Returns [`TranslateError`] if any filter or sort entry is
 /// malformed.
-pub fn config_to_view(
-    name: &str,
-    config: &DatabaseViewConfig,
-) -> Result<BaseView, TranslateError> {
+pub fn config_to_view(name: &str, config: &DatabaseViewConfig) -> Result<BaseView, TranslateError> {
     let (view_type, group_field, date_field) = match &config.view_type {
-        DatabaseViewType::Kanban { column_by } => {
-            (ViewType::Kanban, Some(column_by.clone()), None)
-        }
+        DatabaseViewType::Kanban { column_by } => (ViewType::Kanban, Some(column_by.clone()), None),
         DatabaseViewType::Calendar { date_field } => {
             (ViewType::Calendar, None, Some(date_field.clone()))
         }
@@ -89,9 +84,7 @@ pub fn config_to_view(
         // `Custom` is plugin-provided and has no native apply_view
         // mapping yet — fall back to the same flat-table treatment as
         // the default view.
-        DatabaseViewType::Table | DatabaseViewType::Custom(_) => {
-            (ViewType::Table, None, None)
-        }
+        DatabaseViewType::Table | DatabaseViewType::Custom(_) => (ViewType::Table, None, None),
     };
 
     // Fall back to `group_by` for layouts that can group but didn't
@@ -237,8 +230,7 @@ fn parse_value(s: &str) -> serde_json::Value {
         return serde_json::Value::Null;
     }
     let unquoted = if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\'')))
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
         &s[1..s.len() - 1]
     } else {

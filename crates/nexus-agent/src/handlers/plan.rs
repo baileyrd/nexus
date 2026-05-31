@@ -55,8 +55,7 @@ pub(crate) async fn handle_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse_args(args, "plan")?;
-    let skills_prompt =
-        system_prompt_with_skills(&ctx, &a.goal, a.archetype.as_deref()).await;
+    let skills_prompt = system_prompt_with_skills(&ctx, &a.goal, a.archetype.as_deref()).await;
     let extra = skills_prompt
         .strip_prefix(DEFAULT_SYSTEM_PROMPT)
         .map(str::trim_start)

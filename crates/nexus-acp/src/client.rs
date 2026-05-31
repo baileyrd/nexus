@@ -32,8 +32,8 @@ use tokio::time::{timeout, Duration};
 
 use crate::config::AcpAdapterSpec;
 use crate::transport::{
-    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification,
-    JsonRpcRequest, JsonRpcResponse, TransportError,
+    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, TransportError,
 };
 
 /// Bound on the agent-pushed notification channel. A chatty agent can
@@ -279,10 +279,7 @@ impl AcpClient {
                             result: None,
                             error: Some(JsonRpcError {
                                 code: -32601,
-                                message: format!(
-                                    "host does not implement '{}'",
-                                    req.method
-                                ),
+                                message: format!("host does not implement '{}'", req.method),
                                 data: None,
                             }),
                         });
@@ -435,8 +432,7 @@ impl AcpClient {
                 self.pending.lock().await.remove(&id);
                 Err(AcpClientError::RequestTimeout {
                     method: method.to_string(),
-                    ms: u64::try_from(DEFAULT_REQUEST_TIMEOUT.as_millis())
-                        .unwrap_or(u64::MAX),
+                    ms: u64::try_from(DEFAULT_REQUEST_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
                 })
             }
         }

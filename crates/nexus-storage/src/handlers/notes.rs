@@ -73,10 +73,7 @@ pub(crate) fn read_frontmatter(forge_root: &Path, args: &Value) -> Result<Value,
     to_value(&result, "read_frontmatter")
 }
 
-fn read_frontmatter_for_path(
-    forge_root: &Path,
-    path: &str,
-) -> crate::ipc::ReadFrontmatterResult {
+fn read_frontmatter_for_path(forge_root: &Path, path: &str) -> crate::ipc::ReadFrontmatterResult {
     let abs = forge_root.join(path);
     let Ok(content) = std::fs::read_to_string(&abs) else {
         return crate::ipc::ReadFrontmatterResult::default();
@@ -103,8 +100,8 @@ pub(crate) fn write_frontmatter(
         Some(serde_json::Value::String(s)) => Some(s.clone()),
         Some(other) => {
             return Err(exec_err(format!(
-                "write_frontmatter '{path}' key='{key}': 'value' must be string or null, got {other:?}"
-            )))
+            "write_frontmatter '{path}' key='{key}': 'value' must be string or null, got {other:?}"
+        )))
         }
     };
     let current = std::fs::read_to_string(forge_root.join(&path))

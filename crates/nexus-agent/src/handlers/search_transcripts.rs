@@ -9,8 +9,7 @@ use super::shared::{exec_err, parse_args};
 pub(crate) fn handle_search_transcripts(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let parsed: crate::transcript_search::SearchArgs =
-        parse_args(args, "search_transcripts")?;
+    let parsed: crate::transcript_search::SearchArgs = parse_args(args, "search_transcripts")?;
     let Some(store) = crate::transcript_search::global() else {
         return Ok(serde_json::json!({
             "hits": [],

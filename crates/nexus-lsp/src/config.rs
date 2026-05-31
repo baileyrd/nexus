@@ -409,7 +409,10 @@ command = ""
 "#,
         );
         let err = LspHostConfig::read_from(&path).unwrap_err();
-        assert!(matches!(err, LspConfigError::MissingField { field: "command" }));
+        assert!(matches!(
+            err,
+            LspConfigError::MissingField { field: "command" }
+        ));
     }
 
     #[test]
@@ -466,7 +469,10 @@ disabled = true
     fn merge_contributed_inserts_new_entries() {
         let mut cfg = LspHostConfig::default();
         let skipped = cfg.merge_contributed(vec![
-            (spec("rust-analyzer", "rust-analyzer"), "community.rust".into()),
+            (
+                spec("rust-analyzer", "rust-analyzer"),
+                "community.rust".into(),
+            ),
             (spec("pyright", "pyright"), "community.python".into()),
         ]);
         assert!(skipped.is_empty());
@@ -559,7 +565,10 @@ file_types = ["rs"]
     fn register_contributed_happy_path_inserts_and_records_provenance() {
         let mut cfg = LspHostConfig::default();
         assert!(cfg
-            .register_contributed(spec("rust-analyzer", "rust-analyzer"), "community.rust".into())
+            .register_contributed(
+                spec("rust-analyzer", "rust-analyzer"),
+                "community.rust".into()
+            )
             .is_ok());
         assert_eq!(cfg.servers["rust-analyzer"].command, "rust-analyzer");
         assert_eq!(cfg.contributed_by["rust-analyzer"], "community.rust");
@@ -602,9 +611,7 @@ file_types = ["rs"]
         let mut cfg = LspHostConfig::default();
         cfg.register_contributed(spec("ra", "rust-analyzer"), "community.rust".into())
             .unwrap();
-        let removed = cfg
-            .unregister_contributed("ra", "community.rust")
-            .unwrap();
+        let removed = cfg.unregister_contributed("ra", "community.rust").unwrap();
         assert_eq!(removed.command, "rust-analyzer");
         assert!(!cfg.servers.contains_key("ra"));
         assert!(!cfg.contributed_by.contains_key("ra"));

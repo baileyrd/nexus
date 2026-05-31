@@ -24,7 +24,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use nexus_dap::{DapClient, DapAdapterSpec};
+use nexus_dap::{DapAdapterSpec, DapClient};
 use serde_json::json;
 use tokio::time::timeout;
 
@@ -223,13 +223,10 @@ async fn full_debug_session_lifecycle() {
         metadata: None,
     };
 
-    let client = timeout(
-        Duration::from_secs(15),
-        DapClient::connect("mock", &spec),
-    )
-    .await
-    .expect("connect did not deadlock")
-    .expect("handshake succeeded");
+    let client = timeout(Duration::from_secs(15), DapClient::connect("mock", &spec))
+        .await
+        .expect("connect did not deadlock")
+        .expect("handshake succeeded");
 
     // Capabilities captured from initialize.
     let caps = client.capabilities().await;
@@ -353,20 +350,20 @@ async fn drain_events_returns_queued_batch() {
         env: Default::default(),
         metadata: None,
     };
-    let client = timeout(
-        Duration::from_secs(15),
-        DapClient::connect("mock", &spec),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let client = timeout(Duration::from_secs(15), DapClient::connect("mock", &spec))
+        .await
+        .unwrap()
+        .unwrap();
 
     // launch → emits `initialized`. configurationDone → emits `stopped`.
     let _ = client
         .send_request("launch", Some(json!({"program": "/tmp/x"})))
         .await
         .unwrap();
-    let _ = client.send_request("configurationDone", None).await.unwrap();
+    let _ = client
+        .send_request("configurationDone", None)
+        .await
+        .unwrap();
     // Give the reader task time to put both events on the channel.
     tokio::time::sleep(Duration::from_millis(100)).await;
     let drained = client.drain_events().await;

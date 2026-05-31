@@ -124,11 +124,7 @@ impl McpHostPlugin {
 /// `Arc<McpHostConfig>` so async dispatch keeps its existing
 /// pass-by-Arc helper signatures unchanged.
 fn snapshot_config(cell: &Arc<RwLock<McpHostConfig>>) -> Arc<McpHostConfig> {
-    Arc::new(
-        cell.read()
-            .expect("McpHostConfig RwLock poisoned")
-            .clone(),
-    )
+    Arc::new(cell.read().expect("McpHostConfig RwLock poisoned").clone())
 }
 
 fn parse_transport(raw: &str) -> McpTransport {
@@ -192,10 +188,7 @@ fn parse_register_server(
     Ok((name, spec, plugin_id))
 }
 
-fn required_string(
-    args: &serde_json::Value,
-    key: &str,
-) -> Result<String, PluginError> {
+fn required_string(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
     args.get(key)
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
@@ -225,9 +218,7 @@ fn handle_register_server(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let (name, spec, plugin_id) = parse_register_server(args)?;
-    let mut cfg = config
-        .write()
-        .expect("McpHostConfig RwLock poisoned");
+    let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
     match cfg.register_contributed(name, spec, plugin_id) {
         Ok(()) => Ok(json!({ "ok": true, "status": "ok" })),
         Err(McpMergeSkipReason::TomlOverride) => {
@@ -250,17 +241,11 @@ fn handle_unregister_server(
 ) -> Result<serde_json::Value, PluginError> {
     let name = required_string(args, "name")?;
     let plugin_id = required_string(args, "plugin_id")?;
-    let mut cfg = config
-        .write()
-        .expect("McpHostConfig RwLock poisoned");
+    let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
     match cfg.unregister_contributed(&name, &plugin_id) {
         Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(McpUnregisterError::NotFound) => {
-            Ok(json!({ "ok": false, "status": "not_found" }))
-        }
-        Err(McpUnregisterError::TomlEntry) => {
-            Ok(json!({ "ok": false, "status": "toml_entry" }))
-        }
+        Err(McpUnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
+        Err(McpUnregisterError::TomlEntry) => Ok(json!({ "ok": false, "status": "toml_entry" })),
         Err(McpUnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
             "ok": false,
             "status": "not_owned_by_plugin",
@@ -293,10 +278,7 @@ impl CorePlugin for McpHostPlugin {
                 McpHostConfig::default()
             }
         };
-        *self
-            .config
-            .write()
-            .expect("McpHostConfig RwLock poisoned") = loaded;
+        *self.config.write().expect("McpHostConfig RwLock poisoned") = loaded;
         Ok(())
     }
 
@@ -374,10 +356,7 @@ impl CorePlugin for McpHostPlugin {
     ) -> Result<serde_json::Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
-                let cfg = self
-                    .config
-                    .read()
-                    .expect("McpHostConfig RwLock poisoned");
+                let cfg = self.config.read().expect("McpHostConfig RwLock poisoned");
                 let arr: Vec<serde_json::Value> = cfg
                     .servers
                     .iter()
@@ -400,12 +379,12 @@ impl CorePlugin for McpHostPlugin {
                         plugin_id: PLUGIN_ID.to_string(),
                         reason: format!("register_tool: invalid args: {e}"),
                     })?;
-                crate::dynamic_tools::global()
-                    .register(tool)
-                    .map_err(|e| PluginError::ExecutionFailed {
+                crate::dynamic_tools::global().register(tool).map_err(|e| {
+                    PluginError::ExecutionFailed {
                         plugin_id: PLUGIN_ID.to_string(),
                         reason: format!("register_tool: {e}"),
-                    })?;
+                    }
+                })?;
                 Ok(json!({ "ok": true }))
             }
             HANDLER_UNREGISTER_TOOL => {
@@ -490,9 +469,8 @@ impl CorePlugin for McpHostPlugin {
                             // wrap it as a JSON object so consumers (the
                             // AI tool bridge) can pass it through to the
                             // model verbatim.
-                            let input_schema = serde_json::Value::Object(
-                                t.input_schema.as_ref().clone(),
-                            );
+                            let input_schema =
+                                serde_json::Value::Object(t.input_schema.as_ref().clone());
                             json!({
                                 "name": t.name,
                                 "description": t.description,
@@ -887,11 +865,7 @@ disabled = true
 
     // ── BL-113 Phase 3b — register_server / unregister_server IPC ──────────────
 
-    fn register_server_args(
-        name: &str,
-        command: &str,
-        plugin_id: &str,
-    ) -> serde_json::Value {
+    fn register_server_args(name: &str, command: &str, plugin_id: &str) -> serde_json::Value {
         json!({
             "name": name,
             "transport": "stdio",

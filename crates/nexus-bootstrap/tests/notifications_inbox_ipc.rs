@@ -112,7 +112,11 @@ async fn mark_read_flips_unread_then_count() {
     let list = call(&runtime, "inbox_list", serde_json::json!({}))
         .await
         .expect("list");
-    let id = list[0].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+    let id = list[0]
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     let resp = call(
         &runtime,
@@ -146,7 +150,11 @@ async fn dismiss_also_marks_read() {
     let list = call(&runtime, "inbox_list", serde_json::json!({}))
         .await
         .expect("list");
-    let id = list[0].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+    let id = list[0]
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     let resp = call(
         &runtime,

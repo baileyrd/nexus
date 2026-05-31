@@ -95,10 +95,9 @@ async fn reload_picks_up_new_files() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
 
-    let before: Vec<serde_json::Value> = serde_json::from_value(
-        call(&runtime, "list", serde_json::json!({})).await.unwrap(),
-    )
-    .unwrap();
+    let before: Vec<serde_json::Value> =
+        serde_json::from_value(call(&runtime, "list", serde_json::json!({})).await.unwrap())
+            .unwrap();
     let before_count = before.len();
 
     write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);
@@ -108,10 +107,9 @@ async fn reload_picks_up_new_files() {
     let loaded = v["loaded"].as_u64().expect("loaded is a u64");
     assert_eq!(loaded, (before_count + 1) as u64);
 
-    let after: Vec<serde_json::Value> = serde_json::from_value(
-        call(&runtime, "list", serde_json::json!({})).await.unwrap(),
-    )
-    .unwrap();
+    let after: Vec<serde_json::Value> =
+        serde_json::from_value(call(&runtime, "list", serde_json::json!({})).await.unwrap())
+            .unwrap();
     assert!(after.iter().any(|w| w["workflow"]["name"] == "Greet"));
 }
 
@@ -120,22 +118,14 @@ async fn validate_accepts_good_toml_and_rejects_bad() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
 
-    let v = call(
-        &runtime,
-        "validate",
-        serde_json::json!({ "text": WF_NOOP }),
-    )
-    .await
-    .unwrap();
+    let v = call(&runtime, "validate", serde_json::json!({ "text": WF_NOOP }))
+        .await
+        .unwrap();
     assert_eq!(v["workflow"]["name"], "Greet");
 
-    let err = call(
-        &runtime,
-        "validate",
-        serde_json::json!({ "text": WF_BAD }),
-    )
-    .await
-    .unwrap_err();
+    let err = call(&runtime, "validate", serde_json::json!({ "text": WF_BAD }))
+        .await
+        .unwrap_err();
     assert!(
         matches!(err, IpcError::PluginCrashedDuringCall { .. }),
         "got {err:?}"

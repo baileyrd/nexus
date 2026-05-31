@@ -512,8 +512,7 @@ impl DapClient {
                 self.pending.lock().await.remove(&seq);
                 Err(DapClientError::RequestTimeout {
                     command: command.to_string(),
-                    ms: u64::try_from(DEFAULT_REQUEST_TIMEOUT.as_millis())
-                        .unwrap_or(u64::MAX),
+                    ms: u64::try_from(DEFAULT_REQUEST_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
                 })
             }
         }
@@ -583,7 +582,10 @@ impl DapClient {
     pub async fn shutdown(&mut self) {
         let _ = timeout(
             Duration::from_secs(2),
-            self.send_request("disconnect", Some(json!({ "restart": false, "terminateDebuggee": true }))),
+            self.send_request(
+                "disconnect",
+                Some(json!({ "restart": false, "terminateDebuggee": true })),
+            ),
         )
         .await;
         if let Ok(mut stdin) = self.stdin.try_lock() {

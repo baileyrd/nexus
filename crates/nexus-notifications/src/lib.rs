@@ -217,7 +217,10 @@ impl Transport for DesktopTransport {
         Channel::Desktop
     }
     fn send(&self, notif: &Notification) -> Result<(), SendError> {
-        let bus = self.bus.as_ref().ok_or(SendError::NotConfigured("desktop"))?;
+        let bus = self
+            .bus
+            .as_ref()
+            .ok_or(SendError::NotConfigured("desktop"))?;
         let payload = serde_json::json!({
             "channel": "desktop",
             "title": notif.title.as_deref().unwrap_or("Nexus"),
@@ -392,10 +395,7 @@ impl Transport for TelegramBot {
                 .unwrap_or_default(),
             notif.message,
         );
-        let url = format!(
-            "https://api.telegram.org/bot{}/sendMessage",
-            self.bot_token
-        );
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
         for chunk in Self::split_at_byte_limit(&body, self.max_bytes) {
             let resp = self
                 .client
@@ -510,20 +510,25 @@ impl Transport for SmtpTransport {
             return Err(SendError::NotConfigured("email"));
         }
         let subject = Self::compose_subject(&self.config.subject_template, notif.title.as_deref());
-        let from: lettre::message::Mailbox = self
-            .config
-            .from
-            .parse()
-            .map_err(|e: lettre::address::AddressError| {
-                SendError::Smtp(format!("invalid from address '{}': {e}", self.config.from))
-            })?;
+        let from: lettre::message::Mailbox =
+            self.config
+                .from
+                .parse()
+                .map_err(|e: lettre::address::AddressError| {
+                    SendError::Smtp(format!("invalid from address '{}': {e}", self.config.from))
+                })?;
         let mut builder = lettre::Message::builder().from(from).subject(subject);
-        for raw in self.config.to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            let mailbox: lettre::message::Mailbox = raw.parse().map_err(
-                |e: lettre::address::AddressError| {
+        for raw in self
+            .config
+            .to
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let mailbox: lettre::message::Mailbox =
+                raw.parse().map_err(|e: lettre::address::AddressError| {
                     SendError::Smtp(format!("invalid to address '{raw}': {e}"))
-                },
-            )?;
+                })?;
             builder = builder.to(mailbox);
         }
         let email = builder
@@ -604,9 +609,14 @@ mod tests {
             title: Some("greeting".into()),
         })
         .unwrap();
-        let evt = sub.try_recv().expect("event channel ready").expect("event present");
+        let evt = sub
+            .try_recv()
+            .expect("event channel ready")
+            .expect("event present");
         match &evt.event {
-            NexusEvent::Custom { type_id, payload, .. } => {
+            NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, NOTIFICATION_DELIVERED_TOPIC);
                 assert_eq!(payload["channel"], "desktop");
                 assert_eq!(payload["title"], "greeting");
@@ -629,7 +639,10 @@ mod tests {
             title: None,
         })
         .unwrap();
-        let evt = sub.try_recv().expect("event channel ready").expect("event present");
+        let evt = sub
+            .try_recv()
+            .expect("event channel ready")
+            .expect("event present");
         if let NexusEvent::Custom { payload, .. } = &evt.event {
             assert_eq!(payload["title"], "Nexus");
         } else {
@@ -662,7 +675,11 @@ mod tests {
 
     #[test]
     fn telegram_transport_empty_bot_token_reports_not_configured() {
-        let t = TelegramBot::new(String::new(), "12345".into(), crate::DEFAULT_TELEGRAM_MAX_BYTES);
+        let t = TelegramBot::new(
+            String::new(),
+            "12345".into(),
+            crate::DEFAULT_TELEGRAM_MAX_BYTES,
+        );
         let err = t
             .send(&Notification {
                 message: "hi".into(),
@@ -674,7 +691,11 @@ mod tests {
 
     #[test]
     fn telegram_transport_empty_chat_id_reports_not_configured() {
-        let t = TelegramBot::new("bot:token".into(), String::new(), crate::DEFAULT_TELEGRAM_MAX_BYTES);
+        let t = TelegramBot::new(
+            "bot:token".into(),
+            String::new(),
+            crate::DEFAULT_TELEGRAM_MAX_BYTES,
+        );
         let err = t
             .send(&Notification {
                 message: "hi".into(),

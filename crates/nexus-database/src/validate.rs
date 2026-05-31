@@ -126,7 +126,10 @@ fn validate_url(field: &str, value: &serde_json::Value) -> Result<()> {
     if s.starts_with("http://") || s.starts_with("https://") {
         Ok(())
     } else {
-        Err(validation_err(field, "URL must start with http:// or https://"))
+        Err(validation_err(
+            field,
+            "URL must start with http:// or https://",
+        ))
     }
 }
 
@@ -215,11 +218,7 @@ fn validate_datetime(field: &str, value: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-fn validate_text(
-    field: &str,
-    value: &serde_json::Value,
-    max_length: Option<usize>,
-) -> Result<()> {
+fn validate_text(field: &str, value: &serde_json::Value, max_length: Option<usize>) -> Result<()> {
     let s = value
         .as_str()
         .ok_or_else(|| validation_err(field, "expected a string"))?;
@@ -318,42 +317,54 @@ mod tests {
     fn valid_email() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Email;
-        assert!(v.validate("email", &serde_json::json!("user@example.com"), &config).is_ok());
+        assert!(v
+            .validate("email", &serde_json::json!("user@example.com"), &config)
+            .is_ok());
     }
 
     #[test]
     fn invalid_email() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Email;
-        assert!(v.validate("email", &serde_json::json!("not-an-email"), &config).is_err());
+        assert!(v
+            .validate("email", &serde_json::json!("not-an-email"), &config)
+            .is_err());
     }
 
     #[test]
     fn valid_url() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Url;
-        assert!(v.validate("url", &serde_json::json!("https://example.com"), &config).is_ok());
+        assert!(v
+            .validate("url", &serde_json::json!("https://example.com"), &config)
+            .is_ok());
     }
 
     #[test]
     fn invalid_url() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Url;
-        assert!(v.validate("url", &serde_json::json!("ftp://nope"), &config).is_err());
+        assert!(v
+            .validate("url", &serde_json::json!("ftp://nope"), &config)
+            .is_err());
     }
 
     #[test]
     fn valid_phone() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Phone;
-        assert!(v.validate("phone", &serde_json::json!("+1 (555) 123-4567"), &config).is_ok());
+        assert!(v
+            .validate("phone", &serde_json::json!("+1 (555) 123-4567"), &config)
+            .is_ok());
     }
 
     #[test]
     fn invalid_phone_too_short() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Phone;
-        assert!(v.validate("phone", &serde_json::json!("123"), &config).is_err());
+        assert!(v
+            .validate("phone", &serde_json::json!("123"), &config)
+            .is_err());
     }
 
     #[test]
@@ -375,7 +386,9 @@ mod tests {
             min: Some(0.0),
             max: None,
         };
-        assert!(v.validate("score", &serde_json::json!(-5), &config).is_err());
+        assert!(v
+            .validate("score", &serde_json::json!(-5), &config)
+            .is_err());
     }
 
     #[test]
@@ -386,7 +399,9 @@ mod tests {
             min: None,
             max: Some(100.0),
         };
-        assert!(v.validate("score", &serde_json::json!(200), &config).is_err());
+        assert!(v
+            .validate("score", &serde_json::json!(200), &config)
+            .is_err());
     }
 
     #[test]
@@ -395,7 +410,9 @@ mod tests {
         let config = PropertyConfig::Date {
             format: crate::types::DateFormat::YearMonthDay,
         };
-        assert!(v.validate("due", &serde_json::json!("2026-04-15"), &config).is_ok());
+        assert!(v
+            .validate("due", &serde_json::json!("2026-04-15"), &config)
+            .is_ok());
     }
 
     #[test]
@@ -404,38 +421,42 @@ mod tests {
         let config = PropertyConfig::Date {
             format: crate::types::DateFormat::Full,
         };
-        assert!(v.validate("due", &serde_json::json!("not-a-date"), &config).is_err());
+        assert!(v
+            .validate("due", &serde_json::json!("not-a-date"), &config)
+            .is_err());
     }
 
     #[test]
     fn valid_select() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Select {
-            options: vec![
-                crate::types::SelectOption {
-                    id: "todo".to_string(),
-                    name: "To Do".to_string(),
-                    color: None,
-                },
-            ],
+            options: vec![crate::types::SelectOption {
+                id: "todo".to_string(),
+                name: "To Do".to_string(),
+                color: None,
+            }],
         };
-        assert!(v.validate("status", &serde_json::json!("todo"), &config).is_ok());
-        assert!(v.validate("status", &serde_json::json!("To Do"), &config).is_ok());
+        assert!(v
+            .validate("status", &serde_json::json!("todo"), &config)
+            .is_ok());
+        assert!(v
+            .validate("status", &serde_json::json!("To Do"), &config)
+            .is_ok());
     }
 
     #[test]
     fn invalid_select() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Select {
-            options: vec![
-                crate::types::SelectOption {
-                    id: "todo".to_string(),
-                    name: "To Do".to_string(),
-                    color: None,
-                },
-            ],
+            options: vec![crate::types::SelectOption {
+                id: "todo".to_string(),
+                name: "To Do".to_string(),
+                color: None,
+            }],
         };
-        assert!(v.validate("status", &serde_json::json!("invalid"), &config).is_err());
+        assert!(v
+            .validate("status", &serde_json::json!("invalid"), &config)
+            .is_err());
     }
 
     #[test]
@@ -479,15 +500,21 @@ mod tests {
     fn null_value_always_passes() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Email;
-        assert!(v.validate("email", &serde_json::Value::Null, &config).is_ok());
+        assert!(v
+            .validate("email", &serde_json::Value::Null, &config)
+            .is_ok());
     }
 
     #[test]
     fn checkbox_requires_bool() {
         let v = BuiltinValidator;
         let config = PropertyConfig::Checkbox;
-        assert!(v.validate("done", &serde_json::json!(true), &config).is_ok());
-        assert!(v.validate("done", &serde_json::json!("yes"), &config).is_err());
+        assert!(v
+            .validate("done", &serde_json::json!(true), &config)
+            .is_ok());
+        assert!(v
+            .validate("done", &serde_json::json!("yes"), &config)
+            .is_err());
     }
 
     #[test]
@@ -496,8 +523,12 @@ mod tests {
         let config = PropertyConfig::Text {
             max_length: Some(5),
         };
-        assert!(v.validate("name", &serde_json::json!("abc"), &config).is_ok());
-        assert!(v.validate("name", &serde_json::json!("toolong"), &config).is_err());
+        assert!(v
+            .validate("name", &serde_json::json!("abc"), &config)
+            .is_ok());
+        assert!(v
+            .validate("name", &serde_json::json!("toolong"), &config)
+            .is_err());
     }
 
     #[test]
@@ -516,10 +547,7 @@ mod tests {
     fn validate_record_full_collects_all_issues() {
         let v = BuiltinValidator;
         let mut configs = BTreeMap::new();
-        configs.insert(
-            "email".to_string(),
-            PropertyConfig::Email,
-        );
+        configs.insert("email".to_string(), PropertyConfig::Email);
         configs.insert(
             "score".to_string(),
             PropertyConfig::Number {

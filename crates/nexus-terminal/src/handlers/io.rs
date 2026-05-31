@@ -145,7 +145,9 @@ impl TerminalCorePlugin {
         let store = self.session_store.as_ref().ok_or_else(|| {
             exec_err("session store not attached (runtime built without a forge path)".into())
         })?;
-        let limit = usize::try_from(a.limit.unwrap_or(100)).unwrap_or(100).max(1);
+        let limit = usize::try_from(a.limit.unwrap_or(100))
+            .unwrap_or(100)
+            .max(1);
         let session_ids_slice = a.session_ids.as_deref();
         let store = store.lock().map_err(poisoned)?;
         let hits = store

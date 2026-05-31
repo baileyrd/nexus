@@ -32,10 +32,7 @@ fn risk_level_high_caps_match_spec() {
         Capability::IpcCall,
     ];
     for cap in high_caps {
-        assert!(
-            risk_level(cap).is_high(),
-            "{cap} should be HIGH risk"
-        );
+        assert!(risk_level(cap).is_high(), "{cap} should be HIGH risk");
     }
 }
 
@@ -70,7 +67,9 @@ fn forge_path_validator_blocks_traversal() {
     assert!(validator.validate(Path::new("ok.txt")).is_ok());
 
     // Traversal is blocked
-    assert!(validator.validate(Path::new("../../../etc/passwd")).is_err());
+    assert!(validator
+        .validate(Path::new("../../../etc/passwd"))
+        .is_err());
 }
 
 #[test]
@@ -92,11 +91,17 @@ fn audit_functions_callable() {
 fn security_error_display_is_human_readable() {
     let err = SecurityError::CapabilityDenied(Capability::NetHttp);
     let msg = format!("{err}");
-    assert!(msg.contains("net.http"), "error should show capability name: {msg}");
+    assert!(
+        msg.contains("net.http"),
+        "error should show capability name: {msg}"
+    );
 
     let err = SecurityError::PathTraversal(std::path::PathBuf::from("/bad/path"));
     let msg = format!("{err}");
-    assert!(msg.contains("escapes forge root"), "error should mention traversal: {msg}");
+    assert!(
+        msg.contains("escapes forge root"),
+        "error should mention traversal: {msg}"
+    );
 }
 
 #[test]

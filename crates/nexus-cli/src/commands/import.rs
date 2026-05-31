@@ -26,8 +26,7 @@ pub fn notion_zip(app: &App, source: &Path, dest: Option<PathBuf>) -> Result<()>
         None => app.forge_root().join("Imported from Notion"),
     };
 
-    let report = notion::import_notion_zip(source, &dest_abs)
-        .context("notion import failed")?;
+    let report = notion::import_notion_zip(source, &dest_abs).context("notion import failed")?;
 
     let summary = format!(
         "imported {pages} pages, {bases} databases, {attach} attachments → {path}{warn}",

@@ -246,12 +246,7 @@ fn find_literal_in_tree(dir: &Path, needle: &str, out: &mut Vec<String>) {
                 .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
             for (idx, line) in text.lines().enumerate() {
                 if line.contains(needle) {
-                    out.push(format!(
-                        "  {}:{}: {}",
-                        path.display(),
-                        idx + 1,
-                        line.trim()
-                    ));
+                    out.push(format!("  {}:{}: {}", path.display(), idx + 1, line.trim()));
                 }
             }
         }

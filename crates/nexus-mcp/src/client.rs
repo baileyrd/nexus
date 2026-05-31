@@ -224,9 +224,7 @@ impl McpClient {
         let url = spec.url.as_deref().unwrap_or("").trim();
         if url.is_empty() {
             return Err(McpClientError::Config {
-                reason: format!(
-                    "server '{name}': http transport needs `url = \"https://…\"`"
-                ),
+                reason: format!("server '{name}': http transport needs `url = \"https://…\"`"),
             });
         }
 
@@ -249,8 +247,9 @@ impl McpClient {
         // clean Config error (rather than rmcp's typed-error stack at
         // runtime). Header names get the same case-insensitive treatment
         // browsers do; rmcp internally canonicalises again.
-        let mut custom_headers: HashMap<HeaderName, HeaderValue> =
-            HashMap::with_capacity(spec.headers.len() + resolved_auth.as_ref().map_or(0, |r| r.extra_headers.len()));
+        let mut custom_headers: HashMap<HeaderName, HeaderValue> = HashMap::with_capacity(
+            spec.headers.len() + resolved_auth.as_ref().map_or(0, |r| r.extra_headers.len()),
+        );
         for (k, v) in spec.headers.iter().chain(
             resolved_auth
                 .as_ref()
@@ -258,18 +257,14 @@ impl McpClient {
                 .into_iter()
                 .flatten(),
         ) {
-            let header_name = HeaderName::try_from(k.as_str()).map_err(|e| {
-                McpClientError::Config {
+            let header_name =
+                HeaderName::try_from(k.as_str()).map_err(|e| McpClientError::Config {
                     reason: format!("server '{name}': invalid header name '{k}': {e}"),
-                }
-            })?;
-            let header_value = HeaderValue::try_from(v.as_str()).map_err(|e| {
-                McpClientError::Config {
-                    reason: format!(
-                        "server '{name}': invalid header value for '{k}': {e}"
-                    ),
-                }
-            })?;
+                })?;
+            let header_value =
+                HeaderValue::try_from(v.as_str()).map_err(|e| McpClientError::Config {
+                    reason: format!("server '{name}': invalid header value for '{k}': {e}"),
+                })?;
             custom_headers.insert(header_name, header_value);
         }
 

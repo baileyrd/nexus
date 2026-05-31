@@ -239,11 +239,13 @@ impl RgaText {
         );
         let siblings = match parent {
             None => &mut self.roots,
-            Some(p) => &mut self
-                .nodes
-                .get_mut(&p)
-                .expect("parent presence checked above")
-                .children,
+            Some(p) => {
+                &mut self
+                    .nodes
+                    .get_mut(&p)
+                    .expect("parent presence checked above")
+                    .children
+            }
         };
         let pos = siblings
             .iter()
@@ -423,7 +425,13 @@ mod tests {
         };
 
         // Replay in different orders.
-        let ops = [a.clone(), b.clone(), c.clone(), s2_op.clone(), s3_op.clone()];
+        let ops = [
+            a.clone(),
+            b.clone(),
+            c.clone(),
+            s2_op.clone(),
+            s3_op.clone(),
+        ];
         let permutations = [
             [0, 1, 2, 3, 4],
             [0, 1, 2, 4, 3],
@@ -444,4 +452,3 @@ mod tests {
         );
     }
 }
-

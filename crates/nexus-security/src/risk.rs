@@ -47,9 +47,7 @@ impl std::fmt::Display for RiskLevel {
 #[allow(clippy::match_same_arms)]
 pub fn risk_level(cap: Capability) -> RiskLevel {
     match cap {
-        Capability::FsRead
-        | Capability::KvRead
-        | Capability::KvWrite => RiskLevel::Low,
+        Capability::FsRead | Capability::KvRead | Capability::KvWrite => RiskLevel::Low,
 
         Capability::FsWrite
         | Capability::NetHttpLocalhost
@@ -74,9 +72,9 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // write-side handlers and chat (which can drive tools) are
         // Medium; ai.config.write rotates provider credentials and is
         // High by analogy with process.spawn.
-        Capability::AiIndex
-        | Capability::AiSessionRead
-        | Capability::AiSessionWrite => RiskLevel::Low,
+        Capability::AiIndex | Capability::AiSessionRead | Capability::AiSessionWrite => {
+            RiskLevel::Low
+        }
 
         Capability::AiChat | Capability::AiActivityWrite => RiskLevel::Medium,
 

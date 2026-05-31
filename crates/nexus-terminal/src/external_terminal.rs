@@ -373,13 +373,8 @@ mod tests {
         let which = |program: &str| -> Option<PathBuf> {
             (program == "alacritty").then(|| PathBuf::from("/usr/bin/alacritty"))
         };
-        let (kind, spec) = pick_first_available(
-            &priority,
-            launch_spec,
-            which,
-            Path::new("/tmp"),
-        )
-        .expect("alacritty available");
+        let (kind, spec) = pick_first_available(&priority, launch_spec, which, Path::new("/tmp"))
+            .expect("alacritty available");
         assert_eq!(kind, TerminalKind::Alacritty);
         assert_eq!(spec.program, "alacritty");
     }
@@ -387,20 +382,21 @@ mod tests {
     #[test]
     fn pick_first_available_returns_none_when_nothing_resolves() {
         let priority = vec![TerminalKind::Kitty];
-        let result = pick_first_available(
-            &priority,
-            launch_spec,
-            |_| None,
-            Path::new("/tmp"),
-        );
+        let result = pick_first_available(&priority, launch_spec, |_| None, Path::new("/tmp"));
         assert!(result.is_none());
     }
 
     #[test]
     fn parse_kind_accepts_snake_case_and_hyphenated() {
         assert_eq!(parse_kind("kitty"), Some(TerminalKind::Kitty));
-        assert_eq!(parse_kind("gnome_terminal"), Some(TerminalKind::GnomeTerminal));
-        assert_eq!(parse_kind("gnome-terminal"), Some(TerminalKind::GnomeTerminal));
+        assert_eq!(
+            parse_kind("gnome_terminal"),
+            Some(TerminalKind::GnomeTerminal)
+        );
+        assert_eq!(
+            parse_kind("gnome-terminal"),
+            Some(TerminalKind::GnomeTerminal)
+        );
         assert_eq!(parse_kind("iterm"), Some(TerminalKind::Iterm2));
         assert_eq!(parse_kind("wt"), Some(TerminalKind::WindowsTerminal));
         assert_eq!(parse_kind("nope"), None);

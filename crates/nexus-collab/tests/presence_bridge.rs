@@ -59,7 +59,10 @@ async fn recv_topic(bus: &EventBus, topic: &str) -> serde_json::Value {
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let event = sub.recv().await.expect("recv");
-            if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+            if let NexusEvent::Custom {
+                type_id, payload, ..
+            } = &event.event
+            {
                 if type_id == topic {
                     return payload.clone();
                 }
@@ -120,7 +123,11 @@ async fn peer_joined_fires_on_existing_peers_bus() {
         .expect("peer-joined arrived")
         .expect("non-error");
     match &event.event {
-        NexusEvent::Custom { type_id, emitting_plugin, payload } => {
+        NexusEvent::Custom {
+            type_id,
+            emitting_plugin,
+            payload,
+        } => {
             assert_eq!(type_id, PEER_JOINED_TOPIC);
             assert_eq!(
                 emitting_plugin, COLLAB_BRIDGE_PLUGIN_ID,
@@ -151,7 +158,10 @@ async fn peer_left_fires_on_remaining_peers_bus() {
         .await
         .expect("peer-left arrived")
         .expect("non-error");
-    if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+    if let NexusEvent::Custom {
+        type_id, payload, ..
+    } = &event.event
+    {
         assert_eq!(type_id, PEER_LEFT_TOPIC);
         assert_eq!(payload["peer_id"], "bob");
     } else {
@@ -195,13 +205,23 @@ async fn outbound_skips_bridge_authored_events_no_loop() {
         .expect("publish");
 
     // Each should arrive exactly once and then nothing more.
-    let _first_b = tokio::time::timeout(TEST_TIMEOUT, sub_b.recv()).await.unwrap();
-    let _first_c = tokio::time::timeout(TEST_TIMEOUT, sub_c.recv()).await.unwrap();
+    let _first_b = tokio::time::timeout(TEST_TIMEOUT, sub_b.recv())
+        .await
+        .unwrap();
+    let _first_c = tokio::time::timeout(TEST_TIMEOUT, sub_c.recv())
+        .await
+        .unwrap();
 
     let extra_b = tokio::time::timeout(Duration::from_millis(200), sub_b.recv()).await;
     let extra_c = tokio::time::timeout(Duration::from_millis(200), sub_c.recv()).await;
-    assert!(extra_b.is_err(), "B received a second presence event — loop detected");
-    assert!(extra_c.is_err(), "C received a second presence event — loop detected");
+    assert!(
+        extra_b.is_err(),
+        "B received a second presence event — loop detected"
+    );
+    assert!(
+        extra_c.is_err(),
+        "C received a second presence event — loop detected"
+    );
 }
 
 #[tokio::test]

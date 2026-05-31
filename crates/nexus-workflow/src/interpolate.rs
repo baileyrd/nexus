@@ -202,17 +202,17 @@ mod tests {
     fn invalid_name_chars_skip_substitution() {
         let v = vars(&[("trigger path", toml::Value::String("X".into()))]);
         // Space inside name → not a valid var → passed through.
-        assert_eq!(
-            substitute_string("${trigger path}", &v),
-            "${trigger path}"
-        );
+        assert_eq!(substitute_string("${trigger path}", &v), "${trigger path}");
     }
 
     #[test]
     fn recurses_into_arrays_and_tables() {
         let v = vars(&[("trigger.path", toml::Value::String("X".into()))]);
         let mut table = toml::value::Table::new();
-        table.insert("path".into(), toml::Value::String("p=${trigger.path}".into()));
+        table.insert(
+            "path".into(),
+            toml::Value::String("p=${trigger.path}".into()),
+        );
         let input = toml::Value::Array(vec![
             toml::Value::String("${trigger.path}".into()),
             toml::Value::Table(table),
@@ -222,7 +222,11 @@ mod tests {
         let arr = out.as_array().unwrap();
         assert_eq!(arr[0].as_str(), Some("X"));
         assert_eq!(
-            arr[1].as_table().unwrap().get("path").and_then(|v| v.as_str()),
+            arr[1]
+                .as_table()
+                .unwrap()
+                .get("path")
+                .and_then(|v| v.as_str()),
             Some("p=X")
         );
         assert_eq!(arr[2].as_integer(), Some(3));
@@ -248,15 +252,10 @@ mod tests {
             "target".into(),
             toml::Value::String("com.nexus.storage".into()),
         );
-        step.extra.insert(
-            "command".into(),
-            toml::Value::String("read_file".into()),
-        );
+        step.extra
+            .insert("command".into(), toml::Value::String("read_file".into()));
         let mut args = toml::value::Table::new();
-        args.insert(
-            "path".into(),
-            toml::Value::String("${trigger.path}".into()),
-        );
+        args.insert("path".into(), toml::Value::String("${trigger.path}".into()));
         step.extra.insert("args".into(), toml::Value::Table(args));
 
         let v = vars(&[("trigger.path", toml::Value::String("notes/x.md".into()))]);

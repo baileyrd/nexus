@@ -71,7 +71,9 @@ async fn repl_lifecycle_start_list_stop() {
     assert_eq!(started["lang"], "cat");
     assert!(!id.is_empty());
 
-    let listed = call(&runtime, "repl_list", json!({})).await.expect("repl_list ok");
+    let listed = call(&runtime, "repl_list", json!({}))
+        .await
+        .expect("repl_list ok");
     let entries = listed.as_array().expect("array");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["id"], id);
@@ -82,7 +84,9 @@ async fn repl_lifecycle_start_list_stop() {
         .await
         .expect("repl_stop ok");
 
-    let listed_after = call(&runtime, "repl_list", json!({})).await.expect("repl_list ok");
+    let listed_after = call(&runtime, "repl_list", json!({}))
+        .await
+        .expect("repl_list ok");
     assert_eq!(listed_after.as_array().unwrap().len(), 0);
 }
 
@@ -109,7 +113,9 @@ async fn repl_concurrent_sessions_each_get_distinct_ids() {
     .expect("second start");
     assert_ne!(one["id"], two["id"]);
 
-    let listed = call(&runtime, "repl_list", json!({})).await.expect("repl_list ok");
+    let listed = call(&runtime, "repl_list", json!({}))
+        .await
+        .expect("repl_list ok");
     assert_eq!(listed.as_array().unwrap().len(), 2);
 }
 
@@ -251,11 +257,7 @@ async fn repl_eval_rejects_non_repl_session() {
     let listed = call(&runtime, "list_sessions", json!({}))
         .await
         .expect("list_sessions ok");
-    let still_present = listed
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|s| s["id"] == id);
+    let still_present = listed.as_array().unwrap().iter().any(|s| s["id"] == id);
     assert!(
         still_present,
         "rejected repl_stop must not tear down the regular session"
@@ -345,7 +347,9 @@ async fn repl_list_is_empty_before_any_start_and_after_stop() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
 
-    let initial = call(&runtime, "repl_list", json!({})).await.expect("repl_list");
+    let initial = call(&runtime, "repl_list", json!({}))
+        .await
+        .expect("repl_list");
     assert_eq!(initial.as_array().unwrap().len(), 0);
 
     let started = call(
@@ -360,6 +364,8 @@ async fn repl_list_is_empty_before_any_start_and_after_stop() {
         .await
         .expect("repl_stop");
 
-    let after = call(&runtime, "repl_list", json!({})).await.expect("repl_list");
+    let after = call(&runtime, "repl_list", json!({}))
+        .await
+        .expect("repl_list");
     assert_eq!(after.as_array().unwrap().len(), 0);
 }

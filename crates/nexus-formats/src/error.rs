@@ -161,7 +161,9 @@ mod tests {
 
     #[test]
     fn canvas_error_missing_version_display() {
-        let e = CanvasError::MissingVersion { path: "board.canvas".into() };
+        let e = CanvasError::MissingVersion {
+            path: "board.canvas".into(),
+        };
         let msg = format!("{e}");
         assert!(msg.contains("board.canvas"));
         assert!(msg.contains("version"));
@@ -169,7 +171,9 @@ mod tests {
 
     #[test]
     fn config_error_undefined_env_var_display() {
-        let e = ConfigError::UndefinedEnvVar { name: "SECRET_KEY".into() };
+        let e = ConfigError::UndefinedEnvVar {
+            name: "SECRET_KEY".into(),
+        };
         let msg = format!("{e}");
         assert!(msg.contains("SECRET_KEY"));
     }
@@ -187,7 +191,9 @@ mod tests {
 
     #[test]
     fn top_level_error_wraps_canvas() {
-        let canvas_err = CanvasError::MissingVersion { path: "x.canvas".into() };
+        let canvas_err = CanvasError::MissingVersion {
+            path: "x.canvas".into(),
+        };
         let err: Error = canvas_err.into();
         assert!(matches!(err, Error::Canvas(_)));
     }

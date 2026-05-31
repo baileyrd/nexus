@@ -54,11 +54,11 @@ pub fn render(input: &str, values: &BTreeMap<String, String>) -> Result<String, 
             if inner.is_empty() || inner.contains('{') {
                 return Err(SubstitutionError::MalformedTag { line });
             }
-            let value = values.get(inner).ok_or_else(|| {
-                SubstitutionError::UnknownVariable {
+            let value = values
+                .get(inner)
+                .ok_or_else(|| SubstitutionError::UnknownVariable {
                     name: inner.to_string(),
-                }
-            })?;
+                })?;
             out.push_str(value);
             i = close + 2;
             continue;
@@ -155,9 +155,6 @@ mod tests {
     #[test]
     fn multiple_substitutions_in_one_string() {
         let v = vals(&[("a", "1"), ("b", "2"), ("c", "3")]);
-        assert_eq!(
-            render("{{a}}-{{b}}-{{c}}", &v).unwrap(),
-            "1-2-3"
-        );
+        assert_eq!(render("{{a}}-{{b}}-{{c}}", &v).unwrap(), "1-2-3");
     }
 }

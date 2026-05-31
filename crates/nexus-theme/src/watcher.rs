@@ -15,7 +15,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use notify::RecursiveMode;
-use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
 
 use crate::theme::MANIFEST_FILENAME;
 use crate::{Result, ThemeError};
@@ -168,8 +168,7 @@ fn classify(
     }
 
     if let Some(snippets) = snippets_dir {
-        if path.starts_with(snippets) && path.extension().and_then(|e| e.to_str()) == Some("css")
-        {
+        if path.starts_with(snippets) && path.extension().and_then(|e| e.to_str()) == Some("css") {
             let id = path
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -223,8 +222,7 @@ mod tests {
 
     #[test]
     fn drain_empty_is_empty() {
-        let w =
-            ThemeWatcher::start(None, None, 50).expect("watcher should start with no paths");
+        let w = ThemeWatcher::start(None, None, 50).expect("watcher should start with no paths");
         assert!(w.drain().is_empty());
     }
 
@@ -256,11 +254,7 @@ mod tests {
     #[test]
     fn classify_snippet() {
         let snippets = PathBuf::from("/snippets");
-        let ev = classify(
-            &PathBuf::from("/snippets/neon.css"),
-            None,
-            Some(&snippets),
-        );
+        let ev = classify(&PathBuf::from("/snippets/neon.css"), None, Some(&snippets));
         match ev {
             Some(ThemeReloadEvent::Snippet { id, .. }) => assert_eq!(id, "neon"),
             other => panic!("expected snippet event, got {other:?}"),
@@ -277,8 +271,7 @@ mod tests {
     fn detects_snippet_change() {
         let dir = TempDir::new().unwrap();
         let snippets = dir.path();
-        let watcher = ThemeWatcher::start(None, Some(snippets), 100)
-            .expect("watcher start");
+        let watcher = ThemeWatcher::start(None, Some(snippets), 100).expect("watcher start");
 
         // Let the OS register the watch before writing.
         std::thread::sleep(Duration::from_millis(150));
@@ -311,8 +304,7 @@ mod tests {
         let theme_dir = dir.path().join("my-theme");
         std::fs::create_dir(&theme_dir).unwrap();
 
-        let watcher = ThemeWatcher::start(Some(dir.path()), None, 100)
-            .expect("watcher start");
+        let watcher = ThemeWatcher::start(Some(dir.path()), None, 100).expect("watcher start");
         std::thread::sleep(Duration::from_millis(150));
 
         let manifest = theme_dir.join("NEXUS.toml");

@@ -403,14 +403,8 @@ mod tests {
 
     #[test]
     fn origin_kind_strips_detail() {
-        assert_eq!(
-            ActivityOrigin::Plugin("anything".into()).kind(),
-            "plugin",
-        );
-        assert_eq!(
-            ActivityOrigin::Terminal("tty-7".into()).kind(),
-            "terminal",
-        );
+        assert_eq!(ActivityOrigin::Plugin("anything".into()).kind(), "plugin",);
+        assert_eq!(ActivityOrigin::Terminal("tty-7".into()).kind(), "terminal",);
         assert_eq!(ActivityOrigin::Ai.kind(), "ai");
     }
 
@@ -448,11 +442,26 @@ mod tests {
 
     #[test]
     fn surface_from_str_lossy_normalizes_known_aliases() {
-        assert_eq!(ActivitySurface::from_str_lossy("chat"), ActivitySurface::Chat);
-        assert_eq!(ActivitySurface::from_str_lossy("cmdi"), ActivitySurface::CmdI);
-        assert_eq!(ActivitySurface::from_str_lossy("cmd-i"), ActivitySurface::CmdI);
-        assert_eq!(ActivitySurface::from_str_lossy("cmd_i"), ActivitySurface::CmdI);
-        assert_eq!(ActivitySurface::from_str_lossy("process"), ActivitySurface::Process);
+        assert_eq!(
+            ActivitySurface::from_str_lossy("chat"),
+            ActivitySurface::Chat
+        );
+        assert_eq!(
+            ActivitySurface::from_str_lossy("cmdi"),
+            ActivitySurface::CmdI
+        );
+        assert_eq!(
+            ActivitySurface::from_str_lossy("cmd-i"),
+            ActivitySurface::CmdI
+        );
+        assert_eq!(
+            ActivitySurface::from_str_lossy("cmd_i"),
+            ActivitySurface::CmdI
+        );
+        assert_eq!(
+            ActivitySurface::from_str_lossy("process"),
+            ActivitySurface::Process
+        );
         assert_eq!(
             ActivitySurface::from_str_lossy("not-a-surface"),
             ActivitySurface::Other,

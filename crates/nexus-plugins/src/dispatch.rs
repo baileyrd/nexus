@@ -65,12 +65,8 @@ pub fn parse_args<T: DeserializeOwned>(
     value: &serde_json::Value,
 ) -> Result<T, PluginError> {
     if value.is_null() || matches!(value.as_object(), Some(o) if o.is_empty()) {
-        return serde_json::from_value(serde_json::json!({})).map_err(|e| {
-            exec_err(
-                plugin_id,
-                format!("{command}: default args invalid: {e}"),
-            )
-        });
+        return serde_json::from_value(serde_json::json!({}))
+            .map_err(|e| exec_err(plugin_id, format!("{command}: default args invalid: {e}")));
     }
     serde_json::from_value(value.clone())
         .map_err(|e| exec_err(plugin_id, format!("{command}: invalid args: {e}")))
@@ -222,14 +218,26 @@ mod tests {
     fn parse_args_accepts_null_as_empty_object() {
         let v = serde_json::Value::Null;
         let parsed: Args = parse_args(TEST_ID, "cmd", &v).unwrap();
-        assert_eq!(parsed, Args { name: None, count: 0 });
+        assert_eq!(
+            parsed,
+            Args {
+                name: None,
+                count: 0
+            }
+        );
     }
 
     #[test]
     fn parse_args_accepts_empty_object() {
         let v = serde_json::json!({});
         let parsed: Args = parse_args(TEST_ID, "cmd", &v).unwrap();
-        assert_eq!(parsed, Args { name: None, count: 0 });
+        assert_eq!(
+            parsed,
+            Args {
+                name: None,
+                count: 0
+            }
+        );
     }
 
     #[test]
@@ -285,9 +293,7 @@ mod tests {
             TEST_ID,
             "cmd",
             &v,
-            |a: Args| -> Result<u32, std::convert::Infallible> {
-                Ok(a.count + 1)
-            },
+            |a: Args| -> Result<u32, std::convert::Infallible> { Ok(a.count + 1) },
         )
         .unwrap();
         assert_eq!(out, serde_json::json!(4));
@@ -296,8 +302,7 @@ mod tests {
     #[test]
     fn typed_call_wraps_domain_error_with_command_prefix() {
         let v = serde_json::json!({});
-        let err = typed_call(TEST_ID, "cmd", &v, |_: Args| Err::<(), _>("boom"))
-            .unwrap_err();
+        let err = typed_call(TEST_ID, "cmd", &v, |_: Args| Err::<(), _>("boom")).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("cmd: boom"), "got: {msg}");
     }
@@ -305,13 +310,11 @@ mod tests {
     #[test]
     fn typed_call_propagates_arg_decode_failure() {
         let v = serde_json::Value::Null;
-        let err = typed_call::<Required, (), _, std::convert::Infallible>(
-            TEST_ID,
-            "cmd",
-            &v,
-            |_| unreachable!("closure must not run when decode fails"),
-        )
-        .unwrap_err();
+        let err =
+            typed_call::<Required, (), _, std::convert::Infallible>(TEST_ID, "cmd", &v, |_| {
+                unreachable!("closure must not run when decode fails")
+            })
+            .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("default args invalid"), "got: {msg}");
     }

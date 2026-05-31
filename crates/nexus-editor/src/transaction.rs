@@ -235,10 +235,7 @@ impl Operation {
                 // it may have been mutated by later ops in the same
                 // transaction even though InsertBlock authored an
                 // empty leaf.
-                let live = tree
-                    .get(block.id)
-                    .cloned()
-                    .unwrap_or_else(|| block.clone());
+                let live = tree.get(block.id).cloned().unwrap_or_else(|| block.clone());
                 Ok(Self::DeleteBlock {
                     old_block: live,
                     was_parent_id: *parent_id,
@@ -974,7 +971,9 @@ mod tests {
         let _b = tree.insert(para("b"), None, 1).unwrap();
         let tx = Transaction::move_block(&tree, a, None, 1, None).unwrap();
         match &tx.metadata.user_action {
-            UserAction::BlockOperation { op: BlockOp::Move { direction } } => {
+            UserAction::BlockOperation {
+                op: BlockOp::Move { direction },
+            } => {
                 assert_eq!(direction, "reorder");
             }
             other => panic!("expected BlockOperation::Move, got {other:?}"),

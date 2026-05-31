@@ -56,10 +56,7 @@ struct SessionIdArgs {
 
 /// DG-33 follow-up — auto-record the completed session into the
 /// agent's `history.jsonl`.
-async fn record_session_memory(
-    ctx: &KernelPluginContext,
-    session: &crate::session::AgentSession,
-) {
+async fn record_session_memory(ctx: &KernelPluginContext, session: &crate::session::AgentSession) {
     let Some(archetype) = session.archetype.as_deref() else {
         return;
     };
@@ -267,8 +264,7 @@ pub(crate) async fn handle_session_run(
         tracing::debug!(error = %e, "session_run: publish session_completed failed");
     }
 
-    serde_json::to_value(&session)
-        .map_err(|e| exec_err(format!("session_run: encode reply: {e}")))
+    serde_json::to_value(&session).map_err(|e| exec_err(format!("session_run: encode reply: {e}")))
 }
 
 pub(crate) async fn handle_session_list(

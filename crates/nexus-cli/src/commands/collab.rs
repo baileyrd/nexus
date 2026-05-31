@@ -96,12 +96,7 @@ fn resolve_token(
 /// # Errors
 /// Returns an error if the listener cannot bind, the token cannot be
 /// resolved, or the relay accept loop fails.
-pub fn serve(
-    port: u16,
-    bind_address: &str,
-    token: Option<String>,
-    save_token: bool,
-) -> Result<()> {
+pub fn serve(port: u16, bind_address: &str, token: Option<String>, save_token: bool) -> Result<()> {
     let vault = CredentialVault::new();
     let secret = resolve_token(token.as_deref(), None, &vault)?;
     if save_token {
@@ -120,9 +115,7 @@ pub fn serve(
         let listener = TcpListener::bind(&bind)
             .await
             .with_context(|| format!("bind {bind}"))?;
-        let addr = listener
-            .local_addr()
-            .context("query listener local_addr")?;
+        let addr = listener.local_addr().context("query listener local_addr")?;
         eprintln!("nexus collab serve: listening on ws://{addr}/");
         eprintln!("nexus collab serve: peers join with `nexus collab join ws://{addr}/`");
         eprintln!("nexus collab serve: Ctrl+C to stop");
@@ -162,9 +155,8 @@ pub fn join(
     display_name: Option<String>,
     save_token: bool,
 ) -> Result<()> {
-    let endpoint = parse_ws_url(url).ok_or_else(|| {
-        anyhow!("expected ws://host:port[?token=…]; got {url}")
-    })?;
+    let endpoint =
+        parse_ws_url(url).ok_or_else(|| anyhow!("expected ws://host:port[?token=…]; got {url}"))?;
     let vault = CredentialVault::new();
     let secret = resolve_token(token.as_deref(), endpoint.token.as_deref(), &vault)?;
     if save_token {
@@ -174,9 +166,8 @@ pub fn join(
     let display_name = display_name.unwrap_or_else(default_display_name);
 
     let forge_root = app.forge_root().to_path_buf();
-    let runtime = build_cli_runtime(forge_root.clone()).with_context(|| {
-        format!("failed to build runtime at {}", forge_root.display())
-    })?;
+    let runtime = build_cli_runtime(forge_root.clone())
+        .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
     let Runtime {
         kernel,
         context: _context,
@@ -209,9 +200,7 @@ pub fn join(
             None,
             ReconnectConfig::default(),
         );
-        eprintln!(
-            "nexus collab join: bridge online (auto-reconnect enabled). Ctrl+C to leave."
-        );
+        eprintln!("nexus collab join: bridge online (auto-reconnect enabled). Ctrl+C to leave.");
         signal::ctrl_c().await.context("wait for ctrl_c")?;
         eprintln!("nexus collab join: SIGINT received, leaving relay");
         client.shutdown().await;

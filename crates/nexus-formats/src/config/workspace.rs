@@ -25,13 +25,13 @@ pub struct WorkspaceState {
 impl Default for WorkspaceState {
     fn default() -> Self {
         Self {
-            active_file:      None,
-            open_files:       Vec::new(),
+            active_file: None,
+            open_files: Vec::new(),
             sidebar_collapsed: false,
-            panel_layout:     PanelLayout::default(),
-            recent_files:     Vec::new(),
-            search_query:     String::new(),
-            theme:            "dark".into(),
+            panel_layout: PanelLayout::default(),
+            recent_files: Vec::new(),
+            search_query: String::new(),
+            theme: "dark".into(),
         }
     }
 }
@@ -62,8 +62,14 @@ pub struct PanelLayout {
 impl Default for PanelLayout {
     fn default() -> Self {
         Self {
-            left:  PanelConfig { width: 250, collapsed: false },
-            right: PanelConfig { width: 300, collapsed: true  },
+            left: PanelConfig {
+                width: 250,
+                collapsed: false,
+            },
+            right: PanelConfig {
+                width: 300,
+                collapsed: true,
+            },
         }
     }
 }
@@ -80,6 +86,9 @@ pub struct PanelConfig {
 
 impl Default for PanelConfig {
     fn default() -> Self {
-        Self { width: 250, collapsed: false }
+        Self {
+            width: 250,
+            collapsed: false,
+        }
     }
 }

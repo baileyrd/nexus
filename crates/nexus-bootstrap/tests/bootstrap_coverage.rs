@@ -72,8 +72,8 @@ fn every_workspace_member_is_registered_or_exempt() {
     let cargo_toml = workspace_root.join("Cargo.toml");
     let text = std::fs::read_to_string(&cargo_toml)
         .unwrap_or_else(|e| panic!("read {}: {e}", cargo_toml.display()));
-    let parsed: toml::Value = toml::from_str(&text)
-        .unwrap_or_else(|e| panic!("parse {}: {e}", cargo_toml.display()));
+    let parsed: toml::Value =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", cargo_toml.display()));
     let members: Vec<String> = parsed
         .get("workspace")
         .and_then(|w| w.get("members"))

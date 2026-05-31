@@ -55,7 +55,7 @@
 #![allow(
     clippy::format_push_string,
     clippy::map_unwrap_or,
-    clippy::single_char_pattern,
+    clippy::single_char_pattern
 )]
 
 use regex_lite::Regex;
@@ -245,8 +245,7 @@ fn snapshot_marker_regex() -> &'static Regex {
         // catch-all. Each match contains an associated multi-line
         // body up to the next blank line or the next `- round`
         // marker — handled in the surrounding compressor.
-        Regex::new(r"(?i)\[browser snapshot[^\]]*\]")
-            .expect("snapshot marker pattern compiles")
+        Regex::new(r"(?i)\[browser snapshot[^\]]*\]").expect("snapshot marker pattern compiles")
     })
 }
 
@@ -269,7 +268,9 @@ pub fn compress_stale_snapshots(prompt: &str, recent_window_rounds: usize) -> (S
     round_starts.dedup();
 
     let cutoff = if round_starts.len() > recent_window_rounds {
-        round_starts.get(round_starts.len() - recent_window_rounds).copied()
+        round_starts
+            .get(round_starts.len() - recent_window_rounds)
+            .copied()
     } else {
         // Fewer rounds than the recent window — every snapshot is
         // considered "recent"; do nothing.
@@ -426,9 +427,7 @@ mod tests {
     #[test]
     fn strip_base64_removes_inline_data_uri() {
         let payload = "A".repeat(200);
-        let prompt = format!(
-            "preamble data:image/png;base64,{payload} postamble"
-        );
+        let prompt = format!("preamble data:image/png;base64,{payload} postamble");
         let (out, bytes) = strip_base64_data_uris(&prompt);
         assert!(bytes > 200, "expected stripped byte count > payload length");
         assert!(out.contains("[image data stripped — "));
@@ -440,7 +439,8 @@ mod tests {
     #[test]
     fn strip_base64_ignores_short_data_uris() {
         // 1×1 transparent gif fixture — 39 chars after `base64,`.
-        let prompt = "<img src=\"data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=\">";
+        let prompt =
+            "<img src=\"data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=\">";
         let (out, bytes) = strip_base64_data_uris(prompt);
         // The short fixture is over 50 chars in the body so it WILL
         // strip; pin that behaviour rather than the cutoff itself.
@@ -451,9 +451,7 @@ mod tests {
     fn strip_base64_handles_multiple_uris() {
         let p1 = "B".repeat(120);
         let p2 = "C".repeat(120);
-        let prompt = format!(
-            "data:image/png;base64,{p1} middle data:image/jpeg;base64,{p2}"
-        );
+        let prompt = format!("data:image/png;base64,{p1} middle data:image/jpeg;base64,{p2}");
         let (out, bytes) = strip_base64_data_uris(&prompt);
         assert!(bytes >= 240);
         let placeholder_count = out.matches("[image data stripped").count();
@@ -514,7 +512,10 @@ mod tests {
             out.contains("Original goal: many rounds"),
             "goal lost: {out}",
         );
-        assert!(out.contains("hard_trim_oldest"), "no trim placeholder: {out}");
+        assert!(
+            out.contains("hard_trim_oldest"),
+            "no trim placeholder: {out}"
+        );
         assert!(
             out.contains("Decide the next tool call(s)"),
             "trailing instruction lost: {out}",
@@ -537,8 +538,7 @@ mod tests {
 
     #[test]
     fn sanitize_prompt_runs_every_pass() {
-        let mut prompt =
-            String::from("Original goal: do a thing\n\nResults so far:\n");
+        let mut prompt = String::from("Original goal: do a thing\n\nResults so far:\n");
         // Duplicate result lines.
         for _ in 0..4 {
             prompt.push_str("- round 1: tool_x ok\n");
@@ -566,7 +566,9 @@ mod tests {
         assert!(result.text.contains("Original goal: do a thing"));
         assert!(result.text.contains("(result repeated 3 more times)"));
         assert!(result.text.contains("[image data stripped"));
-        assert!(result.text.contains("compressed (stale beyond recent window)"));
+        assert!(result
+            .text
+            .contains("compressed (stale beyond recent window)"));
     }
 
     #[test]

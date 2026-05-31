@@ -27,9 +27,7 @@ pub(crate) fn handle_list() -> Result<serde_json::Value, PluginError> {
     Ok(serde_json::Value::Array(entries))
 }
 
-pub(crate) fn handle_get(
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
+pub(crate) fn handle_get(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
     let a: GetTemplateArgs = parse_args(args, "templates_get")?;
     let t = templates::find(&a.slug)
         .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
@@ -67,8 +65,7 @@ pub(crate) fn handle_init(
         std::fs::create_dir_all(parent)
             .map_err(|e| exec_err(format!("templates_init: create_dir_all: {e}")))?;
     }
-    std::fs::write(&target, t.body)
-        .map_err(|e| exec_err(format!("templates_init: write: {e}")))?;
+    std::fs::write(&target, t.body).map_err(|e| exec_err(format!("templates_init: write: {e}")))?;
     Ok(serde_json::json!({
         "written": true,
         "path": target.to_string_lossy(),

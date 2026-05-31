@@ -136,9 +136,7 @@ impl SemanticStore {
         let g = self.inner.lock().expect("semantic store poisoned");
         let mut results: Vec<&SemanticEntry> = g
             .values()
-            .filter(|e| {
-                e.key.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q)
-            })
+            .filter(|e| e.key.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q))
             .collect();
         results.sort_by(|a, b| b.stored_at.cmp(&a.stored_at));
         results.into_iter().take(limit).cloned().collect()
@@ -256,7 +254,10 @@ mod tests {
         assert!(store.get(id).is_some());
         assert!(store.remove(id));
         assert!(store.get(id).is_none());
-        assert!(!store.remove(id), "idempotent — second remove returns false");
+        assert!(
+            !store.remove(id),
+            "idempotent — second remove returns false"
+        );
     }
 
     #[test]
@@ -267,6 +268,8 @@ mod tests {
         store.store(SemanticEntry::new("c", "z").with_tags(["user", "context"]));
         let user_entries = store.by_tag(&["user"]);
         assert_eq!(user_entries.len(), 2);
-        assert!(user_entries.iter().all(|e| e.tags.contains(&"user".to_string())));
+        assert!(user_entries
+            .iter()
+            .all(|e| e.tags.contains(&"user".to_string())));
     }
 }

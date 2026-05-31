@@ -420,7 +420,10 @@ command = ""
 "#,
         );
         let err = DapHostConfig::read_from(&path).unwrap_err();
-        assert!(matches!(err, DapConfigError::MissingField { field: "command" }));
+        assert!(matches!(
+            err,
+            DapConfigError::MissingField { field: "command" }
+        ));
     }
 
     #[test]
@@ -552,7 +555,8 @@ file_types = ["rs"]
     #[test]
     fn merge_contributed_populates_contributed_by_for_accepted_entries() {
         let mut cfg = DapHostConfig::default();
-        cfg.adapters.insert("toml-pinned".into(), spec("toml-pinned", "x"));
+        cfg.adapters
+            .insert("toml-pinned".into(), spec("toml-pinned", "x"));
         let skipped = cfg.merge_contributed(vec![
             (spec("contrib-a", "x"), "plugin.a".into()),
             (spec("contrib-b", "x"), "plugin.b".into()),

@@ -106,8 +106,12 @@ mod tests {
 
     #[test]
     fn rejects_non_hex_suffix() {
-        let (name, uid) = strip_notion_uuid(&format!("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md"));
-        assert_eq!(name, format!("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md"));
+        let (name, uid) =
+            strip_notion_uuid(&format!("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md"));
+        assert_eq!(
+            name,
+            format!("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md")
+        );
         assert!(uid.is_none());
     }
 

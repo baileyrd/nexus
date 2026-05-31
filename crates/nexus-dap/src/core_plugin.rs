@@ -87,7 +87,10 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("terminate", HANDLER_TERMINATE),
     ("set_breakpoints", HANDLER_SET_BREAKPOINTS),
     ("set_function_breakpoints", HANDLER_SET_FUNCTION_BREAKPOINTS),
-    ("set_exception_breakpoints", HANDLER_SET_EXCEPTION_BREAKPOINTS),
+    (
+        "set_exception_breakpoints",
+        HANDLER_SET_EXCEPTION_BREAKPOINTS,
+    ),
     ("continue", HANDLER_CONTINUE),
     ("next", HANDLER_NEXT),
     ("step_in", HANDLER_STEP_IN),
@@ -159,11 +162,7 @@ impl DapCorePlugin {
 /// `Arc<DapHostConfig>` so async dispatch keeps its existing
 /// pass-by-Arc helper signatures unchanged.
 fn snapshot_config(cell: &Arc<RwLock<DapHostConfig>>) -> Arc<DapHostConfig> {
-    Arc::new(
-        cell.read()
-            .expect("DapHostConfig RwLock poisoned")
-            .clone(),
-    )
+    Arc::new(cell.read().expect("DapHostConfig RwLock poisoned").clone())
 }
 
 /// BL-113 Phase 1b — sync IPC handler for `register_adapter`.
@@ -194,9 +193,7 @@ fn handle_register_adapter(
 ) -> Result<Value, PluginError> {
     let spec = parse_register_adapter_spec(args)?;
     let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config
-        .write()
-        .expect("DapHostConfig RwLock poisoned");
+    let mut cfg = config.write().expect("DapHostConfig RwLock poisoned");
     let status = match cfg.register_contributed(spec, plugin_id) {
         Ok(()) => ("ok", true),
         Err(MergeSkipReason::TomlOverride) => ("toml_override", false),
@@ -220,17 +217,11 @@ fn handle_unregister_adapter(
 ) -> Result<Value, PluginError> {
     let name = parse_string_field(args, "name")?;
     let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config
-        .write()
-        .expect("DapHostConfig RwLock poisoned");
+    let mut cfg = config.write().expect("DapHostConfig RwLock poisoned");
     match cfg.unregister_contributed(&name, &plugin_id) {
         Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(UnregisterError::NotFound) => {
-            Ok(json!({ "ok": false, "status": "not_found" }))
-        }
-        Err(UnregisterError::TomlEntry) => {
-            Ok(json!({ "ok": false, "status": "toml_entry" }))
-        }
+        Err(UnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
+        Err(UnregisterError::TomlEntry) => Ok(json!({ "ok": false, "status": "toml_entry" })),
         Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
             "ok": false,
             "status": "not_owned_by_plugin",
@@ -336,10 +327,7 @@ impl CorePlugin for DapCorePlugin {
                 DapHostConfig::default()
             }
         };
-        *self
-            .config
-            .write()
-            .expect("DapHostConfig RwLock poisoned") = loaded;
+        *self.config.write().expect("DapHostConfig RwLock poisoned") = loaded;
         Ok(())
     }
 
@@ -397,11 +385,7 @@ impl CorePlugin for DapCorePlugin {
         );
     }
 
-    fn dispatch(
-        &mut self,
-        handler_id: u32,
-        args: &Value,
-    ) -> Result<Value, PluginError> {
+    fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_ADAPTERS => {
                 // The sync `list_adapters` reports the configured set
@@ -410,10 +394,7 @@ impl CorePlugin for DapCorePlugin {
                 // async handler (we route both ids through
                 // `dispatch_async` below; this sync arm is the
                 // fallback for the rare invoker that bypasses async).
-                let cfg = self
-                    .config
-                    .read()
-                    .expect("DapHostConfig RwLock poisoned");
+                let cfg = self.config.read().expect("DapHostConfig RwLock poisoned");
                 let arr: Vec<Value> = cfg
                     .adapters
                     .values()
@@ -446,11 +427,7 @@ impl CorePlugin for DapCorePlugin {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn dispatch_async(
-        &mut self,
-        handler_id: u32,
-        args: &Value,
-    ) -> Option<CorePluginFuture> {
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
         let pool = Arc::clone(&self.pool);
         // BL-113 Phase 1b — async dispatchers consume an immutable
         // snapshot of the host config taken at dispatch time. A
@@ -494,7 +471,12 @@ impl CorePlugin for DapCorePlugin {
                     }
                 }
                 Some(send_command_future(
-                    pool, config, bus, adapter, "launch", Some(launch_args),
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "launch",
+                    Some(launch_args),
                 ))
             }
 
@@ -525,7 +507,12 @@ impl CorePlugin for DapCorePlugin {
             HANDLER_CONFIGURATION_DONE => {
                 let adapter = str_arg(args, "adapter")?;
                 Some(send_ack_future(
-                    pool, config, bus, adapter, "configurationDone", None,
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "configurationDone",
+                    None,
                 ))
             }
 
@@ -552,7 +539,12 @@ impl CorePlugin for DapCorePlugin {
             HANDLER_TERMINATE => {
                 let adapter = str_arg(args, "adapter")?;
                 Some(send_ack_future(
-                    pool, config, bus, adapter, "terminate", None,
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "terminate",
+                    None,
                 ))
             }
 
@@ -655,7 +647,12 @@ impl CorePlugin for DapCorePlugin {
                     payload["levels"] = json!(levels);
                 }
                 Some(send_command_future(
-                    pool, config, bus, adapter, "stackTrace", Some(payload),
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "stackTrace",
+                    Some(payload),
                 ))
             }
 
@@ -664,7 +661,12 @@ impl CorePlugin for DapCorePlugin {
                 let frame_id = args.get("frame_id").and_then(Value::as_i64)?;
                 let payload = json!({ "frameId": frame_id });
                 Some(send_command_future(
-                    pool, config, bus, adapter, "scopes", Some(payload),
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "scopes",
+                    Some(payload),
                 ))
             }
 
@@ -682,7 +684,12 @@ impl CorePlugin for DapCorePlugin {
                     payload["count"] = json!(c);
                 }
                 Some(send_command_future(
-                    pool, config, bus, adapter, "variables", Some(payload),
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "variables",
+                    Some(payload),
                 ))
             }
 
@@ -697,37 +704,37 @@ impl CorePlugin for DapCorePlugin {
                     payload["context"] = json!(c);
                 }
                 Some(send_command_future(
-                    pool, config, bus, adapter, "evaluate", Some(payload),
+                    pool,
+                    config,
+                    bus,
+                    adapter,
+                    "evaluate",
+                    Some(payload),
                 ))
             }
 
-            HANDLER_LIST_ADAPTERS => {
-                Some(Box::pin(async move {
-                    let cfg = config_or_err(config.as_ref())?;
-                    let connected: std::collections::HashSet<String> = pool
-                        .connected_adapters()
-                        .await
-                        .into_iter()
-                        .collect();
-                    let arr: Vec<Value> = cfg
-                        .adapters
-                        .values()
-                        .map(|spec| {
-                            json!({
-                                "name": spec.name,
-                                "command": spec.command,
-                                "args": spec.args,
-                                "adapter_type": spec.adapter_type,
-                                "file_types": spec.file_types,
-                                "disabled": spec.disabled,
-                                "connected": connected.contains(&spec.name),
-                                "metadata": spec.metadata,
-                            })
+            HANDLER_LIST_ADAPTERS => Some(Box::pin(async move {
+                let cfg = config_or_err(config.as_ref())?;
+                let connected: std::collections::HashSet<String> =
+                    pool.connected_adapters().await.into_iter().collect();
+                let arr: Vec<Value> = cfg
+                    .adapters
+                    .values()
+                    .map(|spec| {
+                        json!({
+                            "name": spec.name,
+                            "command": spec.command,
+                            "args": spec.args,
+                            "adapter_type": spec.adapter_type,
+                            "file_types": spec.file_types,
+                            "disabled": spec.disabled,
+                            "connected": connected.contains(&spec.name),
+                            "metadata": spec.metadata,
                         })
-                        .collect();
-                    Ok(Value::Array(arr))
-                }))
-            }
+                    })
+                    .collect();
+                Ok(Value::Array(arr))
+            })),
 
             _ => None,
         }
@@ -882,9 +889,7 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn config_or_err(
-    config: Option<&Arc<DapHostConfig>>,
-) -> Result<Arc<DapHostConfig>, PluginError> {
+fn config_or_err(config: Option<&Arc<DapHostConfig>>) -> Result<Arc<DapHostConfig>, PluginError> {
     config.cloned().ok_or_else(|| PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: "DAP host config not loaded".to_string(),

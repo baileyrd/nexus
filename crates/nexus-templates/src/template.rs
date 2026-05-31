@@ -163,16 +163,19 @@ pub fn parse_template_file(path: &Path) -> Result<Template, TemplateParseError> 
 /// # Errors
 /// See [`TemplateParseError`].
 pub fn parse_template_text(input: &str, file: &str) -> Result<Template, TemplateParseError> {
-    let stripped = input.strip_prefix("---\n").ok_or_else(|| {
-        TemplateParseError::MissingFrontmatter {
-            file: file.to_string(),
-            reason: "file does not start with `---`".to_string(),
-        }
-    })?;
+    let stripped =
+        input
+            .strip_prefix("---\n")
+            .ok_or_else(|| TemplateParseError::MissingFrontmatter {
+                file: file.to_string(),
+                reason: "file does not start with `---`".to_string(),
+            })?;
 
     let end = stripped.find("\n---\n").or_else(|| {
         // Tolerate `---` at end of file with no body.
-        stripped.find("\n---").filter(|i| stripped[*i + 4..].is_empty())
+        stripped
+            .find("\n---")
+            .filter(|i| stripped[*i + 4..].is_empty())
     });
     let end = end.ok_or_else(|| TemplateParseError::MissingFrontmatter {
         file: file.to_string(),
@@ -360,11 +363,11 @@ mod tests {
 
     #[test]
     fn missing_required_parameter_errors() {
-        let t = parse("---\nname: x\nparameters:\n  - name: title\n    required: true\n---\n# {{title}}\n");
+        let t = parse(
+            "---\nname: x\nparameters:\n  - name: title\n    required: true\n---\n# {{title}}\n",
+        );
         let dir = tempdir().unwrap();
-        let err = t
-            .apply(&BTreeMap::new(), dir.path(), false)
-            .unwrap_err();
+        let err = t.apply(&BTreeMap::new(), dir.path(), false).unwrap_err();
         assert!(matches!(err, ApplyError::MissingParameter { name } if name == "title"));
     }
 
@@ -394,9 +397,7 @@ mod tests {
 
     #[test]
     fn renders_target_path_pattern() {
-        let t = parse(
-            "---\nname: daily\ntarget_path: daily/{{today}}.md\n---\nDay log.\n",
-        );
+        let t = parse("---\nname: daily\ntarget_path: daily/{{today}}.md\n---\nDay log.\n");
         let dir = tempdir().unwrap();
         let out = t.apply(&BTreeMap::new(), dir.path(), false).unwrap();
         assert!(out.starts_with(dir.path().join("daily")));

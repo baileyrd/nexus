@@ -35,8 +35,8 @@ use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::Mutex;
 
 use crate::transport::{
-    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcRequest,
-    JsonRpcResponse, TransportError,
+    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    TransportError,
 };
 
 /// Default per-`ipc_call` timeout. Generous because `agent/run` can
@@ -100,11 +100,7 @@ impl AcpServer {
     /// - [`AcpServerError::Transport`] only when the reader fails
     ///   irrecoverably (read past EOF returns `Ok(())`).
     /// - [`AcpServerError::Write`] when the outbound writer breaks.
-    pub async fn serve<R, W>(
-        &self,
-        reader: R,
-        writer: W,
-    ) -> Result<(), AcpServerError>
+    pub async fn serve<R, W>(&self, reader: R, writer: W) -> Result<(), AcpServerError>
     where
         R: AsyncRead + Unpin + Send,
         W: AsyncWrite + Unpin + Send,
@@ -144,15 +140,10 @@ impl AcpServer {
         let params = req.params.unwrap_or(Value::Null);
         let routed = route_method(&req.method);
         match routed {
-            RoutedMethod::Unknown => error_response(
-                id,
-                -32601,
-                format!("method not found: {}", req.method),
-            ),
-            RoutedMethod::Known {
-                plugin_id,
-                command,
-            } => match self
+            RoutedMethod::Unknown => {
+                error_response(id, -32601, format!("method not found: {}", req.method))
+            }
+            RoutedMethod::Known { plugin_id, command } => match self
                 .context
                 .ipc_call(plugin_id, command, params, self.timeout)
                 .await

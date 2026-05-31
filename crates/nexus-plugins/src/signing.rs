@@ -72,9 +72,7 @@ pub enum SignatureError {
     KeyringIo(String),
 
     /// `require_signatures = true` but the manifest carries no signature.
-    #[error(
-        "plugin '{plugin_id}' has no signature but require_signatures is enabled"
-    )]
+    #[error("plugin '{plugin_id}' has no signature but require_signatures is enabled")]
     SignatureRequired {
         /// The plugin id that failed the gate.
         plugin_id: String,
@@ -132,7 +130,10 @@ impl PluginSignatureVerifier {
     pub fn with_keys_dir(keys_dir: &Path) -> Result<Self, SignatureError> {
         let keyring = read_optional_json(&keys_dir.join("community.json"))?;
         let revocations = read_optional_json(&keys_dir.join("revoked.json"))?;
-        Ok(Self { keyring, revocations })
+        Ok(Self {
+            keyring,
+            revocations,
+        })
     }
 
     /// Equivalent of [`Self::with_keys_dir`] rooted at the user's
@@ -157,7 +158,10 @@ impl PluginSignatureVerifier {
     /// pass an explicit keyring path).
     #[must_use]
     pub fn from_inline_keys(keyring: KeyringFile, revocations: RevocationList) -> Self {
-        Self { keyring, revocations }
+        Self {
+            keyring,
+            revocations,
+        }
     }
 
     fn lookup_key(&self, key_id: &str) -> Result<VerifyingKey, SignatureError> {
@@ -205,7 +209,9 @@ impl PluginSignatureVerifier {
         signature: &PluginSignature,
     ) -> Result<(), SignatureError> {
         if !signature.algorithm.eq_ignore_ascii_case("ed25519") {
-            return Err(SignatureError::UnsupportedAlgorithm(signature.algorithm.clone()));
+            return Err(SignatureError::UnsupportedAlgorithm(
+                signature.algorithm.clone(),
+            ));
         }
         let key = self.lookup_key(&signature.signer_key_id)?;
         let sig_bytes = base64::engine::general_purpose::STANDARD
@@ -267,9 +273,8 @@ fn read_optional_json<T: Default + serde::de::DeserializeOwned>(
     path: &Path,
 ) -> Result<T, SignatureError> {
     match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).map_err(|e| {
-            SignatureError::KeyringIo(format!("{}: {e}", path.display()))
-        }),
+        Ok(s) => serde_json::from_str(&s)
+            .map_err(|e| SignatureError::KeyringIo(format!("{}: {e}", path.display()))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
         Err(e) => Err(SignatureError::KeyringIo(format!(
             "{}: {e}",

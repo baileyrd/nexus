@@ -29,9 +29,9 @@ use crate::StorageError;
 // without pulling in this crate.
 
 pub use nexus_types::bases::{
-    Base, BaseMetadata, BaseRecord, BaseRelation, BaseSchema, BaseSummary, BaseView, BasesError,
-    FieldDefinition, FieldType, FilterRule, SortRule, ViewType, init_base, load_base, save_base,
-    validate_record,
+    init_base, load_base, save_base, validate_record, Base, BaseMetadata, BaseRecord, BaseRelation,
+    BaseSchema, BaseSummary, BaseView, BasesError, FieldDefinition, FieldType, FilterRule,
+    SortRule, ViewType,
 };
 
 // ── DB Operations ────────────────────────────────────────────────────────────
@@ -42,10 +42,11 @@ pub use nexus_types::bases::{
 ///
 /// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn insert_base(conn: &Connection, path: &str, base: &Base) -> Result<i64, StorageError> {
-    let schema_json = serde_json::to_string(&base.schema).map_err(|e| StorageError::CorruptFile {
-        path: path.to_string(),
-        reason: e.to_string(),
-    })?;
+    let schema_json =
+        serde_json::to_string(&base.schema).map_err(|e| StorageError::CorruptFile {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
     let metadata_json = serde_json::to_string(&base.metadata).ok();
     let now = crate::unix_now();
 
@@ -183,10 +184,7 @@ mod tests {
         let base = Base {
             name: "Tasks".to_string(),
             schema: sample_schema(),
-            records: vec![
-                sample_record("r1", "Task 1"),
-                sample_record("r2", "Task 2"),
-            ],
+            records: vec![sample_record("r1", "Task 1"), sample_record("r2", "Task 2")],
             views: vec![BaseView {
                 name: "All".to_string(),
                 view_type: ViewType::Table,

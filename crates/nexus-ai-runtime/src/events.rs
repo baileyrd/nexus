@@ -238,7 +238,10 @@ mod tests {
                 kind_label: "session".into(),
                 priority: TaskPriority::Interactive,
             },
-            AiEvent::Started { task_id, attempt: 1 },
+            AiEvent::Started {
+                task_id,
+                attempt: 1,
+            },
             AiEvent::TokenChunk {
                 task_id,
                 text: "x".into(),
@@ -271,7 +274,11 @@ mod tests {
             Some(RunStatus::Queued)
         );
         assert_eq!(
-            AiEvent::Started { task_id, attempt: 1 }.implied_status(),
+            AiEvent::Started {
+                task_id,
+                attempt: 1
+            }
+            .implied_status(),
             Some(RunStatus::Running)
         );
         assert_eq!(

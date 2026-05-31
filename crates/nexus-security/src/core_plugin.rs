@@ -149,10 +149,7 @@ impl CorePlugin for SecurityCorePlugin {
                 reason: e.to_string(),
             });
         }
-        tracing::debug!(
-            plugin_id = PLUGIN_ID,
-            "security subsystem initialized"
-        );
+        tracing::debug!(plugin_id = PLUGIN_ID, "security subsystem initialized");
         Ok(())
     }
 
@@ -202,9 +199,7 @@ impl CorePlugin for SecurityCorePlugin {
                 match self.vault.retrieve(&key) {
                     Ok(value) => Ok(json!({ "value": value })),
                     Err(SecurityError::CredentialNotFound(_))
-                    | Err(SecurityError::KeyringDisabled) => {
-                        Ok(json!({ "value": null }))
-                    }
+                    | Err(SecurityError::KeyringDisabled) => Ok(json!({ "value": null })),
                     Err(e) => Err(map_err(e)),
                 }
             }
@@ -239,17 +234,26 @@ impl CorePlugin for SecurityCorePlugin {
             HANDLER_QUERY_AUDIT_LOG => {
                 // Each filter is optional; missing → None → no constraint.
                 let filter = nexus_kernel::audit_store::AuditQuery {
-                    event_type: args.get("event_type").and_then(|v| v.as_str()).map(str::to_string),
-                    plugin_id:  args.get("plugin_id").and_then(|v| v.as_str()).map(str::to_string),
-                    since_ts:   args.get("since_ts").and_then(serde_json::Value::as_i64),
-                    limit:      args.get("limit").and_then(serde_json::Value::as_u64).and_then(|n| u32::try_from(n).ok()),
+                    event_type: args
+                        .get("event_type")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    plugin_id: args
+                        .get("plugin_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    since_ts: args.get("since_ts").and_then(serde_json::Value::as_i64),
+                    limit: args
+                        .get("limit")
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok()),
                 };
                 let entries = nexus_kernel::audit_store::query(&filter);
                 Ok(serde_json::to_value(&entries).unwrap_or(json!([])))
             }
             HANDLER_METRICS_SNAPSHOT => {
-                let snap = nexus_kernel::metrics::global()
-                    .map(nexus_kernel::KernelMetrics::snapshot);
+                let snap =
+                    nexus_kernel::metrics::global().map(nexus_kernel::KernelMetrics::snapshot);
                 Ok(serde_json::to_value(&snap).unwrap_or(json!(null)))
             }
             HANDLER_CLEAR_AUDIT_LOG => {
@@ -333,9 +337,15 @@ mod tests {
                 platform_hint: "Ensure gnome-keyring or KWallet is running.".to_string(),
             })
         });
-        let err = plugin.on_init().expect_err("on_init must propagate the probe failure");
+        let err = plugin
+            .on_init()
+            .expect_err("on_init must propagate the probe failure");
         match err {
-            PluginError::LifecycleError { plugin_id, hook, reason } => {
+            PluginError::LifecycleError {
+                plugin_id,
+                hook,
+                reason,
+            } => {
                 assert_eq!(plugin_id, PLUGIN_ID);
                 assert_eq!(hook, "on_init");
                 assert!(reason.contains("D-Bus not running"));

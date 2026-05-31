@@ -285,13 +285,8 @@ mod tests {
     }
     #[async_trait]
     impl crate::ChatDriver for MockDriver {
-        async fn propose(
-            &self,
-            system: &str,
-            user_message: &str,
-        ) -> Result<Proposal, String> {
-            *self.captured.lock().unwrap() =
-                Some((system.to_string(), user_message.to_string()));
+        async fn propose(&self, system: &str, user_message: &str) -> Result<Proposal, String> {
+            *self.captured.lock().unwrap() = Some((system.to_string(), user_message.to_string()));
             Ok(Proposal {
                 text: self.reply.clone(),
                 tool_calls: Vec::new(),

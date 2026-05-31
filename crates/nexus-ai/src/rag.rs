@@ -321,7 +321,9 @@ fn renumber_citations_by_answer_order(citations: &mut [Citation], answer: &str) 
         #[allow(clippy::cast_possible_truncation)]
         new_index.insert(orig, (slot + 1) as u32);
     }
-    let mut next_slot = u32::try_from(order.len()).unwrap_or(u32::MAX).saturating_add(1);
+    let mut next_slot = u32::try_from(order.len())
+        .unwrap_or(u32::MAX)
+        .saturating_add(1);
     let mut originals: Vec<u32> = citations.iter().map(|c| c.index).collect();
     originals.sort_unstable();
     for orig in originals {
@@ -599,7 +601,8 @@ mod tests {
     use super::*;
     use crate::tokens::ApproxTokenCounter;
     use async_trait::async_trait;
-    use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
+    use nexus_kernel::{
+        CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
         KernelPluginContext, KvStore,
     };
     use std::sync::{Arc, Mutex};
@@ -686,11 +689,7 @@ mod tests {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let blocks = self
-                    .blocks_by_path
-                    .get(&path)
-                    .cloned()
-                    .unwrap_or_default();
+                let blocks = self.blocks_by_path.get(&path).cloned().unwrap_or_default();
                 let resp = serde_json::Value::Array(blocks);
                 Some(Box::pin(async move { Ok(resp) }))
             } else {
@@ -1030,7 +1029,10 @@ mod tests {
             Some(&scanner),
         );
         assert!(!findings.is_empty(), "scanner returned no findings");
-        assert!(prompt.contains("[[clean.md]]"), "clean source missing: {prompt}");
+        assert!(
+            prompt.contains("[[clean.md]]"),
+            "clean source missing: {prompt}"
+        );
         assert!(
             !prompt.contains("[[evil.md]]"),
             "rejected source leaked into prompt: {prompt}",
@@ -1054,13 +1056,8 @@ mod tests {
         let mut budget1 = TokenBudget::new(10_000, 0);
         let mut budget2 = TokenBudget::new(10_000, 0);
         let (legacy, _) = build_rag_prompt_budgeted(&sources, &mut budget1, &counter, None);
-        let ((with_none, _), findings) = build_rag_prompt_budgeted_with_scanner(
-            &sources,
-            &mut budget2,
-            &counter,
-            None,
-            None,
-        );
+        let ((with_none, _), findings) =
+            build_rag_prompt_budgeted_with_scanner(&sources, &mut budget2, &counter, None, None);
         assert_eq!(legacy, with_none);
         assert!(findings.is_empty());
     }
@@ -1254,9 +1251,16 @@ mod tests {
         };
         let (ctx, _tmp) = make_ctx(dispatcher);
 
-        let resp = query(&ctx, &ai, &embedder, "compare", 5, crate::sanitize::InjectionPolicy::Off)
-            .await
-            .expect("rag::query ok");
+        let resp = query(
+            &ctx,
+            &ai,
+            &embedder,
+            "compare",
+            5,
+            crate::sanitize::InjectionPolicy::Off,
+        )
+        .await
+        .expect("rag::query ok");
 
         assert_eq!(resp.citations.len(), 2);
         // After renumber: index 1 = the source that was first cited
@@ -1288,7 +1292,16 @@ mod tests {
         };
         let (ctx, _tmp) = make_ctx(dispatcher);
 
-        let resp = query(&ctx, &ai, &embedder, "q", 5, crate::sanitize::InjectionPolicy::Off).await.unwrap();
+        let resp = query(
+            &ctx,
+            &ai,
+            &embedder,
+            "q",
+            5,
+            crate::sanitize::InjectionPolicy::Off,
+        )
+        .await
+        .unwrap();
         assert_eq!(resp.citations.len(), 1);
         assert_eq!(resp.citations[0].index, 1);
         assert_eq!(resp.citations[0].start_line, Some(2));
@@ -1318,7 +1331,16 @@ mod tests {
         };
         let (ctx, _tmp) = make_ctx(dispatcher);
 
-        let resp = query(&ctx, &ai, &embedder, "q", 5, crate::sanitize::InjectionPolicy::Off).await.unwrap();
+        let resp = query(
+            &ctx,
+            &ai,
+            &embedder,
+            "q",
+            5,
+            crate::sanitize::InjectionPolicy::Off,
+        )
+        .await
+        .unwrap();
         assert_eq!(resp.citations.len(), 1);
         assert_eq!(resp.citations[0].start_line, None);
         assert_eq!(resp.citations[0].end_line, None);
@@ -1388,10 +1410,15 @@ mod tests {
             5,
             crate::sanitize::InjectionPolicy::Off,
         )
-            .await
-            .expect("rag::query ok");
+        .await
+        .expect("rag::query ok");
 
-        let seen = ai.seen_system.lock().unwrap().clone().expect("system passed");
+        let seen = ai
+            .seen_system
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("system passed");
         assert!(
             !seen.contains("AKIAIOSFODNN7EXAMPLE"),
             "raw key leaked into system prompt: {seen}"

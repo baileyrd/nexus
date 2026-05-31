@@ -138,9 +138,8 @@ pub fn apply_migration(
 
     // Update the SQLite index in-place (UPDATE, not INSERT OR REPLACE)
     // to avoid cascade-deleting schema_versions records.
-    let schema_json = serde_json::to_string(&base.schema).map_err(|e| {
-        DatabaseError::SchemaError(format!("failed to serialize schema: {e}"))
-    })?;
+    let schema_json = serde_json::to_string(&base.schema)
+        .map_err(|e| DatabaseError::SchemaError(format!("failed to serialize schema: {e}")))?;
     let now = chrono::Utc::now().timestamp();
     conn.execute(
         "UPDATE bases SET schema_json = ?1, modified_at = ?2 WHERE id = ?3",
@@ -150,9 +149,8 @@ pub fn apply_migration(
 
     // Record the migration.
     let version = current_version(conn, base_id)? + 1;
-    let op_json = serde_json::to_string(&op).map_err(|e| {
-        DatabaseError::SchemaError(format!("failed to serialize operation: {e}"))
-    })?;
+    let op_json = serde_json::to_string(&op)
+        .map_err(|e| DatabaseError::SchemaError(format!("failed to serialize operation: {e}")))?;
 
     conn.execute(
         "INSERT INTO bases_schema_versions (base_id, version, operation, applied_at)

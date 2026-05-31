@@ -82,7 +82,6 @@ fn params_for(port: u16) -> ConnectParams {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -90,8 +89,7 @@ async fn supervisor_emits_connecting_then_connected_on_initial_handshake() {
     let port = reserve_port().await;
     let _relay = start_relay_on(port, "t").await;
     let bus = Arc::new(EventBus::new(64));
-    let mut state_sub =
-        bus.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
+    let mut state_sub = bus.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
     let _client = ReconnectingClient::start(
         params_for(port),
         Arc::clone(&bus),
@@ -135,10 +133,7 @@ async fn supervisor_emits_connecting_then_connected_on_initial_handshake() {
 /// supervisor reports `target`. Callers must subscribe *before* the
 /// supervisor that produces the event starts; otherwise the
 /// transition can fire on an empty broadcast channel and be lost.
-async fn wait_for_state(
-    sub: &mut nexus_kernel::EventSubscription,
-    target: &str,
-) {
+async fn wait_for_state(sub: &mut nexus_kernel::EventSubscription, target: &str) {
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let event = sub.recv().await.expect("recv state");
@@ -175,9 +170,8 @@ async fn reconnect_replays_buffered_events_after_relay_outage() {
     // Subscribe to connection-state BEFORE starting the supervisor
     // so we never miss a transition; broadcast events with no
     // subscribers are dropped.
-    let mut alice_state = bus_alice.subscribe(EventFilter::CustomExact(
-        CONNECTION_STATE_TOPIC.to_string(),
-    ));
+    let mut alice_state =
+        bus_alice.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
     let mut bob_state =
         bus_bob.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
 
@@ -262,8 +256,7 @@ async fn handshake_failure_with_bad_token_retries_with_backoff() {
     let port = reserve_port().await;
     let _relay = start_relay_on(port, "correct").await;
     let bus = Arc::new(EventBus::new(64));
-    let mut state_sub =
-        bus.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
+    let mut state_sub = bus.subscribe(EventFilter::CustomExact(CONNECTION_STATE_TOPIC.to_string()));
     let mut params = params_for(port);
     params.token = "wrong".into();
     let _client = ReconnectingClient::start(
@@ -300,5 +293,8 @@ async fn handshake_failure_with_bad_token_retries_with_backoff() {
         }
     }
     assert_eq!(connected, 0, "bad token must never reach connected state");
-    assert!(connecting >= 2, "expected at least 2 retry attempts, got {connecting}");
+    assert!(
+        connecting >= 2,
+        "expected at least 2 retry attempts, got {connecting}"
+    );
 }

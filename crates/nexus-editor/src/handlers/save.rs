@@ -84,10 +84,13 @@ fn apply_reflow_after_save(sessions: &SessionMap, relpath: &str) -> Result<(), P
             continue;
         };
         let new_count = u32::try_from(block.content.lines().count()).unwrap_or(u32::MAX);
-        groups
-            .entry(source_relpath.clone())
-            .or_default()
-            .push((input_idx, block_id, *line_start, *line_end, new_count));
+        groups.entry(source_relpath.clone()).or_default().push((
+            input_idx,
+            block_id,
+            *line_start,
+            *line_end,
+            new_count,
+        ));
     }
     for entries in groups.into_values() {
         let inputs: Vec<(u32, u32, u32)> = entries
@@ -100,7 +103,9 @@ fn apply_reflow_after_save(sessions: &SessionMap, relpath: &str) -> Result<(), P
                 continue;
             };
             if let BlockType::Excerpt {
-                line_start, line_end, ..
+                line_start,
+                line_end,
+                ..
             } = &mut block.ty
             {
                 *line_start = new_start;
@@ -445,8 +450,8 @@ pub(crate) async fn read_source_for_excerpts(
         String::from_utf8(bytes)
             .map_err(|_| exec_err(format!("open_excerpts: '{relpath}' is not UTF-8")))
     } else {
-        let abs =
-            resolve_within(forge_root, relpath).map_err(|e| exec_err(format!("open_excerpts: {e}")))?;
+        let abs = resolve_within(forge_root, relpath)
+            .map_err(|e| exec_err(format!("open_excerpts: {e}")))?;
         fs::read_to_string(&abs)
             .map_err(|e| exec_err(format!("open_excerpts: read '{}': {e}", abs.display())))
     }
@@ -482,7 +487,8 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
             .truncate(true)
             .open(&tmp)
             .map_err(|e| e.to_string())?;
-        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())?;
         f.sync_all().map_err(|e| e.to_string())?;
     }
 

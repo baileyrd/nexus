@@ -69,12 +69,7 @@ pub fn log_capability_denied(plugin_id: &str, capability: &str) {
 
 /// Log a plugin lifecycle transition (e.g. "loaded", "initialized", "started", "stopped", "crashed").
 pub fn log_plugin_lifecycle(plugin_id: &str, transition: &str) {
-    tracing::info!(
-        audit = true,
-        plugin_id,
-        transition,
-        "plugin lifecycle"
-    );
+    tracing::info!(audit = true, plugin_id, transition, "plugin lifecycle");
     crate::audit_store::append(
         "plugin_lifecycle",
         Some(plugin_id),
@@ -84,12 +79,7 @@ pub fn log_plugin_lifecycle(plugin_id: &str, transition: &str) {
 
 /// Log a credential access event. The credential value is never logged.
 pub fn log_credential_access(credential_name: &str, action: &str) {
-    tracing::info!(
-        audit = true,
-        credential_name,
-        action,
-        "credential access"
-    );
+    tracing::info!(audit = true, credential_name, action, "credential access");
     crate::audit_store::append(
         "credential_access",
         None,
@@ -240,8 +230,8 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_support::with_captured_events;
+    use super::*;
 
     #[test]
     fn capability_granted_emits_audit_event() {
@@ -251,8 +241,14 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("audit=true"), "missing audit field: {event}");
-        assert!(event.contains("plugin_id=com.example.test"), "missing plugin_id: {event}");
-        assert!(event.contains("capability=fs.read"), "missing capability: {event}");
+        assert!(
+            event.contains("plugin_id=com.example.test"),
+            "missing plugin_id: {event}"
+        );
+        assert!(
+            event.contains("capability=fs.read"),
+            "missing capability: {event}"
+        );
         assert!(event.contains("result=granted"), "missing result: {event}");
     }
 
@@ -275,7 +271,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("audit=true"), "missing audit field: {event}");
-        assert!(event.contains("transition=started"), "missing transition: {event}");
+        assert!(
+            event.contains("transition=started"),
+            "missing transition: {event}"
+        );
     }
 
     #[test]
@@ -286,7 +285,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("audit=true"), "missing audit field: {event}");
-        assert!(event.contains("credential_name=ai.anthropic"), "missing credential_name: {event}");
+        assert!(
+            event.contains("credential_name=ai.anthropic"),
+            "missing credential_name: {event}"
+        );
         assert!(event.contains("action=retrieve"), "missing action: {event}");
     }
 
@@ -298,8 +300,14 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("audit=true"), "missing audit field: {event}");
-        assert!(event.contains("tool=nexus_read_note"), "missing tool: {event}");
-        assert!(event.contains("duration_ms=12"), "missing duration_ms: {event}");
+        assert!(
+            event.contains("tool=nexus_read_note"),
+            "missing tool: {event}"
+        );
+        assert!(
+            event.contains("duration_ms=12"),
+            "missing duration_ms: {event}"
+        );
         assert!(event.contains("result=success"), "missing result: {event}");
     }
 
@@ -311,7 +319,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("result=error"), "missing result: {event}");
-        assert!(event.contains("error=forge: read-only"), "missing error: {event}");
+        assert!(
+            event.contains("error=forge: read-only"),
+            "missing error: {event}"
+        );
     }
 
     #[test]
@@ -322,8 +333,14 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("audit=true"), "missing audit field: {event}");
-        assert!(event.contains("uri=mcp://nexus/notes/foo.md"), "missing uri: {event}");
-        assert!(event.contains("duration_ms=3"), "missing duration_ms: {event}");
+        assert!(
+            event.contains("uri=mcp://nexus/notes/foo.md"),
+            "missing uri: {event}"
+        );
+        assert!(
+            event.contains("duration_ms=3"),
+            "missing duration_ms: {event}"
+        );
         assert!(event.contains("result=success"), "missing result: {event}");
     }
 
@@ -339,6 +356,9 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(event.contains("audit=true"), "missing audit field: {event}");
-        assert!(event.contains("plugin_id=com.example.test"), "missing plugin_id: {event}");
+        assert!(
+            event.contains("plugin_id=com.example.test"),
+            "missing plugin_id: {event}"
+        );
     }
 }

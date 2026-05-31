@@ -91,10 +91,7 @@ pub fn query(filter: &AuditQuery) -> Vec<AuditEntry> {
 /// Delete entries older than `before_ts` from the global store. Returns
 /// the number of rows removed, or 0 if no store is installed.
 pub fn clear(before_ts: i64) -> u64 {
-    AUDIT_STORE
-        .get()
-        .map(|s| s.clear(before_ts))
-        .unwrap_or(0)
+    AUDIT_STORE.get().map(|s| s.clear(before_ts)).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -128,7 +125,11 @@ mod tests {
             let mut rows: Vec<AuditEntry> = g
                 .iter()
                 .filter(|e| q.event_type.as_deref().is_none_or(|t| e.event_type == t))
-                .filter(|e| q.plugin_id.as_deref().is_none_or(|p| e.plugin_id.as_deref() == Some(p)))
+                .filter(|e| {
+                    q.plugin_id
+                        .as_deref()
+                        .is_none_or(|p| e.plugin_id.as_deref() == Some(p))
+                })
                 .filter(|e| q.since_ts.is_none_or(|t| e.ts_ms >= t))
                 .cloned()
                 .collect();
@@ -149,9 +150,19 @@ mod tests {
 
     #[test]
     fn append_then_query_round_trips_through_fake() {
-        let store = FakeStore { events: Mutex::new(Vec::new()) };
-        store.append("capability_granted", Some("nexus.test"), &json!({"capability": "FsRead"}));
-        store.append("capability_denied",  Some("nexus.test"), &json!({"capability": "Net"}));
+        let store = FakeStore {
+            events: Mutex::new(Vec::new()),
+        };
+        store.append(
+            "capability_granted",
+            Some("nexus.test"),
+            &json!({"capability": "FsRead"}),
+        );
+        store.append(
+            "capability_denied",
+            Some("nexus.test"),
+            &json!({"capability": "Net"}),
+        );
         let all = store.query(&AuditQuery::default());
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].event_type, "capability_denied");
@@ -160,7 +171,9 @@ mod tests {
 
     #[test]
     fn fake_query_filters_by_event_type() {
-        let store = FakeStore { events: Mutex::new(Vec::new()) };
+        let store = FakeStore {
+            events: Mutex::new(Vec::new()),
+        };
         store.append("capability_granted", Some("a"), &json!({}));
         store.append("capability_denied", Some("b"), &json!({}));
         let granted = store.query(&AuditQuery {

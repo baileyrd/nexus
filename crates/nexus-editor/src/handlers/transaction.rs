@@ -396,9 +396,7 @@ fn op_payload_size(op: &crate::Operation) -> usize {
             pre_annotations,
             ..
         } => deleted_text.len() + ann_cost(pre_annotations),
-        Operation::InsertBlock { block, .. } => {
-            block.content.len() + ann_cost(&block.annotations)
-        }
+        Operation::InsertBlock { block, .. } => block.content.len() + ann_cost(&block.annotations),
         Operation::DeleteBlock { old_block, .. } => {
             old_block.content.len() + ann_cost(&old_block.annotations)
         }

@@ -96,11 +96,7 @@ pub struct EpisodicEntry {
 impl EpisodicEntry {
     /// Construct an entry for a specific session.
     #[must_use]
-    pub fn for_session(
-        session_id: Uuid,
-        kind: EpisodicKind,
-        content: serde_json::Value,
-    ) -> Self {
+    pub fn for_session(session_id: Uuid, kind: EpisodicKind, content: serde_json::Value) -> Self {
         Self {
             id: EpisodicId::new(),
             session_id: Some(session_id),
@@ -198,7 +194,11 @@ mod tests {
     use super::*;
 
     fn user_msg(sid: Uuid, text: &str) -> EpisodicEntry {
-        EpisodicEntry::for_session(sid, EpisodicKind::UserMessage, serde_json::json!({ "text": text }))
+        EpisodicEntry::for_session(
+            sid,
+            EpisodicKind::UserMessage,
+            serde_json::json!({ "text": text }),
+        )
     }
 
     #[test]

@@ -343,9 +343,7 @@ pub fn load_base(dir: &Path) -> Result<Base, BasesError> {
             reason: e.to_string(),
         })?
     } else {
-        return Err(BasesError::FileNotFound(
-            schema_path.display().to_string(),
-        ));
+        return Err(BasesError::FileNotFound(schema_path.display().to_string()));
     };
 
     // records.json — optional
@@ -816,7 +814,8 @@ targetField = "id"
         let schema = sample_schema();
         let mut base = init_base(&base_dir, "Tasks", &schema).unwrap();
         base.records.push(sample_record("r1", "Buy milk", "todo"));
-        base.records.push(sample_record("r2", "Write tests", "done"));
+        base.records
+            .push(sample_record("r2", "Write tests", "done"));
         base.views.push(BaseView {
             name: "All".to_string(),
             view_type: ViewType::Table,
@@ -904,20 +903,18 @@ targetField = "id"
         if !fixtures.exists() {
             // Shallow clones might skip the fixtures directory — treat
             // as a benign skip instead of a hard failure.
-            eprintln!("skipping: fixtures directory absent at {}", fixtures.display());
+            eprintln!(
+                "skipping: fixtures directory absent at {}",
+                fixtures.display()
+            );
             return;
         }
         let expected = ["Tasks.bases", "Books.bases", "Contacts.bases"];
         for name in expected {
             let dir = fixtures.join(name);
-            assert!(
-                dir.exists(),
-                "committed fixture missing: {}",
-                dir.display(),
-            );
-            let base = load_base(&dir).unwrap_or_else(|e| {
-                panic!("fixture '{name}' failed to load: {e}")
-            });
+            assert!(dir.exists(), "committed fixture missing: {}", dir.display(),);
+            let base =
+                load_base(&dir).unwrap_or_else(|e| panic!("fixture '{name}' failed to load: {e}"));
             assert!(!base.records.is_empty(), "{name}: records empty");
             assert!(!base.views.is_empty(), "{name}: no views configured");
             // Every record must validate against the fixture's schema.

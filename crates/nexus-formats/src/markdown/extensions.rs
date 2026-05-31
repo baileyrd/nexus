@@ -55,8 +55,14 @@ pub fn extract_inline_tags(text: &str, tags: &mut Vec<Tag>) {
                     end += 1;
                 }
                 let name: String = chars[start..end].iter().collect();
-                if !tags.iter().any(|t| t.name == name && t.source == TagSource::Inline) {
-                    tags.push(Tag { name, source: TagSource::Inline });
+                if !tags
+                    .iter()
+                    .any(|t| t.name == name && t.source == TagSource::Inline)
+                {
+                    tags.push(Tag {
+                        name,
+                        source: TagSource::Inline,
+                    });
                 }
                 i = end;
                 continue;
@@ -134,7 +140,10 @@ pub fn extract_math_spans(text: &str) -> Vec<MathSpan> {
                 let end = content_start + rel;
                 let content = text[content_start..end].to_string();
                 consumed.push((i, end + 2));
-                spans.push(MathSpan { display: true, content });
+                spans.push(MathSpan {
+                    display: true,
+                    content,
+                });
                 i = end + 2;
                 continue;
             }
@@ -163,7 +172,10 @@ pub fn extract_math_spans(text: &str) -> Vec<MathSpan> {
                         && !(close_pos + 1 < len && bytes[close_pos + 1] == b'$')
                     {
                         let content = text[content_start..close_pos].to_string();
-                        spans.push(MathSpan { display: false, content });
+                        spans.push(MathSpan {
+                            display: false,
+                            content,
+                        });
                         i = close_pos + 1;
                         continue;
                     }

@@ -28,9 +28,7 @@ mod common;
 use common::MinimalForge;
 
 use nexus_bootstrap::CLI_PLUGIN_ID;
-use nexus_kernel::{Events as _, 
-    BusError, Error, EventFilter, NexusEvent,
-};
+use nexus_kernel::{BusError, Error, EventFilter, Events as _, NexusEvent};
 
 /// (Property 1 + 3) Publishing through a real `PluginContext` produces a
 /// `NexusEvent::Custom` whose `emitting_plugin` is the calling plugin's id,
@@ -42,9 +40,9 @@ async fn ctx_publish_produces_custom_with_kernel_set_emitter() {
     let ctx = &forge.runtime.context;
 
     let bus = forge.runtime.kernel.event_bus();
-    let mut sub = bus.subscribe(EventFilter::CustomExact(
-        format!("{CLI_PLUGIN_ID}.anti_spoofing_probe"),
-    ));
+    let mut sub = bus.subscribe(EventFilter::CustomExact(format!(
+        "{CLI_PLUGIN_ID}.anti_spoofing_probe"
+    )));
 
     // Publish a payload whose JSON shape mimics a kernel-owned event.
     // Even if the caller serialises something that looks like

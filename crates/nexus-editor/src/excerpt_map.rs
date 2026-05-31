@@ -332,7 +332,14 @@ mod tests {
         let li = idx(src);
         // Offset 0 → source byte 0.
         let p = excerpt_to_source(excerpt, 1, &li, 0).unwrap();
-        assert_eq!(p, SourcePos { line: 1, intra_line_byte: 0, source_byte: 0 });
+        assert_eq!(
+            p,
+            SourcePos {
+                line: 1,
+                intra_line_byte: 0,
+                source_byte: 0
+            }
+        );
         // Offset 3 → source byte 3 (mid-line).
         let p = excerpt_to_source(excerpt, 1, &li, 3).unwrap();
         assert_eq!(p.source_byte, 3);
@@ -360,7 +367,10 @@ mod tests {
         let excerpt = "beta\ngamma";
         let li = idx(src);
         // Offset 0 (start of 'beta') → source byte 6.
-        assert_eq!(excerpt_to_source(excerpt, 2, &li, 0).unwrap().source_byte, 6);
+        assert_eq!(
+            excerpt_to_source(excerpt, 2, &li, 0).unwrap().source_byte,
+            6
+        );
         // Offset 4 (the '\n' inside the excerpt) → end of source line 2 = byte 10.
         // (The '\n' in the excerpt represents the terminator byte after
         //  line 2's content. We map it to the line-body-end position.)
@@ -384,7 +394,10 @@ mod tests {
         let excerpt = "alpha\nbeta";
         let li = idx(src);
         // Excerpt offset 0 → source byte 0.
-        assert_eq!(excerpt_to_source(excerpt, 1, &li, 0).unwrap().source_byte, 0);
+        assert_eq!(
+            excerpt_to_source(excerpt, 1, &li, 0).unwrap().source_byte,
+            0
+        );
         // Excerpt offset 5 (the '\n' in the excerpt) → byte 5 = source's '\r'.
         // We map it to intra_line_byte 5 on line 1, which is the line-body-end.
         let p = excerpt_to_source(excerpt, 1, &li, 5).unwrap();
@@ -430,9 +443,11 @@ mod tests {
         let li = idx(src);
         for excerpt_off in 0..=excerpt.len() {
             let p = excerpt_to_source(excerpt, 2, &li, excerpt_off).unwrap();
-            let back =
-                source_to_excerpt(excerpt, 2, 3, src, &li, p.source_byte).unwrap();
-            assert_eq!(back, excerpt_off, "round-trip at excerpt offset {excerpt_off}");
+            let back = source_to_excerpt(excerpt, 2, 3, src, &li, p.source_byte).unwrap();
+            assert_eq!(
+                back, excerpt_off,
+                "round-trip at excerpt offset {excerpt_off}"
+            );
         }
     }
 

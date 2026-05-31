@@ -227,7 +227,15 @@ impl SessionManager {
             Some(c) => start.saturating_add(c).min(total),
             None => total,
         };
-        Some(entry.lines.iter().skip(start).take(end - start).cloned().collect())
+        Some(
+            entry
+                .lines
+                .iter()
+                .skip(start)
+                .take(end - start)
+                .cloned()
+                .collect(),
+        )
     }
 
     /// Search the session's line buffer for `query`. Returns the indices
@@ -235,12 +243,7 @@ impl SessionManager {
     /// are not stable across eviction). `is_regex = true` interprets the
     /// query as a regular expression; an invalid regex returns `None`.
     #[must_use]
-    pub fn lines_search(
-        &self,
-        id: &SessionId,
-        query: &str,
-        is_regex: bool,
-    ) -> Option<Vec<usize>> {
+    pub fn lines_search(&self, id: &SessionId, query: &str, is_regex: bool) -> Option<Vec<usize>> {
         let entry = self.sessions.get(id)?;
         if is_regex {
             let re = regex_lite::Regex::new(query).ok()?;
@@ -350,14 +353,15 @@ impl SessionManager {
     /// # Errors
     /// - [`TerminalError::NotRunning`] if `id` is not tracked.
     /// - Any I/O error from [`Session::read_into_buffer`].
-    pub fn drain(
-        &mut self,
-        id: &SessionId,
-        timeout: Duration,
-    ) -> Result<usize, TerminalError> {
+    pub fn drain(&mut self, id: &SessionId, timeout: Duration) -> Result<usize, TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed.set(Instant::now());
-        let Entry { session, buffer, lines, .. } = entry;
+        let Entry {
+            session,
+            buffer,
+            lines,
+            ..
+        } = entry;
         session.read_into(Some(buffer), Some(lines), timeout)
     }
 
@@ -366,12 +370,7 @@ impl SessionManager {
     /// # Errors
     /// - [`TerminalError::NotRunning`] if `id` is not tracked.
     /// - Any I/O error from [`Session::resize`].
-    pub fn resize(
-        &mut self,
-        id: &SessionId,
-        cols: u16,
-        rows: u16,
-    ) -> Result<(), TerminalError> {
+    pub fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed.set(Instant::now());
         entry.session.resize(cols, rows)
@@ -414,7 +413,9 @@ impl SessionManager {
     /// snapshot for the caller to persist, log, or display.
     #[must_use]
     pub fn remove(&mut self, id: &SessionId) -> Option<Vec<u8>> {
-        self.sessions.remove(id).map(|entry| entry.buffer.snapshot())
+        self.sessions
+            .remove(id)
+            .map(|entry| entry.buffer.snapshot())
     }
 
     /// Copy the session's current output buffer into a fresh `Vec`.
@@ -443,11 +444,7 @@ impl SessionManager {
     /// the current end returns an empty `Vec` and an unchanged cursor.
     /// Returns `None` if `id` is not tracked.
     #[must_use]
-    pub fn buffer_read_since(
-        &self,
-        id: &SessionId,
-        cursor: u64,
-    ) -> Option<(u64, Vec<u8>)> {
+    pub fn buffer_read_since(&self, id: &SessionId, cursor: u64) -> Option<(u64, Vec<u8>)> {
         // BL-062: deliberately does NOT bump `last_accessed`. The
         // WI-12 drainer thread polls this on every active session
         // every few ms; bumping here would make every session look
@@ -804,7 +801,10 @@ mod tests {
         assert_eq!(m.state(&id), Some(ProcessState::Running));
         m.kill(&id).expect("kill");
         match m.state(&id) {
-            Some(ProcessState::Killed { signal: Signal::Kill, .. }) => {}
+            Some(ProcessState::Killed {
+                signal: Signal::Kill,
+                ..
+            }) => {}
             other => panic!("expected Killed(Kill), got {other:?}"),
         }
         // Unknown id returns None.

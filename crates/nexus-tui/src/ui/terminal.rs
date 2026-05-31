@@ -17,11 +17,8 @@ use ratatui::{
 use crate::app::{Mode, TuiApp};
 
 pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
-    let [output_area, input_area] = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let [output_area, input_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
 
     render_output(frame, app, output_area);
     render_input(frame, app, input_area);
@@ -88,8 +85,16 @@ fn render_input(frame: &mut Frame, app: &TuiApp, area: Rect) {
         "  (press T to type, Esc to leave)"
     };
     let line = Line::from(vec![
-        Span::styled(" $ ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Span::styled(app.terminal.input.as_str(), Style::default().fg(Color::White)),
+        Span::styled(
+            " $ ",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            app.terminal.input.as_str(),
+            Style::default().fg(Color::White),
+        ),
         cursor,
         Span::styled(hint, Style::default().fg(Color::DarkGray)),
     ]);

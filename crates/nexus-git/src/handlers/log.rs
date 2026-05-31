@@ -53,9 +53,7 @@ pub(crate) fn file_log(
 ) -> Result<Value, PluginError> {
     let path = path_arg(args, forge_root)?;
     let limit = limit_arg(args, 20);
-    let entries = h
-        .with(move |e| e.log_file(&path, limit))
-        .map_err(map_err)?;
+    let entries = h.with(move |e| e.log_file(&path, limit)).map_err(map_err)?;
     Ok(Value::Array(entries.iter().map(log_entry_value).collect()))
 }
 

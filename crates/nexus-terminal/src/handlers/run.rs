@@ -22,7 +22,10 @@ impl TerminalCorePlugin {
         let saved = {
             let store = self.saved_store()?.lock().map_err(poisoned)?;
             store.get(&a.slug).map_err(crate_err)?.ok_or_else(|| {
-                exec_err(format!("run_saved: no saved command with slug '{}'", a.slug))
+                exec_err(format!(
+                    "run_saved: no saved command with slug '{}'",
+                    a.slug
+                ))
             })?
         };
 

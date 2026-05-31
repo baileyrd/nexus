@@ -148,7 +148,9 @@ where
             break;
         }
         let Some((key, value)) = trimmed.split_once(':') else {
-            return Err(TransportError::BadHeader(format!("no colon in '{trimmed}'")));
+            return Err(TransportError::BadHeader(format!(
+                "no colon in '{trimmed}'"
+            )));
         };
         let key = key.trim();
         let value = value.trim();
@@ -182,10 +184,7 @@ where
 /// - [`TransportError::BadBody`] if the message can't be serialised
 ///   (a `serde_json::Value` containing a non-object root won't fail
 ///   here, so this branch is mostly defensive).
-pub async fn write_message<W>(
-    writer: &mut W,
-    msg: &JsonRpcMessage,
-) -> Result<(), TransportError>
+pub async fn write_message<W>(writer: &mut W, msg: &JsonRpcMessage) -> Result<(), TransportError>
 where
     W: AsyncWrite + Unpin,
 {
@@ -242,8 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn parses_notification_with_extra_header() {
-        let body =
-            br#"{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{}}"#;
+        let body = br#"{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{}}"#;
         let mut framed = format!(
             "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\
              Content-Length: {}\r\n\r\n",

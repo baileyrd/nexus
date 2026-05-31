@@ -1,6 +1,6 @@
 //! HTML export for markdown content.
 
-use comrak::{Arena, Options, format_html, parse_document};
+use comrak::{format_html, parse_document, Arena, Options};
 
 /// Render markdown `content` to a complete standalone HTML document.
 ///
@@ -140,7 +140,10 @@ mod tests {
     #[test]
     fn renders_heading_to_h1() {
         let html = export_to_html("# Hello", "Test");
-        assert!(html.contains("<h1>Hello</h1>"), "expected <h1>, got:\n{html}");
+        assert!(
+            html.contains("<h1>Hello</h1>"),
+            "expected <h1>, got:\n{html}"
+        );
     }
 
     #[test]
@@ -154,7 +157,10 @@ mod tests {
     fn renders_task_list_with_checkboxes() {
         let md = "- [ ] Todo\n- [x] Done\n";
         let html = export_to_html(md, "Tasks");
-        assert!(html.contains("checkbox"), "expected checkbox input, got:\n{html}");
+        assert!(
+            html.contains("checkbox"),
+            "expected checkbox input, got:\n{html}"
+        );
     }
 
     #[test]
@@ -175,7 +181,10 @@ mod tests {
     #[test]
     fn title_is_escaped() {
         let html = export_to_html("Hi", "<script>alert(1)</script>");
-        assert!(!html.contains("<script>"), "title should be escaped, got:\n{html}");
+        assert!(
+            !html.contains("<script>"),
+            "title should be escaped, got:\n{html}"
+        );
         assert!(html.contains("&lt;script&gt;"));
     }
 }

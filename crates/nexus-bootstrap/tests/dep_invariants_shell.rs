@@ -84,7 +84,10 @@ fn shell_tauri_crate_does_not_link_subsystem_engines() {
     // the loophole closed in `dep_invariants.rs` (issue #83).
     if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
         for (cfg_key, cfg_block) in target {
-            if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table) {
+            if let Some(deps) = cfg_block
+                .get("dependencies")
+                .and_then(toml::Value::as_table)
+            {
                 for forbidden in FORBIDDEN_FOR_SHELL {
                     if deps.contains_key(*forbidden) {
                         violations.push(format!(

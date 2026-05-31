@@ -225,9 +225,11 @@ impl WasmSandbox {
         }
 
         let mut linker: Linker<PluginData> = Linker::new(&engine);
-        crate::host_fns::register_host_fns(&mut linker).map_err(|e| PluginError::WasmLoadFailed {
-            plugin_id: plugin_id.clone(),
-            reason: format!("host function registration failed: {e}"),
+        crate::host_fns::register_host_fns(&mut linker).map_err(|e| {
+            PluginError::WasmLoadFailed {
+                plugin_id: plugin_id.clone(),
+                reason: format!("host function registration failed: {e}"),
+            }
         })?;
 
         let instance =
@@ -347,10 +349,11 @@ impl WasmSandbox {
             plugin_id: plugin_id.clone(),
             reason: format!("args serialisation failed: {e}"),
         })?;
-        let args_len = u32::try_from(args_bytes.len()).map_err(|_| PluginError::ExecutionFailed {
-            plugin_id: plugin_id.clone(),
-            reason: "args JSON too large for WASM (> 4 GiB)".to_string(),
-        })?;
+        let args_len =
+            u32::try_from(args_bytes.len()).map_err(|_| PluginError::ExecutionFailed {
+                plugin_id: plugin_id.clone(),
+                reason: "args JSON too large for WASM (> 4 GiB)".to_string(),
+            })?;
 
         // Allocate in WASM memory.
         let args_ptr = nexus_alloc
@@ -480,7 +483,10 @@ impl WasmSandbox {
     /// # Errors
     /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
     /// [`PluginError::LifecycleError`].
-    pub fn call_on_settings_changed(&mut self, settings: &serde_json::Value) -> Result<(), PluginError> {
+    pub fn call_on_settings_changed(
+        &mut self,
+        settings: &serde_json::Value,
+    ) -> Result<(), PluginError> {
         self.dispatch(7, settings)
             .map(|_| ())
             .map_err(|e| to_lifecycle_error(e, "on_settings_changed"))
@@ -502,9 +508,9 @@ impl WasmSandbox {
 /// map to [`PluginError::ExecutionTimeout`]; everything else becomes
 /// [`PluginError::ExecutionFailed`].
 fn map_trap_error(err: &wasmtime::Error, plugin_id: &str) -> PluginError {
-    let is_timeout = err.downcast_ref::<Trap>().is_some_and(|t| {
-        *t == Trap::OutOfFuel || *t == Trap::Interrupt
-    });
+    let is_timeout = err
+        .downcast_ref::<Trap>()
+        .is_some_and(|t| *t == Trap::OutOfFuel || *t == Trap::Interrupt);
     if is_timeout {
         PluginError::ExecutionTimeout {
             plugin_id: plugin_id.to_string(),
@@ -605,18 +611,19 @@ mod tests {
     #[test]
     fn sandbox_dispatch_echo_handler() {
         let bytes = test_wasm_bytes();
-        let mut sandbox =
-            WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
+        let mut sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
         let args = serde_json::json!({"hello": "world"});
         let result = sandbox.dispatch(100, &args).unwrap();
-        assert_eq!(result, args, "echo handler should return the input unchanged");
+        assert_eq!(
+            result, args,
+            "echo handler should return the input unchanged"
+        );
     }
 
     #[test]
     fn sandbox_lifecycle_hooks_succeed() {
         let bytes = test_wasm_bytes();
-        let mut sandbox =
-            WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
+        let mut sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
         sandbox.call_on_init().unwrap();
         sandbox.call_on_start().unwrap();
         sandbox.call_on_stop().unwrap();
@@ -625,11 +632,8 @@ mod tests {
     #[test]
     fn sandbox_unknown_handler_returns_error_json() {
         let bytes = test_wasm_bytes();
-        let mut sandbox =
-            WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
-        let result = sandbox
-            .dispatch(999, &serde_json::json!({}))
-            .unwrap();
+        let mut sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
+        let result = sandbox.dispatch(999, &serde_json::json!({})).unwrap();
         assert!(
             result.get("error").is_some(),
             "expected JSON with 'error' key, got: {result}"

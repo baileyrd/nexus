@@ -183,10 +183,7 @@ impl RelayServer {
     /// Per-connection handler. Public-but-`pub(crate)` so the
     /// integration tests can drive a connection directly without going
     /// through a TCP listener.
-    pub(crate) async fn handle_connection(
-        &self,
-        stream: TcpStream,
-    ) -> Result<(), HandleError> {
+    pub(crate) async fn handle_connection(&self, stream: TcpStream) -> Result<(), HandleError> {
         let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
         config.max_message_size = Some(MAX_FRAME_BYTES);
         config.max_frame_size = Some(MAX_FRAME_BYTES);
@@ -199,10 +196,7 @@ impl RelayServer {
     /// Drive one accepted WebSocket through the handshake and message
     /// loop. Generic over the stream so tests can plug an in-memory
     /// duplex pipe in place of `TcpStream`.
-    pub(crate) async fn run_peer<S>(
-        &self,
-        ws: WebSocketStream<S>,
-    ) -> Result<(), HandleError>
+    pub(crate) async fn run_peer<S>(&self, ws: WebSocketStream<S>) -> Result<(), HandleError>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
@@ -221,7 +215,12 @@ impl RelayServer {
         let hello: ClientMessage = match serde_json::from_str(&first) {
             Ok(m) => m,
             Err(e) => {
-                send_error(&mut sink, ERR_BAD_FRAME, format!("invalid first frame: {e}")).await;
+                send_error(
+                    &mut sink,
+                    ERR_BAD_FRAME,
+                    format!("invalid first frame: {e}"),
+                )
+                .await;
                 return Ok(());
             }
         };
@@ -298,7 +297,11 @@ impl RelayServer {
                 if routed.from.as_deref() == Some(&self_peer_for_writer) {
                     continue;
                 }
-                if sink.send(Message::Text(routed.payload.into())).await.is_err() {
+                if sink
+                    .send(Message::Text(routed.payload.into()))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -429,4 +432,3 @@ where
     let payload = serde_json::to_string(msg).expect("ServerMessage serialises");
     sink.send(Message::Text(payload.into())).await
 }
-

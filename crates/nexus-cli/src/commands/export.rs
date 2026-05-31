@@ -24,8 +24,7 @@ pub fn notion_dir(app: &App, source: Option<PathBuf>, dest: &Path) -> Result<()>
         anyhow::bail!("source is not a directory: {}", source_abs.display());
     }
 
-    let report = notion::export_to_notion(&source_abs, dest)
-        .context("notion export failed")?;
+    let report = notion::export_to_notion(&source_abs, dest).context("notion export failed")?;
 
     let summary = format!(
         "exported {pages} pages, {dbs} databases, {att} attachments → {path}{warn}",

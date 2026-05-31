@@ -121,10 +121,9 @@ impl DynamicToolRegistry {
     /// tests / metrics.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.read().map_or_else(
-            |e| e.into_inner().len(),
-            |g| g.len(),
-        )
+        self.inner
+            .read()
+            .map_or_else(|e| e.into_inner().len(), |g| g.len())
     }
 
     /// True iff no tool is currently registered.

@@ -150,8 +150,9 @@ fn index_queries_return_parsed_data() {
         prefix: Some("notes/other".to_string()),
         ..Default::default()
     };
-    let other_records: Vec<FileRecord> =
-        engine.query_files(&filter_other).expect("query_files other");
+    let other_records: Vec<FileRecord> = engine
+        .query_files(&filter_other)
+        .expect("query_files other");
     assert_eq!(other_records.len(), 1);
     let other_id = other_records[0].id;
     let backlinks: Vec<LinkRecord> = engine.query_backlinks(other_id).expect("query_backlinks");
@@ -179,7 +180,12 @@ fn search_index_standalone() {
     idx.commit().expect("commit");
 
     let results: Vec<SearchResult> = idx.search("rust", 10).expect("search");
-    assert_eq!(results.len(), 2, "expected 2 rust matches, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        2,
+        "expected 2 rust matches, got {}",
+        results.len()
+    );
 
     for r in &results {
         assert!(
@@ -258,7 +264,10 @@ This references [[other-note]] and embeds ![[image.png]].
     let parsed = parse_markdown(complex).expect("parse_markdown");
 
     // Frontmatter
-    assert!(!parsed.frontmatter.is_empty(), "frontmatter should not be empty");
+    assert!(
+        !parsed.frontmatter.is_empty(),
+        "frontmatter should not be empty"
+    );
 
     // Blocks
     assert!(!parsed.blocks.is_empty(), "blocks should not be empty");
@@ -344,7 +353,10 @@ fn reconcile_picks_up_external_changes() {
 
     // Write first file through the engine.
     engine
-        .write_file("notes/via-engine.md", b"# Via Engine\n\nWritten through API.")
+        .write_file(
+            "notes/via-engine.md",
+            b"# Via Engine\n\nWritten through API.",
+        )
         .expect("write via engine");
 
     // Write second file directly to disk, bypassing the engine.
@@ -360,6 +372,10 @@ fn reconcile_picks_up_external_changes() {
     );
 
     // Both should be findable via file_exists.
-    assert!(engine.file_exists("notes/via-engine.md").expect("file_exists via-engine"));
-    assert!(engine.file_exists("notes/external.md").expect("file_exists external"));
+    assert!(engine
+        .file_exists("notes/via-engine.md")
+        .expect("file_exists via-engine"));
+    assert!(engine
+        .file_exists("notes/external.md")
+        .expect("file_exists external"));
 }
