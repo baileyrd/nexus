@@ -146,6 +146,33 @@ impl Default for CancelGate {
     }
 }
 
+/// #192 / R9 — drop terminal rows with the oldest `finished_at` until
+/// at most `cap` terminal rows remain. Active (non-terminal) rows are
+/// untouched regardless of `cap`. Called under the store's outer
+/// mutex (`g` is the live guard) so visitors don't observe a partial
+/// sweep.
+fn evict_oldest_terminal(g: &mut HashMap<Uuid, RunRow>, cap: usize) {
+    let mut terminal: Vec<(Uuid, DateTime<Utc>)> = g
+        .iter()
+        .filter_map(|(id, row)| {
+            if is_terminal(&row.status) {
+                Some((*id, row.finished_at.unwrap_or(row.submitted_at)))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if terminal.len() <= cap {
+        return;
+    }
+    // Oldest first.
+    terminal.sort_by_key(|(_id, ts)| *ts);
+    let to_drop = terminal.len() - cap;
+    for (id, _) in terminal.into_iter().take(to_drop) {
+        g.remove(&id);
+    }
+}
+
 /// Returns true for statuses that mean the worker has finished and
 /// the run's outcome is no longer going to change.
 pub(crate) fn is_terminal(status: &RunStatus) -> bool {
@@ -154,6 +181,15 @@ pub(crate) fn is_terminal(status: &RunStatus) -> bool {
         RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
     )
 }
+
+/// #192 / R9 — default cap on the number of *terminal* runs the store
+/// retains. Active (Queued / Running) runs are never evicted; once the
+/// store has more than this many terminal runs the eviction sweep
+/// inside `observe_status` drops the ones with the oldest `finished_at`
+/// until the cap is met. Picked to comfortably cover an interactive
+/// session's run history (panels typically list the last few hundred)
+/// while bounding the map's footprint on long-lived sessions.
+pub(crate) const DEFAULT_MAX_RETAINED_TERMINAL: usize = 1_024;
 
 /// Thread-safe handle to the run store. Cloned around to give each
 /// worker (and the bus republisher) the same backing map.
@@ -169,6 +205,8 @@ pub(crate) struct Store {
     /// Cleared in the worker after the run reaches a terminal state
     /// so stale entries don't accumulate.
     session_to_task: Arc<Mutex<HashMap<String, Uuid>>>,
+    /// #192 / R9 — eviction cap. See [`DEFAULT_MAX_RETAINED_TERMINAL`].
+    max_retained_terminal: usize,
 }
 
 impl Store {
@@ -176,6 +214,19 @@ impl Store {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
             session_to_task: Arc::new(Mutex::new(HashMap::new())),
+            max_retained_terminal: DEFAULT_MAX_RETAINED_TERMINAL,
+        }
+    }
+
+    /// #192 / R9 — test/runtime override for the terminal-retention
+    /// cap. Tests use a small value to exercise eviction without
+    /// having to submit 1024 runs.
+    #[cfg(test)]
+    pub(crate) fn with_max_retained_terminal(max: usize) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+            session_to_task: Arc::new(Mutex::new(HashMap::new())),
+            max_retained_terminal: max,
         }
     }
 
@@ -327,7 +378,17 @@ impl Store {
             // anyone. The outer-lock guard is dropped before we fire
             // the notify so concurrent `wait_for` calls don't deadlock
             // on the map lock during `notified().await` re-entry.
-            is_terminal(&transition).then(|| Arc::clone(&row.terminal))
+            let notifier = is_terminal(&transition).then(|| Arc::clone(&row.terminal));
+            // #192 / R9 — eviction sweep. Bounds the map size on
+            // long-lived sessions. We only drop *terminal* rows; an
+            // active Queued/Running row is always retained no matter
+            // how large the cap. Cost is O(terminal_rows) per
+            // terminal transition, which is fine for the order of
+            // magnitudes we run (thousands, not millions).
+            if is_terminal(&transition) {
+                evict_oldest_terminal(&mut g, self.max_retained_terminal);
+            }
+            notifier
         };
         if let Some(notify) = terminal_notifier {
             notify.notify_waiters();
@@ -385,6 +446,26 @@ impl Store {
         let g = self.inner.lock().expect("store poisoned");
         u32::try_from(g.values().filter(|r| &r.status == status).count()).unwrap_or(u32::MAX)
     }
+
+    /// #192 / R9 — fire the cancel gate on every non-terminal run.
+    /// Used by `CorePlugin::on_stop` so a shutdown signal propagates to
+    /// in-flight workers instead of relying on `Runtime::Drop` to wait
+    /// out the deadline. Returns the number of runs cancelled (for the
+    /// audit log line). Idempotent: a run that's already cancelled or
+    /// terminal is skipped.
+    pub(crate) fn cancel_all_active(&self, reason: &str) -> usize {
+        let g = self.inner.lock().expect("store poisoned");
+        let mut cancelled = 0usize;
+        for row in g.values() {
+            if is_terminal(&row.status) {
+                continue;
+            }
+            if row.cancel.request(Some(reason.to_string())) {
+                cancelled += 1;
+            }
+        }
+        cancelled
+    }
 }
 
 impl Default for Store {
@@ -435,6 +516,48 @@ mod tests {
         let row = store.get(id).unwrap();
         assert_eq!(row.status, RunStatus::Completed);
         assert!(row.finished_at.is_some());
+    }
+
+    #[test]
+    fn observe_status_evicts_oldest_terminal_runs_over_cap() {
+        // #192 / R9 — the store must not grow unbounded across a
+        // long-lived session. Active runs are never evicted; only
+        // terminal ones, oldest `finished_at` first.
+        let store = Store::with_max_retained_terminal(2);
+        // Three terminal runs — the oldest must be evicted.
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let id = Uuid::new_v4();
+            store.insert(id, "session", TaskPriority::Interactive, None, &format!("p{i}"));
+            store.observe_status(&AiEvent::Finished {
+                task_id: id,
+                outcome: serde_json::Value::Null,
+            });
+            // Force a strict ordering between finished_at timestamps —
+            // `Utc::now()` resolves to microseconds on most platforms
+            // but a sub-microsecond test loop is still a coin flip.
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            ids.push(id);
+        }
+        // Oldest dropped, newer two retained.
+        assert!(store.get(ids[0]).is_none(), "oldest terminal should be evicted");
+        assert!(store.get(ids[1]).is_some());
+        assert!(store.get(ids[2]).is_some());
+        // An active run added afterwards is retained even though the
+        // terminal count is at the cap.
+        let active = Uuid::new_v4();
+        store.insert(active, "session", TaskPriority::Interactive, None, "p-active");
+        // And a fourth terminal run evicts ids[1], not the active one.
+        let newest = Uuid::new_v4();
+        store.insert(newest, "session", TaskPriority::Interactive, None, "p-new");
+        store.observe_status(&AiEvent::Finished {
+            task_id: newest,
+            outcome: serde_json::Value::Null,
+        });
+        assert!(store.get(active).is_some(), "active run must never be evicted");
+        assert!(store.get(ids[1]).is_none(), "ids[1] is now the oldest terminal");
+        assert!(store.get(ids[2]).is_some());
+        assert!(store.get(newest).is_some());
     }
 
     #[test]
