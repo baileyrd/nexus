@@ -20,6 +20,7 @@ import {
   type PluginValue,
   type ViewUpdate,
 } from '@codemirror/view'
+import { getEditorRuntime } from '../runtime'
 
 // ── Wrap / unwrap helpers ────────────────────────────────────────────────────
 
@@ -71,20 +72,33 @@ function toggleWrap(view: EditorView, kind: keyof typeof MARKERS): void {
   })
 }
 
-function insertLink(view: EditorView): void {
+async function insertLink(view: EditorView): Promise<void> {
   const sel = view.state.selection.main
   if (sel.empty) return
   const from = Math.min(sel.anchor, sel.head)
   const to = Math.max(sel.anchor, sel.head)
   const inner = view.state.doc.sliceString(from, to)
-  // Reuse the shell's native prompt — quick and keeps Phase 5 from
-  // building a full autocomplete here.
-  const url = window.prompt('Link URL', 'https://')
+  // #202 / R12 — route through the host dialog surface (api.input.prompt)
+  // so the call works inside the null-origin iframe sandbox where
+  // `window.prompt` is disabled. Absent in test drivers: skip.
+  const promptForLinkUrl = getEditorRuntime()?.promptForLinkUrl
+  if (!promptForLinkUrl) return
+  const url = await promptForLinkUrl()
   if (!url) return
-  const replacement = `[${inner}](${url})`
+  // Re-resolve the selection after the await — the user may have
+  // clicked elsewhere while the prompt was open.
+  const cur = view.state.selection.main
+  const innerNow = view.state.doc.sliceString(
+    Math.min(cur.anchor, cur.head),
+    Math.max(cur.anchor, cur.head),
+  )
+  const targetFrom = cur.empty ? from : Math.min(cur.anchor, cur.head)
+  const targetTo = cur.empty ? to : Math.max(cur.anchor, cur.head)
+  const text = cur.empty ? inner : innerNow
+  const replacement = `[${text}](${url})`
   view.dispatch({
-    changes: { from, to, insert: replacement },
-    selection: EditorSelection.range(from, from + replacement.length),
+    changes: { from: targetFrom, to: targetTo, insert: replacement },
+    selection: EditorSelection.range(targetFrom, targetFrom + replacement.length),
     userEvent: 'input.annotation.link',
   })
 }
@@ -162,7 +176,7 @@ class InlineToolbarPlugin implements PluginValue {
       { label: 'B', title: 'Bold (Cmd/Ctrl+B)', action: () => toggleWrap(this.view, 'bold') },
       { label: 'I', title: 'Italic (Cmd/Ctrl+I)', action: () => toggleWrap(this.view, 'italic') },
       { label: '⌨', title: 'Code (Cmd/Ctrl+E)', action: () => toggleWrap(this.view, 'code') },
-      { label: '🔗', title: 'Link (Cmd/Ctrl+K)', action: () => insertLink(this.view) },
+      { label: '🔗', title: 'Link (Cmd/Ctrl+K)', action: () => { void insertLink(this.view) } },
     ]
     this.dom.textContent = ''
     for (const it of items) {
@@ -239,7 +253,7 @@ export function inlineToolbarExt(): Extension {
       { key: 'Mod-b', run: (view) => { toggleWrap(view, 'bold'); return true } },
       { key: 'Mod-i', run: (view) => { toggleWrap(view, 'italic'); return true } },
       { key: 'Mod-e', run: (view) => { toggleWrap(view, 'code'); return true } },
-      { key: 'Mod-k', run: (view) => { insertLink(view); return true } },
+      { key: 'Mod-k', run: (view) => { void insertLink(view); return true } },
     ]),
   ]
 }

@@ -8,6 +8,7 @@ import {
   type SkillsKernelAPI,
 } from './skillsStore'
 import { SkillEditor } from './SkillEditor'
+import { getSkillsApi } from './runtime'
 import { Icon } from '../../../icons'
 import { splitMergedBody, fragmentTint } from './composeRender'
 
@@ -302,7 +303,9 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
   const canEdit = skill.relpath.length > 0
 
   const onDelete = async () => {
-    const ok = window.confirm(
+    const api = getSkillsApi()
+    if (!api) return
+    const ok = await api.input.confirm(
       `Delete skill '${skill.name}'? This removes ${skill.relpath} from disk.`,
     )
     if (!ok) return

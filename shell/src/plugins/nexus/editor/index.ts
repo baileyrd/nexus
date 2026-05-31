@@ -1866,6 +1866,10 @@ export const editorPlugin: Plugin = {
       },
       kernelEvents: api.kernel,
       kernel: api.kernel,
+      // #202 / R12 — inline-toolbar Link button + Mod-k. Sandbox-safe
+      // route to the styled prompt modal; `window.prompt` is disabled
+      // inside the null-origin iframe used for JS plugins.
+      promptForLinkUrl: () => api.input.prompt('Link URL', 'https://'),
       onBlockLinkNavigate: (link) => {
         // Best-effort tab-name guess from the basename — matches
         // what the files plugin emits for `files:open`.

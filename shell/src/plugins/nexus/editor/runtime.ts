@@ -70,6 +70,15 @@ export interface EditorRuntime {
    * this is the raw `KernelAPI` for cross-plugin IPC.
    */
   kernel?: KernelAPI
+  /**
+   * #202 / R12 — host-side prompt surface, threaded into CodeMirror
+   * extensions that need to ask the user for a string (e.g. the
+   * inline-toolbar Link button, Mod-k). Wired by activate() to
+   * `api.input.prompt`; absent in test drivers, in which case the
+   * caller silently skips the operation rather than crashing the
+   * editor.
+   */
+  promptForLinkUrl?: () => Promise<string | null>
 }
 
 let _runtime: EditorRuntime | null = null

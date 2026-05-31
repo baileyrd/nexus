@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { useBasesStore } from './basesStore'
 import type { Base, BasesKernelClient, BaseView } from './kernelClient'
+import { getBasesApi } from './runtime'
 import {
   applyView,
   filtersFromView,
@@ -119,7 +120,9 @@ export function BasesViewBar({ relpath, base, client }: Props) {
         }
       }
     }
-    const raw = window.prompt('Name this view', defaultName(tab.viewMode, base.views))
+    const api = getBasesApi()
+    if (!api) return
+    const raw = await api.input.prompt('Name this view', defaultName(tab.viewMode, base.views))
     if (!raw) return
     const name = raw.trim()
     if (!name) return
@@ -152,7 +155,9 @@ export function BasesViewBar({ relpath, base, client }: Props) {
   }
 
   const handleRename = async (view: BaseView) => {
-    const raw = window.prompt('Rename view', view.name)
+    const api = getBasesApi()
+    if (!api) return
+    const raw = await api.input.prompt('Rename view', view.name)
     if (!raw) return
     const name = raw.trim()
     if (!name || name === view.name) return
@@ -226,7 +231,9 @@ export function BasesViewBar({ relpath, base, client }: Props) {
   }
 
   const handleDelete = async (view: BaseView) => {
-    if (!window.confirm(`Delete view "${view.name}"?`)) return
+    const api = getBasesApi()
+    if (!api) return
+    if (!(await api.input.confirm(`Delete view "${view.name}"?`))) return
     try {
       setOpError(null)
       const prev: BaseView = JSON.parse(JSON.stringify(view))
