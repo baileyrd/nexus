@@ -559,6 +559,29 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
     if (!isRpcEnvelope(data)) return;
     // Ignore our own echoes and any frames not destined for the guest.
     if (data.direction !== 'host-to-plugin') return;
+    // #196 / R13 — sandbox watchdog. The host fires `sandbox.ping` on
+    // an interval (`SandboxOrchestrator.startWatchdog`) and tears the
+    // plugin down after `maxMissedPongs` consecutive pings without a
+    // pong reply. Until this auto-pong landed, a healthy plugin that
+    // simply didn't subscribe to `sandbox.ping` events was indistinguishable
+    // from a wedged guest and got false-crashed. Replying inline here
+    // — before `handleEvent` lookups — means the heartbeat is independent
+    // of plugin code and survives even when the plugin's own event
+    // loop is busy on a synchronous activate.
+    if (data.kind === 'event' && data.method === 'sandbox.ping') {
+      try {
+        post({
+          id: data.id,
+          direction: 'plugin-to-host',
+          kind: 'event',
+          method: 'sandbox.pong',
+          payload: { ts: Date.now() },
+        });
+      } catch {
+        /* best-effort; missed pong falls through to watchdog */
+      }
+      return;
+    }
     switch (data.kind) {
       case 'handshake':
         handleHandshake(data);
