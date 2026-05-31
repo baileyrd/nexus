@@ -347,7 +347,12 @@ mod tests {
         let mut plugin = AudioCorePlugin::new(dir.path().to_path_buf());
         plugin.on_init().unwrap();
         let v = plugin.dispatch(HANDLER_STATUS, &serde_json::json!({})).unwrap();
-        assert_eq!(v["stt_backend"], "local");
-        assert_eq!(v["tts_backend"], "local");
+        // Default backend is `Platform` (config.rs::AudioConfig::default)
+        // — the Web Speech API contributed by the `nexus.audio` shell
+        // plugin. This test was previously stale on `"local"`; surfaced
+        // by the #185 drift-script run, would have been caught by the
+        // new #184 CI gate.
+        assert_eq!(v["stt_backend"], "platform");
+        assert_eq!(v["tts_backend"], "platform");
     }
 }
