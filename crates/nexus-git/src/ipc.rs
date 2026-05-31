@@ -335,6 +335,28 @@ pub struct GitStashIndexArgs {
     pub index: Option<usize>,
 }
 
+/// Return type for `stash_push` (handler id `23`). #190 — typed
+/// counterpart of the prior `json!({"ok": true, "index": idx})`
+/// reply. The `index` is the 0-based position of the new stash
+/// entry in the stack (always 0 on success since `git stash push`
+/// pushes onto the top).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitStashPushReply {
+    /// Always `true` when the stash was created.
+    pub ok: bool,
+    /// 0-based stack position of the new stash entry.
+    pub index: usize,
+}
+
 /// Args for `stage_hunks` (17) and `unstage_hunks` (18).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
@@ -394,6 +416,40 @@ pub struct GitCreateTagArgs {
     /// Tag message. Provide to create an annotated tag; omit for lightweight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Args for `delete_tag` (handler id `21`). #190 — typed counterpart
+/// of the prior `key_string(args, "name")` lookup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitDeleteTagArgs {
+    /// Short tag name to delete.
+    pub name: String,
+}
+
+/// Args for `push_tags` (handler id `22`). #190 — typed counterpart
+/// of the prior `key_string(args, "remote")` lookup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitPushTagsArgs {
+    /// Remote name (e.g. `"origin"`).
+    pub remote: String,
 }
 
 /// Args for `push` (handler id `16`).
