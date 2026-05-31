@@ -9,4 +9,4 @@
  * borrowed displays). [`IpcErrorEnvelope`] flattens the variant down to a
  * stable category so callers don't have to string-sniff `Display` output.
  */
-export type IpcErrorKind = "timeout" | "plugin_crashed" | "capability_denied" | "dispatch_failed" | "serialization" | "unknown";
+export type IpcErrorKind = "timeout" | "plugin_crashed" | "capability_denied" | "dispatch_failed" | "serialization" | "cancelled" | "unknown";

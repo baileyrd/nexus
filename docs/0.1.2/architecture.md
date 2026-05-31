@@ -4,7 +4,7 @@
 
 ## Shape
 
-Nexus is a Rust **microkernel** workspace (35 crates) plus a pnpm workspace (`shell/` Tauri 2 app + `packages/nexus-extension-api` TypeScript SDK). One CLI binary (`nexus`), one TUI binary (`nexus-tui`), one desktop shell (`nexus-shell`), one MCP server (subcommand of `nexus`).
+Nexus is a Rust **microkernel** workspace (38 crates) plus a pnpm workspace (`shell/` Tauri 2 app + `packages/nexus-extension-api` TypeScript SDK). One CLI binary (`nexus`), one TUI binary (`nexus-tui`), one desktop shell (`nexus-shell`), one MCP server (subcommand of `nexus`).
 
 The kernel mediates **every cross-subsystem call** through one path:
 

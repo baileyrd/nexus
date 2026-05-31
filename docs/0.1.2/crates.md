@@ -2,7 +2,7 @@
 
 > **As of:** 2026-05-17. Sourced from each crate's `Cargo.toml` and `src/lib.rs`.
 
-All 35 workspace members in `crates/`. Excluded from this table: `shell/src-tauri/` (Tauri bridge — see [`shell.md`](shell.md)) and `packages/nexus-extension-api/` (TS package — see [`shell.md`](shell.md)).
+All 38 workspace members in `crates/`. Excluded from this table: `shell/src-tauri/` (Tauri bridge — see [`shell.md`](shell.md)) and `packages/nexus-extension-api/` (TS package — see [`shell.md`](shell.md)).
 
 | Crate | Kind | Purpose | IPC plugin id | Direct nexus-* deps | Notable external deps | Has CorePlugin impl? | Has settings? | Notes |
 |-------|------|---------|---------------|---------------------|----------------------|----------------------|---------------|-------|
@@ -41,12 +41,15 @@ All 35 workspace members in `crates/`. Excluded from this table: `shell/src-taur
 | nexus-fuzz | lib | Security fuzz targets (BL-103) | — | nexus-kernel, nexus-plugin-api, nexus-plugins, nexus-types | rand | No | No | Not published; stable-Rust smoke runner |
 | nexus-audio | lib | Audio subsystem: STT + TTS provider traits | com.nexus.audio | nexus-kernel, nexus-plugins | reqwest, base64, whisper-rs, hound | Yes | No | BL-117; optional local-audio feature |
 | nexus-collab | lib | Live-collaboration relay: WebSocket transport | com.nexus.collab | nexus-kernel, nexus-plugins | tokio-tungstenite, futures-util, uuid | Yes | No | BL-143 Phase 1; topic-agnostic relay |
+| nexus-memory | lib | AI-native memory layer: episodic, semantic, working | — | nexus-plugin-api | serde, serde_json, chrono, uuid | No | No | Move 4; not yet wired into bootstrap (R5) |
+| nexus-context | lib | Typed context-assembly pipeline (budget-bounded entries) | — | nexus-memory, nexus-plugin-api | serde, serde_json | No | No | Move 6; not yet wired into bootstrap (R5) |
+| nexus-protocol | lib | Speech-act protocol above rmcp transport | — | nexus-plugin-api | serde, serde_json | No | No | Move 7; not yet wired into bootstrap (R5) |
 
 ## Summary counts
 
 | Stat | Count |
 |------|-------|
-| Workspace members | 35 |
+| Workspace members | 38 |
 | Crates registering a CorePlugin | 23 |
 | Crates exposing a runtime-mutable Config struct | 11 |
 | Crates with no `nexus-*` deps (leaves) | 4 (`nexus-types`, `nexus-plugin-api`, `nexus-panic-log`, `nexus-fuzz` for deps the test cares about) |
