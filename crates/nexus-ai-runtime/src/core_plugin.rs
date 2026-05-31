@@ -289,6 +289,22 @@ impl CorePlugin for AiRuntimeCorePlugin {
     }
 
     fn on_stop(&mut self) {
+        // #192 / R9 — signal cancellation to every in-flight run
+        // before tearing down so workers observing their CancelGate's
+        // `is_cancelled()` / `cancelled().await` bail out promptly
+        // instead of running to `SESSION_RUN_TIMEOUT`. The pool's
+        // tokio `Runtime::Drop` (kicked off when the supervisor is
+        // dropped after this method returns) still joins the workers;
+        // this just shortens the join wait by making each worker's
+        // outer `tokio::select!` arm observe the cancel signal
+        // immediately.
+        let cancelled = self.supervisor.store().cancel_all_active("on_stop");
+        if cancelled > 0 {
+            tracing::info!(
+                cancelled,
+                "nexus-ai-runtime: on_stop cancelled in-flight runs",
+            );
+        }
         // Drop the pool — its `Runtime::Drop` joins all worker
         // threads after in-flight tasks finish. We deliberately do
         // not call `Runtime::shutdown_timeout` here because Phase 1
