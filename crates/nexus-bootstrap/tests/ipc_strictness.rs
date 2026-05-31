@@ -15,12 +15,16 @@
 //! calling into the comment store, so an extra field hits the strict
 //! deser path and surfaces as `PluginCrashedDuringCall`.
 //!
-//! NOTE: a few subsystems (e.g. `com.nexus.storage`'s `read_file`,
-//! `nexus-git`, `nexus-mcp`) bypass typed structs and read fields off
-//! `serde_json::Value` directly via hand-rolled helpers. Those handlers
-//! cannot be policed by this gate; they're tracked under issue #113
-//! (wire remaining subsystems into the schema generator) and a planned
-//! follow-up to refactor them to `parse_args::<TypedStruct>(...)`.
+//! NOTE: a few subsystems (`nexus-git`, `nexus-mcp`, `nexus-lsp`,
+//! `nexus-dap` reply paths) still bypass typed structs and read
+//! fields off `serde_json::Value` directly via hand-rolled helpers.
+//! Those handlers cannot be policed by this gate; they're tracked
+//! under issue #190 and follow-ups to refactor them to
+//! `parse_args::<TypedStruct>(...)`. `com.nexus.storage::read_file`
+//! was previously on that list — it migrated to `StorageReadFileArgs`
+//! / `StorageReadFileResult` in PR addressing #190, so the strict
+//! gate now covers it (see `storage_read_file_rejects_unknown_field`
+//! below).
 
 use std::time::Duration;
 
@@ -29,6 +33,7 @@ use nexus_kernel::{Ipc as _, IpcError};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const COMMENTS_PLUGIN_ID: &str = "com.nexus.comments";
+const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
 
 fn scratch_forge() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -78,6 +83,58 @@ async fn comments_list_rejects_payload_with_unknown_field() {
         } => {
             assert_eq!(plugin_id, COMMENTS_PLUGIN_ID);
             assert_eq!(command, "list");
+        }
+        other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
+    }
+}
+
+/// #190 / R7 — `com.nexus.storage::read_file` was the audit's named
+/// example of a hand-rolled `serde_json::Value` reader that bypassed
+/// the strictness gate. PR #(this one) migrated it to typed
+/// `StorageReadFileArgs` / `StorageReadFileResult`, so the unknown-
+/// field rejection now applies end-to-end. This test locks the new
+/// contract so a future refactor that drops `deny_unknown_fields` or
+/// reverts to a hand-rolled reader fails CI rather than silently
+/// re-opening the drift surface.
+#[tokio::test]
+async fn storage_read_file_rejects_unknown_field() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // Baseline: the strict shape returns the typed `{ bytes: null }`
+    // result for a missing file. Using a path that doesn't exist
+    // exercises the FileNotFound branch without seeding any state.
+    runtime
+        .context
+        .ipc_call(
+            STORAGE_PLUGIN_ID,
+            "read_file",
+            serde_json::json!({ "path": "does/not/exist.md" }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect("baseline read_file with strict args succeeds");
+
+    let err = runtime
+        .context
+        .ipc_call(
+            STORAGE_PLUGIN_ID,
+            "read_file",
+            serde_json::json!({
+                "path": "does/not/exist.md",
+                "pathh": "typo",
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect_err("unknown field must be rejected");
+
+    match err {
+        IpcError::PluginCrashedDuringCall {
+            plugin_id, command, ..
+        } => {
+            assert_eq!(plugin_id, STORAGE_PLUGIN_ID);
+            assert_eq!(command, "read_file");
         }
         other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
     }

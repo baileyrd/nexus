@@ -4,6 +4,7 @@
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{StorageReadFileArgs, StorageReadFileResult};
 use crate::{FileFilter, StorageEngine};
 
 use super::shared::{exec_err, is_forge_metadata_path, parse_args, path_arg, to_value};
@@ -17,16 +18,27 @@ pub(crate) fn query_files(engine: &StorageEngine, args: &Value) -> Result<Value,
 }
 
 pub(crate) fn read_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "read_file")?;
-    match engine.read_file(&path) {
-        Ok(bytes) => Ok(serde_json::json!({ "bytes": bytes })),
+    // #190 / R7 — typed args + result via the existing
+    // `StorageReadFileArgs` / `StorageReadFileResult` in `ipc.rs`,
+    // both of which carry `#[serde(deny_unknown_fields)]`. The
+    // previous hand-rolled `path_arg` lookup + `json!` reply was
+    // invisible to both the `ipc_strictness` gate and the schemars
+    // schema generator (see `crates/nexus-bootstrap/tests/
+    // ipc_strictness.rs`); routing through `parse_args`/`to_value`
+    // brings it under the same drift + unknown-field guarantees the
+    // rest of the storage handlers already have.
+    let typed: StorageReadFileArgs = parse_args(args, "read_file")?;
+    let path = typed.path;
+    let bytes = match engine.read_file(&path) {
+        Ok(b) => Some(b),
         // Missing files are an expected outcome for callers probing
         // `.forge/workspace.json` on first boot, etc. Return a typed
         // null rather than an error so the IPC bridge doesn't surface
         // it as `PluginCrashedDuringCall`.
-        Err(crate::StorageError::FileNotFound(_)) => Ok(serde_json::json!({ "bytes": null })),
-        Err(e) => Err(exec_err(format!("read_file '{path}': {e}"))),
-    }
+        Err(crate::StorageError::FileNotFound(_)) => None,
+        Err(e) => return Err(exec_err(format!("read_file '{path}': {e}"))),
+    };
+    to_value(&StorageReadFileResult { bytes }, "read_file")
 }
 
 pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
