@@ -37,7 +37,10 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::json;
 
 use crate::config::{McpMergeSkipReason, McpServerSpec, McpTransport, McpUnregisterError};
-use crate::ipc::{McpConnectReply, McpDisconnectMissReply, McpServerArgs, McpServerEntry};
+use crate::ipc::{
+    McpConnectReply, McpDisconnectMissReply, McpPromptEntry, McpResourceEntry, McpServerArgs,
+    McpServerEntry, McpToolEntry,
+};
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{McpClientError, McpHostConfig};
 
@@ -496,8 +499,16 @@ impl CorePlugin for McpHostPlugin {
             }
 
             HANDLER_LIST_TOOLS => {
-                let server = str_arg(args, "server")?;
+                // #190 / R7 — strict-parse args via `McpServerArgs`, reply
+                // via `Vec<McpToolEntry>`. Same parse-error-surfacing
+                // posture as `HANDLER_CONNECT` above.
+                let parsed: Result<McpServerArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let McpServerArgs { server } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("list_tools: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let client = pool
                         .get_or_connect(&server, &cfg)
@@ -505,7 +516,7 @@ impl CorePlugin for McpHostPlugin {
                         .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let tools = lock.list_tools().await.map_err(map_client_err)?;
-                    let arr = tools
+                    let arr: Vec<McpToolEntry> = tools
                         .iter()
                         .map(|t| {
                             // rmcp stores the schema as Arc<JsonObject>;
@@ -514,20 +525,28 @@ impl CorePlugin for McpHostPlugin {
                             // model verbatim.
                             let input_schema =
                                 serde_json::Value::Object(t.input_schema.as_ref().clone());
-                            json!({
-                                "name": t.name,
-                                "description": t.description,
-                                "input_schema": input_schema,
-                            })
+                            McpToolEntry {
+                                name: t.name.to_string(),
+                                description: t.description.as_ref().map(|d| d.to_string()),
+                                input_schema: Some(input_schema),
+                            }
                         })
-                        .collect::<Vec<_>>();
-                    Ok(serde_json::Value::Array(arr))
+                        .collect();
+                    serde_json::to_value(&arr).map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("list_tools: serialize reply: {e}"),
+                    })
                 }))
             }
 
             HANDLER_LIST_RESOURCES => {
-                let server = str_arg(args, "server")?;
+                let parsed: Result<McpServerArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let McpServerArgs { server } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("list_resources: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let client = pool
                         .get_or_connect(&server, &cfg)
@@ -535,24 +554,33 @@ impl CorePlugin for McpHostPlugin {
                         .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let resources = lock.list_resources().await.map_err(map_client_err)?;
-                    let arr = resources
+                    // `Resource` is `rmcp::model::Annotated<RawResource>` which
+                    // only exposes the inner via `Deref`, so we read fields by
+                    // reference + clone rather than moving out.
+                    let arr: Vec<McpResourceEntry> = resources
                         .iter()
-                        .map(|r| {
-                            json!({
-                                "uri": r.uri,
-                                "name": r.name,
-                                "description": r.description,
-                                "mime_type": r.mime_type,
-                            })
+                        .map(|r| McpResourceEntry {
+                            uri: r.uri.clone(),
+                            name: Some(r.name.clone()),
+                            description: r.description.clone(),
+                            mime_type: r.mime_type.clone(),
                         })
-                        .collect::<Vec<_>>();
-                    Ok(serde_json::Value::Array(arr))
+                        .collect();
+                    serde_json::to_value(&arr).map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("list_resources: serialize reply: {e}"),
+                    })
                 }))
             }
 
             HANDLER_LIST_PROMPTS => {
-                let server = str_arg(args, "server")?;
+                let parsed: Result<McpServerArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let McpServerArgs { server } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("list_prompts: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let client = pool
                         .get_or_connect(&server, &cfg)
@@ -560,16 +588,17 @@ impl CorePlugin for McpHostPlugin {
                         .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let prompts = lock.list_prompts().await.map_err(map_client_err)?;
-                    let arr = prompts
+                    let arr: Vec<McpPromptEntry> = prompts
                         .iter()
-                        .map(|p| {
-                            json!({
-                                "name": p.name,
-                                "description": p.description,
-                            })
+                        .map(|p| McpPromptEntry {
+                            name: p.name.clone(),
+                            description: p.description.clone(),
                         })
-                        .collect::<Vec<_>>();
-                    Ok(serde_json::Value::Array(arr))
+                        .collect();
+                    serde_json::to_value(&arr).map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("list_prompts: serialize reply: {e}"),
+                    })
                 }))
             }
 
@@ -750,14 +779,31 @@ disabled = true
     }
 
     #[test]
-    fn async_handler_without_server_arg_returns_none() {
+    fn async_handler_without_server_arg_surfaces_strict_parse_error() {
+        // #190 / R7 — previously `str_arg(args, "server")?` quietly
+        // returned `None` from `dispatch_async`, the kernel then fell
+        // back to sync dispatch, and the sync arm errored with the
+        // misleading "handler_id N requires dispatch_async". Now the
+        // missing `server` field surfaces through the future as a
+        // clean `PluginError::ExecutionFailed { reason: "list_tools:
+        // invalid args: …" }`.
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        // Missing "server" arg → str_arg returns None → dispatch_async returns None
-        let result = plugin.dispatch_async(HANDLER_LIST_TOOLS, &json!({}));
-        assert!(result.is_none());
+        let fut = plugin
+            .dispatch_async(HANDLER_LIST_TOOLS, &json!({}))
+            .expect("dispatch_async must return a future (not None) so the parse error reaches the caller");
+        let err = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(fut)
+            .expect_err("missing 'server' field must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid args") && msg.contains("server"),
+            "error should mention missing 'server' field, got: {msg}",
+        );
     }
 
     #[test]
