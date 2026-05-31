@@ -1,23 +1,36 @@
 //! Status-domain handlers: `status`, `file_status`, `file_statuses`,
 //! `blame`, `lfs_status`.
+//!
+//! #190 / R7 — `status`, `file_statuses`, and `blame` previously emitted
+//! ad-hoc `json!` shapes that bypassed the schemars schema generator.
+//! They now materialise into the typed `GitStatusReply`, `Vec<GitFileStatus>`,
+//! and `Vec<GitBlameEntry>` shapes defined in `crate::ipc`. `file_status`
+//! still returns the bare single-character marker string (well-defined
+//! shape, no struct needed) and `lfs_status` still emits an ad-hoc
+//! object — typed counterparts would need new `GitLfsStatusReply`-shaped
+//! structs and are deferred.
 
 use std::path::Path;
 
 use nexus_plugins::PluginError;
 use serde_json::{json, Value};
 
+use crate::ipc::{GitBlameEntry, GitFileStatus, GitStatusReply};
 use crate::GitWorkerHandle;
 
-use super::shared::{map_err, path_arg};
+use super::shared::{map_err, path_arg, to_value};
 
 pub(crate) fn status(h: &GitWorkerHandle) -> Result<Value, PluginError> {
     let state = h.with(|e| e.state()).map_err(map_err)?;
-    Ok(json!({
-        "branch": state.branch,
-        "head": state.head_oid,
-        "is_dirty": state.is_dirty,
-        "repo_state": format!("{:?}", state.repo_state),
-    }))
+    to_value(
+        &GitStatusReply {
+            branch: state.branch,
+            head: state.head_oid,
+            is_dirty: state.is_dirty,
+            repo_state: format!("{:?}", state.repo_state),
+        },
+        "status",
+    )
 }
 
 pub(crate) fn file_status(
@@ -25,6 +38,11 @@ pub(crate) fn file_status(
     args: &Value,
     forge_root: &Path,
 ) -> Result<Value, PluginError> {
+    // `file_status` returns a single-character marker (`"M"`, `"S"`,
+    // `"?"`, …) as a bare JSON string. The shape is well-defined and
+    // documented on `FileStatus::marker`; wrapping it in a typed
+    // struct would just add a `{ marker: "M" }` envelope without
+    // tightening the contract.
     let path = path_arg(args, forge_root)?;
     let status = h.with(move |e| e.file_status(&path)).map_err(map_err)?;
     Ok(json!(status.marker()))
@@ -32,16 +50,14 @@ pub(crate) fn file_status(
 
 pub(crate) fn file_statuses(h: &GitWorkerHandle) -> Result<Value, PluginError> {
     let statuses = h.with(|e| e.file_statuses()).map_err(map_err)?;
-    let arr: Vec<_> = statuses
-        .iter()
-        .map(|s| {
-            json!({
-                "path": s.path.to_string_lossy(),
-                "status": format!("{:?}", s.status),
-            })
+    let arr: Vec<GitFileStatus> = statuses
+        .into_iter()
+        .map(|s| GitFileStatus {
+            path: s.path.to_string_lossy().into_owned(),
+            status: format!("{:?}", s.status),
         })
         .collect();
-    Ok(Value::Array(arr))
+    to_value(&arr, "file_statuses")
 }
 
 pub(crate) fn blame(
@@ -54,20 +70,18 @@ pub(crate) fn blame(
     // we need to render as ISO-8601 for the shell side.
     let path = path_arg(args, forge_root)?;
     let entries = h.with(move |e| e.blame(&path)).map_err(map_err)?;
-    let arr: Vec<_> = entries
-        .iter()
-        .map(|e| {
-            json!({
-                "commit_hash": e.commit_hash,
-                "author": e.author,
-                "date": e.date.to_rfc3339(),
-                "message": e.message,
-                "start_line": e.start_line,
-                "end_line": e.end_line,
-            })
+    let arr: Vec<GitBlameEntry> = entries
+        .into_iter()
+        .map(|e| GitBlameEntry {
+            commit_hash: e.commit_hash,
+            author: e.author,
+            date: e.date.to_rfc3339(),
+            message: e.message,
+            start_line: u32::try_from(e.start_line).unwrap_or(u32::MAX),
+            end_line: u32::try_from(e.end_line).unwrap_or(u32::MAX),
         })
         .collect();
-    Ok(Value::Array(arr))
+    to_value(&arr, "blame")
 }
 
 /// BL-091 — snapshot of Git-LFS state for `lfs_status`.
