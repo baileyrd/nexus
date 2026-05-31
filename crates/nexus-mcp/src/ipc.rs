@@ -334,6 +334,60 @@ pub struct McpUnregisterServerReply {
     pub actual_owner: Option<String>,
 }
 
+/// Args for `unregister_tool` (DG-39). #190 — typed counterpart of
+/// the prior `str_arg(args, "name")` lookup.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpUnregisterToolArgs {
+    /// Tool name to unregister from the dynamic-tool registry.
+    pub name: String,
+}
+
+/// Return type for `register_tool` (DG-39). #190 — typed counterpart
+/// of the prior `json!({"ok": true})` reply.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpRegisterToolReply {
+    /// Always `true` when the tool was registered.
+    pub ok: bool,
+}
+
+/// Return type for `unregister_tool` (DG-39). #190 — typed counterpart
+/// of the prior `json!({"removed": bool, "name": ...})` reply.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct McpUnregisterToolReply {
+    /// `true` iff a registration was removed (i.e. the tool was
+    /// present). `false` is the no-op success case.
+    pub removed: bool,
+    /// Echoed tool name.
+    pub name: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
