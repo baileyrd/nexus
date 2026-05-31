@@ -130,13 +130,47 @@ impl KernelPluginContext {
     /// `PluginInfo` reporter and tests; live gates should call
     /// [`has_capability`] instead so the read lock is held for the
     /// shortest possible window.
+    ///
+    /// #199 / R16 — recovers from a poisoned lock rather than
+    /// propagating the panic. With `panic = "abort"` enabled in the
+    /// release profile, a `.expect()` here would convert any prior
+    /// writer-side panic into a whole-process abort. The capability
+    /// `RwLock` is only mutated by `revoke_capability`, which writes
+    /// via `caps.remove(cap)` — there's no torn-write state to
+    /// observe, so reading the inner value on poison is safe and
+    /// fail-closed (the worst case is observing a `Capability` that's
+    /// already been removed, which the caller would have rejected
+    /// anyway).
     #[must_use]
     pub fn capabilities_snapshot(&self) -> CapabilitySet {
-        self.capabilities.read().expect("caps lock").clone()
+        match self.capabilities.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                tracing::error!(
+                    plugin_id = %self.plugin_id,
+                    "capabilities RwLock poisoned — reading inner state (see #199)",
+                );
+                poisoned.into_inner().clone()
+            }
+        }
     }
 
     fn caps_contains(&self, cap: Capability) -> bool {
-        self.capabilities.read().expect("caps lock").contains(cap)
+        // #199 / R16 — same recovery posture as `capabilities_snapshot`
+        // above. This sits on the hot IPC-dispatch path; a poisoned
+        // RwLock from a `revoke_capability` panic would otherwise
+        // abort the whole runtime under `panic = "abort"`.
+        match self.capabilities.read() {
+            Ok(guard) => guard.contains(cap),
+            Err(poisoned) => {
+                tracing::error!(
+                    plugin_id = %self.plugin_id,
+                    requested_cap = %cap.as_str(),
+                    "capabilities RwLock poisoned during caps_contains — reading inner state (see #199)",
+                );
+                poisoned.into_inner().contains(cap)
+            }
+        }
     }
 
     /// Body of [`ipc_call`](Self::ipc_call) extracted so the public
@@ -678,6 +712,45 @@ mod tests {
         let ctx = make_context(dir.path(), &[Capability::KvRead]);
         assert!(ctx.has_capability(Capability::KvRead));
         assert!(!ctx.has_capability(Capability::KvWrite));
+    }
+
+    #[test]
+    fn caps_recover_from_poisoned_lock() {
+        // #199 / R16 — poisoning the capabilities `RwLock` (by panicking
+        // inside a write-side closure) must not propagate to readers.
+        // Both `capabilities_snapshot` and the private `caps_contains`
+        // (exercised here via `has_capability`) recover with
+        // `PoisonError::into_inner` and continue serving the inner
+        // state. Without the recovery, every subsequent read would
+        // `.expect()`-panic; under `panic = "abort"` that would abort
+        // the whole runtime over an unrelated subsystem failure.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = make_context(dir.path(), &[Capability::KvRead]);
+        let caps_handle = ctx.caps_handle();
+
+        // Poison the RwLock by panicking while holding the write guard.
+        let caps_for_panic = Arc::clone(&caps_handle);
+        let _ = std::thread::spawn(move || {
+            let _guard = caps_for_panic.write().unwrap();
+            panic!("intentional poison for test");
+        })
+        .join();
+
+        // Sanity: the lock is now poisoned.
+        assert!(caps_handle.read().is_err(), "lock should be poisoned");
+
+        // The recovery paths still serve the original cap.
+        assert!(
+            ctx.has_capability(Capability::KvRead),
+            "has_capability must recover from a poisoned RwLock",
+        );
+        assert!(
+            !ctx.has_capability(Capability::KvWrite),
+            "recovery must not invent caps the plugin doesn't hold",
+        );
+        let snapshot = ctx.capabilities_snapshot();
+        assert!(snapshot.contains(Capability::KvRead));
+        assert!(!snapshot.contains(Capability::KvWrite));
     }
 
     #[tokio::test]

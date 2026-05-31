@@ -140,6 +140,16 @@ Example: `nexus content read notes/foo.md` from the CLI.
 
 The TUI, MCP, and shell take the same path with a different transport in front of step 3.
 
+### Lock-poison policy (#199 / R16)
+
+`profile.release` sets `panic = "abort"` (`Cargo.toml:242`), so a `.expect("mutex poisoned")` on a poisoned lock converts a single subsystem panic into a whole-process abort. ~88 such sites exist across the workspace today.
+
+Policy going forward:
+
+- **Hot-path reads on data with no torn-write states** (capability snapshots, `caps_contains` — `crates/nexus-kernel/src/context_impl.rs:130-180`) recover via `PoisonError::into_inner` and log a structured `tracing::error!` so the audit trail records the recovery. Worst case: the reader observes an already-removed cap, which the caller would have rejected anyway. Fail-closed.
+- **Loader-side write paths and the loader `lock()` handle itself** (`crates/nexus-plugins/src/loader.rs`) still panic on poison. Recovering with stale data on these paths could let an IPC call slip past a half-completed cap-matrix registration; the panic is the security-correct behavior even though it costs an abort.
+- **All new `.lock()/.read()/.write().expect()` sites** must include a comment explaining which tier they're in, so the next reviewer doesn't have to re-derive the call.
+
 ## How to add a backend capability (the right way)
 
 Symptom — "I want a new thing the frontend can do".
