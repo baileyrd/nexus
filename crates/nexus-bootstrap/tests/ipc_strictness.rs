@@ -15,16 +15,19 @@
 //! calling into the comment store, so an extra field hits the strict
 //! deser path and surfaces as `PluginCrashedDuringCall`.
 //!
-//! NOTE: a few subsystems (`nexus-git`, `nexus-mcp`, `nexus-lsp`,
-//! `nexus-dap` reply paths) still bypass typed structs and read
-//! fields off `serde_json::Value` directly via hand-rolled helpers.
-//! Those handlers cannot be policed by this gate; they're tracked
-//! under issue #190 and follow-ups to refactor them to
-//! `parse_args::<TypedStruct>(...)`. `com.nexus.storage::read_file`
-//! was previously on that list — it migrated to `StorageReadFileArgs`
-//! / `StorageReadFileResult` in PR addressing #190, so the strict
-//! gate now covers it (see `storage_read_file_rejects_unknown_field`
-//! below).
+//! NOTE: a few subsystems (`nexus-mcp`, `nexus-lsp`, `nexus-dap`
+//! reply paths) still bypass typed structs and read fields off
+//! `serde_json::Value` directly via hand-rolled helpers. Those
+//! handlers cannot be policed by this gate; they're tracked under
+//! issue #190 and follow-ups to refactor them to
+//! `parse_args::<TypedStruct>(...)`.
+//!
+//! `com.nexus.storage::read_file` (previously on the bypassed list)
+//! migrated to `StorageReadFileArgs` / `StorageReadFileResult` in PR
+//! #212. The `nexus-git` branch handlers (`switch_branch`,
+//! `create_branch`, `delete_branch`, `push`) migrated in the next PR
+//! against #190 to `GitBranchArgs` / `GitPushArgs` / `GitOk`. Both
+//! are now policed below.
 
 use std::time::Duration;
 
@@ -34,6 +37,7 @@ use nexus_kernel::{Ipc as _, IpcError};
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const COMMENTS_PLUGIN_ID: &str = "com.nexus.comments";
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
+const GIT_PLUGIN_ID: &str = "com.nexus.git";
 
 fn scratch_forge() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -135,6 +139,49 @@ async fn storage_read_file_rejects_unknown_field() {
         } => {
             assert_eq!(plugin_id, STORAGE_PLUGIN_ID);
             assert_eq!(command, "read_file");
+        }
+        other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
+    }
+}
+
+/// #190 / R7 — `com.nexus.git::switch_branch` was previously a
+/// hand-rolled `key_string` + `json!({"ok": true})` handler. It
+/// migrated to typed `GitBranchArgs` / `GitOk`, both
+/// `deny_unknown_fields`. This test fires `{ name, namee }` against
+/// the live runtime and asserts the strict deser rejects the typo.
+/// Targets `switch_branch` (vs. `create_branch` / `delete_branch` /
+/// `push`) because all four sit on the same `GitBranchArgs`-shaped
+/// parse path — one assertion covers the family.
+#[tokio::test]
+async fn git_switch_branch_rejects_unknown_field() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // No baseline call — `switch_branch("main")` against a scratch
+    // forge with no `.git/` would error inside the worker for an
+    // unrelated reason (no repo). The unknown-field rejection runs
+    // *before* the handler body, so this still proves the strict
+    // gate fires.
+    let err = runtime
+        .context
+        .ipc_call(
+            GIT_PLUGIN_ID,
+            "switch_branch",
+            serde_json::json!({
+                "name": "main",
+                "namee": "typo",
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect_err("unknown field must be rejected");
+
+    match err {
+        IpcError::PluginCrashedDuringCall {
+            plugin_id, command, ..
+        } => {
+            assert_eq!(plugin_id, GIT_PLUGIN_ID);
+            assert_eq!(command, "switch_branch");
         }
         other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
     }
