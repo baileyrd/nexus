@@ -2,15 +2,25 @@
 //!
 //! Manages pragma configuration and incremental schema migrations for the
 //! nexus index database.
-
-// The public API in this module is consumed by future tasks in this crate.
-// Suppress dead-code lints until the callers are wired up.
-#![allow(dead_code)]
+//!
+//! #202 / R19 — the module-wide `#![allow(dead_code)]` was previously
+//! suppressing every `pub` item here. Today `configure_pragmas` and
+//! `migrate` are only reached from the `index.rs` test fixture, so the
+//! per-item allow on [`CURRENT_VERSION`] (the one constant that has no
+//! caller yet) is sufficient and the broad allow has been removed.
 
 use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
+///
+/// #202 / R19 — exported as part of the public schema-introspection
+/// surface; no in-crate caller today beyond the migration tests, but
+/// the value is the canonical answer to "what version does this build
+/// know how to drive". Kept `pub` so external consumers can compare;
+/// `#[allow(dead_code)]` documents the intentional unused-locally
+/// state without leaking the suppression to the rest of the module.
+#[allow(dead_code)]
 pub const CURRENT_VERSION: u32 = 8;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
