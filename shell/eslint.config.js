@@ -27,6 +27,7 @@
 
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
+import jsxA11y from 'eslint-plugin-jsx-a11y'
 
 export default tseslint.config(
   {
@@ -51,6 +52,7 @@ export default tseslint.config(
     files: ['src/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
+      'jsx-a11y': jsxA11y,
     },
     languageOptions: {
       ecmaVersion: 2022,
@@ -120,6 +122,23 @@ export default tseslint.config(
       // `clientLogger.ts` is the legitimate owner of `console.*` and is
       // exempted in the override block below.
       'no-console': ['error', { allow: ['warn', 'error'] }],
+      // #197 / R14 — a11y baseline via `eslint-plugin-jsx-a11y`. The
+      // recommended preset covers the high-signal markup mistakes
+      // (missing `alt`, label-for-control, keyboard handlers on
+      // non-interactive elements, role validity, …). Set to `warn`
+      // rather than `error` on first introduction: about half of the
+      // shell's JSX surface has not been audited for keyboard /
+      // screen-reader access yet, and gating PRs on a hard error
+      // would force every contributor to land a wide cleanup. As
+      // sites get fixed, individual rules can graduate to `error`
+      // via per-rule overrides, and the preset itself can flip to
+      // `error` once the warning count is at zero.
+      ...Object.fromEntries(
+        Object.keys(jsxA11y.configs.recommended.rules).map((rule) => [
+          rule,
+          'warn',
+        ]),
+      ),
     },
   },
   {

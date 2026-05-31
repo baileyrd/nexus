@@ -15,6 +15,16 @@ mod block;
 pub mod core_plugin;
 pub mod database_view;
 mod error;
+// #202 / R19 — `excerpt_map` is the Step-1 primitive layer of an
+// in-progress excerpt-mapping feature; Step 2 (the `apply_transaction`
+// wire-up) hasn't landed yet so every item in the module is currently
+// uncalled. The `#[allow(dead_code)]` lives here, on the module
+// declaration, rather than as an inner attribute inside the file —
+// the original `#![allow(dead_code)]` was flagged by the audit as
+// the kind of broad inner suppression that silently shadows real
+// findings once the module ships. As Step 2 lands, this attribute
+// can come off entirely.
+#[allow(dead_code)]
 pub(crate) mod excerpt_map;
 pub(crate) mod handlers;
 pub mod ipc;

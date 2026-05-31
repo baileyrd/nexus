@@ -27,8 +27,11 @@
 //! These primitives are intentionally Session-agnostic: they consume
 //! `&str` + line numbers and return `Option<usize>`. Step 2 of
 //! Approach B wires them into `apply_transaction`'s text-op path.
-
-#![allow(dead_code)] // Step 1 primitives; step 2 wires them up.
+//!
+//! #202 / R19 — the module-wide `#![allow(dead_code)]` previously
+//! here has been moved to the module declaration in `lib.rs` so the
+//! suppression is visible at the import site rather than buried in
+//! the file body. It comes off once Step 2 wires the primitives in.
 
 /// Byte offsets of every line start in a source string. Built once
 /// per source text; reused across many position translations against
