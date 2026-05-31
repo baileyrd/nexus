@@ -47,6 +47,8 @@ Rationale per pair is in the inline comments — most reduce to "ipc_call instea
 
 CLI, TUI, MCP server, and the Tauri shell all reach storage / AI / editor / etc. through `ipc_call`. The Tauri bridge in `shell/src-tauri/src/lib.rs` is intentionally thin — see [`shell.md`](shell.md). New backend capability ⇒ new IPC handler in the right service crate, not a new direct dependency from a frontend.
 
+**Timeout & cancellation semantics (#200 / R17).** `ipc_call` enforces a per-dispatch deadline (`IpcError::Timeout`) and exposes a cooperative `CancellationToken` to the handler (`IpcError::Cancelled`). For **async** handlers (`dispatch_async`) the kernel races the future against the timeout/cancel token in a `tokio::select!`, so both fire promptly. For **sync** handlers (the default `dispatch` path running on `spawn_blocking`), the deadline releases the *caller* and frees its blocking-pool *wait*, but Rust offers no preemption inside the blocking body — the handler keeps running until it either returns or polls `nexus_kernel::ipc_cancel_token().is_cancelled()` at a safe yield point. Long-running sync handlers should poll the token, chunk their work, or convert to `dispatch_async`. See `crates/nexus-kernel/src/context_impl.rs:226-262`.
+
 ### 4. Capabilities gate everything
 
 `fs.read`, `fs.write`, `net.http`, `process.spawn`, `ipc.call`, `events.publish`, `ai.chat`, etc. Every kernel-mediated operation checks a capability before it runs. The full inventory + risk classification is at [`capabilities.md`](capabilities.md). Per-handler capability assignment is at [`ipc-handlers.md`](ipc-handlers.md), declared once in `crates/nexus-bootstrap/cap_matrix.toml`.

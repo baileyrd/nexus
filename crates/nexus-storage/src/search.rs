@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use tantivy::schema::{Field, Schema, Value, INDEXED, STORED, TEXT};
-use tantivy::{doc, Index, IndexWriter, ReloadPolicy, TantivyDocument};
+use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
 use tantivy::query::QueryParser;
 use tantivy::collector::TopDocs;
 use tantivy::snippet::SnippetGenerator;
@@ -34,6 +34,13 @@ pub struct SearchResult {
 pub struct SearchIndex {
     index: Index,
     writer: Mutex<IndexWriter>,
+    /// #192 / R9 — long-lived reader. Tantivy's `IndexReader` is the
+    /// expensive handle (it holds the segment cache); a `Searcher` is
+    /// cheap to derive per query via `reader.searcher()`. We build the
+    /// reader once at `open()` and call `reload()` after each writer
+    /// commit so newly-added blocks become visible. Previously the
+    /// reader was rebuilt inside `search()` on every call.
+    reader: IndexReader,
     path_field: Field,
     block_id_field: Field,
     block_type_field: Field,
@@ -76,9 +83,14 @@ impl SearchIndex {
         };
 
         let writer = index.writer(50_000_000)?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::Manual)
+            .try_into()?;
         Ok(Self {
             index,
             writer: Mutex::new(writer),
+            reader,
             path_field,
             block_id_field,
             block_type_field,
@@ -99,9 +111,14 @@ impl SearchIndex {
 
         let index = Index::create_in_ram(schema);
         let writer = index.writer(50_000_000)?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::Manual)
+            .try_into()?;
         Ok(Self {
             index,
             writer: Mutex::new(writer),
+            reader,
             path_field,
             block_id_field,
             block_type_field,
@@ -150,6 +167,10 @@ impl SearchIndex {
     pub fn commit(&self) -> Result<(), StorageError> {
         let mut writer = self.writer.lock().expect("writer mutex poisoned");
         writer.commit()?;
+        // #192 — reload the cached reader so subsequent `search()`
+        // calls see the new segments without rebuilding the reader on
+        // every query.
+        self.reader.reload()?;
         Ok(())
     }
 
@@ -162,14 +183,10 @@ impl SearchIndex {
     /// Returns [`StorageError::Search`] if the query string is malformed or
     /// Tantivy encounters an internal error during search.
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchResult>, StorageError> {
-        let reader = self
-            .index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::Manual)
-            .try_into()?;
-        reader.reload()?;
-
-        let searcher = reader.searcher();
+        // #192 — use the long-lived reader cached on `self`. `commit()`
+        // calls `reload()` so newly-written segments are visible
+        // without rebuilding the reader on every query.
+        let searcher = self.reader.searcher();
         let query_parser = QueryParser::for_index(&self.index, vec![self.content_field]);
         let query = query_parser
             .parse_query(query_str)
@@ -238,6 +255,9 @@ impl SearchIndex {
         let mut writer = self.writer.lock().expect("writer mutex poisoned");
         writer.delete_all_documents()?;
         writer.commit()?;
+        // #192 — reload so subsequent searches see the empty segment
+        // set. Mirrors the reload in `commit()`.
+        self.reader.reload()?;
         Ok(())
     }
 }

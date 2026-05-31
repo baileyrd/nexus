@@ -143,6 +143,104 @@ fn ipc_consumers_do_not_direct_dep_on_forbidden_subsystems() {
     );
 }
 
+/// #201 / R18 — allowlist variant. The `FORBIDDEN` table above is a
+/// denylist: a new frontend/proxy crate could link a subsystem
+/// directly and still pass because it's not in the table. This
+/// complementary check encodes the *positive* contract for the IPC
+/// proxy crates — they may only link to a fixed set of in-tree
+/// `nexus-*` crates (kernel surface + plugin contract + bootstrap +
+/// types), with everything else going through `ipc_call`. Adding any
+/// other `nexus-*` dep to one of these crates is a contract change
+/// that should be visible in the test diff.
+///
+/// Frontend binaries (`nexus-cli`, `nexus-tui`) are intentionally
+/// excluded — they legitimately link many subsystems to assemble the
+/// runtime, and tightening their allowlist is a separate refactor
+/// tracked by the broader microkernel-isolation work.
+const IPC_PROXY_ALLOWLIST: &[(&str, &[&str])] = &[
+    (
+        "nexus-mcp",
+        &[
+            "nexus-kernel",
+            "nexus-plugins",
+            "nexus-plugin-api",
+            "nexus-types",
+            "nexus-bootstrap",
+        ],
+    ),
+    (
+        "nexus-acp",
+        &[
+            "nexus-kernel",
+            "nexus-plugins",
+            "nexus-plugin-api",
+            "nexus-types",
+            "nexus-bootstrap",
+        ],
+    ),
+    (
+        "nexus-remote",
+        &[
+            "nexus-kernel",
+            "nexus-plugins",
+            "nexus-plugin-api",
+            "nexus-types",
+            "nexus-bootstrap",
+        ],
+    ),
+];
+
+#[test]
+fn ipc_proxies_only_link_allowed_in_tree_crates() {
+    let workspace_root = workspace_root();
+    let mut violations = Vec::new();
+    for (crate_name, allowed) in IPC_PROXY_ALLOWLIST {
+        let manifest = workspace_root
+            .join("crates")
+            .join(crate_name)
+            .join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).unwrap_or_else(|e| {
+            panic!("failed to read {}: {e}", manifest.display());
+        });
+        let parsed: toml::Value = toml::from_str(&text).unwrap_or_else(|e| {
+            panic!("failed to parse {}: {e}", manifest.display());
+        });
+
+        let mut check_block = |label: &str, block: &toml::value::Table| {
+            for (dep_name, _) in block {
+                if !dep_name.starts_with("nexus-") {
+                    continue;
+                }
+                if !allowed.contains(&dep_name.as_str()) {
+                    violations.push(format!(
+                        "  {crate_name}/Cargo.toml: [{label}].{dep_name} \
+                         is not on the IPC-proxy allowlist for {crate_name}. \
+                         Allowed in-tree deps: {allowed:?}. Route the call \
+                         through `ipc_call` instead, or update \
+                         IPC_PROXY_ALLOWLIST with a comment explaining why."
+                    ));
+                }
+            }
+        };
+
+        if let Some(deps) = parsed.get("dependencies").and_then(toml::Value::as_table) {
+            check_block("dependencies", deps);
+        }
+        if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
+            for (cfg_key, cfg_block) in target {
+                if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table) {
+                    check_block(&format!("target.'{cfg_key}'.dependencies"), deps);
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "ipc-proxy allowlist violated:\n{}",
+        violations.join("\n"),
+    );
+}
+
 /// Self-test for the cfg-deps extension (issue #83): synthesise a
 /// manifest with a forbidden cfg-conditional dep and confirm the
 /// helper logic flags it. Guards against silently-broken extension

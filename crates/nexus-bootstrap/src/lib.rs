@@ -139,6 +139,13 @@ pub struct Runtime {
     /// itself exposes to plugins. Direct loader access is for
     /// host-internal lifecycle plumbing, not for ergonomic
     /// shortcuts past the IPC layer.
+    ///
+    /// #201 / R18 — `#[doc(hidden)]` so rustdoc / IDE completion
+    /// don't surface the loader as a casual handle. The field stays
+    /// `pub` because shell/bootstrap test consumers in different
+    /// crates need direct field access; the marker just discourages
+    /// new consumers from reaching for it when `context` would do.
+    #[doc(hidden)]
     pub loader: Arc<SharedPluginLoader>,
 }
 

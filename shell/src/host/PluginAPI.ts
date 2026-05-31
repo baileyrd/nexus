@@ -259,12 +259,14 @@ export function buildPluginAPI(
         }
       },
       setValue(key: string, value: unknown) {
-        try {
-          const store = registry.getService<{ set: (k: string, v: unknown) => void }>('configStore')
-          store.set(key, value)
-        } catch {
-          clientLogger.warn('[PluginAPI] configuration-service not loaded yet')
-        }
+        // #193 / R10 — surface a clear error instead of swallowing
+        // the write. A silent `clientLogger.warn` made config writes
+        // during early activate vanish without the caller noticing,
+        // which is the exact failure mode #193 flags. Callers that
+        // legitimately want a startup-safe write should gate on
+        // `registry.hasService('configStore')` first.
+        const store = registry.getService<{ set: (k: string, v: unknown) => void }>('configStore')
+        store.set(key, value)
       },
       onChange(key: string, handler: (v: unknown) => void) {
         // Subscribes to config store changes for a specific key
@@ -291,15 +293,17 @@ export function buildPluginAPI(
     // Available after core.notification-service has loaded
     notifications: {
       show(notification) {
-        try {
-          const queue = registry.getService<{
-            push: (n: typeof notification) => void
-          }>('notificationQueue')
-          queue.push(notification)
-        } catch {
-          // Fallback to console if notification service isn't loaded
-          clientLogger.info(`[Notification] ${notification.message}`)
-        }
+        // #193 / R10 — surface a clear error instead of silently
+        // mirroring the message to the client log. A logged-only
+        // notification looks the same as a delivered one to the
+        // calling plugin, which is the exact silent-no-op failure
+        // mode #193 flags. Callers that legitimately fire-and-forget
+        // notifications during early activate should gate on
+        // `registry.hasService('notificationQueue')` first.
+        const queue = registry.getService<{
+          push: (n: typeof notification) => void
+        }>('notificationQueue')
+        queue.push(notification)
       },
     },
 

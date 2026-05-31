@@ -3,6 +3,7 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { workspace } from '../../../workspace'
 import { SkillsView } from './SkillsView'
 import { skillsPaneViewCreator } from './SkillsPaneView'
+import { setSkillsRuntime } from './runtime'
 import {
   subscribeSkillsChanged,
   useSkillsStore,
@@ -118,6 +119,7 @@ export const skillsPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
+    setSkillsRuntime(api)
     const refresh = async () => {
       const store = useSkillsStore.getState()
       let available = false
