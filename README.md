@@ -6,7 +6,7 @@ The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shel
 
 ## Architecture
 
-Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate. The Cargo workspace has 35 members (the `shell/` desktop target is intentionally excluded — see [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for the full inventory); the most load-bearing are:
+Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate. The Cargo workspace has 38 members (the `shell/` desktop target is intentionally excluded — see [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for the full inventory); the most load-bearing are:
 
 ```
 nexus-kernel        Event bus, plugin lifecycle, capability enforcement, IPC dispatcher

@@ -59,4 +59,12 @@ plugin_id: string,
 /**
  * The command id.
  */
+command: string, } } | { "Cancelled": { 
+/**
+ * The target plugin id.
+ */
+plugin_id: string, 
+/**
+ * The command id.
+ */
 command: string, } };

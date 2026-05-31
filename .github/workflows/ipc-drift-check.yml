@@ -13,20 +13,14 @@
 name: IPC schema drift-check
 
 on:
+  # #194 / R2 follow-up: the hard-coded `paths:` filter let `IpcError::Cancelled`
+  # land without regenerating its TS binding because the change was in
+  # `nexus-plugin-api/src/error.rs` but plenty of *other* crates carry their
+  # own `#[ts(export, ...)]` types. Running on every PR is the safe default;
+  # `cargo test -p nexus-plugin-api --features ts-export` etc. are no-ops when
+  # nothing changed.
   pull_request:
     branches: [main]
-    paths:
-      - 'crates/nexus-storage/src/ipc.rs'
-      - 'crates/nexus-storage/Cargo.toml'
-      - 'crates/nexus-ai/src/ipc.rs'
-      - 'crates/nexus-ai/Cargo.toml'
-      - 'crates/nexus-bootstrap/tests/ipc_schema_emit.rs'
-      - 'crates/nexus-bootstrap/Cargo.toml'
-      - 'crates/nexus-bootstrap/schemas/ipc/**'
-      - 'crates/nexus-plugin-api/**'
-      - 'packages/nexus-extension-api/src/generated/**'
-      - 'scripts/check_ipc_drift.sh'
-      - '.github/workflows/ipc-drift-check.yml'
   push:
     branches: [main]
 

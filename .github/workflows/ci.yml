@@ -1,0 +1,84 @@
+# Repo-wide CI gate. Closes #184.
+#
+# Runs on every PR and on push to main:
+#   * Rust:  fmt --check, clippy -D warnings, test --workspace
+#   * pnpm:  lint, typecheck, test (shell + @nexus/extension-api)
+#
+# Reuses Swatinem/rust-cache like the existing ipc-drift-check workflow.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rust:
+    name: Rust (fmt / clippy / test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      # tauri / nexus-shell pulls in webkit2gtk and libsoup3 system libs; the
+      # workspace itself does not, but a few crates (e.g. nexus-audio) link
+      # against libasound / pkg-config at build time on linux.
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libssl-dev
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --no-fail-fast
+
+  pnpm:
+    name: pnpm (lint / typecheck / test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @nexus/extension-api (consumed by shell)
+        run: pnpm --filter @nexus/extension-api build
+
+      - name: Typecheck @nexus/extension-api
+        run: pnpm --filter @nexus/extension-api check
+
+      - name: Lint shell
+        run: pnpm --filter nexus-shell lint
+
+      - name: Typecheck shell
+        run: pnpm --filter nexus-shell typecheck
+
+      - name: Test shell
+        run: pnpm --filter nexus-shell test

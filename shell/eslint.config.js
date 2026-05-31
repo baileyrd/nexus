@@ -110,6 +110,29 @@ export default tseslint.config(
           },
         ],
       }],
+      // R19 / #202 — raw `console.*` bypasses `clientLogger`, which is the
+      // single sink that timestamps, level-tags, and (in prod) ships log
+      // lines through the Tauri bridge to `~/.nexus-shell/logs/`. `warn`/
+      // `error` are allowed (matches the eslint default and the ~75 sites
+      // that already surface user-visible warnings) but `log`/`info`/
+      // `debug`/`trace` must go through `getClientLogger()` or an explicit
+      // `eslint-disable-next-line no-console` with a comment justifying it.
+      // `clientLogger.ts` is the legitimate owner of `console.*` and is
+      // exempted in the override block below.
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+    },
+  },
+  {
+    // The two `clientLogger.ts` modules legitimately dispatch to `console.*`
+    // — they ARE the indirection #202 wants every other caller routed
+    // through. Without this override the lint rule would forbid its own
+    // sink.
+    files: [
+      'src/clientLogger.ts',
+      'src/host/clientLogger.ts',
+    ],
+    rules: {
+      'no-console': 'off',
     },
   },
 )
