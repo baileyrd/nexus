@@ -35,27 +35,24 @@ pub(crate) fn path_arg(
         .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| exec_err("missing 'path' argument".to_string()))?;
+    validate_path(forge_root, raw)
+}
+
+/// #190 — validate `path` against `forge_root` and return it as a
+/// `PathBuf` for libgit2's path-based APIs. Used by handlers that
+/// parse args through a typed `GitPathArgs` / `GitHunkArgs` struct
+/// (which `path_arg` can't, because the latter only sees the raw
+/// `serde_json::Value` and would reject the extra fields like
+/// `hunk_indices`).
+pub(crate) fn validate_path(forge_root: &Path, raw: &str) -> Result<PathBuf, PluginError> {
     nexus_types::paths::resolve_within(forge_root, raw)
         .map_err(|e| exec_err(format!("invalid 'path': {e}")))?;
     Ok(PathBuf::from(raw))
 }
 
-/// Extract the `hunk_indices` array from IPC args as `Vec<usize>`.
-pub(crate) fn hunk_indices_arg(args: &serde_json::Value) -> Result<Vec<usize>, PluginError> {
-    let arr = args
-        .get("hunk_indices")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| exec_err("missing 'hunk_indices' array argument".to_string()))?;
-    arr.iter()
-        .map(|v| {
-            v.as_u64()
-                .and_then(|n| usize::try_from(n).ok())
-                .ok_or_else(|| {
-                    exec_err("hunk_indices entries must be non-negative integers".to_string())
-                })
-        })
-        .collect()
-}
+// #190 — `hunk_indices_arg` removed; the staging handlers now
+// parse via `GitHunkArgs` and convert `Vec<u64>` → `Vec<usize>`
+// inline.
 
 /// Extract a plain string argument by its key name.
 ///
