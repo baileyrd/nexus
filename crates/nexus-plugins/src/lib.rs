@@ -154,7 +154,8 @@ pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 #[doc(hidden)]
 pub mod __testing {
     pub use crate::host_fns::{
-        register_host_fns, HOST_BUFFER_OVERFLOW, HOST_CAPABILITY_DENIED, HOST_ERROR, HOST_OK,
+        register_host_fns, HOST_BUFFER_OVERFLOW, HOST_CAPABILITY_DENIED, HOST_ERROR,
+        HOST_INTERNAL_ONLY, HOST_OK,
     };
 }
 pub use settings::SettingsManager;

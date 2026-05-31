@@ -26,6 +26,15 @@ pub const HOST_CAPABILITY_DENIED: i32 = -1001;
 /// Returned when the output buffer supplied by the plugin is too small.
 pub const HOST_BUFFER_OVERFLOW: i32 = -1002;
 
+/// #186 / R3 — Returned by `host::invoke_command` when the target handler
+/// is marked `internal = true` in the cap matrix. The WASM sandbox is
+/// always `TrustLevel::Community`, so internal-only handlers (e.g.
+/// `com.nexus.ai::resolve_credentials`) must reject WASM callers no matter
+/// what caps they hold. Distinct from `HOST_CAPABILITY_DENIED` so a guest
+/// can distinguish "you're missing a cap I could grant" from "this
+/// handler is out of reach to sandboxed plugins regardless of caps".
+pub const HOST_INTERNAL_ONLY: i32 = -1003;
+
 // ─── Audit-helper shims ───────────────────────────────────────────────────────
 
 fn deny_capability(plugin_id: &str, capability: &str) -> i32 {
@@ -500,11 +509,17 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
 /// via the [`IpcDispatcher`] injected into [`PluginData`] during
 /// bootstrap.
 ///
-/// Requires `IpcCall` capability. Returns bytes written on success,
-/// `HOST_BUFFER_OVERFLOW` when the JSON response exceeds `out_cap`,
-/// `HOST_CAPABILITY_DENIED` when the caller lacks `ipc.call`, or
-/// `HOST_ERROR` on any other failure (target not found, command not
-/// found, dispatch error, dispatcher not injected).
+/// Requires `IpcCall` capability **and** every per-handler capability
+/// the cap matrix gates the target command behind (`required_caller_caps_for_args`).
+/// Handlers marked `internal = true` are unreachable from the sandbox
+/// regardless of caps.
+///
+/// Returns bytes written on success, `HOST_BUFFER_OVERFLOW` when the JSON
+/// response exceeds `out_cap`, `HOST_CAPABILITY_DENIED` when the caller
+/// lacks `ipc.call` or a per-handler cap, `HOST_INTERNAL_ONLY` when the
+/// target handler is internal-only, or `HOST_ERROR` on any other failure
+/// (target not found, command not found, dispatch error, dispatcher not
+/// injected).
 fn register_host_invoke_command(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
     linker
         .func_wrap(
@@ -564,6 +579,47 @@ fn register_host_invoke_command(linker: &mut Linker<PluginData>) -> Result<(), P
                     );
                     return HOST_ERROR;
                 };
+
+                // #186 / R3 — apply the same per-handler cap matrix the
+                // kernel context applies (`crates/nexus-kernel/src/
+                // context_impl.rs:164-187`). Without these checks a WASM
+                // plugin holding only `ipc.call` could reach handlers
+                // that the kernel path would deny.
+                let caller_caps = caller.data().capabilities.clone();
+                for required in dispatcher.required_caller_caps_for_args(
+                    &target_plugin_id,
+                    &command_id,
+                    &args,
+                ) {
+                    if !caller_caps.contains(required) {
+                        audit::log_capability_denied(&caller_plugin_id, required.as_str());
+                        tracing::warn!(
+                            caller = %caller_plugin_id,
+                            target = %target_plugin_id,
+                            command = %command_id,
+                            missing_cap = %required.as_str(),
+                            "host::invoke_command: per-handler capability denied",
+                        );
+                        return HOST_CAPABILITY_DENIED;
+                    }
+                }
+                // #186 / R3 — `internal = true` handlers require
+                // `TrustLevel::Core`. WASM plugins are always
+                // `Community`, so any internal-only handler is
+                // unreachable from the sandbox regardless of caps.
+                if dispatcher.is_handler_internal_only(&target_plugin_id, &command_id) {
+                    audit::log_capability_denied(
+                        &caller_plugin_id,
+                        &format!("internal-only:{target_plugin_id}::{command_id}"),
+                    );
+                    tracing::warn!(
+                        caller = %caller_plugin_id,
+                        target = %target_plugin_id,
+                        command = %command_id,
+                        "host::invoke_command: internal-only handler rejected for sandboxed caller",
+                    );
+                    return HOST_INTERNAL_ONLY;
+                }
 
                 // Dispatch to target plugin.
                 let result = match dispatcher.dispatch(&target_plugin_id, &command_id, &args) {
@@ -833,6 +889,9 @@ mod tests {
         assert_ne!(HOST_OK, HOST_ERROR);
         assert_ne!(HOST_OK, HOST_CAPABILITY_DENIED);
         assert_ne!(HOST_OK, HOST_BUFFER_OVERFLOW);
+        assert_ne!(HOST_OK, HOST_INTERNAL_ONLY);
         assert_ne!(HOST_ERROR, HOST_CAPABILITY_DENIED);
+        assert_ne!(HOST_CAPABILITY_DENIED, HOST_INTERNAL_ONLY);
+        assert_ne!(HOST_BUFFER_OVERFLOW, HOST_INTERNAL_ONLY);
     }
 }
