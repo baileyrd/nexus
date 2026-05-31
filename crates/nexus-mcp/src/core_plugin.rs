@@ -37,6 +37,7 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::json;
 
 use crate::config::{McpMergeSkipReason, McpServerSpec, McpTransport, McpUnregisterError};
+use crate::ipc::{McpConnectReply, McpDisconnectMissReply, McpServerArgs, McpServerEntry};
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{McpClientError, McpHostConfig};
 
@@ -356,20 +357,24 @@ impl CorePlugin for McpHostPlugin {
     ) -> Result<serde_json::Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
+                // #190 / R7 — materialize into the typed wire shape so the
+                // schemars schema generator sees the same fields the runtime
+                // emits. `McpServerEntry` already carries `deny_unknown_fields`.
                 let cfg = self.config.read().expect("McpHostConfig RwLock poisoned");
-                let arr: Vec<serde_json::Value> = cfg
+                let arr: Vec<McpServerEntry> = cfg
                     .servers
                     .iter()
-                    .map(|(name, spec)| {
-                        json!({
-                            "name": name,
-                            "command": spec.command,
-                            "args": spec.args,
-                            "disabled": spec.disabled,
-                        })
+                    .map(|(name, spec)| McpServerEntry {
+                        name: name.clone(),
+                        command: spec.command.clone(),
+                        args: spec.args.clone(),
+                        disabled: spec.disabled,
                     })
                     .collect();
-                Ok(serde_json::Value::Array(arr))
+                serde_json::to_value(&arr).map_err(|e| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: format!("list_servers: serialize: {e}"),
+                })
             }
             HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
             HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
@@ -431,23 +436,61 @@ impl CorePlugin for McpHostPlugin {
 
         match handler_id {
             HANDLER_CONNECT => {
-                let server = str_arg(args, "server")?;
+                // #190 / R7 — strict-parse args + typed reply via
+                // `McpServerArgs` / `McpConnectReply` (both
+                // `deny_unknown_fields`). A parse error needs to be
+                // surfaced through the future to avoid the prior
+                // quiet-fail mode where `str_arg(...)?` returned `None`
+                // and the kernel fell back to sync dispatch.
+                let parsed: Result<McpServerArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let McpServerArgs { server } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("connect: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     pool.get_or_connect(&server, &cfg)
                         .await
                         .map_err(map_client_err)?;
-                    Ok(json!({"ok": true, "server": server}))
+                    let reply = McpConnectReply { ok: true, server };
+                    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("connect: serialize reply: {e}"),
+                    })
                 }))
             }
 
             HANDLER_DISCONNECT => {
-                let server = str_arg(args, "server")?;
+                // #190 / R7 — see HANDLER_CONNECT for the parse pattern.
+                // Reply shape is `McpConnectReply` for the success branch
+                // and the distinct `McpDisconnectMissReply` for the
+                // not-connected branch — the wire shapes are different
+                // enough that one union type would obscure the contract.
+                let parsed: Result<McpServerArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let McpServerArgs { server } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("disconnect: invalid args: {e}"),
+                        })?;
                     if pool.disconnect(&server).await {
-                        Ok(json!({"ok": true, "server": server}))
+                        serde_json::to_value(&McpConnectReply { ok: true, server }).map_err(
+                            |e| PluginError::ExecutionFailed {
+                                plugin_id: PLUGIN_ID.to_string(),
+                                reason: format!("disconnect: serialize reply: {e}"),
+                            },
+                        )
                     } else {
-                        Ok(json!({"ok": false, "server": server, "reason": "not connected"}))
+                        serde_json::to_value(&McpDisconnectMissReply {
+                            ok: false,
+                            server,
+                            reason: "not connected".to_string(),
+                        })
+                        .map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("disconnect: serialize reply: {e}"),
+                        })
                     }
                 }))
             }
