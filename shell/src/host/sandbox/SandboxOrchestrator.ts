@@ -494,10 +494,12 @@ class SandboxInstanceImpl implements SandboxInstance {
         this.onCrash()
         return
       }
-      // Ping via a host→plugin event frame. The guest's runtime does
-      // not currently respond to these, but the test suite injects a
-      // pong to exercise the recovery path. A follow-up can teach the
-      // runtime to auto-pong — tracked as a Wave 1 runtime extension.
+      // Ping via a host→plugin event frame. The guest's runtime
+      // auto-pongs from `messageListener` in
+      // `packages/nexus-extension-api/src/sandbox/runtime.ts`
+      // (#196 / R13) — independent of plugin code so the heartbeat
+      // measures the iframe's actual liveness, not whether the
+      // plugin subscribed to `sandbox.ping` events.
       try {
         this.router.sendEvent('sandbox.ping', 'watchdog', {
           ts: Date.now(),
