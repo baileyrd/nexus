@@ -54,10 +54,9 @@ const AI_NOT_GATED: &[&str] = &[
 fn loader_gates_every_ai_handler_per_adr_0022() {
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
-    let loader: Arc<dyn IpcDispatcher> =
-        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
+    let loader: Arc<dyn IpcDispatcher> = Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
 
     for (command, expected) in AI_GATES {
         let caps = loader.required_caller_caps("com.nexus.ai", command);
@@ -72,10 +71,9 @@ fn loader_gates_every_ai_handler_per_adr_0022() {
 fn loader_does_not_gate_read_only_ai_handlers() {
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
-    let loader: Arc<dyn IpcDispatcher> =
-        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
+    let loader: Arc<dyn IpcDispatcher> = Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
 
     for command in AI_NOT_GATED {
         let caps = loader.required_caller_caps("com.nexus.ai", command);
@@ -121,10 +119,9 @@ fn loader_args_aware_tool_policy_requires_correct_caps() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
-    let loader: Arc<dyn IpcDispatcher> =
-        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
+    let loader: Arc<dyn IpcDispatcher> = Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
 
     // Helper: caps required for stream_chat with the given `tools` arg.
     let caps_for = |tools: serde_json::Value| {
@@ -138,15 +135,29 @@ fn loader_args_aware_tool_policy_requires_correct_caps() {
     };
 
     // Phase 1 floor: every variant requires AiChat.
-    for case in [json!("auto"), json!("none"), json!("auto_with_mcp"), json!("auto_readonly")] {
+    for case in [
+        json!("auto"),
+        json!("none"),
+        json!("auto_with_mcp"),
+        json!("auto_readonly"),
+    ] {
         let caps = caps_for(case.clone());
-        assert!(caps.contains(&Capability::AiChat), "AiChat missing for {case}: {caps:?}");
+        assert!(
+            caps.contains(&Capability::AiChat),
+            "AiChat missing for {case}: {caps:?}"
+        );
     }
 
     // Phase 2 deltas.
     let auto = caps_for(json!("auto"));
-    assert!(auto.contains(&Capability::AiToolsWrite), "auto must require AiToolsWrite");
-    assert!(!auto.contains(&Capability::AiToolsMcp), "auto must NOT require AiToolsMcp");
+    assert!(
+        auto.contains(&Capability::AiToolsWrite),
+        "auto must require AiToolsWrite"
+    );
+    assert!(
+        !auto.contains(&Capability::AiToolsMcp),
+        "auto must NOT require AiToolsMcp"
+    );
 
     let auto_mcp = caps_for(json!("auto_with_mcp"));
     assert!(auto_mcp.contains(&Capability::AiToolsWrite));

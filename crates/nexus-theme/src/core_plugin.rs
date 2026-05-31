@@ -296,10 +296,7 @@ impl CorePlugin for ThemeCorePlugin {
             }
             HANDLER_GET_AVAILABLE_SNIPPETS => {
                 let engine = self.engine.lock().map_err(|_| engine_poisoned())?;
-                to_value(
-                    &engine.get_available_snippets(),
-                    "get_available_snippets",
-                )
+                to_value(&engine.get_available_snippets(), "get_available_snippets")
             }
             HANDLER_TOGGLE_SNIPPET => {
                 let a: ToggleSnippetArgs = parse_args(args, "toggle_snippet")?;
@@ -406,8 +403,7 @@ mod tests {
     #[test]
     fn apply_theme_emits_changed_event() {
         let bus = Arc::new(EventBus::new(16));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix("com.nexus.theme.".to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix("com.nexus.theme.".to_string()));
         let mut plugin = ThemeCorePlugin::with_builtins(Some(Arc::clone(&bus)));
 
         plugin
@@ -419,7 +415,9 @@ mod tests {
 
         let event = sub.try_recv().unwrap().unwrap();
         match &event.event {
-            nexus_kernel::NexusEvent::Custom { type_id, payload, .. } => {
+            nexus_kernel::NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, EVENT_CHANGED);
                 assert_eq!(payload["theme_id"], "nexus-dark");
             }
@@ -430,8 +428,7 @@ mod tests {
     #[test]
     fn set_mode_emits_changed_event() {
         let bus = Arc::new(EventBus::new(16));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix("com.nexus.theme.".to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix("com.nexus.theme.".to_string()));
         let mut plugin = ThemeCorePlugin::with_builtins(Some(Arc::clone(&bus)));
 
         plugin
@@ -443,7 +440,9 @@ mod tests {
 
         let event = sub.try_recv().unwrap().unwrap();
         match &event.event {
-            nexus_kernel::NexusEvent::Custom { type_id, payload, .. } => {
+            nexus_kernel::NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, EVENT_CHANGED);
                 assert_eq!(payload["mode"], "dark");
             }

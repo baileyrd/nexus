@@ -219,15 +219,11 @@ views:
             assert!(base.properties.contains_key(key), "missing {key}");
         }
         assert_eq!(
-            base.properties["title"]["displayName"]
-                .as_str()
-                .unwrap(),
+            base.properties["title"]["displayName"].as_str().unwrap(),
             "Title"
         );
         assert_eq!(
-            base.properties["rating"]["displayName"]
-                .as_str()
-                .unwrap(),
+            base.properties["rating"]["displayName"].as_str().unwrap(),
             "*"
         );
 

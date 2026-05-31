@@ -7,7 +7,7 @@ use std::io::{self, Write};
 
 use anyhow::{Context, Result};
 use nexus_bootstrap::storage as storage_ipc;
-use nexus_kernel::{Events as _, Ipc as _, EventFilter, NexusEvent};
+use nexus_kernel::{EventFilter, Events as _, Ipc as _, NexusEvent};
 use nexus_types::constants::IPC_TIMEOUT_LONG as IPC_TIMEOUT;
 use nexus_types::plugin_ids;
 use rustyline::error::ReadlineError;
@@ -30,7 +30,11 @@ const EXIT_INTERRUPTED: i32 = 130;
 
 /// Ask a question using RAG.
 pub fn ask(app: &mut App, question: &str) -> Result<()> {
-    let response = call(app, "ask", serde_json::json!({ "question": question, "limit": 5 }))?;
+    let response = call(
+        app,
+        "ask",
+        serde_json::json!({ "question": question, "limit": 5 }),
+    )?;
 
     if let Some(answer) = response.get("answer").and_then(Value::as_str) {
         println!("{answer}");
@@ -125,7 +129,10 @@ pub fn status(app: &mut App) -> Result<()> {
     println!("AI Provider       : {ai_provider} ({ai_model})");
     println!("Embedding Provider: {embed_provider}");
     println!("Indexed Chunks    : {indexed}");
-    println!("TLS Pinned        : {}", if tls_pinned { "yes" } else { "no" });
+    println!(
+        "TLS Pinned        : {}",
+        if tls_pinned { "yes" } else { "no" }
+    );
     println!(
         "Local Embeddings  : {}",
         if local_embeddings_supported {
@@ -278,9 +285,7 @@ pub fn chat(
         // The seeded turn is a user message so the assistant has the
         // file as context for its first reply — same pattern the
         // shell's chat view uses for "ask about this file".
-        history.push(Message::user(format!(
-            "File `{path}`:\n```\n{text}\n```"
-        )));
+        history.push(Message::user(format!("File `{path}`:\n```\n{text}\n```")));
     }
 
     eprintln!("nexus ai chat — session {session_id}");
@@ -344,10 +349,16 @@ struct Message {
 
 impl Message {
     fn user(content: String) -> Self {
-        Self { role: "user", content }
+        Self {
+            role: "user",
+            content,
+        }
     }
     fn assistant(content: String) -> Self {
-        Self { role: "assistant", content }
+        Self {
+            role: "assistant",
+            content,
+        }
     }
 }
 
@@ -414,8 +425,19 @@ fn handle_slash(
             println!("(loaded {} bytes from {rest})", bytes.len());
         }
         "system" => {
-            *system = if rest.is_empty() { None } else { Some(rest.to_owned()) };
-            println!("(system prompt {})", if rest.is_empty() { "cleared" } else { "updated" });
+            *system = if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_owned())
+            };
+            println!(
+                "(system prompt {})",
+                if rest.is_empty() {
+                    "cleared"
+                } else {
+                    "updated"
+                }
+            );
         }
         other => {
             eprintln!("unknown command: /{other} — try /help");
@@ -555,7 +577,10 @@ fn stream_and_collect(app: &mut App, args: Value, session_id: &str) -> Result<St
             loop {
                 match sub.recv().await {
                     Ok(event) => {
-                        let NexusEvent::Custom { type_id, payload, .. } = &event.event else {
+                        let NexusEvent::Custom {
+                            type_id, payload, ..
+                        } = &event.event
+                        else {
                             continue;
                         };
                         let evt_session = payload

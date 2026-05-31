@@ -65,7 +65,10 @@ pub fn print_success(format: OutputFormat, message: &str, data: &serde_json::Val
                 "message": message,
                 "data": data,
             });
-            println!("{}", serde_json::to_string_pretty(&envelope).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&envelope).unwrap_or_default()
+            );
         }
         OutputFormat::Jsonl => {
             let envelope = serde_json::json!({
@@ -109,7 +112,10 @@ pub fn print_list(format: OutputFormat, headers: &[&str], rows: &[Vec<String>]) 
                 "status": "success",
                 "data": records,
             });
-            println!("{}", serde_json::to_string_pretty(&envelope).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&envelope).unwrap_or_default()
+            );
         }
         OutputFormat::Jsonl => {
             for row in rows {
@@ -118,7 +124,10 @@ pub fn print_list(format: OutputFormat, headers: &[&str], rows: &[Vec<String>]) 
                     .zip(row.iter())
                     .map(|(h, v)| (h.to_string(), serde_json::Value::String(v.clone())))
                     .collect();
-                println!("{}", serde_json::to_string(&serde_json::Value::Object(map)).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::Value::Object(map)).unwrap_or_default()
+                );
             }
             let _ = std::io::stdout().flush();
         }
@@ -146,7 +155,10 @@ pub fn print_value(format: OutputFormat, data: &serde_json::Value) {
                 "status": "success",
                 "data": data,
             });
-            println!("{}", serde_json::to_string_pretty(&envelope).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&envelope).unwrap_or_default()
+            );
         }
         OutputFormat::Jsonl => {
             let envelope = serde_json::json!({

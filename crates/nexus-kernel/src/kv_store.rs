@@ -47,9 +47,7 @@ impl KvError {
     /// Convert a plugin-crate `PluginError` style message into a `KvError`.
     #[must_use]
     pub fn backend(msg: impl Into<String>) -> Self {
-        Self::BackendError {
-            reason: msg.into(),
-        }
+        Self::BackendError { reason: msg.into() }
     }
 }
 

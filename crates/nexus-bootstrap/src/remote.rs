@@ -135,13 +135,11 @@ impl IpcInvoker for RemoteIpcInvoker {
             Err(nexus_remote::RemoteClientError::Server { code, message }) => {
                 Err(IpcInvokerError::Remote { code, message })
             }
-            Err(nexus_remote::RemoteClientError::Timeout(_)) => {
-                Err(IpcInvokerError::Timeout {
-                    plugin_id: target_plugin_id.to_string(),
-                    command: command_id.to_string(),
-                    timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-                })
-            }
+            Err(nexus_remote::RemoteClientError::Timeout(_)) => Err(IpcInvokerError::Timeout {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+                timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+            }),
             Err(other) => Err(IpcInvokerError::Transport(other.to_string())),
         }
     }
@@ -202,9 +200,7 @@ pub fn build_remote_runtime_ssh(uri: &ForgeUri) -> Result<RemoteRuntime> {
         .ok_or(RemoteRuntimeError::MissingStdio)
         .context("ssh stdout handle")?;
 
-    let guard = SshTransportGuard {
-        child: Some(child),
-    };
+    let guard = SshTransportGuard { child: Some(child) };
     let writer_boxed: Box<dyn AsyncWrite + Unpin + Send> = Box::new(stdin);
     Ok(build_remote_runtime_over_pipes(
         stdout,
@@ -261,10 +257,7 @@ mod tests {
     fn argv(cmd: &Command) -> Vec<String> {
         let std = cmd.as_std();
         std::iter::once(std.get_program().to_string_lossy().into_owned())
-            .chain(
-                std.get_args()
-                    .map(|a| a.to_string_lossy().into_owned()),
-            )
+            .chain(std.get_args().map(|a| a.to_string_lossy().into_owned()))
             .collect()
     }
 

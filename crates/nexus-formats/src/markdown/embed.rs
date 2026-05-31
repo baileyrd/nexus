@@ -117,10 +117,17 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn make_reader(files: HashMap<PathBuf, &'static str>) -> impl Fn(&Path) -> std::io::Result<String> {
+    fn make_reader(
+        files: HashMap<PathBuf, &'static str>,
+    ) -> impl Fn(&Path) -> std::io::Result<String> {
         move |p: &Path| {
             files.get(p).map_or_else(
-                || Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found")),
+                || {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "not found",
+                    ))
+                },
                 |s| Ok((*s).to_string()),
             )
         }
@@ -163,7 +170,8 @@ mod tests {
 
         // All files embed the next one to force depth overflow.
         let reader = |p: &Path| -> std::io::Result<String> {
-            let stem = p.file_stem()
+            let stem = p
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(0);

@@ -43,8 +43,7 @@ impl LayoutManager {
     /// Returns [`ThemeError::Io`] if the directory can't be created.
     pub fn new(layouts_dir: impl Into<PathBuf>) -> Result<Self> {
         let layouts_dir = layouts_dir.into();
-        fs::create_dir_all(&layouts_dir)
-            .map_err(|e| ThemeError::io(&layouts_dir, e))?;
+        fs::create_dir_all(&layouts_dir).map_err(|e| ThemeError::io(&layouts_dir, e))?;
         Ok(Self { layouts_dir })
     }
 
@@ -100,8 +99,8 @@ impl LayoutManager {
     /// # Errors
     /// Returns [`ThemeError::Io`] if the directory listing itself fails.
     pub fn list(&self) -> Result<Vec<SavedLayoutInfo>> {
-        let entries = fs::read_dir(&self.layouts_dir)
-            .map_err(|e| ThemeError::io(&self.layouts_dir, e))?;
+        let entries =
+            fs::read_dir(&self.layouts_dir).map_err(|e| ThemeError::io(&self.layouts_dir, e))?;
 
         let mut out = Vec::new();
         for entry in entries.flatten() {

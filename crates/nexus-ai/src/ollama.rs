@@ -74,8 +74,7 @@ impl OllamaProvider {
             client: reqwest::Client::new(),
             base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
             chat_model: chat_model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
-            embedding_model: embedding_model
-                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
+            embedding_model: embedding_model.unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
             fim_temperature: fim_temperature.unwrap_or(DEFAULT_FIM_TEMPERATURE),
         }
     }
@@ -274,7 +273,9 @@ mod fim_fallback_tests {
 
     #[test]
     fn ignores_unrelated_400_payloads() {
-        assert!(!is_unsupported_insert_error("400 Bad Request: {\"error\":\"model not found\"}"));
+        assert!(!is_unsupported_insert_error(
+            "400 Bad Request: {\"error\":\"model not found\"}"
+        ));
         assert!(!is_unsupported_insert_error("500 Internal Server Error"));
         assert!(!is_unsupported_insert_error(""));
     }

@@ -11,16 +11,16 @@
 mod composite;
 pub mod dispatch;
 mod error;
-mod host_fns;
-pub mod manifest;
 mod grants_crypto;
+mod host_fns;
+mod hot_reload;
 mod loader;
+pub mod manifest;
+mod sandbox;
+mod scaffold;
+mod settings;
 /// BL-099: plugin manifest signing verification.
 pub mod signing;
-mod sandbox;
-mod settings;
-mod hot_reload;
-mod scaffold;
 
 use std::sync::{Arc, Mutex};
 
@@ -119,19 +119,19 @@ macro_rules! define_dispatch_helpers {
         }
     };
 }
-pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{
     CapRequirementFn, CorePlugin, CorePluginFuture, HandlerClassification, PluginBackend,
     PluginLoader, SharedPluginLoader,
 };
-pub use manifest::{
-    AcpProtocolHostReg, ActivationConfig, CliSubcommandReg, DapProtocolHostReg,
-    EventSubscriberReg, IpcCommandReg, LifecycleConfig, LspProtocolHostReg,
-    ManifestCapabilities, McpProtocolHostReg, PanelSide, PluginDependency, PluginManifest,
-    PluginRuntime, ProtocolHostsContribution, Registrations, SettingsConfig, UiCommandReg,
-    UiPanelReg, UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
-};
 pub use manifest::{load_manifest, parse_manifest, validate};
+pub use manifest::{
+    AcpProtocolHostReg, ActivationConfig, CliSubcommandReg, DapProtocolHostReg, EventSubscriberReg,
+    IpcCommandReg, LifecycleConfig, LspProtocolHostReg, ManifestCapabilities, McpProtocolHostReg,
+    PanelSide, PluginDependency, PluginManifest, PluginRuntime, ProtocolHostsContribution,
+    Registrations, SettingsConfig, UiCommandReg, UiPanelReg, UiRibbonItemReg, UiSettingsTabReg,
+    UiStatusItemReg, WasmConfig,
+};
+pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 
 /// BL-113 / ADR 0027 — aggregate protocol-host adapter contributions
 /// across loaded plugin manifests. Routed through a dedicated module so
@@ -139,9 +139,7 @@ pub use manifest::{load_manifest, parse_manifest, validate};
 /// `nexus-acp`) consume one stable surface independent of the
 /// manifest's parser internals.
 pub mod contributions;
-pub use contributions::{
-    ContributedAdapter, ContributedAdapterSet, collect_contributions,
-};
+pub use contributions::{collect_contributions, ContributedAdapter, ContributedAdapterSet};
 pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 
 /// Host function registration + result codes. Re-exported (doc-hidden)
@@ -158,9 +156,9 @@ pub mod __testing {
         HOST_INTERNAL_ONLY, HOST_OK,
     };
 }
-pub use settings::SettingsManager;
 pub use hot_reload::{HotReloader, ReloadEvent};
 pub use nexus_kernel::{PluginInfo, PluginStatus, TrustLevel};
+pub use settings::SettingsManager;
 
 /// The host's currently-supported major plugin API version (F-9.2.1).
 ///
@@ -418,10 +416,7 @@ pub(crate) fn bump_crash_count(plugin_dir: &std::path::Path) -> std::io::Result<
     Ok(next)
 }
 
-fn reset_crash_count_at(
-    plugins_dir: &std::path::Path,
-    plugin_id: &str,
-) -> std::io::Result<()> {
+fn reset_crash_count_at(plugins_dir: &std::path::Path, plugin_id: &str) -> std::io::Result<()> {
     let p = plugins_dir.join(plugin_id).join(CRASH_FILE);
     if p.exists() {
         std::fs::remove_file(&p)?;
@@ -476,11 +471,17 @@ impl PluginManager {
     ///
     /// # Errors
     /// Returns [`PluginError`] if the hot-reload watcher cannot be started.
-    pub fn new(plugins_dir: &std::path::Path, config: &PluginManagerConfig) -> Result<Self, PluginError> {
+    pub fn new(
+        plugins_dir: &std::path::Path,
+        config: &PluginManagerConfig,
+    ) -> Result<Self, PluginError> {
         let mut loader = loader::PluginLoader::new(plugins_dir);
         loader.set_max_timeout_streak(config.max_timeout_streak);
         let reloader = if config.hot_reload {
-            Some(hot_reload::HotReloader::start(plugins_dir, config.debounce_ms)?)
+            Some(hot_reload::HotReloader::start(
+                plugins_dir,
+                config.debounce_ms,
+            )?)
         } else {
             None
         };
@@ -585,7 +586,10 @@ impl PluginManager {
     ///
     /// # Errors
     /// Propagates errors from [`PluginLoader::load`].
-    pub fn load(&mut self, plugin_dir: &std::path::Path) -> Result<nexus_kernel::PluginInfo, PluginError> {
+    pub fn load(
+        &mut self,
+        plugin_dir: &std::path::Path,
+    ) -> Result<nexus_kernel::PluginInfo, PluginError> {
         self.loader.load(plugin_dir)
     }
 
@@ -621,8 +625,11 @@ impl PluginManager {
             .into_iter()
             .flat_map(|info| {
                 let plugin_id = info.id.clone();
-                let runtime = self.loader.plugin_runtime(&info.id)
-                    .unwrap_or("unknown").to_string();
+                let runtime = self
+                    .loader
+                    .plugin_runtime(&info.id)
+                    .unwrap_or("unknown")
+                    .to_string();
                 self.loader
                     .manifest(&info.id)
                     .map(|m| m.registrations.ui_commands.clone())
@@ -653,8 +660,11 @@ impl PluginManager {
             .into_iter()
             .flat_map(|info| {
                 let plugin_id = info.id.clone();
-                let runtime = self.loader.plugin_runtime(&info.id)
-                    .unwrap_or("unknown").to_string();
+                let runtime = self
+                    .loader
+                    .plugin_runtime(&info.id)
+                    .unwrap_or("unknown")
+                    .to_string();
                 self.loader
                     .manifest(&info.id)
                     .map(|m| m.registrations.ui_panels.clone())
@@ -690,8 +700,11 @@ impl PluginManager {
                 let plugin_id = info.id.clone();
                 let plugin_name = info.name.clone();
                 let plugin_version = info.version.clone();
-                let runtime = self.loader.plugin_runtime(&info.id)
-                    .unwrap_or("unknown").to_string();
+                let runtime = self
+                    .loader
+                    .plugin_runtime(&info.id)
+                    .unwrap_or("unknown")
+                    .to_string();
                 self.loader
                     .manifest(&info.id)
                     .map(|m| m.registrations.ui_settings_tabs.clone())
@@ -759,9 +772,7 @@ impl PluginManager {
                         text: r.text,
                         icon: r.icon,
                         tooltip: r.tooltip,
-                        command_id: r
-                            .command
-                            .map(|c| format!("plugin:{plugin_id}:{c}")),
+                        command_id: r.command.map(|c| format!("plugin:{plugin_id}:{c}")),
                     })
             })
             .collect()
@@ -862,7 +873,11 @@ impl PluginManager {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the subcommand is unknown.
     /// Propagates sandbox dispatch errors.
-    pub fn dispatch_cli(&self, subcommand: &str, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    pub fn dispatch_cli(
+        &self,
+        subcommand: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
         self.loader.dispatch_cli(subcommand, args)
     }
 
@@ -871,7 +886,12 @@ impl PluginManager {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the plugin or command is
     /// unknown. Propagates sandbox dispatch errors.
-    pub fn dispatch_ipc(&self, plugin_id: &str, command_id: &str, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    pub fn dispatch_ipc(
+        &self,
+        plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
         self.loader.dispatch_ipc(plugin_id, command_id, args)
     }
 
@@ -887,7 +907,8 @@ impl PluginManager {
         command_id: &str,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        self.loader.dispatch_ipc_checked(caller_plugin_id, plugin_id, command_id, args)
+        self.loader
+            .dispatch_ipc_checked(caller_plugin_id, plugin_id, command_id, args)
     }
 
     /// Resolve a plugin IPC target without dispatching. Returns the
@@ -974,7 +995,8 @@ impl PluginManager {
         subscription_id: &str,
         enabled: bool,
     ) -> Result<(), PluginError> {
-        self.loader.toggle_event_subscription(plugin_id, subscription_id, enabled)
+        self.loader
+            .toggle_event_subscription(plugin_id, subscription_id, enabled)
     }
 
     /// Return the raw JSON Schema declared by `plugin_id`, or `None`
@@ -1005,7 +1027,11 @@ impl PluginManager {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded, or
     /// propagates settings validation / I/O errors.
-    pub fn set_settings(&mut self, plugin_id: &str, settings: &serde_json::Value) -> Result<(), PluginError> {
+    pub fn set_settings(
+        &mut self,
+        plugin_id: &str,
+        settings: &serde_json::Value,
+    ) -> Result<(), PluginError> {
         self.loader.update_settings(plugin_id, settings)
     }
 
@@ -1092,7 +1118,8 @@ impl PluginManager {
                 Ok(()) => completed.push(event.plugin_id),
                 Err(e) => {
                     tracing::warn!("hot-reload failed for {}: {e}", event.plugin_id);
-                    self.loader.set_status(&event.plugin_id, nexus_kernel::PluginStatus::Crashed);
+                    self.loader
+                        .set_status(&event.plugin_id, nexus_kernel::PluginStatus::Crashed);
                 }
             }
         }
@@ -1142,7 +1169,11 @@ impl PluginManager {
     /// Returns [`PluginError::PluginNotFound`] if the plugin id is
     /// unknown, or [`PluginError::ReloadFailed`] if the new sandbox
     /// cannot be built (after one retry for transient errors).
-    pub fn reload_plugin(&mut self, plugin_id: &str, wasm_path: &std::path::Path) -> Result<(), PluginError> {
+    pub fn reload_plugin(
+        &mut self,
+        plugin_id: &str,
+        wasm_path: &std::path::Path,
+    ) -> Result<(), PluginError> {
         use std::sync::atomic::Ordering;
 
         // RAII guard so the flag is always cleared, even on early return.
@@ -1211,16 +1242,20 @@ impl PluginManager {
                 }
             })?;
             if lifecycle.on_init {
-                sandbox.call_on_init().map_err(|e| PluginError::ReloadFailed {
-                    plugin_id: plugin_id.to_string(),
-                    reason: e.to_string(),
-                })?;
+                sandbox
+                    .call_on_init()
+                    .map_err(|e| PluginError::ReloadFailed {
+                        plugin_id: plugin_id.to_string(),
+                        reason: e.to_string(),
+                    })?;
             }
             if lifecycle.on_start {
-                sandbox.call_on_start().map_err(|e| PluginError::ReloadFailed {
-                    plugin_id: plugin_id.to_string(),
-                    reason: e.to_string(),
-                })?;
+                sandbox
+                    .call_on_start()
+                    .map_err(|e| PluginError::ReloadFailed {
+                        plugin_id: plugin_id.to_string(),
+                        reason: e.to_string(),
+                    })?;
             }
             Ok(sandbox)
         };
@@ -1259,8 +1294,10 @@ impl PluginManager {
                 let _ = guard.call_on_stop();
             }
         }
-        self.loader.replace_sandbox(plugin_id, new_sandbox, capabilities);
-        self.loader.set_status(plugin_id, nexus_kernel::PluginStatus::Running);
+        self.loader
+            .replace_sandbox(plugin_id, new_sandbox, capabilities);
+        self.loader
+            .set_status(plugin_id, nexus_kernel::PluginStatus::Running);
         // A successful reload presumes the fresh sandbox is healthy;
         // clear any in-memory quarantine state so the user doesn't have
         // to manually reset after a hot-reload fix.
@@ -1273,12 +1310,10 @@ impl PluginManager {
         // before this fix but was never wired to the reload path —
         // see issue #74.
         if let Some(dispatcher) = self.cached_ipc_dispatcher.clone() {
-            self.loader
-                .inject_ipc_dispatcher_for(plugin_id, dispatcher);
+            self.loader.inject_ipc_dispatcher_for(plugin_id, dispatcher);
         }
         if let Some(forwarder) = self.cached_event_forwarder.clone() {
-            self.loader
-                .inject_event_forwarder_for(plugin_id, forwarder);
+            self.loader.inject_event_forwarder_for(plugin_id, forwarder);
         }
 
         Ok(())

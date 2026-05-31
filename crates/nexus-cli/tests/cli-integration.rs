@@ -14,7 +14,9 @@ fn forge_init_creates_forge_structure() {
 fn storage_write_read_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
     let engine = nexus_storage::StorageEngine::init(tmp.path()).unwrap();
-    let meta = engine.write_file("notes/test.md", b"# Hello\n\nWorld").unwrap();
+    let meta = engine
+        .write_file("notes/test.md", b"# Hello\n\nWorld")
+        .unwrap();
     assert_eq!(meta.path, "notes/test.md");
     let content = engine.read_file("notes/test.md").unwrap();
     assert_eq!(content, b"# Hello\n\nWorld");
@@ -24,7 +26,9 @@ fn storage_write_read_roundtrip() {
 fn storage_search_finds_content() {
     let tmp = tempfile::tempdir().unwrap();
     let engine = nexus_storage::StorageEngine::init(tmp.path()).unwrap();
-    engine.write_file("notes/rust.md", b"# Rust Programming\n\nRust is great.").unwrap();
+    engine
+        .write_file("notes/rust.md", b"# Rust Programming\n\nRust is great.")
+        .unwrap();
     engine.rebuild_search_index().unwrap();
     let results = engine.search("rust", 10).unwrap();
     assert!(!results.is_empty());
@@ -34,7 +38,9 @@ fn storage_search_finds_content() {
 fn storage_delete_removes_file() {
     let tmp = tempfile::tempdir().unwrap();
     let engine = nexus_storage::StorageEngine::init(tmp.path()).unwrap();
-    engine.write_file("notes/delete-me.md", b"temporary").unwrap();
+    engine
+        .write_file("notes/delete-me.md", b"temporary")
+        .unwrap();
     engine.delete_file("notes/delete-me.md").unwrap();
     assert!(!engine.file_exists("notes/delete-me.md").unwrap());
 }
@@ -62,10 +68,18 @@ fn content_update_overwrites_existing_file() {
 
     // Create then update — mirrors `nexus content create` followed by
     // `nexus content update`.
-    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/a.md", b"first"))
-        .unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(
+        &*invoker,
+        "notes/a.md",
+        b"first",
+    ))
+    .unwrap();
     let meta = rt
-        .block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/a.md", b"second"))
+        .block_on(nexus_bootstrap::storage::write_file(
+            &*invoker,
+            "notes/a.md",
+            b"second",
+        ))
         .unwrap();
     assert_eq!(meta.path, "notes/a.md");
 
@@ -87,17 +101,36 @@ fn content_list_with_prefix_filters() {
     let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
     let invoker = runtime.invoker();
 
-    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/one.md", b"1")).unwrap();
-    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "notes/two.md", b"2")).unwrap();
-    rt.block_on(nexus_bootstrap::storage::write_file(&*invoker, "other/three.md", b"3")).unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(
+        &*invoker,
+        "notes/one.md",
+        b"1",
+    ))
+    .unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(
+        &*invoker,
+        "notes/two.md",
+        b"2",
+    ))
+    .unwrap();
+    rt.block_on(nexus_bootstrap::storage::write_file(
+        &*invoker,
+        "other/three.md",
+        b"3",
+    ))
+    .unwrap();
 
     let all = rt
-        .block_on(nexus_bootstrap::storage::query_files_with_prefix(&*invoker, ""))
+        .block_on(nexus_bootstrap::storage::query_files_with_prefix(
+            &*invoker, "",
+        ))
         .unwrap();
     assert!(all.len() >= 3);
 
     let filtered = rt
-        .block_on(nexus_bootstrap::storage::query_files_with_prefix(&*invoker, "notes/"))
+        .block_on(nexus_bootstrap::storage::query_files_with_prefix(
+            &*invoker, "notes/",
+        ))
         .unwrap();
     let paths: Vec<&str> = filtered.iter().map(|r| r.path.as_str()).collect();
     assert!(paths.iter().all(|p| p.starts_with("notes/")));

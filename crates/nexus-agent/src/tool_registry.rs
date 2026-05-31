@@ -624,12 +624,11 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
         // approvals; the parent's approval gate is sufficient.
         AgentToolSpec {
             name: "delegate_to_agent".to_string(),
-            description:
-                "Hand a sub-goal to another agent archetype. Returns the child session's \
+            description: "Hand a sub-goal to another agent archetype. Returns the child session's \
                 full transcript (rounds + tool calls + outcome). Use when the work \
                 naturally splits along an archetype boundary (e.g. ask the auditor to \
                 review what the writer just produced)."
-                    .to_string(),
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -864,7 +863,10 @@ mod tests {
         let reg = AgentToolRegistry::new();
         reg.register(fake_spec("read", vec![Capability::FileSystemRead]));
         reg.register(fake_spec("write", vec![Capability::FileSystemWrite]));
-        reg.register(fake_spec("both", vec![Capability::FileSystemRead, Capability::FileSystemWrite]));
+        reg.register(fake_spec(
+            "both",
+            vec![Capability::FileSystemRead, Capability::FileSystemWrite],
+        ));
         let visible = reg.list_for_agent(&[Capability::FileSystemRead]);
         let names: std::collections::HashSet<_> = visible.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains("read"));

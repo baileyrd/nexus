@@ -46,10 +46,7 @@ const BOOT_ORDER: &[&str] = &[
 fn registered_deps() -> Vec<(&'static str, &'static [&'static str])> {
     vec![
         ("com.nexus.editor", nexus_editor::core_plugin::MANIFEST_DEPS),
-        (
-            "com.nexus.terminal",
-            nexus_terminal::MANIFEST_DEPS,
-        ),
+        ("com.nexus.terminal", nexus_terminal::MANIFEST_DEPS),
         ("com.nexus.git", nexus_git::core_plugin::MANIFEST_DEPS),
         ("com.nexus.ai", nexus_ai::core_plugin::MANIFEST_DEPS),
         ("com.nexus.agent", nexus_agent::core_plugin::MANIFEST_DEPS),

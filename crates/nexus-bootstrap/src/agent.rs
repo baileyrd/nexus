@@ -124,23 +124,14 @@ struct ProposedWire {
 
 #[async_trait]
 impl ChatDriver for AiChatDriver {
-    async fn propose(
-        &self,
-        system: &str,
-        user_message: &str,
-    ) -> Result<Proposal, String> {
+    async fn propose(&self, system: &str, user_message: &str) -> Result<Proposal, String> {
         let args = serde_json::json!({
             "messages": [{ "role": "user", "content": user_message }],
             "system": system,
         });
         let raw = self
             .ctx
-            .ipc_call(
-                "com.nexus.ai",
-                "propose_tool_calls",
-                args,
-                self.timeout,
-            )
+            .ipc_call("com.nexus.ai", "propose_tool_calls", args, self.timeout)
             .await
             .map_err(|e| e.to_string())?;
         let parsed: ProposeWire = serde_json::from_value(raw).map_err(|e| e.to_string())?;

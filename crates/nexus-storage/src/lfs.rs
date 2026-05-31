@@ -81,7 +81,10 @@ pub fn parse_pointer(bytes: &[u8]) -> Option<LfsPointer> {
             size = rest.trim().parse::<u64>().ok();
         }
     }
-    Some(LfsPointer { oid: oid?, size: size? })
+    Some(LfsPointer {
+        oid: oid?,
+        size: size?,
+    })
 }
 
 /// Run `git lfs smudge` against `pointer_bytes` and return the
@@ -124,10 +127,7 @@ mod tests {
     use super::*;
 
     fn sample_pointer() -> Vec<u8> {
-        format!(
-            "{POINTER_VERSION_LINE}\noid sha256:abc123def456\nsize 1234\n"
-        )
-        .into_bytes()
+        format!("{POINTER_VERSION_LINE}\noid sha256:abc123def456\nsize 1234\n").into_bytes()
     }
 
     #[test]
@@ -170,8 +170,7 @@ mod tests {
 
     #[test]
     fn parse_pointer_returns_none_on_garbage_size() {
-        let bytes =
-            format!("{POINTER_VERSION_LINE}\noid sha256:abc\nsize not-a-number\n");
+        let bytes = format!("{POINTER_VERSION_LINE}\noid sha256:abc\nsize not-a-number\n");
         assert!(parse_pointer(bytes.as_bytes()).is_none());
     }
 

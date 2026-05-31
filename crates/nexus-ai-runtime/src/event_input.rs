@@ -349,10 +349,7 @@ impl TriggerRegistry {
     /// Number of registered triggers.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("trigger registry poisoned")
-            .len()
+        self.inner.lock().expect("trigger registry poisoned").len()
     }
 
     /// `true` if no triggers are registered.
@@ -365,9 +362,7 @@ impl TriggerRegistry {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Extract a stable type string and JSON payload from any [`NexusEvent`].
-pub(crate) fn extract_type_and_payload(
-    event: &NexusEvent,
-) -> (String, serde_json::Value) {
+pub(crate) fn extract_type_and_payload(event: &NexusEvent) -> (String, serde_json::Value) {
     match event {
         NexusEvent::Custom {
             type_id, payload, ..

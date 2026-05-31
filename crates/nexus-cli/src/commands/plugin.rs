@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
-use nexus_plugins::{PluginError, scaffold as nexus_scaffold, PluginTemplate, ScaffoldConfig};
+use anyhow::{anyhow, Context, Result};
+use nexus_plugins::{scaffold as nexus_scaffold, PluginError, PluginTemplate, ScaffoldConfig};
 
 use crate::app::App;
 use crate::output::{print_list, print_success, print_value};
@@ -19,7 +19,10 @@ pub fn install(app: &mut App, dir: &Path) -> Result<()> {
     });
     print_success(
         format,
-        &format!("Plugin '{}' ({}) installed successfully.", info.name, info.id),
+        &format!(
+            "Plugin '{}' ({}) installed successfully.",
+            info.name, info.id
+        ),
         &data,
     );
     Ok(())
@@ -56,8 +59,7 @@ pub fn call(app: &mut App, plugin_id: &str, command: &str, args_json: &str) -> R
     let args: serde_json::Value = if args_json.trim().is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
-        serde_json::from_str(args_json)
-            .map_err(|e| anyhow::anyhow!("invalid JSON args: {e}"))?
+        serde_json::from_str(args_json).map_err(|e| anyhow::anyhow!("invalid JSON args: {e}"))?
     };
     let format = app.format();
     let result = app.plugins()?.dispatch_ipc(plugin_id, command, &args)?;
@@ -291,9 +293,8 @@ pub fn revoke(app: &mut App, plugin_id: &str, capability: &str) -> Result<()> {
 /// downloaded plugin before installing.
 pub fn verify(plugin_dir: &Path, keys_dir: Option<&Path>) -> Result<()> {
     let manifest_path = plugin_dir.join("manifest.toml");
-    let raw = std::fs::read_to_string(&manifest_path).with_context(|| {
-        format!("read manifest at {}", manifest_path.display())
-    })?;
+    let raw = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read manifest at {}", manifest_path.display()))?;
     let manifest = nexus_plugins::parse_manifest(&raw, manifest_path.to_string_lossy().as_ref())
         .map_err(|e| anyhow!("parse manifest: {e}"))?;
     let Some(sig) = manifest.signature.as_ref() else {
@@ -338,8 +339,8 @@ pub fn reset_crash(app: &mut App, plugin_id: &str) -> Result<()> {
 pub fn settings(app: &mut App, plugin_id: &str, set_json: Option<&str>) -> Result<()> {
     let format = app.format();
     if let Some(json_str) = set_json {
-        let new_settings: serde_json::Value = serde_json::from_str(json_str)
-            .map_err(|e| anyhow::anyhow!("invalid JSON: {e}"))?;
+        let new_settings: serde_json::Value =
+            serde_json::from_str(json_str).map_err(|e| anyhow::anyhow!("invalid JSON: {e}"))?;
         app.plugins()?.set_settings(plugin_id, &new_settings)?;
         print_success(
             format,
@@ -397,16 +398,31 @@ pub fn scaffold(
 
     nexus_scaffold(&output_dir, template, &config)?;
 
-    println!("Scaffolded plugin '{plugin_name}' at '{}':", output_dir.display());
+    println!(
+        "Scaffolded plugin '{plugin_name}' at '{}':",
+        output_dir.display()
+    );
     match template {
         PluginTemplate::Script => {
-            for f in ["plugin.json", "index.ts", "README.md", "package.json", "tsconfig.json"] {
+            for f in [
+                "plugin.json",
+                "index.ts",
+                "README.md",
+                "package.json",
+                "tsconfig.json",
+            ] {
                 println!("  {}", output_dir.join(f).display());
             }
             println!();
             println!("Next steps:");
-            println!("  cd {} && pnpm install && pnpm build", output_dir.display());
-            println!("  cp index.js plugin.json ~/.nexus-shell/plugins/{}/", plugin_id);
+            println!(
+                "  cd {} && pnpm install && pnpm build",
+                output_dir.display()
+            );
+            println!(
+                "  cp index.js plugin.json ~/.nexus-shell/plugins/{}/",
+                plugin_id
+            );
         }
         PluginTemplate::Core | PluginTemplate::Community => {
             println!("  {}", output_dir.join("Cargo.toml").display());
@@ -442,8 +458,7 @@ pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> 
         Ok(result) => {
             let text = match &result {
                 serde_json::Value::String(s) => s.clone(),
-                other => serde_json::to_string_pretty(other)
-                    .unwrap_or_else(|_| other.to_string()),
+                other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
             };
             println!("{text}");
             Ok(())
@@ -463,13 +478,7 @@ pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> 
                 // user's terminal. See issue #85.
                 let list = available
                     .iter()
-                    .map(|(id, desc)| {
-                        format!(
-                            "  {:<20} {}",
-                            strip_ansi(id),
-                            strip_ansi(desc),
-                        )
-                    })
+                    .map(|(id, desc)| format!("  {:<20} {}", strip_ansi(id), strip_ansi(desc),))
                     .collect::<Vec<_>>()
                     .join("\n");
                 Err(anyhow!(
@@ -518,14 +527,15 @@ pub fn install_dispatch(app: &mut App, plugin: &str) -> Result<()> {
 pub fn list_shell_plugins() -> Result<()> {
     let dir = shell_plugins_dir()?;
     if !dir.exists() {
-        println!("No shell plugins installed ({} does not exist).", dir.display());
+        println!(
+            "No shell plugins installed ({} does not exist).",
+            dir.display()
+        );
         return Ok(());
     }
 
     let mut rows: Vec<(String, String, String)> = Vec::new();
-    for entry in std::fs::read_dir(&dir)
-        .with_context(|| format!("reading {}", dir.display()))?
-    {
+    for entry in std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -533,9 +543,8 @@ pub fn list_shell_plugins() -> Result<()> {
         let id = entry.file_name().to_string_lossy().into_owned();
         let manifest_path = entry.path().join("plugin.json");
         let (name, version) = if manifest_path.exists() {
-            read_plugin_manifest(&manifest_path).unwrap_or_else(|_| {
-                (String::from("<unreadable plugin.json>"), String::from("?"))
-            })
+            read_plugin_manifest(&manifest_path)
+                .unwrap_or_else(|_| (String::from("<unreadable plugin.json>"), String::from("?")))
         } else {
             (String::from("<no plugin.json>"), String::from("?"))
         };
@@ -578,8 +587,7 @@ pub fn remove_shell_plugin(id: &str, yes: bool) -> Result<()> {
         }
     }
 
-    std::fs::remove_dir_all(&dir)
-        .with_context(|| format!("removing {}", dir.display()))?;
+    std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
     println!("Removed shell plugin '{id}'.");
     Ok(())
 }
@@ -751,8 +759,7 @@ mod shell_plugin_tests {
             r#"{"name":"Foo Plugin","version":"1.2.3"}"#,
         )
         .unwrap();
-        let (name, version) =
-            read_plugin_manifest(&plugin_dir.join("plugin.json")).unwrap();
+        let (name, version) = read_plugin_manifest(&plugin_dir.join("plugin.json")).unwrap();
         assert_eq!(name, "Foo Plugin");
         assert_eq!(version, "1.2.3");
     }

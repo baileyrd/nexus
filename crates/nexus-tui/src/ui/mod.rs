@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    Frame,
 };
 
 use crate::app::{Mode, TuiApp};
@@ -21,17 +21,11 @@ mod viewer;
 
 /// Render the full TUI layout.
 pub fn render(frame: &mut Frame, app: &mut TuiApp) {
-    let [body, status] = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(frame.area());
+    let [body, status] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
 
-    let [tree_area, right_area] = Layout::horizontal([
-        Constraint::Percentage(25),
-        Constraint::Percentage(75),
-    ])
-    .areas(body);
+    let [tree_area, right_area] =
+        Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)]).areas(body);
 
     file_tree::render(frame, app, tree_area);
 
@@ -51,11 +45,9 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
     } else {
         // Split right pane for backlinks when visible.
         let (viewer_area, backlinks_area) = if app.backlinks.visible {
-            let [va, ba] = Layout::vertical([
-                Constraint::Percentage(70),
-                Constraint::Percentage(30),
-            ])
-            .areas(right_area);
+            let [va, ba] =
+                Layout::vertical([Constraint::Percentage(70), Constraint::Percentage(30)])
+                    .areas(right_area);
             (va, Some(ba))
         } else {
             (right_area, None)
@@ -63,11 +55,8 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
 
         // Viewer area: split off a find bar when in Find mode.
         if app.mode == Mode::Find {
-            let [viewer_body, find_bar] = Layout::vertical([
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .areas(viewer_area);
+            let [viewer_body, find_bar] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(viewer_area);
             viewer::render(frame, app, viewer_body);
             render_find_bar(frame, app, find_bar);
         } else {
@@ -147,11 +136,8 @@ fn render_search_overlay(frame: &mut Frame, app: &TuiApp) {
     frame.render_widget(block, popup_area);
 
     // Split the inner area: query line at top, then results list.
-    let [query_area, results_area] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(inner);
+    let [query_area, results_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
 
     // Query line.
     let query_line = Line::from(vec![

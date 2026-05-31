@@ -274,10 +274,7 @@ impl<P> crate::SessionPolicy for ManifestPolicyGate<P>
 where
     P: crate::SessionPolicy,
 {
-    async fn allow_round(
-        &self,
-        round: &crate::ProposedRound,
-    ) -> crate::RoundDecision {
+    async fn allow_round(&self, round: &crate::ProposedRound) -> crate::RoundDecision {
         // Manifest denials, indexed by tool_use_id.
         let manifest_denials: Vec<crate::RoundDecisionEntry> = round
             .tool_calls
@@ -552,10 +549,8 @@ pub fn resolve_system_prompt(
     }
     if let Some(rel) = &manifest.system_prompt.path {
         let full = manifest_dir.join(rel);
-        return std::fs::read_to_string(&full).map_err(|source| CustomAgentError::Io {
-            path: full,
-            source,
-        });
+        return std::fs::read_to_string(&full)
+            .map_err(|source| CustomAgentError::Io { path: full, source });
     }
     // Should be unreachable thanks to the parse-time check, but keep
     // a clear error rather than panicking.
@@ -776,10 +771,8 @@ text = "ok"
 
     #[test]
     fn scan_forge_handles_missing_directory_silently() {
-        let tmp = std::env::temp_dir().join(format!(
-            "nexus-agent-scan-missing-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("nexus-agent-scan-missing-{}", std::process::id()));
         let (manifests, errors) = scan_forge(&tmp);
         assert!(manifests.is_empty());
         assert!(errors.is_empty());

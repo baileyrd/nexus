@@ -70,7 +70,9 @@ async fn end_to_end_publishes_op_and_persists_state() {
         .expect("event must arrive within 2s")
         .expect("non-error");
     let payload = match &event.event {
-        NexusEvent::Custom { type_id, payload, .. } => {
+        NexusEvent::Custom {
+            type_id, payload, ..
+        } => {
             assert_eq!(type_id, "com.nexus.editor.ops.notes.md");
             payload.clone()
         }

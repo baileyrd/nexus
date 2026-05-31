@@ -24,9 +24,7 @@ pub(crate) fn read_file(engine: &StorageEngine, args: &Value) -> Result<Value, P
         // `.forge/workspace.json` on first boot, etc. Return a typed
         // null rather than an error so the IPC bridge doesn't surface
         // it as `PluginCrashedDuringCall`.
-        Err(crate::StorageError::FileNotFound(_)) => {
-            Ok(serde_json::json!({ "bytes": null }))
-        }
+        Err(crate::StorageError::FileNotFound(_)) => Ok(serde_json::json!({ "bytes": null })),
         Err(e) => Err(exec_err(format!("read_file '{path}': {e}"))),
     }
 }
@@ -83,8 +81,11 @@ pub(crate) fn write_vault_file(engine: &StorageEngine, args: &Value) -> Result<V
             serde_json::from_value(v.clone())
                 .map_err(|e| exec_err(format!("write_vault_file '{path}': bytes decode: {e}")))
         })?;
-    engine
-        .write_raw(&path, &bytes)
-        .map_err(|e| exec_err(format!("write_vault_file '{path}' ({} bytes): {e}", bytes.len())))?;
+    engine.write_raw(&path, &bytes).map_err(|e| {
+        exec_err(format!(
+            "write_vault_file '{path}' ({} bytes): {e}",
+            bytes.len()
+        ))
+    })?;
     Ok(serde_json::json!({}))
 }

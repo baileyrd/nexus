@@ -12,14 +12,14 @@
 //! explicitly after batches of changes.
 
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use nexus_kernel::{EventBus, EventFilter};
 use nexus_plugins::{CorePlugin, PluginError};
 
-use crate::{StorageConfig, StorageEngine};
 use crate::watcher::{StorageEvent, Watcher};
+use crate::{StorageConfig, StorageEngine};
 
 /// Topic the git plugin emits on every HEAD change; the storage
 /// plugin subscribes here so that an external pull / rebase / checkout
@@ -557,12 +557,13 @@ impl CorePlugin for StorageCorePlugin {
     /// Start the forge watcher and the bridge thread that translates
     /// [`StorageEvent`]s into [`NexusEvent`]s on the kernel bus.
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let watcher = Watcher::start(&self.forge_root, self.config.debounce_ms)
-            .map_err(|e| PluginError::LifecycleError {
+        let watcher = Watcher::start(&self.forge_root, self.config.debounce_ms).map_err(|e| {
+            PluginError::LifecycleError {
                 plugin_id: PLUGIN_ID.to_string(),
                 hook: "on_start".to_string(),
                 reason: format!("watcher failed to start: {e}"),
-            })?;
+            }
+        })?;
 
         let bus = Arc::clone(&self.event_bus);
         let (stop_tx, stop_rx) = mpsc::sync_channel::<()>(1);
@@ -586,10 +587,7 @@ impl CorePlugin for StorageCorePlugin {
         let commit_sub = self
             .event_bus
             .subscribe(EventFilter::CustomExact(GIT_COMMIT_TOPIC.to_string()));
-        let engine_for_commit = self
-            .engine
-            .as_ref()
-            .map(Arc::clone);
+        let engine_for_commit = self.engine.as_ref().map(Arc::clone);
         let (commit_stop_tx, commit_stop_rx) = mpsc::sync_channel::<()>(1);
         self.commit_stop_tx = Some(commit_stop_tx);
         let commit_handle = std::thread::Builder::new()
@@ -667,10 +665,13 @@ impl CorePlugin for StorageCorePlugin {
         // Engine is `Arc<StorageEngine>`; no per-call locking. Methods
         // all take `&self`, internal write paths use a fine-grained
         // mutex on the write connection where needed. See issue #80.
-        let engine = self.engine.as_ref().ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: "storage engine not initialised (on_init did not run)".to_string(),
-        })?;
+        let engine = self
+            .engine
+            .as_ref()
+            .ok_or_else(|| PluginError::ExecutionFailed {
+                plugin_id: PLUGIN_ID.to_string(),
+                reason: "storage engine not initialised (on_init did not run)".to_string(),
+            })?;
 
         match handler_id {
             HANDLER_QUERY_FILES => crate::handlers::files::query_files(engine, args),
@@ -732,9 +733,7 @@ impl CorePlugin for StorageCorePlugin {
                 crate::handlers::index::obsidian_base_query(engine, args)
             }
             HANDLER_IMPORT_FORGE => crate::handlers::index::import_forge(engine, args),
-            HANDLER_FIND_IN_FILES => {
-                crate::handlers::search::find_in_files(&self.forge_root, args)
-            }
+            HANDLER_FIND_IN_FILES => crate::handlers::search::find_in_files(&self.forge_root, args),
             HANDLER_REPLACE_IN_FILES => {
                 crate::handlers::search::replace_in_files(engine, &self.forge_root, args)
             }
@@ -792,7 +791,11 @@ pub fn apply_frontmatter_edit(content: &str, key: &str, value: Option<&str>) -> 
             } else {
                 "---\n\n"
             };
-            let line_end = if opener.ends_with("\r\n") { "\r\n" } else { "\n" };
+            let line_end = if opener.ends_with("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
             return format!("{opener}{key}: {v}{line_end}{closer}{content}");
         }
     };
@@ -911,10 +914,7 @@ fn git_commit_loop(
         if had_event {
             if let Some(engine) = engine.as_ref() {
                 match engine.reconcile_index() {
-                    Ok(delta) => tracing::debug!(
-                        ?delta,
-                        "BL-114: reconcile after git.commit",
-                    ),
+                    Ok(delta) => tracing::debug!(?delta, "BL-114: reconcile after git.commit",),
                     Err(err) => tracing::warn!(
                         %err,
                         "BL-114: reconcile after git.commit failed",
@@ -927,11 +927,7 @@ fn git_commit_loop(
     }
 }
 
-fn bridge_loop(
-    watcher: Watcher,
-    bus: Arc<EventBus>,
-    stop_rx: mpsc::Receiver<()>,
-) {
+fn bridge_loop(watcher: Watcher, bus: Arc<EventBus>, stop_rx: mpsc::Receiver<()>) {
     let rx = watcher.events();
 
     loop {
@@ -1014,7 +1010,11 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             publish_file_activity(bus, "deleted", path, None);
         }
 
-        StorageEvent::FileRenamed { from, to, content_hash } => {
+        StorageEvent::FileRenamed {
+            from,
+            to,
+            content_hash,
+        } => {
             publish_storage_event(
                 bus,
                 "com.nexus.storage.file_renamed",
@@ -1050,15 +1050,9 @@ fn publish_storage_event(bus: &EventBus, type_id: &str, payload: serde_json::Val
 /// Best-effort: a bus failure logs at debug level and is swallowed —
 /// missing one activity entry is preferable to interrupting the
 /// storage event pipeline.
-fn publish_file_activity(
-    bus: &EventBus,
-    kind: &str,
-    path: &str,
-    extra_path: Option<&str>,
-) {
+fn publish_file_activity(bus: &EventBus, kind: &str, path: &str, extra_path: Option<&str>) {
     use nexus_types::activity::{
-        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
-        ACTIVITY_APPENDED_TOPIC,
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
     };
 
     let mut entry = ActivityEntry::now(
@@ -1123,7 +1117,10 @@ mod tests {
             ("HANDLER_QUERY_TAGS", HANDLER_QUERY_TAGS),
             ("HANDLER_VECTOR_INSERT", HANDLER_VECTOR_INSERT),
             ("HANDLER_VECTOR_QUERY", HANDLER_VECTOR_QUERY),
-            ("HANDLER_VECTOR_DELETE_BY_FILE", HANDLER_VECTOR_DELETE_BY_FILE),
+            (
+                "HANDLER_VECTOR_DELETE_BY_FILE",
+                HANDLER_VECTOR_DELETE_BY_FILE,
+            ),
             ("HANDLER_VECTORSTORE_COUNT", HANDLER_VECTORSTORE_COUNT),
             ("HANDLER_QUERY_BLOCKS", HANDLER_QUERY_BLOCKS),
             ("HANDLER_CONFIG_READ", HANDLER_CONFIG_READ),
@@ -1155,12 +1152,18 @@ mod tests {
             ("HANDLER_BASE_VIEW_DELETE", HANDLER_BASE_VIEW_DELETE),
             ("HANDLER_BASE_CREATE", HANDLER_BASE_CREATE),
             ("HANDLER_BASE_PROPERTY_RENAME", HANDLER_BASE_PROPERTY_RENAME),
-            ("HANDLER_BASE_RECORD_SOFT_DELETE", HANDLER_BASE_RECORD_SOFT_DELETE),
+            (
+                "HANDLER_BASE_RECORD_SOFT_DELETE",
+                HANDLER_BASE_RECORD_SOFT_DELETE,
+            ),
             ("HANDLER_BASE_RECORD_RESTORE", HANDLER_BASE_RECORD_RESTORE),
             ("HANDLER_OBSIDIAN_BASE_QUERY", HANDLER_OBSIDIAN_BASE_QUERY),
             ("HANDLER_NOTE_APPEND", HANDLER_NOTE_APPEND),
             ("HANDLER_BACKLINKS_TO_BLOCK", HANDLER_BACKLINKS_TO_BLOCK),
-            ("HANDLER_WRITE_DEFAULT_GITIGNORE", HANDLER_WRITE_DEFAULT_GITIGNORE),
+            (
+                "HANDLER_WRITE_DEFAULT_GITIGNORE",
+                HANDLER_WRITE_DEFAULT_GITIGNORE,
+            ),
             ("HANDLER_SETTINGS_READ", HANDLER_SETTINGS_READ),
             ("HANDLER_SETTINGS_WRITE", HANDLER_SETTINGS_WRITE),
             ("HANDLER_QUERY_SYMBOL", HANDLER_QUERY_SYMBOL),
@@ -1168,7 +1171,10 @@ mod tests {
             ("HANDLER_ENTITY_GET", HANDLER_ENTITY_GET),
             ("HANDLER_ENTITY_RELATIONS", HANDLER_ENTITY_RELATIONS),
             ("HANDLER_ENTITY_UPSERT", HANDLER_ENTITY_UPSERT),
-            ("HANDLER_ENTITY_FIND_DUPLICATES", HANDLER_ENTITY_FIND_DUPLICATES),
+            (
+                "HANDLER_ENTITY_FIND_DUPLICATES",
+                HANDLER_ENTITY_FIND_DUPLICATES,
+            ),
             ("HANDLER_WRITE_FRONTMATTER", HANDLER_WRITE_FRONTMATTER),
         ];
         handlers.sort_by_key(|(_, id)| *id);
@@ -1209,7 +1215,10 @@ mod tests {
 
         // Returns FileMetadata-shaped JSON.
         assert_eq!(resp.get("path").and_then(|v| v.as_str()), Some("Inbox.md"));
-        assert!(resp.get("size_bytes").and_then(serde_json::Value::as_u64).is_some());
+        assert!(resp
+            .get("size_bytes")
+            .and_then(serde_json::Value::as_u64)
+            .is_some());
 
         let on_disk = std::fs::read_to_string(dir.path().join("Inbox.md")).expect("read back");
         assert_eq!(on_disk, "## Captured\n\nfirst note\n");
@@ -1369,12 +1378,18 @@ mod tests {
         let mut plugin = boot_plugin(dir.path());
         let path = dir.path().join(".forge").join(".gitignore");
         let _ = std::fs::remove_file(&path);
-        assert!(!path.exists(), "test setup: file must be absent before dispatch");
+        assert!(
+            !path.exists(),
+            "test setup: file must be absent before dispatch"
+        );
 
         let resp = plugin
             .dispatch(HANDLER_WRITE_DEFAULT_GITIGNORE, &serde_json::json!({}))
             .expect("write_default_gitignore dispatch");
-        assert_eq!(resp.get("wrote").and_then(serde_json::Value::as_bool), Some(true));
+        assert_eq!(
+            resp.get("wrote").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
         assert!(path.exists(), "fresh write must create the file");
 
         let resp_again = plugin
@@ -1451,9 +1466,15 @@ mod tests {
                 &serde_json::json!({ "query": "", "entity_type": "person" }),
             )
             .expect("entity_search with filter");
-        let typed_results = typed.get("results").and_then(serde_json::Value::as_array).unwrap();
+        let typed_results = typed
+            .get("results")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
         assert_eq!(typed_results.len(), 1);
-        assert_eq!(typed_results[0].get("id").and_then(|v| v.as_str()), Some("alice"));
+        assert_eq!(
+            typed_results[0].get("id").and_then(|v| v.as_str()),
+            Some("alice")
+        );
     }
 
     #[test]
@@ -1470,7 +1491,9 @@ mod tests {
         let missing = plugin
             .dispatch(HANDLER_ENTITY_GET, &serde_json::json!({ "id": "ghost" }))
             .expect("get ghost ok");
-        assert!(missing.get("entity").is_some_and(serde_json::Value::is_null));
+        assert!(missing
+            .get("entity")
+            .is_some_and(serde_json::Value::is_null));
 
         let present = plugin
             .dispatch(HANDLER_ENTITY_GET, &serde_json::json!({ "id": "Al" }))

@@ -471,7 +471,9 @@ mod tests {
             panic!();
         };
         assert_eq!(records.len(), 2);
-        assert!(records.iter().all(|r| r.fields["priority"].as_f64().unwrap() >= 3.0));
+        assert!(records
+            .iter()
+            .all(|r| r.fields["priority"].as_f64().unwrap() >= 3.0));
     }
 
     #[test]
@@ -577,7 +579,10 @@ mod tests {
         else {
             panic!();
         };
-        assert_eq!(asc.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["b", "a", "c"]);
+        assert_eq!(
+            asc.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["b", "a", "c"]
+        );
 
         view.sort = vec![SortRule {
             field: "priority".into(),
@@ -588,7 +593,10 @@ mod tests {
         else {
             panic!();
         };
-        assert_eq!(desc.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["c", "a", "b"]);
+        assert_eq!(
+            desc.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["c", "a", "b"]
+        );
     }
 
     #[test]
@@ -600,8 +608,14 @@ mod tests {
         ];
         let mut view = table_view("Sorted");
         view.sort = vec![
-            SortRule { field: "status".into(), direction: "asc".into() },
-            SortRule { field: "priority".into(), direction: "desc".into() },
+            SortRule {
+                field: "status".into(),
+                direction: "asc".into(),
+            },
+            SortRule {
+                field: "priority".into(),
+                direction: "desc".into(),
+            },
         ];
         let ViewLayout::Flat { records } = apply_view(&records, &empty_schema(), &view).layout
         else {
@@ -677,7 +691,11 @@ mod tests {
         assert_eq!(groups[0].records.len(), 1);
         assert_eq!(groups[1].key, "todo");
         assert_eq!(
-            groups[1].records.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            groups[1]
+                .records
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["a", "c"],
             "records within group stay in sort order",
         );
@@ -808,10 +826,22 @@ mod tests {
     #[test]
     fn combined_filter_sort_group_pipeline_runs_in_order() {
         let records = vec![
-            record("a", json!({"status": "todo", "priority": 3, "archived": false})),
-            record("b", json!({"status": "todo", "priority": 1, "archived": false})),
-            record("c", json!({"status": "done", "priority": 2, "archived": false})),
-            record("d", json!({"status": "todo", "priority": 5, "archived": true})),
+            record(
+                "a",
+                json!({"status": "todo", "priority": 3, "archived": false}),
+            ),
+            record(
+                "b",
+                json!({"status": "todo", "priority": 1, "archived": false}),
+            ),
+            record(
+                "c",
+                json!({"status": "done", "priority": 2, "archived": false}),
+            ),
+            record(
+                "d",
+                json!({"status": "todo", "priority": 5, "archived": true}),
+            ),
         ];
         let view = BaseView {
             name: "Active board".into(),
@@ -839,9 +869,18 @@ mod tests {
         assert_eq!(groups.len(), 2);
         let done = groups.iter().find(|g| g.key == "done").unwrap();
         let todo = groups.iter().find(|g| g.key == "todo").unwrap();
-        assert_eq!(done.records.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["c"]);
         assert_eq!(
-            todo.records.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            done.records
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["c"]
+        );
+        assert_eq!(
+            todo.records
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["a", "b"],
             "priority 3 > 1 under desc",
         );

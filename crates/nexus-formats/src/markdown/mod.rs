@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use comrak::nodes::{AstNode, NodeValue};
-use comrak::{Arena, Options, parse_document};
+use comrak::{parse_document, Arena, Options};
 
 use crate::error::MarkdownError;
 use crate::util::sha256_hex;
@@ -19,11 +19,13 @@ pub mod html;
 pub mod wikilinks;
 
 pub use embed::MAX_EMBED_DEPTH;
-pub use extensions::{MathSpan, Tag, TagSource, detect_callout, extract_block_ref,
-                     extract_inline_tags, extract_math_spans};
-pub use frontmatter::{Frontmatter, extract as extract_frontmatter_raw};
+pub use extensions::{
+    detect_callout, extract_block_ref, extract_inline_tags, extract_math_spans, MathSpan, Tag,
+    TagSource,
+};
+pub use frontmatter::{extract as extract_frontmatter_raw, Frontmatter};
 pub use html::export_to_html;
-pub use wikilinks::{LinkType, WikiLink, scan as scan_wikilinks};
+pub use wikilinks::{scan as scan_wikilinks, LinkType, WikiLink};
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -112,10 +114,14 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
     let (fm, body) = frontmatter::extract(content)?;
 
     // Seed tag list with frontmatter tags.
-    let mut tags: Vec<Tag> = fm.tags.iter().map(|t| Tag {
-        name: t.clone(),
-        source: TagSource::Frontmatter,
-    }).collect();
+    let mut tags: Vec<Tag> = fm
+        .tags
+        .iter()
+        .map(|t| Tag {
+            name: t.clone(),
+            source: TagSource::Frontmatter,
+        })
+        .collect();
 
     let arena = Arena::new();
     let mut opts = Options::default();
@@ -126,16 +132,16 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
 
     let root = parse_document(&arena, body, &opts);
 
-    let mut blocks   = Vec::new();
-    let mut links    = Vec::new();
-    let mut tasks    = Vec::new();
+    let mut blocks = Vec::new();
+    let mut links = Vec::new();
+    let mut tasks = Vec::new();
     let mut math_all = Vec::new();
 
     for child in root.children() {
         let ast = child.data.borrow();
         let sp = &ast.sourcepos;
         let start_line = u32::try_from(sp.start.line).unwrap_or(0);
-        let end_line   = u32::try_from(sp.end.line).unwrap_or(0);
+        let end_line = u32::try_from(sp.end.line).unwrap_or(0);
 
         match &ast.value {
             NodeValue::Heading(h) => {
@@ -149,7 +155,8 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
                     kind: BlockKind::Heading,
                     level: Some(h.level),
                     content: text,
-                    start_line, end_line,
+                    start_line,
+                    end_line,
                     block_ref_id,
                     callout_type: None,
                 });
@@ -165,7 +172,8 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
                     kind: BlockKind::Paragraph,
                     level: None,
                     content: text,
-                    start_line, end_line,
+                    start_line,
+                    end_line,
                     block_ref_id,
                     callout_type: None,
                 });
@@ -175,7 +183,8 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
                     kind: BlockKind::CodeBlock,
                     level: None,
                     content: cb.literal.clone(),
-                    start_line, end_line,
+                    start_line,
+                    end_line,
                     block_ref_id: None,
                     callout_type: None,
                 });
@@ -190,7 +199,8 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
                     kind: BlockKind::List,
                     level: None,
                     content: text,
-                    start_line, end_line,
+                    start_line,
+                    end_line,
                     block_ref_id,
                     callout_type: None,
                 });
@@ -201,7 +211,8 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
                     kind: BlockKind::Table,
                     level: None,
                     content: text,
-                    start_line, end_line,
+                    start_line,
+                    end_line,
                     block_ref_id: None,
                     callout_type: None,
                 });
@@ -212,12 +223,17 @@ pub fn parse(content: &str) -> Result<ParsedMarkdown, MarkdownError> {
                 let (content, block_ref_id) = extract_block_ref(&after_callout);
                 scan_and_add_wikilinks(&content, &mut links);
                 extract_inline_tags(&content, &mut tags);
-                let kind = if btype == "callout" { BlockKind::Callout } else { BlockKind::BlockQuote };
+                let kind = if btype == "callout" {
+                    BlockKind::Callout
+                } else {
+                    BlockKind::BlockQuote
+                };
                 blocks.push(Block {
                     kind,
                     level: None,
                     content,
-                    start_line, end_line,
+                    start_line,
+                    end_line,
                     block_ref_id,
                     callout_type,
                 });
@@ -259,13 +275,27 @@ pub fn parse_frontmatter(path: &Path) -> Result<HashMap<String, serde_json::Valu
     let mut map: HashMap<String, serde_json::Value> = HashMap::new();
 
     // Reserved keys → JSON values.
-    if let Some(v) = fm.title    { map.insert("title".into(),    v.into()); }
-    if let Some(v) = fm.doc_type { map.insert("type".into(),     v.into()); }
-    if let Some(v) = fm.status   { map.insert("status".into(),   v.into()); }
-    if let Some(v) = fm.cssclass { map.insert("cssclass".into(), v.into()); }
-    if let Some(v) = fm.date     { map.insert("date".into(),     v.into()); }
-    if let Some(v) = fm.created  { map.insert("created".into(),  v.into()); }
-    if let Some(v) = fm.modified { map.insert("modified".into(), v.into()); }
+    if let Some(v) = fm.title {
+        map.insert("title".into(), v.into());
+    }
+    if let Some(v) = fm.doc_type {
+        map.insert("type".into(), v.into());
+    }
+    if let Some(v) = fm.status {
+        map.insert("status".into(), v.into());
+    }
+    if let Some(v) = fm.cssclass {
+        map.insert("cssclass".into(), v.into());
+    }
+    if let Some(v) = fm.date {
+        map.insert("date".into(), v.into());
+    }
+    if let Some(v) = fm.created {
+        map.insert("created".into(), v.into());
+    }
+    if let Some(v) = fm.modified {
+        map.insert("modified".into(), v.into());
+    }
     if !fm.aliases.is_empty() {
         map.insert("aliases".into(), fm.aliases.into());
     }
@@ -319,8 +349,8 @@ fn collect_text<'a>(node: &'a AstNode<'a>) -> String {
 
 fn collect_text_into<'a>(node: &'a AstNode<'a>, buf: &mut String) {
     match &node.data.borrow().value {
-        NodeValue::Text(t)               => buf.push_str(t),
-        NodeValue::Code(c)               => buf.push_str(&c.literal),
+        NodeValue::Text(t) => buf.push_str(t),
+        NodeValue::Code(c) => buf.push_str(&c.literal),
         NodeValue::SoftBreak | NodeValue::LineBreak => buf.push(' '),
         _ => {}
     }
@@ -346,7 +376,9 @@ fn extract_task_items<'a>(list_node: &'a AstNode<'a>, tasks: &mut Vec<Task>) {
 
 /// Recursively search `dir` for a file whose file-stem matches `name`.
 fn find_by_stem(dir: &Path, name: &str) -> Option<std::path::PathBuf> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return None };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return None;
+    };
     for entry in rd.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -390,7 +422,11 @@ mod tests {
     #[test]
     fn parse_multiple_headings() {
         let r = parse("# H1\n## H2\n### H3\n").unwrap();
-        let headings: Vec<_> = r.blocks.iter().filter(|b| b.kind == BlockKind::Heading).collect();
+        let headings: Vec<_> = r
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Heading)
+            .collect();
         assert_eq!(headings.len(), 3);
         assert_eq!(headings[0].level, Some(1));
         assert_eq!(headings[2].level, Some(3));
@@ -406,7 +442,11 @@ mod tests {
     #[test]
     fn parse_code_block() {
         let r = parse("```rust\nfn main() {}\n```\n").unwrap();
-        let cb = r.blocks.iter().find(|b| b.kind == BlockKind::CodeBlock).unwrap();
+        let cb = r
+            .blocks
+            .iter()
+            .find(|b| b.kind == BlockKind::CodeBlock)
+            .unwrap();
         assert!(cb.content.contains("fn main()"));
     }
 
@@ -421,14 +461,22 @@ mod tests {
     fn parse_frontmatter_tags_in_tags_list() {
         let md = "---\ntags:\n  - rust\n  - testing\n---\nHello\n";
         let r = parse(md).unwrap();
-        let fm_tags: Vec<_> = r.tags.iter().filter(|t| t.source == TagSource::Frontmatter).collect();
+        let fm_tags: Vec<_> = r
+            .tags
+            .iter()
+            .filter(|t| t.source == TagSource::Frontmatter)
+            .collect();
         assert_eq!(fm_tags.len(), 2);
     }
 
     #[test]
     fn parse_inline_tags() {
         let r = parse("Hello #rust and #nexus\n").unwrap();
-        let inline: Vec<_> = r.tags.iter().filter(|t| t.source == TagSource::Inline).collect();
+        let inline: Vec<_> = r
+            .tags
+            .iter()
+            .filter(|t| t.source == TagSource::Inline)
+            .collect();
         assert!(inline.iter().any(|t| t.name == "rust"));
         assert!(inline.iter().any(|t| t.name == "nexus"));
     }
@@ -436,14 +484,22 @@ mod tests {
     #[test]
     fn parse_wikilink() {
         let r = parse("See [[other note]]\n").unwrap();
-        let wl = r.links.iter().find(|l| l.link_type == LinkType::Wikilink).unwrap();
+        let wl = r
+            .links
+            .iter()
+            .find(|l| l.link_type == LinkType::Wikilink)
+            .unwrap();
         assert_eq!(wl.target, "other note");
     }
 
     #[test]
     fn parse_wikilink_display_text() {
         let r = parse("See [[path/to/note|display text]]\n").unwrap();
-        let wl = r.links.iter().find(|l| l.link_type == LinkType::Wikilink).unwrap();
+        let wl = r
+            .links
+            .iter()
+            .find(|l| l.link_type == LinkType::Wikilink)
+            .unwrap();
         assert_eq!(wl.target, "path/to/note");
         assert_eq!(wl.display.as_deref(), Some("display text"));
     }
@@ -451,7 +507,11 @@ mod tests {
     #[test]
     fn parse_embed() {
         let r = parse("![[embedded-note]]\n").unwrap();
-        let em = r.links.iter().find(|l| l.link_type == LinkType::Embed).unwrap();
+        let em = r
+            .links
+            .iter()
+            .find(|l| l.link_type == LinkType::Embed)
+            .unwrap();
         assert_eq!(em.target, "embedded-note");
     }
 
@@ -479,7 +539,11 @@ mod tests {
     fn parse_callout() {
         let md = "> [!warning] Be careful\n> This is dangerous\n";
         let r = parse(md).unwrap();
-        let callout = r.blocks.iter().find(|b| b.kind == BlockKind::Callout).unwrap();
+        let callout = r
+            .blocks
+            .iter()
+            .find(|b| b.kind == BlockKind::Callout)
+            .unwrap();
         assert_eq!(callout.callout_type, Some("warning".to_string()));
     }
 
@@ -502,7 +566,11 @@ mod tests {
     #[test]
     fn wikilink_fragment_preserved() {
         let r = parse("[[note#Section]]\n").unwrap();
-        let wl = r.links.iter().find(|l| l.link_type == LinkType::Wikilink).unwrap();
+        let wl = r
+            .links
+            .iter()
+            .find(|l| l.link_type == LinkType::Wikilink)
+            .unwrap();
         assert_eq!(wl.fragment.as_deref(), Some("Section"));
     }
 }

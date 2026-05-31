@@ -131,10 +131,9 @@ async fn reload_picks_up_new_files() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
 
-    let before: Vec<serde_json::Value> = serde_json::from_value(
-        call(&runtime, "list", serde_json::json!({})).await.unwrap(),
-    )
-    .unwrap();
+    let before: Vec<serde_json::Value> =
+        serde_json::from_value(call(&runtime, "list", serde_json::json!({})).await.unwrap())
+            .unwrap();
     assert!(
         !before.iter().any(|s| s["id"] == "tone"),
         "precondition: tone skill not yet on disk"
@@ -148,10 +147,9 @@ async fn reload_picks_up_new_files() {
     let loaded = v["loaded"].as_u64().expect("loaded is a u64");
     assert!(loaded >= 1, "reload should load at least tone");
 
-    let after: Vec<serde_json::Value> = serde_json::from_value(
-        call(&runtime, "list", serde_json::json!({})).await.unwrap(),
-    )
-    .unwrap();
+    let after: Vec<serde_json::Value> =
+        serde_json::from_value(call(&runtime, "list", serde_json::json!({})).await.unwrap())
+            .unwrap();
     assert!(after.iter().any(|s| s["id"] == "tone"));
 }
 

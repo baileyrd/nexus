@@ -637,7 +637,9 @@ impl CorePlugin for EditorCorePlugin {
                 crate::handlers::session::close(&self.sessions, self.op_observer.as_ref(), args)
             }
             HANDLER_GET_TREE => crate::handlers::tree::get_tree(&self.sessions, args),
-            HANDLER_SAVE => crate::handlers::save::save_sync(&self.forge_root, &self.sessions, args),
+            HANDLER_SAVE => {
+                crate::handlers::save::save_sync(&self.forge_root, &self.sessions, args)
+            }
             HANDLER_APPLY_TRANSACTION => crate::handlers::transaction::apply_transaction(
                 &self.sessions,
                 self.event_bus.as_ref(),
@@ -787,10 +789,6 @@ impl CorePlugin for EditorCorePlugin {
 /// under this id.
 pub(crate) const MULTIBUFFER_RELPATH_PREFIX: &str = "multibuffer://";
 
-
-
-
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 pub(crate) fn snapshot_of(s: &Session) -> EditorSnapshot {
@@ -844,7 +842,10 @@ pub(crate) fn publish_changed(
     }
 }
 
-pub(crate) fn snapshot_to_value(snapshot: &EditorSnapshot, command: &str) -> Result<Value, PluginError> {
+pub(crate) fn snapshot_to_value(
+    snapshot: &EditorSnapshot,
+    command: &str,
+) -> Result<Value, PluginError> {
     serde_json::to_value(snapshot)
         .map_err(|e| exec_err(format!("{command}: serialize snapshot: {e}")))
 }
@@ -869,8 +870,7 @@ pub(crate) fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, Stri
     if relpath.is_empty() {
         return Err("empty relpath".into());
     }
-    let candidate = nexus_types::paths::resolve_within(root, relpath)
-        .map_err(|e| e.to_string())?;
+    let candidate = nexus_types::paths::resolve_within(root, relpath).map_err(|e| e.to_string())?;
     let canon_root = fs::canonicalize(root).map_err(|e| e.to_string())?;
     let canon = fs::canonicalize(&candidate).map_err(|e| e.to_string())?;
     if !canon.starts_with(&canon_root) {
@@ -879,10 +879,7 @@ pub(crate) fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, Stri
     Ok(canon)
 }
 
-
 // ── Tests ────────────────────────────────────────────────────────────────────
-
-
 
 #[cfg(test)]
 mod tests {
@@ -1330,15 +1327,9 @@ mod tests {
     /// snapshot so callers can detect the no-op via revision parity).
     #[test]
     fn apply_transaction_response_shape_per_op_kind() {
-        use crate::{
-            Annotation, AnnotationType, Operation, Transaction, TransactionMetadata,
-        };
+        use crate::{Annotation, AnnotationType, Operation, Transaction, TransactionMetadata};
         let (_tmp, root) = setup_forge();
-        write_note(
-            &root,
-            "notes/a.md",
-            "first paragraph\n\nsecond paragraph\n",
-        );
+        write_note(&root, "notes/a.md", "first paragraph\n\nsecond paragraph\n");
         let mut p = new_plugin(root);
         let snap = open_value(&mut p, "notes/a.md");
         let block_id = snap.tree.root_blocks[0];
@@ -1568,7 +1559,9 @@ mod tests {
 
         let event = sub.try_recv().unwrap().unwrap();
         match &event.event {
-            NexusEvent::Custom { type_id, payload, .. } => {
+            NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, "com.nexus.editor.changed.notes/a.md");
                 assert_eq!(payload["revision"], 1);
                 assert!(payload["transaction_id"].is_null());
@@ -1745,8 +1738,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let stamp_id =
-            uuid::Uuid::parse_str(stamp_resp["stable_id"].as_str().unwrap()).unwrap();
+        let stamp_id = uuid::Uuid::parse_str(stamp_resp["stable_id"].as_str().unwrap()).unwrap();
         p.dispatch(
             HANDLER_SAVE,
             &serde_json::json!({ "relpath": "notes/a.md" }),
@@ -1973,10 +1965,7 @@ mod tests {
         assert_eq!(extract_wikilink_block_uuid(&with_display), Some(id));
 
         // Heading fragments aren't block refs.
-        assert_eq!(
-            extract_wikilink_block_uuid("[[notes/foo#section]]"),
-            None,
-        );
+        assert_eq!(extract_wikilink_block_uuid("[[notes/foo#section]]"), None,);
         // Path-only links have no fragment to stamp against.
         assert_eq!(extract_wikilink_block_uuid("[[notes/foo]]"), None);
         // Fragment present but not a uuid.
@@ -1989,10 +1978,7 @@ mod tests {
         // annotation pointing at an unstamped block must auto-stamp
         // the target so the link can survive the next reload.
         use crate::{Annotation, AnnotationType, Operation, Transaction, TransactionMetadata};
-        let (_dir, mut p) = forge_with_file(
-            "notes/a.md",
-            "first paragraph\n\nsecond paragraph\n",
-        );
+        let (_dir, mut p) = forge_with_file("notes/a.md", "first paragraph\n\nsecond paragraph\n");
         let snap = open_value(&mut p, "notes/a.md");
         let source_id = snap.tree.root_blocks[0];
         let target_id = snap.tree.root_blocks[1];
@@ -2035,10 +2021,7 @@ mod tests {
         // not the annotation payload, so auto-stamping has to recover
         // it via byte-slicing the post-apply content.
         use crate::{Annotation, AnnotationType, Operation, Transaction, TransactionMetadata};
-        let (_dir, mut p) = forge_with_file(
-            "notes/a.md",
-            "first paragraph\n\nsecond paragraph\n",
-        );
+        let (_dir, mut p) = forge_with_file("notes/a.md", "first paragraph\n\nsecond paragraph\n");
         let snap = open_value(&mut p, "notes/a.md");
         let source_id = snap.tree.root_blocks[0];
         let target_id = snap.tree.root_blocks[1];
@@ -2087,10 +2070,7 @@ mod tests {
 
     fn open_value(p: &mut EditorCorePlugin, relpath: &str) -> EditorSnapshot {
         let resp = p
-            .dispatch(
-                HANDLER_OPEN,
-                &serde_json::json!({ "relpath": relpath }),
-            )
+            .dispatch(HANDLER_OPEN, &serde_json::json!({ "relpath": relpath }))
             .unwrap();
         serde_json::from_value(resp).unwrap()
     }
@@ -2117,10 +2097,7 @@ mod tests {
     /// Fetch the current snapshot via `get_tree` (always full).
     fn get_tree_value(p: &mut EditorCorePlugin, relpath: &str) -> EditorSnapshot {
         let resp = p
-            .dispatch(
-                HANDLER_GET_TREE,
-                &serde_json::json!({ "relpath": relpath }),
-            )
+            .dispatch(HANDLER_GET_TREE, &serde_json::json!({ "relpath": relpath }))
             .unwrap();
         serde_json::from_value(resp).unwrap()
     }

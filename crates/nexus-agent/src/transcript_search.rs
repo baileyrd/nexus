@@ -364,9 +364,7 @@ pub(crate) fn render_entry(entry: &MemoryEntry) -> (&'static str, String) {
             }
             ("assistant", out)
         }
-        MemoryEntry::ToolCall {
-            tool, success, ..
-        } => {
+        MemoryEntry::ToolCall { tool, success, .. } => {
             let verdict = if *success { "ok" } else { "failed" };
             ("tool", format!("tool {tool} {verdict}"))
         }
@@ -626,7 +624,10 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert!(alpha.is_empty(), "stale row from first replace should be gone");
+        assert!(
+            alpha.is_empty(),
+            "stale row from first replace should be gone"
+        );
         assert_eq!(beta.len(), 1);
     }
 
@@ -753,10 +754,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         let agents = root.join(AGENTS_DIR);
-        for (id, body) in &[
-            ("coder", "first goal"),
-            ("researcher", "second goal"),
-        ] {
+        for (id, body) in &[("coder", "first goal"), ("researcher", "second goal")] {
             let dir = agents.join(id);
             std::fs::create_dir_all(&dir).unwrap();
             let entry = MemoryEntry::UserGoal {

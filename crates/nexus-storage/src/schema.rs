@@ -700,7 +700,11 @@ mod tests {
         )
         .unwrap();
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE file_id = ?1;", rusqlite::params![fid], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE file_id = ?1;",
+                rusqlite::params![fid],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1, "tasks table should contain the inserted row");
     }
@@ -806,7 +810,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 1, "jsx_components table should contain the inserted row");
+        assert_eq!(
+            count, 1,
+            "jsx_components table should contain the inserted row"
+        );
     }
 
     // ── 19. migrate_v6_creates_canvas_nodes_table ──────────────────────────

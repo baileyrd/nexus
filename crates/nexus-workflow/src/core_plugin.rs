@@ -54,7 +54,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
-use nexus_kernel::{Events as _, Ipc as _, EventFilter, KernelPluginContext, NexusEvent, RecvError};
+use nexus_kernel::{
+    EventFilter, Events as _, Ipc as _, KernelPluginContext, NexusEvent, RecvError,
+};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 
@@ -123,11 +125,7 @@ pub const HANDLER_NEXT_FIRE: u32 = 12;
 /// execution (long after boot), so the IPC dispatch resolves fine
 /// at runtime even without the manifest dep. Declaring them here
 /// would trip `check_dependencies` and fail boot.
-pub const MANIFEST_DEPS: &[&str] = &[
-    "com.nexus.storage",
-    "com.nexus.ai",
-    "com.nexus.ai.runtime",
-];
+pub const MANIFEST_DEPS: &[&str] = &["com.nexus.storage", "com.nexus.ai", "com.nexus.ai.runtime"];
 
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::workflow::register`.
@@ -331,11 +329,12 @@ impl WorkflowCorePlugin {
     /// [`DigestConfig`]. Bootstrap loads the config from
     /// `<forge>/.forge/config.toml` and passes it here.
     #[must_use]
-    pub fn open_with_digest_config(
-        workflows_dir: PathBuf,
-        digest_config: DigestConfig,
-    ) -> Self {
-        Self::open_full(workflows_dir, digest_config, webhook::WebhookConfig::default())
+    pub fn open_with_digest_config(workflows_dir: PathBuf, digest_config: DigestConfig) -> Self {
+        Self::open_full(
+            workflows_dir,
+            digest_config,
+            webhook::WebhookConfig::default(),
+        )
     }
 
     /// Construct with both the digest and webhook config blocks set.
@@ -753,7 +752,10 @@ async fn file_event_loop(ctx: Arc<KernelPluginContext>, spec: FileEventSpec) {
                 return;
             }
         };
-        let NexusEvent::Custom { type_id, payload, .. } = &published.event else {
+        let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &published.event
+        else {
             continue;
         };
         let Some(event_type) = event_type_for_type_id(type_id) else {
@@ -784,12 +786,7 @@ async fn file_event_loop(ctx: Arc<KernelPluginContext>, spec: FileEventSpec) {
             "variables": variables,
         });
         match ctx
-            .ipc_call(
-                PLUGIN_ID,
-                "run",
-                args,
-                std::time::Duration::from_secs(600),
-            )
+            .ipc_call(PLUGIN_ID, "run", args, std::time::Duration::from_secs(600))
             .await
         {
             Ok(_) => {
@@ -904,7 +901,12 @@ impl GitEventSpec {
             .and_then(|v| v.as_str())
             .map(ToString::to_string);
 
-        let branch_pattern = match wf.trigger.extra.get("branch_pattern").and_then(|v| v.as_str()) {
+        let branch_pattern = match wf
+            .trigger
+            .extra
+            .get("branch_pattern")
+            .and_then(|v| v.as_str())
+        {
             Some(p) => Some(
                 regex_lite::Regex::new(p)
                     .map_err(|e| format!("invalid branch_pattern regex `{p}`: {e}"))?,
@@ -999,9 +1001,7 @@ impl WorkflowCorePlugin {
 }
 
 async fn git_event_loop(ctx: Arc<KernelPluginContext>, spec: GitEventSpec) {
-    let mut sub = ctx.subscribe(EventFilter::CustomPrefix(
-        "com.nexus.git.".to_string(),
-    ));
+    let mut sub = ctx.subscribe(EventFilter::CustomPrefix("com.nexus.git.".to_string()));
     loop {
         let published = match sub.recv().await {
             Ok(e) => e,
@@ -1014,7 +1014,10 @@ async fn git_event_loop(ctx: Arc<KernelPluginContext>, spec: GitEventSpec) {
                 return;
             }
         };
-        let NexusEvent::Custom { type_id, payload, .. } = &published.event else {
+        let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &published.event
+        else {
             continue;
         };
         let Some(event_type) = git_event_type_for_type_id(type_id) else {
@@ -1027,9 +1030,15 @@ async fn git_event_loop(ctx: Arc<KernelPluginContext>, spec: GitEventSpec) {
         // new branch under `to`, every other topic carries it under
         // `branch`.
         let branch = if event_type == "branch_changed" {
-            payload.get("to").and_then(|v| v.as_str()).unwrap_or_default()
+            payload
+                .get("to")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
         } else {
-            payload.get("branch").and_then(|v| v.as_str()).unwrap_or_default()
+            payload
+                .get("branch")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
         };
         if !spec.matches_branch(branch) {
             continue;
@@ -1069,12 +1078,7 @@ async fn git_event_loop(ctx: Arc<KernelPluginContext>, spec: GitEventSpec) {
             "variables": variables,
         });
         match ctx
-            .ipc_call(
-                PLUGIN_ID,
-                "run",
-                args,
-                std::time::Duration::from_secs(600),
-            )
+            .ipc_call(PLUGIN_ID, "run", args, std::time::Duration::from_secs(600))
             .await
         {
             Ok(_) => {
@@ -1135,7 +1139,9 @@ impl McpEventSpec {
         let events = match wf.trigger.extra.get("events") {
             None => McpEventSet::defaults(),
             Some(toml::Value::Array(items)) => {
-                let mut set = McpEventSet { host_started: false };
+                let mut set = McpEventSet {
+                    host_started: false,
+                };
                 for item in items {
                     match item.as_str() {
                         Some("host_started") => set.host_started = true,
@@ -1217,9 +1223,7 @@ impl WorkflowCorePlugin {
 }
 
 async fn mcp_event_loop(ctx: Arc<KernelPluginContext>, spec: McpEventSpec) {
-    let mut sub = ctx.subscribe(EventFilter::CustomPrefix(
-        "com.nexus.mcp.".to_string(),
-    ));
+    let mut sub = ctx.subscribe(EventFilter::CustomPrefix("com.nexus.mcp.".to_string()));
     loop {
         let published = match sub.recv().await {
             Ok(e) => e,
@@ -1232,7 +1236,10 @@ async fn mcp_event_loop(ctx: Arc<KernelPluginContext>, spec: McpEventSpec) {
                 return;
             }
         };
-        let NexusEvent::Custom { type_id, payload, .. } = &published.event else {
+        let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &published.event
+        else {
             continue;
         };
         let Some(event_type) = mcp_event_type_for_type_id(type_id) else {
@@ -1262,12 +1269,7 @@ async fn mcp_event_loop(ctx: Arc<KernelPluginContext>, spec: McpEventSpec) {
             "variables": variables,
         });
         match ctx
-            .ipc_call(
-                PLUGIN_ID,
-                "run",
-                args,
-                std::time::Duration::from_secs(600),
-            )
+            .ipc_call(PLUGIN_ID, "run", args, std::time::Duration::from_secs(600))
             .await
         {
             Ok(_) => {
@@ -1418,8 +1420,8 @@ async fn handle_webhook_connection(
     let max = webhook::MAX_HEADER_BYTES + webhook::MAX_BODY_BYTES;
     let mut buf = Vec::with_capacity(2_048);
     let mut tmp = [0u8; 2_048];
-    let read_deadline = tokio::time::Instant::now()
-        + std::time::Duration::from_millis(webhook::READ_TIMEOUT_MS);
+    let read_deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_millis(webhook::READ_TIMEOUT_MS);
     let parsed = loop {
         if buf.len() >= max {
             let _ = write_status(&mut sock, 413, "Payload Too Large").await;
@@ -1476,12 +1478,7 @@ async fn handle_webhook_connection(
                 "variables": variables,
             });
             let dispatch = ctx
-                .ipc_call(
-                    PLUGIN_ID,
-                    "run",
-                    args,
-                    std::time::Duration::from_secs(600),
-                )
+                .ipc_call(PLUGIN_ID, "run", args, std::time::Duration::from_secs(600))
                 .await;
             match dispatch {
                 Ok(_) => {
@@ -1498,7 +1495,11 @@ async fn handle_webhook_connection(
     let _ = sock.shutdown().await;
 }
 
-async fn write_status(sock: &mut tokio::net::TcpStream, code: u16, reason: &str) -> std::io::Result<()> {
+async fn write_status(
+    sock: &mut tokio::net::TcpStream,
+    code: u16,
+    reason: &str,
+) -> std::io::Result<()> {
     use tokio::io::AsyncWriteExt;
     let body = format!("{code} {reason}");
     let resp = format!(
@@ -1563,7 +1564,9 @@ async fn scheduler_loop(
             .await;
         match call {
             Ok(_) => tracing::info!(workflow = %workflow_name, "cron fired"),
-            Err(err) => tracing::warn!(workflow = %workflow_name, %err, "cron run failed; scheduler continues"),
+            Err(err) => {
+                tracing::warn!(workflow = %workflow_name, %err, "cron run failed; scheduler continues")
+            }
         }
     }
 }
@@ -1686,7 +1689,9 @@ path = "journal/today.md"
         let tmp = TempDir::new().unwrap();
         write(tmp.path(), "daily.workflow.toml", WF);
         let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
-        let v = plugin.dispatch(HANDLER_LIST, &serde_json::json!({})).unwrap();
+        let v = plugin
+            .dispatch(HANDLER_LIST, &serde_json::json!({}))
+            .unwrap();
         let arr = v.as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["workflow"]["name"], "Daily");
@@ -1722,7 +1727,9 @@ path = "journal/today.md"
             0
         );
         write(tmp.path(), "daily.workflow.toml", WF);
-        let v = plugin.dispatch(HANDLER_RELOAD, &serde_json::json!({})).unwrap();
+        let v = plugin
+            .dispatch(HANDLER_RELOAD, &serde_json::json!({}))
+            .unwrap();
         assert_eq!(v["loaded"], 1);
     }
 
@@ -1782,10 +1789,7 @@ path = "x.md"
         assert_eq!(arr[0]["name"], "Daily");
 
         let filtered = plugin
-            .dispatch(
-                HANDLER_NEXT_FIRE,
-                &serde_json::json!({ "name": "Manual" }),
-            )
+            .dispatch(HANDLER_NEXT_FIRE, &serde_json::json!({ "name": "Manual" }))
             .unwrap();
         let arr = filtered.as_array().unwrap();
         assert_eq!(arr.len(), 0, "non-cron workflow filtered out by name");
@@ -1974,8 +1978,14 @@ branch_pattern = "[unterminated"
 
     #[test]
     fn git_event_type_mapping_covers_all_four_topics() {
-        assert_eq!(git_event_type_for_type_id("com.nexus.git.state"), Some("state"));
-        assert_eq!(git_event_type_for_type_id("com.nexus.git.commit"), Some("commit"));
+        assert_eq!(
+            git_event_type_for_type_id("com.nexus.git.state"),
+            Some("state")
+        );
+        assert_eq!(
+            git_event_type_for_type_id("com.nexus.git.commit"),
+            Some("commit")
+        );
         assert_eq!(
             git_event_type_for_type_id("com.nexus.git.branch_changed"),
             Some("branch_changed")
@@ -2163,7 +2173,9 @@ events = ["nope"]
                 &serde_json::json!({ "slug": "research-prompt" }),
             )
             .unwrap();
-        let v = plugin.dispatch(HANDLER_RELOAD, &serde_json::json!({})).unwrap();
+        let v = plugin
+            .dispatch(HANDLER_RELOAD, &serde_json::json!({}))
+            .unwrap();
         assert_eq!(v["loaded"], 1);
         let list = plugin
             .dispatch(HANDLER_LIST, &serde_json::json!({}))
@@ -2176,7 +2188,10 @@ events = ["nope"]
         let tmp = TempDir::new().unwrap();
         let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
         let err = plugin
-            .dispatch(HANDLER_VALIDATE, &serde_json::json!({ "text": "not-toml {{" }))
+            .dispatch(
+                HANDLER_VALIDATE,
+                &serde_json::json!({ "text": "not-toml {{" }),
+            )
             .unwrap_err();
         assert!(matches!(err, PluginError::ExecutionFailed { .. }));
     }

@@ -105,7 +105,10 @@ pub fn list(app: &mut App, prefix: Option<&str>) -> Result<()> {
     let format = app.format();
     let (invoker, rt) = app.invoker()?;
     let records = rt
-        .block_on(ipc::query_files_with_prefix(&*invoker, prefix.unwrap_or("")))
+        .block_on(ipc::query_files_with_prefix(
+            &*invoker,
+            prefix.unwrap_or(""),
+        ))
         .map_err(|e| anyhow::anyhow!("failed to list files: {e}"))?;
 
     if records.is_empty() {
@@ -258,7 +261,11 @@ pub fn tasks(app: &mut App, completed: bool, all: bool, file: Option<&str>) -> R
         .map(|t| {
             vec![
                 t.id.to_string(),
-                if t.completed { "[x]".to_string() } else { "[ ]".to_string() },
+                if t.completed {
+                    "[x]".to_string()
+                } else {
+                    "[ ]".to_string()
+                },
                 t.content.clone(),
                 format!("{}:{}", t.file_path, t.line_number),
             ]
@@ -277,7 +284,11 @@ pub fn task_toggle(app: &mut App, task_id: u64) -> Result<()> {
         .block_on(ipc::toggle_task(&*invoker, task_id))
         .map_err(|e| anyhow::anyhow!("failed to toggle task {task_id}: {e}"))?;
 
-    let status = if record.completed { "completed" } else { "pending" };
+    let status = if record.completed {
+        "completed"
+    } else {
+        "pending"
+    };
     println!(
         "Task {} toggled to {}: {} ({}:{})",
         record.id, status, record.content, record.file_path, record.line_number
@@ -307,7 +318,11 @@ pub fn links(app: &mut App, path: &str) -> Result<()> {
                 l.target_path.clone(),
                 l.link_type.clone(),
                 l.link_text.clone(),
-                if l.is_resolved { "yes".to_string() } else { "no".to_string() },
+                if l.is_resolved {
+                    "yes".to_string()
+                } else {
+                    "no".to_string()
+                },
                 l.fragment.clone().unwrap_or_default(),
             ]
         })
@@ -349,7 +364,11 @@ pub fn export(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
         .block_on(ipc::read_file(&*invoker, path))
         .map_err(|e| anyhow::anyhow!("failed to read file '{path}': {e}"))?;
     let text = String::from_utf8_lossy(&bytes);
-    let title = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md");
+    let title = path
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .trim_end_matches(".md");
     let html = nexus_bootstrap::export_to_html(&text, title);
     if let Some(out_path) = output {
         std::fs::write(out_path, &html)
@@ -377,7 +396,10 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
     let (invoker, rt) = app.invoker()?;
 
     // Check if already exists
-    if rt.block_on(ipc::file_exists(&*invoker, &path)).unwrap_or(false) {
+    if rt
+        .block_on(ipc::file_exists(&*invoker, &path))
+        .unwrap_or(false)
+    {
         println!("Daily note already exists: {path}");
         return Ok(());
     }
@@ -385,9 +407,8 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
     let title = date.format("%B %d, %Y");
     let date_str = date.format("%Y-%m-%d");
 
-    let content = format!(
-        "---\ndate: {date_str}\ntags: [daily]\n---\n# {title}\n\n## Tasks\n\n## Notes\n"
-    );
+    let content =
+        format!("---\ndate: {date_str}\ntags: [daily]\n---\n# {title}\n\n## Tasks\n\n## Notes\n");
 
     let meta = rt
         .block_on(ipc::write_file(&*invoker, &path, content.as_bytes()))

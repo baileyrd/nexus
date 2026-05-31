@@ -9,9 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{AudioBackends, SttProvider, TtsProvider};
 use crate::provider_backend::{ProviderRoutedStt, ProviderRoutedTts, SharedCtx};
-use crate::stub_backend::{
-    local_stt_stub, local_tts_stub, platform_stt_stub, platform_tts_stub,
-};
+use crate::stub_backend::{local_stt_stub, local_tts_stub, platform_stt_stub, platform_tts_stub};
 use crate::AudioError;
 
 /// Named backend selector. Wire form is the same lowercase string

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nexus_kernel::{Events as _, EventFilter, NexusEvent};
+use nexus_kernel::{EventFilter, Events as _, NexusEvent};
 
 use crate::app::App;
 

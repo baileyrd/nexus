@@ -67,7 +67,11 @@ impl ManagedConfig {
     /// Build a baseline config — no pre-commands, no auto-restart,
     /// standard backoff.
     #[must_use]
-    pub fn new(slug: impl Into<String>, name: impl Into<String>, shell_cmd: impl Into<String>) -> Self {
+    pub fn new(
+        slug: impl Into<String>,
+        name: impl Into<String>,
+        shell_cmd: impl Into<String>,
+    ) -> Self {
         Self {
             slug: slug.into(),
             name: name.into(),
@@ -296,8 +300,8 @@ impl ManagedProcess {
             });
         }
         self.state = ManagedState::Crashed { exit_code };
-        let can_retry = self.config.auto_restart
-            && self.restart_attempts < self.config.max_restart_attempts;
+        let can_retry =
+            self.config.auto_restart && self.restart_attempts < self.config.max_restart_attempts;
         Ok(can_retry)
     }
 
@@ -412,7 +416,10 @@ mod tests {
         p.mark_running().expect("run");
         let can_retry = p.mark_crashed(Some(1)).expect("crash");
         assert!(!can_retry);
-        assert!(matches!(p.state(), ManagedState::Crashed { exit_code: Some(1) }));
+        assert!(matches!(
+            p.state(),
+            ManagedState::Crashed { exit_code: Some(1) }
+        ));
     }
 
     #[test]
@@ -463,7 +470,10 @@ mod tests {
         // the machine drops to Stopped so UI sees a clean park.
         assert!(!p.mark_crashed(None).expect("crash 3"));
         let err = p.mark_restarting().unwrap_err();
-        assert!(matches!(err, TransitionError::RestartExhausted { attempts: 2 }));
+        assert!(matches!(
+            err,
+            TransitionError::RestartExhausted { attempts: 2 }
+        ));
         assert_eq!(*p.state(), ManagedState::Stopped);
     }
 

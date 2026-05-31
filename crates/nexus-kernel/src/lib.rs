@@ -53,8 +53,8 @@ pub use context_impl::{in_flight_sync_dispatches, KernelPluginContext};
 pub use error::{ConfigError, Error, KvError, PluginError, RecvError, Result};
 pub use event_bus::{type_id_in_namespace, EventBus, EventSubscription};
 pub use kernel::Kernel;
-pub use metrics::{CallStatus, HistogramSnapshot, KernelMetrics, MetricsSnapshot};
 pub use kv_store::{InMemoryKvStore, KvStore};
+pub use metrics::{CallStatus, HistogramSnapshot, KernelMetrics, MetricsSnapshot};
 
 // Cooperative cancellation accessor for handler opt-in. See [`cancel`].
 pub use cancel::ipc_cancel_token;

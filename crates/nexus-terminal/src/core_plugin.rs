@@ -110,9 +110,9 @@ use crate::activity::build_activity_entry;
 use crate::adhoc::SqliteAdHocStore;
 use crate::memory::{MemoryLimitAction, MemoryLimits, MemoryMonitor};
 use crate::persist::SqliteSessionStore;
-use crate::saved::SqliteSavedCommandStore;
 #[cfg(test)]
 use crate::saved::SavedCommand;
+use crate::saved::SqliteSavedCommandStore;
 use crate::server::{InMemoryTerminalServer, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
 
@@ -1331,10 +1331,7 @@ impl TerminalCorePlugin {
             .lock()
             .expect("freshly-built server mutex cannot be poisoned")
             .subscribe_events();
-        self.lifecycle_forwarder = Some(spawn_lifecycle_forwarder(
-            lifecycle_rx,
-            Arc::clone(&bus),
-        ));
+        self.lifecycle_forwarder = Some(spawn_lifecycle_forwarder(lifecycle_rx, Arc::clone(&bus)));
         self.drainer = Some(spawn_drainer(
             Arc::clone(&self.server),
             Arc::clone(&self.emitters),
@@ -1440,9 +1437,7 @@ fn drainer_round(
         let mut em = emitters.lock().ok()?;
         let entry = em.entry(id.clone()).or_default();
         let cursor = entry.cursor;
-        if let Some((next_cursor, bytes)) =
-            server_guard.manager().buffer_read_since(&id, cursor)
-        {
+        if let Some((next_cursor, bytes)) = server_guard.manager().buffer_read_since(&id, cursor) {
             entry.cursor = next_cursor;
             if !bytes.is_empty() {
                 found.push((id, bytes));
@@ -1582,10 +1577,7 @@ fn memory_poller_round(
         for (id, pid) in &live {
             if let Some(pid) = pid {
                 if !mem.session_pid.contains_key(id.as_str()) {
-                    let effective = mem
-                        .pending_overrides
-                        .remove(id.as_str())
-                        .unwrap_or(limits);
+                    let effective = mem.pending_overrides.remove(id.as_str()).unwrap_or(limits);
                     mem.monitor.track(*pid, effective);
                     mem.session_pid.insert(id.as_str().to_string(), *pid);
                 }
@@ -1683,11 +1675,7 @@ fn spawn_lifecycle_forwarder(
     }
 }
 
-fn lifecycle_forwarder_loop(
-    rx: &Receiver<TerminalEvent>,
-    bus: &EventBus,
-    stop: &Arc<AtomicBool>,
-) {
+fn lifecycle_forwarder_loop(rx: &Receiver<TerminalEvent>, bus: &EventBus, stop: &Arc<AtomicBool>) {
     let timeout = Duration::from_millis(LIFECYCLE_RECV_TIMEOUT_MS);
     while !stop.load(Ordering::Relaxed) {
         match rx.recv_timeout(timeout) {
@@ -1884,7 +1872,6 @@ impl CorePlugin for TerminalCorePlugin {
 // ── Dispatch helpers ─────────────────────────────────────────────────────────
 
 impl TerminalCorePlugin {
-
     /// BL-061 — read the latest RSS the poller cached for `session_id`.
     /// Returns `None` when the plugin was built without a memory
     /// monitor, when the session isn't known to the monitor (e.g. it
@@ -1954,8 +1941,7 @@ impl TerminalCorePlugin {
     pub(crate) fn adhoc_store(&self) -> Result<&Mutex<SqliteAdHocStore>, PluginError> {
         self.adhoc.as_ref().ok_or_else(|| {
             exec_err(
-                "ad-hoc history store not attached (runtime built without a forge path)"
-                    .into(),
+                "ad-hoc history store not attached (runtime built without a forge path)".into(),
             )
         })
     }
@@ -2151,8 +2137,7 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_OUTPUT_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(EVENT_OUTPUT_PREFIX.to_string()));
 
         // Two `printf`s separated by a sleep so the pump observes the
         // output in two distinct flushes — the second pump must produce
@@ -2163,10 +2148,9 @@ mod tests {
             "shell": "/bin/sh",
             "shell_args": ["-c", "printf 'hello\\n'; sleep 0.2; printf 'world\\n'"],
         });
-        let CreateSessionResponse { id } = serde_json::from_value(
-            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
-        )
-        .expect("decode");
+        let CreateSessionResponse { id } =
+            serde_json::from_value(p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"))
+                .expect("decode");
 
         // Pump until we see the first event (printf may take a tick to
         // flush through the PTY). 3s upper bound matches the sibling
@@ -2188,7 +2172,9 @@ mod tests {
             );
         };
         let (type_id, payload) = match &first.event {
-            NexusEvent::Custom { type_id, payload, .. } => (type_id.clone(), payload.clone()),
+            NexusEvent::Custom {
+                type_id, payload, ..
+            } => (type_id.clone(), payload.clone()),
             other => panic!("expected Custom, got {other:?}"),
         };
         assert_eq!(
@@ -2199,7 +2185,10 @@ mod tests {
         let payload: OutputStreamPayload =
             serde_json::from_value(payload).expect("payload decodes");
         assert_eq!(payload.seq, 1, "first chunk for a session is seq = 1");
-        assert!(!payload.data.is_empty(), "payload bytes should be non-empty");
+        assert!(
+            !payload.data.is_empty(),
+            "payload bytes should be non-empty"
+        );
 
         // Force the second flush to land. Drain any extra pre-second-
         // printf events so we can assert seq strictly increments.
@@ -2243,8 +2232,7 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_OUTPUT_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(EVENT_OUTPUT_PREFIX.to_string()));
 
         // `with_event_bus` spawns the drainer thread.
         let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
@@ -2253,19 +2241,18 @@ mod tests {
             "shell": "/bin/sh",
             "shell_args": ["-c", "printf 'autonomous\\n'; sleep 1"],
         });
-        let CreateSessionResponse { id } = serde_json::from_value(
-            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
-        )
-        .expect("decode");
+        let CreateSessionResponse { id } =
+            serde_json::from_value(p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"))
+                .expect("decode");
 
         // No manual pump — wait for the drainer to publish on its own.
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(evt) = sub.try_recv().expect("bus alive") {
                 let (type_id, payload) = match &evt.event {
-                    NexusEvent::Custom { type_id, payload, .. } => {
-                        (type_id.clone(), payload.clone())
-                    }
+                    NexusEvent::Custom {
+                        type_id, payload, ..
+                    } => (type_id.clone(), payload.clone()),
                     other => panic!("expected Custom, got {other:?}"),
                 };
                 assert_eq!(type_id, format!("{EVENT_OUTPUT_PREFIX}{id}"));
@@ -2372,11 +2359,8 @@ mod tests {
         }
         let mut p = TerminalCorePlugin::new();
         let CreateSessionResponse { id } = serde_json::from_value(
-            p.dispatch(
-                HANDLER_CREATE_SESSION,
-                &create_args("sleep 2"),
-            )
-            .expect("create"),
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 2"))
+                .expect("create"),
         )
         .expect("decode");
         let resp = p
@@ -2422,7 +2406,10 @@ mod tests {
                 &serde_json::json!({ "id": id, "timeout_ms": 50 }),
             );
             while let Some(evt) = sub.try_recv().expect("bus alive") {
-                if let NexusEvent::Custom { type_id, payload, .. } = &evt.event {
+                if let NexusEvent::Custom {
+                    type_id, payload, ..
+                } = &evt.event
+                {
                     if !type_id.starts_with(EVENT_LIFECYCLE_PREFIX) {
                         continue;
                     }
@@ -2449,8 +2436,9 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            EVENT_LIFECYCLE_PREFIX.to_string(),
+        ));
 
         let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
         let resp = p
@@ -2485,8 +2473,9 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(128));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            EVENT_LIFECYCLE_PREFIX.to_string(),
+        ));
 
         let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
         let create = serde_json::json!({
@@ -2494,10 +2483,9 @@ mod tests {
             "shell": "/bin/sh",
             "shell_args": ["-c", "printf 'first-line\\n'; sleep 0.2; printf 'second-line\\n'"],
         });
-        let CreateSessionResponse { id } = serde_json::from_value(
-            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
-        )
-        .expect("decode");
+        let CreateSessionResponse { id } =
+            serde_json::from_value(p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"))
+                .expect("decode");
 
         let evt = pump_until_lifecycle(
             &mut p,
@@ -2532,8 +2520,9 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            EVENT_LIFECYCLE_PREFIX.to_string(),
+        ));
 
         let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
         let create = serde_json::json!({
@@ -2541,10 +2530,9 @@ mod tests {
             "shell": "/bin/sh",
             "shell_args": ["-c", "printf 'warmup\\nready-signal\\ntail\\n'"],
         });
-        let CreateSessionResponse { id } = serde_json::from_value(
-            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
-        )
-        .expect("decode");
+        let CreateSessionResponse { id } =
+            serde_json::from_value(p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"))
+                .expect("decode");
 
         // wait_for_pattern drives its own pump loop and emits a
         // PatternMatched event from inside the in-memory server when
@@ -2578,7 +2566,10 @@ mod tests {
         )
         .expect("PatternMatched event never reached the kernel bus");
 
-        if let crate::TerminalEvent::PatternMatched { id: eid, pattern, .. } = evt {
+        if let crate::TerminalEvent::PatternMatched {
+            id: eid, pattern, ..
+        } = evt
+        {
             assert_eq!(eid, id);
             assert_eq!(pattern, "ready-signal");
         } else {
@@ -2595,8 +2586,9 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            EVENT_LIFECYCLE_PREFIX.to_string(),
+        ));
 
         let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
         let CreateSessionResponse { id } = serde_json::from_value(
@@ -2606,10 +2598,7 @@ mod tests {
         .expect("decode");
 
         let _ = p
-            .dispatch(
-                HANDLER_CLOSE_SESSION,
-                &serde_json::json!({ "id": id }),
-            )
+            .dispatch(HANDLER_CLOSE_SESSION, &serde_json::json!({ "id": id }))
             .expect("close");
 
         let evt = pump_until_lifecycle(
@@ -2643,9 +2632,9 @@ mod tests {
     /// it to the plugin (the plugin owns the only handle once
     /// `with_adhoc_store` consumes it). Returns the plugin plus the
     /// ids of each inserted row in insertion order.
-    fn plugin_with_seeded_adhoc(rows: &[(&str, Option<&str>, Option<i32>, u64)])
-        -> (TerminalCorePlugin, Vec<String>)
-    {
+    fn plugin_with_seeded_adhoc(
+        rows: &[(&str, Option<&str>, Option<i32>, u64)],
+    ) -> (TerminalCorePlugin, Vec<String>) {
         let adhoc = SqliteAdHocStore::in_memory().expect("open adhoc");
         let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
         let mut ids = Vec::with_capacity(rows.len());
@@ -2721,8 +2710,7 @@ mod tests {
 
     #[test]
     fn adhoc_get_returns_full_record_for_known_id() {
-        let (mut p, ids) =
-            plugin_with_seeded_adhoc(&[("hang", None, None, 250)]);
+        let (mut p, ids) = plugin_with_seeded_adhoc(&[("hang", None, None, 250)]);
         let id = ids.first().expect("seeded one row").clone();
         let v = p
             .dispatch(HANDLER_ADHOC_GET, &serde_json::json!({ "id": id }))
@@ -2757,8 +2745,7 @@ mod tests {
 
     #[test]
     fn adhoc_promote_creates_saved_command_with_supplied_name_and_options() {
-        let (mut p, ids) =
-            plugin_with_seeded_adhoc(&[("npm test", Some("/work"), Some(0), 800)]);
+        let (mut p, ids) = plugin_with_seeded_adhoc(&[("npm test", Some("/work"), Some(0), 800)]);
         let id = ids.first().expect("seeded one row").clone();
         let v = p
             .dispatch(
@@ -2784,8 +2771,7 @@ mod tests {
         let list_v = p
             .dispatch(HANDLER_SAVED_LIST, &serde_json::json!({}))
             .expect("saved_list");
-        let saved_rows: Vec<SavedCommand> =
-            serde_json::from_value(list_v).expect("decode saved");
+        let saved_rows: Vec<SavedCommand> = serde_json::from_value(list_v).expect("decode saved");
         assert!(saved_rows.iter().any(|r| r.slug == "run_tests"));
     }
 
@@ -2916,7 +2902,10 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
+                assert!(
+                    reason.contains("invalid args") || reason.contains("default args invalid"),
+                    "got: {reason}"
+                );
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -3025,7 +3014,10 @@ mod tests {
             .with_event_bus(Arc::clone(&bus));
 
         let resp = p
-            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "uncapped" }))
+            .dispatch(
+                HANDLER_RUN_SAVED,
+                &serde_json::json!({ "slug": "uncapped" }),
+            )
             .expect("run_saved");
         let body: CreateSessionResponse = serde_json::from_value(resp).expect("decode");
 
@@ -3062,7 +3054,10 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
+                assert!(
+                    reason.contains("invalid args") || reason.contains("default args invalid"),
+                    "got: {reason}"
+                );
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -3077,8 +3072,9 @@ mod tests {
         }
 
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            EVENT_LIFECYCLE_PREFIX.to_string(),
+        ));
 
         let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
         let CreateSessionResponse { id } = serde_json::from_value(
@@ -3187,8 +3183,9 @@ mod tests {
             return;
         }
         let bus = Arc::new(EventBus::new(64));
-        let mut sub =
-            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            EVENT_LIFECYCLE_PREFIX.to_string(),
+        ));
 
         // 1 MB hard cap — any shell will exceed this in its first
         // sample. soft is left below hard so the evaluation prefers
@@ -3213,7 +3210,10 @@ mod tests {
         let mut breach_before_closed = false;
         while std::time::Instant::now() < deadline {
             if let Some(evt) = sub.try_recv().expect("bus alive") {
-                if let NexusEvent::Custom { type_id, payload, .. } = &evt.event {
+                if let NexusEvent::Custom {
+                    type_id, payload, ..
+                } = &evt.event
+                {
                     if !type_id.ends_with(&id) {
                         continue;
                     }
@@ -3221,10 +3221,8 @@ mod tests {
                         match kind {
                             "memory_limit_exceeded" => {
                                 saw_breach = true;
-                                let limit_mb =
-                                    payload.get("limit_mb").and_then(|v| v.as_u64());
-                                let rss_bytes =
-                                    payload.get("rss_bytes").and_then(|v| v.as_u64());
+                                let limit_mb = payload.get("limit_mb").and_then(|v| v.as_u64());
+                                let rss_bytes = payload.get("rss_bytes").and_then(|v| v.as_u64());
                                 assert_eq!(limit_mb, Some(1));
                                 assert!(rss_bytes.is_some_and(|b| b > 0));
                             }
@@ -3323,11 +3321,8 @@ mod tests {
         }
         let mut p = TerminalCorePlugin::new();
         // Spawn a short-lived shell that prints something boring.
-        p.dispatch(
-            HANDLER_CREATE_SESSION,
-            &create_args("printf hello"),
-        )
-        .expect("create");
+        p.dispatch(HANDLER_CREATE_SESSION, &create_args("printf hello"))
+            .expect("create");
         let list_v = p
             .dispatch(HANDLER_LIST_SESSIONS, &serde_json::json!({}))
             .expect("list");
@@ -3387,9 +3382,11 @@ mod tests {
         assert_eq!(body.source_rule, "cargo.compile_failure");
         assert_eq!(body.severity, "error");
         assert!(!body.llm_used, "ctx is None — must fall back to static");
-        assert!(body.reason.contains("error info") || body.reason.contains("crate"),
+        assert!(
+            body.reason.contains("error info") || body.reason.contains("crate"),
             "static reason should mention the rule's hint, got: {}",
-            body.reason);
+            body.reason
+        );
     }
 
     #[tokio::test]
@@ -3424,7 +3421,10 @@ mod tests {
         .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
+                assert!(
+                    reason.contains("invalid args") || reason.contains("default args invalid"),
+                    "got: {reason}"
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -3494,7 +3494,10 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("invalid args") || reason.contains("default args invalid"), "got: {reason}");
+                assert!(
+                    reason.contains("invalid args") || reason.contains("default args invalid"),
+                    "got: {reason}"
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }

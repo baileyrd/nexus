@@ -254,10 +254,8 @@ mod tests {
     #[test]
     fn ipc_step_target_recorded_separately() {
         let mut step = mk_step("ipc");
-        step.extra.insert(
-            "target".into(),
-            toml::Value::String("com.nexus.git".into()),
-        );
+        step.extra
+            .insert("target".into(), toml::Value::String("com.nexus.git".into()));
         step.extra
             .insert("command".into(), toml::Value::String("push".into()));
         let wf = mk_workflow(vec![step]);

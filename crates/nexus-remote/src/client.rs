@@ -23,8 +23,8 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
 
 use crate::transport::{
-    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcRequest,
-    JsonRpcResponse, TransportError,
+    read_message, write_message, JsonRpcError, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    TransportError,
 };
 
 /// Default per-call timeout. Mirrors the server's
@@ -94,18 +94,14 @@ impl RemoteClient {
     /// `writer` is `Box<dyn AsyncWrite>` so callers don't have to
     /// thread the concrete type (SSH child stdin, duplex half, …)
     /// through every layer.
-    pub fn new<R>(
-        reader: R,
-        writer: Box<dyn AsyncWrite + Unpin + Send>,
-    ) -> Self
+    pub fn new<R>(reader: R, writer: Box<dyn AsyncWrite + Unpin + Send>) -> Self
     where
         R: AsyncRead + Unpin + Send + 'static,
     {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let subscribers: Arc<
-            Mutex<HashMap<String, mpsc::UnboundedSender<EventDelivery>>>,
-        > = Arc::new(Mutex::new(HashMap::new()));
+        let subscribers: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<EventDelivery>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let pending_for_task = Arc::clone(&pending);
         let subscribers_for_task = Arc::clone(&subscribers);
         let disconnect_notify = Arc::new(Notify::new());
@@ -249,10 +245,7 @@ impl RemoteClient {
     /// [`Self::ipc_call`]. A server "unknown `subscription_id`" reply is
     /// returned as `Ok(false)` rather than an error so callers can
     /// safely call unsubscribe twice.
-    pub async fn unsubscribe(
-        &self,
-        subscription_id: &str,
-    ) -> Result<bool, RemoteClientError> {
+    pub async fn unsubscribe(&self, subscription_id: &str) -> Result<bool, RemoteClientError> {
         let params = json!({ "subscription_id": subscription_id });
         let response = self
             .request_with_timeout("event_unsubscribe", params, self.default_timeout)
@@ -261,10 +254,7 @@ impl RemoteClient {
         // Always drop the sink locally — even if the server says it
         // never knew about this id, we should clear our own state.
         self.subscribers.lock().await.remove(subscription_id);
-        let ok = value
-            .get("ok")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let ok = value.get("ok").and_then(Value::as_bool).unwrap_or(false);
         Ok(ok)
     }
 
@@ -351,9 +341,7 @@ fn result_or_err(response: JsonRpcResponse) -> Result<Value, RemoteClientError> 
             message: err.message,
         });
     }
-    response
-        .result
-        .ok_or(RemoteClientError::MalformedResponse)
+    response.result.ok_or(RemoteClientError::MalformedResponse)
 }
 
 async fn run_router<R>(
@@ -381,15 +369,10 @@ async fn run_router<R>(
                     if let Some(sender) = sender {
                         let _ = sender.send(resp);
                     } else {
-                        tracing::warn!(
-                            id,
-                            "nexus-remote client: response for unknown id"
-                        );
+                        tracing::warn!(id, "nexus-remote client: response for unknown id");
                     }
                 } else {
-                    tracing::warn!(
-                        "nexus-remote client: response with non-integer id"
-                    );
+                    tracing::warn!("nexus-remote client: response with non-integer id");
                 }
             }
             JsonRpcMessage::Notification(n) if n.method == "event" => {
@@ -401,10 +384,7 @@ async fn run_router<R>(
                 else {
                     continue;
                 };
-                let event = params
-                    .get("event")
-                    .cloned()
-                    .unwrap_or(Value::Null);
+                let event = params.get("event").cloned().unwrap_or(Value::Null);
                 let sink = subscribers.lock().await.get(&sid).cloned();
                 if let Some(sink) = sink {
                     let _ = sink.send(EventDelivery {

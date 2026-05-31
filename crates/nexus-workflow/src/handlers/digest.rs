@@ -64,9 +64,9 @@ pub(crate) fn handle_set_config(
     let new_cfg: DigestConfig = serde_json::from_value(args)
         .map_err(|e| exec_err(format!("set_digest_config: decode: {e}")))?;
     {
-        let mut g = cfg_handle.write().map_err(|_| {
-            exec_err("set_digest_config: digest config lock poisoned".to_string())
-        })?;
+        let mut g = cfg_handle
+            .write()
+            .map_err(|_| exec_err("set_digest_config: digest config lock poisoned".to_string()))?;
         *g = new_cfg;
     }
     Ok(serde_json::json!({ "applied": true }))

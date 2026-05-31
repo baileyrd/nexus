@@ -149,9 +149,10 @@ async fn submit_returns_a_task_id_and_records_the_run_in_list() {
             .expect("list");
         let runs = listing.get("runs").and_then(|v| v.as_array()).cloned();
         let runs = runs.unwrap_or_default();
-        if let Some(row) = runs.iter().find(|r| {
-            r.get("task_id").and_then(|v| v.as_str()) == Some(task_id.as_str())
-        }) {
+        if let Some(row) = runs
+            .iter()
+            .find(|r| r.get("task_id").and_then(|v| v.as_str()) == Some(task_id.as_str()))
+        {
             found = Some(row.clone());
             let status = row.get("status").and_then(|v| v.as_str()).unwrap_or("");
             if matches!(status, "completed" | "failed") {
@@ -161,10 +162,7 @@ async fn submit_returns_a_task_id_and_records_the_run_in_list() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let row = found.expect("run row appears in list");
-    let status = row
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let status = row.get("status").and_then(|v| v.as_str()).unwrap_or("");
     // Phase 1 doesn't pin the failure mode — empty session_run args
     // can produce a parse error or a "no provider" error depending
     // on agent internals. Either is acceptable; what matters is the
@@ -288,9 +286,8 @@ async fn republisher_translates_round_proposed_to_typed_ai_event() {
         }
     }
 
-    let payload = found.expect(
-        "typed AiEvent::RoundProposed must be republished within 2s of the inner publish",
-    );
+    let payload = found
+        .expect("typed AiEvent::RoundProposed must be republished within 2s of the inner publish");
     assert_eq!(
         payload.get("kind").and_then(|v| v.as_str()),
         Some("round_proposed")
@@ -347,7 +344,11 @@ async fn register_trigger_returns_a_trigger_id() {
     let resp = call(
         &runtime,
         "register_trigger",
-        make_trigger("file-watch", "com.nexus.storage.file_changed", "Handle: {{event.payload}}"),
+        make_trigger(
+            "file-watch",
+            "com.nexus.storage.file_changed",
+            "Handle: {{event.payload}}",
+        ),
     )
     .await
     .expect("register_trigger");
@@ -357,7 +358,11 @@ async fn register_trigger_returns_a_trigger_id() {
         .get("trigger_id")
         .and_then(|v| v.as_str())
         .expect("trigger_id should be a UUID string");
-    assert_eq!(trigger_id.len(), 36, "trigger_id should be a formatted UUID, got {trigger_id}");
+    assert_eq!(
+        trigger_id.len(),
+        36,
+        "trigger_id should be a formatted UUID, got {trigger_id}"
+    );
 }
 
 #[tokio::test]
@@ -396,9 +401,15 @@ async fn register_then_list_then_unregister_round_trip() {
     let list = call(&runtime, "list_triggers", serde_json::json!({}))
         .await
         .expect("list_triggers");
-    let triggers = list.get("triggers").and_then(|v| v.as_array()).expect("triggers array");
+    let triggers = list
+        .get("triggers")
+        .and_then(|v| v.as_array())
+        .expect("triggers array");
     assert_eq!(triggers.len(), 1);
-    assert_eq!(triggers[0].get("name").and_then(|v| v.as_str()), Some("my-trigger"));
+    assert_eq!(
+        triggers[0].get("name").and_then(|v| v.as_str()),
+        Some("my-trigger")
+    );
 
     // unregister — trigger_id is a bare UUID string on the wire
     let un_resp = call(
@@ -414,7 +425,10 @@ async fn register_then_list_then_unregister_round_trip() {
     let list2 = call(&runtime, "list_triggers", serde_json::json!({}))
         .await
         .expect("list_triggers after unregister");
-    let triggers2 = list2.get("triggers").and_then(|v| v.as_array()).expect("triggers array");
+    let triggers2 = list2
+        .get("triggers")
+        .and_then(|v| v.as_array())
+        .expect("triggers array");
     assert!(triggers2.is_empty());
 }
 
@@ -457,7 +471,9 @@ async fn trigger_watcher_spawns_session_when_matching_event_fires() {
     assert!(reg_resp.get("trigger_id").is_some());
 
     // Confirm list starts empty (no sessions submitted yet).
-    let pre = call(&runtime, "list", serde_json::json!({})).await.expect("list");
+    let pre = call(&runtime, "list", serde_json::json!({}))
+        .await
+        .expect("list");
     assert_eq!(pre["runs"].as_array().unwrap().len(), 0);
 
     // Give the watcher loop a moment to start before we fire the event.
@@ -478,10 +494,15 @@ async fn trigger_watcher_spawns_session_when_matching_event_fires() {
     let mut found_run = false;
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
-        let listing = call(&runtime, "list", serde_json::json!({})).await.expect("list");
+        let listing = call(&runtime, "list", serde_json::json!({}))
+            .await
+            .expect("list");
         let runs = listing["runs"].as_array().unwrap();
         if !runs.is_empty() {
-            assert_eq!(runs[0]["kind"], "session", "watcher must submit a session task");
+            assert_eq!(
+                runs[0]["kind"], "session",
+                "watcher must submit a session task"
+            );
             found_run = true;
             break;
         }

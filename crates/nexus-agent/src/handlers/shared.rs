@@ -242,7 +242,12 @@ pub(crate) async fn load_custom_archetype_prompt(
             .await
             .map_err(|e| format!("read {} failed: {e}", full_path.display()))?;
         std::str::from_utf8(&bytes)
-            .map_err(|e| format!("system prompt file not UTF-8 at {}: {e}", full_path.display()))?
+            .map_err(|e| {
+                format!(
+                    "system prompt file not UTF-8 at {}: {e}",
+                    full_path.display()
+                )
+            })?
             .to_string()
     } else {
         return Ok(None);
@@ -335,7 +340,10 @@ pub(crate) async fn compose_entity_preamble(
         )
         .await
     {
-        if let Some(hits) = response.get("results").and_then(serde_json::Value::as_array) {
+        if let Some(hits) = response
+            .get("results")
+            .and_then(serde_json::Value::as_array)
+        {
             if !hits.is_empty() {
                 if let Some(rendered) = format_entity_preamble(hits) {
                     return Some(rendered);
@@ -479,7 +487,10 @@ async fn compose_skill_body(ctx: &KernelPluginContext, id: &str) -> Option<Strin
         )
         .await
         .ok()?;
-    if let Some(arr) = response.get("conflicts").and_then(serde_json::Value::as_array) {
+    if let Some(arr) = response
+        .get("conflicts")
+        .and_then(serde_json::Value::as_array)
+    {
         if !arr.is_empty() {
             tracing::warn!(
                 skill_id = id,
@@ -593,11 +604,7 @@ pub(crate) struct AiChatBridge {
 
 #[async_trait]
 impl ChatDriver for AiChatBridge {
-    async fn propose(
-        &self,
-        system: &str,
-        user_message: &str,
-    ) -> Result<crate::Proposal, String> {
+    async fn propose(&self, system: &str, user_message: &str) -> Result<crate::Proposal, String> {
         propose_via_ai(&self.ctx, self.timeout, system, user_message).await
     }
 }
@@ -730,9 +737,7 @@ impl crate::SessionPolicy for BusBridgePolicy {
                 }
             }
             Err(e) => {
-                return crate::RoundDecision::Abort(format!(
-                    "session approval map poisoned: {e}"
-                ));
+                return crate::RoundDecision::Abort(format!("session approval map poisoned: {e}"));
             }
         };
 
@@ -760,10 +765,7 @@ impl crate::SessionPolicy for BusBridgePolicy {
             "text": round.text,
             "tool_calls": annotated,
         });
-        if let Err(e) = self
-            .ctx
-            .publish("com.nexus.agent.round_proposed", payload)
-        {
+        if let Err(e) = self.ctx.publish("com.nexus.agent.round_proposed", payload) {
             drop_pending(&self.pending, &self.session_id);
             return crate::RoundDecision::Abort(format!("publish round_proposed: {e}"));
         }
@@ -772,9 +774,7 @@ impl crate::SessionPolicy for BusBridgePolicy {
             Ok(Ok(decision)) => decision,
             Ok(Err(_recv_err)) => {
                 drop_pending(&self.pending, &self.session_id);
-                crate::RoundDecision::Abort(
-                    "approval channel closed without a decision".into(),
-                )
+                crate::RoundDecision::Abort("approval channel closed without a decision".into())
             }
             Err(_elapsed) => {
                 drop_pending(&self.pending, &self.session_id);

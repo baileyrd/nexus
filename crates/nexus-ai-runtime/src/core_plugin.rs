@@ -23,16 +23,18 @@ use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
-use nexus_plugin_api::{Capability, CapabilitySet, token::CapabilityToken};
+use nexus_plugin_api::{token::CapabilityToken, Capability, CapabilitySet};
 
 use crate::events::{topic_for, AiEvent};
 use crate::pool::WorkerPool;
 use crate::scheduler::Store;
-use crate::supervisor::{Supervisor, TOPIC_SESSION_CANCELLED, TOPIC_SESSION_COMPLETED, TOPIC_SESSION_STARTED};
+use crate::supervisor::{
+    Supervisor, TOPIC_SESSION_CANCELLED, TOPIC_SESSION_COMPLETED, TOPIC_SESSION_STARTED,
+};
 use crate::{
-    AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs,
-    AiRuntimeSubmitArgs, AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply,
-    PoolStats, RunStatus, SessionKind, PLUGIN_ID,
+    AgentTaskKind, AiRuntimeEventsArgs, AiRuntimeGetArgs, AiRuntimeListArgs, AiRuntimeSubmitArgs,
+    AiRuntimeSubmitReply, AiRuntimeWaitForArgs, AiRuntimeWaitForReply, PoolStats, RunStatus,
+    SessionKind, PLUGIN_ID,
 };
 
 /// `submit` handler id.
@@ -112,8 +114,7 @@ const WORKFLOW_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// `peak-sessions-per-second × 500 ms` extra entries in the reverse
 /// map — negligible vs. the cap on concurrent runs the scheduler
 /// already enforces.
-const SESSION_CORRELATION_GRACE: std::time::Duration =
-    std::time::Duration::from_millis(500);
+const SESSION_CORRELATION_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Core plugin state. The pool is built lazily in `wire_context` so
 /// `cargo test -p nexus-ai-runtime` doesn't pay the cost when only
@@ -408,12 +409,22 @@ fn handle_submit(
                 &store_for_worker,
                 ctx_for_worker.as_ref(),
                 &ring,
-                &AiEvent::Cancelled { task_id, by: by.clone() },
+                &AiEvent::Cancelled {
+                    task_id,
+                    by: by.clone(),
+                },
             );
             // Emit session-lifecycle event so bus subscribers tracking
             // the session_id rather than the task_id see the cancellation.
             if let Some(ref sid) = allocated_session_id {
-                publish_session_cancelled(ctx_for_worker.as_ref(), sid, task_id, Some(&by), &goal_for_worker, None);
+                publish_session_cancelled(
+                    ctx_for_worker.as_ref(),
+                    sid,
+                    task_id,
+                    Some(&by),
+                    &goal_for_worker,
+                    None,
+                );
                 // Drop the correlation entry before bailing so the
                 // session→task map doesn't leak when a task is cancelled
                 // before it ever ran.
@@ -422,12 +433,21 @@ fn handle_submit(
             return;
         }
 
-        let started = AiEvent::Started { task_id, attempt: 1 };
+        let started = AiEvent::Started {
+            task_id,
+            attempt: 1,
+        };
         record_and_publish(&store_for_worker, ctx_for_worker.as_ref(), &ring, &started);
         // Emit session.started so subscribers tracking session_id see
         // the transition to Running.
         if let Some(ref sid) = allocated_session_id {
-            publish_session_started(ctx_for_worker.as_ref(), sid, task_id, session_kind, &goal_for_worker);
+            publish_session_started(
+                ctx_for_worker.as_ref(),
+                sid,
+                task_id,
+                session_kind,
+                &goal_for_worker,
+            );
         }
 
         let task_start = std::time::Instant::now();
@@ -435,8 +455,7 @@ fn handle_submit(
             match task_kind {
                 AgentTaskKind::Session { args } => run_session(&ctx_for_worker, args).await,
                 AgentTaskKind::AiStream { .. } => Err(
-                    "ai_stream is reserved for BL-134 Phase 2b-ii (typed event correlation)"
-                        .into(),
+                    "ai_stream is reserved for BL-134 Phase 2b-ii (typed event correlation)".into(),
                 ),
                 AgentTaskKind::WorkflowAiStep {
                     target_plugin,
@@ -444,15 +463,17 @@ fn handle_submit(
                     args,
                     workflow,
                     step,
-                } => run_workflow_ai_step(
-                    &ctx_for_worker,
-                    &target_plugin,
-                    &command,
-                    args,
-                    &workflow,
-                    step,
-                )
-                .await,
+                } => {
+                    run_workflow_ai_step(
+                        &ctx_for_worker,
+                        &target_plugin,
+                        &command,
+                        args,
+                        &workflow,
+                        step,
+                    )
+                    .await
+                }
             }
         };
 
@@ -477,7 +498,13 @@ fn handle_submit(
         if let Some(ref sid) = allocated_session_id {
             match &event {
                 AiEvent::Finished { .. } => {
-                    publish_session_completed(ctx_for_worker.as_ref(), sid, task_id, &goal_for_worker, elapsed_ms);
+                    publish_session_completed(
+                        ctx_for_worker.as_ref(),
+                        sid,
+                        task_id,
+                        &goal_for_worker,
+                        elapsed_ms,
+                    );
                 }
                 AiEvent::Cancelled { by, .. } => {
                     publish_session_cancelled(
@@ -490,7 +517,14 @@ fn handle_submit(
                     );
                 }
                 AiEvent::Failed { error, .. } => {
-                    publish_session_failed(ctx_for_worker.as_ref(), sid, task_id, error, &goal_for_worker, elapsed_ms);
+                    publish_session_failed(
+                        ctx_for_worker.as_ref(),
+                        sid,
+                        task_id,
+                        error,
+                        &goal_for_worker,
+                        elapsed_ms,
+                    );
                 }
                 _ => {}
             }
@@ -532,16 +566,14 @@ fn handle_submit(
 /// builds without spamming production logs.
 async fn republish_loop(store: Store, ctx: Arc<KernelPluginContext>) {
     use crate::republisher::{TOPIC_ROUND_PROPOSED, TOPIC_STREAM_CHUNK};
-    use nexus_kernel::{Events as _, EventFilter};
+    use nexus_kernel::{EventFilter, Events as _};
 
     // Two separate subscriptions because `CustomPrefix` would over-
     // match (e.g. `stream_start` / `stream_done` carry session_id
     // but we don't translate them). One `CustomExact` filter per
     // topic keeps the dispatch cheap and the translate set explicit.
-    let mut sub_stream =
-        ctx.subscribe(EventFilter::CustomExact(TOPIC_STREAM_CHUNK.to_string()));
-    let mut sub_round =
-        ctx.subscribe(EventFilter::CustomExact(TOPIC_ROUND_PROPOSED.to_string()));
+    let mut sub_stream = ctx.subscribe(EventFilter::CustomExact(TOPIC_STREAM_CHUNK.to_string()));
+    let mut sub_round = ctx.subscribe(EventFilter::CustomExact(TOPIC_ROUND_PROPOSED.to_string()));
 
     tracing::info!(
         plugin_id = PLUGIN_ID,
@@ -588,8 +620,7 @@ async fn republish_loop(store: Store, ctx: Arc<KernelPluginContext>) {
             // Session not owned by the runtime — drop silently.
             return;
         };
-        let Some(typed) = crate::republisher::translate_bus_event(type_id, payload, task_id)
-        else {
+        let Some(typed) = crate::republisher::translate_bus_event(type_id, payload, task_id) else {
             return;
         };
         // Look up the run's event ring + record + publish through the
@@ -632,7 +663,10 @@ fn inject_session_id(
         _ => {
             let fresh = uuid::Uuid::new_v4().to_string();
             if let serde_json::Value::Object(map) = &mut args {
-                map.insert("session_id".into(), serde_json::Value::String(fresh.clone()));
+                map.insert(
+                    "session_id".into(),
+                    serde_json::Value::String(fresh.clone()),
+                );
             }
             fresh
         }
@@ -725,13 +759,7 @@ async fn run_workflow_ai_step(
 ) -> Result<serde_json::Value, String> {
     use nexus_kernel::Ipc as _;
 
-    let span = tracing::info_span!(
-        "workflow_ai_step",
-        target_plugin,
-        command,
-        workflow,
-        step
-    );
+    let span = tracing::info_span!("workflow_ai_step", target_plugin, command, workflow, step);
     let _enter = span.enter();
     ctx.ipc_call(target_plugin, command, args, WORKFLOW_STEP_TIMEOUT)
         .await
@@ -760,8 +788,7 @@ fn handle_list(store: &Store, args: &serde_json::Value) -> Result<serde_json::Va
             .map_err(|e| exec_err(format!("list: invalid args: {e}")))?
     };
     let runs = store.list(&parsed);
-    serde_json::to_value(&ListReply { runs })
-        .map_err(|e| exec_err(format!("list: serialize: {e}")))
+    serde_json::to_value(&ListReply { runs }).map_err(|e| exec_err(format!("list: serialize: {e}")))
 }
 
 #[derive(Serialize)]
@@ -769,7 +796,10 @@ struct EventsReply {
     events: Vec<crate::events::AiEvent>,
 }
 
-fn handle_events(store: &Store, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+fn handle_events(
+    store: &Store,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
     let parsed: AiRuntimeEventsArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("events: invalid args: {e}")))?;
     let ring = store
@@ -983,7 +1013,9 @@ fn publish_session_started(
     goal: &str,
 ) {
     use nexus_kernel::Events as _;
-    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
+    };
     let payload = serde_json::json!({
         "session_id": session_id,
         "session_kind": kind,
@@ -1007,7 +1039,11 @@ fn publish_session_started(
     activity.outcome = ActivityOutcome::Ok;
     if let Ok(activity_payload) = serde_json::to_value(&activity) {
         if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
-            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+            tracing::warn!(
+                plugin_id = PLUGIN_ID,
+                session_id,
+                "activity publish failed: {e}"
+            );
         }
     }
 }
@@ -1021,7 +1057,9 @@ fn publish_session_completed(
     duration_ms: u64,
 ) {
     use nexus_kernel::Events as _;
-    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
+    };
     let payload = serde_json::json!({
         "session_id": session_id,
         "outcome": "completed",
@@ -1046,7 +1084,11 @@ fn publish_session_completed(
     activity.duration_ms = Some(duration_ms);
     if let Ok(activity_payload) = serde_json::to_value(&activity) {
         if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
-            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+            tracing::warn!(
+                plugin_id = PLUGIN_ID,
+                session_id,
+                "activity publish failed: {e}"
+            );
         }
     }
 }
@@ -1061,7 +1103,9 @@ fn publish_session_failed(
     duration_ms: u64,
 ) {
     use nexus_kernel::Events as _;
-    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
+    };
     let payload = serde_json::json!({
         "session_id": session_id,
         "outcome": "failed",
@@ -1088,7 +1132,11 @@ fn publish_session_failed(
     activity.duration_ms = Some(duration_ms);
     if let Ok(activity_payload) = serde_json::to_value(&activity) {
         if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
-            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+            tracing::warn!(
+                plugin_id = PLUGIN_ID,
+                session_id,
+                "activity publish failed: {e}"
+            );
         }
     }
 }
@@ -1103,7 +1151,9 @@ fn publish_session_cancelled(
     duration_ms: Option<u64>,
 ) {
     use nexus_kernel::Events as _;
-    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC};
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ACTIVITY_APPENDED_TOPIC,
+    };
     let payload = serde_json::json!({
         "session_id": session_id,
         "reason": reason,
@@ -1128,7 +1178,11 @@ fn publish_session_cancelled(
     activity.duration_ms = duration_ms;
     if let Ok(activity_payload) = serde_json::to_value(&activity) {
         if let Err(e) = ctx.publish(ACTIVITY_APPENDED_TOPIC, activity_payload) {
-            tracing::warn!(plugin_id = PLUGIN_ID, session_id, "activity publish failed: {e}");
+            tracing::warn!(
+                plugin_id = PLUGIN_ID,
+                session_id,
+                "activity publish failed: {e}"
+            );
         }
     }
 }
@@ -1249,12 +1303,17 @@ mod tests {
             .supervisor
             .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.supervisor.store().observe_status(&AiEvent::Finished {
-            task_id: id,
-            outcome: serde_json::json!({"ok": true}),
-        });
+        plugin
+            .supervisor
+            .store()
+            .observe_status(&AiEvent::Finished {
+                task_id: id,
+                outcome: serde_json::json!({"ok": true}),
+            });
         let args = serde_json::json!({ "task_id": id });
-        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args)
+            .await
+            .unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(!reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Completed);
@@ -1278,7 +1337,9 @@ mod tests {
         });
         let args = serde_json::json!({ "task_id": id });
         let started = std::time::Instant::now();
-        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args)
+            .await
+            .unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(!reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Completed);
@@ -1300,7 +1361,9 @@ mod tests {
             attempt: 1,
         });
         let args = serde_json::json!({ "task_id": id, "timeout_ms": 25 });
-        let value = handle_wait_for(plugin.supervisor.store(), &args).await.unwrap();
+        let value = handle_wait_for(plugin.supervisor.store(), &args)
+            .await
+            .unwrap();
         let reply: crate::AiRuntimeWaitForReply = serde_json::from_value(value).unwrap();
         assert!(reply.timed_out);
         assert_eq!(reply.run.status, RunStatus::Running);
@@ -1450,10 +1513,13 @@ mod tests {
             .supervisor
             .store()
             .insert(id, "session", TaskPriority::Interactive, None, "x");
-        plugin.supervisor.store().observe_status(&AiEvent::Finished {
-            task_id: id,
-            outcome: serde_json::Value::Null,
-        });
+        plugin
+            .supervisor
+            .store()
+            .observe_status(&AiEvent::Finished {
+                task_id: id,
+                outcome: serde_json::Value::Null,
+            });
 
         let ctx = test_ctx();
         let err = handle_cancel(

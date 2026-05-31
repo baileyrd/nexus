@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use nexus_kernel::{Events as _, EventBus, EventFilter, KernelPluginContext, NexusEvent};
+use nexus_kernel::{EventBus, EventFilter, Events as _, KernelPluginContext, NexusEvent};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 
@@ -307,10 +307,15 @@ impl NotificationsCorePlugin {
     ) -> Result<Self, crate::config::ConfigError> {
         let router = Router::from_config(&config)?;
         let mut transports: HashMap<Channel, Box<dyn Transport>> = HashMap::new();
-        transports.insert(Channel::Desktop, Box::new(DesktopTransport::new(bus.clone())));
+        transports.insert(
+            Channel::Desktop,
+            Box::new(DesktopTransport::new(bus.clone())),
+        );
         transports.insert(
             Channel::Discord,
-            Box::new(DiscordWebhook::new(config.channels.discord.webhook_url.clone())),
+            Box::new(DiscordWebhook::new(
+                config.channels.discord.webhook_url.clone(),
+            )),
         );
         transports.insert(
             Channel::Telegram,
@@ -403,8 +408,8 @@ impl NotificationsCorePlugin {
         transports: HashMap<Channel, Box<dyn Transport>>,
         config: NotificationsConfig,
     ) -> Self {
-        let router = Router::from_config(&config)
-            .expect("test fixture: invalid notifications config");
+        let router =
+            Router::from_config(&config).expect("test fixture: invalid notifications config");
         Self {
             transports,
             router,
@@ -423,13 +428,11 @@ impl NotificationsCorePlugin {
         transports: HashMap<Channel, Box<dyn Transport>>,
         config: NotificationsConfig,
     ) -> Self {
-        let router = Router::from_config(&config)
-            .expect("test fixture: invalid notifications config");
+        let router =
+            Router::from_config(&config).expect("test fixture: invalid notifications config");
         let max_rows = config.inbox.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
         let max_age = config.inbox.max_age_days.unwrap_or(DEFAULT_MAX_AGE_DAYS);
-        let inbox = Inbox::in_memory(max_rows, max_age)
-            .ok()
-            .map(Arc::new);
+        let inbox = Inbox::in_memory(max_rows, max_age).ok().map(Arc::new);
         Self {
             transports,
             router,
@@ -642,11 +645,8 @@ impl CorePlugin for NotificationsCorePlugin {
             let mut sub = ctx.subscribe(EventFilter::CustomPrefix(
                 AI_RUNTIME_TOPIC_PREFIX.to_string(),
             ));
-            let transports_snapshot: Vec<(Channel, &'static str)> = self
-                .transports
-                .keys()
-                .map(|c| (*c, c.as_str()))
-                .collect();
+            let transports_snapshot: Vec<(Channel, &'static str)> =
+                self.transports.keys().map(|c| (*c, c.as_str())).collect();
             // The subscriber needs to call back into `dispatch_routed`,
             // but `&mut self` cannot escape into a tokio task. Clone
             // the bits it actually needs: the router + transports.
@@ -728,10 +728,7 @@ impl CorePlugin for NotificationsCorePlugin {
 }
 
 impl NotificationsCorePlugin {
-    fn dispatch_send(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
+    fn dispatch_send(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         let parsed: SendArgs = serde_json::from_value(args.clone())
             .map_err(|e| exec_err(format!("send: invalid args: {e}")))?;
         if parsed.channel.is_none() && parsed.source.is_none() {
@@ -746,12 +743,10 @@ impl NotificationsCorePlugin {
         let severity = parsed.severity.unwrap_or_default();
         // Override path — caller picked a channel explicitly.
         if let Some(channel) = parsed.channel {
-            let transport = self.transports.get(&channel).ok_or_else(|| {
-                exec_err(format!(
-                    "send: unknown channel {}",
-                    channel.as_str()
-                ))
-            })?;
+            let transport = self
+                .transports
+                .get(&channel)
+                .ok_or_else(|| exec_err(format!("send: unknown channel {}", channel.as_str())))?;
             transport
                 .send(&notif)
                 .map_err(|e| exec_err(format!("send: {e}")))?;
@@ -769,7 +764,7 @@ impl NotificationsCorePlugin {
                 routing: "override".to_string(),
             };
             return serde_json::to_value(&reply)
-                .map_err(|e| exec_err(format!("send: serialize: {e}")))
+                .map_err(|e| exec_err(format!("send: serialize: {e}")));
         }
         // Router path — source tag.
         let source = parsed.source.expect("checked above");
@@ -885,10 +880,7 @@ impl NotificationsCorePlugin {
 /// Translate a `com.nexus.ai.runtime.*` event payload into a
 /// [`Notification`]. Returns `None` for events that are too noisy to
 /// surface as a notification (token chunks, intermediate tool calls).
-fn translate_ai_runtime_event(
-    type_id: &str,
-    payload: &serde_json::Value,
-) -> Option<Notification> {
+fn translate_ai_runtime_event(type_id: &str, payload: &serde_json::Value) -> Option<Notification> {
     let suffix = type_id.strip_prefix(AI_RUNTIME_TOPIC_PREFIX)?;
     // Read `kind` if the runtime emits typed AiEvent payloads
     // (post-Phase-2 BL-134), fall back to suffix-based mapping.
@@ -928,11 +920,7 @@ fn translate_ai_runtime_event(
 /// any error setting up the watcher logs + drops back to a
 /// no-watcher state; the loaded config still works, just without
 /// live reload.
-fn spawn_config_watcher(
-    path: PathBuf,
-    router: Router,
-    config: Arc<RwLock<NotificationsConfig>>,
-) {
+fn spawn_config_watcher(path: PathBuf, router: Router, config: Arc<RwLock<NotificationsConfig>>) {
     use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
     // notify watchers want to watch a directory; watching the file
     // directly is unreliable on platforms (atomic-rename editors
@@ -966,8 +954,8 @@ fn spawn_config_watcher(
             // it first happens, then stay silent for the remaining
             // callbacks until the watcher itself is dropped.
             let mut send_warned = false;
-            let mut watcher = match notify::recommended_watcher(
-                move |res: notify::Result<notify::Event>| {
+            let mut watcher =
+                match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                     if let Err(err) = tx.send(res) {
                         if !send_warned {
                             tracing::warn!(
@@ -978,14 +966,13 @@ fn spawn_config_watcher(
                             send_warned = true;
                         }
                     }
-                },
-            ) {
-                Ok(w) => w,
-                Err(err) => {
-                    tracing::warn!(%err, "notifications.toml: watcher init failed");
-                    return;
-                }
-            };
+                }) {
+                    Ok(w) => w,
+                    Err(err) => {
+                        tracing::warn!(%err, "notifications.toml: watcher init failed");
+                        return;
+                    }
+                };
             if let Err(err) = watcher.watch(&parent, RecursiveMode::NonRecursive) {
                 tracing::warn!(
                     parent = %parent.display(),
@@ -1178,8 +1165,13 @@ mod tests {
 
     #[test]
     fn send_rejects_missing_message() {
-        let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new(), SmtpConfig::default());
+        let mut plugin = NotificationsCorePlugin::with_defaults(
+            None,
+            String::new(),
+            String::new(),
+            String::new(),
+            SmtpConfig::default(),
+        );
         let err = plugin
             .dispatch(HANDLER_SEND, &serde_json::json!({ "channel": "desktop" }))
             .unwrap_err();
@@ -1188,8 +1180,13 @@ mod tests {
 
     #[test]
     fn send_rejects_unknown_field() {
-        let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new(), SmtpConfig::default());
+        let mut plugin = NotificationsCorePlugin::with_defaults(
+            None,
+            String::new(),
+            String::new(),
+            String::new(),
+            SmtpConfig::default(),
+        );
         let err = plugin
             .dispatch(
                 HANDLER_SEND,
@@ -1205,8 +1202,13 @@ mod tests {
 
     #[test]
     fn send_rejects_neither_channel_nor_source() {
-        let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new(), SmtpConfig::default());
+        let mut plugin = NotificationsCorePlugin::with_defaults(
+            None,
+            String::new(),
+            String::new(),
+            String::new(),
+            SmtpConfig::default(),
+        );
         let err = plugin
             .dispatch(HANDLER_SEND, &serde_json::json!({ "message": "x" }))
             .unwrap_err();
@@ -1215,8 +1217,13 @@ mod tests {
 
     #[test]
     fn unknown_handler_id_errors() {
-        let mut plugin =
-            NotificationsCorePlugin::with_defaults(None, String::new(), String::new(), String::new(), SmtpConfig::default());
+        let mut plugin = NotificationsCorePlugin::with_defaults(
+            None,
+            String::new(),
+            String::new(),
+            String::new(),
+            SmtpConfig::default(),
+        );
         let err = plugin.dispatch(99, &serde_json::json!({})).unwrap_err();
         assert!(format!("{err}").contains("unknown handler id 99"));
     }
@@ -1316,8 +1323,7 @@ min_severity = "warn"
     fn router_path_reports_per_channel_failures_without_aborting() {
         let m_desk = Arc::new(MockTransport::new(Channel::Desktop));
         let m_disc = Arc::new(
-            MockTransport::new(Channel::Discord)
-                .with_error(SendError::Http("502".into())),
+            MockTransport::new(Channel::Discord).with_error(SendError::Http("502".into())),
         );
         let mut plugin = router_plugin(
             r#"
@@ -1394,9 +1400,7 @@ route = ["desktop"]
         let cfg = NotificationsConfig::load_from(&path).unwrap();
         let plugin = NotificationsCorePlugin::from_config(None, cfg, Some(path.clone())).unwrap();
         // Initial state: workflow → desktop.
-        let res = plugin
-            .router()
-            .resolve("workflow", Severity::Info, 12 * 60);
+        let res = plugin.router().resolve("workflow", Severity::Info, 12 * 60);
         assert_eq!(res, Resolution::Routed(vec![Channel::Desktop]));
 
         // Rewrite + reload.
@@ -1409,9 +1413,7 @@ route = ["discord"]
         )
         .unwrap();
         plugin.reload_config_from_disk().unwrap();
-        let res = plugin
-            .router()
-            .resolve("workflow", Severity::Info, 12 * 60);
+        let res = plugin.router().resolve("workflow", Severity::Info, 12 * 60);
         assert_eq!(res, Resolution::Routed(vec![Channel::Discord]));
     }
 

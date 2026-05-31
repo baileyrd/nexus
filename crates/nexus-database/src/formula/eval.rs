@@ -81,8 +81,7 @@ impl PartialEq for FormulaValue {
         match (self, other) {
             (Self::Null, Self::Null) => true,
             (Self::Number(a), Self::Number(b)) => (a - b).abs() < f64::EPSILON,
-            (Self::String(a), Self::String(b))
-            | (Self::Date(a), Self::Date(b)) => a == b,
+            (Self::String(a), Self::String(b)) | (Self::Date(a), Self::Date(b)) => a == b,
             (Self::Boolean(a), Self::Boolean(b)) => a == b,
             _ => false,
         }
@@ -114,17 +113,11 @@ pub fn evaluate(expr: &Expr, ctx: &EvalContext<'_>) -> Result<FormulaValue> {
     evaluate_inner(expr, ctx, 0)
 }
 
-fn evaluate_inner(
-    expr: &Expr,
-    ctx: &EvalContext<'_>,
-    depth: usize,
-) -> Result<FormulaValue> {
+fn evaluate_inner(expr: &Expr, ctx: &EvalContext<'_>, depth: usize) -> Result<FormulaValue> {
     if depth > MAX_RECURSION_DEPTH {
         return Err(DatabaseError::FormulaError {
             position: 0,
-            message: format!(
-                "formula recursion depth exceeded {MAX_RECURSION_DEPTH}"
-            ),
+            message: format!("formula recursion depth exceeded {MAX_RECURSION_DEPTH}"),
         });
     }
     let next = depth + 1;
@@ -249,20 +242,18 @@ fn eval_binary_op(left: &FormulaValue, op: BinaryOp, right: &FormulaValue) -> Re
         }
 
         // Logical.
-        BinaryOp::And => Ok(FormulaValue::Boolean(
-            left.is_truthy() && right.is_truthy(),
-        )),
-        BinaryOp::Or => Ok(FormulaValue::Boolean(
-            left.is_truthy() || right.is_truthy(),
-        )),
+        BinaryOp::And => Ok(FormulaValue::Boolean(left.is_truthy() && right.is_truthy())),
+        BinaryOp::Or => Ok(FormulaValue::Boolean(left.is_truthy() || right.is_truthy())),
     }
 }
 
 fn num_pair(left: &FormulaValue, right: &FormulaValue, op: &str) -> Result<(f64, f64)> {
-    let l = left.as_number().ok_or_else(|| DatabaseError::FormulaError {
-        position: 0,
-        message: format!("left operand of '{op}' is not a number"),
-    })?;
+    let l = left
+        .as_number()
+        .ok_or_else(|| DatabaseError::FormulaError {
+            position: 0,
+            message: format!("left operand of '{op}' is not a number"),
+        })?;
     let r = right
         .as_number()
         .ok_or_else(|| DatabaseError::FormulaError {
@@ -308,7 +299,10 @@ mod tests {
         evaluate(&ast, &EvalContext { fields: &empty }).unwrap()
     }
 
-    fn eval_with_fields(input: &str, fields: &serde_json::Map<String, serde_json::Value>) -> FormulaValue {
+    fn eval_with_fields(
+        input: &str,
+        fields: &serde_json::Map<String, serde_json::Value>,
+    ) -> FormulaValue {
         let tokens = crate::formula::token::tokenize(input).unwrap();
         let ast = crate::formula::parser::parse(&tokens).unwrap();
         evaluate(&ast, &EvalContext { fields }).unwrap()
@@ -321,7 +315,10 @@ mod tests {
 
     #[test]
     fn literal_string() {
-        assert_eq!(eval(r#""hello""#), FormulaValue::String("hello".to_string()));
+        assert_eq!(
+            eval(r#""hello""#),
+            FormulaValue::String("hello".to_string())
+        );
     }
 
     #[test]
@@ -354,8 +351,14 @@ mod tests {
 
     #[test]
     fn if_expression() {
-        assert_eq!(eval(r#"if(true, "yes", "no")"#), FormulaValue::String("yes".to_string()));
-        assert_eq!(eval(r#"if(false, "yes", "no")"#), FormulaValue::String("no".to_string()));
+        assert_eq!(
+            eval(r#"if(true, "yes", "no")"#),
+            FormulaValue::String("yes".to_string())
+        );
+        assert_eq!(
+            eval(r#"if(false, "yes", "no")"#),
+            FormulaValue::String("no".to_string())
+        );
     }
 
     #[test]
@@ -379,10 +382,7 @@ mod tests {
         let mut fields = serde_json::Map::new();
         fields.insert("priority".to_string(), serde_json::json!(4));
 
-        let result = eval_with_fields(
-            r#"if(prop("priority") > 3, "High", "Low")"#,
-            &fields,
-        );
+        let result = eval_with_fields(r#"if(prop("priority") > 3, "High", "Low")"#, &fields);
         assert_eq!(result, FormulaValue::String("High".to_string()));
     }
 

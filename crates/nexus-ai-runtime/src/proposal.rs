@@ -34,7 +34,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use nexus_plugin_api::{Capability, CapabilityError, token::CapabilityToken};
+use nexus_plugin_api::{token::CapabilityToken, Capability, CapabilityError};
 
 // ─── Identifiers ─────────────────────────────────────────────────────────────
 
@@ -531,9 +531,10 @@ mod tests {
     fn submit_approved_when_token_grants_capability() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         let result = store.submit(sid, fs_write_action(), &token);
         assert!(result.is_ok(), "expected Approved, got: {result:?}");
         let pid = result.unwrap();
@@ -559,9 +560,10 @@ mod tests {
     fn submit_rejected_when_token_is_revoked() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         token.revoke();
         let result = store.submit(sid, fs_write_action(), &token);
         assert!(result.is_err(), "revoked token must not approve");
@@ -571,9 +573,10 @@ mod tests {
     fn commit_approved_proposal_returns_snapshot_id() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         let pid = store.submit(sid, fs_write_action(), &token).unwrap();
         let entries = vec![SnapshotEntry::FsWrite {
             path: "notes/test.md".into(),
@@ -610,9 +613,10 @@ mod tests {
     fn rollback_marks_snapshot_and_returns_clone() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         let pid = store.submit(sid, fs_write_action(), &token).unwrap();
         let snap_id = store.commit(pid, vec![]).unwrap();
         let rolled = store.rollback(snap_id).expect("rollback should succeed");
@@ -624,9 +628,10 @@ mod tests {
     fn rollback_is_not_idempotent_errors_on_second_call() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         let pid = store.submit(sid, fs_write_action(), &token).unwrap();
         let snap_id = store.commit(pid, vec![]).unwrap();
         store.rollback(snap_id).unwrap();
@@ -645,9 +650,10 @@ mod tests {
     fn snapshots_for_session_sorted_by_committed_at() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         // Commit two proposals in order.
         let pid1 = store.submit(sid, fs_write_action(), &token).unwrap();
         let snap1 = store.commit(pid1, vec![]).unwrap();
@@ -665,9 +671,10 @@ mod tests {
         let store = ProposalStore::new();
         let sid_a = session_id();
         let sid_b = session_id();
-        let token_a = CapabilityToken::new(sid_a, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token_a = CapabilityToken::new(
+            sid_a,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         let _ = store.submit(sid_a, fs_write_action(), &token_a);
         let _ = store.submit(sid_a, fs_write_action(), &token_a);
         let token_b = CapabilityToken::new(sid_b, CapabilitySet::default());
@@ -680,9 +687,10 @@ mod tests {
     fn pending_count_tracks_non_terminal_proposals() {
         let store = ProposalStore::new();
         let sid = session_id();
-        let token = CapabilityToken::new(sid, CapabilitySet::from_iter([
-            nexus_plugin_api::Capability::FsWrite,
-        ]));
+        let token = CapabilityToken::new(
+            sid,
+            CapabilitySet::from_iter([nexus_plugin_api::Capability::FsWrite]),
+        );
         assert_eq!(store.pending_count(), 0);
         let pid1 = store.submit(sid, fs_write_action(), &token).unwrap();
         // Approved counts as live.
@@ -695,11 +703,19 @@ mod tests {
     #[test]
     fn proposed_action_capability_required_is_stable() {
         assert_eq!(
-            ProposedAction::FsWrite { path: "x".into(), content: "y".into() }.capability_required(),
+            ProposedAction::FsWrite {
+                path: "x".into(),
+                content: "y".into()
+            }
+            .capability_required(),
             nexus_plugin_api::Capability::FsWrite,
         );
         assert_eq!(
-            ProposedAction::FsWriteExternal { path: "/tmp/x".into(), content: "y".into() }.capability_required(),
+            ProposedAction::FsWriteExternal {
+                path: "/tmp/x".into(),
+                content: "y".into()
+            }
+            .capability_required(),
             nexus_plugin_api::Capability::FsWriteExternal,
         );
         assert_eq!(
@@ -707,15 +723,27 @@ mod tests {
             nexus_plugin_api::Capability::FsWrite,
         );
         assert_eq!(
-            ProposedAction::IpcCall { target_plugin: "com.nexus.ai".into(), command: "ask".into(), args: serde_json::Value::Null }.capability_required(),
+            ProposedAction::IpcCall {
+                target_plugin: "com.nexus.ai".into(),
+                command: "ask".into(),
+                args: serde_json::Value::Null
+            }
+            .capability_required(),
             nexus_plugin_api::Capability::IpcCall,
         );
         assert_eq!(
-            ProposedAction::KvWrite { key: "k".into(), value: serde_json::Value::Null }.capability_required(),
+            ProposedAction::KvWrite {
+                key: "k".into(),
+                value: serde_json::Value::Null
+            }
+            .capability_required(),
             nexus_plugin_api::Capability::KvWrite,
         );
         assert_eq!(
-            ProposedAction::ProcessSpawn { argv: vec!["ls".into()] }.capability_required(),
+            ProposedAction::ProcessSpawn {
+                argv: vec!["ls".into()]
+            }
+            .capability_required(),
             nexus_plugin_api::Capability::ProcessSpawn,
         );
     }

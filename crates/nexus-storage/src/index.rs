@@ -4,11 +4,11 @@
 //! `properties`, and `fts_blocks` tables defined in the schema migration.
 
 use chrono::NaiveDate;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::StorageError;
 use crate::parser::{ParsedFile, Property};
+use crate::StorageError;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -190,7 +190,10 @@ pub fn insert_file(
 
     // ── 3. Links ─────────────────────────────────────────────────────────────
     for link in &parsed.links {
-        let resolve_target = link.target_path.as_deref().or(Some(link.link_text.as_str()));
+        let resolve_target = link
+            .target_path
+            .as_deref()
+            .or(Some(link.link_text.as_str()));
         let (target_file_id, is_resolved) = resolve_link(conn, resolve_target);
         conn.execute(
             "INSERT INTO links
@@ -239,7 +242,10 @@ pub fn insert_file(
 /// # Errors
 ///
 /// Returns [`StorageError::Database`] on any `SQLite` failure.
-pub fn query_files(conn: &Connection, filter: &FileFilter) -> Result<Vec<FileRecord>, StorageError> {
+pub fn query_files(
+    conn: &Connection,
+    filter: &FileFilter,
+) -> Result<Vec<FileRecord>, StorageError> {
     // Build the WHERE clauses and a parallel params list dynamically.
     let mut clauses: Vec<String> = Vec::new();
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -269,8 +275,10 @@ pub fn query_files(conn: &Connection, filter: &FileFilter) -> Result<Vec<FileRec
          FROM files {where_clause} ORDER BY path;"
     );
 
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(std::convert::AsRef::as_ref).collect();
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+        .iter()
+        .map(std::convert::AsRef::as_ref)
+        .collect();
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_refs.as_slice(), map_file_record)?;
@@ -647,11 +655,7 @@ pub fn invalidate_links_to(conn: &Connection, file_id: u64) -> Result<usize, Sto
 /// Insert a single property row, ignoring duplicate `(file_id, key)` pairs.
 /// Populates typed columns (`value_num`, `value_date`, `value_bool`) based on
 /// the JSON value and `property_type` hint.
-fn insert_property(
-    conn: &Connection,
-    file_id: u64,
-    prop: &Property,
-) -> Result<(), StorageError> {
+fn insert_property(conn: &Connection, file_id: u64, prop: &Property) -> Result<(), StorageError> {
     let (value_num, value_date, value_bool) =
         extract_typed_values(&prop.value, prop.property_type.as_deref());
     conn.execute(
@@ -932,7 +936,12 @@ mod tests {
             ..Default::default()
         };
         let results = query_files(&conn, &filter).unwrap();
-        assert_eq!(results.len(), 1, "expected 1 attachment, got {}", results.len());
+        assert_eq!(
+            results.len(),
+            1,
+            "expected 1 attachment, got {}",
+            results.len()
+        );
         assert_eq!(results[0].file_type, "attachment");
     }
 
@@ -998,7 +1007,12 @@ mod tests {
         insert_file(&conn, "notes/b.md", "markdown", 10, &file_b).unwrap();
 
         let backlinks = query_backlinks(&conn, a_id).unwrap();
-        assert_eq!(backlinks.len(), 1, "expected 1 backlink, got {}", backlinks.len());
+        assert_eq!(
+            backlinks.len(),
+            1,
+            "expected 1 backlink, got {}",
+            backlinks.len()
+        );
     }
 
     // ── 11. delete_file_cascades ──────────────────────────────────────────────
@@ -1015,7 +1029,10 @@ mod tests {
         delete_file(&conn, file_id).unwrap();
 
         let after = query_blocks(&conn, file_id).unwrap();
-        assert!(after.is_empty(), "cascaded delete should remove child blocks");
+        assert!(
+            after.is_empty(),
+            "cascaded delete should remove child blocks"
+        );
     }
 
     // ── 12. file_by_path_returns_none_for_missing ─────────────────────────────
@@ -1052,7 +1069,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(count > 0, "FTS should have at least one match for 'content'");
+        assert!(
+            count > 0,
+            "FTS should have at least one match for 'content'"
+        );
     }
 
     // ── 15. insert_property_populates_typed_columns ──────────────────────────
@@ -1181,7 +1201,10 @@ mod tests {
         )
         .unwrap();
         let links = query_links(&conn, src_id).unwrap();
-        assert!(links[0].is_resolved, "[[Target]] should resolve to target.md");
+        assert!(
+            links[0].is_resolved,
+            "[[Target]] should resolve to target.md"
+        );
         assert_eq!(links[0].target_file_id, Some(target_id));
     }
 

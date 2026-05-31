@@ -17,7 +17,10 @@ use crate::ipc::{AiStreamChatArgs, AiStreamChatMode, AiToolPolicy};
 use crate::tools::ToolRegistry;
 use nexus_types::activity::{ActivityEntry, ActivityOutcome};
 
-#[allow(clippy::too_many_lines, reason = "BL-037 records on every exit path; flow stays linear")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "BL-037 records on every exit path; flow stays linear"
+)]
 pub(crate) async fn handle_stream_chat(
     ctx: Arc<KernelPluginContext>,
     ai_cfg: Option<AiConfig>,

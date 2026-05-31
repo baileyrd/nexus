@@ -1,7 +1,7 @@
 //! The `Kernel` struct — entry point for the nexus-kernel crate.
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use crate::config::KernelConfig;
 use crate::error::Result;
@@ -113,8 +113,9 @@ impl Kernel {
     /// compatibility.
     #[allow(clippy::unused_async)]
     pub async fn shutdown(&self) -> Result<()> {
-        let was_already_shutdown =
-            self.shutdown_flag.swap(true, std::sync::atomic::Ordering::SeqCst);
+        let was_already_shutdown = self
+            .shutdown_flag
+            .swap(true, std::sync::atomic::Ordering::SeqCst);
         if was_already_shutdown {
             tracing::debug!("nexus kernel shutdown already signalled; no-op");
             return Ok(());
@@ -122,7 +123,6 @@ impl Kernel {
         tracing::info!("nexus kernel shutdown signalled");
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -139,7 +139,10 @@ mod tests {
     fn new_succeeds_with_default_config() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-kernel-test"));
         let kernel = Kernel::new(config, kv()).unwrap();
-        assert_eq!(kernel.config().forge_root, PathBuf::from("/tmp/nexus-kernel-test"));
+        assert_eq!(
+            kernel.config().forge_root,
+            PathBuf::from("/tmp/nexus-kernel-test")
+        );
     }
 
     #[test]
@@ -182,7 +185,6 @@ mod tests {
         let kernel = Kernel::new(config, kv()).unwrap();
         kernel.start().await.unwrap();
         kernel.shutdown().await.unwrap();
-        kernel.shutdown().await.unwrap();  // no panic, no error
+        kernel.shutdown().await.unwrap(); // no panic, no error
     }
-
 }

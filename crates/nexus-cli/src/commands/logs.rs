@@ -43,7 +43,11 @@ pub fn tail(app: &App, level: Option<&str>, lines: usize) -> Result<()> {
     let content = fs::read_to_string(most_recent)?;
     let all_lines: Vec<&str> = content.lines().collect();
 
-    let tail_lines: Vec<&&str> = all_lines.iter().rev().take(lines).collect::<Vec<_>>()
+    let tail_lines: Vec<&&str> = all_lines
+        .iter()
+        .rev()
+        .take(lines)
+        .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect();
@@ -137,8 +141,17 @@ pub fn audit_list(
         let ts = row.get("ts_ms").and_then(Value::as_i64).unwrap_or(0);
         let event = row.get("event_type").and_then(Value::as_str).unwrap_or("?");
         let plugin = row.get("plugin_id").and_then(Value::as_str).unwrap_or("-");
-        let detail = row.get("detail_json").and_then(Value::as_str).unwrap_or("{}");
-        println!("{}  {:<24}  {:<32}  {}", format_ts(ts), event, plugin, detail);
+        let detail = row
+            .get("detail_json")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        println!(
+            "{}  {:<24}  {:<32}  {}",
+            format_ts(ts),
+            event,
+            plugin,
+            detail
+        );
     }
     Ok(())
 }
@@ -164,7 +177,10 @@ pub fn audit_export(
     let rows: Vec<Value> = rows
         .into_iter()
         .filter(|r| match end_ts {
-            Some(end) => r.get("ts_ms").and_then(Value::as_i64).is_some_and(|t| t < end),
+            Some(end) => r
+                .get("ts_ms")
+                .and_then(Value::as_i64)
+                .is_some_and(|t| t < end),
             None => true,
         })
         .collect();
@@ -198,8 +214,7 @@ pub fn audit_export(
 
 /// `nexus logs clear` — prune entries older than `older_than` days.
 pub fn audit_clear(app: &mut App, older_than: u32) -> Result<()> {
-    let cutoff =
-        chrono::Utc::now().timestamp_millis() - i64::from(older_than) * MS_PER_DAY;
+    let cutoff = chrono::Utc::now().timestamp_millis() - i64::from(older_than) * MS_PER_DAY;
     let response = call_security(app, "clear_audit_log", json!({ "before_ts": cutoff }))?;
     let removed = response.get("removed").and_then(Value::as_u64).unwrap_or(0);
     println!("Removed {removed} audit entries older than {older_than} days.");

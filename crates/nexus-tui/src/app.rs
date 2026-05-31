@@ -14,7 +14,7 @@ use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRec
 use nexus_bootstrap::terminal as term_ipc;
 use nexus_bootstrap::terminal::OutputLine;
 use nexus_bootstrap::{build_tui_runtime, Runtime};
-use nexus_kernel::{Ipc as _, EventFilter, EventSubscription, NexusEvent};
+use nexus_kernel::{EventFilter, EventSubscription, Ipc as _, NexusEvent};
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
 use tokio::task::JoinHandle;
@@ -1047,12 +1047,7 @@ impl TuiApp {
 
         // Restore selection by path, falling back to 0.
         if let Some(prev_path) = prev_selected_path {
-            if let Some(idx) = self
-                .tree
-                .entries
-                .iter()
-                .position(|e| e.path == prev_path)
-            {
+            if let Some(idx) = self.tree.entries.iter().position(|e| e.path == prev_path) {
                 self.tree.select(idx);
             } else {
                 self.tree.select(0);
@@ -1122,8 +1117,8 @@ impl TuiApp {
         if !self.kernel_stats.visible {
             return;
         }
-        use std::time::Duration;
         use nexus_kernel::Ipc as _;
+        use std::time::Duration;
         let result = self.rt.block_on(self.runtime.context.ipc_call(
             "com.nexus.security",
             "metrics_snapshot",
@@ -1242,7 +1237,10 @@ impl TuiApp {
         };
         let line = std::mem::take(&mut self.terminal.input);
         let invoker = self.runtime.invoker();
-        if let Err(e) = self.rt.block_on(term_ipc::send_input(&*invoker, &id, &line)) {
+        if let Err(e) = self
+            .rt
+            .block_on(term_ipc::send_input(&*invoker, &id, &line))
+        {
             tracing::warn!(error = %e, "terminal send_input failed");
         }
     }
@@ -1254,19 +1252,17 @@ impl TuiApp {
             return;
         };
         let invoker = self.runtime.invoker();
-        if let Err(e) = self.rt.block_on(term_ipc::send_raw_input(&*invoker, &id, data)) {
+        if let Err(e) = self
+            .rt
+            .block_on(term_ipc::send_raw_input(&*invoker, &id, data))
+        {
             tracing::warn!(error = %e, "terminal send_raw_input failed");
         }
     }
 
     /// Refresh cached status bar statistics from the storage engine.
     pub fn refresh_status(&mut self) {
-        let file_count = self
-            .tree
-            .entries
-            .iter()
-            .filter(|e| !e.is_dir)
-            .count();
+        let file_count = self.tree.entries.iter().filter(|e| !e.is_dir).count();
 
         let invoker = self.runtime.invoker();
         let link_count = self
@@ -1387,10 +1383,7 @@ impl TuiApp {
                     .get("ai_provider")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let model = value
-                    .get("ai_model")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let model = value.get("ai_model").and_then(|v| v.as_str()).unwrap_or("");
                 let label = match (provider, model) {
                     ("", _) => "(no provider)".to_string(),
                     (p, "") => p.to_string(),
@@ -1461,9 +1454,13 @@ impl TuiApp {
         // between the spawn and our first pump still reach us
         // (broadcast channels drop pre-subscription events).
         let session_id = uuid::Uuid::new_v4().to_string();
-        let subscription = self.runtime.kernel.event_bus().subscribe(
-            EventFilter::CustomPrefix("com.nexus.ai.stream_".to_string()),
-        );
+        let subscription = self
+            .runtime
+            .kernel
+            .event_bus()
+            .subscribe(EventFilter::CustomPrefix(
+                "com.nexus.ai.stream_".to_string(),
+            ));
 
         // Spawn the IPC call on the multi-threaded tokio runtime.
         // The future captures `runtime` (Arc clone) by move so it
@@ -1516,7 +1513,10 @@ impl TuiApp {
         loop {
             match session.subscription.try_recv() {
                 Ok(Some(event)) => {
-                    let NexusEvent::Custom { type_id, payload, .. } = &event.event else {
+                    let NexusEvent::Custom {
+                        type_id, payload, ..
+                    } = &event.event
+                    else {
                         continue;
                     };
                     if type_id == STREAM_START_TOPIC
@@ -1570,9 +1570,7 @@ impl TuiApp {
         // any UI mutation; the join harvest can't observe pre-take
         // state because we're the only mutator.
         let mut session = self.ai.streaming.take().expect("checked Some above");
-        let join_result = self
-            .rt
-            .block_on(async { (&mut session.join).await });
+        let join_result = self.rt.block_on(async { (&mut session.join).await });
         self.ai.in_flight = false;
 
         let outcome = match join_result {
@@ -1705,7 +1703,10 @@ impl TuiApp {
         loop {
             match session.subscription.try_recv() {
                 Ok(Some(event)) => {
-                    let NexusEvent::Custom { type_id, payload, .. } = &event.event else {
+                    let NexusEvent::Custom {
+                        type_id, payload, ..
+                    } = &event.event
+                    else {
                         continue;
                     };
                     if type_id != AGENT_ROUND_PROPOSED_TOPIC {
@@ -1925,10 +1926,7 @@ pub fn is_modal_expired(
 /// transcript. Pulled out for testability; mirrors the CLI's
 /// `print_session` shape but folds each output line into a typed
 /// `AgentLine` so the renderer can style by kind.
-fn render_session_into_transcript(
-    state: &mut AgentPanelState,
-    session: &serde_json::Value,
-) {
+fn render_session_into_transcript(state: &mut AgentPanelState, session: &serde_json::Value) {
     let rounds = session
         .get("rounds")
         .and_then(|v| v.as_array())
@@ -1945,7 +1943,10 @@ fn render_session_into_transcript(
         if let Some(calls) = round.get("tool_calls").and_then(|v| v.as_array()) {
             for tc in calls {
                 let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let approved = tc.get("approved").and_then(|v| v.as_bool()).unwrap_or(false);
+                let approved = tc
+                    .get("approved")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let error = tc.get("error").and_then(|v| v.as_str()).unwrap_or("");
                 let marker = if !error.is_empty() {
                     "✗"
@@ -2203,7 +2204,10 @@ mod bl132_tests {
         assert!(parsed.text.starts_with("I will delete"));
         assert_eq!(parsed.calls.len(), 2);
         assert_eq!(parsed.calls[0].name, "delete_file");
-        assert_eq!(parsed.calls[0].target_plugin_id.as_deref(), Some("com.nexus.storage"));
+        assert_eq!(
+            parsed.calls[0].target_plugin_id.as_deref(),
+            Some("com.nexus.storage")
+        );
         assert!(parsed.calls[0].requires_approval);
         assert!(parsed.calls[0].registered);
         assert!(!parsed.calls[1].requires_approval);
@@ -2249,7 +2253,10 @@ mod bl132_tests {
         // for that case.
         let opened = Instant::now();
         let earlier = opened;
-        assert!(!is_modal_expired(opened, Duration::from_secs(1800), earlier));
+        assert!(!is_modal_expired(
+            opened,
+            Duration::from_secs(1800),
+            earlier
+        ));
     }
 }
-

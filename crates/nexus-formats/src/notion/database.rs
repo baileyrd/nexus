@@ -149,13 +149,10 @@ fn is_iso_date(s: &str) -> bool {
     if bytes.len() < 10 {
         return false;
     }
-    bytes[..10]
-        .iter()
-        .enumerate()
-        .all(|(i, b)| match i {
-            4 | 7 => *b == b'-',
-            _ => b.is_ascii_digit(),
-        })
+    bytes[..10].iter().enumerate().all(|(i, b)| match i {
+        4 | 7 => *b == b'-',
+        _ => b.is_ascii_digit(),
+    })
 }
 
 // ── TOML escaping ───────────────────────────────────────────────────────────

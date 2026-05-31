@@ -30,8 +30,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{Ipc as _, 
-    Capability, CapabilitySet, EventBus, IpcDispatcher, IpcError, KernelPluginContext, KvStore,
+use nexus_kernel::{
+    Capability, CapabilitySet, EventBus, Ipc as _, IpcDispatcher, IpcError, KernelPluginContext,
+    KvStore,
 };
 use nexus_plugins::SharedPluginLoader;
 
@@ -68,8 +69,8 @@ const GATED_COMMANDS: &[(&str, &str)] = &[
 async fn ipc_call_denied_without_process_spawn_capability() {
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
     let loader = Arc::clone(&runtime.loader);
 
     // Caller holds only `IpcCall` — same shape as workflow's post-#73 caps.
@@ -77,7 +78,12 @@ async fn ipc_call_denied_without_process_spawn_capability() {
 
     for (target, command) in GATED_COMMANDS {
         let err = ctx
-            .ipc_call(target, command, serde_json::json!({}), Duration::from_secs(5))
+            .ipc_call(
+                target,
+                command,
+                serde_json::json!({}),
+                Duration::from_secs(5),
+            )
             .await
             .expect_err(&format!(
                 "{target}::{command} must be denied without ProcessSpawn"
@@ -89,9 +95,7 @@ async fn ipc_call_denied_without_process_spawn_capability() {
                     "denied envelope must name the caller, not the target"
                 );
             }
-            other => panic!(
-                "{target}::{command}: expected CapabilityDenied, got: {other:?}"
-            ),
+            other => panic!("{target}::{command}: expected CapabilityDenied, got: {other:?}"),
         }
     }
 }
@@ -100,8 +104,8 @@ async fn ipc_call_denied_without_process_spawn_capability() {
 async fn ipc_call_passes_gate_with_process_spawn_capability() {
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
     let loader = Arc::clone(&runtime.loader);
 
     // Caller holds `IpcCall + ProcessSpawn` — same shape the shell's
@@ -116,7 +120,12 @@ async fn ipc_call_passes_gate_with_process_spawn_capability() {
 
     for (target, command) in GATED_COMMANDS {
         let result = ctx
-            .ipc_call(target, command, serde_json::json!({}), Duration::from_secs(5))
+            .ipc_call(
+                target,
+                command,
+                serde_json::json!({}),
+                Duration::from_secs(5),
+            )
             .await;
         match result {
             Ok(_) => {
@@ -141,8 +150,8 @@ async fn unrelated_targets_pass_with_only_ipc_call() {
     // requirements (e.g., `com.nexus.storage::read_file`).
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
     let loader = Arc::clone(&runtime.loader);
 
     let ctx = make_ctx(loader, dir.path(), &[Capability::IpcCall]);
@@ -173,10 +182,9 @@ fn loader_required_caller_caps_returns_process_spawn_for_gated_commands() {
     // this test pins the loader-side wiring specifically).
     let dir = tempfile::tempdir().expect("tempdir");
     nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
-    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
-        .expect("build runtime");
-    let loader: Arc<dyn IpcDispatcher> =
-        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+    let runtime =
+        nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf()).expect("build runtime");
+    let loader: Arc<dyn IpcDispatcher> = Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
 
     for (target, command) in GATED_COMMANDS {
         let caps = loader.required_caller_caps(target, command);

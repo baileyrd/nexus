@@ -255,7 +255,9 @@ fn dispatch_list(
 ) -> Result<serde_json::Value, PluginError> {
     let a: FilePathArg =
         serde_json::from_value(args.clone()).map_err(|e| exec_err(format!("list: {e}")))?;
-    let threads = store.list_threads(&a.file_path).map_err(|e| map_store_err(&e))?;
+    let threads = store
+        .list_threads(&a.file_path)
+        .map_err(|e| map_store_err(&e))?;
     serde_json::to_value(&threads).map_err(|e| exec_err(format!("list: serialize: {e}")))
 }
 
@@ -287,8 +289,7 @@ fn dispatch_create_thread(
     let thread = store
         .create_thread(&a.file_path, a.block_id, a.body, a.author)
         .map_err(|e| map_store_err(&e))?;
-    serde_json::to_value(&thread)
-        .map_err(|e| exec_err(format!("create_thread: serialize: {e}")))
+    serde_json::to_value(&thread).map_err(|e| exec_err(format!("create_thread: serialize: {e}")))
 }
 
 fn dispatch_add_reply(
@@ -301,21 +302,19 @@ fn dispatch_add_reply(
     let comment = store
         .add_reply(&a.file_path, a.thread_id, a.body, a.author)
         .map_err(|e| map_store_err(&e))?;
-    serde_json::to_value(&comment)
-        .map_err(|e| exec_err(format!("add_reply: serialize: {e}")))
+    serde_json::to_value(&comment).map_err(|e| exec_err(format!("add_reply: serialize: {e}")))
 }
 
 fn dispatch_set_resolved(
     store: &CommentStore,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: SetResolvedArgs = serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("set_resolved: {e}")))?;
+    let a: SetResolvedArgs =
+        serde_json::from_value(args.clone()).map_err(|e| exec_err(format!("set_resolved: {e}")))?;
     let thread = store
         .set_resolved(&a.file_path, a.thread_id, a.resolved, a.author)
         .map_err(|e| map_store_err(&e))?;
-    serde_json::to_value(&thread)
-        .map_err(|e| exec_err(format!("set_resolved: serialize: {e}")))
+    serde_json::to_value(&thread).map_err(|e| exec_err(format!("set_resolved: serialize: {e}")))
 }
 
 fn dispatch_delete_thread(
@@ -346,14 +345,13 @@ fn dispatch_edit_comment(
     store: &CommentStore,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let a: EditCommentArgs = serde_json::from_value(args.clone())
-        .map_err(|e| exec_err(format!("edit_comment: {e}")))?;
+    let a: EditCommentArgs =
+        serde_json::from_value(args.clone()).map_err(|e| exec_err(format!("edit_comment: {e}")))?;
     check_body_size(&a.body, "edit_comment")?;
     let comment = store
         .edit_comment(&a.file_path, a.thread_id, a.comment_id, a.body)
         .map_err(|e| map_store_err(&e))?;
-    serde_json::to_value(&comment)
-        .map_err(|e| exec_err(format!("edit_comment: serialize: {e}")))
+    serde_json::to_value(&comment).map_err(|e| exec_err(format!("edit_comment: serialize: {e}")))
 }
 
 fn map_store_err(err: &CommentStoreError) -> PluginError {

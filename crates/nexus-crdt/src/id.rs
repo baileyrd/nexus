@@ -54,9 +54,7 @@ impl Lamport {
 /// Globally-unique operation id. Total order is `(lamport, site)`:
 /// lamport breaks most ties; the site UUID is an unambiguous fallback
 /// for concurrent ops that share a lamport.
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct OpId {
     /// Logical timestamp (primary sort key).
     pub lamport: Lamport,

@@ -67,7 +67,14 @@ async fn retired_handlers_return_command_not_found() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
 
-    for cmd in ["run", "run_plan", "execute_step", "parallel", "pipeline", "trace_get"] {
+    for cmd in [
+        "run",
+        "run_plan",
+        "execute_step",
+        "parallel",
+        "pipeline",
+        "trace_get",
+    ] {
         let err = call(&runtime, cmd, serde_json::json!({}))
             .await
             .unwrap_err();

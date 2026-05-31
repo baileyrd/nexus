@@ -122,8 +122,8 @@ impl SqliteAdHocStore {
     /// # Errors
     /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn in_memory() -> Result<Self, TerminalError> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| TerminalError::Persist(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| TerminalError::Persist(e.to_string()))?;
         Self::migrate(&conn)?;
         Ok(Self { conn })
     }
@@ -244,7 +244,10 @@ impl SqliteAdHocStore {
             )
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
         let rows = stmt
-            .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], row_to_record)
+            .query_map(
+                params![i64::try_from(limit).unwrap_or(i64::MAX)],
+                row_to_record,
+            )
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
         let mut out = Vec::new();
         for row in rows {
@@ -276,7 +279,10 @@ impl SqliteAdHocStore {
     /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn delete(&self, id: &str) -> Result<(), TerminalError> {
         self.conn
-            .execute("DELETE FROM procmgr_adhoc_history WHERE id = ?1", params![id])
+            .execute(
+                "DELETE FROM procmgr_adhoc_history WHERE id = ?1",
+                params![id],
+            )
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
         Ok(())
     }
@@ -312,12 +318,8 @@ mod tests {
     #[test]
     fn record_inserts_and_dedupes_by_command_and_cwd() {
         let s = SqliteAdHocStore::in_memory().expect("open");
-        let id1 = s
-            .record("ls", Some("/tmp"), Some(0), 50)
-            .expect("record 1");
-        let id2 = s
-            .record("ls", Some("/tmp"), Some(0), 60)
-            .expect("record 2");
+        let id1 = s.record("ls", Some("/tmp"), Some(0), 50).expect("record 1");
+        let id2 = s.record("ls", Some("/tmp"), Some(0), 60).expect("record 2");
         assert_eq!(id1, id2, "same command+cwd should dedupe to one row");
         let got = s.get(&id1).expect("get").expect("present");
         assert_eq!(got.run_count, 2);

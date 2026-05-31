@@ -59,11 +59,10 @@ pub fn load_workspace_state(forge_root: &Path) -> Result<WorkspaceState, Storage
 /// # Errors
 ///
 /// Returns [`StorageError`] on I/O or serialization failure.
-pub fn save_workspace_state(
-    forge_root: &Path,
-    state: &WorkspaceState,
-) -> Result<(), StorageError> {
-    Ok(nexus_formats::config::save_workspace_state(forge_root, state)?)
+pub fn save_workspace_state(forge_root: &Path, state: &WorkspaceState) -> Result<(), StorageError> {
+    Ok(nexus_formats::config::save_workspace_state(
+        forge_root, state,
+    )?)
 }
 
 /// Load MCP config from `.forge/mcp.toml`. Returns defaults when the file is

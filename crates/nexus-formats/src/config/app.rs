@@ -53,13 +53,13 @@ pub struct CoreSettings {
 impl Default for CoreSettings {
     fn default() -> Self {
         Self {
-            name:               "MyForge".into(),
-            default_note_dir:   "notes".into(),
-            attachment_dir:     "attachments".into(),
-            daily_note_format:  "%Y-%m-%d".into(),
-            default_layout:     "sidebar".into(),
-            theme:              "auto".into(),
-            language:           "en".into(),
+            name: "MyForge".into(),
+            default_note_dir: "notes".into(),
+            attachment_dir: "attachments".into(),
+            daily_note_format: "%Y-%m-%d".into(),
+            default_layout: "sidebar".into(),
+            theme: "auto".into(),
+            language: "en".into(),
         }
     }
 }
@@ -85,11 +85,11 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
-            font_size:          14,
-            font_family:        "monospace".into(),
-            line_height:        1.6,
-            enable_vim_mode:    false,
-            auto_save:          true,
+            font_size: 14,
+            font_family: "monospace".into(),
+            line_height: 1.6,
+            enable_vim_mode: false,
+            auto_save: true,
             auto_save_delay_ms: 3000,
         }
     }
@@ -101,20 +101,20 @@ impl Default for EditorSettings {
 #[allow(clippy::struct_excessive_bools)]
 pub struct PreviewSettings {
     /// Enable Mermaid diagram rendering.
-    pub enable_mermaid:    bool,
+    pub enable_mermaid: bool,
     /// Enable `KaTeX` math rendering.
-    pub enable_katex:      bool,
+    pub enable_katex: bool,
     /// Enable syntax highlighting.
-    pub enable_highlight:  bool,
+    pub enable_highlight: bool,
     /// Resolve wikilinks in preview.
-    pub enable_wikilinks:  bool,
+    pub enable_wikilinks: bool,
 }
 
 impl Default for PreviewSettings {
     fn default() -> Self {
         Self {
-            enable_mermaid:   true,
-            enable_katex:     true,
+            enable_mermaid: true,
+            enable_katex: true,
             enable_highlight: true,
             enable_wikilinks: true,
         }
@@ -126,19 +126,19 @@ impl Default for PreviewSettings {
 #[serde(default)]
 pub struct SearchSettings {
     /// Enable full-text search.
-    pub enable_full_text:    bool,
+    pub enable_full_text: bool,
     /// Re-index interval in milliseconds.
-    pub index_interval_ms:   u64,
+    pub index_interval_ms: u64,
     /// Maximum results to return.
-    pub max_results:         usize,
+    pub max_results: usize,
 }
 
 impl Default for SearchSettings {
     fn default() -> Self {
         Self {
-            enable_full_text:  true,
+            enable_full_text: true,
             index_interval_ms: 5000,
-            max_results:       50,
+            max_results: 50,
         }
     }
 }
@@ -180,13 +180,13 @@ pub struct GitSettings {
 impl Default for GitSettings {
     fn default() -> Self {
         Self {
-            enabled:                   true,
-            auto_commit:               false,
+            enabled: true,
+            auto_commit: false,
             auto_commit_interval_secs: 1800,
-            auto_commit_on_save:       false,
+            auto_commit_on_save: false,
             auto_commit_debounce_secs: 5,
-            poll_interval_secs:        None,
-            auto_commit_tick_secs:     None,
+            poll_interval_secs: None,
+            auto_commit_tick_secs: None,
         }
     }
 }
@@ -231,12 +231,12 @@ pub struct DreamCycleSettings {
 impl Default for DreamCycleSettings {
     fn default() -> Self {
         Self {
-            enabled:          false,
-            schedule:         "0 2 * * *".into(),
-            merge_threshold:  0.97,
+            enabled: false,
+            schedule: "0 2 * * *".into(),
+            merge_threshold: 0.97,
             review_threshold: 0.92,
-            decay_factor:     0.95,
-            decay_floor:      0.10,
+            decay_factor: 0.95,
+            decay_floor: 0.10,
         }
     }
 }

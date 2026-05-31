@@ -140,8 +140,7 @@ impl AcpHostConfig {
     ) -> Vec<MergeSkip> {
         let mut skipped = Vec::new();
         for (spec, plugin_id) in contributions {
-            if let Err(reason) = self.register_contributed(spec.clone(), plugin_id.clone())
-            {
+            if let Err(reason) = self.register_contributed(spec.clone(), plugin_id.clone()) {
                 skipped.push(MergeSkip {
                     name: spec.name,
                     plugin_id,
@@ -263,7 +262,8 @@ mod tests {
     #[test]
     fn register_contributed_refuses_duplicate_name() {
         let mut cfg = AcpHostConfig::new();
-        cfg.register_contributed(spec("a", "x"), "p1".into()).unwrap();
+        cfg.register_contributed(spec("a", "x"), "p1".into())
+            .unwrap();
         assert_eq!(
             cfg.register_contributed(spec("a", "y"), "p2".into())
                 .unwrap_err(),
@@ -277,7 +277,8 @@ mod tests {
     #[test]
     fn merge_contributed_preserves_input_order_in_skipped() {
         let mut cfg = AcpHostConfig::new();
-        cfg.register_contributed(spec("a", "x"), "p0".into()).unwrap();
+        cfg.register_contributed(spec("a", "x"), "p0".into())
+            .unwrap();
         let skipped = cfg.merge_contributed(vec![
             (spec("a", "y"), "p1".into()),
             (spec("b", "ok"), "p2".into()),
@@ -295,7 +296,8 @@ mod tests {
     #[test]
     fn unregister_contributed_round_trip() {
         let mut cfg = AcpHostConfig::new();
-        cfg.register_contributed(spec("a", "x"), "p1".into()).unwrap();
+        cfg.register_contributed(spec("a", "x"), "p1".into())
+            .unwrap();
         let removed = cfg.unregister_contributed("a", "p1").unwrap();
         assert_eq!(removed.command, "x");
         assert!(cfg.adapters.is_empty());
@@ -305,7 +307,8 @@ mod tests {
     #[test]
     fn unregister_contributed_refuses_other_plugin() {
         let mut cfg = AcpHostConfig::new();
-        cfg.register_contributed(spec("a", "x"), "owner".into()).unwrap();
+        cfg.register_contributed(spec("a", "x"), "owner".into())
+            .unwrap();
         match cfg.unregister_contributed("a", "intruder") {
             Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => {
                 assert_eq!(actual_owner, "owner");

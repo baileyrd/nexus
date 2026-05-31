@@ -42,9 +42,8 @@ pub(crate) fn handle_list_tools(
         Some(ids) => {
             let mut held = Vec::with_capacity(ids.len());
             for id in ids {
-                let cap = crate::Capability::from_str(&id).ok_or_else(|| {
-                    exec_err(format!("list_tools: unknown capability id '{id}'"))
-                })?;
+                let cap = crate::Capability::from_str(&id)
+                    .ok_or_else(|| exec_err(format!("list_tools: unknown capability id '{id}'")))?;
                 held.push(cap);
             }
             registry.list_for_agent(&held)

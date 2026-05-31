@@ -233,10 +233,7 @@ use_case = ["writing", "coding"]
         assert_eq!(m.theme.name, "Default Light");
         assert_eq!(m.theme.category, ThemeCategory::Light);
         assert_eq!(m.variables["--nx-color-primary"], "#4A90E2");
-        assert_eq!(
-            m.platforms.macos["--nx-color-primary"],
-            "#006AFF"
-        );
+        assert_eq!(m.platforms.macos["--nx-color-primary"], "#006AFF");
         assert_eq!(
             m.typography.as_ref().unwrap().sans_font.as_deref(),
             Some("system-ui, sans-serif"),
@@ -266,7 +263,10 @@ description = "minimal"
     #[test]
     fn platform_overrides_lookup() {
         let m = ThemeManifest::from_toml(SAMPLE).unwrap();
-        assert!(m.platforms.for_platform(Platform::Macos).contains_key("--nx-color-primary"));
+        assert!(m
+            .platforms
+            .for_platform(Platform::Macos)
+            .contains_key("--nx-color-primary"));
         assert!(m.platforms.for_platform(Platform::Windows).is_empty());
     }
 

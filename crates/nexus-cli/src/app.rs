@@ -166,8 +166,9 @@ impl App {
                 .enable_all()
                 .build()
                 .context("failed to start tokio runtime")?;
-            let runtime = build_cli_runtime(self.forge_root.clone())
-                .with_context(|| format!("failed to build runtime at {}", self.forge_root.display()))?;
+            let runtime = build_cli_runtime(self.forge_root.clone()).with_context(|| {
+                format!("failed to build runtime at {}", self.forge_root.display())
+            })?;
             self.runtime = Some(runtime);
             self.rt = Some(rt);
         }
@@ -195,9 +196,7 @@ impl App {
     ///   broken, etc.).
     /// - Remote SSH spawn failure (binary not on `$PATH`, connection
     ///   refused, etc.).
-    pub fn invoker(
-        &mut self,
-    ) -> Result<(Arc<dyn IpcInvoker + Send + Sync>, &TokioRuntime)> {
+    pub fn invoker(&mut self) -> Result<(Arc<dyn IpcInvoker + Send + Sync>, &TokioRuntime)> {
         if self.is_remote() {
             self.ensure_tokio()?;
             if self.remote.is_none() {
@@ -260,13 +259,12 @@ impl App {
                 safe_mode: self.safe_mode,
                 ..Default::default()
             };
-            let mut manager =
-                PluginManager::new(&plugins_dir, &config).with_context(|| {
-                    format!(
-                        "failed to create plugin manager at '{}'",
-                        plugins_dir.display()
-                    )
-                })?;
+            let mut manager = PluginManager::new(&plugins_dir, &config).with_context(|| {
+                format!(
+                    "failed to create plugin manager at '{}'",
+                    plugins_dir.display()
+                )
+            })?;
             // Wire the kernel bus so community plugins can subscribe to events.
             manager.set_event_bus(Arc::clone(&self.event_bus));
             self.plugins = Some(manager);

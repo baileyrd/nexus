@@ -103,13 +103,7 @@ fn run_scenario(sc: Scenario) -> String {
     let start = Instant::now();
     for i in 0..sc.iterations {
         let t0 = Instant::now();
-        apply_one(
-            &mut plugin,
-            relpath,
-            target,
-            content_len + warmup + i,
-            "y",
-        );
+        apply_one(&mut plugin, relpath, target, content_len + warmup + i, "y");
         samples_us.push(t0.elapsed().as_secs_f64() * 1_000_000.0);
     }
     let total_ms = start.elapsed().as_secs_f64() * 1_000.0;
@@ -133,7 +127,13 @@ fn run_scenario(sc: Scenario) -> String {
     .to_string()
 }
 
-fn apply_one(plugin: &mut EditorCorePlugin, relpath: &str, block: uuid::Uuid, pos: usize, ch: &str) {
+fn apply_one(
+    plugin: &mut EditorCorePlugin,
+    relpath: &str,
+    block: uuid::Uuid,
+    pos: usize,
+    ch: &str,
+) {
     let tx = Transaction::new(
         vec![Operation::InsertText {
             block_id: block,

@@ -98,9 +98,7 @@ impl ConnectionPool {
         if spec.disabled {
             return Err(AcpClientError::Spawn {
                 command: spec.command.clone(),
-                source: std::io::Error::other(format!(
-                    "agent '{agent_name}' is disabled"
-                )),
+                source: std::io::Error::other(format!("agent '{agent_name}' is disabled")),
             });
         }
         let client = AcpClient::connect(agent_name, spec, self.forge_root.clone()).await?;

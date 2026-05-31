@@ -7,9 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use nexus_kernel::{
-    EventFilter, InMemoryKvStore, Kernel, KernelConfig, KvStore,
-};
+use nexus_kernel::{EventFilter, InMemoryKvStore, Kernel, KernelConfig, KvStore};
 
 fn kv() -> Arc<dyn KvStore> {
     Arc::new(InMemoryKvStore::new())
@@ -47,8 +45,14 @@ async fn smoke_new_start_shutdown() {
     let forge = TempForge::new("new-start-shutdown");
     let config = KernelConfig::for_testing(forge.path.clone());
     let kernel = Kernel::new(config, kv()).expect("kernel construction should succeed");
-    kernel.start().await.expect("kernel start should succeed with empty plugin set");
-    kernel.shutdown().await.expect("kernel shutdown should succeed");
+    kernel
+        .start()
+        .await
+        .expect("kernel start should succeed with empty plugin set");
+    kernel
+        .shutdown()
+        .await
+        .expect("kernel shutdown should succeed");
 }
 
 #[tokio::test]
@@ -67,7 +71,10 @@ async fn smoke_event_bus_round_trip() {
     // the kernel run its own lifecycle. In PRD 01 scope with no plugins,
     // this test just verifies subscription and try_recv don't panic.
     let result = sub.try_recv().unwrap();
-    assert!(result.is_none(), "empty plugin set should produce no PluginLoaded events");
+    assert!(
+        result.is_none(),
+        "empty plugin set should produce no PluginLoaded events"
+    );
 
     kernel.shutdown().await.unwrap();
 }
@@ -98,18 +105,18 @@ async fn smoke_multiple_shutdown_calls_are_idempotent() {
     let kernel = Kernel::new(config, kv()).unwrap();
     kernel.start().await.unwrap();
     kernel.shutdown().await.unwrap();
-    kernel.shutdown().await.unwrap();  // must not panic or error
+    kernel.shutdown().await.unwrap(); // must not panic or error
 }
 
 // A compile-check test: ensures every public type from the interface spec §3
 // can be named. If any of these names break, the contract has regressed.
 #[test]
 fn smoke_all_public_types_importable() {
-    use nexus_kernel::{BusError, Capability, CapabilityError, CapabilityParseError, CapabilitySet, ConfigError,
+    use nexus_kernel::{
+        BusError, Capability, CapabilityError, CapabilityParseError, CapabilitySet, ConfigError,
         Error, EventBus, EventFilter, EventMetadata, EventSubscription, IpcError, Kernel,
         KernelConfig, KvError, LogLevel, NexusEvent, PluginContext, PluginError, PluginInfo,
-        PluginStatus, PublishedEvent, RecvError, Result,
-        StopReason, TrustLevel,
+        PluginStatus, PublishedEvent, RecvError, Result, StopReason, TrustLevel,
     };
 
     // Just reference each type to force the import — this compiles iff
@@ -139,8 +146,8 @@ fn smoke_all_public_types_importable() {
 
         // Types that aren't Default/None-constructible are just referenced
         // via std::marker to force the import:
-        let _: std::marker::PhantomData<Kernel>           = std::marker::PhantomData;
-        let _: std::marker::PhantomData<EventBus>         = std::marker::PhantomData;
+        let _: std::marker::PhantomData<Kernel> = std::marker::PhantomData;
+        let _: std::marker::PhantomData<EventBus> = std::marker::PhantomData;
         let _: std::marker::PhantomData<EventSubscription> = std::marker::PhantomData;
         let _: std::marker::PhantomData<dyn PluginContext> = std::marker::PhantomData;
         type _R = Result<()>;

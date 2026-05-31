@@ -60,7 +60,10 @@ pub fn merge_driver(base: &Path, ours: &Path, theirs: &Path) -> Result<()> {
             // overwriting per-block state from theirs when ours
             // didn't have it.
             for (block_id, rga) in &theirs.state.rga {
-                ours.state.rga.entry(*block_id).or_insert_with(|| rga.clone());
+                ours.state
+                    .rga
+                    .entry(*block_id)
+                    .or_insert_with(|| rga.clone());
             }
             for (block_id, meta) in &theirs.state.block_meta {
                 ours.state
@@ -85,8 +88,7 @@ pub fn merge_driver(base: &Path, ours: &Path, theirs: &Path) -> Result<()> {
 
     let bytes = serde_json::to_vec(&merged).context("encode merged crdt envelope")?;
     let tmp = ours.with_extension("json.merge-tmp");
-    fs::write(&tmp, &bytes)
-        .with_context(|| format!("write merged tmp file: {}", tmp.display()))?;
+    fs::write(&tmp, &bytes).with_context(|| format!("write merged tmp file: {}", tmp.display()))?;
     fs::rename(&tmp, ours)
         .with_context(|| format!("rename {} → {}", tmp.display(), ours.display()))?;
     Ok(())
@@ -136,10 +138,7 @@ pub fn install_merge_driver(apply: bool) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(err) => return Err(err).context("read .gitattributes"),
     };
-    if !existing
-        .lines()
-        .any(|l| l.trim() == ATTR_LINE.trim())
-    {
+    if !existing.lines().any(|l| l.trim() == ATTR_LINE.trim()) {
         let mut updated = existing.clone();
         if !updated.is_empty() && !updated.ends_with('\n') {
             updated.push('\n');
@@ -153,11 +152,7 @@ pub fn install_merge_driver(apply: bool) -> Result<()> {
     }
 
     // Register the driver in `.git/config` for this repository.
-    git_config(&[
-        "config",
-        &format!("merge.{DRIVER_NAME}.driver"),
-        DRIVER_CMD,
-    ])?;
+    git_config(&["config", &format!("merge.{DRIVER_NAME}.driver"), DRIVER_CMD])?;
     git_config(&[
         "config",
         &format!("merge.{DRIVER_NAME}.name"),
@@ -169,7 +164,10 @@ pub fn install_merge_driver(apply: bool) -> Result<()> {
 }
 
 fn git_config(args: &[&str]) -> Result<()> {
-    let status = Command::new("git").args(args).status().context("spawn git")?;
+    let status = Command::new("git")
+        .args(args)
+        .status()
+        .context("spawn git")?;
     if !status.success() {
         return Err(anyhow!("git {} failed (exit {status})", args.join(" ")));
     }
@@ -199,7 +197,10 @@ fn git_config(args: &[&str]) -> Result<()> {
 /// runtime.
 pub fn enable_transport(app: &mut App) -> Result<()> {
     let forge_root = app.forge_root().to_path_buf();
-    println!("BL-007 git-CRDT transport — enabling on {}", forge_root.display());
+    println!(
+        "BL-007 git-CRDT transport — enabling on {}",
+        forge_root.display()
+    );
     println!();
 
     let (invoker, rt) = app.invoker()?;

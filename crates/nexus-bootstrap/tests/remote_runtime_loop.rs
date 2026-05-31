@@ -27,8 +27,7 @@ use tokio::io::AsyncWrite;
 ///
 /// Returns the runtime + the forge tempdir guard + the server's
 /// JoinHandle so the test can keep the server alive for its scope.
-fn boot(
-) -> (
+fn boot() -> (
     nexus_bootstrap::remote::RemoteRuntime,
     tempfile::TempDir,
     tokio::task::JoinHandle<()>,
@@ -45,8 +44,8 @@ fn boot(
     // Leak so plugins stay live for the test.
     Box::leak(Box::new(kernel));
 
-    let server = RemoteServer::new(Arc::new(context), event_bus)
-        .with_timeout(Duration::from_secs(30));
+    let server =
+        RemoteServer::new(Arc::new(context), event_bus).with_timeout(Duration::from_secs(30));
 
     let (client_writer, server_reader) = tokio::io::duplex(64 * 1024);
     let (server_writer, client_reader) = tokio::io::duplex(64 * 1024);
@@ -59,11 +58,8 @@ fn boot(
     });
 
     let writer_boxed: Box<dyn AsyncWrite + Unpin + Send> = Box::new(client_writer);
-    let runtime = build_remote_runtime_over_pipes(
-        client_reader,
-        writer_boxed,
-        Box::new(NoopTransportGuard),
-    );
+    let runtime =
+        build_remote_runtime_over_pipes(client_reader, writer_boxed, Box::new(NoopTransportGuard));
     (runtime, forge, server_handle)
 }
 
@@ -102,10 +98,7 @@ async fn invoker_surfaces_remote_server_errors_with_jsonrpc_code() {
     match err {
         IpcInvokerError::Remote { code, message } => {
             assert_eq!(code, -32000);
-            assert!(
-                message.contains("ipc_call failed"),
-                "unexpected: {message}"
-            );
+            assert!(message.contains("ipc_call failed"), "unexpected: {message}");
         }
         other => panic!("expected Remote, got: {other}"),
     }

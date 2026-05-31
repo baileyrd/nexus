@@ -29,8 +29,8 @@
 //! parent.
 
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 use crate::capability::{Capability, CapabilitySet};
@@ -159,11 +159,7 @@ impl CapabilityToken {
     /// The `child_session_id` identifies the sub-session this token is
     /// being minted for.
     #[must_use]
-    pub fn attenuate(
-        &self,
-        child_session_id: uuid::Uuid,
-        requested: CapabilitySet,
-    ) -> Self {
+    pub fn attenuate(&self, child_session_id: uuid::Uuid, requested: CapabilitySet) -> Self {
         let intersection = self
             .capabilities
             .iter()
@@ -252,10 +248,7 @@ mod tests {
     #[test]
     fn revoking_parent_invalidates_child() {
         let parent = token_with([Capability::FsRead]);
-        let child = parent.attenuate(
-            session_id(),
-            CapabilitySet::from_iter([Capability::FsRead]),
-        );
+        let child = parent.attenuate(session_id(), CapabilitySet::from_iter([Capability::FsRead]));
         assert!(child.check(Capability::FsRead).is_ok());
         parent.revoke();
         assert!(child.check(Capability::FsRead).is_err());
@@ -265,10 +258,7 @@ mod tests {
     #[test]
     fn revoking_child_does_not_revoke_parent() {
         let parent = token_with([Capability::FsRead]);
-        let child = parent.attenuate(
-            session_id(),
-            CapabilitySet::from_iter([Capability::FsRead]),
-        );
+        let child = parent.attenuate(session_id(), CapabilitySet::from_iter([Capability::FsRead]));
         child.revoke();
         assert!(child.is_revoked());
         assert!(!parent.is_revoked());

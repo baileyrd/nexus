@@ -54,12 +54,12 @@ pub mod substitute;
 pub mod template;
 
 pub use core_plugin::{
-    TemplatesCorePlugin, HANDLER_APPLY, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD,
-    HANDLER_RENDER, PLUGIN_ID,
+    TemplatesCorePlugin, HANDLER_APPLY, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RENDER,
+    PLUGIN_ID,
 };
 pub use registry::{TemplateRegistry, TemplateRegistryError};
 pub use substitute::{render, SubstitutionError};
 pub use template::{
-    parse_template_file, parse_template_text, ApplyError, ParameterType, Template,
-    TemplateMeta, TemplateParameter, TemplateParseError,
+    parse_template_file, parse_template_text, ApplyError, ParameterType, Template, TemplateMeta,
+    TemplateParameter, TemplateParseError,
 };

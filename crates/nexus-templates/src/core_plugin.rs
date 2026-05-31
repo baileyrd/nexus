@@ -313,7 +313,10 @@ mod tests {
             .unwrap();
         // TemplateMeta is `#[serde(flatten)]` into Template, so `name`
         // is at the top level.
-        assert_eq!(result.get("name").and_then(|v| v.as_str()), Some("daily-journal"));
+        assert_eq!(
+            result.get("name").and_then(|v| v.as_str()),
+            Some("daily-journal")
+        );
     }
 
     #[test]
@@ -330,7 +333,10 @@ mod tests {
     fn render_dry_runs_a_template() {
         let (mut plugin, _dir) = open_plugin();
         let mut args = serde_json::Map::new();
-        args.insert("name".into(), serde_json::Value::String("daily-journal".into()));
+        args.insert(
+            "name".into(),
+            serde_json::Value::String("daily-journal".into()),
+        );
         let result = plugin
             .dispatch(HANDLER_RENDER, &serde_json::Value::Object(args))
             .unwrap();

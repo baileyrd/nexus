@@ -261,10 +261,7 @@ impl Parser<'_> {
                 self.expect(&Token::RParen)?;
                 Ok(expr)
             }
-            _ => Err(self.error(&format!(
-                "unexpected token: {:?}",
-                self.current()
-            ))),
+            _ => Err(self.error(&format!("unexpected token: {:?}", self.current()))),
         }
     }
 
@@ -295,7 +292,9 @@ mod tests {
     #[test]
     fn literal_number() {
         let expr = parse_str("42");
-        assert!(matches!(expr, Expr::Literal(LiteralValue::Number(n)) if (n - 42.0).abs() < f64::EPSILON));
+        assert!(
+            matches!(expr, Expr::Literal(LiteralValue::Number(n)) if (n - 42.0).abs() < f64::EPSILON)
+        );
     }
 
     #[test]
@@ -325,7 +324,13 @@ mod tests {
     #[test]
     fn binary_addition() {
         let expr = parse_str("1 + 2");
-        assert!(matches!(expr, Expr::BinaryOp { op: BinaryOp::Add, .. }));
+        assert!(matches!(
+            expr,
+            Expr::BinaryOp {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -338,7 +343,13 @@ mod tests {
                 right,
                 ..
             } => {
-                assert!(matches!(*right, Expr::BinaryOp { op: BinaryOp::Mul, .. }));
+                assert!(matches!(
+                    *right,
+                    Expr::BinaryOp {
+                        op: BinaryOp::Mul,
+                        ..
+                    }
+                ));
             }
             _ => panic!("expected Add at top level"),
         }
@@ -354,7 +365,13 @@ mod tests {
                 left,
                 ..
             } => {
-                assert!(matches!(*left, Expr::BinaryOp { op: BinaryOp::Add, .. }));
+                assert!(matches!(
+                    *left,
+                    Expr::BinaryOp {
+                        op: BinaryOp::Add,
+                        ..
+                    }
+                ));
             }
             _ => panic!("expected Mul at top level"),
         }
@@ -406,13 +423,25 @@ mod tests {
     fn logical_and_or() {
         let expr = parse_str("a and b or c");
         // Should parse as (a and b) or c
-        assert!(matches!(expr, Expr::BinaryOp { op: BinaryOp::Or, .. }));
+        assert!(matches!(
+            expr,
+            Expr::BinaryOp {
+                op: BinaryOp::Or,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn comparison_operators() {
         let expr = parse_str("x > 5");
-        assert!(matches!(expr, Expr::BinaryOp { op: BinaryOp::Gt, .. }));
+        assert!(matches!(
+            expr,
+            Expr::BinaryOp {
+                op: BinaryOp::Gt,
+                ..
+            }
+        ));
     }
 
     #[test]

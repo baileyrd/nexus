@@ -60,7 +60,10 @@ pub(crate) async fn handle_index_trigger(
         if !ext_ok {
             continue;
         }
-        if tx.send(DaemonMsg::Touched(std::path::PathBuf::from(path))).is_ok() {
+        if tx
+            .send(DaemonMsg::Touched(std::path::PathBuf::from(path)))
+            .is_ok()
+        {
             queued += 1;
         }
     }
@@ -86,8 +89,8 @@ pub(crate) async fn handle_index_file(
                 .map_err(|e| exec_err(format!("index_file: blocks decode: {e}")))
         })?;
 
-    let embed_cfg =
-        embed_cfg.ok_or_else(|| exec_err("index_file: no AI embedding provider configured".to_string()))?;
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("index_file: no AI embedding provider configured".to_string()))?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
     let count = rag::index_file(ctx, embedder.as_ref(), file_path, &blocks)

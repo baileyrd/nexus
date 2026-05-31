@@ -31,11 +31,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 /// no file-locking races with a second runtime build.
 async fn drive_server<F, Fut>(forge: MinimalForge, client: F)
 where
-    F: FnOnce(
-            tokio::io::DuplexStream,
-            BufReader<tokio::io::DuplexStream>,
-        ) -> Fut
-        + Send,
+    F: FnOnce(tokio::io::DuplexStream, BufReader<tokio::io::DuplexStream>) -> Fut + Send,
     Fut: std::future::Future<Output = ()> + Send,
 {
     let MinimalForge {
@@ -48,8 +44,8 @@ where
         loader: _loader,
     } = runtime;
     let context = Arc::new(context);
-    let server = nexus_acp::AcpServer::new(Arc::clone(&context))
-        .with_timeout(Duration::from_secs(10));
+    let server =
+        nexus_acp::AcpServer::new(Arc::clone(&context)).with_timeout(Duration::from_secs(10));
 
     let (client_writer, server_reader) = tokio::io::duplex(64 * 1024);
     let (server_writer, client_reader_inner) = tokio::io::duplex(64 * 1024);
@@ -118,9 +114,14 @@ async fn unknown_method_returns_minus_32601() {
         });
         let resp = round_trip(&mut writer, &mut reader, &req).await;
         assert_eq!(resp["id"], 99);
-        let err = resp.get("error").expect("unknown method must produce an error");
+        let err = resp
+            .get("error")
+            .expect("unknown method must produce an error");
         assert_eq!(err["code"], -32601);
-        assert!(err["message"].as_str().unwrap().contains("agent/nonexistent"));
+        assert!(err["message"]
+            .as_str()
+            .unwrap()
+            .contains("agent/nonexistent"));
         assert!(resp.get("result").is_none(), "error responses omit result");
         drop(writer);
     })
@@ -142,7 +143,9 @@ async fn invalid_params_for_known_method_surface_as_server_error() {
         });
         let resp = round_trip(&mut writer, &mut reader, &req).await;
         assert_eq!(resp["id"], 5);
-        let err = resp.get("error").expect("missing field should produce an error");
+        let err = resp
+            .get("error")
+            .expect("missing field should produce an error");
         assert_eq!(err["code"], -32000, "ipc failures surface as -32000");
         assert!(
             err["message"].as_str().unwrap().contains("server error"),

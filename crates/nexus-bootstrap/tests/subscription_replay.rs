@@ -19,9 +19,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use nexus_bootstrap::reconnect::{ConnectionFactory, ReconnectingRuntime};
-use nexus_bootstrap::remote::{
-    build_remote_runtime_over_pipes, NoopTransportGuard, RemoteRuntime,
-};
+use nexus_bootstrap::remote::{build_remote_runtime_over_pipes, NoopTransportGuard, RemoteRuntime};
 use nexus_bootstrap::{build_cli_runtime, init_forge, Runtime};
 use nexus_kernel::EventBus;
 use nexus_remote::{EventDelivery, RemoteServer};
@@ -64,11 +62,8 @@ fn boot_one() -> BootedOne {
     });
 
     let writer_boxed: Box<dyn AsyncWrite + Unpin + Send> = Box::new(client_writer);
-    let runtime = build_remote_runtime_over_pipes(
-        client_reader,
-        writer_boxed,
-        Box::new(NoopTransportGuard),
-    );
+    let runtime =
+        build_remote_runtime_over_pipes(client_reader, writer_boxed, Box::new(NoopTransportGuard));
     BootedOne {
         runtime,
         bus,
@@ -91,9 +86,7 @@ struct StackedFactory {
 }
 
 impl ConnectionFactory for StackedFactory {
-    fn build<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
+    fn build<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<RemoteRuntime>> + Send + 'a>> {
         Box::pin(async move {
             self.builds
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -124,10 +117,8 @@ async fn subscription_replays_after_transport_drop() {
         _server_handles: vec![booted1._server_handle, booted2._server_handle],
         builds: Arc::new(AtomicUsize::new(0)),
     };
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(20),
-        Duration::from_millis(40),
-    ]);
+    let runtime = ReconnectingRuntime::new(Arc::new(factory))
+        .with_backoff(vec![Duration::from_millis(20), Duration::from_millis(40)]);
     let mut replay_rx = runtime.subscribe_replays();
 
     // Establish the initial connection with an ipc_call. This fires
@@ -185,9 +176,7 @@ async fn subscription_replays_after_transport_drop() {
     // happened.
     let mut saw_replay = false;
     for _ in 0..10 {
-        if let Ok(Ok(n)) =
-            tokio::time::timeout(Duration::from_secs(2), replay_rx.recv()).await
-        {
+        if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(2), replay_rx.recv()).await {
             if n >= 1 {
                 saw_replay = true;
                 break;
@@ -229,9 +218,8 @@ async fn subscribe_queues_when_disconnected_and_installs_on_next_connect() {
         _server_handles: vec![booted._server_handle],
         builds: Arc::new(AtomicUsize::new(0)),
     };
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(20),
-    ]);
+    let runtime =
+        ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![Duration::from_millis(20)]);
 
     // No connection yet — subscribe should just queue the entry.
     let (tx, mut rx) = mpsc::unbounded_channel::<EventDelivery>();
@@ -283,9 +271,8 @@ async fn unsubscribe_clears_registry_so_replay_is_skipped() {
         _server_handles: vec![booted1._server_handle, booted2._server_handle],
         builds: Arc::new(AtomicUsize::new(0)),
     };
-    let runtime = ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![
-        Duration::from_millis(20),
-    ]);
+    let runtime =
+        ReconnectingRuntime::new(Arc::new(factory)).with_backoff(vec![Duration::from_millis(20)]);
     let mut replay_rx = runtime.subscribe_replays();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<EventDelivery>();
@@ -312,9 +299,7 @@ async fn unsubscribe_clears_registry_so_replay_is_skipped() {
     // should be 0.
     let mut saw_zero = false;
     for _ in 0..10 {
-        if let Ok(Ok(n)) =
-            tokio::time::timeout(Duration::from_secs(2), replay_rx.recv()).await
-        {
+        if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(2), replay_rx.recv()).await {
             if n == 0 {
                 saw_zero = true;
                 break;

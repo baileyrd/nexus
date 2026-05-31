@@ -275,7 +275,12 @@ pub struct Session {
 impl Session {
     /// Create a new session in [`SessionState::Idle`].
     #[must_use]
-    pub fn new(id: SessionId, kind: SessionKind, budget: Budget, capabilities: CapabilityToken) -> Self {
+    pub fn new(
+        id: SessionId,
+        kind: SessionKind,
+        budget: Budget,
+        capabilities: CapabilityToken,
+    ) -> Self {
         Self {
             id,
             kind,
@@ -316,7 +321,12 @@ mod tests {
     #[test]
     fn session_starts_idle() {
         let id = SessionId::new();
-        let s = Session::new(id, SessionKind::UserDriven, Budget::default(), test_token(&id));
+        let s = Session::new(
+            id,
+            SessionKind::UserDriven,
+            Budget::default(),
+            test_token(&id),
+        );
         assert!(matches!(s.state, SessionState::Idle));
         assert!(!s.state.is_terminal());
     }
@@ -345,7 +355,12 @@ mod tests {
     #[test]
     fn mark_terminal_sets_finished_at_and_outcome() {
         let id = SessionId::new();
-        let mut s = Session::new(id, SessionKind::UserDriven, Budget::default(), test_token(&id));
+        let mut s = Session::new(
+            id,
+            SessionKind::UserDriven,
+            Budget::default(),
+            test_token(&id),
+        );
         s.mark_terminal(SessionOutcome::Completed);
         assert!(s.state.is_terminal());
         assert!(s.finished_at.is_some());

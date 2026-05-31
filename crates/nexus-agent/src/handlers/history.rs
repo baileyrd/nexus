@@ -118,9 +118,8 @@ pub(crate) async fn handle_history_delete(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: PlanIdArgs = parse_args(args, "history_delete")?;
-    let path = history_path(&a.plan_id).ok_or_else(|| {
-        exec_err(format!("history_delete: invalid plan_id '{}'", a.plan_id))
-    })?;
+    let path = history_path(&a.plan_id)
+        .ok_or_else(|| exec_err(format!("history_delete: invalid plan_id '{}'", a.plan_id)))?;
     ctx.delete_file(&path)
         .await
         .map_err(|e| exec_err(format!("history_delete: {e}")))?;

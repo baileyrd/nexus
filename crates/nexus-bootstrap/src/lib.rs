@@ -27,25 +27,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use nexus_kernel::{Capability, CapabilitySet, EventBus, IpcDispatcher, Kernel, KernelConfig, KernelPluginContext,
+use nexus_kernel::{
+    Capability, CapabilitySet, EventBus, IpcDispatcher, Kernel, KernelConfig, KernelPluginContext,
     PluginError as KernelPluginError,
 };
 use nexus_plugins::{CorePlugin, PluginError, PluginLoader, PluginManifest, SharedPluginLoader};
 
 pub mod agent;
-pub mod forge_template;
 mod audit_sqlite;
-mod plugins;
-/// BL-140 Phase 2b — `IpcInvoker` trait abstracting local vs remote
-/// IPC dispatch. The CLI consumes this trait so the same subcommand
-/// body works against both shapes.
-pub mod invoker;
-/// BL-140 Phase 2b — `RemoteRuntime` factory + SSH child-process
-/// transport for `--forge-path ssh://...` URIs.
-pub mod remote;
-/// BL-140 Phase 2c — reconnect-on-drop wrapper layered over
-/// [`remote::RemoteRuntime`].
-pub mod reconnect;
 /// BL-138 — TOML-driven per-handler capability matrix loader. See
 /// [`cap_matrix::apply`] and the companion `cap_matrix.toml`.
 pub mod cap_matrix;
@@ -56,14 +45,26 @@ pub mod collab;
 pub mod crdt_publisher;
 pub mod database;
 pub mod dream_cycle;
-pub mod storage;
-pub mod terminal;
+pub mod forge_template;
+/// BL-140 Phase 2b — `IpcInvoker` trait abstracting local vs remote
+/// IPC dispatch. The CLI consumes this trait so the same subcommand
+/// body works against both shapes.
+pub mod invoker;
+mod plugins;
 /// BL-113 / ADR 0027 — manifest-side `ContributedAdapter` → host-side
 /// `{Lsp,Mcp}ServerSpec` converters. Phase 2a/3a primitive; the
 /// bootstrap-side wiring that calls these converters and feeds the
 /// result through `merge_contributed` lands in Phase 2b/3b once the
 /// plugin-lifecycle callback shape is settled by Phase 1.
 pub mod protocol_host_specs;
+/// BL-140 Phase 2c — reconnect-on-drop wrapper layered over
+/// [`remote::RemoteRuntime`].
+pub mod reconnect;
+/// BL-140 Phase 2b — `RemoteRuntime` factory + SSH child-process
+/// transport for `--forge-path ssh://...` URIs.
+pub mod remote;
+pub mod storage;
+pub mod terminal;
 
 /// BL-113 Phase 1c — bootstrap-side wiring that issues
 /// `com.nexus.dap::register_adapter` IPC calls for each DAP
@@ -94,14 +95,14 @@ pub mod acp_contribution_wiring;
 /// Re-exported from `nexus-formats` (pure format library, no `SQLite`).
 pub use nexus_formats::export_to_html;
 
-/// Canvas data types and pure (de)serialization helpers, re-exported from
-/// `nexus-formats` so CLI/TUI canvas commands can parse and mutate canvas
-/// files without pulling in the SQLite-backed `nexus-storage` crate.
-pub use nexus_formats::{CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType};
 /// Parse a `.canvas` JSON string.
 pub use nexus_formats::canvas::parse as parse_canvas;
 /// Serialize a [`CanvasFile`] to pretty-printed JSON.
 pub use nexus_formats::canvas::serialize as serialize_canvas;
+/// Canvas data types and pure (de)serialization helpers, re-exported from
+/// `nexus-formats` so CLI/TUI canvas commands can parse and mutate canvas
+/// files without pulling in the SQLite-backed `nexus-storage` crate.
+pub use nexus_formats::{CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType};
 
 /// Plugin id for the in-tree Nexus CLI invoker.
 pub const CLI_PLUGIN_ID: &str = "com.nexus.cli";
@@ -203,7 +204,11 @@ pub fn build_tui_runtime(forge_root: PathBuf) -> Result<Runtime> {
     build(&forge_root, TUI_PLUGIN_ID, "Nexus TUI")
 }
 
-fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &str) -> Result<Runtime> {
+fn build(
+    forge_root: &std::path::Path,
+    invoker_id: &'static str,
+    invoker_name: &str,
+) -> Result<Runtime> {
     let config = KernelConfig::load(forge_root)
         .with_context(|| format!("failed to load kernel config at '{}'", forge_root.display()))?;
 
@@ -456,7 +461,6 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         loader: shared,
     })
 }
-
 
 fn invoker_manifest(id: &str, name: &str) -> PluginManifest {
     plugins::core_manifest(id, name, plugins::LifecycleFlags::NONE)
@@ -840,7 +844,10 @@ fn load_telegram_config(forge_root: &std::path::Path) -> (String, String) {
         }
     };
     match toml::from_str::<Wrapper>(&text) {
-        Ok(w) => (w.notifications.telegram.bot_token, w.notifications.telegram.chat_id),
+        Ok(w) => (
+            w.notifications.telegram.bot_token,
+            w.notifications.telegram.chat_id,
+        ),
         Err(err) => {
             tracing::warn!(
                 path = %path.display(),
@@ -960,4 +967,3 @@ fn load_webhook_config(forge_root: &std::path::Path) -> nexus_workflow::webhook:
         }
     }
 }
-

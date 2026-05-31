@@ -220,7 +220,10 @@ struct NexusContextInput {
 
 /// Input for the `nexus_impact` tool (BL-115).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[allow(dead_code, reason = "depth is in the JSON Schema for forward-compat but ignored in v1")]
+#[allow(
+    dead_code,
+    reason = "depth is in the JSON Schema for forward-compat but ignored in v1"
+)]
 struct NexusImpactInput {
     /// Identifier as it appears in source.
     name: String,
@@ -1271,7 +1274,10 @@ impl NexusMcpServer {
         &self,
         Parameters(input): Parameters<NexusContextInput>,
     ) -> Json<NexusContextOutput> {
-        let rows = match self.query_symbol_rows(&input.name, input.path.as_deref(), 50).await {
+        let rows = match self
+            .query_symbol_rows(&input.name, input.path.as_deref(), 50)
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("nexus_context: {e}");
@@ -1301,7 +1307,10 @@ impl NexusMcpServer {
         &self,
         Parameters(input): Parameters<NexusImpactInput>,
     ) -> Json<NexusImpactOutput> {
-        let rows = match self.query_symbol_rows(&input.name, input.path.as_deref(), 50).await {
+        let rows = match self
+            .query_symbol_rows(&input.name, input.path.as_deref(), 50)
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("nexus_impact: {e}");
@@ -1556,9 +1565,9 @@ impl rmcp::ServerHandler for NexusMcpServer {
         // names are reserved by `dynamic_tools::validate_name`.
         let dynamic = crate::dynamic_tools::global().lookup(&tool_name);
         let kernel_ctx = Arc::clone(&self.context);
-        let tcc_opt = dynamic
-            .is_none()
-            .then(|| rmcp::handler::server::tool::ToolCallContext::new(self, request.clone(), context));
+        let tcc_opt = dynamic.is_none().then(|| {
+            rmcp::handler::server::tool::ToolCallContext::new(self, request.clone(), context)
+        });
         let static_fut = tcc_opt.map(|tcc| self.tool_router.call(tcc));
         async move {
             let outcome = if let Some(tool) = dynamic {
@@ -1588,12 +1597,9 @@ impl rmcp::ServerHandler for NexusMcpServer {
             };
             let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             match &outcome {
-                Ok(_) => nexus_kernel::audit::log_mcp_tool_call(
-                    &tool_name,
-                    duration_ms,
-                    "success",
-                    None,
-                ),
+                Ok(_) => {
+                    nexus_kernel::audit::log_mcp_tool_call(&tool_name, duration_ms, "success", None)
+                }
                 Err(e) => nexus_kernel::audit::log_mcp_tool_call(
                     &tool_name,
                     duration_ms,
@@ -1682,19 +1688,13 @@ impl rmcp::ServerHandler for NexusMcpServer {
                     )
                 })?;
             let text = String::from_utf8_lossy(&resp.bytes).into_owned();
-            let contents =
-                ResourceContents::text(text, &uri).with_mime_type("text/markdown");
+            let contents = ResourceContents::text(text, &uri).with_mime_type("text/markdown");
             Ok(ReadResourceResult::new(vec![contents]))
         }
         .await;
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &outcome {
-            Ok(_) => nexus_kernel::audit::log_mcp_resource_read(
-                &uri,
-                duration_ms,
-                "success",
-                None,
-            ),
+            Ok(_) => nexus_kernel::audit::log_mcp_resource_read(&uri, duration_ms, "success", None),
             Err(e) => nexus_kernel::audit::log_mcp_resource_read(
                 &uri,
                 duration_ms,

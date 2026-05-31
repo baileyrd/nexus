@@ -91,22 +91,22 @@ pub struct AiConfig {
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            provider:               DEFAULT_PROVIDER.into(),
-            model:                  DEFAULT_MODEL.into(),
-            api_key_env:            Some(DEFAULT_API_KEY_ENV.into()),
-            embedding_model:        None,
-            max_tokens:             DEFAULT_MAX_TOKENS,
-            temperature:            DEFAULT_TEMPERATURE,
-            anthropic_model:        None,
-            openai_chat_model:      None,
+            provider: DEFAULT_PROVIDER.into(),
+            model: DEFAULT_MODEL.into(),
+            api_key_env: Some(DEFAULT_API_KEY_ENV.into()),
+            embedding_model: None,
+            max_tokens: DEFAULT_MAX_TOKENS,
+            temperature: DEFAULT_TEMPERATURE,
+            anthropic_model: None,
+            openai_chat_model: None,
             openai_embedding_model: None,
-            ollama_chat_model:      None,
-            ollama_base_url:        None,
+            ollama_chat_model: None,
+            ollama_base_url: None,
             ollama_embedding_model: None,
-            ollama_temperature:     None,
+            ollama_temperature: None,
             indexing_debounce_secs: None,
-            providers:              std::collections::BTreeMap::new(),
-            models:                 Vec::new(),
+            providers: std::collections::BTreeMap::new(),
+            models: Vec::new(),
         }
     }
 }
@@ -143,5 +143,9 @@ pub struct AiModel {
     pub system_prompt: Option<String>,
 }
 
-fn default_max_tokens() -> u32 { DEFAULT_MAX_TOKENS }
-fn default_temperature() -> f64 { DEFAULT_TEMPERATURE }
+fn default_max_tokens() -> u32 {
+    DEFAULT_MAX_TOKENS
+}
+fn default_temperature() -> f64 {
+    DEFAULT_TEMPERATURE
+}

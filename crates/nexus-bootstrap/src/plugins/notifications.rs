@@ -24,28 +24,28 @@ pub(super) fn register(
     forge_root: &std::path::Path,
     event_bus: &Arc<EventBus>,
 ) -> Result<()> {
-    let (notifications_config, notifications_config_path) =
-        load_notifications_config(forge_root);
+    let (notifications_config, notifications_config_path) = load_notifications_config(forge_root);
     let inbox_db_path = forge_root.join(nexus_notifications::INBOX_DB_RELPATH);
-    let notifications_plugin = nexus_notifications::core_plugin::NotificationsCorePlugin::from_config_with_inbox(
-        Some(Arc::clone(event_bus)),
-        notifications_config,
-        notifications_config_path,
-        Some(inbox_db_path),
-    )
-    .unwrap_or_else(|err| {
-        tracing::warn!(
-            %err,
-            "notifications.toml: resolve_sources failed; falling back to empty router"
-        );
-        NotificationsCorePlugin::with_defaults(
+    let notifications_plugin =
+        nexus_notifications::core_plugin::NotificationsCorePlugin::from_config_with_inbox(
             Some(Arc::clone(event_bus)),
-            String::new(),
-            String::new(),
-            String::new(),
-            nexus_notifications::SmtpConfig::default(),
+            notifications_config,
+            notifications_config_path,
+            Some(inbox_db_path),
         )
-    });
+        .unwrap_or_else(|err| {
+            tracing::warn!(
+                %err,
+                "notifications.toml: resolve_sources failed; falling back to empty router"
+            );
+            NotificationsCorePlugin::with_defaults(
+                Some(Arc::clone(event_bus)),
+                String::new(),
+                String::new(),
+                String::new(),
+                nexus_notifications::SmtpConfig::default(),
+            )
+        });
     loader
         .register_core(
             core_manifest_with_ipc(

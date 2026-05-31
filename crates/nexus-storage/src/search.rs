@@ -5,11 +5,11 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use tantivy::schema::{Field, Schema, Value, INDEXED, STORED, TEXT};
-use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
-use tantivy::query::QueryParser;
 use tantivy::collector::TopDocs;
+use tantivy::query::QueryParser;
+use tantivy::schema::{Field, Schema, Value, INDEXED, STORED, TEXT};
 use tantivy::snippet::SnippetGenerator;
+use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
 
 use serde::{Deserialize, Serialize};
 
@@ -188,9 +188,9 @@ impl SearchIndex {
         // without rebuilding the reader on every query.
         let searcher = self.reader.searcher();
         let query_parser = QueryParser::for_index(&self.index, vec![self.content_field]);
-        let query = query_parser
-            .parse_query(query_str)
-            .map_err(|e| StorageError::Search(tantivy::TantivyError::InvalidArgument(e.to_string())))?;
+        let query = query_parser.parse_query(query_str).map_err(|e| {
+            StorageError::Search(tantivy::TantivyError::InvalidArgument(e.to_string()))
+        })?;
 
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
 
@@ -276,8 +276,13 @@ mod tests {
     #[test]
     fn add_and_search_single_block() {
         let idx = SearchIndex::open_in_memory().unwrap();
-        idx.add_block("notes/test.md", 42, "paragraph", "hello world of rust programming")
-            .unwrap();
+        idx.add_block(
+            "notes/test.md",
+            42,
+            "paragraph",
+            "hello world of rust programming",
+        )
+        .unwrap();
         idx.commit().unwrap();
 
         let results = idx.search("rust", 10).unwrap();
@@ -289,8 +294,13 @@ mod tests {
     #[test]
     fn search_returns_empty_for_no_match() {
         let idx = SearchIndex::open_in_memory().unwrap();
-        idx.add_block("notes/test.md", 1, "paragraph", "hello world of rust programming")
-            .unwrap();
+        idx.add_block(
+            "notes/test.md",
+            1,
+            "paragraph",
+            "hello world of rust programming",
+        )
+        .unwrap();
         idx.commit().unwrap();
 
         let results = idx.search("python", 10).unwrap();
@@ -320,8 +330,13 @@ mod tests {
         let idx = SearchIndex::open_in_memory().unwrap();
         idx.add_block("notes/a.md", 1, "paragraph", "machine learning is great")
             .unwrap();
-        idx.add_block("notes/b.md", 2, "paragraph", "learning about machines today")
-            .unwrap();
+        idx.add_block(
+            "notes/b.md",
+            2,
+            "paragraph",
+            "learning about machines today",
+        )
+        .unwrap();
         idx.commit().unwrap();
 
         let results = idx.search("\"machine learning\"", 10).unwrap();
@@ -395,8 +410,13 @@ mod tests {
         )
         .unwrap();
         // Doc with low TF for "rust"
-        idx.add_block("notes/light.md", 2, "paragraph", "rust programming language")
-            .unwrap();
+        idx.add_block(
+            "notes/light.md",
+            2,
+            "paragraph",
+            "rust programming language",
+        )
+        .unwrap();
         idx.commit().unwrap();
 
         let results = idx.search("rust", 10).unwrap();

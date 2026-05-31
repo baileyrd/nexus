@@ -181,11 +181,7 @@ mod tests {
 
     #[async_trait]
     impl ChatDriver for CannedDriver {
-        async fn propose(
-            &self,
-            _system: &str,
-            _user: &str,
-        ) -> Result<crate::Proposal, String> {
+        async fn propose(&self, _system: &str, _user: &str) -> Result<crate::Proposal, String> {
             Ok(crate::Proposal {
                 text: "ok".into(),
                 tool_calls: Vec::new(),
@@ -265,7 +261,14 @@ mod tests {
 
     #[test]
     fn is_builtin_archetype_recognises_all_six_slugs() {
-        for s in ["writer", "coder", "researcher", "auditor", "librarian", "coach"] {
+        for s in [
+            "writer",
+            "coder",
+            "researcher",
+            "auditor",
+            "librarian",
+            "coach",
+        ] {
             assert!(is_builtin_archetype(s), "{s} should be a built-in");
             // Case + whitespace insensitive.
             assert!(is_builtin_archetype(&s.to_ascii_uppercase()));
@@ -314,12 +317,8 @@ mod tests {
 
     #[tokio::test]
     async fn build_archetype_with_prompt_empty_extra_keeps_base_alone() {
-        let agent = build_archetype_with_prompt(
-            "com.nexus.agent.custom.x",
-            "BASE",
-            CannedDriver,
-            Some(""),
-        );
+        let agent =
+            build_archetype_with_prompt("com.nexus.agent.custom.x", "BASE", CannedDriver, Some(""));
         // Empty extra is treated the same as None (no separator
         // appended). Same layering rule as `build_archetype`.
         assert_eq!(agent.id(), "com.nexus.agent.custom.x");

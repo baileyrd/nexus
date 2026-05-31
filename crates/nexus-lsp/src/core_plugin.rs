@@ -142,11 +142,7 @@ impl LspCorePlugin {
 /// `Arc<LspHostConfig>` so async dispatch keeps its existing
 /// pass-by-Arc helper signatures unchanged.
 fn snapshot_config(cell: &Arc<RwLock<LspHostConfig>>) -> Arc<LspHostConfig> {
-    Arc::new(
-        cell.read()
-            .expect("LspHostConfig RwLock poisoned")
-            .clone(),
-    )
+    Arc::new(cell.read().expect("LspHostConfig RwLock poisoned").clone())
 }
 
 /// BL-113 Phase 2b — sync IPC handler for `register_server`. Parses
@@ -172,9 +168,7 @@ fn handle_register_server(
 ) -> Result<Value, PluginError> {
     let spec = parse_register_server_spec(args)?;
     let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config
-        .write()
-        .expect("LspHostConfig RwLock poisoned");
+    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
     let status = match cfg.register_contributed(spec, plugin_id) {
         Ok(()) => ("ok", true),
         Err(MergeSkipReason::TomlOverride) => ("toml_override", false),
@@ -197,17 +191,11 @@ fn handle_unregister_server(
 ) -> Result<Value, PluginError> {
     let name = parse_string_field(args, "name")?;
     let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config
-        .write()
-        .expect("LspHostConfig RwLock poisoned");
+    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
     match cfg.unregister_contributed(&name, &plugin_id) {
         Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(UnregisterError::NotFound) => {
-            Ok(json!({ "ok": false, "status": "not_found" }))
-        }
-        Err(UnregisterError::TomlEntry) => {
-            Ok(json!({ "ok": false, "status": "toml_entry" }))
-        }
+        Err(UnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
+        Err(UnregisterError::TomlEntry) => Ok(json!({ "ok": false, "status": "toml_entry" })),
         Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
             "ok": false,
             "status": "not_owned_by_plugin",
@@ -295,10 +283,7 @@ impl CorePlugin for LspCorePlugin {
                 LspHostConfig::default()
             }
         };
-        *self
-            .config
-            .write()
-            .expect("LspHostConfig RwLock poisoned") = loaded;
+        *self.config.write().expect("LspHostConfig RwLock poisoned") = loaded;
         Ok(())
     }
 
@@ -359,17 +344,10 @@ impl CorePlugin for LspCorePlugin {
         );
     }
 
-    fn dispatch(
-        &mut self,
-        handler_id: u32,
-        args: &Value,
-    ) -> Result<Value, PluginError> {
+    fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
-                let cfg = self
-                    .config
-                    .read()
-                    .expect("LspHostConfig RwLock poisoned");
+                let cfg = self.config.read().expect("LspHostConfig RwLock poisoned");
                 let arr: Vec<Value> = cfg
                     .servers
                     .values()
@@ -409,11 +387,7 @@ impl CorePlugin for LspCorePlugin {
     }
 
     #[allow(clippy::too_many_lines)] // dispatch_async fans out across 10 verbs; splitting per-verb hurts readability
-    fn dispatch_async(
-        &mut self,
-        handler_id: u32,
-        args: &Value,
-    ) -> Option<CorePluginFuture> {
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
         let pool = Arc::clone(&self.pool);
         // BL-113 Phase 2b — async dispatchers consume an immutable
         // snapshot of the host config taken at dispatch time. A
@@ -511,23 +485,13 @@ impl CorePlugin for LspCorePlugin {
                 }))
             }
 
-            HANDLER_COMPLETIONS => proxy_position_request(
-                args,
-                config,
-                pool,
-                bus,
-                "textDocument/completion",
-            ),
-            HANDLER_HOVER => {
-                proxy_position_request(args, config, pool, bus, "textDocument/hover")
+            HANDLER_COMPLETIONS => {
+                proxy_position_request(args, config, pool, bus, "textDocument/completion")
             }
-            HANDLER_DEFINITION => proxy_position_request(
-                args,
-                config,
-                pool,
-                bus,
-                "textDocument/definition",
-            ),
+            HANDLER_HOVER => proxy_position_request(args, config, pool, bus, "textDocument/hover"),
+            HANDLER_DEFINITION => {
+                proxy_position_request(args, config, pool, bus, "textDocument/definition")
+            }
             HANDLER_REFERENCES => {
                 let path = str_arg(args, "path")?;
                 let line = args.get("line").and_then(Value::as_i64)?;
@@ -757,10 +721,7 @@ async fn republish_pending(client: &crate::client::LspClient, bus: Option<&Arc<E
         // Map LSP method names like `textDocument/publishDiagnostics`
         // to a dotted topic suitable for the kernel bus's
         // namespace check (`com.nexus.lsp.<…>`).
-        let topic = format!(
-            "com.nexus.lsp.{}",
-            n.method.replace('/', ".")
-        );
+        let topic = format!("com.nexus.lsp.{}", n.method.replace('/', "."));
         if let Err(e) = bus.publish_plugin(PLUGIN_ID, &topic, n.params) {
             tracing::warn!(
                 plugin_id = PLUGIN_ID,
@@ -778,9 +739,7 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn config_or_err(
-    config: Option<&Arc<LspHostConfig>>,
-) -> Result<Arc<LspHostConfig>, PluginError> {
+fn config_or_err(config: Option<&Arc<LspHostConfig>>) -> Result<Arc<LspHostConfig>, PluginError> {
     config.cloned().ok_or_else(|| PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: "LSP host config not loaded".to_string(),
@@ -943,10 +902,7 @@ disabled = true
 
     #[test]
     fn file_uri_passthrough_on_already_uri() {
-        assert_eq!(
-            file_uri_from_path("file:///tmp/x.rs"),
-            "file:///tmp/x.rs"
-        );
+        assert_eq!(file_uri_from_path("file:///tmp/x.rs"), "file:///tmp/x.rs");
         assert_eq!(file_uri_from_path("/tmp/x.rs"), "file:///tmp/x.rs");
     }
 

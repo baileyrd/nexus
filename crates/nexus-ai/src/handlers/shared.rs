@@ -91,10 +91,7 @@ pub(crate) struct ForwardingExecutor {
 
 #[async_trait::async_trait]
 impl crate::tools::ToolExecutor for ForwardingExecutor {
-    async fn execute(
-        &self,
-        input: serde_json::Value,
-    ) -> Result<String, crate::tools::ToolError> {
+    async fn execute(&self, input: serde_json::Value) -> Result<String, crate::tools::ToolError> {
         self.source.execute(&self.target_name, input).await
     }
 }
@@ -141,7 +138,9 @@ pub(crate) fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, S
     }
 }
 
-pub(crate) fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>, String> {
+pub(crate) fn build_embedding_provider(
+    cfg: &AiConfig,
+) -> Result<Box<dyn EmbeddingProvider>, String> {
     match cfg.provider.as_str() {
         "openai" => Ok(Box::new(OpenAiProvider::new(
             cfg.api_key.clone().unwrap_or_default(),
@@ -163,7 +162,9 @@ pub(crate) fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn Embeddi
 }
 
 #[cfg(feature = "local-embeddings")]
-pub(crate) fn build_local_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>, String> {
+pub(crate) fn build_local_embedding_provider(
+    cfg: &AiConfig,
+) -> Result<Box<dyn EmbeddingProvider>, String> {
     use crate::local_embedding::{LocalEmbedding, DEFAULT_LOCAL_MODEL};
     let model = cfg
         .local_embedding_model
@@ -175,10 +176,14 @@ pub(crate) fn build_local_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn E
 }
 
 #[cfg(not(feature = "local-embeddings"))]
-pub(crate) fn build_local_embedding_provider(_cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>, String> {
-    Err("provider 'local' requires the 'local-embeddings' Cargo feature; \
+pub(crate) fn build_local_embedding_provider(
+    _cfg: &AiConfig,
+) -> Result<Box<dyn EmbeddingProvider>, String> {
+    Err(
+        "provider 'local' requires the 'local-embeddings' Cargo feature; \
          rebuild nexus-ai with --features local-embeddings to enable fastembed-rs"
-        .to_string())
+            .to_string(),
+    )
 }
 
 // ─── Status / config helpers (sync, no I/O) ─────────────────────────────────

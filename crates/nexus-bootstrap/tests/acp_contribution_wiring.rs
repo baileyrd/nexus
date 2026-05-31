@@ -95,7 +95,10 @@ async fn wire_acp_contributions_registers_every_contribution() {
     assert!(names.contains(&"hermes".to_string()));
     assert!(names.contains(&"hermes-coder".to_string()));
     let hermes = entries.iter().find(|e| e["name"] == "hermes").unwrap();
-    assert_eq!(hermes["capabilities"], serde_json::json!(["delegate", "tools"]));
+    assert_eq!(
+        hermes["capabilities"],
+        serde_json::json!(["delegate", "tools"])
+    );
     assert_eq!(hermes["metadata"]["plugin_id"], "community.hermes-pack");
     assert_eq!(hermes["metadata"]["display_name"], "Hermes");
 }
@@ -120,8 +123,7 @@ async fn wire_then_unwire_is_idempotent_round_trip() {
     let manifest = manifest_with_two_acp_agents();
     let wired = wire_acp_contributions(&forge.runtime.context, &[&manifest]).await;
     assert!(wired.iter().all(|o| o.status == AcpWireStatus::Ok));
-    let unwired =
-        unwire_acp_contributions_for_plugin(&forge.runtime.context, &manifest).await;
+    let unwired = unwire_acp_contributions_for_plugin(&forge.runtime.context, &manifest).await;
     assert_eq!(unwired.len(), 2);
     for o in &unwired {
         assert_eq!(o.status, AcpWireStatus::Ok, "outcome was {o:?}");
@@ -134,8 +136,7 @@ async fn wire_then_unwire_is_idempotent_round_trip() {
 
     // A second unwire returns not_found for every entry — no panic,
     // no dispatch error.
-    let second =
-        unwire_acp_contributions_for_plugin(&forge.runtime.context, &manifest).await;
+    let second = unwire_acp_contributions_for_plugin(&forge.runtime.context, &manifest).await;
     assert_eq!(second.len(), 2);
     for o in &second {
         assert_eq!(o.status, AcpWireStatus::NotFound);
@@ -171,8 +172,7 @@ command = "doesnt-matter"
         "intruder.manifest.toml",
     )
     .unwrap();
-    let outcomes =
-        unwire_acp_contributions_for_plugin(&forge.runtime.context, &manifest_b).await;
+    let outcomes = unwire_acp_contributions_for_plugin(&forge.runtime.context, &manifest_b).await;
     assert_eq!(outcomes.len(), 2);
     for o in &outcomes {
         match &o.status {

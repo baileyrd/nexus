@@ -8,11 +8,11 @@
 //! `ui::agent_approval`.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{AgentLineKind, Mode, TuiApp};
@@ -55,7 +55,9 @@ fn make_title(app: &TuiApp) -> Line<'static> {
         Span::raw(" "),
         Span::styled(
             "com.nexus.agent · interactive",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(mode_hint, Style::default().fg(Color::DarkGray)),
         Span::raw(" "),

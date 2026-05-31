@@ -392,7 +392,8 @@ mod tests {
         write_file(src.path(), "diff.md", b"source");
         write_file(dst.path(), "diff.md", b"dest");
         let plan = plan_import(src.path(), dst.path()).unwrap();
-        let report = apply_import(src.path(), dst.path(), &plan, &ImportOptions::default()).unwrap();
+        let report =
+            apply_import(src.path(), dst.path(), &plan, &ImportOptions::default()).unwrap();
         assert_eq!(read(dst.path(), "diff.md"), b"dest");
         assert_eq!(report.skipped_conflicts, vec!["diff.md".to_string()]);
     }
@@ -408,7 +409,9 @@ mod tests {
             src.path(),
             dst.path(),
             &plan,
-            &ImportOptions { on_conflict: ConflictStrategy::Overwrite },
+            &ImportOptions {
+                on_conflict: ConflictStrategy::Overwrite,
+            },
         )
         .unwrap();
         assert_eq!(read(dst.path(), "diff.md"), b"source");
@@ -426,11 +429,17 @@ mod tests {
             src.path(),
             dst.path(),
             &plan,
-            &ImportOptions { on_conflict: ConflictStrategy::Rename },
+            &ImportOptions {
+                on_conflict: ConflictStrategy::Rename,
+            },
         )
         .unwrap();
 
-        assert_eq!(read(dst.path(), "notes/diff.md"), b"dest", "destination must be untouched");
+        assert_eq!(
+            read(dst.path(), "notes/diff.md"),
+            b"dest",
+            "destination must be untouched"
+        );
         let renamed = report.renamed.first().expect("rename report entry");
         assert_eq!(renamed.0, "notes/diff.md");
         assert!(

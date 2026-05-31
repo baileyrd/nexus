@@ -37,7 +37,9 @@ pub fn substitute(text: &str) -> Result<String, ConfigError> {
         if let Ok(val) = std::env::var(name) {
             val
         } else {
-            error = Some(ConfigError::UndefinedEnvVar { name: name.to_string() });
+            error = Some(ConfigError::UndefinedEnvVar {
+                name: name.to_string(),
+            });
             String::new()
         }
     });

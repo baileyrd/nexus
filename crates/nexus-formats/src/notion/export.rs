@@ -120,7 +120,10 @@ fn visit_md_files(
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+        if path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        {
             continue; // skip dotfiles, especially .forge/
         }
         if path.is_dir() {
@@ -219,18 +222,16 @@ fn export_markdown(
 
     std::fs::write(&target_abs, out)?;
     report.pages_written += 1;
-    report
-        .written
-        .push(target_abs.strip_prefix(dest).unwrap_or(&target_abs).to_path_buf());
+    report.written.push(
+        target_abs
+            .strip_prefix(dest)
+            .unwrap_or(&target_abs)
+            .to_path_buf(),
+    );
     Ok(())
 }
 
-fn export_bases(
-    abs: &Path,
-    rel: &Path,
-    dest: &Path,
-    report: &mut ExportReport,
-) -> Result<()> {
+fn export_bases(abs: &Path, rel: &Path, dest: &Path, report: &mut ExportReport) -> Result<()> {
     let body = std::fs::read_to_string(abs)?;
     match bases_to_csv(&body) {
         Ok(csv) => {
@@ -241,9 +242,12 @@ fn export_bases(
             }
             std::fs::write(&target_abs, csv)?;
             report.databases_written += 1;
-            report
-                .written
-                .push(target_abs.strip_prefix(dest).unwrap_or(&target_abs).to_path_buf());
+            report.written.push(
+                target_abs
+                    .strip_prefix(dest)
+                    .unwrap_or(&target_abs)
+                    .to_path_buf(),
+            );
         }
         Err(e) => {
             report
@@ -255,21 +259,19 @@ fn export_bases(
     Ok(())
 }
 
-fn copy_attachment(
-    abs: &Path,
-    rel: &Path,
-    dest: &Path,
-    report: &mut ExportReport,
-) -> Result<()> {
+fn copy_attachment(abs: &Path, rel: &Path, dest: &Path, report: &mut ExportReport) -> Result<()> {
     let target_abs = dest.join(rel);
     if let Some(p) = target_abs.parent() {
         std::fs::create_dir_all(p)?;
     }
     std::fs::copy(abs, &target_abs)?;
     report.attachments_copied += 1;
-    report
-        .written
-        .push(target_abs.strip_prefix(dest).unwrap_or(&target_abs).to_path_buf());
+    report.written.push(
+        target_abs
+            .strip_prefix(dest)
+            .unwrap_or(&target_abs)
+            .to_path_buf(),
+    );
     Ok(())
 }
 
@@ -326,11 +328,7 @@ fn convert_callouts_to_emoji(input: &str) -> String {
     out
 }
 
-fn rewrite_wikilinks(
-    input: &str,
-    index: &ExportIndex,
-    report: &mut ExportReport,
-) -> String {
+fn rewrite_wikilinks(input: &str, index: &ExportIndex, report: &mut ExportReport) -> String {
     let mut out = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut i = 0;
@@ -432,9 +430,8 @@ fn parse_frontmatter(body: &str) -> Option<(HashMap<String, String>, &str)> {
 /// header and `[[records]]` for the data rows. Records that are missing a
 /// field render as an empty cell.
 pub fn bases_to_csv(toml_body: &str) -> Result<String> {
-    let parsed: toml::Value = toml::from_str(toml_body).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("toml: {e}"))
-    })?;
+    let parsed: toml::Value = toml::from_str(toml_body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("toml: {e}")))?;
 
     let fields = parsed
         .get("fields")
@@ -478,8 +475,9 @@ pub fn bases_to_csv(toml_body: &str) -> Result<String> {
                     .unwrap_or_default()
             })
             .collect();
-        wtr.write_record(&row)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("csv: {e}")))?;
+        wtr.write_record(&row).map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("csv: {e}"))
+        })?;
     }
 
     let bytes = wtr
@@ -555,10 +553,8 @@ mod tests {
         );
 
         export_to_notion(src.path(), dest.path()).unwrap();
-        let a = fs::read_to_string(
-            dest.path().join("A aaaa1111aaaa1111aaaa1111aaaa1111.md"),
-        )
-        .unwrap();
+        let a =
+            fs::read_to_string(dest.path().join("A aaaa1111aaaa1111aaaa1111aaaa1111.md")).unwrap();
         assert!(
             a.contains("[B](B%20bbbb2222bbbb2222bbbb2222bbbb2222.md)"),
             "got:\n{a}"
@@ -579,10 +575,8 @@ mod tests {
         );
 
         export_to_notion(src.path(), dest.path()).unwrap();
-        let a = fs::read_to_string(
-            dest.path().join("A aaaa1111aaaa1111aaaa1111aaaa1111.md"),
-        )
-        .unwrap();
+        let a =
+            fs::read_to_string(dest.path().join("A aaaa1111aaaa1111aaaa1111aaaa1111.md")).unwrap();
         assert!(
             a.contains("[the other](B%20bbbb2222bbbb2222bbbb2222bbbb2222.md)"),
             "got:\n{a}"
@@ -599,10 +593,8 @@ mod tests {
         );
 
         export_to_notion(src.path(), dest.path()).unwrap();
-        let body = fs::read_to_string(
-            dest.path().join("X aaaa1111aaaa1111aaaa1111aaaa1111.md"),
-        )
-        .unwrap();
+        let body =
+            fs::read_to_string(dest.path().join("X aaaa1111aaaa1111aaaa1111aaaa1111.md")).unwrap();
         assert!(body.contains("> 💡 Hello."), "{body}");
         assert!(body.contains("> ⚠️ Watch out."), "{body}");
     }
@@ -617,13 +609,14 @@ mod tests {
         );
 
         export_to_notion(src.path(), dest.path()).unwrap();
-        let body = fs::read_to_string(
-            dest.path().join("X aaaa1111aaaa1111aaaa1111aaaa1111.md"),
-        )
-        .unwrap();
+        let body =
+            fs::read_to_string(dest.path().join("X aaaa1111aaaa1111aaaa1111aaaa1111.md")).unwrap();
         assert!(body.contains("| Status | Active |"), "{body}");
         assert!(body.contains("| Owner | Alex |"), "{body}");
-        assert!(!body.contains("notion_id"), "should not leak notion_id: {body}");
+        assert!(
+            !body.contains("notion_id"),
+            "should not leak notion_id: {body}"
+        );
     }
 
     #[test]
@@ -689,10 +682,7 @@ Score = 2
     fn unknown_wikilink_warns_but_continues() {
         let src = tempdir().unwrap();
         let dest = tempdir().unwrap();
-        write(
-            &src.path().join("A.md"),
-            "Refs [[Missing]] target.\n",
-        );
+        write(&src.path().join("A.md"), "Refs [[Missing]] target.\n");
 
         let report = export_to_notion(src.path(), dest.path()).unwrap();
         assert!(

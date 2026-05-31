@@ -217,11 +217,7 @@ pub fn write_last_fired(forge_root: &std::path::Path, snapshot: &LastFired) {
 /// recorded fire for `kind`. Used by the scheduler loop to defend
 /// against backwards clock jumps re-firing the same boundary.
 #[must_use]
-pub fn within_suppression_window(
-    last: &LastFired,
-    kind: DigestKind,
-    now: DateTime<Utc>,
-) -> bool {
+pub fn within_suppression_window(last: &LastFired, kind: DigestKind, now: DateTime<Utc>) -> bool {
     let Some(prev) = last.get(kind) else {
         return false;
     };
@@ -456,7 +452,9 @@ async fn walk_markdown(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let is_dir = entry.get("isDir").and_then(serde_json::Value::as_bool)
+        let is_dir = entry
+            .get("isDir")
+            .and_then(serde_json::Value::as_bool)
             .or_else(|| entry.get("is_dir").and_then(serde_json::Value::as_bool))
             .unwrap_or(false);
         if is_dir {
@@ -477,7 +475,7 @@ async fn walk_markdown(
 }
 
 async fn read_file(ctx: &Arc<KernelPluginContext>, relpath: &str) -> Result<String, PluginError> {
-let v = ctx
+    let v = ctx
         .ipc_call(
             "com.nexus.storage",
             "read_file",
@@ -511,7 +509,7 @@ async fn write_file(
     relpath: &str,
     bytes: &[u8],
 ) -> Result<(), PluginError> {
-let bytes_array: Vec<serde_json::Value> = bytes
+    let bytes_array: Vec<serde_json::Value> = bytes
         .iter()
         .map(|b| serde_json::Value::from(u64::from(*b)))
         .collect();
@@ -527,7 +525,7 @@ let bytes_array: Vec<serde_json::Value> = bytes
 }
 
 async fn create_dir(ctx: &Arc<KernelPluginContext>, relpath: &str) -> Result<(), PluginError> {
-match ctx
+    match ctx
         .ipc_call(
             "com.nexus.storage",
             "create_dir",
@@ -554,7 +552,7 @@ async fn ask_ai(
     ctx: &Arc<KernelPluginContext>,
     prompt: &str,
 ) -> Result<(String, Option<String>), PluginError> {
-let v = ctx
+    let v = ctx
         .ipc_call(
             "com.nexus.ai",
             "ask",
@@ -618,7 +616,9 @@ pub fn next_fire(
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use nexus_kernel::{Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, KvStore};
+    use nexus_kernel::{
+        Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, KvStore,
+    };
     use std::sync::Mutex;
 
     fn ts(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
@@ -843,9 +843,7 @@ mod tests {
                         .unwrap_or_default();
                     Ok(serde_json::Value::String(body))
                 }
-                ("com.nexus.storage", "create_dir" | "write_file") => {
-                    Ok(serde_json::json!({}))
-                }
+                ("com.nexus.storage", "create_dir" | "write_file") => Ok(serde_json::json!({})),
                 ("com.nexus.ai", "ask") => Ok(serde_json::json!({
                     "answer": self.ai_answer,
                     "model": "stub-model",
@@ -894,11 +892,7 @@ mod tests {
                 "today body".to_string(),
                 in_window_ms,
             ),
-            (
-                "notes/old.md".to_string(),
-                "old body".to_string(),
-                stale_ms,
-            ),
+            ("notes/old.md".to_string(), "old body".to_string(), stale_ms),
             // Skipped — outside .md filter.
             (
                 "notes/photo.png".to_string(),
@@ -931,9 +925,7 @@ mod tests {
         assert!(calls
             .iter()
             .any(|(t, c)| t == "com.nexus.storage" && c == "read_file"));
-        assert!(calls
-            .iter()
-            .any(|(t, c)| t == "com.nexus.ai" && c == "ask"));
+        assert!(calls.iter().any(|(t, c)| t == "com.nexus.ai" && c == "ask"));
         assert!(calls
             .iter()
             .any(|(t, c)| t == "com.nexus.storage" && c == "write_file"));
@@ -943,11 +935,7 @@ mod tests {
     async fn run_digest_short_circuits_when_no_files_in_window() {
         let now = ts(2026, 4, 29, 12, 0);
         let stale_ms = now.timestamp_millis() - 30 * 86_400_000;
-        let files = vec![(
-            "notes/old.md".to_string(),
-            "old".to_string(),
-            stale_ms,
-        )];
+        let files = vec![("notes/old.md".to_string(), "old".to_string(), stale_ms)];
         let dispatcher = StubDispatcher::new(files, "unused");
         let ctx = make_ctx(Arc::clone(&dispatcher));
         let cfg = DigestConfig {
@@ -973,5 +961,4 @@ mod tests {
         assert_eq!(DigestKind::from_str("weekly").unwrap(), DigestKind::Weekly);
         assert!(DigestKind::from_str("monthly").is_err());
     }
-
 }

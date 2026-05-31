@@ -3,11 +3,11 @@
 //! Parses a markdown file into structured blocks, links, tags, and frontmatter.
 
 use comrak::nodes::{AstNode, NodeValue};
-use comrak::{Arena, Options, parse_document};
+use comrak::{parse_document, Arena, Options};
 use nexus_formats::sha256_hex;
 
-use crate::StorageError;
 use crate::tasks::ParsedTask;
+use crate::StorageError;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -199,8 +199,7 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
             }
             NodeValue::BlockQuote => {
                 let raw_text = collect_text(child);
-                let (block_type, callout_type, content_after_callout) =
-                    detect_callout(&raw_text);
+                let (block_type, callout_type, content_after_callout) = detect_callout(&raw_text);
                 let (content, block_ref_id) = extract_block_ref(&content_after_callout);
                 extract_wikilinks_and_embeds(&content, &mut links);
                 extract_inline_tags(&content, &mut tags);
@@ -667,11 +666,7 @@ mod tests {
     #[test]
     fn parse_inline_tags() {
         let pf = parse_markdown("Hello #rust and #programming\n").unwrap();
-        let inline_tags: Vec<_> = pf
-            .tags
-            .iter()
-            .filter(|t| t.source == "inline")
-            .collect();
+        let inline_tags: Vec<_> = pf.tags.iter().filter(|t| t.source == "inline").collect();
         assert!(inline_tags.iter().any(|t| t.name == "rust"), "rust missing");
         assert!(
             inline_tags.iter().any(|t| t.name == "programming"),
@@ -827,8 +822,15 @@ mod tests {
     fn parse_regular_blockquote_not_callout() {
         let md = "> Just a regular quote\n";
         let pf = parse_markdown(md).unwrap();
-        let blocks: Vec<_> = pf.blocks.iter().filter(|b| b.block_type == "callout").collect();
-        assert!(blocks.is_empty(), "regular blockquote should not be a callout");
+        let blocks: Vec<_> = pf
+            .blocks
+            .iter()
+            .filter(|b| b.block_type == "callout")
+            .collect();
+        assert!(
+            blocks.is_empty(),
+            "regular blockquote should not be a callout"
+        );
     }
 
     // ── task extraction ──────────────────────────────────────────────────

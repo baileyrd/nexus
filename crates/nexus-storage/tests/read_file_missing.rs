@@ -15,8 +15,7 @@ use std::sync::Arc;
 use nexus_kernel::EventBus;
 use nexus_plugins::CorePlugin;
 use nexus_storage::{
-    StorageConfig, StorageCorePlugin, StorageEngine,
-    core_plugin::HANDLER_READ_FILE,
+    core_plugin::HANDLER_READ_FILE, StorageConfig, StorageCorePlugin, StorageEngine,
 };
 
 #[test]

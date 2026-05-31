@@ -71,7 +71,9 @@ pub fn import_csv<R: Read>(
         let row = match row_result {
             Ok(r) => r,
             Err(e) => {
-                result.errors.push((row_num, format!("CSV parse error: {e}")));
+                result
+                    .errors
+                    .push((row_num, format!("CSV parse error: {e}")));
                 result.skipped += 1;
                 continue;
             }
@@ -79,7 +81,10 @@ pub fn import_csv<R: Read>(
 
         let mut fields = serde_json::Map::new();
         let record_id = uuid::Uuid::new_v4().to_string();
-        fields.insert("id".to_string(), serde_json::Value::String(record_id.clone()));
+        fields.insert(
+            "id".to_string(),
+            serde_json::Value::String(record_id.clone()),
+        );
 
         for (col_idx, field_name) in &mapping.mappings {
             if let Some(value) = row.get(*col_idx) {
@@ -207,8 +212,14 @@ mod tests {
         };
         let (records, _) = import_csv(csv_data.as_bytes(), &mapping, true).unwrap();
         assert_eq!(records.len(), 3);
-        assert_eq!(records[0].fields.get("val").unwrap(), &serde_json::json!(42.0));
-        assert_eq!(records[1].fields.get("val").unwrap(), &serde_json::json!(true));
+        assert_eq!(
+            records[0].fields.get("val").unwrap(),
+            &serde_json::json!(42.0)
+        );
+        assert_eq!(
+            records[1].fields.get("val").unwrap(),
+            &serde_json::json!(true)
+        );
         assert_eq!(records[2].fields.get("val").unwrap(), "hello");
     }
 
@@ -266,15 +277,15 @@ mod tests {
         export_csv(&mut buf, &records, &fields).unwrap();
 
         let mapping = ColumnMapping {
-            mappings: vec![
-                (0, "title".to_string()),
-                (1, "count".to_string()),
-            ],
+            mappings: vec![(0, "title".to_string()), (1, "count".to_string())],
         };
         let (imported, result) = import_csv(buf.as_slice(), &mapping, true).unwrap();
         assert_eq!(result.imported, 1);
         assert_eq!(imported[0].fields.get("title").unwrap(), "Test");
-        assert_eq!(imported[0].fields.get("count").unwrap(), &serde_json::json!(42.0));
+        assert_eq!(
+            imported[0].fields.get("count").unwrap(),
+            &serde_json::json!(42.0)
+        );
     }
 
     #[test]

@@ -12,7 +12,9 @@ use nexus_agent::AgentCorePlugin;
 use nexus_kernel::EventBus;
 use nexus_plugins::PluginLoader;
 
-use super::{core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt};
+use super::{
+    core_manifest_with_ipc_and_deps, with_v1_aliases, LifecycleFlags, RegisterCoreResultExt,
+};
 
 pub(super) fn register(
     loader: &mut PluginLoader,

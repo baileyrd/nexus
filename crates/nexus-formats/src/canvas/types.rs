@@ -133,10 +133,10 @@ impl CanvasNodeType {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::File     => "file",
-            Self::Text     => "text",
-            Self::Link     => "link",
-            Self::Group    => "group",
+            Self::File => "file",
+            Self::Text => "text",
+            Self::Link => "link",
+            Self::Group => "group",
             Self::Database => "database",
             Self::Terminal => "terminal",
         }
@@ -193,7 +193,7 @@ impl CanvasEdgeType {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Solid  => "solid",
+            Self::Solid => "solid",
             Self::Dashed => "dashed",
             Self::Dotted => "dotted",
         }

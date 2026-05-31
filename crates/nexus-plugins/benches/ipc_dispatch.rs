@@ -10,12 +10,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use nexus_kernel::{Identity as _, Ipc as _,
-    Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+use nexus_kernel::{
+    Capability, CapabilitySet, EventBus, Identity as _, InMemoryKvStore, Ipc as _,
+    KernelPluginContext, KvStore,
 };
-use nexus_plugins::{
-    parse_manifest, CorePlugin, PluginError, PluginLoader, SharedPluginLoader,
-};
+use nexus_plugins::{parse_manifest, CorePlugin, PluginError, PluginLoader, SharedPluginLoader};
 
 const TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -31,11 +30,7 @@ impl CorePlugin for NoopHandler {
     }
 }
 
-fn core_manifest_with_ipc(
-    id: &str,
-    cmd: &str,
-    handler_id: u32,
-) -> nexus_plugins::PluginManifest {
+fn core_manifest_with_ipc(id: &str, cmd: &str, handler_id: u32) -> nexus_plugins::PluginManifest {
     let toml = format!(
         r#"
 [plugin]
@@ -103,7 +98,11 @@ fn build_fixture() -> BenchFixture {
         .build()
         .expect("rt");
 
-    BenchFixture { _forge: forge, rt, ctx }
+    BenchFixture {
+        _forge: forge,
+        rt,
+        ctx,
+    }
 }
 
 fn bench_dispatch_noop_handler(c: &mut Criterion) {

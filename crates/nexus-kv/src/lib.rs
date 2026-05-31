@@ -265,4 +265,3 @@ mod sqlite_tests {
         assert_eq!(val, binary);
     }
 }
-

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_kernel::{Events as _, Ipc as _, EventFilter, KernelPluginContext, NexusEvent};
+use nexus_kernel::{EventFilter, Events as _, Ipc as _, KernelPluginContext, NexusEvent};
 use serde::Deserialize;
 
 /// Bus topic emitted by `handle_session_run` after a session finishes.
@@ -115,7 +115,9 @@ pub fn spawn(ctx: Arc<KernelPluginContext>, threshold_secs: u64) {
         );
         return;
     };
-    let mut sub = ctx.subscribe(EventFilter::CustomExact(SESSION_COMPLETED_TOPIC.to_string()));
+    let mut sub = ctx.subscribe(EventFilter::CustomExact(
+        SESSION_COMPLETED_TOPIC.to_string(),
+    ));
     let threshold_ms = threshold_secs.saturating_mul(1000);
     handle.spawn(async move {
         tracing::debug!(
@@ -128,8 +130,9 @@ pub fn spawn(ctx: Arc<KernelPluginContext>, threshold_secs: u64) {
                     let NexusEvent::Custom { payload, .. } = &evt.event else {
                         continue;
                     };
-                    let Some(duration_ms) =
-                        payload.get("duration_ms").and_then(serde_json::Value::as_u64)
+                    let Some(duration_ms) = payload
+                        .get("duration_ms")
+                        .and_then(serde_json::Value::as_u64)
                     else {
                         continue;
                     };
@@ -207,8 +210,7 @@ mod tests {
     fn load_threshold_falls_back_on_garbage() {
         let dir = TempDir::new().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
-        std::fs::write(dir.path().join(".forge/config.toml"), "not = valid = toml")
-            .unwrap();
+        std::fs::write(dir.path().join(".forge/config.toml"), "not = valid = toml").unwrap();
         assert_eq!(load_threshold_secs(dir.path()), DEFAULT_THRESHOLD_S);
     }
 

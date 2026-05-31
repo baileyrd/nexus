@@ -30,10 +30,7 @@ async fn call(
 
 #[tokio::test]
 async fn list_dir_returns_sorted_entries_and_hides_forge_dir() {
-    let forge = MinimalForge::with_files(&[
-        ("notes/b.md", b"b"),
-        ("notes/a.md", b"a"),
-    ]);
+    let forge = MinimalForge::with_files(&[("notes/b.md", b"b"), ("notes/a.md", b"a")]);
     fs::create_dir_all(forge.root().join("notes/sub")).unwrap();
 
     // Root listing must not include `.forge/`.
@@ -168,10 +165,7 @@ async fn rename_entry_moves_file_and_updates_index() {
 
 #[tokio::test]
 async fn rename_entry_rejects_existing_destination() {
-    let forge = MinimalForge::with_files(&[
-        ("notes/a.md", b"a"),
-        ("notes/b.md", b"b"),
-    ]);
+    let forge = MinimalForge::with_files(&[("notes/a.md", b"a"), ("notes/b.md", b"b")]);
 
     let err = call(
         &forge,
@@ -219,13 +213,9 @@ async fn path_confinement_rejects_traversal() {
     let forge = MinimalForge::new();
 
     for cmd in ["list_dir", "create_file", "create_dir", "delete_entry"] {
-        let err = call(
-            &forge,
-            cmd,
-            serde_json::json!({ "relpath": "../escaped" }),
-        )
-        .await
-        .expect_err(&format!("{cmd} with ..  must fail"));
+        let err = call(&forge, cmd, serde_json::json!({ "relpath": "../escaped" }))
+            .await
+            .expect_err(&format!("{cmd} with ..  must fail"));
         match err {
             IpcError::PluginCrashedDuringCall { .. } => {}
             other => panic!("{cmd}: expected PluginCrashedDuringCall, got {other:?}"),

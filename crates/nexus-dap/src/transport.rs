@@ -111,10 +111,7 @@ where
 /// - [`TransportError::Io`] on write failure.
 /// - [`TransportError::BadBody`] if serialisation fails — defensive,
 ///   `serde_json` never fails for our types.
-pub async fn write_message<W>(
-    writer: &mut W,
-    msg: &ProtocolMessage,
-) -> Result<(), TransportError>
+pub async fn write_message<W>(writer: &mut W, msg: &ProtocolMessage) -> Result<(), TransportError>
 where
     W: AsyncWrite + Unpin,
 {

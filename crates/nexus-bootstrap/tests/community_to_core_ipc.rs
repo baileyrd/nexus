@@ -77,8 +77,7 @@ fn scratch_forge() -> tempfile::TempDir {
 
 fn build_composite(runtime: &nexus_bootstrap::Runtime) -> CompositeIpcDispatcher {
     let fallback = FallbackCell::new();
-    let core: Arc<dyn IpcDispatcher> =
-        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+    let core: Arc<dyn IpcDispatcher> = Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
     fallback.set(core);
     CompositeIpcDispatcher::new(Arc::new(EmptyCommunityDispatcher), fallback)
 }
@@ -91,7 +90,11 @@ fn community_dispatcher_falls_through_to_core_theme_plugin() {
     let composite = build_composite(&runtime);
 
     let cfg = composite
-        .dispatch("com.nexus.theme", "get_theme_config", &serde_json::json!({}))
+        .dispatch(
+            "com.nexus.theme",
+            "get_theme_config",
+            &serde_json::json!({}),
+        )
         .expect("get_theme_config routes through fallback");
 
     assert!(
@@ -108,11 +111,7 @@ fn community_dispatcher_falls_through_to_core_storage_plugin() {
     let composite = build_composite(&runtime);
 
     let value = composite
-        .dispatch(
-            "com.nexus.storage",
-            "query_files",
-            &serde_json::json!({}),
-        )
+        .dispatch("com.nexus.storage", "query_files", &serde_json::json!({}))
         .expect("query_files routes through fallback");
 
     assert!(
@@ -129,7 +128,11 @@ fn fallback_surfaces_core_command_not_found_errors() {
     let composite = build_composite(&runtime);
 
     let err = composite
-        .dispatch("com.nexus.theme", "not-a-real-command", &serde_json::json!({}))
+        .dispatch(
+            "com.nexus.theme",
+            "not-a-real-command",
+            &serde_json::json!({}),
+        )
         .unwrap_err();
 
     assert!(
@@ -148,8 +151,7 @@ fn community_command_not_found_does_not_fall_through() {
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
 
     let fallback = FallbackCell::new();
-    let core: Arc<dyn IpcDispatcher> =
-        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+    let core: Arc<dyn IpcDispatcher> = Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
     fallback.set(core);
     let composite = CompositeIpcDispatcher::new(Arc::new(StubCommunityDispatcher), fallback);
 
@@ -176,7 +178,11 @@ fn empty_fallback_returns_primary_plugin_not_found() {
     let composite = CompositeIpcDispatcher::new(Arc::new(EmptyCommunityDispatcher), fallback);
 
     let err = composite
-        .dispatch("com.nexus.theme", "get_theme_config", &serde_json::json!({}))
+        .dispatch(
+            "com.nexus.theme",
+            "get_theme_config",
+            &serde_json::json!({}),
+        )
         .unwrap_err();
 
     assert!(

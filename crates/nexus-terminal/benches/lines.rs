@@ -18,8 +18,12 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use nexus_terminal::LineBuffer;
 
 fn sample_line(i: usize) -> Vec<u8> {
-    format!("log entry {i}: step {step} of {total} — status ok\n", step = i % 100, total = 100)
-        .into_bytes()
+    format!(
+        "log entry {i}: step {step} of {total} — status ok\n",
+        step = i % 100,
+        total = 100
+    )
+    .into_bytes()
 }
 
 fn build_buffer(n: usize) -> LineBuffer {

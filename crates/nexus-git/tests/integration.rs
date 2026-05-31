@@ -77,7 +77,11 @@ fn full_lifecycle() {
     assert!(!engine.state().unwrap().is_dirty);
 
     // ── Modify and diff ──────────────────────────────────────────────────────
-    fs::write(dir.path().join("README.md"), "# Nexus\n\nUpdated content.\n").unwrap();
+    fs::write(
+        dir.path().join("README.md"),
+        "# Nexus\n\nUpdated content.\n",
+    )
+    .unwrap();
     let statuses = engine.file_statuses().unwrap();
     assert!(
         statuses
@@ -133,7 +137,11 @@ fn open_non_repo_returns_error() {
 fn log_limit_respected() {
     let (dir, engine) = setup();
     for i in 0..10 {
-        fs::write(dir.path().join(format!("file{i}.txt")), format!("content {i}")).unwrap();
+        fs::write(
+            dir.path().join(format!("file{i}.txt")),
+            format!("content {i}"),
+        )
+        .unwrap();
         commit(dir.path(), &format!("commit {i}"));
     }
     let log = engine.log(5).unwrap();
@@ -152,10 +160,16 @@ fn staging_and_commit_workflow() {
 
     engine.stage_file(Path::new("a.txt")).unwrap();
     let statuses = engine.file_statuses().unwrap();
-    let a_status = statuses.iter().find(|s| s.path == Path::new("a.txt")).unwrap();
+    let a_status = statuses
+        .iter()
+        .find(|s| s.path == Path::new("a.txt"))
+        .unwrap();
     assert_eq!(a_status.status, FileStatus::Added);
     // b.txt should still be untracked.
-    let b_status = statuses.iter().find(|s| s.path == Path::new("b.txt")).unwrap();
+    let b_status = statuses
+        .iter()
+        .find(|s| s.path == Path::new("b.txt"))
+        .unwrap();
     assert_eq!(b_status.status, FileStatus::Untracked);
 
     // Stage all remaining.
@@ -244,15 +258,23 @@ fn unstage_all_reverts_index() {
 
     // Both should be staged.
     let statuses = engine.file_statuses().unwrap();
-    assert!(statuses.iter().any(|s| s.status == FileStatus::Staged || s.status == FileStatus::Added));
+    assert!(statuses
+        .iter()
+        .any(|s| s.status == FileStatus::Staged || s.status == FileStatus::Added));
 
     // Unstage all.
     engine.unstage_all().unwrap();
     let statuses = engine.file_statuses().unwrap();
     // file.txt should be Modified, new.txt should be Untracked.
-    let file_s = statuses.iter().find(|s| s.path == Path::new("file.txt")).unwrap();
+    let file_s = statuses
+        .iter()
+        .find(|s| s.path == Path::new("file.txt"))
+        .unwrap();
     assert_eq!(file_s.status, FileStatus::Modified);
-    let new_s = statuses.iter().find(|s| s.path == Path::new("new.txt")).unwrap();
+    let new_s = statuses
+        .iter()
+        .find(|s| s.path == Path::new("new.txt"))
+        .unwrap();
     assert_eq!(new_s.status, FileStatus::Untracked);
 }
 
@@ -280,7 +302,10 @@ fn merge_fast_forward() {
     assert!(result.fast_forward, "should be fast-forward");
     assert!(result.conflicts.is_empty());
     assert!(result.commit_hash.is_some());
-    assert!(dir.path().join("feature.txt").exists(), "feature.txt should exist after merge");
+    assert!(
+        dir.path().join("feature.txt").exists(),
+        "feature.txt should exist after merge"
+    );
 }
 
 #[test]
@@ -344,7 +369,10 @@ fn merge_with_conflicts() {
         "shared.txt should be conflicted, got: {:?}",
         result.conflicts
     );
-    assert!(result.commit_hash.is_none(), "should not auto-commit on conflict");
+    assert!(
+        result.commit_hash.is_none(),
+        "should not auto-commit on conflict"
+    );
 
     // conflict_files should also report the conflict.
     let conflicts = engine.conflict_files().unwrap();
@@ -589,7 +617,9 @@ fn cherry_pick_applies_single_commit_cleanly() {
     // The new commit is on main, not the original hash.
     let log_after = engine.log(5).unwrap();
     assert!(
-        log_after.iter().any(|e| e.message.starts_with("feat: add picked.txt")),
+        log_after
+            .iter()
+            .any(|e| e.message.starts_with("feat: add picked.txt")),
         "cherry-picked commit must appear in main's log"
     );
 }
@@ -671,7 +701,10 @@ fn cherry_pick_pauses_on_conflict_and_aborts_cleanly() {
     fs::write(dir.path().join("conflict.txt"), "main edit\n").unwrap();
     engine.stage_all().unwrap();
     engine.commit("main: change conflict.txt").unwrap();
-    assert!(!engine.state().unwrap().is_dirty, "tree must be clean before cherry-pick");
+    assert!(
+        !engine.state().unwrap().is_dirty,
+        "tree must be clean before cherry-pick"
+    );
 
     let result = engine.cherry_pick(&target_hash).unwrap();
     assert!(

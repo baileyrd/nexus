@@ -13,9 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use nexus_collab::{
-    ClientMessage, RelayServer, ServerMessage, Token, ERR_AUTH, ERR_HANDSHAKE,
-};
+use nexus_collab::{ClientMessage, RelayServer, ServerMessage, Token, ERR_AUTH, ERR_HANDSHAKE};
 use serde_json::json;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;

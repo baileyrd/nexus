@@ -500,10 +500,7 @@ impl Session {
     /// Propagates any [`TerminalError::Io`] from signal delivery that
     /// isn't the benign "no such process" race (child exited between
     /// the `try_wait` and the kill). Callers should treat that as success.
-    pub fn request_shutdown(
-        &mut self,
-        step_timeout: Duration,
-    ) -> Result<Signal, TerminalError> {
+    pub fn request_shutdown(&mut self, step_timeout: Duration) -> Result<Signal, TerminalError> {
         for signal in [Signal::Int, Signal::Term, Signal::Kill] {
             if self.child.is_none() {
                 // Already exited — pretend we delivered Kill so callers
@@ -562,10 +559,7 @@ impl Session {
                 .kill()
                 .map_err(|e| TerminalError::Io(std::io::Error::other(e.to_string())))?;
             // Best-effort wait so the zombie is reaped before we return.
-            let code = child
-                .wait()
-                .map(|s| s.exit_code())
-                .unwrap_or(0);
+            let code = child.wait().map(|s| s.exit_code()).unwrap_or(0);
             self.state = ProcessState::Killed {
                 signal: Signal::Kill,
                 code,
@@ -1113,7 +1107,10 @@ while True:
         assert_eq!(session.state(), ProcessState::Running);
         session.kill().expect("kill");
         match session.state() {
-            ProcessState::Killed { signal: Signal::Kill, .. } => {}
+            ProcessState::Killed {
+                signal: Signal::Kill,
+                ..
+            } => {}
             other => panic!("expected Killed(Kill), got {other:?}"),
         }
     }
@@ -1138,7 +1135,10 @@ while True:
         // A responsive `sleep` dies on the first step — SIGINT.
         assert_eq!(finisher, Signal::Int);
         match session.state() {
-            ProcessState::Killed { signal: Signal::Int, .. } => {}
+            ProcessState::Killed {
+                signal: Signal::Int,
+                ..
+            } => {}
             other => panic!("expected Killed(Int), got {other:?}"),
         }
     }
@@ -1154,7 +1154,10 @@ while True:
         assert!(exited.is_terminated());
         assert_eq!(exited.exit_code(), Some(0));
 
-        let killed = ProcessState::Killed { signal: Signal::Term, code: 143 };
+        let killed = ProcessState::Killed {
+            signal: Signal::Term,
+            code: 143,
+        };
         assert!(!killed.is_running());
         assert!(killed.is_terminated());
         assert_eq!(killed.exit_code(), Some(143));

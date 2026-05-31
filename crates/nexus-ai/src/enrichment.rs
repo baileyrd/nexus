@@ -218,7 +218,10 @@ fn parse_tag_response(raw: &str) -> Vec<String> {
         if t.chars().any(char::is_whitespace) {
             continue;
         }
-        if !t.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !t
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             continue;
         }
         if !out.iter().any(|e: &String| e == &t) {
@@ -454,7 +457,9 @@ fn parse_tags_field(yaml: &str) -> Vec<String> {
                 let after = line.split_once(':').map_or("", |(_, v)| v).trim();
                 if after.is_empty() {
                     in_block = true;
-                } else if let Some(stripped) = after.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                } else if let Some(stripped) =
+                    after.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+                {
                     for piece in stripped.split(',') {
                         let p = piece.trim().trim_matches('"').trim_matches('\'');
                         if !p.is_empty() {

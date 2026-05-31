@@ -162,5 +162,4 @@ pub trait Log: Send + Sync {
 /// the whole surface continue to use `&dyn PluginContext` unchanged.
 pub trait PluginContext: Identity + FileSystem + KvAccess + Events + Ipc + Log {}
 
-impl<T> PluginContext for T where T: Identity + FileSystem + KvAccess + Events + Ipc + Log + ?Sized
-{}
+impl<T> PluginContext for T where T: Identity + FileSystem + KvAccess + Events + Ipc + Log + ?Sized {}

@@ -61,12 +61,11 @@ impl TemplateRegistry {
         let user_dir = forge_root.join(".forge/templates");
         if user_dir.exists() {
             visit_templates(&user_dir, &mut |path| {
-                let tpl = parse_template_file(path).map_err(|source| {
-                    TemplateRegistryError::Parse {
+                let tpl =
+                    parse_template_file(path).map_err(|source| TemplateRegistryError::Parse {
                         file: path.display().to_string(),
                         source,
-                    }
-                })?;
+                    })?;
                 by_name.insert(tpl.meta.name.clone(), tpl);
                 Ok(())
             })?;

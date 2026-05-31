@@ -224,8 +224,7 @@ impl CollabClient {
             display_name,
         } = params;
         let stream = TcpStream::connect((host.as_str(), port)).await?;
-        let mut ws_config =
-            tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+        let mut ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
         ws_config.max_message_size = Some(MAX_FRAME_BYTES);
         ws_config.max_frame_size = Some(MAX_FRAME_BYTES);
         let (ws, _) = tokio_tungstenite::client_async_with_config(&url, stream, Some(ws_config))
@@ -453,9 +452,9 @@ async fn run_inbound(
     while let Some(frame) = stream.next().await {
         let text = match frame {
             Ok(Message::Text(t)) => t,
-            Ok(
-                Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_),
-            ) => continue,
+            Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_)) => {
+                continue
+            }
             Ok(Message::Close(_))
             | Err(
                 tokio_tungstenite::tungstenite::Error::ConnectionClosed

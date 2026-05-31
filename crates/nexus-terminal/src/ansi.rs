@@ -141,10 +141,7 @@ mod tests {
 
     #[test]
     fn csi_truecolor_is_removed() {
-        assert_eq!(
-            strip_ansi(b"\x1b[38;2;255;0;0mred\x1b[0m"),
-            "red"
-        );
+        assert_eq!(strip_ansi(b"\x1b[38;2;255;0;0mred\x1b[0m"), "red");
     }
 
     #[test]

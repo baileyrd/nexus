@@ -48,8 +48,7 @@ fn setup_plugin_with_cap(
     let plugin_dir = tmp.path().join(plugin_id);
     std::fs::create_dir_all(&plugin_dir).unwrap();
 
-    let wasm_src =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimal-plugin.wasm");
+    let wasm_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimal-plugin.wasm");
     let wasm_dst = plugin_dir.join("test.wasm");
     std::fs::copy(&wasm_src, &wasm_dst).unwrap();
 
@@ -81,13 +80,14 @@ on_stop = false
 
 #[test]
 fn hot_reload_picks_up_revoked_high_risk_cap() {
-    let (tmp, plugin_dir, wasm_path) =
-        setup_plugin_with_cap("com.test.hot_reload_revoke");
+    let (tmp, plugin_dir, wasm_path) = setup_plugin_with_cap("com.test.hot_reload_revoke");
 
     // 1. Grant the HIGH-risk cap, then load.
     write_granted_caps(&plugin_dir, "1.0.0", &[HIGH_RISK_CAP]);
     let mut mgr = PluginManager::new(tmp.path(), &no_reload_config()).unwrap();
-    let info = mgr.load(&plugin_dir).expect("load with grant should succeed");
+    let info = mgr
+        .load(&plugin_dir)
+        .expect("load with grant should succeed");
     assert!(
         info.capabilities
             .iter()
@@ -107,12 +107,16 @@ fn hot_reload_picks_up_revoked_high_risk_cap() {
         .get("com.test.hot_reload_revoke")
         .expect("plugin still loaded after reload");
     assert!(
-        !post.capabilities
+        !post
+            .capabilities
             .iter()
             .any(|c| c.as_str() == HIGH_RISK_CAP),
         "post-reload sandbox must not retain the revoked HIGH-risk cap; \
          caps were: {:?}",
-        post.capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>()
+        post.capabilities
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -122,15 +126,17 @@ fn hot_reload_picks_up_granted_high_risk_cap() {
     // grants between load and reload must take effect on reload — same
     // mechanism, opposite direction. Confirms the helper re-reads disk
     // rather than using a one-way "subtract revoked" shortcut.
-    let (tmp, plugin_dir, wasm_path) =
-        setup_plugin_with_cap("com.test.hot_reload_grant");
+    let (tmp, plugin_dir, wasm_path) = setup_plugin_with_cap("com.test.hot_reload_grant");
 
     // 1. Load with no grants — HIGH-risk cap should be filtered out.
     write_granted_caps(&plugin_dir, "1.0.0", &[]);
     let mut mgr = PluginManager::new(tmp.path(), &no_reload_config()).unwrap();
-    let info = mgr.load(&plugin_dir).expect("load without grant should succeed");
+    let info = mgr
+        .load(&plugin_dir)
+        .expect("load without grant should succeed");
     assert!(
-        !info.capabilities
+        !info
+            .capabilities
             .iter()
             .any(|c| c.as_str() == HIGH_RISK_CAP),
         "pre-reload sandbox must NOT have the ungranted HIGH-risk cap"

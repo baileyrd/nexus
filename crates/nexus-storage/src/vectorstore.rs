@@ -71,12 +71,7 @@ pub fn upsert(
             let blob = embedding_to_blob(&chunk.embedding);
             #[allow(clippy::cast_possible_wrap)]
             let block_id = chunk.block_id as i64;
-            stmt.execute(params![
-                chunk.file_path,
-                block_id,
-                chunk.chunk_text,
-                blob,
-            ])?;
+            stmt.execute(params![chunk.file_path, block_id, chunk.chunk_text, blob,])?;
         }
     }
     tx.commit()?;
@@ -134,7 +129,11 @@ pub fn search(
         })
         .collect();
 
-    matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     matches.truncate(limit);
 
     Ok(matches)

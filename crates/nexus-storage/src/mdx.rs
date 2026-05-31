@@ -86,9 +86,7 @@ pub fn parse_mdx(content: &str) -> Result<MdxParseResult, StorageError> {
                     while i < lines.len() && depth > 0 {
                         let inner = lines[i].trim();
                         // Check for nested opening tags of the same component.
-                        if inner.starts_with(&format!("<{name}"))
-                            && !inner.ends_with("/>")
-                        {
+                        if inner.starts_with(&format!("<{name}")) && !inner.ends_with("/>") {
                             depth += 1;
                         }
                         if inner.contains(&close_tag) {
@@ -344,7 +342,8 @@ mod tests {
 
     #[test]
     fn parse_block_component() {
-        let mdx = "# Title\n\n<Alert type=\"warning\">\nThis is dangerous\n</Alert>\n\nMore text.\n";
+        let mdx =
+            "# Title\n\n<Alert type=\"warning\">\nThis is dangerous\n</Alert>\n\nMore text.\n";
         let result = parse_mdx(mdx).unwrap();
         assert_eq!(result.components.len(), 1);
         let c = &result.components[0];
@@ -359,7 +358,8 @@ mod tests {
 
     #[test]
     fn parse_multiple_components() {
-        let mdx = "<Header />\n\n# Title\n\n<Chart data={[1,2,3]} />\n\n<Footer>\nCopyright\n</Footer>\n";
+        let mdx =
+            "<Header />\n\n# Title\n\n<Chart data={[1,2,3]} />\n\n<Footer>\nCopyright\n</Footer>\n";
         let result = parse_mdx(mdx).unwrap();
         assert_eq!(result.components.len(), 3);
         assert_eq!(result.components[0].name, "Header");
@@ -377,7 +377,11 @@ mod tests {
         let mdx = "import { data } from \"./data.json\"\nexport const meta = {}\n\n# Title\n";
         let result = parse_mdx(mdx).unwrap();
         assert_eq!(result.components.len(), 0);
-        assert!(result.parsed_file.blocks.iter().any(|b| b.content == "Title"));
+        assert!(result
+            .parsed_file
+            .blocks
+            .iter()
+            .any(|b| b.content == "Title"));
     }
 
     // ── html tags ignored ────────────────────────────────────────────────
@@ -447,7 +451,11 @@ mod tests {
     fn wikilinks_and_tags_extracted_from_mdx() {
         let mdx = "See [[other-note]] and #rust\n\n<Widget />\n";
         let result = parse_mdx(mdx).unwrap();
-        assert!(result.parsed_file.links.iter().any(|l| l.link_text == "other-note"));
+        assert!(result
+            .parsed_file
+            .links
+            .iter()
+            .any(|l| l.link_text == "other-note"));
         assert!(result.parsed_file.tags.iter().any(|t| t.name == "rust"));
     }
 

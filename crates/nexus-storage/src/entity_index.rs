@@ -170,7 +170,12 @@ impl EntityIndex {
             let Ok(content) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let relpath = format!("{ENTITIES_DIR}/{}", path.file_name().and_then(|s| s.to_str()).unwrap_or_default());
+            let relpath = format!(
+                "{ENTITIES_DIR}/{}",
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+            );
             match parse_entity(stem, &relpath, &content) {
                 Ok(record) => index.insert(record),
                 Err(reason) => {
@@ -289,13 +294,20 @@ impl EntityIndex {
     ///
     /// Returns an empty Vec when the id doesn't resolve.
     #[must_use]
-    pub fn relations(&self, id_or_alias: &str, direction: RelationDirection) -> Vec<ResolvedRelation> {
+    pub fn relations(
+        &self,
+        id_or_alias: &str,
+        direction: RelationDirection,
+    ) -> Vec<ResolvedRelation> {
         let Some(record) = self.get(id_or_alias) else {
             return Vec::new();
         };
         let canonical = &record.id;
         let mut out: Vec<ResolvedRelation> = Vec::new();
-        if matches!(direction, RelationDirection::Outgoing | RelationDirection::Both) {
+        if matches!(
+            direction,
+            RelationDirection::Outgoing | RelationDirection::Both
+        ) {
             for rel in &record.relations {
                 let resolved_target = self
                     .by_alias
@@ -310,7 +322,10 @@ impl EntityIndex {
                 });
             }
         }
-        if matches!(direction, RelationDirection::Incoming | RelationDirection::Both) {
+        if matches!(
+            direction,
+            RelationDirection::Incoming | RelationDirection::Both
+        ) {
             for other in self.by_id.values() {
                 if &other.id == canonical {
                     continue;
@@ -382,7 +397,11 @@ impl EntityIndex {
                     } else {
                         ((*id_b).clone(), (*id_a).clone())
                     };
-                    candidates.push(DuplicateCandidate { a, b, similarity: sim });
+                    candidates.push(DuplicateCandidate {
+                        a,
+                        b,
+                        similarity: sim,
+                    });
                 }
             }
         }
@@ -421,11 +440,11 @@ impl EntityIndex {
             for rel in &record.relations {
                 if rel.confidence <= threshold + f32::EPSILON {
                     all.push(DraftRelationCandidate {
-                        from:       record.id.clone(),
-                        target:     rel.target.clone(),
-                        kind:       rel.kind.clone(),
+                        from: record.id.clone(),
+                        target: rel.target.clone(),
+                        kind: rel.kind.clone(),
                         confidence: rel.confidence,
-                        relpath:    record.relpath.clone(),
+                        relpath: record.relpath.clone(),
                     });
                 }
             }
@@ -482,10 +501,7 @@ fn tokenise(text: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
-fn jaccard(
-    a: &std::collections::HashSet<String>,
-    b: &std::collections::HashSet<String>,
-) -> f32 {
+fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f32 {
     if a.is_empty() && b.is_empty() {
         return 0.0;
     }
@@ -701,7 +717,10 @@ pub fn render_entity_markdown(payload: &EntityUpsert) -> String {
 
 fn yaml_escape(s: &str) -> String {
     let needs_quotes = s.is_empty()
-        || s.starts_with([' ', '\t', '"', '\'', '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '%', '@', '`'])
+        || s.starts_with([
+            ' ', '\t', '"', '\'', '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|',
+            '>', '%', '@', '`',
+        ])
         || s.contains(['\n', '"', ':'])
         || s.trim() != s;
     if needs_quotes {
@@ -755,9 +774,9 @@ fn is_entity_file(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    path.extension().and_then(|s| s.to_str()).is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
-    })
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
 }
 
 /// Parse one entity file's source into an [`EntityRecord`]. Exposed
@@ -775,8 +794,8 @@ fn is_entity_file(path: &Path) -> bool {
 pub fn parse_entity(stem: &str, relpath: &str, content: &str) -> Result<EntityRecord, String> {
     let (yaml_src, body) = split_frontmatter(content);
     let yaml_src = yaml_src.ok_or_else(|| "no YAML frontmatter".to_string())?;
-    let raw: RawEntityFrontmatter = serde_yml::from_str(yaml_src)
-        .map_err(|e| format!("frontmatter YAML decode: {e}"))?;
+    let raw: RawEntityFrontmatter =
+        serde_yml::from_str(yaml_src).map_err(|e| format!("frontmatter YAML decode: {e}"))?;
     let entity_type = raw
         .entity_type
         .map(|s| s.trim().to_string())
@@ -858,7 +877,9 @@ fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     };
     let yaml = &after_open[..close_pos];
     let after_close = &after_open[close_pos + close_pattern.len()..];
-    let body = after_close.trim_start_matches('\r').trim_start_matches('\n');
+    let body = after_close
+        .trim_start_matches('\r')
+        .trim_start_matches('\n');
     (Some(yaml), body)
 }
 
@@ -923,7 +944,10 @@ pub fn merge_records(keep: &EntityRecord, drop: &EntityRecord) -> MergedEntity {
         .collect();
     let mut aliases: Vec<String> = keep.aliases.clone();
     let mut aliases_added = 0u32;
-    let try_add_alias = |a: &str, alias_keys: &mut std::collections::BTreeSet<String>, aliases: &mut Vec<String>, added: &mut u32| {
+    let try_add_alias = |a: &str,
+                         alias_keys: &mut std::collections::BTreeSet<String>,
+                         aliases: &mut Vec<String>,
+                         added: &mut u32| {
         let trimmed = a.trim();
         if trimmed.is_empty() || trimmed == keep.id {
             return;
@@ -976,7 +1000,10 @@ pub fn merge_records(keep: &EntityRecord, drop: &EntityRecord) -> MergedEntity {
     let relations: Vec<EntityUpsertRelation> = order
         .into_iter()
         .map(|(target, kind)| {
-            let confidence = by_key.get(&(target.clone(), kind.clone())).copied().unwrap_or(1.0);
+            let confidence = by_key
+                .get(&(target.clone(), kind.clone()))
+                .copied()
+                .unwrap_or(1.0);
             EntityUpsertRelation {
                 target,
                 kind,
@@ -1018,7 +1045,7 @@ impl Default for DecayParams {
     fn default() -> Self {
         Self {
             factor: 0.95,
-            floor:  0.10,
+            floor: 0.10,
         }
     }
 }
@@ -1050,7 +1077,7 @@ pub struct DecayedFile {
 #[must_use]
 pub fn decay_file_content(content: &str, params: &DecayParams) -> Option<DecayedFile> {
     let factor = params.factor.clamp(0.0, 1.0);
-    let floor  = params.floor.clamp(0.0, 1.0);
+    let floor = params.floor.clamp(0.0, 1.0);
     // A factor at-or-above 1 cannot lower any confidence — short-circuit
     // before touching the parser.
     if factor >= 1.0 - f32::EPSILON {
@@ -1356,19 +1383,32 @@ mod tests {
     fn relations_for_unknown_id_returns_empty() {
         let dir = tempdir();
         let index = EntityIndex::load(dir.path());
-        assert!(index
-            .relations("ghost", RelationDirection::Both)
-            .is_empty());
+        assert!(index.relations("ghost", RelationDirection::Both).is_empty());
     }
 
     #[test]
     fn parse_direction_known_and_unknown() {
-        assert_eq!(RelationDirection::parse(Some("outgoing")), RelationDirection::Outgoing);
-        assert_eq!(RelationDirection::parse(Some("OUT")), RelationDirection::Outgoing);
-        assert_eq!(RelationDirection::parse(Some("incoming")), RelationDirection::Incoming);
-        assert_eq!(RelationDirection::parse(Some("both")), RelationDirection::Both);
+        assert_eq!(
+            RelationDirection::parse(Some("outgoing")),
+            RelationDirection::Outgoing
+        );
+        assert_eq!(
+            RelationDirection::parse(Some("OUT")),
+            RelationDirection::Outgoing
+        );
+        assert_eq!(
+            RelationDirection::parse(Some("incoming")),
+            RelationDirection::Incoming
+        );
+        assert_eq!(
+            RelationDirection::parse(Some("both")),
+            RelationDirection::Both
+        );
         assert_eq!(RelationDirection::parse(None), RelationDirection::Both);
-        assert_eq!(RelationDirection::parse(Some("nope")), RelationDirection::Both);
+        assert_eq!(
+            RelationDirection::parse(Some("nope")),
+            RelationDirection::Both
+        );
     }
 
     #[test]
@@ -1536,9 +1576,7 @@ mod tests {
     // ── BL-129 decay_file_content ───────────────────────────────────────────
 
     fn entity_src(relations_yaml: &str, body: &str) -> String {
-        format!(
-            "---\nentity_type: person\ndescription: A person.\n{relations_yaml}---\n{body}"
-        )
+        format!("---\nentity_type: person\ndescription: A person.\n{relations_yaml}---\n{body}")
     }
 
     #[test]
@@ -1547,8 +1585,14 @@ mod tests {
             "relations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
             "",
         );
-        let out = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
-            .expect("relation should decay");
+        let out = decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1,
+            },
+        )
+        .expect("relation should decay");
         assert_eq!(out.relations_decayed, 1);
         assert_eq!(out.relations_at_floor, 0);
         let rec = parse_entity("e", "entities/e.md", &out.content).expect("parses");
@@ -1561,8 +1605,14 @@ mod tests {
             "relations:\n  - target: nexus\n    type: works_on\n    confidence: 0.15\n",
             "",
         );
-        let out = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
-            .expect("clamps to floor");
+        let out = decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1,
+            },
+        )
+        .expect("clamps to floor");
         assert_eq!(out.relations_decayed, 1);
         assert_eq!(out.relations_at_floor, 1);
         let rec = parse_entity("e", "entities/e.md", &out.content).expect("parses");
@@ -1575,13 +1625,27 @@ mod tests {
             "relations:\n  - target: nexus\n    type: works_on\n    confidence: 0.1\n",
             "",
         );
-        assert!(decay_file_content(&src, &DecayParams { factor: 0.95, floor: 0.1 }).is_none());
+        assert!(decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 0.95,
+                floor: 0.1
+            }
+        )
+        .is_none());
     }
 
     #[test]
     fn decay_no_relations_is_noop() {
         let src = entity_src("", "");
-        assert!(decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
+        assert!(decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1
+            }
+        )
+        .is_none());
     }
 
     #[test]
@@ -1590,7 +1654,14 @@ mod tests {
             "relations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
             "",
         );
-        assert!(decay_file_content(&src, &DecayParams { factor: 1.0, floor: 0.1 }).is_none());
+        assert!(decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 1.0,
+                floor: 0.1
+            }
+        )
+        .is_none());
     }
 
     #[test]
@@ -1599,8 +1670,14 @@ mod tests {
             "relations:\n  - target: nexus\n    type: works_on\n    confidence: 1.0\n",
             "Free-form notes about the entity.\n\nA second paragraph.\n",
         );
-        let out = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
-            .expect("relation should decay");
+        let out = decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1,
+            },
+        )
+        .expect("relation should decay");
         assert!(out.content.contains("Free-form notes about the entity."));
         assert!(out.content.contains("A second paragraph."));
     }
@@ -1608,7 +1685,14 @@ mod tests {
     #[test]
     fn decay_no_frontmatter_is_noop() {
         let src = "Just a body, no frontmatter.\n";
-        assert!(decay_file_content(src, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
+        assert!(decay_file_content(
+            src,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1
+            }
+        )
+        .is_none());
     }
 
     // ── BL-129 merge_records ────────────────────────────────────────────────
@@ -1681,8 +1765,8 @@ mod tests {
             &[],
             "",
             &[
-                ("x", "knows", 0.7),     // dup — should keep 0.7 (max)
-                ("z", "works_on", 0.5),  // new
+                ("x", "knows", 0.7),    // dup — should keep 0.7 (max)
+                ("z", "works_on", 0.5), // new
             ],
         );
         let m = merge_records(&keep, &drop);
@@ -1812,9 +1896,21 @@ mod tests {
             "relations:\n  - target: nexus\n    type: works_on\n    confidence: 0.15\n",
             "body",
         );
-        let first = decay_file_content(&src, &DecayParams { factor: 0.5, floor: 0.1 })
-            .expect("first pass decays");
-        assert!(decay_file_content(&first.content, &DecayParams { factor: 0.5, floor: 0.1 }).is_none());
+        let first = decay_file_content(
+            &src,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1,
+            },
+        )
+        .expect("first pass decays");
+        assert!(decay_file_content(
+            &first.content,
+            &DecayParams {
+                factor: 0.5,
+                floor: 0.1
+            }
+        )
+        .is_none());
     }
 }
-

@@ -337,9 +337,7 @@ impl McpHostConfig {
     ) -> Vec<McpMergeSkip> {
         let mut skipped = Vec::new();
         for (name, spec, plugin_id) in contributions {
-            if let Err(reason) =
-                self.register_contributed(name.clone(), spec, plugin_id.clone())
-            {
+            if let Err(reason) = self.register_contributed(name.clone(), spec, plugin_id.clone()) {
                 skipped.push(McpMergeSkip {
                     name,
                     plugin_id,
@@ -414,7 +412,9 @@ impl McpHostConfig {
             }),
             Some(_) => {
                 self.contributed_by.remove(name);
-                self.servers.remove(name).ok_or(McpUnregisterError::NotFound)
+                self.servers
+                    .remove(name)
+                    .ok_or(McpUnregisterError::NotFound)
             }
         }
     }
@@ -600,7 +600,10 @@ mod tests {
             command = "echo"
         "#;
         let cfg = McpHostConfig::from_str(toml, "inline").unwrap();
-        assert_eq!(cfg.servers.get("fs").unwrap().transport, McpTransport::Stdio);
+        assert_eq!(
+            cfg.servers.get("fs").unwrap().transport,
+            McpTransport::Stdio
+        );
     }
 
     #[test]
@@ -641,7 +644,11 @@ mod tests {
     fn merge_contributed_inserts_new_entries() {
         let mut cfg = McpHostConfig::default();
         let skipped = cfg.merge_contributed(vec![
-            ("fs".into(), stdio_spec("filesystem-mcp"), "community.fs".into()),
+            (
+                "fs".into(),
+                stdio_spec("filesystem-mcp"),
+                "community.fs".into(),
+            ),
             (
                 "remote".into(),
                 http_spec("https://example.com/mcp"),
@@ -694,8 +701,12 @@ mod tests {
         ]);
         assert_eq!(skipped.len(), 3);
         assert_eq!(skipped[0].reason, McpMergeSkipReason::InvalidName);
-        assert!(matches!(skipped[1].reason, McpMergeSkipReason::Invalid(ref r) if r.contains("empty command")));
-        assert!(matches!(skipped[2].reason, McpMergeSkipReason::Invalid(ref r) if r.contains("no `url`")));
+        assert!(
+            matches!(skipped[1].reason, McpMergeSkipReason::Invalid(ref r) if r.contains("empty command"))
+        );
+        assert!(
+            matches!(skipped[2].reason, McpMergeSkipReason::Invalid(ref r) if r.contains("no `url`"))
+        );
         assert!(cfg.servers.is_empty());
     }
 
@@ -724,8 +735,7 @@ mod tests {
     #[test]
     fn merge_contributed_populates_contributed_by_for_accepted_entries() {
         let mut cfg = McpHostConfig::default();
-        cfg.servers
-            .insert("toml-pinned".into(), stdio_spec("x"));
+        cfg.servers.insert("toml-pinned".into(), stdio_spec("x"));
         let skipped = cfg.merge_contributed(vec![
             ("contrib-a".into(), stdio_spec("x"), "plugin.a".into()),
             ("contrib-b".into(), stdio_spec("y"), "plugin.b".into()),
@@ -804,12 +814,8 @@ mod tests {
     fn unregister_contributed_distinguishes_not_found_toml_and_wrong_owner() {
         let mut cfg = McpHostConfig::default();
         cfg.servers.insert("toml".into(), stdio_spec("x"));
-        cfg.register_contributed(
-            "contrib".into(),
-            stdio_spec("x"),
-            "plugin.owner".into(),
-        )
-        .unwrap();
+        cfg.register_contributed("contrib".into(), stdio_spec("x"), "plugin.owner".into())
+            .unwrap();
         assert_eq!(
             cfg.unregister_contributed("ghost", "anyone").unwrap_err(),
             McpUnregisterError::NotFound,

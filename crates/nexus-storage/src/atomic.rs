@@ -39,11 +39,7 @@ use crate::StorageError;
 ///
 /// Returns [`StorageError::WriteFailed`] on permanent failure or after
 /// exhausting retries on a transient one.
-pub fn atomic_write(
-    target: &Path,
-    content: &[u8],
-    temp_dir: &Path,
-) -> Result<(), StorageError> {
+pub fn atomic_write(target: &Path, content: &[u8], temp_dir: &Path) -> Result<(), StorageError> {
     // Ensure parent dirs exist.
     if let Some(parent) = target.parent() {
         if !parent.as_os_str().is_empty() {
@@ -96,11 +92,7 @@ pub fn atomic_write(
 /// so the retry loop can match on `e.kind()` and skip retries on
 /// permanent failures. The caller is responsible for translating the
 /// final failure into `StorageError::WriteFailed`.
-fn try_write(
-    target: &Path,
-    content: &[u8],
-    tmp_path: &Path,
-) -> io::Result<()> {
+fn try_write(target: &Path, content: &[u8], tmp_path: &Path) -> io::Result<()> {
     let file = fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -208,7 +200,10 @@ mod tests {
             .unwrap()
             .filter_map(Result::ok)
             .collect();
-        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {leftovers:?}"
+        );
     }
 
     #[test]

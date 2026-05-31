@@ -54,11 +54,7 @@ pub(crate) async fn handle_predict(
 
     let raw = match ai_cfg.provider.as_str() {
         "ollama" => {
-            let provider = OllamaProvider::new(
-                ai_cfg.base_url.clone(),
-                ai_cfg.model.clone(),
-                None,
-            );
+            let provider = OllamaProvider::new(ai_cfg.base_url.clone(), ai_cfg.model.clone(), None);
             provider
                 .fim_generate(&parsed.prefix, &parsed.suffix, max_tokens)
                 .await
@@ -81,8 +77,7 @@ pub(crate) async fn handle_predict(
 
     let completion = sanitize_completion(&raw, &parsed.suffix);
     let reply = AiPredictReply { completion };
-    serde_json::to_value(&reply)
-        .map_err(|e| exec_err(format!("predict: encode reply: {e}")))
+    serde_json::to_value(&reply).map_err(|e| exec_err(format!("predict: encode reply: {e}")))
 }
 
 async fn chat_fim_fallback(
@@ -169,7 +164,9 @@ mod tests {
 
     #[test]
     fn sanitize_caps_runaway_output() {
-        let raw: String = std::iter::repeat('x').take(COMPLETION_CHAR_CAP + 500).collect();
+        let raw: String = std::iter::repeat('x')
+            .take(COMPLETION_CHAR_CAP + 500)
+            .collect();
         let out = sanitize_completion(&raw, "");
         assert_eq!(out.chars().count(), COMPLETION_CHAR_CAP);
     }
@@ -186,7 +183,9 @@ mod tests {
             "language": "rust",
             "file_path": "src/lib.rs",
         });
-        let err = rt.block_on(handle_predict(None, &args)).expect_err("expected error");
+        let err = rt
+            .block_on(handle_predict(None, &args))
+            .expect_err("expected error");
         assert!(
             format!("{err}").contains("no AI chat provider configured"),
             "expected configured error, got: {err}",

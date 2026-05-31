@@ -352,11 +352,8 @@ mod tests {
     fn symlink_within_root_is_allowed() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("real.txt"), "hello").unwrap();
-        std::os::unix::fs::symlink(
-            dir.path().join("real.txt"),
-            dir.path().join("link.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt"))
+            .unwrap();
         let validator = ForgePathValidator::new(dir.path()).unwrap();
 
         let result = validator.validate(Path::new("link.txt"));

@@ -32,7 +32,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use nexus_kernel::{Events as _, Ipc as _, EventFilter, KernelPluginContext, NexusEvent};
+use nexus_kernel::{EventFilter, Events as _, Ipc as _, KernelPluginContext, NexusEvent};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
@@ -76,9 +76,8 @@ pub type BlockTuple = (u64, String, String, Option<i32>);
 /// [`IndexingDaemon::start`]. Boxed + `Send + Sync + 'static` because
 /// the daemon thread re-invokes it for every batch to pick up runtime
 /// `set_config` changes.
-pub type EmbedderFactory = Arc<
-    dyn Fn() -> Option<Box<dyn crate::embedding::EmbeddingProvider>> + Send + Sync + 'static,
->;
+pub type EmbedderFactory =
+    Arc<dyn Fn() -> Option<Box<dyn crate::embedding::EmbeddingProvider>> + Send + Sync + 'static>;
 
 /// Shared, lock-protected status handle. Cheap to clone; the inner
 /// [`RwLock`] is taken briefly on every event arrival and on every
@@ -257,7 +256,10 @@ fn parse_storage_path(payload: &serde_json::Value) -> Option<PathBuf> {
 /// from other plugins (cheaper than `EventFilter::CustomPrefix` because
 /// we sidestep the per-event filter allocation).
 fn event_to_msg(event: &NexusEvent) -> Vec<DaemonMsg> {
-    let NexusEvent::Custom { type_id, payload, .. } = event else {
+    let NexusEvent::Custom {
+        type_id, payload, ..
+    } = event
+    else {
         return Vec::new();
     };
     if !type_id.starts_with(STORAGE_EVENT_PREFIX) {
@@ -675,9 +677,7 @@ async fn process_batch(
 /// Returns a string describing the first decode failure encountered:
 /// - The outer value isn't an array or `{ blocks: [...] }`.
 /// - A record is missing the required `block_id` field.
-fn decode_blocks(
-    value: &serde_json::Value,
-) -> Result<Vec<BlockTuple>, String> {
+fn decode_blocks(value: &serde_json::Value) -> Result<Vec<BlockTuple>, String> {
     let arr = value
         .as_array()
         .or_else(|| value.get("blocks").and_then(|v| v.as_array()))
@@ -866,7 +866,10 @@ mod tests {
         }
         let snap = snapshot(&status);
         assert!(snap.running, "daemon should report running");
-        assert!(snap.total_seen >= 1, "expected total_seen >= 1, got {snap:?}");
+        assert!(
+            snap.total_seen >= 1,
+            "expected total_seen >= 1, got {snap:?}"
+        );
 
         daemon.stop();
         let snap = snapshot(&status);

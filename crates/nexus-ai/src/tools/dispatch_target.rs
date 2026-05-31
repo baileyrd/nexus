@@ -169,13 +169,12 @@ pub fn dispatch_target(name: &str, input: Value) -> Result<DispatchTarget, Dispa
                     reason: "missing 'id' string".into(),
                 })?
                 .to_string();
-            let signal = input
-                .get("signal")
-                .and_then(Value::as_str)
-                .ok_or_else(|| DispatchTargetError::InvalidInput {
+            let signal = input.get("signal").and_then(Value::as_str).ok_or_else(|| {
+                DispatchTargetError::InvalidInput {
                     tool: "terminal_send_signal".into(),
                     reason: "missing 'signal' string".into(),
-                })?;
+                }
+            })?;
             let byte = match signal {
                 "SIGINT" => 0x03_u8,
                 "SIGQUIT" => 0x1c,
@@ -202,9 +201,9 @@ pub fn dispatch_target(name: &str, input: Value) -> Result<DispatchTarget, Dispa
             // truncated the tool tail at 64 chars — that fails at
             // the MCP server's resolver, not here.
             let rest = &other["mcp__".len()..];
-            let sep = rest.find("__").ok_or_else(|| {
-                DispatchTargetError::MalformedMcp(other.to_string())
-            })?;
+            let sep = rest
+                .find("__")
+                .ok_or_else(|| DispatchTargetError::MalformedMcp(other.to_string()))?;
             let server = &rest[..sep];
             let tool = &rest[sep + 2..];
             if server.is_empty() || tool.is_empty() {
@@ -238,12 +237,14 @@ mod tests {
 
     #[test]
     fn write_file_reshapes_content_to_bytes() {
-        let t =
-            dispatch_target("write_file", json!({"path": "x.md", "content": "hi"})).unwrap();
+        let t = dispatch_target("write_file", json!({"path": "x.md", "content": "hi"})).unwrap();
         assert_eq!(t.target_plugin_id, "com.nexus.storage");
         assert_eq!(t.command_id, "write_file");
         let bytes = t.args["bytes"].as_array().expect("bytes array");
-        let decoded: Vec<u8> = bytes.iter().map(|v| u8::try_from(v.as_u64().unwrap()).unwrap()).collect();
+        let decoded: Vec<u8> = bytes
+            .iter()
+            .map(|v| u8::try_from(v.as_u64().unwrap()).unwrap())
+            .collect();
         assert_eq!(decoded, b"hi");
         assert_eq!(t.args["path"], "x.md");
     }
@@ -276,11 +277,7 @@ mod tests {
 
     #[test]
     fn mcp_name_routes_to_call_tool_with_wrapped_args() {
-        let t = dispatch_target(
-            "mcp__notes__fetch",
-            json!({"url": "https://example"}),
-        )
-        .unwrap();
+        let t = dispatch_target("mcp__notes__fetch", json!({"url": "https://example"})).unwrap();
         assert_eq!(t.target_plugin_id, "com.nexus.mcp.host");
         assert_eq!(t.command_id, "call_tool");
         assert_eq!(t.args["server"], "notes");
@@ -331,11 +328,8 @@ mod tests {
             ("SIGTSTP", 0x1a),
             ("EOF", 0x04),
         ] {
-            let t = dispatch_target(
-                "terminal_send_signal",
-                json!({"id": "x", "signal": signal}),
-            )
-            .unwrap_or_else(|e| panic!("{signal}: {e:?}"));
+            let t = dispatch_target("terminal_send_signal", json!({"id": "x", "signal": signal}))
+                .unwrap_or_else(|e| panic!("{signal}: {e:?}"));
             assert_eq!(t.target_plugin_id, "com.nexus.terminal");
             assert_eq!(t.command_id, "send_raw_input");
             assert_eq!(t.args["id"], "x");
@@ -347,9 +341,11 @@ mod tests {
 
     #[test]
     fn terminal_send_signal_rejects_unknown_signal() {
-        let err =
-            dispatch_target("terminal_send_signal", json!({"id": "x", "signal": "SIGKILL"}))
-                .unwrap_err();
+        let err = dispatch_target(
+            "terminal_send_signal",
+            json!({"id": "x", "signal": "SIGKILL"}),
+        )
+        .unwrap_err();
         match err {
             DispatchTargetError::InvalidInput { tool, reason } => {
                 assert_eq!(tool, "terminal_send_signal");
@@ -362,12 +358,10 @@ mod tests {
     #[test]
     fn terminal_send_signal_rejects_missing_fields() {
         // Missing id.
-        let err = dispatch_target("terminal_send_signal", json!({"signal": "SIGINT"}))
-            .unwrap_err();
+        let err = dispatch_target("terminal_send_signal", json!({"signal": "SIGINT"})).unwrap_err();
         assert!(matches!(err, DispatchTargetError::InvalidInput { .. }));
         // Missing signal.
-        let err =
-            dispatch_target("terminal_send_signal", json!({"id": "x"})).unwrap_err();
+        let err = dispatch_target("terminal_send_signal", json!({"id": "x"})).unwrap_err();
         assert!(matches!(err, DispatchTargetError::InvalidInput { .. }));
     }
 

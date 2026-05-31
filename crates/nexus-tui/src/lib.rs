@@ -122,8 +122,8 @@ fn init_file_tracing() {
     // Default to `nexus_tui=debug` so every input-handler breadcrumb
     // lands without the user having to set RUST_LOG manually. Any
     // existing RUST_LOG value still takes precedence.
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("nexus_tui=debug"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("nexus_tui=debug"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::sync::Mutex::new(file))

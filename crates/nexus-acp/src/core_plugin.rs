@@ -104,11 +104,7 @@ impl AcpCorePlugin {
 }
 
 fn snapshot_config(cell: &Arc<RwLock<AcpHostConfig>>) -> Arc<AcpHostConfig> {
-    Arc::new(
-        cell.read()
-            .expect("AcpHostConfig RwLock poisoned")
-            .clone(),
-    )
+    Arc::new(cell.read().expect("AcpHostConfig RwLock poisoned").clone())
 }
 
 /// BL-113 Phase 4 — sync handler for `register_server`. Same
@@ -139,9 +135,7 @@ fn handle_unregister_server(
     let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
     match cfg.unregister_contributed(&name, &plugin_id) {
         Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(UnregisterError::NotFound) => {
-            Ok(json!({ "ok": false, "status": "not_found" }))
-        }
+        Err(UnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
         Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
             "ok": false,
             "status": "not_owned_by_plugin",
@@ -175,7 +169,10 @@ fn parse_register_server_spec(args: &Value) -> Result<AcpAdapterSpec, PluginErro
             })
             .unwrap_or_default()
     };
-    let disabled = args.get("disabled").and_then(Value::as_bool).unwrap_or(false);
+    let disabled = args
+        .get("disabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let env = args
         .get("env")
         .and_then(Value::as_object)
@@ -185,13 +182,10 @@ fn parse_register_server_spec(args: &Value) -> Result<AcpAdapterSpec, PluginErro
                 .collect()
         })
         .unwrap_or_default();
-    let metadata = args.get("metadata").cloned().and_then(|v| {
-        if v.is_null() {
-            None
-        } else {
-            Some(v)
-        }
-    });
+    let metadata = args
+        .get("metadata")
+        .cloned()
+        .and_then(|v| if v.is_null() { None } else { Some(v) });
     Ok(AcpAdapterSpec {
         name,
         command,
@@ -241,8 +235,7 @@ impl CorePlugin for AcpCorePlugin {
         // Same shutdown shape as LspCorePlugin: spawn a current-thread
         // runtime so we don't need an outer reactor, hard-cap the join
         // so a misbehaving agent can't hang kernel shutdown.
-        const SHUTDOWN_DEADLINE: std::time::Duration =
-            std::time::Duration::from_secs(5);
+        const SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
         let pool = Arc::clone(&self.pool);
         let handle = std::thread::spawn(move || {
             if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
@@ -276,10 +269,7 @@ impl CorePlugin for AcpCorePlugin {
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_AGENTS => {
-                let cfg = self
-                    .config
-                    .read()
-                    .expect("AcpHostConfig RwLock poisoned");
+                let cfg = self.config.read().expect("AcpHostConfig RwLock poisoned");
                 // `pool.connected_agents()` is async; the sync handler
                 // can't await it. We surface the registry shape only;
                 // a future "connected" column rides on an async list
@@ -303,10 +293,7 @@ impl CorePlugin for AcpCorePlugin {
             }
             HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
             HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
-            HANDLER_INITIALIZE
-            | HANDLER_PROPOSE
-            | HANDLER_ACCEPT
-            | HANDLER_REJECT
+            HANDLER_INITIALIZE | HANDLER_PROPOSE | HANDLER_ACCEPT | HANDLER_REJECT
             | HANDLER_DISCONNECT => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("handler_id {handler_id} requires dispatch_async"),
@@ -318,11 +305,7 @@ impl CorePlugin for AcpCorePlugin {
         }
     }
 
-    fn dispatch_async(
-        &mut self,
-        handler_id: u32,
-        args: &Value,
-    ) -> Option<CorePluginFuture> {
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
         let pool = Arc::clone(&self.pool);
         let config = Some(snapshot_config(&self.config));
         let bus = self.event_bus.clone();
@@ -337,10 +320,7 @@ impl CorePlugin for AcpCorePlugin {
                             let bus = bus.clone();
                             Box::pin(async move {
                                 let lock = client.lock().await;
-                                let caps = lock
-                                    .server_capabilities()
-                                    .await
-                                    .unwrap_or(Value::Null);
+                                let caps = lock.server_capabilities().await.unwrap_or(Value::Null);
                                 republish_pending(&lock, bus.as_ref()).await;
                                 Ok(caps)
                             })
@@ -450,9 +430,7 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn config_or_err(
-    config: Option<&Arc<AcpHostConfig>>,
-) -> Result<Arc<AcpHostConfig>, PluginError> {
+fn config_or_err(config: Option<&Arc<AcpHostConfig>>) -> Result<Arc<AcpHostConfig>, PluginError> {
     config.cloned().ok_or_else(|| PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: "ACP host config not loaded".to_string(),
@@ -487,12 +465,7 @@ mod tests {
         let mut p = make_plugin(dir.path());
         assert!(p.on_init().is_ok());
         // Registry stays empty until a contribution arrives.
-        assert!(p
-            .config
-            .read()
-            .unwrap()
-            .adapters
-            .is_empty());
+        assert!(p.config.read().unwrap().adapters.is_empty());
     }
 
     #[test]

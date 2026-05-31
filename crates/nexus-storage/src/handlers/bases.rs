@@ -92,10 +92,7 @@ pub(crate) fn record_restore(engine: &StorageEngine, args: &Value) -> Result<Val
 
 // ── Properties ──────────────────────────────────────────────────────────────
 
-pub(crate) fn property_create(
-    engine: &StorageEngine,
-    args: &Value,
-) -> Result<Value, PluginError> {
+pub(crate) fn property_create(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     let path = path_arg(args, "base_property_create")?;
     let name = name_arg(args, "base_property_create")?;
     let definition = args
@@ -108,10 +105,7 @@ pub(crate) fn property_create(
     Ok(serde_json::json!({}))
 }
 
-pub(crate) fn property_update(
-    engine: &StorageEngine,
-    args: &Value,
-) -> Result<Value, PluginError> {
+pub(crate) fn property_update(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     let path = path_arg(args, "base_property_update")?;
     let name = name_arg(args, "base_property_update")?;
     let definition = args
@@ -128,10 +122,7 @@ pub(crate) fn property_update(
     Ok(serde_json::json!({}))
 }
 
-pub(crate) fn property_delete(
-    engine: &StorageEngine,
-    args: &Value,
-) -> Result<Value, PluginError> {
+pub(crate) fn property_delete(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     let path = path_arg(args, "base_property_delete")?;
     let name = name_arg(args, "base_property_delete")?;
     engine
@@ -140,10 +131,7 @@ pub(crate) fn property_delete(
     Ok(serde_json::json!({}))
 }
 
-pub(crate) fn property_rename(
-    engine: &StorageEngine,
-    args: &Value,
-) -> Result<Value, PluginError> {
+pub(crate) fn property_rename(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     let path = path_arg(args, "base_property_rename")?;
     let old_name = args
         .get("old_name")
@@ -246,8 +234,8 @@ pub(crate) fn index(
 pub(crate) fn load(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
     let path = path_arg(args, "base_load")?;
     let abs_dir = forge_root.join(&path);
-    let base = nexus_types::bases::load_base(&abs_dir)
-        .map_err(|e| exec_err(format!("base_load: {e}")))?;
+    let base =
+        nexus_types::bases::load_base(&abs_dir).map_err(|e| exec_err(format!("base_load: {e}")))?;
     to_value(&base, "base_load")
 }
 

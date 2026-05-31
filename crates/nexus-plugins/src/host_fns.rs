@@ -80,7 +80,12 @@ pub fn register_host_fns(linker: &mut Linker<PluginData>) -> Result<(), PluginEr
 /// Copy bytes from WASM linear memory at `[ptr, ptr+len)` into a `Vec<u8>`.
 ///
 /// Returns `None` if the range is out of bounds or `ptr`/`len` are negative.
-fn read_wasm_bytes(memory: &wasmtime::Memory, caller: &impl wasmtime::AsContext, ptr: i32, len: i32) -> Option<Vec<u8>> {
+fn read_wasm_bytes(
+    memory: &wasmtime::Memory,
+    caller: &impl wasmtime::AsContext,
+    ptr: i32,
+    len: i32,
+) -> Option<Vec<u8>> {
     let start = usize::try_from(ptr).ok()?;
     let length = usize::try_from(len).ok()?;
     let data = memory.data(caller);
@@ -89,7 +94,12 @@ fn read_wasm_bytes(memory: &wasmtime::Memory, caller: &impl wasmtime::AsContext,
 }
 
 /// Read a UTF-8 string from WASM linear memory. Returns `None` on any error.
-fn read_wasm_str(memory: &wasmtime::Memory, caller: &impl wasmtime::AsContext, ptr: i32, len: i32) -> Option<String> {
+fn read_wasm_str(
+    memory: &wasmtime::Memory,
+    caller: &impl wasmtime::AsContext,
+    ptr: i32,
+    len: i32,
+) -> Option<String> {
     let bytes = read_wasm_bytes(memory, caller, ptr, len)?;
     String::from_utf8(bytes).ok()
 }
@@ -226,8 +236,12 @@ fn register_host_kv_get(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
                     }
                 };
 
-                let Ok(o_start) = usize::try_from(out_ptr) else { return HOST_ERROR; };
-                let Ok(o_cap) = usize::try_from(out_cap) else { return HOST_ERROR; };
+                let Ok(o_start) = usize::try_from(out_ptr) else {
+                    return HOST_ERROR;
+                };
+                let Ok(o_cap) = usize::try_from(out_cap) else {
+                    return HOST_ERROR;
+                };
                 if value.len() > o_cap {
                     return HOST_BUFFER_OVERFLOW;
                 }

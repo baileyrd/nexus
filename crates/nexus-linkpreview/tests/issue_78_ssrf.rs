@@ -27,33 +27,49 @@ fn ipv4_loopback_is_blocked() {
 #[test]
 fn ipv4_aws_metadata_is_blocked() {
     // AWS EC2 instance metadata service.
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        169, 254, 169, 254
+    ))));
 }
 
 #[test]
 fn ipv4_link_local_is_blocked() {
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 1))));
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(169, 254, 255, 254))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        169, 254, 0, 1
+    ))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        169, 254, 255, 254
+    ))));
 }
 
 #[test]
 fn ipv4_rfc1918_is_blocked() {
     // 10.0.0.0/8
     assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(10, 255, 255, 254))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        10, 255, 255, 254
+    ))));
     // 172.16.0.0/12
     assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(172, 31, 255, 254))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        172, 31, 255, 254
+    ))));
     // 192.168.0.0/16
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))));
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        192, 168, 0, 1
+    ))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        192, 168, 1, 1
+    ))));
 }
 
 #[test]
 fn ipv4_cgnat_is_blocked() {
     // RFC6598 carrier-grade NAT (100.64.0.0/10).
     assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1))));
-    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(100, 127, 255, 254))));
+    assert!(is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        100, 127, 255, 254
+    ))));
 }
 
 #[test]
@@ -120,7 +136,9 @@ fn public_ipv4_is_allowed() {
     assert!(!is_blocked_address(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
     assert!(!is_blocked_address(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
     // 172.32.x.x — outside the 172.16/12 RFC1918 block.
-    assert!(!is_blocked_address(IpAddr::V4(Ipv4Addr::new(172, 32, 0, 1))));
+    assert!(!is_blocked_address(IpAddr::V4(Ipv4Addr::new(
+        172, 32, 0, 1
+    ))));
 }
 
 #[test]

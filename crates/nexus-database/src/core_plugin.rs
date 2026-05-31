@@ -280,7 +280,10 @@ fn dispatch_csv_export(args: &serde_json::Value) -> Result<serde_json::Value, Pl
             let mut buf: Vec<u8> = Vec::new();
             let count =
                 export_csv(&mut buf, &a.records, &a.field_names).map_err(|e| e.to_string())?;
-            Ok(CsvExportResponse { csv_bytes: buf, count })
+            Ok(CsvExportResponse {
+                csv_bytes: buf,
+                count,
+            })
         },
     )
 }
@@ -341,9 +344,7 @@ pub struct ComputeRollupArgs {
     pub aggregation: String,
 }
 
-fn dispatch_resolve_relation(
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
+fn dispatch_resolve_relation(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
     typed_call(
         "resolve_relation",
         args,
@@ -358,9 +359,7 @@ fn dispatch_resolve_relation(
     )
 }
 
-fn dispatch_compute_rollup(
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
+fn dispatch_compute_rollup(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
     let a: ComputeRollupArgs = parse_args(args, "compute_rollup")?;
     let agg = crate::relations::parse_aggregation(&a.aggregation).ok_or_else(|| {
         exec_err(format!(
@@ -458,10 +457,7 @@ mod tests {
         });
         let value = plugin.dispatch(HANDLER_APPLY_VIEW, &args).unwrap();
         // Response shape is a full AppliedView with a Grouped layout.
-        let layout = value
-            .get("layout")
-            .expect("layout")
-            .clone();
+        let layout = value.get("layout").expect("layout").clone();
         assert_eq!(layout["kind"], "grouped");
         let groups = layout["groups"].as_array().expect("groups");
         assert_eq!(groups.len(), 2);

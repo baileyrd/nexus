@@ -764,7 +764,9 @@ mod tests {
             })
             .unwrap();
         // Site 2, unaware, edits its content.
-        let edit_op = doc2.apply_local(&insert_text_op(b, 0, "still here")).unwrap();
+        let edit_op = doc2
+            .apply_local(&insert_text_op(b, 0, "still here"))
+            .unwrap();
 
         // Site 1 receives the concurrent edit on a now-deleted block.
         match doc1.apply_remote(edit_op).unwrap() {
@@ -787,8 +789,10 @@ mod tests {
         // pos 0, all gossip to each other. Final state must agree.
         let sites: [SiteId; 3] = [SiteId::new(), SiteId::new(), SiteId::new()];
         let (tree, b) = tree_with_block_content("Z");
-        let mut docs: Vec<CrdtDoc> =
-            sites.iter().map(|&s| CrdtDoc::new(s, tree.clone())).collect();
+        let mut docs: Vec<CrdtDoc> = sites
+            .iter()
+            .map(|&s| CrdtDoc::new(s, tree.clone()))
+            .collect();
 
         // Each authors its own concurrent insert.
         let ops: Vec<CrdtOp> = (0..3)

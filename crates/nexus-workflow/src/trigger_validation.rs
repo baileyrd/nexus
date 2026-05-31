@@ -75,15 +75,11 @@ fn validate_file_event_trigger(wf: &Workflow) -> Result<(), String> {
     }
     if let Some(value) = wf.trigger.extra.get("events") {
         let toml::Value::Array(items) = value else {
-            return Err(
-                "file_event trigger `events` must be an array of strings".into(),
-            );
+            return Err("file_event trigger `events` must be an array of strings".into());
         };
         for item in items {
             let Some(s) = item.as_str() else {
-                return Err(
-                    "file_event trigger `events` array must contain only strings".into(),
-                );
+                return Err("file_event trigger `events` array must contain only strings".into());
             };
             if !matches!(s, "created" | "modified" | "deleted") {
                 return Err(format!(
@@ -93,7 +89,8 @@ fn validate_file_event_trigger(wf: &Workflow) -> Result<(), String> {
         }
         if items.is_empty() {
             return Err(
-                "file_event trigger `events` array cannot be empty (omit the key for the default)".into(),
+                "file_event trigger `events` array cannot be empty (omit the key for the default)"
+                    .into(),
             );
         }
     }
@@ -331,8 +328,8 @@ name = "BadCron"
 type = "cron"
 schedule = "not a cron"
 "#;
-        let err = parse_workflow_text(src)
-            .expect_err("invalid cron should be rejected at parse time");
+        let err =
+            parse_workflow_text(src).expect_err("invalid cron should be rejected at parse time");
         let msg = err.to_string();
         assert!(msg.contains("invalid schedule"), "got: {msg}");
     }

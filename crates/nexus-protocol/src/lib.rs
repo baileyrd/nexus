@@ -298,10 +298,7 @@ pub struct ProtocolMessage {
 impl ProtocolMessage {
     /// Build a user `Request` addressed to an agent session.
     #[must_use]
-    pub fn user_request(
-        text: impl Into<String>,
-        agent_session_id: Uuid,
-    ) -> Self {
+    pub fn user_request(text: impl Into<String>, agent_session_id: Uuid) -> Self {
         Self {
             id: MessageId::new(),
             channel: Channel::User,
@@ -517,7 +514,10 @@ impl Conversation {
     /// All messages on a specific channel.
     #[must_use]
     pub fn on_channel(&self, channel: Channel) -> Vec<&ProtocolMessage> {
-        self.messages.iter().filter(|m| m.channel == channel).collect()
+        self.messages
+            .iter()
+            .filter(|m| m.channel == channel)
+            .collect()
     }
 
     /// Most recent N messages, newest last.
@@ -654,14 +654,16 @@ mod tests {
 
     #[test]
     fn tool_result_ok_and_err_constructors() {
-        if let MessageContent::ToolResult { success, content, .. } =
-            MessageContent::tool_result_ok("id1", "data")
+        if let MessageContent::ToolResult {
+            success, content, ..
+        } = MessageContent::tool_result_ok("id1", "data")
         {
             assert!(success);
             assert_eq!(content, "data");
         }
-        if let MessageContent::ToolResult { success, content, .. } =
-            MessageContent::tool_result_err("id2", "boom")
+        if let MessageContent::ToolResult {
+            success, content, ..
+        } = MessageContent::tool_result_err("id2", "boom")
         {
             assert!(!success);
             assert_eq!(content, "boom");

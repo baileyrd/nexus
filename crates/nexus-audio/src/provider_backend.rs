@@ -27,8 +27,7 @@ use reqwest::multipart;
 use tokio::runtime::Handle;
 
 use crate::backend::{
-    AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput, TranscriptionOutput,
-    TtsProvider,
+    AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput, TranscriptionOutput, TtsProvider,
 };
 use crate::config::AudioConfig;
 use crate::AudioError;
@@ -146,10 +145,7 @@ impl SttProvider for ProviderRoutedStt {
         BACKEND_NAME
     }
 
-    fn transcribe(
-        &mut self,
-        input: TranscriptionInput,
-    ) -> Result<TranscriptionOutput, AudioError> {
+    fn transcribe(&mut self, input: TranscriptionInput) -> Result<TranscriptionOutput, AudioError> {
         let cfg = self.cfg.clone();
         let ctx = Arc::clone(&self.ctx);
         let model = self.cfg.provider_stt_model.clone();
@@ -165,10 +161,7 @@ impl SttProvider for ProviderRoutedStt {
             let mut form = multipart::Form::new()
                 .text("model", model)
                 .text("response_format", "json")
-                .part(
-                    "file",
-                    multipart::Part::bytes(bytes).file_name(filename),
-                );
+                .part("file", multipart::Part::bytes(bytes).file_name(filename));
             if let Some(lang) = language {
                 form = form.text("language", lang);
             }
@@ -189,8 +182,8 @@ impl SttProvider for ProviderRoutedStt {
             // OpenAI's `response_format: json` returns
             // `{ "text": "…" }` plus optional `language`. We parse
             // loosely so a backend that adds fields doesn't break us.
-            let parsed: serde_json::Value = serde_json::from_str(&body)
-                .map_err(|e| AudioError::Backend {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&body).map_err(|e| AudioError::Backend {
                     backend: BACKEND_NAME.to_string(),
                     reason: format!("transcribe response parse: {e}: {body}"),
                 })?;
@@ -238,8 +231,7 @@ impl TtsProvider for ProviderRoutedTts {
         let cfg = self.cfg.clone();
         let ctx = Arc::clone(&self.ctx);
         let model = self.cfg.provider_tts_model.clone();
-        let voice = voice
-            .map_or_else(|| self.cfg.provider_tts_voice.clone(), str::to_string);
+        let voice = voice.map_or_else(|| self.cfg.provider_tts_voice.clone(), str::to_string);
         let text = text.to_string();
 
         // OpenAI accepts `mp3` / `opus` / `aac` / `flac` / `wav` /

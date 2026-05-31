@@ -46,7 +46,10 @@ use ts_rs::TS;
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageSearchArgs {
@@ -64,7 +67,10 @@ pub struct StorageSearchArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageSearchHit {
@@ -85,7 +91,10 @@ pub struct StorageSearchHit {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageSearchResult {
@@ -100,7 +109,10 @@ pub struct StorageSearchResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageReadFileArgs {
@@ -117,7 +129,10 @@ pub struct StorageReadFileArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageReadFileResult {
@@ -136,7 +151,10 @@ pub struct StorageReadFileResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageWriteFileArgs {
@@ -153,7 +171,10 @@ pub struct StorageWriteFileArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageWriteFileResult {
@@ -182,7 +203,10 @@ pub struct StorageWriteFileResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageNoteAppendArgs {
@@ -201,7 +225,10 @@ pub struct StorageNoteAppendArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageNoteAppendResult {
@@ -222,7 +249,10 @@ pub struct StorageNoteAppendResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageListDirArgs {
@@ -238,7 +268,10 @@ pub struct StorageListDirArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StorageListDirEntry {
@@ -263,7 +296,10 @@ pub struct StorageListDirEntry {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageListDirResult {
@@ -290,7 +326,10 @@ pub struct StorageListDirResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageReadFrontmatterArgs {
@@ -303,7 +342,10 @@ pub struct StorageReadFrontmatterArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct ReadFrontmatterResult {
@@ -386,7 +428,10 @@ fn stringify_yaml_value(v: &serde_yml::Value) -> String {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageQuerySymbolArgs {
@@ -407,7 +452,10 @@ pub struct StorageQuerySymbolArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageSymbolRow {
@@ -438,7 +486,10 @@ pub struct StorageSymbolRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageQuerySymbolResult {
@@ -453,7 +504,10 @@ pub struct StorageQuerySymbolResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntitySearchArgs {
@@ -475,7 +529,10 @@ pub struct EntitySearchArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntitySearchHitRow {
@@ -497,7 +554,10 @@ pub struct EntitySearchHitRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntitySearchResult {
@@ -510,7 +570,10 @@ pub struct EntitySearchResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityGetArgs {
@@ -523,7 +586,10 @@ pub struct EntityGetArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRelationRow {
@@ -541,7 +607,10 @@ pub struct EntityRelationRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRecordRow {
@@ -564,7 +633,10 @@ pub struct EntityRecordRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityGetResult {
@@ -579,7 +651,10 @@ pub struct EntityGetResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRelationsArgs {
@@ -597,7 +672,10 @@ pub struct EntityRelationsArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRelationsResultRow {
@@ -617,7 +695,10 @@ pub struct EntityRelationsResultRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRelationsResult {
@@ -636,7 +717,10 @@ pub struct EntityRelationsResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityUpsertRelationRow {
@@ -661,7 +745,10 @@ pub struct EntityUpsertRelationRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityUpsertArgs {
@@ -685,7 +772,10 @@ pub struct EntityUpsertArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityUpsertResult {
@@ -703,7 +793,10 @@ pub struct EntityUpsertResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityFindDuplicatesArgs {
@@ -719,7 +812,10 @@ pub struct EntityFindDuplicatesArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityDuplicatePairRow {
@@ -736,7 +832,10 @@ pub struct EntityDuplicatePairRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityFindDuplicatesResult {
@@ -765,7 +864,10 @@ pub struct EntityFindDuplicatesResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityMergeArgs {
@@ -781,7 +883,10 @@ pub struct EntityMergeArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityMergeResult {
@@ -813,7 +918,10 @@ pub struct EntityMergeResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct ListDraftRelationsArgs {
@@ -836,7 +944,10 @@ pub struct ListDraftRelationsArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct DraftRelationRow {
@@ -859,7 +970,10 @@ pub struct DraftRelationRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct ListDraftRelationsResult {
@@ -885,7 +999,10 @@ pub struct ListDraftRelationsResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityDecayRelationsArgs {
@@ -909,7 +1026,10 @@ pub struct EntityDecayRelationsArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityDecayRelationsResult {

@@ -17,9 +17,7 @@ nexus_plugins::define_dispatch_helpers!(pub(crate));
 /// Read the `kind` string argument used by `config_read` /
 /// `config_reset`. Returns the borrowed `&str` so callers can match
 /// against literals without an extra allocation.
-pub(crate) fn config_kind(
-    args: &serde_json::Value,
-) -> Result<&str, PluginError> {
+pub(crate) fn config_kind(args: &serde_json::Value) -> Result<&str, PluginError> {
     args.get("kind")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| exec_err("config: missing 'kind' string argument".to_string()))
@@ -35,10 +33,7 @@ pub(crate) fn path_arg(value: &serde_json::Value, command: &str) -> Result<Strin
     string_arg(value, command, "path")
 }
 
-pub(crate) fn relpath_arg(
-    value: &serde_json::Value,
-    command: &str,
-) -> Result<String, PluginError> {
+pub(crate) fn relpath_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
     string_arg(value, command, "relpath")
 }
 

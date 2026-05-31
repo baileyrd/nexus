@@ -21,20 +21,18 @@ use tokio::sync::mpsc;
 /// duplex, and returns a `RemoteClient` bound to the client-facing
 /// halves. The kernel is leaked for the test's lifetime — dropping it
 /// tears down every plugin and breaks the IPC surface mid-test.
-async fn boot_pair(
-) -> (RemoteClient, tempfile::TempDir, tokio::task::JoinHandle<()>) {
+async fn boot_pair() -> (RemoteClient, tempfile::TempDir, tokio::task::JoinHandle<()>) {
     let forge = tempfile::tempdir().expect("tempdir");
     init_forge(forge.path()).expect("init_forge");
-    let runtime =
-        build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
     let Runtime {
         kernel,
         context,
         loader: _loader,
     } = runtime;
     let event_bus = kernel.event_bus();
-    let server = RemoteServer::new(Arc::new(context), event_bus)
-        .with_timeout(Duration::from_secs(30));
+    let server =
+        RemoteServer::new(Arc::new(context), event_bus).with_timeout(Duration::from_secs(30));
     Box::leak(Box::new(kernel));
 
     // client_writer → server_reader (client outbound).
@@ -60,12 +58,7 @@ async fn ipc_call_round_trips_through_the_client() {
     let (client, _forge, _server) = boot_pair().await;
 
     let v: Value = client
-        .ipc_call(
-            "com.nexus.storage",
-            "list_dir",
-            json!({ "path": "" }),
-            None,
-        )
+        .ipc_call("com.nexus.storage", "list_dir", json!({ "path": "" }), None)
         .await
         .expect("ipc_call");
 
@@ -133,19 +126,12 @@ async fn subscribe_unsubscribe_round_trips() {
     // don't depend on a specific event — only that we either see one
     // (validating delivery wire shape) or don't (still OK).
     let _ = client
-        .ipc_call(
-            "com.nexus.storage",
-            "list_dir",
-            json!({ "path": "" }),
-            None,
-        )
+        .ipc_call("com.nexus.storage", "list_dir", json!({ "path": "" }), None)
         .await
         .expect("ipc_call");
 
     // Drain any deliveries that arrived during the call.
-    if let Ok(delivery) =
-        tokio::time::timeout(Duration::from_millis(250), rx.recv()).await
-    {
+    if let Ok(delivery) = tokio::time::timeout(Duration::from_millis(250), rx.recv()).await {
         let d = delivery.expect("subscription channel still open");
         assert_eq!(d.subscription_id, "test-sub");
         assert!(d.event.is_object());
@@ -223,12 +209,7 @@ async fn shutdown_wakes_pending_calls_via_router_drop() {
     let (client, _forge, _server) = boot_pair().await;
     // Make one normal call to confirm the channel works.
     let _ = client
-        .ipc_call(
-            "com.nexus.storage",
-            "list_dir",
-            json!({ "path": "" }),
-            None,
-        )
+        .ipc_call("com.nexus.storage", "list_dir", json!({ "path": "" }), None)
         .await
         .expect("first call");
 

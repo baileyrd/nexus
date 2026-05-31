@@ -105,8 +105,7 @@ pub enum FetchError {
 pub fn is_blocked_address(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            if v4.is_loopback() || v4.is_unspecified() || v4.is_multicast() || v4.is_broadcast()
-            {
+            if v4.is_loopback() || v4.is_unspecified() || v4.is_multicast() || v4.is_broadcast() {
                 return true;
             }
             // RFC1918 private + link-local + shared (CGNAT).
@@ -305,7 +304,10 @@ fn find_meta(html: &str, property: &str) -> Option<String> {
         r#"(?is)<meta\b[^>]*?\bproperty\s*=\s*["']{p}["'][^>]*?\bcontent\s*=\s*["']([^"']*)["']"#,
         p = regex_escape(property),
     );
-    let a = Regex::new(&pat).ok()?.captures(html).map(|c| c[1].to_string());
+    let a = Regex::new(&pat)
+        .ok()?
+        .captures(html)
+        .map(|c| c[1].to_string());
     if a.is_some() {
         return normalize(a);
     }
@@ -313,7 +315,12 @@ fn find_meta(html: &str, property: &str) -> Option<String> {
         r#"(?is)<meta\b[^>]*?\bcontent\s*=\s*["']([^"']*)["'][^>]*?\bproperty\s*=\s*["']{p}["']"#,
         p = regex_escape(property),
     );
-    normalize(Regex::new(&pat2).ok()?.captures(html).map(|c| c[1].to_string()))
+    normalize(
+        Regex::new(&pat2)
+            .ok()?
+            .captures(html)
+            .map(|c| c[1].to_string()),
+    )
 }
 
 /// Find `<meta name="…" content="…">` — for `twitter:*` + plain
@@ -323,7 +330,10 @@ fn find_meta_name(html: &str, name: &str) -> Option<String> {
         r#"(?is)<meta\b[^>]*?\bname\s*=\s*["']{n}["'][^>]*?\bcontent\s*=\s*["']([^"']*)["']"#,
         n = regex_escape(name),
     );
-    let a = Regex::new(&pat).ok()?.captures(html).map(|c| c[1].to_string());
+    let a = Regex::new(&pat)
+        .ok()?
+        .captures(html)
+        .map(|c| c[1].to_string());
     if a.is_some() {
         return normalize(a);
     }
@@ -331,7 +341,12 @@ fn find_meta_name(html: &str, name: &str) -> Option<String> {
         r#"(?is)<meta\b[^>]*?\bcontent\s*=\s*["']([^"']*)["'][^>]*?\bname\s*=\s*["']{n}["']"#,
         n = regex_escape(name),
     );
-    normalize(Regex::new(&pat2).ok()?.captures(html).map(|c| c[1].to_string()))
+    normalize(
+        Regex::new(&pat2)
+            .ok()?
+            .captures(html)
+            .map(|c| c[1].to_string()),
+    )
 }
 
 /// Find the first `<title>...</title>` in `<head>`. Falls back to
@@ -369,7 +384,11 @@ fn absolutise(base: &str, v: &str) -> String {
     }
     if let Some(rest) = trimmed.strip_prefix("//") {
         // protocol-relative — use the base's scheme
-        let scheme = if base.starts_with("https://") { "https:" } else { "http:" };
+        let scheme = if base.starts_with("https://") {
+            "https:"
+        } else {
+            "http:"
+        };
         return format!("{scheme}//{rest}");
     }
     let origin = origin_of(base).unwrap_or_default();
@@ -383,15 +402,23 @@ fn absolutise(base: &str, v: &str) -> String {
 
 /// `https://a.com/x/y?z=1` → `https://a.com`.
 fn origin_of(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"))?;
-    let scheme = if url.starts_with("https://") { "https://" } else { "http://" };
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))?;
+    let scheme = if url.starts_with("https://") {
+        "https://"
+    } else {
+        "http://"
+    };
     let host_end = rest.find('/').unwrap_or(rest.len());
     Some(format!("{scheme}{}", &rest[..host_end]))
 }
 
 /// Extract the hostname portion of a URL for `site_name` fallback.
 fn hostname(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"))?;
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))?;
     let host_end = rest.find('/').unwrap_or(rest.len());
     Some(rest[..host_end].to_string())
 }
@@ -420,7 +447,10 @@ fn normalize(s: Option<String>) -> Option<String> {
 fn regex_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if matches!(c, '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$') {
+        if matches!(
+            c,
+            '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$'
+        ) {
             out.push('\\');
         }
         out.push(c);
@@ -449,7 +479,10 @@ mod tests {
         assert_eq!(p.description.as_deref(), Some("An example page."));
         assert_eq!(p.image_url.as_deref(), Some("https://example.com/hero.png"));
         assert_eq!(p.site_name.as_deref(), Some("Example"));
-        assert_eq!(p.favicon_url.as_deref(), Some("https://example.com/favicon.ico"));
+        assert_eq!(
+            p.favicon_url.as_deref(),
+            Some("https://example.com/favicon.ico")
+        );
     }
 
     #[test]
@@ -465,7 +498,10 @@ mod tests {
         let p = parse_html("https://example.net/", html);
         assert_eq!(p.title.as_deref(), Some("Twitter Title"));
         assert_eq!(p.description.as_deref(), Some("TX desc"));
-        assert_eq!(p.image_url.as_deref(), Some("https://cdn.example.net/img.jpg"));
+        assert_eq!(
+            p.image_url.as_deref(),
+            Some("https://cdn.example.net/img.jpg")
+        );
     }
 
     #[test]
@@ -496,7 +532,10 @@ mod tests {
             absolutise("https://a.com/x", "//cdn.b.com/i.png"),
             "https://cdn.b.com/i.png"
         );
-        assert_eq!(absolutise("https://a.com/x/y", "/z.png"), "https://a.com/z.png");
+        assert_eq!(
+            absolutise("https://a.com/x/y", "/z.png"),
+            "https://a.com/z.png"
+        );
         assert_eq!(
             absolutise("https://a.com/x/y", "z.png"),
             "https://a.com/x/z.png"

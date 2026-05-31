@@ -177,8 +177,7 @@ mod tests {
     fn command_not_found_does_not_fall_through() {
         let cell = FallbackCell::new();
         cell.set(ok("fallback"));
-        let composite =
-            CompositeIpcDispatcher::new(command_not_found("com.x", "nope"), cell);
+        let composite = CompositeIpcDispatcher::new(command_not_found("com.x", "nope"), cell);
 
         let err = composite
             .dispatch("com.x", "nope", &serde_json::json!({}))

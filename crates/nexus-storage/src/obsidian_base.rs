@@ -70,11 +70,10 @@ pub fn query(
     base_path: &str,
 ) -> Result<ObsidianBaseQueryResult, StorageError> {
     let abs = forge_root.join(base_path);
-    let yaml =
-        std::fs::read_to_string(&abs).map_err(|e| StorageError::CorruptFile {
-            path: base_path.to_string(),
-            reason: format!("read .base: {e}"),
-        })?;
+    let yaml = std::fs::read_to_string(&abs).map_err(|e| StorageError::CorruptFile {
+        path: base_path.to_string(),
+        reason: format!("read .base: {e}"),
+    })?;
     let base: ObsidianBase =
         obsidian_base::parse(&yaml).map_err(|e| StorageError::CorruptFile {
             path: base_path.to_string(),
@@ -188,7 +187,10 @@ fn build_note_facts(conn: &Connection, note: &NoteRow) -> Result<NoteFacts, Stor
     })
 }
 
-fn load_frontmatter(conn: &Connection, file_id: i64) -> Result<BTreeMap<String, Value>, StorageError> {
+fn load_frontmatter(
+    conn: &Connection,
+    file_id: i64,
+) -> Result<BTreeMap<String, Value>, StorageError> {
     let mut stmt = conn.prepare("SELECT key, value FROM properties WHERE file_id = ?1")?;
     let rows = stmt
         .query_map(params![file_id], |row| {
@@ -239,12 +241,14 @@ fn resolve_column(col: &str, facts: &NoteFacts) -> Value {
         "file.folder" => Value::String(facts.folder.clone()),
         "file.ctime" => Value::Number(facts.ctime.into()),
         "file.mtime" => Value::Number(facts.mtime.into()),
-        "file.tags" => Value::Array(facts.tags.iter().map(|t| Value::String(t.clone())).collect()),
-        other => facts
-            .frontmatter
-            .get(other)
-            .cloned()
-            .unwrap_or(Value::Null),
+        "file.tags" => Value::Array(
+            facts
+                .tags
+                .iter()
+                .map(|t| Value::String(t.clone()))
+                .collect(),
+        ),
+        other => facts.frontmatter.get(other).cloned().unwrap_or(Value::Null),
     }
 }
 
@@ -343,10 +347,7 @@ views:
         insert_note(
             &conn,
             "movies/inception.md",
-            &[
-                ("type", "\"movie\""),
-                ("title", "\"Inception\""),
-            ],
+            &[("type", "\"movie\""), ("title", "\"Inception\"")],
             &[],
             100,
             200,
@@ -471,13 +472,12 @@ properties:
         let dir = tempdir().unwrap();
         let conn = make_conn();
         let id = insert_note(&conn, "a.md", &[("type", "\"book\"")], &[], 0, 0);
-        conn.execute("UPDATE files SET is_deleted = 1 WHERE id = ?1;", params![id])
-            .unwrap();
-        let base_path = write_base(
-            dir.path(),
-            "x.base",
-            "properties:\n  file.name: {}\n",
-        );
+        conn.execute(
+            "UPDATE files SET is_deleted = 1 WHERE id = ?1;",
+            params![id],
+        )
+        .unwrap();
+        let base_path = write_base(dir.path(), "x.base", "properties:\n  file.name: {}\n");
         let result = query(&conn, dir.path(), &base_path).unwrap();
         assert_eq!(result.rows.len(), 0);
     }

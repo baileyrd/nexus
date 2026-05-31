@@ -125,10 +125,7 @@ impl AiSuggestionEngine {
     /// one suggestion.
     #[must_use]
     pub fn observe(&self, line: &str) -> Vec<SuggestedCommand> {
-        self.rules
-            .iter()
-            .filter_map(|r| r.evaluate(line))
-            .collect()
+        self.rules.iter().filter_map(|r| r.evaluate(line)).collect()
     }
 
     /// Convenience wrapper that reads the ANSI-stripped text from an
@@ -220,13 +217,14 @@ impl SuggestionRule for CommandNotFoundRule {
             .or_else(|| {
                 // zsh: "zsh: command not found: foo" — the name is the
                 // last colon-separated chunk.
-                line.rsplit(':').next().map(str::trim).filter(|s| !s.is_empty())
+                line.rsplit(':')
+                    .next()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
             })?;
         Some(SuggestedCommand {
             text: format!("which {cmd}"),
-            reason: format!(
-                "Shell reported '{cmd}' missing. Check if it's installed or on PATH.",
-            ),
+            reason: format!("Shell reported '{cmd}' missing. Check if it's installed or on PATH.",),
             severity: SuggestionSeverity::Warning,
             source_rule: self.id(),
         })
@@ -277,8 +275,7 @@ impl SuggestionRule for AddressInUseRule {
             // `netstat -ano` alternatives; we're optimising for the
             // common dev-laptop case.
             text: "lsof -iTCP -sTCP:LISTEN -nP".into(),
-            reason: "A port's already bound. List LISTENing sockets to find the holder."
-                .into(),
+            reason: "A port's already bound. List LISTENing sockets to find the holder.".into(),
             severity: SuggestionSeverity::Error,
             source_rule: self.id(),
         })
@@ -326,7 +323,9 @@ mod tests {
     #[test]
     fn cargo_rule_does_not_fire_on_unrelated_errors() {
         let e = AiSuggestionEngine::empty().with_rule(Box::new(CargoCompileFailureRule));
-        assert!(e.observe("error: unrelated panic at src/main.rs:42").is_empty());
+        assert!(e
+            .observe("error: unrelated panic at src/main.rs:42")
+            .is_empty());
     }
 
     #[test]
@@ -354,8 +353,7 @@ mod tests {
     #[test]
     fn git_publickey_rule_fires_on_permission_denied_line() {
         let e = AiSuggestionEngine::empty().with_rule(Box::new(GitPublicKeyRule));
-        let hits =
-            e.observe("git@github.com: Permission denied (publickey).");
+        let hits = e.observe("git@github.com: Permission denied (publickey).");
         assert_eq!(texts(&hits), vec!["ssh-add -l"]);
     }
 

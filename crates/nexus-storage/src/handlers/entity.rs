@@ -32,22 +32,24 @@ pub(crate) fn search(forge_root: &Path, args: &Value) -> Result<Value, PluginErr
 pub(crate) fn get(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
     let parsed: crate::ipc::EntityGetArgs = parse_args(args, "entity_get")?;
     let index = crate::entity_index::EntityIndex::load(forge_root);
-    let entity = index.get(&parsed.id).map(|rec| crate::ipc::EntityRecordRow {
-        id: rec.id.clone(),
-        entity_type: rec.entity_type.clone(),
-        aliases: rec.aliases.clone(),
-        description: rec.description.clone(),
-        relations: rec
-            .relations
-            .iter()
-            .map(|r| crate::ipc::EntityRelationRow {
-                target: r.target.clone(),
-                kind: r.kind.clone(),
-                confidence: r.confidence,
-            })
-            .collect(),
-        relpath: rec.relpath.clone(),
-    });
+    let entity = index
+        .get(&parsed.id)
+        .map(|rec| crate::ipc::EntityRecordRow {
+            id: rec.id.clone(),
+            entity_type: rec.entity_type.clone(),
+            aliases: rec.aliases.clone(),
+            description: rec.description.clone(),
+            relations: rec
+                .relations
+                .iter()
+                .map(|r| crate::ipc::EntityRelationRow {
+                    target: r.target.clone(),
+                    kind: r.kind.clone(),
+                    confidence: r.confidence,
+                })
+                .collect(),
+            relpath: rec.relpath.clone(),
+        });
     to_value(&crate::ipc::EntityGetResult { entity }, "entity_get")
 }
 
@@ -75,12 +77,13 @@ pub(crate) fn upsert(forge_root: &Path, args: &Value) -> Result<Value, PluginErr
     let parsed: crate::ipc::EntityUpsertArgs = parse_args(args, "entity_upsert")?;
     let id_trimmed = parsed.id.trim();
     if id_trimmed.is_empty() {
-        return Err(exec_err("entity_upsert: 'id' must be non-empty".to_string()));
+        return Err(exec_err(
+            "entity_upsert: 'id' must be non-empty".to_string(),
+        ));
     }
     if id_trimmed.contains(['/', '\\']) || id_trimmed.contains("..") {
         return Err(exec_err(
-            "entity_upsert: 'id' must be a bare file stem (no path separators or '..')"
-                .to_string(),
+            "entity_upsert: 'id' must be a bare file stem (no path separators or '..')".to_string(),
         ));
     }
     let entity_type_trimmed = parsed.entity_type.trim();
@@ -127,8 +130,7 @@ pub(crate) fn upsert(forge_root: &Path, args: &Value) -> Result<Value, PluginErr
 }
 
 pub(crate) fn find_duplicates(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let parsed: crate::ipc::EntityFindDuplicatesArgs =
-        parse_args(args, "entity_find_duplicates")?;
+    let parsed: crate::ipc::EntityFindDuplicatesArgs = parse_args(args, "entity_find_duplicates")?;
     let threshold = parsed.threshold.unwrap_or(0.92).clamp(0.0, 1.0);
     let index = crate::entity_index::EntityIndex::load(forge_root);
     let pairs = index
@@ -203,34 +205,28 @@ pub(crate) fn merge(forge_root: &Path, args: &Value) -> Result<Value, PluginErro
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| exec_err(format!("entity_merge: create temp dir: {e}")))?;
     let markdown = crate::entity_index::render_entity_markdown(&merged.payload);
-    crate::atomic_write(&target, markdown.as_bytes(), &temp_dir).map_err(|e| {
-        exec_err(format!("entity_merge: write {}: {e}", target.display()))
-    })?;
+    crate::atomic_write(&target, markdown.as_bytes(), &temp_dir)
+        .map_err(|e| exec_err(format!("entity_merge: write {}: {e}", target.display())))?;
 
     let drop_path = forge_root
         .join(crate::entity_index::ENTITIES_DIR)
         .join(format!("{}.md", drop_rec.id));
     if drop_path.exists() {
-        std::fs::remove_file(&drop_path).map_err(|e| {
-            exec_err(format!(
-                "entity_merge: remove {}: {e}",
-                drop_path.display()
-            ))
-        })?;
+        std::fs::remove_file(&drop_path)
+            .map_err(|e| exec_err(format!("entity_merge: remove {}: {e}", drop_path.display())))?;
     }
 
     let result = crate::ipc::EntityMergeResult {
-        kept:            keep_rec.id,
-        dropped:         drop_rec.id,
-        aliases_added:   merged.aliases_added,
+        kept: keep_rec.id,
+        dropped: drop_rec.id,
+        aliases_added: merged.aliases_added,
         relations_added: merged.relations_added,
     };
     to_value(&result, "entity_merge")
 }
 
 pub(crate) fn list_draft_relations(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let parsed: crate::ipc::ListDraftRelationsArgs =
-        parse_args(args, "list_draft_relations")?;
+    let parsed: crate::ipc::ListDraftRelationsArgs = parse_args(args, "list_draft_relations")?;
     let threshold = parsed.threshold.unwrap_or(0.5);
     let limit = parsed
         .limit
@@ -244,11 +240,11 @@ pub(crate) fn list_draft_relations(forge_root: &Path, args: &Value) -> Result<Va
         relations: rows
             .into_iter()
             .map(|r| crate::ipc::DraftRelationRow {
-                from:       r.from,
-                target:     r.target,
-                kind:       r.kind,
+                from: r.from,
+                target: r.target,
+                kind: r.kind,
                 confidence: r.confidence,
-                relpath:    r.relpath,
+                relpath: r.relpath,
             })
             .collect(),
         total,
@@ -258,11 +254,10 @@ pub(crate) fn list_draft_relations(forge_root: &Path, args: &Value) -> Result<Va
 }
 
 pub(crate) fn decay_relations(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let parsed: crate::ipc::EntityDecayRelationsArgs =
-        parse_args(args, "entity_decay_relations")?;
+    let parsed: crate::ipc::EntityDecayRelationsArgs = parse_args(args, "entity_decay_relations")?;
     let params = crate::entity_index::DecayParams {
         factor: parsed.factor.unwrap_or(0.95),
-        floor:  parsed.floor.unwrap_or(0.10),
+        floor: parsed.floor.unwrap_or(0.10),
     };
     let dry_run = parsed.dry_run.unwrap_or(false);
 
@@ -279,9 +274,8 @@ pub(crate) fn decay_relations(forge_root: &Path, args: &Value) -> Result<Value, 
 
     let temp_dir = forge_root.join(".forge").join("temp");
     if !dry_run {
-        std::fs::create_dir_all(&temp_dir).map_err(|e| {
-            exec_err(format!("entity_decay_relations: create temp dir: {e}"))
-        })?;
+        std::fs::create_dir_all(&temp_dir)
+            .map_err(|e| exec_err(format!("entity_decay_relations: create temp dir: {e}")))?;
     }
 
     for entry in read_dir.flatten() {
@@ -289,9 +283,12 @@ pub(crate) fn decay_relations(forge_root: &Path, args: &Value) -> Result<Value, 
         if !path.is_file() {
             continue;
         }
-        let is_md = path.extension().and_then(|s| s.to_str()).is_some_and(|ext| {
-            ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
-        });
+        let is_md = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+            });
         if !is_md {
             continue;
         }

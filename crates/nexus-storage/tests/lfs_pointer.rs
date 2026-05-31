@@ -14,10 +14,8 @@ use nexus_storage::lfs;
 use nexus_storage::StorageEngine;
 
 fn pointer_bytes(oid: &str, size: u64) -> Vec<u8> {
-    format!(
-        "version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {size}\n"
-    )
-    .into_bytes()
+    format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {size}\n")
+        .into_bytes()
 }
 
 #[test]
@@ -26,7 +24,10 @@ fn read_file_returns_pointer_bytes_when_smudge_unavailable() {
     let engine = StorageEngine::init(tmp.path()).expect("init forge");
 
     let path = "image.png";
-    let bytes = pointer_bytes("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", 0);
+    let bytes = pointer_bytes(
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        0,
+    );
     fs::write(tmp.path().join(path), &bytes).expect("write pointer");
 
     let read_back = engine.read_file(path).expect("read_file");

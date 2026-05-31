@@ -4,10 +4,10 @@
 //! expand/collapse indicators and per-entry icons.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem},
+    Frame,
 };
 
 use crate::app::{Focus, Mode, TuiApp};
@@ -68,7 +68,11 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
         .map(|entry| {
             let indent = "  ".repeat(entry.depth);
             let icon = if entry.is_dir {
-                if entry.is_expanded { "▼ " } else { "▶ " }
+                if entry.is_expanded {
+                    "▼ "
+                } else {
+                    "▶ "
+                }
             } else {
                 "  "
             };

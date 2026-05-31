@@ -43,14 +43,14 @@ const MAX_KEYS_PER_METRIC: usize = 4096;
 
 /// Bucket upper bounds in nanoseconds (last bucket = +∞).
 const BUCKET_UPPER_NS: &[u64] = &[
-    1_000,           // 1µs
-    10_000,          // 10µs
-    100_000,         // 100µs
-    1_000_000,       // 1ms
-    10_000_000,      // 10ms
-    100_000_000,     // 100ms
-    1_000_000_000,   // 1s
-    10_000_000_000,  // 10s
+    1_000,          // 1µs
+    10_000,         // 10µs
+    100_000,        // 100µs
+    1_000_000,      // 1ms
+    10_000_000,     // 10ms
+    100_000_000,    // 100ms
+    1_000_000_000,  // 1s
+    10_000_000_000, // 10s
 ];
 
 const NUM_BUCKETS: usize = BUCKET_UPPER_NS.len() + 1;

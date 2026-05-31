@@ -521,10 +521,12 @@ async fn handle_invoke(
     composed_body: String,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let parsed: InvokeSkillArgs = serde_json::from_value(args)
-        .map_err(|e| exec_err(format!("invoke: invalid args: {e}")))?;
+    let parsed: InvokeSkillArgs =
+        serde_json::from_value(args).map_err(|e| exec_err(format!("invoke: invalid args: {e}")))?;
     let ctx = ctx.ok_or_else(|| {
-        exec_err("invoke: no kernel context wired (bootstrap did not call wire_context)".to_string())
+        exec_err(
+            "invoke: no kernel context wired (bootstrap did not call wire_context)".to_string(),
+        )
     })?;
     let archetype = parsed
         .archetype

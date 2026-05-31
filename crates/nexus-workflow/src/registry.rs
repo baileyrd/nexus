@@ -117,10 +117,7 @@ impl WorkflowRegistry {
     }
 }
 
-fn visit(
-    dir: &Path,
-    on_workflow: &mut impl FnMut(&Path),
-) -> Result<(), WorkflowRegistryError> {
+fn visit(dir: &Path, on_workflow: &mut impl FnMut(&Path)) -> Result<(), WorkflowRegistryError> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();

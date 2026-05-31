@@ -55,9 +55,7 @@ pub use error::{CrdtError, Result};
 pub use id::{Lamport, OpId, SiteId, VersionVector};
 pub use log::OpLog;
 pub use op::{affected_blocks, primary_block_id, CrdtOp};
-pub use state::{
-    content_hash_hex, crdt_state_path, CrdtState, PersistedCrdt, PERSISTED_VERSION,
-};
+pub use state::{content_hash_hex, crdt_state_path, CrdtState, PersistedCrdt, PERSISTED_VERSION};
 pub use sync::{DocHandle, InboundOutcome, SyncLoop};
 pub use wire::{
     conflict_topic, ops_topic, relpath_of_conflict_topic, relpath_of_topic, ConflictEnvelope,

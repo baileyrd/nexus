@@ -287,9 +287,7 @@ fn build_acp_contribution_metadata(
 
 /// Convert every ACP contribution in `set`. Preserves order.
 #[must_use]
-pub fn acp_contributions_to_specs(
-    set: &ContributedAdapterSet,
-) -> Vec<(AcpAdapterSpec, String)> {
+pub fn acp_contributions_to_specs(set: &ContributedAdapterSet) -> Vec<(AcpAdapterSpec, String)> {
     set.acp
         .iter()
         .cloned()
@@ -573,10 +571,9 @@ env = { RUST_BACKTRACE = "1" }
             Some("1"),
         );
         // BL-113 — shell-only fields ride through opaque `metadata`.
-        let md = spec
-            .metadata
-            .as_ref()
-            .expect("contribution with display_name + schema + markers + renderers should set metadata");
+        let md = spec.metadata.as_ref().expect(
+            "contribution with display_name + schema + markers + renderers should set metadata",
+        );
         assert_eq!(md["plugin_id"], "community.rust-debug");
         assert_eq!(md["display_name"], "Rust (codelldb)");
         assert_eq!(md["launch_config_schema"], "./launch.schema.json");

@@ -312,7 +312,11 @@ impl CrdtPublisher {
             }
         };
         let topic = ops_topic(relpath);
-        if let Err(err) = self.inner.bus.publish_plugin(EDITOR_PLUGIN_ID, &topic, payload) {
+        if let Err(err) = self
+            .inner
+            .bus
+            .publish_plugin(EDITOR_PLUGIN_ID, &topic, payload)
+        {
             tracing::warn!(%err, relpath, "BL-074: bus publish failed");
         }
     }
@@ -339,7 +343,11 @@ impl CrdtPublisher {
             }
         };
         let topic = conflict_topic(relpath);
-        if let Err(err) = self.inner.bus.publish_plugin(EDITOR_PLUGIN_ID, &topic, payload) {
+        if let Err(err) = self
+            .inner
+            .bus
+            .publish_plugin(EDITOR_PLUGIN_ID, &topic, payload)
+        {
             tracing::warn!(%err, relpath, "BL-007: conflict bus publish failed");
         }
     }
@@ -589,7 +597,8 @@ impl CrdtPublisher {
                     }
                 })
                 .collect();
-            state.ops_since_checkpoint = state.ops_since_checkpoint.saturating_add(wire.len() as u64);
+            state.ops_since_checkpoint =
+                state.ops_since_checkpoint.saturating_add(wire.len() as u64);
             let checkpoint = if self.inner.checkpoint_every > 0
                 && state.ops_since_checkpoint >= self.inner.checkpoint_every
             {
@@ -680,8 +689,8 @@ fn build_conflict_detail(
                 .get(*edit)
                 .or_else(|| remote_log.get(*edit))
                 .and_then(|o| content_from_op(&o.op));
-            let local_content = edit_op_content
-                .or_else(|| doc.tree().get(*block_id).map(|b| b.content.clone()));
+            let local_content =
+                edit_op_content.or_else(|| doc.tree().get(*block_id).map(|b| b.content.clone()));
             ConflictDetail {
                 conflict: conflict.clone(),
                 local_content,
@@ -809,7 +818,9 @@ mod tests {
             .expect("event arrived")
             .expect("non-error");
         match &event.event {
-            NexusEvent::Custom { type_id, payload, .. } => {
+            NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, "com.nexus.editor.ops.notes.md");
                 let envelope = OpEnvelope::from_json(payload).expect("decodes");
                 assert_eq!(envelope.op.id.site, publisher.site());
@@ -831,7 +842,11 @@ mod tests {
 
         // The persistence file must now exist on disk.
         let state_path = dir.path().join(crdt_state_path("notes.md"));
-        assert!(state_path.exists(), "state file missing at {}", state_path.display());
+        assert!(
+            state_path.exists(),
+            "state file missing at {}",
+            state_path.display()
+        );
 
         // Reopen with the *same* tree+source bytes that the editor
         // would parse from the freshly-saved markdown — the
@@ -864,11 +879,8 @@ mod tests {
         // *before* on_session_closed runs.
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            2,
-        );
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 2);
 
         let (tree, b) = fresh_tree();
         publisher.on_session_opened("notes.md", &tree, b"");
@@ -895,11 +907,8 @@ mod tests {
         // containing a DeleteText (the inverse of the InsertText).
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
         let mut sub = bus.subscribe(EventFilter::CustomExact(ops_topic("notes.md")));
 
         let (tree, b) = fresh_tree();
@@ -953,11 +962,8 @@ mod tests {
         let bus = Arc::new(EventBus::new(64));
 
         // Session A: 3 ops, then close.
-        let publisher_a = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher_a =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
         let (tree, b) = fresh_tree();
         publisher_a.on_session_opened("notes.md", &tree, b"");
         publisher_a.on_apply_transaction("notes.md", &[insert_text(b, 0, "a")]);
@@ -990,11 +996,8 @@ mod tests {
         tree_b.insert(bb, None, 0).unwrap();
 
         // Session B: open (restoring 3 ops), author 2 more, close.
-        let publisher_b = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher_b =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
         publisher_b.on_session_opened("notes.md", &tree_b, saved_markdown.as_bytes());
         publisher_b.on_apply_transaction("notes.md", &[insert_text(b, 3, "d")]);
         publisher_b.on_apply_transaction("notes.md", &[insert_text(b, 4, "e")]);
@@ -1106,11 +1109,8 @@ mod tests {
         // peer's op and publishes one envelope on the ops topic.
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
         let mut sub = bus.subscribe(EventFilter::CustomExact(ops_topic("notes.md")));
 
         let (tree, b) = fresh_tree();
@@ -1181,13 +1181,11 @@ mod tests {
         // `ConflictEnvelope` on the conflict topic.
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
-        let mut conflict_sub =
-            bus.subscribe(EventFilter::CustomExact(nexus_crdt::conflict_topic("notes.md")));
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
+        let mut conflict_sub = bus.subscribe(EventFilter::CustomExact(nexus_crdt::conflict_topic(
+            "notes.md",
+        )));
 
         // Live tree: a paragraph block initialised to "old".
         let mut tree = BlockTree::new(DocumentMetadata::default());
@@ -1249,7 +1247,10 @@ mod tests {
             .await
             .expect("conflict event arrived")
             .expect("non-error");
-        if let NexusEvent::Custom { type_id, payload, .. } = &event.event {
+        if let NexusEvent::Custom {
+            type_id, payload, ..
+        } = &event.event
+        {
             assert_eq!(type_id, "com.nexus.editor.crdt.conflict.notes.md");
             let env = nexus_crdt::ConflictEnvelope::from_json(payload).unwrap();
             assert_eq!(env.conflicts.len(), 1);
@@ -1274,11 +1275,8 @@ mod tests {
         // modal can show what would be lost).
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
 
         // Live tree: a paragraph block with content "edited".
         let mut tree = BlockTree::new(DocumentMetadata::default());
@@ -1328,7 +1326,10 @@ mod tests {
             nexus_crdt::Conflict::StructuralDeleteEdit { .. }
         ));
         // The remote side issued the delete.
-        assert_eq!(detail.delete_origin, Some(nexus_crdt::ConflictOrigin::Remote));
+        assert_eq!(
+            detail.delete_origin,
+            Some(nexus_crdt::ConflictOrigin::Remote)
+        );
         // Surviving edit content surfaces so the user sees what
         // accepting the delete would discard.
         assert_eq!(detail.local_content.as_deref(), Some("L-edited"));
@@ -1343,13 +1344,11 @@ mod tests {
         // `publish_conflicts`.
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
-        let mut conflict_sub =
-            bus.subscribe(EventFilter::CustomExact(nexus_crdt::conflict_topic("notes.md")));
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
+        let mut conflict_sub = bus.subscribe(EventFilter::CustomExact(nexus_crdt::conflict_topic(
+            "notes.md",
+        )));
 
         let (tree, b) = fresh_tree();
         publisher.on_session_opened("notes.md", &tree, b"");
@@ -1386,11 +1385,8 @@ mod tests {
         // the ops topic.
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
         let mut ops_sub = bus.subscribe(EventFilter::CustomExact(ops_topic("notes.md")));
 
         let (tree, b) = fresh_tree();
@@ -1466,11 +1462,8 @@ mod tests {
         // the second time — `apply_remote` filters duplicates by id.
         let dir = tempfile::tempdir().unwrap();
         let bus = Arc::new(EventBus::new(64));
-        let publisher = CrdtPublisher::with_checkpoint_every(
-            dir.path().to_path_buf(),
-            Arc::clone(&bus),
-            0,
-        );
+        let publisher =
+            CrdtPublisher::with_checkpoint_every(dir.path().to_path_buf(), Arc::clone(&bus), 0);
 
         let (tree, b) = fresh_tree();
         publisher.on_session_opened("notes.md", &tree, b"");

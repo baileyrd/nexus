@@ -49,7 +49,10 @@ pub fn show(app: &mut App, path: &str) -> Result<()> {
     println!("Fields:");
     for (name, def) in &base.schema.fields {
         let ft = def.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-        let req = def.get("required").and_then(|v| v.as_bool()).unwrap_or(false);
+        let req = def
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let marker = if req { " (required)" } else { "" };
         println!("  {name}: {ft}{marker}");
     }
@@ -61,8 +64,8 @@ pub fn show(app: &mut App, path: &str) -> Result<()> {
 
 /// Add a record to a base from JSON.
 pub fn add_record(app: &mut App, path: &str, data_json: &str) -> Result<()> {
-    let record: bases::BaseRecord = serde_json::from_str(data_json)
-        .map_err(|e| anyhow::anyhow!("Invalid record JSON: {e}"))?;
+    let record: bases::BaseRecord =
+        serde_json::from_str(data_json).map_err(|e| anyhow::anyhow!("Invalid record JSON: {e}"))?;
 
     let abs_dir = app.forge_root().join(path);
     let mut base = bases::load_base(&abs_dir)?;
@@ -109,8 +112,9 @@ pub fn query(
     // Structured query — delegate to storage plugin (which holds the DB
     // connection) via IPC.
     let (invoker, rt) = app.invoker()?;
-    let result =
-        rt.block_on(storage_ipc::base_query(&*invoker, path, filters, sorts, limit, offset))?;
+    let result = rt.block_on(storage_ipc::base_query(
+        &*invoker, path, filters, sorts, limit, offset,
+    ))?;
 
     if result.records.is_empty() {
         println!("No matching records.");
@@ -118,7 +122,11 @@ pub fn query(
         for record in &result.records {
             println!("{}", serde_json::to_string(record)?);
         }
-        println!("--- {} of {} total", result.records.len(), result.total_count);
+        println!(
+            "--- {} of {} total",
+            result.records.len(),
+            result.total_count
+        );
         if result.has_more {
             println!("(more records available — use --offset to paginate)");
         }
@@ -131,8 +139,8 @@ pub fn import(app: &mut App, path: &str, csv_file: &str, has_header: bool) -> Re
     let abs_dir = app.forge_root().join(path);
     let mut base = bases::load_base(&abs_dir)?;
 
-    let csv_bytes = std::fs::read(csv_file)
-        .map_err(|e| anyhow::anyhow!("Failed to read CSV file: {e}"))?;
+    let csv_bytes =
+        std::fs::read(csv_file).map_err(|e| anyhow::anyhow!("Failed to read CSV file: {e}"))?;
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
 
     let (invoker, rt) = app.invoker()?;
@@ -167,7 +175,11 @@ pub fn export(app: &mut App, path: &str, csv_file: &str) -> Result<()> {
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
 
     let (invoker, rt) = app.invoker()?;
-    let response = rt.block_on(database_ipc::csv_export(&*invoker, &base.records, &field_names))?;
+    let response = rt.block_on(database_ipc::csv_export(
+        &*invoker,
+        &base.records,
+        &field_names,
+    ))?;
 
     std::fs::write(csv_file, &response.csv_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to write CSV file: {e}"))?;

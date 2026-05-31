@@ -304,19 +304,16 @@ async fn run_one_session(
     let mut ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
     ws_config.max_message_size = Some(16 * 1024 * 1024);
     ws_config.max_frame_size = Some(16 * 1024 * 1024);
-    let (ws, _) = match tokio_tungstenite::client_async_with_config(
-        &params.url,
-        stream,
-        Some(ws_config),
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::debug!(error = %e, "nexus-collab/reconnect: ws handshake failed");
-            return SessionOutcome::HandshakeFailed;
-        }
-    };
+    let (ws, _) =
+        match tokio_tungstenite::client_async_with_config(&params.url, stream, Some(ws_config))
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(error = %e, "nexus-collab/reconnect: ws handshake failed");
+                return SessionOutcome::HandshakeFailed;
+            }
+        };
     let (mut sink, mut stream) = ws.split();
 
     // Send Hello.
@@ -334,8 +331,7 @@ async fn run_one_session(
     // outer cycle bounds total wait time via backoff sleeps).
     let reply = loop {
         match stream.next().await {
-            Some(Ok(Message::Text(t))) => match serde_json::from_str::<ServerMessage>(t.as_ref())
-            {
+            Some(Ok(Message::Text(t))) => match serde_json::from_str::<ServerMessage>(t.as_ref()) {
                 Ok(m) => break m,
                 Err(e) => {
                     tracing::debug!(error = %e, "nexus-collab/reconnect: bad hello reply");
@@ -345,9 +341,7 @@ async fn run_one_session(
             Some(Ok(
                 Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_),
             )) => {}
-            None | Some(Ok(Message::Close(_)) | Err(_)) => {
-                return SessionOutcome::HandshakeFailed
-            }
+            None | Some(Ok(Message::Close(_)) | Err(_)) => return SessionOutcome::HandshakeFailed,
         }
     };
     match reply {
@@ -465,9 +459,9 @@ async fn run_inbound(
     while let Some(frame) = stream.next().await {
         let text = match frame {
             Ok(Message::Text(t)) => t,
-            Ok(
-                Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_),
-            ) => continue,
+            Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_)) => {
+                continue
+            }
             Ok(Message::Close(_))
             | Err(
                 tokio_tungstenite::tungstenite::Error::ConnectionClosed

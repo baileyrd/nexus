@@ -151,17 +151,18 @@ mod tests {
     #[test]
     fn unknown_source_resolves_to_unknown() {
         let r = Router::from_config(&cfg("")).unwrap();
-        assert_eq!(r.resolve("nope", Severity::Info, 600), Resolution::UnknownSource);
+        assert_eq!(
+            r.resolve("nope", Severity::Info, 600),
+            Resolution::UnknownSource
+        );
     }
 
     #[test]
     fn routes_to_configured_channels() {
-        let r = Router::from_config(&cfg(
-            r#"
+        let r = Router::from_config(&cfg(r#"
 [sources.workflow]
 route = ["desktop", "discord"]
-"#,
-        ))
+"#))
         .unwrap();
         assert_eq!(
             r.resolve("workflow", Severity::Info, 600),
@@ -171,15 +172,16 @@ route = ["desktop", "discord"]
 
     #[test]
     fn filters_by_min_severity() {
-        let r = Router::from_config(&cfg(
-            r#"
+        let r = Router::from_config(&cfg(r#"
 [sources.workflow]
 route = ["desktop"]
 min_severity = "warn"
-"#,
-        ))
+"#))
         .unwrap();
-        assert_eq!(r.resolve("workflow", Severity::Info, 600), Resolution::Filtered);
+        assert_eq!(
+            r.resolve("workflow", Severity::Info, 600),
+            Resolution::Filtered
+        );
         assert_eq!(
             r.resolve("workflow", Severity::Warn, 600),
             Resolution::Routed(vec![Channel::Desktop]),
@@ -192,13 +194,11 @@ min_severity = "warn"
 
     #[test]
     fn filters_by_quiet_hours() {
-        let r = Router::from_config(&cfg(
-            r#"
+        let r = Router::from_config(&cfg(r#"
 [sources.workflow]
 route = ["desktop"]
 quiet_hours = "22:00-08:00"
-"#,
-        ))
+"#))
         .unwrap();
         // 23:00 — inside the quiet window.
         assert_eq!(
@@ -214,37 +214,37 @@ quiet_hours = "22:00-08:00"
 
     #[test]
     fn empty_route_filters() {
-        let r = Router::from_config(&cfg(
-            r#"
+        let r = Router::from_config(&cfg(r#"
 [sources.workflow]
 route = []
-"#,
-        ))
+"#))
         .unwrap();
-        assert_eq!(r.resolve("workflow", Severity::Info, 600), Resolution::Filtered);
+        assert_eq!(
+            r.resolve("workflow", Severity::Info, 600),
+            Resolution::Filtered
+        );
     }
 
     #[test]
     fn swap_config_swaps_rules() {
-        let r = Router::from_config(&cfg(
-            r#"
+        let r = Router::from_config(&cfg(r#"
 [sources.workflow]
 route = ["desktop"]
-"#,
-        ))
+"#))
         .unwrap();
         assert!(matches!(
             r.resolve("workflow", Severity::Info, 600),
             Resolution::Routed(_)
         ));
-        r.swap_config(&cfg(
-            r#"
+        r.swap_config(&cfg(r#"
 [sources.agent]
 route = ["discord"]
-"#,
-        ))
-        .unwrap();
-        assert_eq!(r.resolve("workflow", Severity::Info, 600), Resolution::UnknownSource);
+"#))
+            .unwrap();
+        assert_eq!(
+            r.resolve("workflow", Severity::Info, 600),
+            Resolution::UnknownSource
+        );
         assert_eq!(
             r.resolve("agent", Severity::Info, 600),
             Resolution::Routed(vec![Channel::Discord]),
@@ -253,15 +253,13 @@ route = ["discord"]
 
     #[test]
     fn source_names_reflect_loaded_config() {
-        let r = Router::from_config(&cfg(
-            r#"
+        let r = Router::from_config(&cfg(r#"
 [sources.alpha]
 route = ["desktop"]
 
 [sources.beta]
 route = ["discord"]
-"#,
-        ))
+"#))
         .unwrap();
         let mut names = r.source_names();
         names.sort();

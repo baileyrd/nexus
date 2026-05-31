@@ -34,7 +34,8 @@ pub enum WorkflowParseError {
 /// [`WorkflowParseError::MissingField`] when semantic invariants
 /// (non-empty name, non-empty trigger type) fail.
 pub fn parse_workflow_text(s: &str) -> Result<Workflow, WorkflowParseError> {
-    let workflow: Workflow = toml::from_str(s).map_err(|e| WorkflowParseError::Toml(e.to_string()))?;
+    let workflow: Workflow =
+        toml::from_str(s).map_err(|e| WorkflowParseError::Toml(e.to_string()))?;
     validate(&workflow)?;
     Ok(workflow)
 }
@@ -65,8 +66,7 @@ fn validate(w: &Workflow) -> Result<(), WorkflowParseError> {
     // AIG-03 — type-specific trigger validation. Catches invalid
     // cron expressions, non-`/` webhook paths, and malformed
     // file_event regex / event lists at parse time.
-    crate::trigger_validation::validate_trigger(w)
-        .map_err(WorkflowParseError::InvalidTrigger)?;
+    crate::trigger_validation::validate_trigger(w).map_err(WorkflowParseError::InvalidTrigger)?;
     Ok(())
 }
 
@@ -148,7 +148,10 @@ name = "   "
 type = "manual"
 "#;
         let err = parse_workflow_text(src).unwrap_err();
-        assert!(matches!(err, WorkflowParseError::MissingField("workflow.name")));
+        assert!(matches!(
+            err,
+            WorkflowParseError::MissingField("workflow.name")
+        ));
     }
 
     #[test]
@@ -162,7 +165,10 @@ name = "T"
 type = ""
 "#;
         let err = parse_workflow_text(src).unwrap_err();
-        assert!(matches!(err, WorkflowParseError::MissingField("trigger.type")));
+        assert!(matches!(
+            err,
+            WorkflowParseError::MissingField("trigger.type")
+        ));
     }
 
     #[test]

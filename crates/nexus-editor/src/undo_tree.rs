@@ -198,22 +198,11 @@ impl UndoTree {
     }
 
     fn to_persisted_full(&self) -> PersistedUndoTree {
-        let transactions = self
-            .transactions
-            .iter()
-            .map(|tx| (**tx).clone())
-            .collect();
-        let mut parent: Vec<(usize, usize)> = self
-            .parent
-            .iter()
-            .map(|(&c, &p)| (c, p))
-            .collect();
+        let transactions = self.transactions.iter().map(|tx| (**tx).clone()).collect();
+        let mut parent: Vec<(usize, usize)> = self.parent.iter().map(|(&c, &p)| (c, p)).collect();
         parent.sort_unstable();
-        let mut children: Vec<(Option<usize>, Vec<usize>)> = self
-            .children
-            .iter()
-            .map(|(k, v)| (*k, v.clone()))
-            .collect();
+        let mut children: Vec<(Option<usize>, Vec<usize>)> =
+            self.children.iter().map(|(k, v)| (*k, v.clone())).collect();
         children.sort_by_key(|(k, _)| *k);
         PersistedUndoTree {
             transactions,
@@ -525,7 +514,10 @@ mod tests {
         assert_eq!(persisted.parent, vec![(1, 0), (2, 1)]);
         // The cap-induced linearization always rebuilds children
         // mappings, including the virtual-root entry.
-        assert!(persisted.children.iter().any(|(k, v)| *k == None && v == &vec![0usize]));
+        assert!(persisted
+            .children
+            .iter()
+            .any(|(k, v)| *k == None && v == &vec![0usize]));
     }
 
     #[test]

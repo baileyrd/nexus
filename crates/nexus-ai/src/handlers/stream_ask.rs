@@ -9,13 +9,18 @@ use nexus_plugins::PluginError;
 
 use crate::activity_log::ActivityRecorder;
 use crate::config::AiConfig;
-use crate::handlers::shared::{build_ai_provider, build_embedding_provider, exec_err, record_activity_error};
+use crate::handlers::shared::{
+    build_ai_provider, build_embedding_provider, exec_err, record_activity_error,
+};
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface};
 
 // Same shape as handle_stream_chat — every error path records an
 // `ActivityEntry` so the timeline reflects retrieval failures, embed
 // failures, etc. alongside successes.
-#[allow(clippy::too_many_lines, reason = "BL-037 records on every exit path; flow stays linear")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "BL-037 records on every exit path; flow stays linear"
+)]
 pub(crate) async fn handle_stream_ask(
     ctx: Arc<KernelPluginContext>,
     ai_cfg: Option<AiConfig>,
@@ -73,11 +78,15 @@ pub(crate) async fn handle_stream_ask(
 
     let Some(ai_cfg) = ai_cfg else {
         record_err("stream_ask: no AI chat provider configured".into()).await;
-        return Err(exec_err("stream_ask: no AI chat provider configured".to_string()));
+        return Err(exec_err(
+            "stream_ask: no AI chat provider configured".to_string(),
+        ));
     };
     let Some(embed_cfg) = embed_cfg else {
         record_err("stream_ask: no embedding provider configured".into()).await;
-        return Err(exec_err("stream_ask: no embedding provider configured".to_string()));
+        return Err(exec_err(
+            "stream_ask: no embedding provider configured".to_string(),
+        ));
     };
     let ai = match build_ai_provider(&ai_cfg) {
         Ok(p) => p,
@@ -130,7 +139,10 @@ pub(crate) async fn handle_stream_ask(
         }
     };
 
-    let text = match ai.chat_stream_with(&messages, Some(&system), &on_chunk).await {
+    let text = match ai
+        .chat_stream_with(&messages, Some(&system), &on_chunk)
+        .await
+    {
         Ok(t) => t,
         Err(e) => {
             let msg = format!("stream_ask: {e}");

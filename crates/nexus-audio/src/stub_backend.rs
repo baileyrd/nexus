@@ -8,8 +8,7 @@
 //! or silent fallback.
 
 use crate::backend::{
-    AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput, TranscriptionOutput,
-    TtsProvider,
+    AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput, TranscriptionOutput, TtsProvider,
 };
 use crate::AudioError;
 
@@ -36,7 +35,10 @@ impl SttProvider for DisabledStt {
     fn name(&self) -> &'static str {
         self.name
     }
-    fn transcribe(&mut self, _input: TranscriptionInput) -> Result<TranscriptionOutput, AudioError> {
+    fn transcribe(
+        &mut self,
+        _input: TranscriptionInput,
+    ) -> Result<TranscriptionOutput, AudioError> {
         Err(AudioError::BackendNotEnabled {
             backend: self.name.to_string(),
             reason: self.reason.to_string(),

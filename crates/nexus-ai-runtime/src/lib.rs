@@ -67,24 +67,23 @@ pub mod supervisor;
 /// subsystems (today: `nexus-ai::indexing_daemon`).
 pub use pool::shared_pool_handle;
 
+/// Re-export Move 7 event-input types so callers can register ambient
+/// triggers and work with the perception unit without reaching into the
+/// `event_input` module directly.
+pub use event_input::{
+    AmbientTrigger, EventInput, EventInputMode, TriggerFilter, TriggerId, TriggerRegistry,
+};
+/// Re-export Move 3 proposal/snapshot types for callers that submit
+/// actions through the capability gate or query the rollback ledger.
+pub use proposal::{
+    Proposal, ProposalId, ProposalState, ProposalStore, ProposedAction, Snapshot, SnapshotEntry,
+    SnapshotId,
+};
 /// Re-export session identity types so callers only need one `use`
 /// path for the AI-runtime's session surface.
 pub use session::{Budget, Session, SessionId, SessionKind, SessionOutcome, SessionState, Step};
 /// Re-export the Supervisor and its admission-control config.
 pub use supervisor::{AdmissionConfig, Supervisor};
-/// Re-export Move 3 proposal/snapshot types for callers that submit
-/// actions through the capability gate or query the rollback ledger.
-pub use proposal::{
-    Proposal, ProposalId, ProposalState, ProposalStore, ProposedAction,
-    Snapshot, SnapshotEntry, SnapshotId,
-};
-/// Re-export Move 7 event-input types so callers can register ambient
-/// triggers and work with the perception unit without reaching into the
-/// `event_input` module directly.
-pub use event_input::{
-    AmbientTrigger, EventInput, EventInputMode, TriggerFilter, TriggerId,
-    TriggerRegistry,
-};
 
 /// Reverse-DNS plugin id — also the bus-topic prefix the republisher
 /// owns (`com.nexus.ai.runtime.*`).

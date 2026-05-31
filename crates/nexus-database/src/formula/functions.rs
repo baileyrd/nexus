@@ -46,7 +46,7 @@ pub fn call(name: &str, args: &[FormulaValue]) -> Result<FormulaValue> {
                 FormulaValue::String(s) => Ok(FormulaValue::Number(s.len() as f64)),
                 FormulaValue::Array(a) => Ok(FormulaValue::Number(a.len() as f64)),
                 _ => Ok(FormulaValue::Number(
-                    args[0].to_display_string().len() as f64,
+                    args[0].to_display_string().len() as f64
                 )),
             }
         }
@@ -61,10 +61,7 @@ pub fn call(name: &str, args: &[FormulaValue]) -> Result<FormulaValue> {
         "slice" => {
             check_args_range(name, args, 2, 3)?;
             let s = args[0].to_display_string();
-            let start = args[1]
-                .as_number()
-                .map_or(0, |n| n as usize)
-                .min(s.len());
+            let start = args[1].as_number().map_or(0, |n| n as usize).min(s.len());
             let end = args
                 .get(2)
                 .and_then(FormulaValue::as_number)
@@ -104,16 +101,15 @@ pub fn call(name: &str, args: &[FormulaValue]) -> Result<FormulaValue> {
         "round" => {
             check_args_range(name, args, 1, 2)?;
             let n = require_number(name, &args[0])?;
-            let places = args
-                .get(1)
-                .and_then(FormulaValue::as_number)
-                .unwrap_or(0.0) as i32;
+            let places = args.get(1).and_then(FormulaValue::as_number).unwrap_or(0.0) as i32;
             let factor = 10_f64.powi(places);
             Ok(FormulaValue::Number((n * factor).round() / factor))
         }
         "floor" => {
             check_args(name, args, 1)?;
-            Ok(FormulaValue::Number(require_number(name, &args[0])?.floor()))
+            Ok(FormulaValue::Number(
+                require_number(name, &args[0])?.floor(),
+            ))
         }
         "ceil" => {
             check_args(name, args, 1)?;
@@ -283,19 +279,11 @@ fn check_args(name: &str, args: &[FormulaValue], expected: usize) -> Result<()> 
     Ok(())
 }
 
-fn check_args_range(
-    name: &str,
-    args: &[FormulaValue],
-    min: usize,
-    max: usize,
-) -> Result<()> {
+fn check_args_range(name: &str, args: &[FormulaValue], min: usize, max: usize) -> Result<()> {
     if args.len() < min || args.len() > max {
         return Err(formula_err(
             name,
-            &format!(
-                "expected {min}–{max} argument(s), got {}",
-                args.len()
-            ),
+            &format!("expected {min}–{max} argument(s), got {}", args.len()),
         ));
     }
     Ok(())
@@ -306,10 +294,7 @@ fn require_number(func: &str, val: &FormulaValue) -> Result<f64> {
         .ok_or_else(|| formula_err(func, "expected a number"))
 }
 
-fn require_date_str(
-    func: &str,
-    val: &FormulaValue,
-) -> Result<chrono::NaiveDateTime> {
+fn require_date_str(func: &str, val: &FormulaValue) -> Result<chrono::NaiveDateTime> {
     let s = match val {
         FormulaValue::Date(d) => d.clone(),
         FormulaValue::String(s) => s.clone(),
@@ -498,8 +483,14 @@ mod tests {
     #[test]
     fn fn_year_month_day() {
         let date = FormulaValue::Date("2026-04-15T10:30:00".to_string());
-        assert_eq!(call_ok("year", vec![date.clone()]), FormulaValue::Number(2026.0));
-        assert_eq!(call_ok("month", vec![date.clone()]), FormulaValue::Number(4.0));
+        assert_eq!(
+            call_ok("year", vec![date.clone()]),
+            FormulaValue::Number(2026.0)
+        );
+        assert_eq!(
+            call_ok("month", vec![date.clone()]),
+            FormulaValue::Number(4.0)
+        );
         assert_eq!(call_ok("day", vec![date]), FormulaValue::Number(15.0));
     }
 

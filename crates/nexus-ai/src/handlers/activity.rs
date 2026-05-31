@@ -15,8 +15,10 @@ pub(crate) async fn handle_activity_list(
         // Pre-`wire_context`: no recorder yet. Return an empty list
         // rather than erroring so the shell can poll on activate
         // without a race.
-        return serde_json::to_value(&AiActivityListResult { entries: Vec::new() })
-            .map_err(|e| exec_err(format!("activity_list: encode: {e}")));
+        return serde_json::to_value(&AiActivityListResult {
+            entries: Vec::new(),
+        })
+        .map_err(|e| exec_err(format!("activity_list: encode: {e}")));
     };
     // The on-disk log is oldest-first; the IPC contract returns
     // newest-first. Reverse + cap.

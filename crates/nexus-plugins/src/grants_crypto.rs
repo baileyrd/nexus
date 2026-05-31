@@ -31,11 +31,11 @@
 //! warning, and grants reset to deny-all (per the BL-101 DoD: forces
 //! re-consent).
 
+use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng},
     AeadCore, ChaCha20Poly1305, Key, Nonce,
 };
-use chacha20poly1305::aead::rand_core::RngCore;
 
 const MAGIC: &[u8; 6] = b"NXENC1";
 const NONCE_LEN: usize = 12;
@@ -261,11 +261,8 @@ mod tests {
     #[test]
     fn decrypt_returns_none_on_wrong_key() {
         let payload = b"{}";
-        let blob = encrypt_blob(
-            &GrantsKey::with_test_key("dev.test", fixed_key()),
-            payload,
-        )
-        .expect("encrypt");
+        let blob = encrypt_blob(&GrantsKey::with_test_key("dev.test", fixed_key()), payload)
+            .expect("encrypt");
         let mut other_key = fixed_key();
         other_key[0] ^= 0x01;
         let wrong = GrantsKey::with_test_key("dev.test", other_key);

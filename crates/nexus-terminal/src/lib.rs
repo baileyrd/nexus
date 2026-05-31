@@ -84,35 +84,32 @@ pub use ai::{
 };
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
-pub use core_plugin::{
-    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CrossSessionSearchArgs, RunSavedArgs,
-    SuggestArgs, SuggestResponse,
-    CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
-    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ReplEvalArgs, ReplInfo,
-    ReplStartArgs, ReplStartResponse, ResizeArgs, SearchOutputArgs,
-    SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
-    WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
-    HANDLER_ADHOC_DELETE, HANDLER_ADHOC_GET, HANDLER_ADHOC_LIST, HANDLER_ADHOC_PROMOTE,
-    HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION, HANDLER_CROSS_SESSION_SEARCH,
-    HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
-    HANDLER_OPEN_IN_TERMINAL, HANDLER_READ_RAW_SINCE, HANDLER_REPL_EVAL, HANDLER_REPL_LIST,
-    HANDLER_REPL_START, HANDLER_REPL_STOP, HANDLER_RUN_SAVED, HANDLER_SUGGEST,
-    HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
-    HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT, HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT,
-    HANDLER_WAIT_FOR_PATTERN, IPC_HANDLERS, MANIFEST_DEPS, PLUGIN_ID,
-};
-pub use external_terminal::{
-    parse_kind as parse_terminal_kind, TerminalKind, DEFAULT_PRIORITY,
-};
 pub use compound::{
-    execute_chain, parse_command_chain, requires_single_shell, ChainOutcome, CommandStep,
-    Operator, SkipReason, StepOutcome,
+    execute_chain, parse_command_chain, requires_single_shell, ChainOutcome, CommandStep, Operator,
+    SkipReason, StepOutcome,
+};
+pub use core_plugin::{
+    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CreateSessionArgs, CreateSessionResponse,
+    CrossSessionSearchArgs, OutputStreamPayload, PumpArgs, PumpResponse, ReadOutputArgs,
+    ReadRawSinceArgs, ReadRawSinceResponse, ReplEvalArgs, ReplInfo, ReplStartArgs,
+    ReplStartResponse, ResizeArgs, RunSavedArgs, SearchOutputArgs, SendInputArgs, SendRawInputArgs,
+    SessionIdArgs, SuggestArgs, SuggestResponse, TerminalCorePlugin, WaitForPatternArgs,
+    WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX, HANDLER_ADHOC_DELETE,
+    HANDLER_ADHOC_GET, HANDLER_ADHOC_LIST, HANDLER_ADHOC_PROMOTE, HANDLER_CLOSE_SESSION,
+    HANDLER_CREATE_SESSION, HANDLER_CROSS_SESSION_SEARCH, HANDLER_GET_SESSION_INFO,
+    HANDLER_LIST_SESSIONS, HANDLER_OPEN_IN_TERMINAL, HANDLER_PUMP, HANDLER_READ_OUTPUT,
+    HANDLER_READ_RAW_SINCE, HANDLER_REPL_EVAL, HANDLER_REPL_LIST, HANDLER_REPL_START,
+    HANDLER_REPL_STOP, HANDLER_RUN_SAVED, HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE,
+    HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER, HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT,
+    HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT, HANDLER_SUGGEST, HANDLER_WAIT_FOR_PATTERN,
+    IPC_HANDLERS, MANIFEST_DEPS, PLUGIN_ID,
 };
 pub use env::{
     interpolate_env, is_secret_key, mask_secrets, parse_env_file, parse_env_text, resolve_env,
     REDACTED,
 };
 pub use error::TerminalError;
+pub use external_terminal::{parse_kind as parse_terminal_kind, TerminalKind, DEFAULT_PRIORITY};
 pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
@@ -125,8 +122,8 @@ pub use precmd::{
     run_pre_commands, PreCommandOptions, PreCommandOutcome, ShellFamily, DEFAULT_STEP_TIMEOUT,
 };
 pub use procmgr::{
-    ManagedConfig, ManagedProcess, ManagedState, TransitionError,
-    DEFAULT_AUTO_RESTART_BACKOFF_MS, DEFAULT_PRE_COMMAND_TIMEOUT,
+    ManagedConfig, ManagedProcess, ManagedState, TransitionError, DEFAULT_AUTO_RESTART_BACKOFF_MS,
+    DEFAULT_PRE_COMMAND_TIMEOUT,
 };
 pub use profile::{
     profile_path_for_shell, profile_source_command, profile_source_command_for_path,

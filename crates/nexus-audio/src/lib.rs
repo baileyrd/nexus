@@ -50,16 +50,16 @@
 pub mod backend;
 pub mod config;
 pub mod core_plugin;
-pub mod ipc;
 mod error;
-mod provider_backend;
-mod stub_backend;
+pub mod ipc;
 /// BL-117 local backends. Compiled in only with the `local-audio`
 /// feature; default builds fall through to the
 /// [`stub_backend`] family which returns
 /// [`AudioError::BackendNotEnabled`] from the first dispatch.
 #[cfg(feature = "local-audio")]
 mod local_backend;
+mod provider_backend;
+mod stub_backend;
 
 pub use backend::{
     AudioBackends, AudioFormat, SttProvider, SynthesisOutput, TranscriptionInput,

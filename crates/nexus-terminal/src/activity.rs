@@ -13,9 +13,7 @@ use crate::server::TerminalEvent;
 pub(crate) fn build_activity_entry(
     event: &TerminalEvent,
 ) -> Option<nexus_types::activity::ActivityEntry> {
-    use nexus_types::activity::{
-        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
-    };
+    use nexus_types::activity::{ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface};
 
     let session_id = event.session_id().to_string();
     let mut entry = ActivityEntry::now(
@@ -56,9 +54,7 @@ pub(crate) fn build_activity_entry(
             limit_mb,
         } => {
             entry.outcome = ActivityOutcome::Error;
-            entry.prompt = format!(
-                "session {id} killed (OOM): rss={rss_bytes} limit={limit_mb}MB"
-            );
+            entry.prompt = format!("session {id} killed (OOM): rss={rss_bytes} limit={limit_mb}MB");
             entry.error = Some(format!("memory limit exceeded ({limit_mb}MB)"));
         }
         // Streaming / internal variants don't reach the activity log.

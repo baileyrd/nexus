@@ -89,8 +89,8 @@ fn boot_pair() -> (
         loader: _loader,
     } = runtime;
     let event_bus = kernel.event_bus();
-    let server = RemoteServer::new(Arc::new(context), event_bus)
-        .with_timeout(Duration::from_secs(30));
+    let server =
+        RemoteServer::new(Arc::new(context), event_bus).with_timeout(Duration::from_secs(30));
     Box::leak(Box::new(kernel));
 
     // server_reader pairs with client_writer.

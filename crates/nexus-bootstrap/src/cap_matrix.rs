@@ -241,9 +241,10 @@ fn alias_set(
     }
     let version_prefix = format!("{command}.v");
     for c in commands {
-        if c.starts_with(&version_prefix) && c[version_prefix.len()..]
-            .chars()
-            .all(|ch| ch.is_ascii_digit())
+        if c.starts_with(&version_prefix)
+            && c[version_prefix.len()..]
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
         {
             out.push(c.clone());
         }

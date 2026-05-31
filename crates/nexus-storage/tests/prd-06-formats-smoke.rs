@@ -22,7 +22,9 @@ fn canvas_write_and_read_round_trip() {
             {"id": "e1", "from": "n1", "to": "n2", "type": "dashed", "label": "references"}
         ]
     }"#;
-    engine.write_file("project.canvas", json.as_bytes()).unwrap();
+    engine
+        .write_file("project.canvas", json.as_bytes())
+        .unwrap();
 
     let canvas = engine.read_canvas("project.canvas").unwrap();
     assert_eq!(canvas.nodes.len(), 2);
@@ -38,9 +40,7 @@ fn canvas_indexed_as_canvas_type() {
     let json = r#"{"nodes":[],"edges":[]}"#;
     engine.write_file("empty.canvas", json.as_bytes()).unwrap();
 
-    let files = engine
-        .query_files(&FileFilter::default())
-        .unwrap();
+    let files = engine.query_files(&FileFilter::default()).unwrap();
     let canvas_file = files.iter().find(|f| f.path == "empty.canvas");
     assert!(canvas_file.is_some(), "canvas should be indexed");
     assert_eq!(canvas_file.unwrap().file_type, "canvas");
@@ -51,14 +51,18 @@ fn canvas_rewrite_replaces_data() {
     let (_dir, engine) = engine();
 
     let json1 = r#"{"nodes":[{"id":"n1","type":"text","text":"A","x":0,"y":0,"width":100,"height":100}],"edges":[]}"#;
-    engine.write_file("rewrite.canvas", json1.as_bytes()).unwrap();
+    engine
+        .write_file("rewrite.canvas", json1.as_bytes())
+        .unwrap();
     assert_eq!(engine.read_canvas("rewrite.canvas").unwrap().nodes.len(), 1);
 
     let json2 = r#"{"nodes":[
         {"id":"n1","type":"text","text":"A","x":0,"y":0,"width":100,"height":100},
         {"id":"n2","type":"text","text":"B","x":200,"y":0,"width":100,"height":100}
     ],"edges":[]}"#;
-    engine.write_file("rewrite.canvas", json2.as_bytes()).unwrap();
+    engine
+        .write_file("rewrite.canvas", json2.as_bytes())
+        .unwrap();
     assert_eq!(engine.read_canvas("rewrite.canvas").unwrap().nodes.len(), 2);
 }
 
@@ -86,7 +90,9 @@ fn canvas_file_node_creates_graph_link() {
         "nodes": [{"id":"n1","type":"file","file":"notes/target.md","x":0,"y":0,"width":200,"height":200}],
         "edges": []
     }"#;
-    engine.write_file("overview.canvas", json.as_bytes()).unwrap();
+    engine
+        .write_file("overview.canvas", json.as_bytes())
+        .unwrap();
 
     // The canvas should have an outgoing link in the graph.
     let outgoing = engine.outgoing_links("overview.canvas").unwrap();
@@ -244,7 +250,10 @@ fn bases_validation_rejects_bad_records() {
     let good = nexus_storage::bases::BaseRecord {
         id: "r1".to_string(),
         deleted_at: None,
-        fields: serde_json::json!({"title": "Valid"}).as_object().unwrap().clone(),
+        fields: serde_json::json!({"title": "Valid"})
+            .as_object()
+            .unwrap()
+            .clone(),
     };
     assert!(nexus_storage::bases::validate_record(&schema, &good).is_ok());
 
@@ -298,7 +307,10 @@ fn bases_views_round_trip() {
     assert_eq!(table_view.view_type, nexus_storage::bases::ViewType::Table);
     assert_eq!(table_view.fields.len(), 2);
     let kanban_view = loaded.views.iter().find(|v| v.name == "By Status").unwrap();
-    assert_eq!(kanban_view.view_type, nexus_storage::bases::ViewType::Kanban);
+    assert_eq!(
+        kanban_view.view_type,
+        nexus_storage::bases::ViewType::Kanban
+    );
     assert_eq!(kanban_view.group_field.as_deref(), Some("status"));
 }
 
@@ -319,7 +331,10 @@ fn bases_full_lifecycle() {
     base.records.push(nexus_storage::bases::BaseRecord {
         id: "p1".to_string(),
         deleted_at: None,
-        fields: serde_json::json!({"name": "Nexus", "status": "active"}).as_object().unwrap().clone(),
+        fields: serde_json::json!({"name": "Nexus", "status": "active"})
+            .as_object()
+            .unwrap()
+            .clone(),
     });
     nexus_storage::bases::save_base(&base_dir, &base).unwrap();
     engine.index_base("Projects.bases", &base).unwrap();

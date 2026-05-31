@@ -6,7 +6,11 @@ use chrono::{DateTime, TimeZone, Utc};
 use git2::{ApplyLocation, DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
-use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, RebaseResult, CherryPickResult, ConflictVersions, DiffLineKind, DiffLine, TagInfo, StashEntry};
+use crate::types::{
+    BlameEntry, BranchInfo, CherryPickResult, ConflictVersions, DiffLine, DiffLineKind, FileStatus,
+    GitState, HunkDiff, LogEntry, MergeResult, RebaseResult, RepoState, StashEntry, StatusEntry,
+    TagInfo,
+};
 
 /// Git engine backed by `git2::Repository`.
 ///
@@ -33,9 +37,8 @@ impl GitEngine {
     /// Returns [`GitError::NotARepo`] if no git repository exists at
     /// `path` (the parent dirs are no longer searched).
     pub fn open(path: &Path) -> Result<Self, GitError> {
-        let repo = Repository::open(path).map_err(|_| {
-            GitError::NotARepo(path.display().to_string())
-        })?;
+        let repo =
+            Repository::open(path).map_err(|_| GitError::NotARepo(path.display().to_string()))?;
         Ok(Self { repo })
     }
 
@@ -44,7 +47,7 @@ impl GitEngine {
     /// # Panics
     ///
     /// Panics if the repository is bare (no workdir).
-    #[must_use] 
+    #[must_use]
     pub fn repo_root(&self) -> &Path {
         self.repo.workdir().expect("bare repos not supported")
     }
@@ -61,15 +64,16 @@ impl GitEngine {
         };
 
         let head_oid = match self.repo.head() {
-            Ok(head) => head
-                .target().map_or_else(|| "(none)".to_string(), |oid| oid.to_string()[..7].to_string()),
+            Ok(head) => head.target().map_or_else(
+                || "(none)".to_string(),
+                |oid| oid.to_string()[..7].to_string(),
+            ),
             Err(_) => "(none)".to_string(),
         };
 
         let is_dirty = {
             let mut opts = StatusOptions::new();
-            opts.include_untracked(true)
-                .recurse_untracked_dirs(false);
+            opts.include_untracked(true).recurse_untracked_dirs(false);
             match self.repo.statuses(Some(&mut opts)) {
                 Ok(statuses) => !statuses.is_empty(),
                 Err(_) => false,
@@ -78,13 +82,14 @@ impl GitEngine {
 
         let repo_state = match self.repo.state() {
             git2::RepositoryState::Merge => RepoState::Merge,
-            git2::RepositoryState::Rebase
-            | git2::RepositoryState::RebaseMerge => RepoState::Rebase,
+            git2::RepositoryState::Rebase | git2::RepositoryState::RebaseMerge => RepoState::Rebase,
             git2::RepositoryState::RebaseInteractive => RepoState::RebaseInteractive,
-            git2::RepositoryState::CherryPick
-            | git2::RepositoryState::CherryPickSequence => RepoState::CherryPick,
-            git2::RepositoryState::Revert
-            | git2::RepositoryState::RevertSequence => RepoState::Revert,
+            git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+                RepoState::CherryPick
+            }
+            git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => {
+                RepoState::Revert
+            }
             git2::RepositoryState::Bisect => RepoState::Bisect,
             _ => RepoState::Clean,
         };
@@ -98,10 +103,7 @@ impl GitEngine {
             Some(name) => match self.repo.find_branch(name, git2::BranchType::Local) {
                 Ok(local) => match local.upstream() {
                     Ok(up) => {
-                        let oid = up
-                            .get()
-                            .target()
-                            .map(|o| o.to_string()[..7].to_string());
+                        let oid = up.get().target().map(|o| o.to_string()[..7].to_string());
                         let up_name = up.name().ok().flatten().map(String::from);
                         (oid, up_name)
                     }
@@ -169,10 +171,9 @@ impl GitEngine {
         let mut opts = DiffOptions::new();
         opts.pathspec(path.to_string_lossy().as_ref());
 
-        let diff = self.repo.diff_tree_to_workdir_with_index(
-            head_tree.as_ref(),
-            Some(&mut opts),
-        )?;
+        let diff = self
+            .repo
+            .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))?;
 
         collect_hunks(&diff)
     }
@@ -185,11 +186,9 @@ impl GitEngine {
     pub fn diff_staged(&self) -> Result<Vec<(String, Vec<HunkDiff>)>, GitError> {
         let head_tree = self.head_tree()?;
 
-        let diff = self.repo.diff_tree_to_index(
-            head_tree.as_ref(),
-            None,
-            None,
-        )?;
+        let diff = self
+            .repo
+            .diff_tree_to_index(head_tree.as_ref(), None, None)?;
 
         collect_file_hunks(&diff)
     }
@@ -389,11 +388,8 @@ impl GitEngine {
     pub fn unstage_all(&self) -> Result<(), GitError> {
         let head = self.repo.head()?;
         let commit = head.peel_to_commit()?;
-        self.repo.reset(
-            commit.as_object(),
-            git2::ResetType::Mixed,
-            None,
-        )?;
+        self.repo
+            .reset(commit.as_object(), git2::ResetType::Mixed, None)?;
         Ok(())
     }
 
@@ -494,14 +490,9 @@ impl GitEngine {
         };
         let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
 
-        let oid = self.repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &parent_refs,
-        )?;
+        let oid = self
+            .repo
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)?;
 
         Ok(oid.to_string()[..7].to_string())
     }
@@ -521,10 +512,7 @@ impl GitEngine {
         let mut result = Vec::new();
         for branch in self.repo.branches(Some(git2::BranchType::Local))? {
             let (branch, _) = branch?;
-            let name = branch
-                .name()?
-                .unwrap_or("")
-                .to_string();
+            let name = branch.name()?.unwrap_or("").to_string();
             let is_head = head_name.as_deref() == Some(&name);
             let upstream = branch
                 .upstream()
@@ -561,9 +549,8 @@ impl GitEngine {
     pub fn switch_branch(&self, name: &str) -> Result<(), GitError> {
         let refname = format!("refs/heads/{name}");
         self.repo.set_head(&refname)?;
-        self.repo.checkout_head(Some(
-            git2::build::CheckoutBuilder::new().force(),
-        ))?;
+        self.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
         Ok(())
     }
 
@@ -653,14 +640,21 @@ impl GitEngine {
             let direct_oid = r.target().unwrap_or(git2::Oid::zero());
             let (is_annotated, message) = match self.repo.find_tag(direct_oid) {
                 Ok(tag_obj) => {
-                    let msg = tag_obj.message().map(|m| m.trim_end_matches('\n').to_string());
+                    let msg = tag_obj
+                        .message()
+                        .map(|m| m.trim_end_matches('\n').to_string());
                     (true, msg)
                 }
                 Err(_) => (false, None),
             };
             let commit = r.peel_to_commit()?;
             let target_hash = commit.id().to_string()[..7].to_string();
-            tags.push(TagInfo { name, target_hash, is_annotated, message });
+            tags.push(TagInfo {
+                name,
+                target_hash,
+                is_annotated,
+                message,
+            });
         }
         tags.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(tags)
@@ -800,8 +794,13 @@ impl GitEngine {
     /// Returns [`GitError`] on any libgit2 failure.
     pub fn merge(&self, branch_name: &str) -> Result<MergeResult, GitError> {
         // Resolve the branch to an annotated commit.
-        let annotated = self.repo.find_reference(&format!("refs/heads/{branch_name}"))
-            .or_else(|_| self.repo.find_reference(&format!("refs/remotes/{branch_name}")))
+        let annotated = self
+            .repo
+            .find_reference(&format!("refs/heads/{branch_name}"))
+            .or_else(|_| {
+                self.repo
+                    .find_reference(&format!("refs/remotes/{branch_name}"))
+            })
             .and_then(|reference| self.repo.reference_to_annotated_commit(&reference))?;
 
         let (analysis, _preference) = self.repo.merge_analysis(&[&annotated])?;
@@ -819,9 +818,8 @@ impl GitEngine {
             let target_oid = annotated.id();
             let mut head_ref = self.repo.head()?;
             head_ref.set_target(target_oid, &format!("fast-forward to {branch_name}"))?;
-            self.repo.checkout_head(Some(
-                git2::build::CheckoutBuilder::new().force(),
-            ))?;
+            self.repo
+                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
             return Ok(MergeResult {
                 fast_forward: true,
                 conflicts: Vec::new(),
@@ -909,7 +907,8 @@ impl GitEngine {
     /// Returns [`GitError`] on any libgit2 failure.
     pub fn abort_merge(&self) -> Result<(), GitError> {
         let head = self.repo.head()?.peel_to_commit()?;
-        self.repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+        self.repo
+            .reset(head.as_object(), git2::ResetType::Hard, None)?;
         self.repo.cleanup_state()?;
         Ok(())
     }
@@ -977,7 +976,10 @@ impl GitEngine {
         let onto_ref = self
             .repo
             .find_reference(&format!("refs/heads/{onto_branch}"))
-            .or_else(|_| self.repo.find_reference(&format!("refs/remotes/{onto_branch}")))?;
+            .or_else(|_| {
+                self.repo
+                    .find_reference(&format!("refs/remotes/{onto_branch}"))
+            })?;
         let onto = self.repo.reference_to_annotated_commit(&onto_ref)?;
 
         let head_ref = self.repo.head()?;
@@ -986,18 +988,25 @@ impl GitEngine {
         // we replay our commits.
         let branch = upstream;
 
-        let mut rebase = self.repo.rebase(Some(&branch), Some(&onto), Some(&onto), None)?;
+        let mut rebase = self
+            .repo
+            .rebase(Some(&branch), Some(&onto), Some(&onto), None)?;
 
         let mut commits_rebased: u32 = 0;
         loop {
-            let Some(op_result) = rebase.next() else { break };
+            let Some(op_result) = rebase.next() else {
+                break;
+            };
             let _op = op_result?;
 
             // Conflicts surface as a non-empty index conflicts iter.
             let index = self.repo.index()?;
             if index.has_conflicts() {
                 let conflicts = collect_conflict_paths(&index)?;
-                return Ok(RebaseResult { commits_rebased, conflicts });
+                return Ok(RebaseResult {
+                    commits_rebased,
+                    conflicts,
+                });
             }
 
             // No conflicts on this op — commit it and advance.
@@ -1012,7 +1021,10 @@ impl GitEngine {
         }
 
         rebase.finish(None)?;
-        Ok(RebaseResult { commits_rebased, conflicts: Vec::new() })
+        Ok(RebaseResult {
+            commits_rebased,
+            conflicts: Vec::new(),
+        })
     }
 
     /// Abort an in-progress rebase (BL-088), restoring the
@@ -1044,7 +1056,10 @@ impl GitEngine {
         let mut index = self.repo.index()?;
         if index.has_conflicts() {
             let conflicts = collect_conflict_paths(&index)?;
-            return Ok(CherryPickResult { conflicts, commit_hash: None });
+            return Ok(CherryPickResult {
+                conflicts,
+                commit_hash: None,
+            });
         }
 
         let tree_id = index.write_tree()?;
@@ -1074,7 +1089,8 @@ impl GitEngine {
     /// Returns [`GitError`] on any libgit2 failure.
     pub fn abort_cherry_pick(&self) -> Result<(), GitError> {
         let head = self.repo.head()?.peel_to_commit()?;
-        self.repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+        self.repo
+            .reset(head.as_object(), git2::ResetType::Hard, None)?;
         self.repo.cleanup_state()?;
         Ok(())
     }
@@ -1135,9 +1151,7 @@ fn make_callbacks() -> git2::RemoteCallbacks<'static> {
                         return Ok(cred);
                     }
                     // 2. Cached passphrase from OS keyring.
-                    if let Ok(passphrase) =
-                        vault.retrieve(&format!("ssh-passphrase:{key_name}"))
-                    {
+                    if let Ok(passphrase) = vault.retrieve(&format!("ssh-passphrase:{key_name}")) {
                         if let Ok(cred) =
                             git2::Cred::ssh_key(username, None, &key_path, Some(&passphrase))
                         {
@@ -1288,36 +1302,42 @@ fn build_patch_for_hunks(
     reverse: bool,
 ) -> Vec<u8> {
     // Collect only the valid, in-range indices up front.
-    let selected: Vec<&HunkDiff> = indices
-        .iter()
-        .filter_map(|&i| all_hunks.get(i))
-        .collect();
+    let selected: Vec<&HunkDiff> = indices.iter().filter_map(|&i| all_hunks.get(i)).collect();
     if selected.is_empty() {
         return Vec::new();
     }
 
     let path_str = path.to_string_lossy();
     // libgit2's Diff::from_buffer requires the full git diff header.
-    let mut out = format!(
-        "diff --git a/{path_str} b/{path_str}\n--- a/{path_str}\n+++ b/{path_str}\n"
-    );
+    let mut out =
+        format!("diff --git a/{path_str} b/{path_str}\n--- a/{path_str}\n+++ b/{path_str}\n");
 
     for hunk in selected {
         let (os, oc, ns, nc) = if reverse {
-            (hunk.new_start, hunk.new_count, hunk.old_start, hunk.old_count)
+            (
+                hunk.new_start,
+                hunk.new_count,
+                hunk.old_start,
+                hunk.old_count,
+            )
         } else {
-            (hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count)
+            (
+                hunk.old_start,
+                hunk.old_count,
+                hunk.new_start,
+                hunk.new_count,
+            )
         };
 
         out.push_str(&format!("@@ -{os},{oc} +{ns},{nc} @@\n"));
 
         for line in &hunk.lines {
             let prefix = match (reverse, &line.kind) {
-                (false, DiffLineKind::Added)   => '+',
+                (false, DiffLineKind::Added) => '+',
                 (false, DiffLineKind::Removed) => '-',
-                (true,  DiffLineKind::Added)   => '-',
-                (true,  DiffLineKind::Removed) => '+',
-                _                              => ' ',
+                (true, DiffLineKind::Added) => '-',
+                (true, DiffLineKind::Removed) => '+',
+                _ => ' ',
             };
             // Normalize: strip any trailing newline then re-add exactly one.
             // libgit2 includes the line terminator in DiffLine::content; the
@@ -1445,12 +1465,12 @@ mod tests {
         let hunks = engine.diff_file(Path::new("file.txt")).unwrap();
         assert!(!hunks.is_empty(), "expected at least one hunk");
 
-        let has_added = hunks.iter().any(|h| {
-            h.lines.iter().any(|l| l.kind == DiffLineKind::Added)
-        });
-        let has_removed = hunks.iter().any(|h| {
-            h.lines.iter().any(|l| l.kind == DiffLineKind::Removed)
-        });
+        let has_added = hunks
+            .iter()
+            .any(|h| h.lines.iter().any(|l| l.kind == DiffLineKind::Added));
+        let has_removed = hunks
+            .iter()
+            .any(|h| h.lines.iter().any(|l| l.kind == DiffLineKind::Removed));
         assert!(has_added, "expected added lines in diff");
         assert!(has_removed, "expected removed lines in diff");
     }
@@ -1650,7 +1670,10 @@ mod tests {
         engine.create_branch("feature-a").unwrap();
         let branches = engine.branches().unwrap();
         let names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
-        assert!(names.contains(&"feature-a"), "feature-a should be in branches: {names:?}");
+        assert!(
+            names.contains(&"feature-a"),
+            "feature-a should be in branches: {names:?}"
+        );
     }
 
     #[test]
@@ -1673,10 +1696,18 @@ mod tests {
         make_commit(&engine, "initial");
 
         engine.create_branch("to-delete").unwrap();
-        assert!(engine.branches().unwrap().iter().any(|b| b.name == "to-delete"));
+        assert!(engine
+            .branches()
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "to-delete"));
 
         engine.delete_branch("to-delete").unwrap();
-        assert!(!engine.branches().unwrap().iter().any(|b| b.name == "to-delete"));
+        assert!(!engine
+            .branches()
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "to-delete"));
     }
 
     #[test]
@@ -1884,8 +1915,14 @@ mod tests {
         engine.discard_hunks(path, &[0]).unwrap();
 
         let after_text = fs::read_to_string(dir.path().join("file.txt")).unwrap();
-        assert!(after_text.starts_with("line1\n"), "hunk 0 should be reverted: got {after_text:?}");
-        assert!(after_text.contains("CHANGED9"), "hunk 1 should survive: got {after_text:?}");
+        assert!(
+            after_text.starts_with("line1\n"),
+            "hunk 0 should be reverted: got {after_text:?}"
+        );
+        assert!(
+            after_text.contains("CHANGED9"),
+            "hunk 1 should survive: got {after_text:?}"
+        );
 
         let hunks_after = engine.diff_file(path).unwrap();
         assert_eq!(
@@ -1911,7 +1948,10 @@ mod tests {
         engine.discard_hunks(path, &[0]).unwrap();
 
         let restored = fs::read_to_string(dir.path().join("file.txt")).unwrap();
-        assert_eq!(restored, "alpha\n", "workdir should match HEAD after full discard");
+        assert_eq!(
+            restored, "alpha\n",
+            "workdir should match HEAD after full discard"
+        );
         let after = engine.diff_file(path).unwrap();
         assert!(
             after.is_empty(),
@@ -1934,6 +1974,9 @@ mod tests {
         engine.discard_hunks(path, &[42]).unwrap();
 
         let unchanged = fs::read_to_string(dir.path().join("file.txt")).unwrap();
-        assert_eq!(unchanged, "beta\n", "out-of-range discard must not touch the workdir");
+        assert_eq!(
+            unchanged, "beta\n",
+            "out-of-range discard must not touch the workdir"
+        );
     }
 }

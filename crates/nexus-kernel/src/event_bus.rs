@@ -50,8 +50,7 @@ pub fn type_id_in_namespace(type_id: &str, plugin_id: &str) -> bool {
 /// still populates `emitting_plugin` and `metadata.source_plugin_id`
 /// from the caller, so subscribers can attribute each entry to its
 /// real source; spoofing the topic name doesn't spoof attribution.
-const KERNEL_OWNED_SHARED_TOPICS: &[&str] =
-    &[nexus_types::activity::ACTIVITY_APPENDED_TOPIC];
+const KERNEL_OWNED_SHARED_TOPICS: &[&str] = &[nexus_types::activity::ACTIVITY_APPENDED_TOPIC];
 
 /// Return true iff `type_id` is one of the [`KERNEL_OWNED_SHARED_TOPICS`].
 #[doc(hidden)]
@@ -277,13 +276,13 @@ fn matches_filter(event: &NexusEvent, filter: &EventFilter) -> bool {
 #[allow(clippy::match_same_arms)]
 fn variant_name(event: &NexusEvent) -> &'static str {
     match event {
-        NexusEvent::PluginLoaded { .. }     => "PluginLoaded",
-        NexusEvent::PluginStarted { .. }    => "PluginStarted",
-        NexusEvent::PluginStopped { .. }    => "PluginStopped",
-        NexusEvent::PluginCrashed { .. }    => "PluginCrashed",
+        NexusEvent::PluginLoaded { .. } => "PluginLoaded",
+        NexusEvent::PluginStarted { .. } => "PluginStarted",
+        NexusEvent::PluginStopped { .. } => "PluginStopped",
+        NexusEvent::PluginCrashed { .. } => "PluginCrashed",
         NexusEvent::CapabilityGranted { .. } => "CapabilityGranted",
-        NexusEvent::CapabilityDenied { .. }  => "CapabilityDenied",
-        NexusEvent::Custom { .. }            => "Custom",
+        NexusEvent::CapabilityDenied { .. } => "CapabilityDenied",
+        NexusEvent::Custom { .. } => "Custom",
     }
 }
 
@@ -344,7 +343,8 @@ mod tests {
         // Publish a PluginStarted event — should be received
         bus.publish_kernel(NexusEvent::PluginStarted {
             plugin_id: "com.b".to_string(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let published = sub.recv().await.unwrap();
         match &published.event {
@@ -362,7 +362,8 @@ mod tests {
             type_id: "com.test.ping".to_string(),
             emitting_plugin: "com.test".to_string(),
             payload: serde_json::json!({}),
-        }).unwrap();
+        })
+        .unwrap();
 
         let published = sub.recv().await.unwrap();
         match &published.event {
@@ -415,7 +416,8 @@ mod tests {
         let mut sub = bus.subscribe(EventFilter::All);
 
         for i in 0..5 {
-            bus.publish_kernel(plugin_loaded_event(&format!("com.test.{i}"))).unwrap();
+            bus.publish_kernel(plugin_loaded_event(&format!("com.test.{i}")))
+                .unwrap();
         }
 
         // First recv should return Lagged, not an actual event.
@@ -452,7 +454,11 @@ mod tests {
         let published = sub.recv().await.unwrap();
         assert_eq!(published.metadata.source_plugin_id, "com.example.plugin");
         match &published.event {
-            NexusEvent::Custom { type_id, emitting_plugin, .. } => {
+            NexusEvent::Custom {
+                type_id,
+                emitting_plugin,
+                ..
+            } => {
                 assert_eq!(type_id, "com.example.plugin.ping");
                 assert_eq!(emitting_plugin, "com.example.plugin");
             }
@@ -485,11 +491,7 @@ mod tests {
     #[test]
     fn publish_plugin_rejects_substring_prefix_spoof() {
         let bus = EventBus::new(16);
-        let result = bus.publish_plugin(
-            "com.foo",
-            "com.foobar.event",
-            serde_json::json!({}),
-        );
+        let result = bus.publish_plugin("com.foo", "com.foobar.event", serde_json::json!({}));
         assert!(
             matches!(
                 result,
@@ -504,23 +506,15 @@ mod tests {
     #[test]
     fn publish_plugin_allows_dotted_suffix() {
         let bus = EventBus::new(16);
-        bus.publish_plugin(
-            "com.foo",
-            "com.foo.event",
-            serde_json::json!({}),
-        )
-        .expect("dotted suffix is the legitimate namespace shape");
+        bus.publish_plugin("com.foo", "com.foo.event", serde_json::json!({}))
+            .expect("dotted suffix is the legitimate namespace shape");
     }
 
     #[test]
     fn publish_plugin_allows_bare_plugin_id_as_type_id() {
         let bus = EventBus::new(16);
-        bus.publish_plugin(
-            "com.foo",
-            "com.foo",
-            serde_json::json!({}),
-        )
-        .expect("bare plugin_id as type_id is unambiguously the plugin's");
+        bus.publish_plugin("com.foo", "com.foo", serde_json::json!({}))
+            .expect("bare plugin_id as type_id is unambiguously the plugin's");
     }
 
     #[tokio::test]
@@ -542,10 +536,7 @@ mod tests {
                 emitting_plugin,
                 ..
             } => {
-                assert_eq!(
-                    type_id,
-                    nexus_types::activity::ACTIVITY_APPENDED_TOPIC
-                );
+                assert_eq!(type_id, nexus_types::activity::ACTIVITY_APPENDED_TOPIC);
                 // Attribution still tracks the real caller — the shared
                 // topic is not an anonymity escape hatch.
                 assert_eq!(emitting_plugin, "com.nexus.terminal");
@@ -565,11 +556,17 @@ mod tests {
         assert!(!type_id_in_namespace("com.foo", "com.foobar"));
 
         // Disjoint ids are rejected.
-        assert!(!type_id_in_namespace("com.evil.spoofed", "com.legit.plugin"));
+        assert!(!type_id_in_namespace(
+            "com.evil.spoofed",
+            "com.legit.plugin"
+        ));
 
         // Legitimate suffix shapes pass.
         assert!(type_id_in_namespace("com.foo.event", "com.foo"));
-        assert!(type_id_in_namespace("com.foo.deeply.nested.event", "com.foo"));
+        assert!(type_id_in_namespace(
+            "com.foo.deeply.nested.event",
+            "com.foo"
+        ));
         assert!(type_id_in_namespace("com.foo", "com.foo"));
     }
 
@@ -591,7 +588,8 @@ mod tests {
 
         // Cause a lag
         for i in 0..5 {
-            bus.publish_kernel(plugin_loaded_event(&format!("com.test.{i}"))).unwrap();
+            bus.publish_kernel(plugin_loaded_event(&format!("com.test.{i}")))
+                .unwrap();
         }
 
         // First recv — lagged

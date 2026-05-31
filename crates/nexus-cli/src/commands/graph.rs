@@ -51,12 +51,7 @@ pub fn unresolved(app: &mut App) -> Result<()> {
     let headers = &["Target", "Referenced By"];
     let rows: Vec<Vec<String>> = links
         .iter()
-        .map(|u| {
-            vec![
-                u.target_path.clone(),
-                u.referenced_by.join(", "),
-            ]
-        })
+        .map(|u| vec![u.target_path.clone(), u.referenced_by.join(", ")])
         .collect();
 
     print_list(format, headers, &rows);
@@ -120,13 +115,7 @@ pub fn entity_list(app: &mut App, entity_type: Option<&str>, limit: u32) -> Resu
             let headers = &["Id", "Type", "Description"];
             let rows: Vec<Vec<String>> = hits
                 .iter()
-                .map(|h| {
-                    vec![
-                        h.id.clone(),
-                        h.entity_type.clone(),
-                        h.description.clone(),
-                    ]
-                })
+                .map(|h| vec![h.id.clone(), h.entity_type.clone(), h.description.clone()])
                 .collect();
             print_list(format, headers, &rows);
         }
@@ -197,7 +186,12 @@ pub fn entity_search(
     let format = app.format();
     let (invoker, rt) = app.invoker()?;
     let hits = rt
-        .block_on(ipc::entity_search(&*invoker, query, entity_type, Some(limit)))
+        .block_on(ipc::entity_search(
+            &*invoker,
+            query,
+            entity_type,
+            Some(limit),
+        ))
         .map_err(|e| anyhow::anyhow!("entity_search failed: {e}"))?;
 
     if hits.is_empty() {
@@ -316,9 +310,7 @@ pub fn dream_cycle_run(
         // Use the lower of the two thresholds as the IPC review floor so
         // we still see merge candidates even if `--merge-threshold` is
         // below the server-side default.
-        let scan_floor = review_threshold
-            .unwrap_or(0.92)
-            .min(merge_thr);
+        let scan_floor = review_threshold.unwrap_or(0.92).min(merge_thr);
         let pairs = rt
             .block_on(ipc::entity_find_duplicates(&*invoker, Some(scan_floor)))
             .map_err(|e| anyhow::anyhow!("dream-cycle dedup failed: {e}"))?;
@@ -330,8 +322,7 @@ pub fn dream_cycle_run(
         // Track ids that already participated in a merge this pass so a
         // single entity can't be merged into two different survivors in
         // one cycle (deterministic across pair order).
-        let mut consumed: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
+        let mut consumed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for p in &pairs {
             if p.similarity >= merge_thr {
                 if consumed.contains(&p.a) || consumed.contains(&p.b) {
@@ -455,9 +446,16 @@ pub fn dream_cycle_run(
                 });
                 match ai_ipc_call(&*invoker, rt, "enrich_entity", args) {
                     Ok(reply) => {
-                        if reply.get("skipped").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                        if reply
+                            .get("skipped")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                        {
                             skipped += 1;
-                        } else if reply.get("applied").and_then(serde_json::Value::as_bool).unwrap_or(false)
+                        } else if reply
+                            .get("applied")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
                             || dry_run
                         {
                             enriched += 1;
@@ -608,13 +606,7 @@ pub fn entity_duplicates(app: &mut App, threshold: f32) -> Result<()> {
             let headers = &["Similarity", "A", "B"];
             let rows: Vec<Vec<String>> = pairs
                 .iter()
-                .map(|p| {
-                    vec![
-                        format!("{:.3}", p.similarity),
-                        p.a.clone(),
-                        p.b.clone(),
-                    ]
-                })
+                .map(|p| vec![format!("{:.3}", p.similarity), p.a.clone(), p.b.clone()])
                 .collect();
             print_list(format, headers, &rows);
         }

@@ -139,12 +139,8 @@ pub async fn create_session(
 /// # Errors
 /// Propagates any IPC / signal-delivery failure.
 pub async fn close_session(invoker: &(dyn IpcInvoker + Send + Sync), id: &str) -> Result<()> {
-    let _: serde_json::Value = call(
-        invoker,
-        "close_session",
-        serde_json::json!({ "id": id }),
-    )
-    .await?;
+    let _: serde_json::Value =
+        call(invoker, "close_session", serde_json::json!({ "id": id })).await?;
     Ok(())
 }
 
@@ -227,9 +223,7 @@ pub async fn read_output(
 ///
 /// # Errors
 /// Propagates any IPC failure.
-pub async fn list_sessions(
-    invoker: &(dyn IpcInvoker + Send + Sync),
-) -> Result<Vec<SessionInfo>> {
+pub async fn list_sessions(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<Vec<SessionInfo>> {
     call(invoker, "list_sessions", serde_json::json!({})).await
 }
 
@@ -242,10 +236,5 @@ pub async fn get_session_info(
     invoker: &(dyn IpcInvoker + Send + Sync),
     id: &str,
 ) -> Result<SessionInfo> {
-    call(
-        invoker,
-        "get_session_info",
-        serde_json::json!({ "id": id }),
-    )
-    .await
+    call(invoker, "get_session_info", serde_json::json!({ "id": id })).await
 }

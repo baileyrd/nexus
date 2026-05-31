@@ -128,27 +128,28 @@ pub(crate) async fn handle_suggest(
     // misbehaving provider can still leak the future past the
     // deadline; the outer timeout is the load-bearing guarantee.
     let llm_call = ctx.ipc_call("com.nexus.ai", "stream_chat", ai_args, SUGGEST_LLM_TIMEOUT);
-    let enriched_text: Option<String> =
-        match tokio::time::timeout(SUGGEST_LLM_TIMEOUT, llm_call).await {
-            Ok(Ok(response)) => {
-                let text = response
-                    .get("text")
-                    .and_then(|v: &serde_json::Value| v.as_str())
-                    .map(str::to_string);
-                text.filter(|s: &String| !s.trim().is_empty())
-            }
-            Ok(Err(err)) => {
-                tracing::debug!(plugin = PLUGIN_ID, %err, "suggest: AI call failed; falling back to static rule");
-                None
-            }
-            Err(_) => {
-                tracing::debug!(
-                    plugin = PLUGIN_ID,
-                    "suggest: AI call timed out after 10s; falling back to static rule"
-                );
-                None
-            }
-        };
+    let enriched_text: Option<String> = match tokio::time::timeout(SUGGEST_LLM_TIMEOUT, llm_call)
+        .await
+    {
+        Ok(Ok(response)) => {
+            let text = response
+                .get("text")
+                .and_then(|v: &serde_json::Value| v.as_str())
+                .map(str::to_string);
+            text.filter(|s: &String| !s.trim().is_empty())
+        }
+        Ok(Err(err)) => {
+            tracing::debug!(plugin = PLUGIN_ID, %err, "suggest: AI call failed; falling back to static rule");
+            None
+        }
+        Err(_) => {
+            tracing::debug!(
+                plugin = PLUGIN_ID,
+                "suggest: AI call timed out after 10s; falling back to static rule"
+            );
+            None
+        }
+    };
 
     let response = match enriched_text {
         Some(reason) => SuggestResponse {

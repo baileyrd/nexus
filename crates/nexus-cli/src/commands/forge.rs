@@ -68,9 +68,13 @@ pub fn init(app: &App, dir: Option<PathBuf>, template: Option<&str>) -> Result<(
         _ => {
             println!("Forge initialised at '{location}'");
             if stats.files_processed > 0 {
-                println!("Indexed {} existing files ({} blocks, {} links, {} tags)",
-                    stats.files_processed, stats.blocks_indexed,
-                    stats.links_found, stats.tags_found);
+                println!(
+                    "Indexed {} existing files ({} blocks, {} links, {} tags)",
+                    stats.files_processed,
+                    stats.blocks_indexed,
+                    stats.links_found,
+                    stats.tags_found
+                );
             }
         }
     }
@@ -156,12 +160,12 @@ pub fn import(
             .cloned()
             .unwrap_or_default();
         println!("Import plan ({}):", abs.display());
-        println!(
-            "  copies:    {} new file(s)",
-            copies.len()
-        );
+        println!("  copies:    {} new file(s)", copies.len());
         println!("  identical: {} file(s) (no action)", skips.len());
-        println!("  conflicts: {} (strategy = {on_conflict})", conflicts.len());
+        println!(
+            "  conflicts: {} (strategy = {on_conflict})",
+            conflicts.len()
+        );
         if !conflicts.is_empty() {
             println!("\nConflicting paths:");
             for c in &conflicts {
@@ -173,7 +177,10 @@ pub fn import(
         return Ok(());
     }
 
-    let copied = resp.get("copied").and_then(serde_json::Value::as_array).map_or(0, Vec::len);
+    let copied = resp
+        .get("copied")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
     let overwritten = resp
         .get("overwritten")
         .and_then(serde_json::Value::as_array)
@@ -215,10 +222,8 @@ pub fn doctor(app: &mut App, fix: bool) -> Result<()> {
     let indexed = rt
         .block_on(ipc::query_files(&*invoker))
         .map_err(|e| anyhow::anyhow!("doctor: query_files: {e}"))?;
-    let indexed_by_path: std::collections::HashMap<&str, &ipc::FileRecord> = indexed
-        .iter()
-        .map(|r| (r.path.as_str(), r))
-        .collect();
+    let indexed_by_path: std::collections::HashMap<&str, &ipc::FileRecord> =
+        indexed.iter().map(|r| (r.path.as_str(), r)).collect();
 
     let on_disk = walk_markdown_files(&forge_root)?;
     let on_disk_set: std::collections::HashSet<&str> =
@@ -423,4 +428,3 @@ pub fn reindex(app: &mut App) -> Result<()> {
 
     Ok(())
 }
-

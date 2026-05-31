@@ -271,8 +271,7 @@ fn handle_search_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
                 app.search.selected -= 1;
             }
         }
-        (KeyModifiers::NONE, KeyCode::Char(c))
-        | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+        (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
             app.search.query.push(c);
             app.search.cursor_pos += 1;
         }
@@ -302,15 +301,13 @@ fn handle_find_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             scroll_to_match(app);
         }
         // Shift+N → prev match
-        (KeyModifiers::SHIFT, KeyCode::Char('N'))
-        | (KeyModifiers::NONE, KeyCode::Char('N'))
+        (KeyModifiers::SHIFT, KeyCode::Char('N')) | (KeyModifiers::NONE, KeyCode::Char('N'))
             if !app.find.query.is_empty() =>
         {
             app.find.prev_match();
             scroll_to_match(app);
         }
-        (KeyModifiers::NONE, KeyCode::Char(c))
-        | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+        (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
             app.find.query.push(c);
             app.find.cursor_pos += 1;
             let lines = app.viewer.lines.clone();
@@ -428,22 +425,14 @@ fn open_in_editor(app: &mut TuiApp) -> Result<()> {
 
     // Leave the TUI.
     crossterm::terminal::disable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
 
     // Spawn editor and wait.
     let _ = Command::new(&editor).arg(&full_path).status();
 
     // Re-enter the TUI.
     crossterm::terminal::enable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        EnterAlternateScreen,
-        EnableMouseCapture
-    )?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
 
     // Reload file content from storage (it may have changed).
     let invoker = app.runtime.invoker();
@@ -509,13 +498,11 @@ fn handle_agent_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             app.mode = Mode::Normal;
             return Ok(());
         }
-        (KeyModifiers::NONE, KeyCode::Backspace)
-        | (KeyModifiers::SHIFT, KeyCode::Backspace) => {
+        (KeyModifiers::NONE, KeyCode::Backspace) | (KeyModifiers::SHIFT, KeyCode::Backspace) => {
             app.agent.backspace();
             return Ok(());
         }
-        (KeyModifiers::NONE, KeyCode::Char(c))
-        | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+        (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
             app.agent.insert_char(c);
             return Ok(());
         }
@@ -544,16 +531,14 @@ fn handle_ai_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             app.submit_ai();
             return Ok(());
         }
-        (KeyModifiers::NONE, KeyCode::Backspace)
-        | (KeyModifiers::SHIFT, KeyCode::Backspace) => {
+        (KeyModifiers::NONE, KeyCode::Backspace) | (KeyModifiers::SHIFT, KeyCode::Backspace) => {
             app.ai.backspace();
             return Ok(());
         }
         // Plain printable input. Excludes the modifier-prefixed
         // arrow keys etc. that crossterm reports as Char-with-
         // -modifier; those fall through to the catch-all below.
-        (KeyModifiers::NONE, KeyCode::Char(c))
-        | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+        (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
             app.ai.insert_char(c);
             return Ok(());
         }
@@ -570,14 +555,20 @@ mod bl132_key_tests {
     #[test]
     fn approve_keys_map_to_true() {
         for code in [KeyCode::Char('y'), KeyCode::Char('Y'), KeyCode::Enter] {
-            assert_eq!(key_to_approval_decision(KeyModifiers::NONE, code), Some(true));
+            assert_eq!(
+                key_to_approval_decision(KeyModifiers::NONE, code),
+                Some(true)
+            );
         }
     }
 
     #[test]
     fn reject_keys_map_to_false() {
         for code in [KeyCode::Char('n'), KeyCode::Char('N'), KeyCode::Esc] {
-            assert_eq!(key_to_approval_decision(KeyModifiers::NONE, code), Some(false));
+            assert_eq!(
+                key_to_approval_decision(KeyModifiers::NONE, code),
+                Some(false)
+            );
         }
     }
 

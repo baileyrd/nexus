@@ -243,14 +243,20 @@ fn node_content_json(node: &CanvasNode) -> Option<String> {
         CanvasNodeType::Text => node.text.as_ref().map(|t| serde_json::json!({"text": t})),
         CanvasNodeType::Link => node.url.as_ref().map(|u| serde_json::json!({"url": u})),
         CanvasNodeType::Group => node.label.as_ref().map(|l| serde_json::json!({"label": l})),
-        CanvasNodeType::Database => node.source.as_ref().map(|s| serde_json::json!({"source": s})),
-        CanvasNodeType::Terminal => node.command.as_ref().map(|c| serde_json::json!({"command": c})),
+        CanvasNodeType::Database => node
+            .source
+            .as_ref()
+            .map(|s| serde_json::json!({"source": s})),
+        CanvasNodeType::Terminal => node
+            .command
+            .as_ref()
+            .map(|c| serde_json::json!({"command": c})),
     };
     obj.map(|v| v.to_string())
 }
 
 /// Extract file paths referenced by file-type nodes.
-#[must_use] 
+#[must_use]
 pub fn extract_file_links(canvas: &CanvasFile) -> Vec<String> {
     canvas
         .nodes
@@ -352,10 +358,7 @@ pub enum CanvasPatchError {
 /// # Errors
 ///
 /// Returns [`CanvasPatchError`] on duplicate-id add.
-pub fn apply_patch(
-    canvas: &mut CanvasFile,
-    ops: &[CanvasPatchOp],
-) -> Result<(), CanvasPatchError> {
+pub fn apply_patch(canvas: &mut CanvasFile, ops: &[CanvasPatchOp]) -> Result<(), CanvasPatchError> {
     for op in ops {
         match op {
             CanvasPatchOp::NodeAdd { node } => {
@@ -522,7 +525,8 @@ mod tests {
                 text: Some("Hello".to_string()),
                 url: None,
                 source: None,
-                command: None, extra: serde_json::Map::new(),
+                command: None,
+                extra: serde_json::Map::new(),
             }],
             edges: vec![CanvasEdge {
                 id: "e1".to_string(),
@@ -530,7 +534,8 @@ mod tests {
                 to_node: "n2".to_string(),
                 edge_type: CanvasEdgeType::Dashed,
                 label: Some("links to".to_string()),
-                color: None, extra: serde_json::Map::new(),
+                color: None,
+                extra: serde_json::Map::new(),
             }],
             ..CanvasFile::default()
         };
@@ -567,16 +572,36 @@ mod tests {
                 CanvasNode {
                     id: "n1".to_string(),
                     node_type: CanvasNodeType::Text,
-                    x: 0.0, y: 0.0, width: 100.0, height: 100.0,
-                    color: None, label: Some("Hello".to_string()), collapsed: false,
-                    file: None, text: Some("content".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                    color: None,
+                    label: Some("Hello".to_string()),
+                    collapsed: false,
+                    file: None,
+                    text: Some("content".to_string()),
+                    url: None,
+                    source: None,
+                    command: None,
+                    extra: serde_json::Map::new(),
                 },
                 CanvasNode {
                     id: "n2".to_string(),
                     node_type: CanvasNodeType::File,
-                    x: 200.0, y: 0.0, width: 250.0, height: 300.0,
-                    color: None, label: None, collapsed: false,
-                    file: Some("notes/a.md".to_string()), text: None, url: None, source: None, command: None, extra: serde_json::Map::new(),
+                    x: 200.0,
+                    y: 0.0,
+                    width: 250.0,
+                    height: 300.0,
+                    color: None,
+                    label: None,
+                    collapsed: false,
+                    file: Some("notes/a.md".to_string()),
+                    text: None,
+                    url: None,
+                    source: None,
+                    command: None,
+                    extra: serde_json::Map::new(),
                 },
             ],
             edges: vec![CanvasEdge {
@@ -585,7 +610,8 @@ mod tests {
                 to_node: "n2".to_string(),
                 edge_type: CanvasEdgeType::Solid,
                 label: Some("references".to_string()),
-                color: None, extra: serde_json::Map::new(),
+                color: None,
+                extra: serde_json::Map::new(),
             }],
             ..CanvasFile::default()
         };
@@ -624,9 +650,19 @@ mod tests {
             nodes: vec![CanvasNode {
                 id: "n1".to_string(),
                 node_type: CanvasNodeType::Text,
-                x: 0.0, y: 0.0, width: 100.0, height: 100.0,
-                color: None, label: None, collapsed: false,
-                file: None, text: Some("hi".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+                color: None,
+                label: None,
+                collapsed: false,
+                file: None,
+                text: Some("hi".to_string()),
+                url: None,
+                source: None,
+                command: None,
+                extra: serde_json::Map::new(),
             }],
             ..CanvasFile::default()
         };
@@ -644,16 +680,36 @@ mod tests {
                 CanvasNode {
                     id: "n1".to_string(),
                     node_type: CanvasNodeType::File,
-                    x: 0.0, y: 0.0, width: 100.0, height: 100.0,
-                    color: None, label: None, collapsed: false,
-                    file: Some("notes/a.md".to_string()), text: None, url: None, source: None, command: None, extra: serde_json::Map::new(),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                    color: None,
+                    label: None,
+                    collapsed: false,
+                    file: Some("notes/a.md".to_string()),
+                    text: None,
+                    url: None,
+                    source: None,
+                    command: None,
+                    extra: serde_json::Map::new(),
                 },
                 CanvasNode {
                     id: "n2".to_string(),
                     node_type: CanvasNodeType::Text,
-                    x: 0.0, y: 0.0, width: 100.0, height: 100.0,
-                    color: None, label: None, collapsed: false,
-                    file: None, text: Some("hi".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                    color: None,
+                    label: None,
+                    collapsed: false,
+                    file: None,
+                    text: Some("hi".to_string()),
+                    url: None,
+                    source: None,
+                    command: None,
+                    extra: serde_json::Map::new(),
                 },
             ],
             ..CanvasFile::default()
@@ -666,9 +722,19 @@ mod tests {
         CanvasNode {
             id: id.to_string(),
             node_type: CanvasNodeType::Text,
-            x, y, width: 100.0, height: 100.0,
-            color: None, label: None, collapsed: false,
-            file: None, text: Some("t".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
+            x,
+            y,
+            width: 100.0,
+            height: 100.0,
+            color: None,
+            label: None,
+            collapsed: false,
+            file: None,
+            text: Some("t".to_string()),
+            url: None,
+            source: None,
+            command: None,
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -679,17 +745,32 @@ mod tests {
             to_node: to.to_string(),
             edge_type: CanvasEdgeType::Solid,
             label: None,
-            color: None, extra: serde_json::Map::new(),
+            color: None,
+            extra: serde_json::Map::new(),
         }
     }
 
     #[test]
     fn apply_patch_node_add_remove_move() {
         let mut c = CanvasFile::default();
-        apply_patch(&mut c, &[CanvasPatchOp::NodeAdd { node: text_node("a", 0.0, 0.0) }]).unwrap();
+        apply_patch(
+            &mut c,
+            &[CanvasPatchOp::NodeAdd {
+                node: text_node("a", 0.0, 0.0),
+            }],
+        )
+        .unwrap();
         assert_eq!(c.nodes.len(), 1);
 
-        apply_patch(&mut c, &[CanvasPatchOp::NodeMove { id: "a".into(), x: 50.0, y: 60.0 }]).unwrap();
+        apply_patch(
+            &mut c,
+            &[CanvasPatchOp::NodeMove {
+                id: "a".into(),
+                x: 50.0,
+                y: 60.0,
+            }],
+        )
+        .unwrap();
         assert!((c.nodes[0].x - 50.0).abs() < f64::EPSILON);
         assert!((c.nodes[0].y - 60.0).abs() < f64::EPSILON);
 
@@ -699,9 +780,17 @@ mod tests {
 
     #[test]
     fn apply_patch_duplicate_node_add_errors() {
-        let mut c = CanvasFile { nodes: vec![text_node("a", 0.0, 0.0)], ..Default::default() };
-        let err = apply_patch(&mut c, &[CanvasPatchOp::NodeAdd { node: text_node("a", 1.0, 1.0) }])
-            .unwrap_err();
+        let mut c = CanvasFile {
+            nodes: vec![text_node("a", 0.0, 0.0)],
+            ..Default::default()
+        };
+        let err = apply_patch(
+            &mut c,
+            &[CanvasPatchOp::NodeAdd {
+                node: text_node("a", 1.0, 1.0),
+            }],
+        )
+        .unwrap_err();
         assert!(matches!(err, CanvasPatchError::DuplicateNodeId(ref id) if id == "a"));
     }
 
@@ -713,7 +802,10 @@ mod tests {
             ..Default::default()
         };
         apply_patch(&mut c, &[CanvasPatchOp::NodeRemove { id: "a".into() }]).unwrap();
-        assert!(c.edges.is_empty(), "edge incident to removed node must be dropped");
+        assert!(
+            c.edges.is_empty(),
+            "edge incident to removed node must be dropped"
+        );
     }
 
     #[test]
@@ -740,11 +832,19 @@ mod tests {
     #[test]
     fn apply_patch_unknown_id_is_noop() {
         let mut c = CanvasFile::default();
-        apply_patch(&mut c, &[
-            CanvasPatchOp::NodeRemove { id: "ghost".into() },
-            CanvasPatchOp::NodeMove { id: "ghost".into(), x: 1.0, y: 1.0 },
-            CanvasPatchOp::EdgeRemove { id: "ghost".into() },
-        ]).unwrap();
+        apply_patch(
+            &mut c,
+            &[
+                CanvasPatchOp::NodeRemove { id: "ghost".into() },
+                CanvasPatchOp::NodeMove {
+                    id: "ghost".into(),
+                    x: 1.0,
+                    y: 1.0,
+                },
+                CanvasPatchOp::EdgeRemove { id: "ghost".into() },
+            ],
+        )
+        .unwrap();
         assert!(c.nodes.is_empty() && c.edges.is_empty());
     }
 
@@ -754,11 +854,22 @@ mod tests {
             nodes: vec![text_node("a", 0.0, 0.0), text_node("b", 0.0, 0.0)],
             ..Default::default()
         };
-        apply_patch(&mut c, &[CanvasPatchOp::EdgeAdd { edge: edge("e1", "a", "b") }]).unwrap();
+        apply_patch(
+            &mut c,
+            &[CanvasPatchOp::EdgeAdd {
+                edge: edge("e1", "a", "b"),
+            }],
+        )
+        .unwrap();
         assert_eq!(c.edges.len(), 1);
 
-        let err = apply_patch(&mut c, &[CanvasPatchOp::EdgeAdd { edge: edge("e1", "a", "b") }])
-            .unwrap_err();
+        let err = apply_patch(
+            &mut c,
+            &[CanvasPatchOp::EdgeAdd {
+                edge: edge("e1", "a", "b"),
+            }],
+        )
+        .unwrap_err();
         assert!(matches!(err, CanvasPatchError::DuplicateEdgeId(_)));
 
         apply_patch(&mut c, &[CanvasPatchOp::EdgeRemove { id: "e1".into() }]).unwrap();
@@ -767,7 +878,10 @@ mod tests {
 
     #[test]
     fn apply_patch_node_update_replaces_in_place() {
-        let mut c = CanvasFile { nodes: vec![text_node("a", 0.0, 0.0)], ..Default::default() };
+        let mut c = CanvasFile {
+            nodes: vec![text_node("a", 0.0, 0.0)],
+            ..Default::default()
+        };
         let mut replacement = text_node("a", 999.0, 999.0);
         replacement.label = Some("updated".to_string());
         apply_patch(&mut c, &[CanvasPatchOp::NodeUpdate { node: replacement }]).unwrap();

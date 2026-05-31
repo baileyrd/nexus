@@ -209,12 +209,7 @@ mod tests {
     use super::*;
 
     fn skill(name: &str, patterns: &[&str]) -> ProceduralEntry {
-        ProceduralEntry::new(
-            name,
-            "test skill",
-            patterns.iter().copied(),
-            "do the thing",
-        )
+        ProceduralEntry::new(name, "test skill", patterns.iter().copied(), "do the thing")
     }
 
     #[test]

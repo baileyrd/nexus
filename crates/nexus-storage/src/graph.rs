@@ -189,7 +189,7 @@ impl KnowledgeGraph {
     }
 
     /// Return graph statistics.
-    #[must_use] 
+    #[must_use]
     pub fn stats(&self) -> GraphStats {
         GraphStats {
             node_count: self.graph.node_count(),
@@ -199,7 +199,7 @@ impl KnowledgeGraph {
     }
 
     /// Return all files that link TO `path`.
-    #[must_use] 
+    #[must_use]
     pub fn backlinks(&self, path: &str) -> Vec<BacklinkResult> {
         let Some(&idx) = self.path_to_node.get(path) else {
             return Vec::new();
@@ -239,7 +239,7 @@ impl KnowledgeGraph {
     }
 
     /// Return all links FROM `path` to other files.
-    #[must_use] 
+    #[must_use]
     pub fn outgoing_links(&self, path: &str) -> Vec<OutgoingLink> {
         let Some(&idx) = self.path_to_node.get(path) else {
             return Vec::new();
@@ -260,7 +260,7 @@ impl KnowledgeGraph {
     }
 
     /// Return all phantom nodes (unresolved link targets) with their referrers.
-    #[must_use] 
+    #[must_use]
     pub fn unresolved_links(&self) -> Vec<UnresolvedLink> {
         self.phantom_nodes
             .iter()
@@ -311,7 +311,7 @@ impl KnowledgeGraph {
 
     /// BFS traversal from `path` up to `depth` hops in both directions.
     /// Returns unique paths excluding the start node.
-    #[must_use] 
+    #[must_use]
     pub fn neighbors(&self, path: &str, depth: usize) -> Vec<String> {
         let Some(&start) = self.path_to_node.get(path) else {
             return Vec::new();
@@ -562,9 +562,7 @@ mod tests {
             EdgeData {
                 link_type: "wikilink".to_string(),
                 link_text: "target".to_string(),
-                fragment: Some(
-                    "^d8e9f0a1-2b3c-4d5e-9f01-abcdef012345".to_string(),
-                ),
+                fragment: Some("^d8e9f0a1-2b3c-4d5e-9f01-abcdef012345".to_string()),
             },
         );
         let bl = kg.backlinks("notes/target.md");
@@ -849,7 +847,11 @@ mod tests {
         );
         let snap = kg.snapshot();
         assert_eq!(snap.nodes.len(), 2);
-        let phantom = snap.nodes.iter().find(|n| n.path == "notes/missing.md").unwrap();
+        let phantom = snap
+            .nodes
+            .iter()
+            .find(|n| n.path == "notes/missing.md")
+            .unwrap();
         assert!(phantom.is_phantom);
         assert_eq!(snap.edges.len(), 1);
         assert!(!snap.edges[0].is_resolved);

@@ -44,7 +44,6 @@ pub(crate) fn delete_branch(h: &GitWorkerHandle, args: &Value) -> Result<Value, 
 pub(crate) fn push(h: &GitWorkerHandle, args: &Value) -> Result<Value, PluginError> {
     let remote = key_string(args, "remote")?;
     let branch = key_string(args, "branch")?;
-    h.with(move |e| e.push(&remote, &branch))
-        .map_err(map_err)?;
+    h.with(move |e| e.push(&remote, &branch)).map_err(map_err)?;
     Ok(json!({"ok": true}))
 }

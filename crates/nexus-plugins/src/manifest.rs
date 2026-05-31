@@ -934,14 +934,22 @@ struct TomlUriHandlerReg {
 #[derive(Deserialize, Default)]
 #[allow(clippy::struct_excessive_bools)]
 struct TomlLifecycle {
-    #[serde(default)] on_load: bool,
-    #[serde(default)] on_init: bool,
-    #[serde(default)] on_start: bool,
-    #[serde(default)] on_stop: bool,
-    #[serde(default)] on_unload: bool,
-    #[serde(default)] on_enable: bool,
-    #[serde(default)] on_disable: bool,
-    #[serde(default)] on_settings_changed: bool,
+    #[serde(default)]
+    on_load: bool,
+    #[serde(default)]
+    on_init: bool,
+    #[serde(default)]
+    on_start: bool,
+    #[serde(default)]
+    on_stop: bool,
+    #[serde(default)]
+    on_unload: bool,
+    #[serde(default)]
+    on_enable: bool,
+    #[serde(default)]
+    on_disable: bool,
+    #[serde(default)]
+    on_settings_changed: bool,
 }
 
 // ─── Conversion helpers ───────────────────────────────────────────────────────
@@ -978,16 +986,12 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
     let runtime = if let Some(ref r) = raw.plugin.runtime {
         let explicit = PluginRuntime::parse(r).ok_or_else(|| PluginError::ManifestInvalid {
             path: path.to_string(),
-            reason: format!(
-                "unknown runtime '{r}'; expected 'native', 'wasm', or 'script'"
-            ),
+            reason: format!("unknown runtime '{r}'; expected 'native', 'wasm', or 'script'"),
         })?;
         if explicit != inferred {
             return Err(PluginError::ManifestInvalid {
                 path: path.to_string(),
-                reason: format!(
-                    "plugin.runtime = {r:?} disagrees with the declared sections"
-                ),
+                reason: format!("plugin.runtime = {r:?} disagrees with the declared sections"),
             });
         }
         explicit
@@ -1733,7 +1737,10 @@ badge = "—"
 template = "---\n\u0000"
 "#;
         let m = parse_manifest(toml, "manifest.toml").unwrap();
-        assert_eq!(m.registrations.slash_commands[0].aliases, Vec::<String>::new());
+        assert_eq!(
+            m.registrations.slash_commands[0].aliases,
+            Vec::<String>::new()
+        );
     }
 }
 
@@ -1789,8 +1796,7 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
     }
 
     // Rule 1: ID format.
-    let id_re =
-        Regex::new(r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$").unwrap();
+    let id_re = Regex::new(r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$").unwrap();
     if !id_re.is_match(id) {
         return Err(PluginError::ManifestValidation {
             plugin_id: id.clone(),
@@ -2003,9 +2009,10 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
             if manifest.script.is_some() {
                 return Err(PluginError::ManifestValidation {
                     plugin_id: id.clone(),
-                    reason: "core plugins are native Rust and must not declare a [script] section; \
+                    reason:
+                        "core plugins are native Rust and must not declare a [script] section; \
                              remove [script] or change trust_level to 'community'"
-                        .to_string(),
+                            .to_string(),
                 });
             }
         }
@@ -2254,8 +2261,7 @@ on_stop = true
             icon: None,
             keybinding: None,
         });
-        validate(&m, dir.path())
-            .expect("ipc/ui handler-id sharing must validate post-ADR-0021");
+        validate(&m, dir.path()).expect("ipc/ui handler-id sharing must validate post-ADR-0021");
     }
 
     #[test]

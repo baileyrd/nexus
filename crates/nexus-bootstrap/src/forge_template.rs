@@ -57,13 +57,7 @@ pub fn apply(root: &Path, template: ForgeTemplate) -> Result<()> {
 }
 
 const OS_DIRS: &[&str] = &[
-    "raw",
-    "wiki",
-    "output",
-    "projects",
-    "ops",
-    "personal",
-    "archive",
+    "raw", "wiki", "output", "projects", "ops", "personal", "archive",
 ];
 
 const OS_CLAUDE_MD: &str = include_str!("../templates/os/CLAUDE.md");

@@ -40,7 +40,7 @@ use async_trait::async_trait;
 use nexus_kernel::{Ipc as _, KernelPluginContext};
 use serde::{Deserialize, Serialize};
 
-use super::registry::{ToolExecutor, ToolError, ToolRegistry, ToolSchema};
+use super::registry::{ToolError, ToolExecutor, ToolRegistry, ToolSchema};
 
 /// Plugin id of the storage core plugin — identical to the constant in
 /// `vectorstore.rs` but kept local so this module is self-contained.
@@ -174,9 +174,9 @@ impl ToolExecutor for ReadFileTool {
         let reply: StorageReadReply = serde_json::from_value(response)
             .map_err(|e| ToolError::ExecutionFailed(format!("read_file: decode: {e}")))?;
 
-        let bytes = reply.bytes.ok_or_else(|| {
-            ToolError::ExecutionFailed(format!("file not found: {}", args.path))
-        })?;
+        let bytes = reply
+            .bytes
+            .ok_or_else(|| ToolError::ExecutionFailed(format!("file not found: {}", args.path)))?;
 
         String::from_utf8(bytes)
             .map_err(|e| ToolError::ExecutionFailed(format!("read_file: not UTF-8: {e}")))
@@ -631,12 +631,7 @@ impl ToolExecutor for TerminalRunSavedTool {
         }
         let response = self
             .ctx
-            .ipc_call(
-                TERMINAL_PLUGIN,
-                "run_saved",
-                payload,
-                STORAGE_IPC_TIMEOUT,
-            )
+            .ipc_call(TERMINAL_PLUGIN, "run_saved", payload, STORAGE_IPC_TIMEOUT)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("terminal run_saved: {e}")))?;
         Ok(response.to_string())
@@ -764,11 +759,7 @@ pub fn register_extended_builtins(registry: &mut ToolRegistry, ctx: Arc<KernelPl
         list_backlinks_schema(),
         Arc::new(ListBacklinksTool::new(Arc::clone(&ctx))),
     );
-    registry.register(
-        "git_log",
-        git_log_schema(),
-        Arc::new(GitLogTool::new(ctx)),
-    );
+    registry.register("git_log", git_log_schema(), Arc::new(GitLogTool::new(ctx)));
 }
 
 #[cfg(test)]
@@ -939,7 +930,8 @@ mod tests {
     #[test]
     fn terminal_builtins_register_under_documented_names() {
         use crate::tools::registry::ToolRegistry;
-        use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+        use nexus_kernel::{
+            CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -972,7 +964,8 @@ mod tests {
     #[test]
     fn extended_builtins_register_under_documented_names() {
         use crate::tools::registry::ToolRegistry;
-        use nexus_kernel::{CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+        use nexus_kernel::{
+            CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
         };
 
         let dir = tempfile::tempdir().unwrap();

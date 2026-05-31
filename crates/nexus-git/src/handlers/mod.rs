@@ -14,7 +14,7 @@ pub(crate) mod branches;
 pub(crate) mod log;
 pub(crate) mod merge;
 pub(crate) mod shared;
-pub(crate) mod stash;
 pub(crate) mod staging;
+pub(crate) mod stash;
 pub(crate) mod status;
 pub(crate) mod tags;

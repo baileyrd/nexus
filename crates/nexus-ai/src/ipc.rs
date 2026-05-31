@@ -536,7 +536,10 @@ pub struct AiGenerateDocsReply {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRecallArgs {
@@ -557,7 +560,10 @@ pub struct EntityRecallArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRecallHitRow {
@@ -579,7 +585,10 @@ pub struct EntityRecallHitRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntityRecallResult {
@@ -600,7 +609,10 @@ pub struct EntityRecallResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EnrichEntityArgs {
@@ -624,7 +636,10 @@ pub struct EnrichEntityArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EnrichEntityResult {
@@ -654,7 +669,10 @@ pub struct EnrichEntityResult {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct InferEntityRelationsArgs {
@@ -675,7 +693,10 @@ pub struct InferEntityRelationsArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct InferredRelationRow {
@@ -694,7 +715,10 @@ pub struct InferredRelationRow {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct InferEntityRelationsResult {
@@ -841,7 +865,10 @@ mod stream_chat_serde_tests {
         assert_eq!(back.mode, Some(AiStreamChatMode::Complete));
         assert_eq!(back.tools, Some(AiToolPolicy::None));
         assert_eq!(back.max_tokens, Some(64));
-        assert_eq!(back.stop.as_deref(), Some(&["\n\n".to_string(), "END".to_string()][..]));
+        assert_eq!(
+            back.stop.as_deref(),
+            Some(&["\n\n".to_string(), "END".to_string()][..])
+        );
         assert_eq!(back.trim, Some(true));
     }
 

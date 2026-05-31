@@ -321,10 +321,7 @@ mod tests {
     fn search_dir_returns_correct_path() {
         let dir = tmp();
         let forge = Forge::new(dir.path());
-        assert_eq!(
-            forge.search_dir(),
-            dir.path().join(".forge").join("search")
-        );
+        assert_eq!(forge.search_dir(), dir.path().join(".forge").join("search"));
     }
 
     // ── init() ────────────────────────────────────────────────────────────────
@@ -380,10 +377,17 @@ mod tests {
         let dir = tmp();
         let forge = Forge::new(dir.path());
         forge.init().expect("init");
-        let body = fs::read_to_string(forge.forge_gitignore_path())
-            .expect("gitignore exists after init");
+        let body =
+            fs::read_to_string(forge.forge_gitignore_path()).expect("gitignore exists after init");
         // Excludes the rebuildable / per-machine state.
-        for needle in &["index.db", "search/", "kv.sqlite3", "lock", "temp/", ".kernel/"] {
+        for needle in &[
+            "index.db",
+            "search/",
+            "kv.sqlite3",
+            "lock",
+            "temp/",
+            ".kernel/",
+        ] {
             assert!(
                 body.contains(needle),
                 "default gitignore should ignore {needle}, got:\n{body}"
@@ -441,9 +445,8 @@ mod tests {
         fs::write(&stale, b"old").expect("write stale");
 
         // Set mtime 2 hours in the past
-        let two_hours_ago = FileTime::from_system_time(
-            SystemTime::now() - Duration::from_secs(7200),
-        );
+        let two_hours_ago =
+            FileTime::from_system_time(SystemTime::now() - Duration::from_secs(7200));
         set_file_mtime(&stale, two_hours_ago).expect("set mtime");
 
         forge.clean_temp().expect("clean_temp");

@@ -115,14 +115,8 @@ fn compile_filter(filter: &Filter) -> (String, Vec<serde_json::Value>) {
     let field_expr = format!("json_extract(data_json, '$.{}')", filter.field);
 
     match filter.operator {
-        FilterOp::Is => (
-            format!("{field_expr} = ?"),
-            vec![filter.value.clone()],
-        ),
-        FilterOp::IsNot => (
-            format!("{field_expr} != ?"),
-            vec![filter.value.clone()],
-        ),
+        FilterOp::Is => (format!("{field_expr} = ?"), vec![filter.value.clone()]),
+        FilterOp::IsNot => (format!("{field_expr} != ?"), vec![filter.value.clone()]),
         FilterOp::Contains => (
             format!("{field_expr} LIKE '%' || ? || '%'"),
             vec![filter.value.clone()],
@@ -163,22 +157,10 @@ fn compile_filter(filter: &Filter) -> (String, Vec<serde_json::Value>) {
             format!("({field_expr} IS NOT NULL AND {field_expr} != '')"),
             vec![],
         ),
-        FilterOp::DateIsBefore => (
-            format!("{field_expr} < ?"),
-            vec![filter.value.clone()],
-        ),
-        FilterOp::DateIsAfter => (
-            format!("{field_expr} > ?"),
-            vec![filter.value.clone()],
-        ),
-        FilterOp::DateIsOnOrBefore => (
-            format!("{field_expr} <= ?"),
-            vec![filter.value.clone()],
-        ),
-        FilterOp::DateIsOnOrAfter => (
-            format!("{field_expr} >= ?"),
-            vec![filter.value.clone()],
-        ),
+        FilterOp::DateIsBefore => (format!("{field_expr} < ?"), vec![filter.value.clone()]),
+        FilterOp::DateIsAfter => (format!("{field_expr} > ?"), vec![filter.value.clone()]),
+        FilterOp::DateIsOnOrBefore => (format!("{field_expr} <= ?"), vec![filter.value.clone()]),
+        FilterOp::DateIsOnOrAfter => (format!("{field_expr} >= ?"), vec![filter.value.clone()]),
     }
 }
 
@@ -205,8 +187,7 @@ fn compile_sort(sort: &Sort) -> String {
 pub fn execute(conn: &Connection, query: &Query) -> Result<QueryResult> {
     // Build WHERE clauses.
     let mut where_parts = vec!["base_id = ?".to_string()];
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
-        vec![Box::new(query.base_id)];
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(query.base_id)];
 
     for filter in &query.filters {
         let (clause, filter_params) = compile_filter(filter);
@@ -267,10 +248,8 @@ pub fn execute(conn: &Connection, query: &Query) -> Result<QueryResult> {
     for row in rows {
         let json_str =
             row.map_err(|e| DatabaseError::QueryError(format!("row read failed: {e}")))?;
-        let record: nexus_types::bases::BaseRecord =
-            serde_json::from_str(&json_str).map_err(|e| {
-                DatabaseError::QueryError(format!("failed to deserialize record: {e}"))
-            })?;
+        let record: nexus_types::bases::BaseRecord = serde_json::from_str(&json_str)
+            .map_err(|e| DatabaseError::QueryError(format!("failed to deserialize record: {e}")))?;
         records.push(record);
     }
 
@@ -407,13 +386,12 @@ fn parse_value(s: &str) -> serde_json::Value {
         return serde_json::Value::Null;
     }
     // Strip quotes.
-    let unquoted = if (s.starts_with('"') && s.ends_with('"'))
-        || (s.starts_with('\'') && s.ends_with('\''))
-    {
-        &s[1..s.len() - 1]
-    } else {
-        s
-    };
+    let unquoted =
+        if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+            &s[1..s.len() - 1]
+        } else {
+            s
+        };
 
     // Try boolean.
     if unquoted.eq_ignore_ascii_case("true") {

@@ -231,9 +231,7 @@ impl SkipReason {
     #[must_use]
     pub const fn description(self) -> &'static str {
         match self {
-            SkipReason::AndFailedPredecessor => {
-                "previous step failed; && guard skipped this step"
-            }
+            SkipReason::AndFailedPredecessor => "previous step failed; && guard skipped this step",
             SkipReason::OrSucceededPredecessor => {
                 "previous step succeeded; || guard skipped this step"
             }
@@ -553,10 +551,7 @@ mod tests {
         let steps = parse_command_chain("true");
         let out = execute_chain(&steps, |_| Ok(7));
         assert_eq!(out.final_exit_code, 7);
-        assert_eq!(
-            out.steps[0].1,
-            StepOutcome::Ran { exit_code: 7 }
-        );
+        assert_eq!(out.steps[0].1, StepOutcome::Ran { exit_code: 7 });
     }
 
     #[test]
@@ -572,7 +567,9 @@ mod tests {
         assert_eq!(out.steps[0].1, StepOutcome::Ran { exit_code: 1 });
         assert_eq!(
             out.steps[1].1,
-            StepOutcome::Skipped { reason: SkipReason::AndFailedPredecessor }
+            StepOutcome::Skipped {
+                reason: SkipReason::AndFailedPredecessor
+            }
         );
         assert_eq!(out.final_exit_code, 1);
     }
@@ -590,7 +587,9 @@ mod tests {
         assert_eq!(out.steps[0].1, StepOutcome::Ran { exit_code: 0 });
         assert_eq!(
             out.steps[1].1,
-            StepOutcome::Skipped { reason: SkipReason::OrSucceededPredecessor }
+            StepOutcome::Skipped {
+                reason: SkipReason::OrSucceededPredecessor
+            }
         );
         assert_eq!(out.final_exit_code, 0);
     }
@@ -626,7 +625,9 @@ mod tests {
         assert!(matches!(out.steps[0].1, StepOutcome::Failed { .. }));
         assert_eq!(
             out.steps[1].1,
-            StepOutcome::Skipped { reason: SkipReason::AndFailedPredecessor }
+            StepOutcome::Skipped {
+                reason: SkipReason::AndFailedPredecessor
+            }
         );
         assert_eq!(out.steps[2].1, StepOutcome::Ran { exit_code: 0 });
         // Runner was called for a and c, not b.
@@ -643,13 +644,16 @@ mod tests {
     #[test]
     fn all_ok_reports_false_when_any_step_exited_non_zero() {
         let steps = parse_command_chain("a ; b");
-        let out = execute_chain(&steps, |step| {
-            if step.command == "a" {
-                Ok(2)
-            } else {
-                Ok(0)
-            }
-        });
+        let out = execute_chain(
+            &steps,
+            |step| {
+                if step.command == "a" {
+                    Ok(2)
+                } else {
+                    Ok(0)
+                }
+            },
+        );
         assert!(!out.all_ok());
     }
 
@@ -676,7 +680,10 @@ mod tests {
                 Ok(0)
             }
         });
-        let ran: Vec<_> = out.ran_steps().map(|(s, c)| (s.command.clone(), c)).collect();
+        let ran: Vec<_> = out
+            .ran_steps()
+            .map(|(s, c)| (s.command.clone(), c))
+            .collect();
         assert_eq!(ran.len(), 2);
         assert_eq!(ran[0].0, "a");
         assert_eq!(ran[1].0, "c");

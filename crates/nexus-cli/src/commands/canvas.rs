@@ -61,7 +61,12 @@ pub fn show(app: &mut App, path: &str) -> Result<()> {
             CanvasNodeType::Database => node.source.as_deref().unwrap_or("").to_string(),
             CanvasNodeType::Terminal => node.command.as_deref().unwrap_or("").to_string(),
         };
-        println!("  [{:>8}] {} — {}", node.node_type.as_str(), node.id, detail);
+        println!(
+            "  [{:>8}] {} — {}",
+            node.node_type.as_str(),
+            node.id,
+            detail
+        );
     }
     for edge in &canvas.edges {
         let label = edge.label.as_deref().unwrap_or("");

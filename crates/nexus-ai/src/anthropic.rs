@@ -295,15 +295,15 @@ fn turns_to_anthropic(turns: &[ChatTurn]) -> Vec<AnthropicBlockMessage> {
 
     let mut pending_tool_results: Vec<AnthropicBlock> = Vec::new();
 
-    let flush_tool_results =
-        |out: &mut Vec<AnthropicBlockMessage>, pending: &mut Vec<AnthropicBlock>| {
-            if !pending.is_empty() {
-                out.push(AnthropicBlockMessage {
-                    role: "user",
-                    content: std::mem::take(pending),
-                });
-            }
-        };
+    let flush_tool_results = |out: &mut Vec<AnthropicBlockMessage>,
+                              pending: &mut Vec<AnthropicBlock>| {
+        if !pending.is_empty() {
+            out.push(AnthropicBlockMessage {
+                role: "user",
+                content: std::mem::take(pending),
+            });
+        }
+    };
 
     for turn in turns {
         match turn {

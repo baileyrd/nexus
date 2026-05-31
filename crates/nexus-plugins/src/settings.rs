@@ -73,10 +73,12 @@ impl SettingsManager {
         };
 
         let compiled =
-            jsonschema::options().build(schema).map_err(|e| PluginError::SettingsInvalid {
-                plugin_id: plugin_id.to_string(),
-                reason: format!("invalid schema: {e}"),
-            })?;
+            jsonschema::options()
+                .build(schema)
+                .map_err(|e| PluginError::SettingsInvalid {
+                    plugin_id: plugin_id.to_string(),
+                    reason: format!("invalid schema: {e}"),
+                })?;
 
         let errors: Vec<String> = compiled
             .iter_errors(settings)
@@ -122,13 +124,12 @@ impl SettingsManager {
             // required fields would fail validation on first load and
             // the plugin would appear broken until the user manually
             // wrote a file.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self
-                .schemas
-                .get(plugin_id)
-                .map_or_else(
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.schemas.get(plugin_id).map_or_else(
                     || serde_json::Value::Object(serde_json::Map::new()),
                     defaults_from_schema,
-                ),
+                )
+            }
             Err(e) => return Err(PluginError::Io(e)),
         };
 
@@ -153,12 +154,11 @@ impl SettingsManager {
     ) -> Result<(), PluginError> {
         self.validate(plugin_id, settings)?;
 
-        let pretty = serde_json::to_string_pretty(settings).map_err(|e| {
-            PluginError::SettingsInvalid {
+        let pretty =
+            serde_json::to_string_pretty(settings).map_err(|e| PluginError::SettingsInvalid {
                 plugin_id: plugin_id.to_string(),
                 reason: format!("could not serialize settings: {e}"),
-            }
-        })?;
+            })?;
 
         let path = plugin_dir.join("settings.json");
         std::fs::write(&path, pretty)?;
@@ -261,9 +261,7 @@ mod tests {
     fn validate_wrong_type() {
         let m = manager_with_schema();
         // name should be a string, passing a number
-        let err = m
-            .validate(PLUGIN_ID, &json!({ "name": 42 }))
-            .unwrap_err();
+        let err = m.validate(PLUGIN_ID, &json!({ "name": 42 })).unwrap_err();
         assert!(matches!(err, PluginError::SettingsInvalid { .. }));
     }
 

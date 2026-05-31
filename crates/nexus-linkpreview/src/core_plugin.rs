@@ -85,14 +85,13 @@ fn dispatch_fetch(args: &serde_json::Value) -> Result<serde_json::Value, PluginE
     let a: FetchArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("fetch: invalid args: {e}")))?;
     match fetch_blocking(&a.url) {
-        Ok(preview) => serde_json::to_value(&preview)
-            .map_err(|e| exec_err(format!("fetch: serialize: {e}"))),
+        Ok(preview) => {
+            serde_json::to_value(&preview).map_err(|e| exec_err(format!("fetch: serialize: {e}")))
+        }
         // Fetch errors are expected (bad URLs, offline hosts, 4xx/5xx).
         // Map them to a fallback preview so the shell can render *something*
         // rather than surfacing a raw IPC error for every missed link.
-        Err(FetchError::InvalidUrl(url)) => {
-            Err(exec_err(format!("invalid URL: {url}")))
-        }
+        Err(FetchError::InvalidUrl(url)) => Err(exec_err(format!("invalid URL: {url}"))),
         Err(err) => {
             tracing::debug!(%err, "link preview fetch failed; returning empty preview");
             let fallback = crate::LinkPreview {

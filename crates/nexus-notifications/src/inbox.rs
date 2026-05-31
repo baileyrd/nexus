@@ -642,9 +642,7 @@ mod tests {
         let i = fresh(100);
         let a = insert_one(&i, "wf", "a", &[]);
         let b = insert_one(&i, "wf", "b", &[]);
-        let updated = i
-            .mark_read(&[a.clone(), b.clone()])
-            .expect("mark_read 1");
+        let updated = i.mark_read(&[a.clone(), b.clone()]).expect("mark_read 1");
         assert_eq!(updated, 2);
         // Second call is a no-op — rows are already read.
         let updated = i.mark_read(&[a, b]).expect("mark_read 2");
@@ -668,9 +666,7 @@ mod tests {
         let a = insert_one(&i, "wf", "a", &[]);
         let _b = insert_one(&i, "wf", "b", &[]);
         i.mark_read(&[a]).expect("mark");
-        let unread = i
-            .list(None, StatusFilter::Unread, None, 10)
-            .expect("list");
+        let unread = i.list(None, StatusFilter::Unread, None, 10).expect("list");
         assert_eq!(unread.len(), 1);
         assert_eq!(unread[0].body, "b");
     }
@@ -693,9 +689,7 @@ mod tests {
         insert_one(&i, "wf", "first", &[]);
         std::thread::sleep(std::time::Duration::from_secs(1));
         insert_one(&i, "wf", "second", &[]);
-        let rows = i
-            .list(None, StatusFilter::All, None, 10)
-            .expect("list");
+        let rows = i.list(None, StatusFilter::All, None, 10).expect("list");
         assert_eq!(rows[0].body, "second");
         assert_eq!(rows[1].body, "first");
     }
@@ -707,9 +701,7 @@ mod tests {
         let _b = insert_one(&i, "wf", "b", &[]);
         let _c = insert_one(&i, "wf", "c", &[]);
         let _d = insert_one(&i, "wf", "d", &[]);
-        let rows = i
-            .list(None, StatusFilter::All, None, 10)
-            .expect("list");
+        let rows = i.list(None, StatusFilter::All, None, 10).expect("list");
         assert_eq!(rows.len(), 3);
         // Newest three survive — oldest ("a") drops.
         let bodies: Vec<_> = rows.iter().map(|r| r.body.as_str()).collect();
@@ -722,9 +714,7 @@ mod tests {
         for _ in 0..5 {
             insert_one(&i, "wf", "x", &[]);
         }
-        let rows = i
-            .list(None, StatusFilter::All, None, 100)
-            .expect("list");
+        let rows = i.list(None, StatusFilter::All, None, 100).expect("list");
         assert_eq!(rows.len(), 5);
     }
 
@@ -781,7 +771,10 @@ mod tests {
         let after_a = i.get(&a).expect("get a").expect("present");
         let after_b = i.get(&b).expect("get b").expect("present");
         assert!(after_a.read_at.is_some(), "read_at preserved for a");
-        assert!(after_b.dismissed_at.is_some(), "dismissed_at preserved for b");
+        assert!(
+            after_b.dismissed_at.is_some(),
+            "dismissed_at preserved for b"
+        );
     }
 
     #[test]

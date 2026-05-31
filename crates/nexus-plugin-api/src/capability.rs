@@ -9,7 +9,13 @@ use serde::{Deserialize, Serialize};
 /// strings (e.g., `"fs.read"`); this enum is the canonical in-memory form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub enum Capability {
     /// Read files within the forge root.
     FsRead,
@@ -142,7 +148,13 @@ pub enum Capability {
 /// Error parsing a capability string.
 #[derive(Debug, thiserror::Error)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub enum CapabilityParseError {
     /// The string does not match any known capability name.
     #[error("unknown capability string '{0}'")]
@@ -212,39 +224,39 @@ impl Capability {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Capability::FsRead           => "fs.read",
-            Capability::FsWrite          => "fs.write",
-            Capability::FsReadExternal   => "fs.read.external",
-            Capability::FsWriteExternal  => "fs.write.external",
-            Capability::NetHttp          => "net.http",
+            Capability::FsRead => "fs.read",
+            Capability::FsWrite => "fs.write",
+            Capability::FsReadExternal => "fs.read.external",
+            Capability::FsWriteExternal => "fs.write.external",
+            Capability::NetHttp => "net.http",
             Capability::NetHttpLocalhost => "net.http.localhost",
-            Capability::ProcessSpawn     => "process.spawn",
-            Capability::KvRead           => "kv.read",
-            Capability::KvWrite          => "kv.write",
-            Capability::IpcCall          => "ipc.call",
-            Capability::DbQuery          => "db.query",
-            Capability::DbWrite          => "db.write",
-            Capability::EventsPublish    => "events.publish",
-            Capability::UiNotify         => "ui.notify",
-            Capability::AiChat           => "ai.chat",
-            Capability::AiIndex          => "ai.index",
-            Capability::AiSessionRead    => "ai.session.read",
-            Capability::AiSessionWrite   => "ai.session.write",
-            Capability::AiConfigWrite    => "ai.config.write",
-            Capability::AiActivityWrite  => "ai.activity.write",
-            Capability::AiToolsWrite     => "ai.tools.write",
-            Capability::AiToolsMcp       => "ai.tools.mcp",
-            Capability::AudioRecord      => "audio.record",
-            Capability::AudioSynthesize  => "audio.synthesize",
-            Capability::AiRuntimeSubmit  => "ai.runtime.submit",
+            Capability::ProcessSpawn => "process.spawn",
+            Capability::KvRead => "kv.read",
+            Capability::KvWrite => "kv.write",
+            Capability::IpcCall => "ipc.call",
+            Capability::DbQuery => "db.query",
+            Capability::DbWrite => "db.write",
+            Capability::EventsPublish => "events.publish",
+            Capability::UiNotify => "ui.notify",
+            Capability::AiChat => "ai.chat",
+            Capability::AiIndex => "ai.index",
+            Capability::AiSessionRead => "ai.session.read",
+            Capability::AiSessionWrite => "ai.session.write",
+            Capability::AiConfigWrite => "ai.config.write",
+            Capability::AiActivityWrite => "ai.activity.write",
+            Capability::AiToolsWrite => "ai.tools.write",
+            Capability::AiToolsMcp => "ai.tools.mcp",
+            Capability::AudioRecord => "audio.record",
+            Capability::AudioSynthesize => "audio.synthesize",
+            Capability::AiRuntimeSubmit => "ai.runtime.submit",
             Capability::AiRuntimeControl => "ai.runtime.control",
             Capability::AiRuntimeObserve => "ai.runtime.observe",
-            Capability::NotificationsInboxRead  => "notifications.inbox.read",
+            Capability::NotificationsInboxRead => "notifications.inbox.read",
             Capability::NotificationsInboxWrite => "notifications.inbox.write",
-            Capability::ProtocolHostContribute  => "protocol.host.contribute",
-            Capability::SecurityWrite           => "security.write",
-            Capability::SecurityAuditWrite      => "security.audit.write",
-            Capability::NetworkBind             => "network.bind",
+            Capability::ProtocolHostContribute => "protocol.host.contribute",
+            Capability::SecurityWrite => "security.write",
+            Capability::SecurityAuditWrite => "security.audit.write",
+            Capability::NetworkBind => "network.bind",
         }
     }
 
@@ -256,39 +268,39 @@ impl Capability {
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self, CapabilityParseError> {
         match s {
-            "fs.read"            => Ok(Capability::FsRead),
-            "fs.write"           => Ok(Capability::FsWrite),
-            "fs.read.external"   => Ok(Capability::FsReadExternal),
-            "fs.write.external"  => Ok(Capability::FsWriteExternal),
-            "net.http"           => Ok(Capability::NetHttp),
+            "fs.read" => Ok(Capability::FsRead),
+            "fs.write" => Ok(Capability::FsWrite),
+            "fs.read.external" => Ok(Capability::FsReadExternal),
+            "fs.write.external" => Ok(Capability::FsWriteExternal),
+            "net.http" => Ok(Capability::NetHttp),
             "net.http.localhost" => Ok(Capability::NetHttpLocalhost),
-            "process.spawn"      => Ok(Capability::ProcessSpawn),
-            "kv.read"            => Ok(Capability::KvRead),
-            "kv.write"           => Ok(Capability::KvWrite),
-            "ipc.call"           => Ok(Capability::IpcCall),
-            "db.query"           => Ok(Capability::DbQuery),
-            "db.write"           => Ok(Capability::DbWrite),
-            "events.publish"     => Ok(Capability::EventsPublish),
-            "ui.notify"          => Ok(Capability::UiNotify),
-            "ai.chat"            => Ok(Capability::AiChat),
-            "ai.index"           => Ok(Capability::AiIndex),
-            "ai.session.read"    => Ok(Capability::AiSessionRead),
-            "ai.session.write"   => Ok(Capability::AiSessionWrite),
-            "ai.config.write"    => Ok(Capability::AiConfigWrite),
-            "ai.activity.write"  => Ok(Capability::AiActivityWrite),
-            "ai.tools.write"     => Ok(Capability::AiToolsWrite),
-            "ai.tools.mcp"       => Ok(Capability::AiToolsMcp),
-            "audio.record"       => Ok(Capability::AudioRecord),
-            "audio.synthesize"   => Ok(Capability::AudioSynthesize),
-            "ai.runtime.submit"  => Ok(Capability::AiRuntimeSubmit),
+            "process.spawn" => Ok(Capability::ProcessSpawn),
+            "kv.read" => Ok(Capability::KvRead),
+            "kv.write" => Ok(Capability::KvWrite),
+            "ipc.call" => Ok(Capability::IpcCall),
+            "db.query" => Ok(Capability::DbQuery),
+            "db.write" => Ok(Capability::DbWrite),
+            "events.publish" => Ok(Capability::EventsPublish),
+            "ui.notify" => Ok(Capability::UiNotify),
+            "ai.chat" => Ok(Capability::AiChat),
+            "ai.index" => Ok(Capability::AiIndex),
+            "ai.session.read" => Ok(Capability::AiSessionRead),
+            "ai.session.write" => Ok(Capability::AiSessionWrite),
+            "ai.config.write" => Ok(Capability::AiConfigWrite),
+            "ai.activity.write" => Ok(Capability::AiActivityWrite),
+            "ai.tools.write" => Ok(Capability::AiToolsWrite),
+            "ai.tools.mcp" => Ok(Capability::AiToolsMcp),
+            "audio.record" => Ok(Capability::AudioRecord),
+            "audio.synthesize" => Ok(Capability::AudioSynthesize),
+            "ai.runtime.submit" => Ok(Capability::AiRuntimeSubmit),
             "ai.runtime.control" => Ok(Capability::AiRuntimeControl),
             "ai.runtime.observe" => Ok(Capability::AiRuntimeObserve),
-            "notifications.inbox.read"  => Ok(Capability::NotificationsInboxRead),
+            "notifications.inbox.read" => Ok(Capability::NotificationsInboxRead),
             "notifications.inbox.write" => Ok(Capability::NotificationsInboxWrite),
-            "protocol.host.contribute"  => Ok(Capability::ProtocolHostContribute),
-            "security.write"            => Ok(Capability::SecurityWrite),
-            "security.audit.write"      => Ok(Capability::SecurityAuditWrite),
-            "network.bind"              => Ok(Capability::NetworkBind),
+            "protocol.host.contribute" => Ok(Capability::ProtocolHostContribute),
+            "security.write" => Ok(Capability::SecurityWrite),
+            "security.audit.write" => Ok(Capability::SecurityAuditWrite),
+            "network.bind" => Ok(Capability::NetworkBind),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -299,7 +311,13 @@ impl Capability {
 /// Internally a bitmask over the `Capability` discriminant for O(1) contains.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/"
+    )
+)]
 pub struct CapabilitySet(std::collections::HashSet<Capability>);
 
 impl CapabilitySet {

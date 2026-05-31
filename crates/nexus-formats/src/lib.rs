@@ -31,17 +31,15 @@ pub mod migration;
 pub mod notion;
 pub mod util;
 
-pub use core_plugin::{
-    FormatsCorePlugin, HANDLER_EXPORT_NOTION, HANDLER_IMPORT_NOTION, PLUGIN_ID,
-};
+pub use core_plugin::{FormatsCorePlugin, HANDLER_EXPORT_NOTION, HANDLER_IMPORT_NOTION, PLUGIN_ID};
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
-pub use error::{
-    CanvasError, ConfigError, Error, MarkdownError, Result, UtilError,
-};
+pub use error::{CanvasError, ConfigError, Error, MarkdownError, Result, UtilError};
 
-pub use util::{attachment_name, detect_mime, sha256_hex, slugify, validate_filename, validate_path};
+pub use util::{
+    attachment_name, detect_mime, sha256_hex, slugify, validate_filename, validate_path,
+};
 
 pub use canvas::{
     CanvasBackground, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType,
@@ -49,17 +47,17 @@ pub use canvas::{
 pub use markdown::export_to_html;
 
 pub use config::{
-    AiConfig, AppConfig, McpConfig, WorkspaceState,
-    load_ai_config, load_app_config, load_mcp_config, load_workspace_state,
-    save_ai_config, save_app_config, save_mcp_config, save_workspace_state,
+    load_ai_config, load_app_config, load_mcp_config, load_workspace_state, save_ai_config,
+    save_app_config, save_mcp_config, save_workspace_state, AiConfig, AppConfig, McpConfig,
+    WorkspaceState,
 };
 
 pub use markdown::{
-    Block, BlockKind, Frontmatter, MathSpan, ParsedMarkdown, Tag, TagSource, Task, WikiLink,
-    LinkType, parse as parse_markdown, parse_frontmatter, resolve_wikilink,
+    parse as parse_markdown, parse_frontmatter, resolve_wikilink, Block, BlockKind, Frontmatter,
+    LinkType, MathSpan, ParsedMarkdown, Tag, TagSource, Task, WikiLink,
 };
 
 pub use migration::{
-    detect_version, scan_versions, FormatVersion, MigrationError, MigrationFn,
-    MigrationRegistry, VersionTally, DEFAULT_VERSION,
+    detect_version, scan_versions, FormatVersion, MigrationError, MigrationFn, MigrationRegistry,
+    VersionTally, DEFAULT_VERSION,
 };

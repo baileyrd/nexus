@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use nexus_kernel::{Ipc as _, EventBus, KernelPluginContext};
+use nexus_kernel::{EventBus, Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

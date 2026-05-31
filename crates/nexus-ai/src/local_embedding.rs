@@ -249,9 +249,7 @@ pub fn map_model(name: &str) -> Result<EmbeddingModel, AiError> {
     let normalized = name.trim().to_ascii_lowercase();
     match normalized.as_str() {
         // Default — INT8 quantized, 384-dim, 33 MB.
-        "bge-small-en-v1.5-int8" | "bge-small-en-v1.5-q" | "" => {
-            Ok(EmbeddingModel::BGESmallENV15Q)
-        }
+        "bge-small-en-v1.5-int8" | "bge-small-en-v1.5-q" | "" => Ok(EmbeddingModel::BGESmallENV15Q),
         "bge-small-en-v1.5" => Ok(EmbeddingModel::BGESmallENV15),
         "bge-base-en-v1.5" => Ok(EmbeddingModel::BGEBaseENV15),
         "bge-large-en-v1.5" => Ok(EmbeddingModel::BGELargeENV15),
@@ -371,7 +369,10 @@ mod tests {
             })
             .unwrap();
         }
-        assert_eq!(calls, 3, "every call should hit fetch when cache is disabled");
+        assert_eq!(
+            calls, 3,
+            "every call should hit fetch when cache is disabled"
+        );
         assert_eq!(cache.len(), 0);
     }
 

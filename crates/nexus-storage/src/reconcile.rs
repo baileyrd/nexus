@@ -10,11 +10,13 @@ use rusqlite::Connection;
 
 use nexus_formats::sha256_hex;
 
-use crate::StorageError;
 use crate::code_index;
-use crate::index::{FileFilter, FileRecord, delete_file, insert_file, query_files, soft_delete_file};
+use crate::index::{
+    delete_file, insert_file, query_files, soft_delete_file, FileFilter, FileRecord,
+};
 use crate::parser::parse_markdown;
 use crate::watcher::should_ignore;
+use crate::StorageError;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -83,8 +85,7 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
         disk_files.iter().map(|(p, _, _)| p.clone()).collect();
 
     // Track record IDs that were consumed as rename sources (skip soft-delete).
-    let mut renamed_source_ids: std::collections::HashSet<u64> =
-        std::collections::HashSet::new();
+    let mut renamed_source_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     // ── 4. Process each file on disk ─────────────────────────────────────────
     for (rel_path, hash, size_bytes) in &disk_files {
@@ -129,10 +130,7 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
                 // and hasn't already been claimed as a rename source.
                 candidates
                     .iter()
-                    .find(|r| {
-                        !disk_paths.contains(&r.path)
-                            && !renamed_source_ids.contains(&r.id)
-                    })
+                    .find(|r| !disk_paths.contains(&r.path) && !renamed_source_ids.contains(&r.id))
                     .cloned()
             } else {
                 None
@@ -369,7 +367,11 @@ mod tests {
         let conn = setup_db();
         let delta = reconcile(&conn, forge_root).unwrap();
 
-        assert_eq!(delta.created, 2, "expected 2 created, got {}", delta.created);
+        assert_eq!(
+            delta.created, 2,
+            "expected 2 created, got {}",
+            delta.created
+        );
         assert_eq!(delta.modified, 0);
         assert_eq!(delta.renamed, 0);
         assert_eq!(delta.deleted, 0);
@@ -396,7 +398,11 @@ mod tests {
 
         let delta2 = reconcile(&conn, forge_root).unwrap();
         assert_eq!(delta2.created, 0);
-        assert_eq!(delta2.modified, 1, "expected 1 modified, got {}", delta2.modified);
+        assert_eq!(
+            delta2.modified, 1,
+            "expected 1 modified, got {}",
+            delta2.modified
+        );
         assert_eq!(delta2.renamed, 0);
         assert_eq!(delta2.deleted, 0);
     }
@@ -420,7 +426,11 @@ mod tests {
         assert_eq!(delta2.created, 0);
         assert_eq!(delta2.modified, 0);
         assert_eq!(delta2.renamed, 0);
-        assert_eq!(delta2.deleted, 1, "expected 1 deleted, got {}", delta2.deleted);
+        assert_eq!(
+            delta2.deleted, 1,
+            "expected 1 deleted, got {}",
+            delta2.deleted
+        );
 
         // Verify it's soft-deleted in the index.
         let filter = FileFilter {
@@ -452,10 +462,22 @@ mod tests {
         .unwrap();
 
         let delta2 = reconcile(&conn, forge_root).unwrap();
-        assert_eq!(delta2.created, 0, "expected 0 created, got {}", delta2.created);
+        assert_eq!(
+            delta2.created, 0,
+            "expected 0 created, got {}",
+            delta2.created
+        );
         assert_eq!(delta2.modified, 0);
-        assert_eq!(delta2.renamed, 1, "expected 1 renamed, got {}", delta2.renamed);
-        assert_eq!(delta2.deleted, 0, "expected 0 deleted, got {}", delta2.deleted);
+        assert_eq!(
+            delta2.renamed, 1,
+            "expected 1 renamed, got {}",
+            delta2.renamed
+        );
+        assert_eq!(
+            delta2.deleted, 0,
+            "expected 0 deleted, got {}",
+            delta2.deleted
+        );
 
         // Verify new path is in the index.
         let record = crate::index::file_by_path(&conn, "notes/renamed.md").unwrap();
@@ -492,10 +514,17 @@ mod tests {
         let conn = setup_db();
         let delta = reconcile(&conn, forge_root).unwrap();
 
-        assert_eq!(delta.created, 1, "expected 1 created, got {}", delta.created);
+        assert_eq!(
+            delta.created, 1,
+            "expected 1 created, got {}",
+            delta.created
+        );
 
         let record = crate::index::file_by_path(&conn, "notes/sub/deep/deep.md").unwrap();
-        assert!(record.is_some(), "notes/sub/deep/deep.md should be in index");
+        assert!(
+            record.is_some(),
+            "notes/sub/deep/deep.md should be in index"
+        );
     }
 
     // ── 7b. reconcile_resurrects_soft_deleted_same_hash ───────────────────────

@@ -4,11 +4,11 @@
 //! including line numbers and markdown syntax highlighting.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 use crate::app::{Focus, TuiApp};
@@ -25,11 +25,7 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         Color::DarkGray
     };
 
-    let title = app
-        .viewer
-        .file_path
-        .as_deref()
-        .unwrap_or(" Preview ");
+    let title = app.viewer.file_path.as_deref().unwrap_or(" Preview ");
 
     let block = Block::default()
         .borders(Borders::ALL)

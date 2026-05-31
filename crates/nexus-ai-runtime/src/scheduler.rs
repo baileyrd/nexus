@@ -23,7 +23,8 @@ use uuid::Uuid;
 
 use crate::events::AiEvent;
 use crate::{
-    AgentRun, AgentRunSummary, AiRuntimeListArgs, EventRing, RunStatus, SharedEventRing, TaskPriority,
+    AgentRun, AgentRunSummary, AiRuntimeListArgs, EventRing, RunStatus, SharedEventRing,
+    TaskPriority,
 };
 
 /// One run's bookkeeping. Stored in the shared map; the per-run event
@@ -354,7 +355,11 @@ impl Store {
     pub(crate) fn observe_status(&self, event: &AiEvent) -> bool {
         let task_id = event.task_id();
         let Some(transition) = event.implied_status() else {
-            return self.inner.lock().expect("store poisoned").contains_key(&task_id);
+            return self
+                .inner
+                .lock()
+                .expect("store poisoned")
+                .contains_key(&task_id);
         };
         let terminal_notifier = {
             let mut g = self.inner.lock().expect("store poisoned");
@@ -423,7 +428,11 @@ impl Store {
         let mut rows: Vec<&RunRow> = g
             .values()
             .filter(|r| args.status.as_ref().is_none_or(|want| &r.status == want))
-            .filter(|r| args.since.as_ref().is_none_or(|since| r.submitted_at >= *since))
+            .filter(|r| {
+                args.since
+                    .as_ref()
+                    .is_none_or(|since| r.submitted_at >= *since)
+            })
             .collect();
         rows.sort_by(|a, b| b.submitted_at.cmp(&a.submitted_at));
         let limit = args.limit.map_or(usize::MAX, |n| n as usize);
@@ -490,7 +499,13 @@ mod tests {
     fn insert_then_get_round_trips() {
         let store = Store::new();
         let id = Uuid::new_v4();
-        let _ring = store.insert(id, "session", TaskPriority::Interactive, None, "com.nexus.cli");
+        let _ring = store.insert(
+            id,
+            "session",
+            TaskPriority::Interactive,
+            None,
+            "com.nexus.cli",
+        );
         let row = store.get(id).expect("row present");
         assert_eq!(row.task_id, id);
         assert_eq!(row.kind, "session");
@@ -528,7 +543,13 @@ mod tests {
         let mut ids = Vec::new();
         for i in 0..3 {
             let id = Uuid::new_v4();
-            store.insert(id, "session", TaskPriority::Interactive, None, &format!("p{i}"));
+            store.insert(
+                id,
+                "session",
+                TaskPriority::Interactive,
+                None,
+                &format!("p{i}"),
+            );
             store.observe_status(&AiEvent::Finished {
                 task_id: id,
                 outcome: serde_json::Value::Null,
@@ -540,13 +561,22 @@ mod tests {
             ids.push(id);
         }
         // Oldest dropped, newer two retained.
-        assert!(store.get(ids[0]).is_none(), "oldest terminal should be evicted");
+        assert!(
+            store.get(ids[0]).is_none(),
+            "oldest terminal should be evicted"
+        );
         assert!(store.get(ids[1]).is_some());
         assert!(store.get(ids[2]).is_some());
         // An active run added afterwards is retained even though the
         // terminal count is at the cap.
         let active = Uuid::new_v4();
-        store.insert(active, "session", TaskPriority::Interactive, None, "p-active");
+        store.insert(
+            active,
+            "session",
+            TaskPriority::Interactive,
+            None,
+            "p-active",
+        );
         // And a fourth terminal run evicts ids[1], not the active one.
         let newest = Uuid::new_v4();
         store.insert(newest, "session", TaskPriority::Interactive, None, "p-new");
@@ -554,8 +584,14 @@ mod tests {
             task_id: newest,
             outcome: serde_json::Value::Null,
         });
-        assert!(store.get(active).is_some(), "active run must never be evicted");
-        assert!(store.get(ids[1]).is_none(), "ids[1] is now the oldest terminal");
+        assert!(
+            store.get(active).is_some(),
+            "active run must never be evicted"
+        );
+        assert!(
+            store.get(ids[1]).is_none(),
+            "ids[1] is now the oldest terminal"
+        );
         assert!(store.get(ids[2]).is_some());
         assert!(store.get(newest).is_some());
     }
@@ -578,7 +614,13 @@ mod tests {
         let store = Store::new();
         for i in 0..5 {
             let id = Uuid::new_v4();
-            store.insert(id, "session", TaskPriority::Interactive, None, &format!("p{i}"));
+            store.insert(
+                id,
+                "session",
+                TaskPriority::Interactive,
+                None,
+                &format!("p{i}"),
+            );
             if i % 2 == 0 {
                 store.observe_status(&AiEvent::Finished {
                     task_id: id,
@@ -626,7 +668,10 @@ mod tests {
         let b = store.terminal_notify(id).expect("notify present");
         assert!(Arc::ptr_eq(&a, &b), "same run must hand out the same Arc");
         let c = store.terminal_notify(other).expect("notify present");
-        assert!(!Arc::ptr_eq(&a, &c), "different runs must have distinct Arcs");
+        assert!(
+            !Arc::ptr_eq(&a, &c),
+            "different runs must have distinct Arcs"
+        );
         assert!(store.terminal_notify(Uuid::new_v4()).is_none());
     }
 
@@ -636,7 +681,10 @@ mod tests {
         let id = Uuid::new_v4();
         store.insert(id, "session", TaskPriority::Interactive, None, "x");
         assert_eq!(store.is_terminal(id), Some(false));
-        store.observe_status(&AiEvent::Started { task_id: id, attempt: 1 });
+        store.observe_status(&AiEvent::Started {
+            task_id: id,
+            attempt: 1,
+        });
         assert_eq!(store.is_terminal(id), Some(false));
         store.observe_status(&AiEvent::Finished {
             task_id: id,
@@ -699,7 +747,10 @@ mod tests {
         }
         let id = Uuid::new_v4();
         store.insert(id, "session", TaskPriority::Interactive, None, "x");
-        store.observe_status(&AiEvent::Started { task_id: id, attempt: 1 });
+        store.observe_status(&AiEvent::Started {
+            task_id: id,
+            attempt: 1,
+        });
         assert_eq!(store.count_status(&RunStatus::Queued), 3);
         assert_eq!(store.count_status(&RunStatus::Running), 1);
     }

@@ -13,7 +13,7 @@ use std::io::{self, BufRead, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use nexus_kernel::{Events as _, Ipc as _, EventFilter, NexusEvent};
+use nexus_kernel::{EventFilter, Events as _, Ipc as _, NexusEvent};
 use nexus_types::constants::IPC_TIMEOUT_EXTENDED as IPC_TIMEOUT;
 use nexus_types::plugin_ids;
 use serde_json::Value;
@@ -355,7 +355,11 @@ pub fn list_custom(app: &mut App) -> Result<()> {
             .max()
             .unwrap_or(4)
             .max("SLUG".len());
-        println!("{:width$}  NAME                 ARCHETYPE", "SLUG", width = slug_w);
+        println!(
+            "{:width$}  NAME                 ARCHETYPE",
+            "SLUG",
+            width = slug_w
+        );
         for m in &manifests {
             let slug = m.get("slug").and_then(Value::as_str).unwrap_or("?");
             let name = m
@@ -422,7 +426,10 @@ fn print_plan(plan: &Value) {
                 .get("target_plugin_id")
                 .and_then(Value::as_str)
                 .unwrap_or("?");
-            let cmd = call.get("command_id").and_then(Value::as_str).unwrap_or("?");
+            let cmd = call
+                .get("command_id")
+                .and_then(Value::as_str)
+                .unwrap_or("?");
             print!(" → {target}.{cmd}");
         }
         println!();
@@ -430,7 +437,10 @@ fn print_plan(plan: &Value) {
 }
 
 fn print_session(session: &Value) {
-    let id = session.get("id").and_then(Value::as_str).unwrap_or("<no-id>");
+    let id = session
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("<no-id>");
     let goal = session
         .get("goal")
         .and_then(Value::as_str)
@@ -601,7 +611,10 @@ mod tests {
             "rounds": [{ "round": 1 }, { "round": 2 }, { "round": 3 }],
         });
         let msg = compose_completion_message(goal, elapsed, &response);
-        assert_eq!(msg, "complete · 3 rounds · 35s · summarise yesterday's notes");
+        assert_eq!(
+            msg,
+            "complete · 3 rounds · 35s · summarise yesterday's notes"
+        );
     }
 
     #[test]

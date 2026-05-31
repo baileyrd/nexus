@@ -12,7 +12,9 @@ use crate::config::AiConfig;
 use crate::handlers::shared::{
     build_ai_provider, exec_err, filter_to_read_only, ipc_messages_to_chat, messages_to_turns,
 };
-use crate::ipc::{AiProposeArgs, AiProposeReply, AiProposedToolCall, AiToolPolicy, AiUnmappedToolCall};
+use crate::ipc::{
+    AiProposeArgs, AiProposeReply, AiProposedToolCall, AiToolPolicy, AiUnmappedToolCall,
+};
 use crate::tools::ToolRegistry;
 
 /// G7 — single-turn provider call that returns the model's tool-use
@@ -33,8 +35,9 @@ pub(crate) async fn handle_propose_tool_calls(
     let parsed: AiProposeArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("propose_tool_calls: args decode: {e}")))?;
 
-    let ai_cfg = ai_cfg
-        .ok_or_else(|| exec_err("propose_tool_calls: no AI chat provider configured".to_string()))?;
+    let ai_cfg = ai_cfg.ok_or_else(|| {
+        exec_err("propose_tool_calls: no AI chat provider configured".to_string())
+    })?;
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
 
     let policy = parsed.tools.unwrap_or_default();

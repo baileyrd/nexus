@@ -335,10 +335,7 @@ mod platform {
                 // Expected shape: "VmRSS:    12345 kB". Strip whitespace,
                 // take the numeric prefix, multiply to bytes.
                 let trimmed = rest.trim();
-                let num_part: String = trimmed
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect();
+                let num_part: String = trimmed.chars().take_while(char::is_ascii_digit).collect();
                 if num_part.is_empty() {
                     return Err(TerminalError::Io(io::Error::other(format!(
                         "VmRSS parse failed: '{trimmed}'",
@@ -390,8 +387,7 @@ mod platform {
             GetProcessMemoryInfo(
                 handle,
                 counters.as_mut_ptr(),
-                u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS>())
-                    .unwrap_or(u32::MAX),
+                u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS>()).unwrap_or(u32::MAX),
             )
         };
         let err = if rc == 0 {
@@ -454,7 +450,10 @@ mod tests {
             hard_mb: Some(200),
         };
         let a = l.evaluate(300 * 1_048_576);
-        assert!(matches!(a, MemoryLimitAction::HardExceeded { limit_mb: 200, .. }));
+        assert!(matches!(
+            a,
+            MemoryLimitAction::HardExceeded { limit_mb: 200, .. }
+        ));
         assert!(a.should_kill());
     }
 

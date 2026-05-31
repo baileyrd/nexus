@@ -298,7 +298,7 @@ mod tests {
         let mut b = OutputBuffer::with_capacity(8);
         b.push(b"AAAAAAAA"); // fills
         b.push(b"BCD"); // evicts 3, leaves head mid-array
-        // After: "AAAAABCD" logically, but underlying slices are split.
+                        // After: "AAAAABCD" logically, but underlying slices are split.
         assert!(b.contains(b"AAAAA"));
         assert!(b.contains(b"ABCD"));
         assert_eq!(b.find(b"BCD"), Some(5));

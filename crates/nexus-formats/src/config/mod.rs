@@ -128,7 +128,7 @@ fn save_toml<T: serde::Serialize>(
     filename: &str,
     value: &T,
 ) -> Result<(), ConfigError> {
-    let dir  = forge_root.join(".forge");
+    let dir = forge_root.join(".forge");
     std::fs::create_dir_all(&dir).map_err(|e| ConfigError::TomlParse {
         path: dir.display().to_string(),
         reason: e.to_string(),
@@ -168,7 +168,7 @@ fn save_json<T: serde::Serialize>(
     filename: &str,
     value: &T,
 ) -> Result<(), ConfigError> {
-    let dir  = forge_root.join(".forge");
+    let dir = forge_root.join(".forge");
     std::fs::create_dir_all(&dir).map_err(|e| ConfigError::JsonParse {
         path: dir.display().to_string(),
         reason: e.to_string(),
@@ -229,7 +229,8 @@ mod tests {
         std::fs::write(
             dir.path().join(".forge/app.toml"),
             "[core]\nname = \"Partial\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         let cfg = load_app_config(dir.path()).unwrap();
         assert_eq!(cfg.core.name, "Partial");
         assert_eq!(cfg.editor.font_size, 14); // default
@@ -300,7 +301,8 @@ mod tests {
         std::fs::write(
             dir.path().join(".forge/ai.toml"),
             "provider = \"anthropic\"\napi_key_env = \"${_NEXUS_TEST_API_KEY}\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         let loaded = load_ai_config(dir.path()).unwrap();
         assert_eq!(loaded.api_key_env.as_deref(), Some("sk-test-value"));
         std::env::remove_var("_NEXUS_TEST_API_KEY");

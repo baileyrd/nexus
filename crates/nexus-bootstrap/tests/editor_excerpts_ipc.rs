@@ -414,13 +414,9 @@ async fn open_excerpts_update_block_content_round_trips_to_source_on_save() {
     .await
     .expect("apply_transaction (UpdateBlockContent) must succeed");
 
-    call(
-        &runtime,
-        "save",
-        json!({ "relpath": snapshot_relpath }),
-    )
-    .await
-    .expect("save must succeed for synthetic session in Phase 2");
+    call(&runtime, "save", json!({ "relpath": snapshot_relpath }))
+        .await
+        .expect("save must succeed for synthetic session in Phase 2");
 
     let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
     assert_eq!(
@@ -505,18 +501,13 @@ async fn open_excerpts_multi_excerpt_same_file_save_handles_shifts() {
     .await
     .expect("second UpdateBlockContent");
 
-    call(
-        &runtime,
-        "save",
-        json!({ "relpath": snapshot_relpath }),
-    )
-    .await
-    .expect("save");
+    call(&runtime, "save", json!({ "relpath": snapshot_relpath }))
+        .await
+        .expect("save");
 
     let on_disk = fs::read_to_string(root.join("big.md")).unwrap();
     assert_eq!(
-        on_disk,
-        "L1\nL2-A\nL2-B\nL2-C\nL2-D\nL4\nL5\nL6\nL7+L8\nL9\nL10\n",
+        on_disk, "L1\nL2-A\nL2-B\nL2-C\nL2-D\nL4\nL5\nL6\nL7+L8\nL9\nL10\n",
         "both splices land correctly with line-range shifting; unedited lines preserved"
     );
 }
@@ -555,13 +546,9 @@ async fn open_against_multibuffer_relpath_returns_existing_snapshot() {
     // same session (same root block id), not try to read
     // `multibuffer://...` from disk.
     let reopened: EditorSnapshot = serde_json::from_value(
-        call(
-            &runtime,
-            "open",
-            json!({ "relpath": synthetic_relpath }),
-        )
-        .await
-        .expect("re-open synthetic"),
+        call(&runtime, "open", json!({ "relpath": synthetic_relpath }))
+            .await
+            .expect("re-open synthetic"),
     )
     .unwrap();
     assert_eq!(reopened.tree.root_blocks[0], first_block_id);
@@ -618,13 +605,9 @@ async fn open_excerpts_save_with_no_edits_preserves_source_file() {
     .unwrap();
     let snapshot_relpath = snap.relpath.clone();
 
-    call(
-        &runtime,
-        "save",
-        json!({ "relpath": snapshot_relpath }),
-    )
-    .await
-    .expect("save no-op must succeed");
+    call(&runtime, "save", json!({ "relpath": snapshot_relpath }))
+        .await
+        .expect("save no-op must succeed");
 
     let on_disk = fs::read_to_string(root.join("doc.md")).unwrap();
     assert_eq!(on_disk, original, "source file must be byte-identical");
@@ -802,13 +785,9 @@ async fn refresh_excerpts_rejects_non_synthetic_session() {
         .await
         .expect("open ok");
 
-    let err = call(
-        &runtime,
-        "refresh_excerpts",
-        json!({ "relpath": "doc.md" }),
-    )
-    .await
-    .expect_err("refresh_excerpts must reject a non-synthetic session");
+    let err = call(&runtime, "refresh_excerpts", json!({ "relpath": "doc.md" }))
+        .await
+        .expect_err("refresh_excerpts must reject a non-synthetic session");
     assert!(
         err.to_string().contains("multibuffer"),
         "expected multibuffer error, got: {err}"
@@ -890,8 +869,7 @@ async fn save_reflows_excerpt_ranges_to_match_post_splice_positions() {
             .expect("get_tree ok"),
     )
     .unwrap();
-    let second_ty =
-        serde_json::to_value(&after.tree.blocks[&second].ty).unwrap();
+    let second_ty = serde_json::to_value(&after.tree.blocks[&second].ty).unwrap();
     assert_eq!(second_ty["line_start"], 5);
     assert_eq!(second_ty["line_end"], 5);
     // The first excerpt's range grew from 1 line to 2.

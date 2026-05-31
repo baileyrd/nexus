@@ -478,7 +478,15 @@ where
     if config.max_context_tokens > 0 {
         let compressor = crate::compression::LlmCompressor::new(driver);
         return run_session_with_compressor(
-            driver, dispatcher, policy, goal, system, archetype, id, config, &compressor,
+            driver,
+            dispatcher,
+            policy,
+            goal,
+            system,
+            archetype,
+            id,
+            config,
+            &compressor,
         )
         .await;
     }
@@ -635,9 +643,14 @@ where
         };
         let decision = policy.allow_round(&proposed).await;
 
-        let (records, stop_reason) =
-            execute_round(dispatcher, round_idx, &proposal.text, proposal.tool_calls, decision)
-                .await;
+        let (records, stop_reason) = execute_round(
+            dispatcher,
+            round_idx,
+            &proposal.text,
+            proposal.tool_calls,
+            decision,
+        )
+        .await;
 
         let any_approved = records.iter().any(|r| r.approved);
         let all_errored = !records.is_empty() && records.iter().all(|r| !r.error.is_empty());
@@ -649,9 +662,7 @@ where
 
         if let Some(stop) = stop_reason {
             let (outcome, label, reason) = match stop {
-                RoundStopReason::Aborted(r) => {
-                    (SessionOutcome::Aborted, "session aborted", r)
-                }
+                RoundStopReason::Aborted(r) => (SessionOutcome::Aborted, "session aborted", r),
                 RoundStopReason::Timeout(r) => {
                     (SessionOutcome::ApprovalTimeout, "approval timeout", r)
                 }
@@ -693,11 +704,9 @@ where
         // chunk of history forward but stops short of the working
         // set so the most recent rounds stay verbatim.
         if config.max_context_tokens > 0 {
-            let budget_chars =
-                (config.max_context_tokens as usize).saturating_mul(4);
+            let budget_chars = (config.max_context_tokens as usize).saturating_mul(4);
             while current_prompt.len() > budget_chars
-                && session.rounds.len().saturating_sub(live_rounds_start)
-                    > WORKING_SET_ROUNDS
+                && session.rounds.len().saturating_sub(live_rounds_start) > WORKING_SET_ROUNDS
             {
                 let new_start = session.rounds.len() - WORKING_SET_ROUNDS;
                 let to_compress = &session.rounds[live_rounds_start..new_start];
@@ -1092,7 +1101,11 @@ mod tests {
                     .map(|(i, tc)| RoundDecisionEntry {
                         tool_use_id: tc.id.clone(),
                         approve: i == 0,
-                        reason: if i == 0 { String::new() } else { "skip the second".into() },
+                        reason: if i == 0 {
+                            String::new()
+                        } else {
+                            "skip the second".into()
+                        },
                     })
                     .collect();
                 RoundDecision::Partial(entries)
@@ -1229,10 +1242,7 @@ mod tests {
         for i in 1..=50 {
             replies.push(Proposal {
                 text: String::new(),
-                tool_calls: vec![read_tool(
-                    &format!("u{i}"),
-                    &format!("decision_{i}.md"),
-                )],
+                tool_calls: vec![read_tool(&format!("u{i}"), &format!("decision_{i}.md"))],
             });
         }
         replies.push(Proposal {

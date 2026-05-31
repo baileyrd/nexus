@@ -45,16 +45,13 @@ pub const BUILTIN_TOMORROW_NIGHT_TOML: &str =
 
 /// Bundled Forge Ember dark theme manifest — derived from the Forge Color
 /// System v0.1 ("ember on slate").
-pub const BUILTIN_EMBER_DARK_TOML: &str =
-    include_str!("../themes/nexus-ember-dark/NEXUS.toml");
+pub const BUILTIN_EMBER_DARK_TOML: &str = include_str!("../themes/nexus-ember-dark/NEXUS.toml");
 
 /// Bundled Forge Ember light theme manifest.
-pub const BUILTIN_EMBER_LIGHT_TOML: &str =
-    include_str!("../themes/nexus-ember-light/NEXUS.toml");
+pub const BUILTIN_EMBER_LIGHT_TOML: &str = include_str!("../themes/nexus-ember-light/NEXUS.toml");
 
 /// Bundled Manuscript theme manifest — warm parchment canvas on dark chrome.
-pub const BUILTIN_MANUSCRIPT_TOML: &str =
-    include_str!("../themes/nexus-manuscript/NEXUS.toml");
+pub const BUILTIN_MANUSCRIPT_TOML: &str = include_str!("../themes/nexus-manuscript/NEXUS.toml");
 
 /// Identifier for the bundled light theme.
 pub const BUILTIN_LIGHT_ID: &str = "nexus-light";
@@ -157,14 +154,13 @@ impl Theme {
     pub fn load(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         let manifest_path = dir.join(MANIFEST_FILENAME);
-        let source = fs::read_to_string(&manifest_path)
-            .map_err(|e| ThemeError::io(&manifest_path, e))?;
-        let manifest = ThemeManifest::from_toml(&source).map_err(|source| {
-            ThemeError::Manifest {
+        let source =
+            fs::read_to_string(&manifest_path).map_err(|e| ThemeError::io(&manifest_path, e))?;
+        let manifest =
+            ThemeManifest::from_toml(&source).map_err(|source| ThemeError::Manifest {
                 path: manifest_path.clone(),
                 source,
-            }
-        })?;
+            })?;
         let id = dir
             .file_name()
             .and_then(|s| s.to_str())
@@ -295,12 +291,10 @@ mod tests {
             by_id[BUILTIN_FORGE_ID].manifest.theme.category,
             ThemeCategory::Dark
         );
-        assert!(
-            by_id[BUILTIN_LIGHT_ID]
-                .manifest
-                .variables
-                .contains_key("--nx-color-primary")
-        );
+        assert!(by_id[BUILTIN_LIGHT_ID]
+            .manifest
+            .variables
+            .contains_key("--nx-color-primary"));
     }
 
     #[test]

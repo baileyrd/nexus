@@ -223,9 +223,12 @@ async fn read_source_snippet(
         .map_err(|e| exec_err(format!("generate_docs: read_file: {e}")))?;
     let reply: ReadFileReply = serde_json::from_value(raw)
         .map_err(|e| exec_err(format!("generate_docs: decode read_file: {e}")))?;
-    let bytes = reply
-        .bytes
-        .ok_or_else(|| exec_err(format!("generate_docs: source file missing: {}", symbol.path)))?;
+    let bytes = reply.bytes.ok_or_else(|| {
+        exec_err(format!(
+            "generate_docs: source file missing: {}",
+            symbol.path
+        ))
+    })?;
     let text = String::from_utf8(bytes)
         .map_err(|e| exec_err(format!("generate_docs: source is not UTF-8: {e}")))?;
     Ok(slice_lines(&text, symbol.line_start, symbol.line_end))
@@ -310,7 +313,9 @@ pub(crate) fn build_prompt(
         DocStyle::Rustdoc => "rustdoc (`/// …` over the item)",
         DocStyle::JsDoc => "JSDoc (`/** … */` over the item)",
         DocStyle::Godoc => "godoc (`// Name …` paragraph over the item)",
-        DocStyle::PyDocstring => "Python docstring (triple-quoted string as the first body statement)",
+        DocStyle::PyDocstring => {
+            "Python docstring (triple-quoted string as the first body statement)"
+        }
     });
     out.push_str("\nPath: ");
     out.push_str(&symbol.path);
@@ -322,8 +327,10 @@ pub(crate) fn build_prompt(
     out.push_str("=== End source ===\n\n");
 
     if !neighbours.is_empty() {
-        out.push_str("Nearby symbols (parent + siblings — used as proxy for callers/callees \
-                     since the index lacks call edges):\n");
+        out.push_str(
+            "Nearby symbols (parent + siblings — used as proxy for callers/callees \
+                     since the index lacks call edges):\n",
+        );
         for n in neighbours.iter().take(12) {
             let _ = writeln!(
                 out,

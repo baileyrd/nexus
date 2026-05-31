@@ -278,10 +278,7 @@ mod tests {
 
     #[test]
     fn equals_missing_field_errors() {
-        let c = cond(
-            "equals",
-            &[("left", toml::Value::String("x".into()))],
-        );
+        let c = cond("equals", &[("left", toml::Value::String("x".into()))]);
         let err = evaluate_condition(&c, &empty_ctx()).unwrap_err();
         assert!(matches!(
             err,

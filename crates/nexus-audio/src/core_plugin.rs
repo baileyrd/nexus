@@ -89,7 +89,12 @@ impl AudioCorePlugin {
 impl CorePlugin for AudioCorePlugin {
     fn on_init(&mut self) -> Result<(), PluginError> {
         // Skip re-init when `with_backends` was used.
-        if self.backends.lock().expect("audio backends mutex").is_some() {
+        if self
+            .backends
+            .lock()
+            .expect("audio backends mutex")
+            .is_some()
+        {
             return Ok(());
         }
         let cfg = AudioConfig::load(&self.forge_root).map_err(|e| PluginError::LifecycleError {
@@ -132,9 +137,9 @@ impl AudioCorePlugin {
         let bytes = decode_b64(&a.audio_b64).map_err(audio_err)?;
         let format = AudioFormat::parse_or_default(a.format.as_deref());
         let mut guard = self.backends.lock().expect("audio backends mutex");
-        let backends = guard
-            .as_mut()
-            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)".to_string()))?;
+        let backends = guard.as_mut().ok_or_else(|| {
+            exec_err("audio backends not initialised (on_init did not run)".to_string())
+        })?;
         let stt = backends.stt_mut();
         let backend_name = stt.name().to_string();
         let out = stt
@@ -160,9 +165,9 @@ impl AudioCorePlugin {
             .map_err(|e| exec_err(format!("synthesize: invalid args: {e}")))?;
         let format = AudioFormat::parse_or_default(a.format.as_deref());
         let mut guard = self.backends.lock().expect("audio backends mutex");
-        let backends = guard
-            .as_mut()
-            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)".to_string()))?;
+        let backends = guard.as_mut().ok_or_else(|| {
+            exec_err("audio backends not initialised (on_init did not run)".to_string())
+        })?;
         let tts = backends.tts_mut();
         let backend_name = tts.name().to_string();
         let out = tts
@@ -178,9 +183,9 @@ impl AudioCorePlugin {
 
     fn dispatch_status(&self) -> Result<serde_json::Value, PluginError> {
         let guard = self.backends.lock().expect("audio backends mutex");
-        let backends = guard
-            .as_ref()
-            .ok_or_else(|| exec_err("audio backends not initialised (on_init did not run)".to_string()))?;
+        let backends = guard.as_ref().ok_or_else(|| {
+            exec_err("audio backends not initialised (on_init did not run)".to_string())
+        })?;
         let (stt, tts) = backends.names();
         serde_json::to_value(&AudioStatusResult {
             stt_backend: stt.to_string(),
@@ -265,10 +270,8 @@ mod tests {
     #[test]
     fn transcribe_round_trips_bytes_and_returns_text() {
         let (mut plugin, calls) = plugin_with_mocks();
-        let audio_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            b"raw-bytes",
-        );
+        let audio_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"raw-bytes");
         let v = plugin
             .dispatch(
                 HANDLER_TRANSCRIBE,
@@ -314,7 +317,9 @@ mod tests {
     #[test]
     fn status_returns_backend_pair() {
         let (mut plugin, _) = plugin_with_mocks();
-        let v = plugin.dispatch(HANDLER_STATUS, &serde_json::json!({})).unwrap();
+        let v = plugin
+            .dispatch(HANDLER_STATUS, &serde_json::json!({}))
+            .unwrap();
         assert_eq!(v["stt_backend"], "mock-stt");
         assert_eq!(v["tts_backend"], "mock-tts");
     }
@@ -335,9 +340,7 @@ mod tests {
     #[test]
     fn dispatch_unknown_handler_fails() {
         let (mut plugin, _) = plugin_with_mocks();
-        let err = plugin
-            .dispatch(999, &serde_json::json!({}))
-            .unwrap_err();
+        let err = plugin.dispatch(999, &serde_json::json!({})).unwrap_err();
         assert!(err.to_string().contains("unknown handler id 999"));
     }
 
@@ -346,7 +349,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut plugin = AudioCorePlugin::new(dir.path().to_path_buf());
         plugin.on_init().unwrap();
-        let v = plugin.dispatch(HANDLER_STATUS, &serde_json::json!({})).unwrap();
+        let v = plugin
+            .dispatch(HANDLER_STATUS, &serde_json::json!({}))
+            .unwrap();
         // Default backend is `Platform` (config.rs::AudioConfig::default)
         // — the Web Speech API contributed by the `nexus.audio` shell
         // plugin. This test was previously stale on `"local"`; surfaced

@@ -107,17 +107,17 @@ fn parse_yaml_frontmatter(yaml: &serde_yml::Value) -> Frontmatter {
     for (k, v) in map {
         let key = yaml_key_str(k);
         match key.as_str() {
-            "title"    => fm.title    = yaml_as_string(v),
-            "type"     => fm.doc_type = yaml_as_string(v),
-            "status"   => fm.status   = yaml_as_string(v),
+            "title" => fm.title = yaml_as_string(v),
+            "type" => fm.doc_type = yaml_as_string(v),
+            "status" => fm.status = yaml_as_string(v),
             "cssclass" => fm.cssclass = yaml_as_string(v),
-            "date"     => fm.date     = yaml_as_string(v),
-            "created"  => fm.created  = yaml_as_string(v),
+            "date" => fm.date = yaml_as_string(v),
+            "created" => fm.created = yaml_as_string(v),
             "modified" => fm.modified = yaml_as_string(v),
-            "version"  => fm.version  = yaml_as_string(v),
-            "aliases"  => fm.aliases  = yaml_as_string_list(v),
-            "tags"     => fm.tags     = yaml_as_string_list(v),
-            _          => {
+            "version" => fm.version = yaml_as_string(v),
+            "aliases" => fm.aliases = yaml_as_string_list(v),
+            "tags" => fm.tags = yaml_as_string_list(v),
+            _ => {
                 fm.custom.insert(key, yaml_to_json(v));
             }
         }
@@ -136,7 +136,7 @@ fn yaml_key_str(k: &serde_yml::Value) -> String {
 fn yaml_as_string(v: &serde_yml::Value) -> Option<String> {
     match v {
         serde_yml::Value::String(s) => Some(s.clone()),
-        serde_yml::Value::Bool(b)   => Some(b.to_string()),
+        serde_yml::Value::Bool(b) => Some(b.to_string()),
         serde_yml::Value::Number(n) => Some(n.to_string()),
         _ => None,
     }
@@ -158,9 +158,9 @@ fn yaml_as_string_list(v: &serde_yml::Value) -> Vec<String> {
 
 fn yaml_to_json(v: &serde_yml::Value) -> serde_json::Value {
     match v {
-        serde_yml::Value::Null         => serde_json::Value::Null,
-        serde_yml::Value::Bool(b)      => serde_json::Value::Bool(*b),
-        serde_yml::Value::Number(n)    => {
+        serde_yml::Value::Null => serde_json::Value::Null,
+        serde_yml::Value::Bool(b) => serde_json::Value::Bool(*b),
+        serde_yml::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 serde_json::Value::Number(i.into())
             } else if let Some(f) = n.as_f64() {
@@ -170,7 +170,7 @@ fn yaml_to_json(v: &serde_yml::Value) -> serde_json::Value {
                 serde_json::Value::Null
             }
         }
-        serde_yml::Value::String(s)    => serde_json::Value::String(s.clone()),
+        serde_yml::Value::String(s) => serde_json::Value::String(s.clone()),
         serde_yml::Value::Sequence(seq) => {
             serde_json::Value::Array(seq.iter().map(yaml_to_json).collect())
         }

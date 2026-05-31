@@ -109,7 +109,9 @@ pub(crate) fn prepare(
         let workflow_name = workflow.workflow.name.clone();
         let started_at = chrono::Utc::now().to_rfc3339();
         publish_workflow_activity(&ctx, &workflow_name, true, None).await;
-        let dispatcher = KernelActionDispatcher { ctx: Arc::clone(&ctx) };
+        let dispatcher = KernelActionDispatcher {
+            ctx: Arc::clone(&ctx),
+        };
         let result = run_workflow_with_variables(&workflow, &dispatcher, &variables).await;
         // BL-052 — emit activity end (success or failure).
         let err_msg = result.as_ref().err().map(std::string::ToString::to_string);
@@ -119,7 +121,11 @@ pub(crate) fn prepare(
         // present; on `EmptyPlan` we record zero.
         let finished_at = chrono::Utc::now().to_rfc3339();
         let (success, step_count, history_err) = match &result {
-            Ok(run) => (run.success, u32::try_from(run.steps.len()).unwrap_or(u32::MAX), None),
+            Ok(run) => (
+                run.success,
+                u32::try_from(run.steps.len()).unwrap_or(u32::MAX),
+                None,
+            ),
             Err(_) => (false, 0u32, err_msg.clone()),
         };
         run_history.append(crate::run_history::RunHistoryEntry {
@@ -351,7 +357,9 @@ impl TerminalStepArgs {
             .get("command")
             .and_then(|v| v.as_str())
             .map(str::to_string);
-        if matches!(action, TerminalAction::RunAdhoc) && command.as_deref().unwrap_or("").trim().is_empty() {
+        if matches!(action, TerminalAction::RunAdhoc)
+            && command.as_deref().unwrap_or("").trim().is_empty()
+        {
             return Err("terminal step: action 'run_adhoc' requires a non-empty `command`".into());
         }
         let working_dir = step
@@ -427,7 +435,12 @@ impl KernelActionDispatcher {
         }
         let resp = self
             .ctx
-            .ipc_call("com.nexus.terminal", "run_saved", payload, DEFAULT_STEP_TIMEOUT)
+            .ipc_call(
+                "com.nexus.terminal",
+                "run_saved",
+                payload,
+                DEFAULT_STEP_TIMEOUT,
+            )
             .await
             .map_err(|e| e.to_string())?;
         Ok(serde_json::json!({
@@ -457,10 +470,10 @@ impl KernelActionDispatcher {
             .as_array()
             .map(|rows| {
                 rows.iter()
-                    .filter(|row| row.get("name").and_then(|n| n.as_str()) == Some(target_name.as_str()))
-                    .filter_map(|row| {
-                        row.get("id").and_then(|i| i.as_str()).map(str::to_string)
+                    .filter(|row| {
+                        row.get("name").and_then(|n| n.as_str()) == Some(target_name.as_str())
                     })
+                    .filter_map(|row| row.get("id").and_then(|i| i.as_str()).map(str::to_string))
                     .collect()
             })
             .unwrap_or_default();
@@ -523,14 +536,8 @@ impl ActionDispatcher for KernelActionDispatcher {
                     ipc_args["limit"] = serde_json::Value::Number(limit.into());
                 }
                 if step.async_submit {
-                    return submit_async_step(
-                        &self.ctx,
-                        step,
-                        "com.nexus.ai",
-                        "ask",
-                        ipc_args,
-                    )
-                    .await;
+                    return submit_async_step(&self.ctx, step, "com.nexus.ai", "ask", ipc_args)
+                        .await;
                 }
                 self.ctx
                     .ipc_call("com.nexus.ai", "ask", ipc_args, DEFAULT_STEP_TIMEOUT)
@@ -1098,7 +1105,8 @@ prompt = "What time is it?"
             Some("workflow_ai_step")
         );
         assert_eq!(
-            task.get("target_plugin").and_then(serde_json::Value::as_str),
+            task.get("target_plugin")
+                .and_then(serde_json::Value::as_str),
             Some("com.nexus.ai")
         );
         assert_eq!(

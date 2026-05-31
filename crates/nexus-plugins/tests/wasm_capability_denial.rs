@@ -24,13 +24,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexus_kernel::{Capability, CapabilitySet};
-use nexus_plugins::__testing::{register_host_fns, HOST_CAPABILITY_DENIED};
 use nexus_plugins::PluginData;
+use nexus_plugins::__testing::{register_host_fns, HOST_CAPABILITY_DENIED};
 use tracing_subscriber::layer::SubscriberExt;
 use wasmtime::{Engine, Instance, Linker, Module, Store};
 
-const PROBE_WAT: &str =
-    include_str!("fixtures/denial_probe.wat");
+const PROBE_WAT: &str = include_str!("fixtures/denial_probe.wat");
 
 const TEST_PLUGIN_ID: &str = "com.nexus.test.denial-probe";
 
