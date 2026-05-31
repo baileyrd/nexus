@@ -4,6 +4,8 @@
 >
 > **Status legend:** open items are unchecked `[ ]`. Mark closed items `[x] ✅ Closed` with the commit SHA, mirroring [`gaps-inconsistencies-2026-05-21.md`](gaps-inconsistencies-2026-05-21.md).
 >
+> **GitHub issues:** R1–R19 are tracked as [#184–#202](https://github.com/baileyrd/nexus/issues?q=label%3Aexpert-review-2026-05-31) (label `expert-review-2026-05-31`). R6 (#189) follows up closed #77; R7 (#190) follows up closed #113.
+>
 > **Headline:** the four microkernel invariants hold and two are test-enforced (`dep_invariants.rs`, cap-matrix completeness). Findings are *evolution artifacts and enforcement gaps*, not structural decay. The single highest-leverage fix is **R1 (CI)** — it activates the ~4,200 existing tests, the drift gate, and clippy/fmt in one move and would have prevented R2.
 
 ## Severity counts
