@@ -360,6 +360,45 @@ pub struct ReadFrontmatterResult {
     pub fields: std::collections::BTreeMap<String, String>,
 }
 
+// ── #190 / R7 — shared `{ path }` args + file_exists reply ──────────────────
+
+/// Shared `{ path: String }` args envelope for storage verbs that
+/// take just a forge-relative path. Adopted by `delete_file`,
+/// `file_exists`, `write_vault_file` per #190 so the schemars
+/// generator + the `ipc_strictness` gate see the same wire shape
+/// the handlers read. Path-traversal attempts (`..`) and absolute
+/// paths are rejected by the engine boundary, not here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StoragePathArgs {
+    /// Forge-relative path. Empty string is rejected by the engine.
+    pub path: String,
+}
+
+/// Reply for `com.nexus.storage::file_exists`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageFileExistsResult {
+    /// `true` iff the file exists at the given forge-relative path.
+    pub exists: bool,
+}
+
 // ── #190 / R7 — write_frontmatter ────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::write_frontmatter`. Mirrors the

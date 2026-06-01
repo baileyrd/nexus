@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StoragePathArgs",
+  "description": "Shared `{ path: String }` args envelope for storage verbs that\ntake just a forge-relative path. Adopted by `delete_file`,\n`file_exists`, `write_vault_file` per #190 so the schemars\ngenerator + the `ipc_strictness` gate see the same wire shape\nthe handlers read. Path-traversal attempts (`..`) and absolute\npaths are rejected by the engine boundary, not here.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path. Empty string is rejected by the engine.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

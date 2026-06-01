@@ -4,10 +4,13 @@
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{StorageReadFileArgs, StorageReadFileResult};
+use crate::ipc::{
+    StorageFileExistsResult, StorageOk, StoragePathArgs, StorageReadFileArgs,
+    StorageReadFileResult, StorageWriteFileArgs,
+};
 use crate::{FileFilter, StorageEngine};
 
-use super::shared::{exec_err, is_forge_metadata_path, parse_args, path_arg, to_value};
+use super::shared::{exec_err, is_forge_metadata_path, parse_args, to_value};
 
 pub(crate) fn query_files(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     let filter: FileFilter = parse_args(args, "query_files")?;
@@ -42,14 +45,8 @@ pub(crate) fn read_file(engine: &StorageEngine, args: &Value) -> Result<Value, P
 }
 
 pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "write_file")?;
-    let bytes: Vec<u8> = args
-        .get("bytes")
-        .ok_or_else(|| exec_err(format!("write_file '{path}': missing 'bytes'")))
-        .and_then(|v| {
-            serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("write_file '{path}': bytes decode: {e}")))
-        })?;
+    // #190 / R7 — strict-parse via typed `StorageWriteFileArgs`.
+    let StorageWriteFileArgs { path, bytes } = parse_args(args, "write_file")?;
     let meta = engine
         .write_file(&path, &bytes)
         .map_err(|e| exec_err(format!("write_file '{path}' ({} bytes): {e}", bytes.len())))?;
@@ -57,23 +54,31 @@ pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, 
 }
 
 pub(crate) fn delete_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "delete_file")?;
+    // #190 / R7 — strict-parse via the shared `StoragePathArgs`.
+    let StoragePathArgs { path } = parse_args(args, "delete_file")?;
     engine
         .delete_file(&path)
         .map_err(|e| exec_err(format!("delete_file '{path}': {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "delete_file")
 }
 
 pub(crate) fn file_exists(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "file_exists")?;
+    // #190 / R7 — strict-parse via the shared `StoragePathArgs`,
+    // typed reply via `StorageFileExistsResult`.
+    let StoragePathArgs { path } = parse_args(args, "file_exists")?;
     let exists = engine
         .file_exists(&path)
         .map_err(|e| exec_err(format!("file_exists '{path}': {e}")))?;
-    Ok(serde_json::json!({ "exists": exists }))
+    to_value(&StorageFileExistsResult { exists }, "file_exists")
 }
 
 pub(crate) fn write_vault_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "write_vault_file")?;
+    // #190 / R7 — strict-parse via `StorageWriteFileArgs` (same wire
+    // shape as `write_file`). The metadata-namespace confinement
+    // check runs after the parse so a typo in `bytes` surfaces as
+    // an invalid-args error rather than getting masked by the
+    // namespace error.
+    let StorageWriteFileArgs { path, bytes } = parse_args(args, "write_vault_file")?;
     // The handler is documented as ".forge/-prefixed shell metadata
     // only" — `write_raw` skips FTS, graph, and watcher updates, so a
     // vault path (e.g. `notes/foo.md`) written here would silently
@@ -86,18 +91,11 @@ pub(crate) fn write_vault_file(engine: &StorageEngine, args: &Value) -> Result<V
              metadata namespace; vault writes must go through write_file"
         )));
     }
-    let bytes: Vec<u8> = args
-        .get("bytes")
-        .ok_or_else(|| exec_err(format!("write_vault_file '{path}': missing 'bytes'")))
-        .and_then(|v| {
-            serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("write_vault_file '{path}': bytes decode: {e}")))
-        })?;
     engine.write_raw(&path, &bytes).map_err(|e| {
         exec_err(format!(
             "write_vault_file '{path}' ({} bytes): {e}",
             bytes.len()
         ))
     })?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "write_vault_file")
 }
