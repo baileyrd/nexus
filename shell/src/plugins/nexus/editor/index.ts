@@ -11,6 +11,12 @@ import { startMultibufferSync } from './multibuffer/sync'
 import { markdownViewCreator } from './MarkdownView'
 import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
 import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
+// R10 / #193 — register this plugin's editor surface with the host seam so
+// `api.editor` delegates to it instead of the host statically importing the
+// editor store + fenced-code registry.
+import { registerEditorHostSurface } from '../../../host/EditorHostSurface'
+import { computeActiveEditor, activeEditorEquals } from '../../../host/activeEditor'
+import { fencedCodeRegistry } from './cm/fencedCodeRegistry'
 import { useEditorBlameStore } from './blameStore'
 import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
@@ -349,6 +355,27 @@ export const editorPlugin: Plugin = {
     installBlockHandleStyles()
     installInlineToolbarStyles()
     installMarginSuggestStyles()
+    // R10 / #193 — publish the editor surface the host's `api.editor`
+    // delegates to. The host owns the seam; this plugin owns the store,
+    // projection, and de-dup. Registered before any consumer plugin
+    // (mermaid, enrich, …) activates, since the editor is a core plugin.
+    // The returned disposer is discarded: the surface lives for the
+    // plugin's lifetime, matching every other long-lived registration in
+    // this file (no plugin-deactivate hook exists yet).
+    void registerEditorHostSurface({
+      getActiveEditor: () => computeActiveEditor(useEditorStore.getState()),
+      subscribeActiveEditor: (handler) => {
+        let last = computeActiveEditor(useEditorStore.getState())
+        return useEditorStore.subscribe((state) => {
+          const next = computeActiveEditor(state)
+          if (activeEditorEquals(next, last)) return
+          last = next
+          handler(next)
+        })
+      },
+      registerFencedCodeRenderer: (language, renderer) =>
+        fencedCodeRegistry.register(language, renderer),
+    })
     // BL-141 / Phase 4.6 — multibuffer external-edit sync. Was a
     // standalone nexus.multibufferSync plugin; folded in here since
     // no other plugin consumed it. Wiring lives in editor/multibuffer/.
