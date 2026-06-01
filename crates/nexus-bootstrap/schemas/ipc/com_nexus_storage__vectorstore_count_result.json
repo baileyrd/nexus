@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageVectorstoreCountResult",
+  "description": "Reply for `com.nexus.storage::vectorstore_count`.",
+  "type": "object",
+  "properties": {
+    "count": {
+      "description": "Total number of chunk-embedding rows in the store.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "count"
+  ]
+}

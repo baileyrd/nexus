@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageVectorQueryArgs",
+  "description": "Args for `com.nexus.storage::vector_query`.",
+  "type": "object",
+  "properties": {
+    "embedding": {
+      "description": "Query embedding (same dimensionality as the stored vectors).",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      }
+    },
+    "limit": {
+      "description": "Maximum number of matches to return. Defaults to 5 when absent.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "embedding"
+  ]
+}

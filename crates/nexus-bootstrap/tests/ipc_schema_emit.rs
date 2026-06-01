@@ -37,12 +37,14 @@ use nexus_storage::ipc::{
     EntityMergeArgs, EntityMergeResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
-    ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult,
+    ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult, StorageChunkEmbedding,
     StorageFileExistsResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
     StorageNoteAppendArgs, StorageNoteAppendResult, StorageOk, StoragePathArgs,
     StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
     StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
-    StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult, StorageWriteFrontmatterArgs,
+    StorageSymbolRow, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
+    StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
+    StorageWriteFrontmatterArgs,
 };
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
@@ -246,6 +248,13 @@ fn emit_all_schemas_impl() {
     // `file_exists` carries a non-`StorageOk` reply.
     write_schema::<StoragePathArgs>("com_nexus_storage__path_args", "shared");
     write_schema::<StorageFileExistsResult>("com_nexus_storage__file_exists", "result");
+
+    // ── com.nexus.storage::vector_* (#190) ───────────────────────────────
+    write_schema::<StorageChunkEmbedding>("com_nexus_storage__vector", "chunk");
+    write_schema::<StorageVectorInsertArgs>("com_nexus_storage__vector_insert", "args");
+    write_schema::<StorageVectorQueryArgs>("com_nexus_storage__vector_query", "args");
+    write_schema::<StorageVectorMatch>("com_nexus_storage__vector_query", "match");
+    write_schema::<StorageVectorstoreCountResult>("com_nexus_storage__vectorstore_count", "result");
 
     // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
     write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");

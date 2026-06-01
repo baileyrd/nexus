@@ -399,6 +399,111 @@ pub struct StorageFileExistsResult {
     pub exists: bool,
 }
 
+// ── #190 / R7 — vector store handlers ────────────────────────────────────────
+
+/// Mirror of [`crate::vectorstore::ChunkEmbedding`] — kept in sync
+/// manually so the impl type stays free of the optional `ts-rs` /
+/// `schemars` derives. Compared via `cargo test -p nexus-bootstrap
+/// --test ipc_schema_emit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageChunkEmbedding {
+    /// Path of the source file (forge-relative).
+    pub file_path: String,
+    /// Identifier of the originating block.
+    pub block_id: u64,
+    /// Textual content of the chunk.
+    pub chunk_text: String,
+    /// Dense vector representation of the chunk.
+    pub embedding: Vec<f32>,
+}
+
+/// Args for `com.nexus.storage::vector_insert`. Replaces all chunks
+/// for `file_path` atomically.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorInsertArgs {
+    /// Forge-relative path of the source file. Used as the dedup key.
+    pub file_path: String,
+    /// Replacement chunk set. Empty array clears all chunks for the
+    /// file without inserting new ones.
+    pub chunks: Vec<StorageChunkEmbedding>,
+}
+
+/// Args for `com.nexus.storage::vector_query`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorQueryArgs {
+    /// Query embedding (same dimensionality as the stored vectors).
+    pub embedding: Vec<f32>,
+    /// Maximum number of matches to return. Defaults to 5 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One match row in a `vector_query` reply. Mirror of
+/// [`crate::vectorstore::ChunkMatch`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorMatch {
+    /// Path of the source file (forge-relative).
+    pub file_path: String,
+    /// Identifier of the originating block.
+    pub block_id: u64,
+    /// Textual content of the matched chunk.
+    pub chunk_text: String,
+    /// Cosine similarity score. Higher is more relevant.
+    pub score: f32,
+}
+
+/// Reply for `com.nexus.storage::vectorstore_count`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorstoreCountResult {
+    /// Total number of chunk-embedding rows in the store.
+    pub count: u64,
+}
+
 // ── #190 / R7 — write_frontmatter ────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::write_frontmatter`. Mirrors the

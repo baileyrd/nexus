@@ -6,9 +6,10 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{StorageOk, StoragePathArgs};
 use crate::StorageEngine;
 
-use super::shared::{exec_err, path_arg, to_value};
+use super::shared::{exec_err, parse_args, to_value};
 
 pub(crate) fn rebuild_index(engine: &StorageEngine) -> Result<Value, PluginError> {
     let stats = engine
@@ -18,17 +19,19 @@ pub(crate) fn rebuild_index(engine: &StorageEngine) -> Result<Value, PluginError
 }
 
 pub(crate) fn rebuild_search_index(engine: &StorageEngine) -> Result<Value, PluginError> {
+    // #190 / R7 — typed reply via `StorageOk` (was `json!({})`).
     engine
         .rebuild_search_index()
         .map_err(|e| exec_err(format!("rebuild_search_index: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "rebuild_search_index")
 }
 
 pub(crate) fn obsidian_base_query(
     engine: &StorageEngine,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let path = path_arg(args, "obsidian_base_query")?;
+    // #190 / R7 — strict-parse via the shared `StoragePathArgs`.
+    let StoragePathArgs { path } = parse_args(args, "obsidian_base_query")?;
     let result = engine
         .obsidian_base_query(&path)
         .map_err(|e| exec_err(format!("obsidian_base_query '{path}': {e}")))?;
