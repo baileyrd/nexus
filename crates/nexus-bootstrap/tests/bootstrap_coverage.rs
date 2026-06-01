@@ -47,20 +47,30 @@ const EXEMPT_CRATES: &[(&str, &str)] = &[
     ("nexus-mcp", "IPC proxy (MCP server)"),
     ("nexus-acp", "IPC proxy (ACP host/server)"),
     ("nexus-remote", "IPC proxy (remote-forge JSON-RPC server)"),
-    // Not-yet-wired subsystems tracked by #188 / R5. Removing one of
-    // these rows requires landing the corresponding registrar file in
-    // `crates/nexus-bootstrap/src/plugins/`.
+    // #188 / R5 — library crates that are not, and were never intended to be,
+    // CorePlugins. Each is a building block the AI / agent loop will consume
+    // (vs. an IPC-reachable service); the audit's framing of "subsystems
+    // awaiting bootstrap wiring" overstated their role — they are libraries
+    // whose integration belongs to a downstream consumer crate, not a fresh
+    // registrar. Removing one of these rows requires either a consumer that
+    // pulls it in or a deliberate decision to surface it as a CorePlugin
+    // (which would in turn need an IPC handler design + cap-matrix entry).
     (
         "nexus-memory",
-        "Move 4 AI memory layer; bootstrap wiring pending (#188)",
+        "library: episodic / semantic / procedural memory stores. Planned \
+         consumer: nexus-ai-runtime per-session state (#188).",
     ),
     (
         "nexus-context",
-        "Move 6 context-assembly pipeline; bootstrap wiring pending (#188)",
+        "library: typed context-assembly pipeline. Already consumes \
+         nexus-memory; planned consumer: nexus-ai-runtime per-tick context \
+         builder (#188).",
     ),
     (
         "nexus-protocol",
-        "Move 7 speech-act protocol; bootstrap wiring pending (#188)",
+        "library: speech-act protocol types for agent ↔ tool messages. Zero \
+         in-tree consumers; staging until the agent loop adopts typed \
+         messages (#188).",
     ),
 ];
 
