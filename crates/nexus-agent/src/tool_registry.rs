@@ -96,6 +96,9 @@ impl Capability {
     }
 
     /// Parse a string id produced by [`Capability::as_str`].
+    // Inherent `from_str` returns `Option`, not the `Result`-based
+    // `std::str::FromStr`; the lenient Option API is intentional.
+    #[allow(clippy::should_implement_trait)]
     #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -355,7 +358,7 @@ impl AgentToolRegistry {
 
         let additional_allowed = schema
             .get("additionalProperties")
-            .map_or(true, |v| v.as_bool().unwrap_or(true));
+            .is_none_or(|v| v.as_bool().unwrap_or(true));
         if !additional_allowed {
             let properties = schema
                 .get("properties")

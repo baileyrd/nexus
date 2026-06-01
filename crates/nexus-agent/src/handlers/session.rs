@@ -247,7 +247,7 @@ pub(crate) async fn handle_session_run(
     let duration_ms =
         crate::auto_notify::duration_ms_between(&session.started_at, &session.ended_at)
             .unwrap_or(0);
-    let outcome_str = match serde_json::to_value(&session.outcome) {
+    let outcome_str = match serde_json::to_value(session.outcome) {
         Ok(serde_json::Value::String(s)) => s,
         _ => "completed".to_string(),
     };

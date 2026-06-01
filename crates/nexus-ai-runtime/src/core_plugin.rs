@@ -745,8 +745,8 @@ async fn run_session(
 /// executor packages the underlying IPC dispatch (e.g.
 /// `("com.nexus.ai", "ask", …)` for `ai_prompt`) into a
 /// `WorkflowAiStep` task; the runtime fires the call here and the
-/// terminal `Finished` event carries the reply verbatim. `workflow`
-/// + `step` ride along on the tracing span for observability so a
+/// terminal `Finished` event carries the reply verbatim. `workflow` +
+/// `step` ride along on the tracing span for observability so a
 /// long-running async `ai_prompt` step appears in the worker logs
 /// with its parent run id.
 async fn run_workflow_ai_step(

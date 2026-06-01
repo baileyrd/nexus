@@ -372,10 +372,7 @@ fn process_events(
             // their own watcher events but aren't a piece of file-as-
             // truth content the storage layer should index; we read
             // it once and route accordingly.
-            let metadata = match std::fs::symlink_metadata(path) {
-                Ok(meta) => Some(meta),
-                Err(_) => None,
-            };
+            let metadata = std::fs::symlink_metadata(path).ok();
             if let Some(ref meta) = metadata {
                 if meta.file_type().is_symlink() {
                     tracing::debug!(

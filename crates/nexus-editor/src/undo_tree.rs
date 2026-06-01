@@ -517,7 +517,7 @@ mod tests {
         assert!(persisted
             .children
             .iter()
-            .any(|(k, v)| *k == None && v == &vec![0usize]));
+            .any(|(k, v)| k.is_none() && v == &vec![0usize]));
     }
 
     #[test]

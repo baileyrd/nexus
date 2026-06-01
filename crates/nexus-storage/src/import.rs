@@ -38,20 +38,16 @@ use crate::error::StorageError;
 /// destination file at the same relpath.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ConflictStrategy {
     /// Leave the destination file unchanged; record the conflict.
+    #[default]
     Skip,
     /// Replace the destination bytes with the source bytes.
     Overwrite,
     /// Write the source file to `<stem>.imported.<n>.<ext>` so both
     /// versions coexist. Picks the lowest non-colliding `<n>`.
     Rename,
-}
-
-impl Default for ConflictStrategy {
-    fn default() -> Self {
-        Self::Skip
-    }
 }
 
 /// One conflict in an import plan — the source and destination files
@@ -170,8 +166,7 @@ fn walk_for_import(
         let relpath = path
             .strip_prefix(root)
             .map_err(|_| {
-                StorageError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                StorageError::Io(std::io::Error::other(
                     "internal: source walk produced path outside root",
                 ))
             })?
@@ -218,8 +213,10 @@ pub fn apply_import(
     plan: &ImportPlan,
     options: &ImportOptions,
 ) -> Result<ImportReport, StorageError> {
-    let mut report = ImportReport::default();
-    report.total_examined = plan.copies.len() + plan.skips_identical.len() + plan.conflicts.len();
+    let mut report = ImportReport {
+        total_examined: plan.copies.len() + plan.skips_identical.len() + plan.conflicts.len(),
+        ..Default::default()
+    };
 
     // Pre-existing rename counters per parent directory so `Rename`
     // strategy never re-reads disk for `<n>` discovery in the inner loop.

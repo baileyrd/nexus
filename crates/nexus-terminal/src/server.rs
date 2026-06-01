@@ -388,8 +388,8 @@ pub trait TerminalServer {
 /// returns any persistence error so the server can log + drop. The
 /// callback runs synchronously inside `create_session` while the
 /// server lock is held — implementations should write quickly (the
-/// underlying `SqliteSessionStore::save_scrollback` writes one row
-/// + one file blob). `Send + Sync` so a `&InMemoryTerminalServer`
+/// underlying `SqliteSessionStore::save_scrollback` writes one row +
+/// one file blob). `Send + Sync` so a `&InMemoryTerminalServer`
 /// behind an `Arc<Mutex<...>>` can host the callback.
 pub type EvictionPersister =
     Box<dyn Fn(&str, &[u8]) -> Result<(), TerminalError> + Send + Sync + 'static>;
@@ -1167,6 +1167,7 @@ mod tests {
 
         // Wire a persister that records (id, snapshot) so the test
         // can assert on what landed.
+        #[allow(clippy::type_complexity)]
         let captured: std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>> =
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured_clone = std::sync::Arc::clone(&captured);

@@ -400,6 +400,7 @@ impl Matcher {
 /// at `[col, col+len)` qualifies when:
 ///   - the byte before is non-word (or the match starts the line), AND
 ///   - the byte after is non-word (or the match ends the line).
+///
 /// "Word" follows ASCII `\w` semantics: alphanumeric or underscore.
 /// Matches the literal-search semantics of every editor we care
 /// about (VS Code, Sublime, Vim).

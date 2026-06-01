@@ -106,8 +106,7 @@ mod tests {
 
     #[test]
     fn rejects_non_hex_suffix() {
-        let (name, uid) =
-            strip_notion_uuid(&format!("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md"));
+        let (name, uid) = strip_notion_uuid("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md");
         assert_eq!(
             name,
             format!("Title not_hex_ZZZZZZZZZZZZZZZZZZZZZZZZZZZ.md")
@@ -118,7 +117,7 @@ mod tests {
     #[test]
     fn rejects_uppercase_hex() {
         // Notion always lowercases its UUID suffixes; uppercase shouldn't match.
-        let (name, uid) = strip_notion_uuid(&format!("Title ABCDEF1234567890ABCDEF1234567890.md"));
+        let (name, uid) = strip_notion_uuid("Title ABCDEF1234567890ABCDEF1234567890.md");
         assert!(uid.is_none(), "must not strip uppercase suffix");
         assert!(name.contains("ABCDEF"));
     }

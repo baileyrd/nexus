@@ -164,9 +164,7 @@ mod tests {
 
     #[test]
     fn sanitize_caps_runaway_output() {
-        let raw: String = std::iter::repeat('x')
-            .take(COMPLETION_CHAR_CAP + 500)
-            .collect();
+        let raw: String = std::iter::repeat_n('x', COMPLETION_CHAR_CAP + 500).collect();
         let out = sanitize_completion(&raw, "");
         assert_eq!(out.chars().count(), COMPLETION_CHAR_CAP);
     }

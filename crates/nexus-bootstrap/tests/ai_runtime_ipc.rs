@@ -450,8 +450,6 @@ async fn unregister_unknown_trigger_id_returns_found_false() {
 
 #[tokio::test]
 async fn trigger_watcher_spawns_session_when_matching_event_fires() {
-    use nexus_kernel::Events as _;
-
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
 

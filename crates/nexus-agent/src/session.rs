@@ -455,6 +455,9 @@ where
 /// at this surface. The struct is `Clone` + cheap to construct;
 /// the loop sanitises the values internally so a misconfigured
 /// `max_iterations = 0` clamps to 1 rather than deadlocking.
+// Session driver wiring (driver/dispatcher/policy/config/...); folding these
+// into a params struct would just move the arguments around.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_session_with_config<D, P, T>(
     driver: &D,
     dispatcher: &T,
@@ -508,6 +511,9 @@ where
 /// [`crate::compression::Compressor`]. The compressor only fires
 /// when [`SessionConfig::max_context_tokens`] > 0; otherwise the
 /// loop runs identically to BL-119.
+// Session driver wiring plus the compressor; same rationale as
+// `run_session_with_config`.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_session_with_compressor<D, P, T, C>(
     driver: &D,
     dispatcher: &T,
@@ -892,15 +898,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     }
 }
 
-/// Compose the prompt for the next round. Phase 2a uses a flat
-/// re-statement with a compact summary of prior rounds; a future
-/// upgrade can switch to provider-native multi-turn chat.
-#[cfg(test)]
-fn compose_followup_prompt(goal: &str, rounds: &[RoundRecord], all_errored: bool) -> String {
-    compose_followup_prompt_compressed(goal, rounds, 0, "", all_errored)
-}
-
-/// BL-120 — variant of [`compose_followup_prompt`] that honours a
+/// BL-120 — follow-up prompt builder that honours a
 /// rolling-summary preamble + a working-set window. `live_start`
 /// is the index into `rounds` of the first round still considered
 /// "live"; rounds before it have already been folded into

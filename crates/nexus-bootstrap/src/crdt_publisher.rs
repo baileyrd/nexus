@@ -915,7 +915,7 @@ mod tests {
         publisher.on_session_opened("notes.md", &tree, b"");
 
         let insert = insert_text(b, 0, "hello");
-        publisher.on_apply_transaction("notes.md", &[insert.clone()]);
+        publisher.on_apply_transaction("notes.md", std::slice::from_ref(&insert));
         // Drain the apply event.
         sub.recv().await.unwrap();
 

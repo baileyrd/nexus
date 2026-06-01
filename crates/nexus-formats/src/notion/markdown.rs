@@ -181,10 +181,10 @@ fn callout_type_for_emoji(emoji: &str) -> &'static str {
 /// Walk block quotes and convert `> <emoji> body` into Nexus callout syntax.
 fn convert_callouts(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
-    let mut lines = input.lines().peekable();
+    let lines = input.lines().peekable();
     let mut first = true;
 
-    while let Some(line) = lines.next() {
+    for line in lines {
         if !first {
             out.push('\n');
         }

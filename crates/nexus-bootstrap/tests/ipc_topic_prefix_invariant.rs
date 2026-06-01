@@ -212,16 +212,15 @@ fn owners_table_matches_plugin_id_constants() {
         // PLUGIN_ID lives in `core_plugin.rs` for most crates, but
         // a couple declare it in `lib.rs` instead (e.g. nexus-ai-runtime).
         // Walk the tree rather than hard-requiring a fixed file path.
-        if !core.exists() || !file_contains(&core, expected_id) {
-            if !found_plugin_id_in_tree(&src, expected_id)
-                && !file_contains(&plugin_ids_registry, expected_id)
-            {
-                errors.push(format!(
-                    "{crate_name}: expected literal {expected_id:?} \
+        if (!core.exists() || !file_contains(&core, expected_id))
+            && !found_plugin_id_in_tree(&src, expected_id)
+            && !file_contains(&plugin_ids_registry, expected_id)
+        {
+            errors.push(format!(
+                "{crate_name}: expected literal {expected_id:?} \
                      somewhere under src/ or in nexus-types/src/plugin_ids.rs \
                      — OWNERS may be stale"
-                ));
-            }
+            ));
         }
     }
 

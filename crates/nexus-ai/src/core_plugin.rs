@@ -1662,8 +1662,10 @@ mod bl102_tls_pinning_status_tests {
 
     #[test]
     fn config_flag_enables_pinning_regardless_of_env() {
-        let mut cfg = AiConfig::default();
-        cfg.tls_pinning_enabled = true;
+        let cfg = AiConfig {
+            tls_pinning_enabled: true,
+            ..Default::default()
+        };
         // The OR with the env var means a `true` config flag short-
         // circuits to `true`; this assertion holds whether or not the
         // ambient `NEXUS_TLS_PINNING` is set.

@@ -280,23 +280,20 @@ fn find_op_outside_string(src: &str, op: &str) -> Option<usize> {
     let mut quote: Option<u8> = None;
     while i + op_bytes.len() <= bytes.len() {
         let b = bytes[i];
-        match quote {
-            Some(q) => {
-                // Inside a string. Skip the next byte after a
-                // backslash so `\"` and `\\` don't close the string.
-                if b == b'\\' && i + 1 < bytes.len() {
-                    i += 2;
-                    continue;
-                }
-                if b == q {
-                    quote = None;
-                    i += 1;
-                    continue;
-                }
+        if let Some(q) = quote {
+            // Inside a string. Skip the next byte after a
+            // backslash so `\"` and `\\` don't close the string.
+            if b == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                quote = None;
                 i += 1;
                 continue;
             }
-            None => {}
+            i += 1;
+            continue;
         }
         if b == b'"' || b == b'\'' {
             quote = Some(b);

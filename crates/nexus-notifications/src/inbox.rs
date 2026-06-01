@@ -175,7 +175,7 @@ impl Inbox {
             .conn
             .lock()
             .map_err(|e| InboxError::Sql(format!("inbox mutex poisoned: {e}")))?;
-        f(&*guard)
+        f(&guard)
     }
 }
 
@@ -326,8 +326,7 @@ impl Inbox {
         if ids.is_empty() {
             return Ok(0);
         }
-        let placeholders = std::iter::repeat("?")
-            .take(ids.len())
+        let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
             .join(",");
         let ts = unix_now();
@@ -355,8 +354,7 @@ impl Inbox {
         if ids.is_empty() {
             return Ok(0);
         }
-        let placeholders = std::iter::repeat("?")
-            .take(ids.len())
+        let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
             .join(",");
         let ts = unix_now();
@@ -653,7 +651,7 @@ mod tests {
     fn dismiss_also_marks_read() {
         let i = fresh(100);
         let id = insert_one(&i, "wf", "a", &[]);
-        let n = i.dismiss(&[id.clone()]).expect("dismiss");
+        let n = i.dismiss(std::slice::from_ref(&id)).expect("dismiss");
         assert_eq!(n, 1);
         let got = i.get(&id).expect("get").expect("present");
         assert!(got.read_at.is_some());
@@ -738,8 +736,8 @@ mod tests {
         let a = insert_one(&i, "wf", "a", &[]);
         let b = insert_one(&i, "wf", "b", &[]);
         let _c = insert_one(&i, "wf", "c", &[]);
-        i.mark_read(&[a.clone()]).expect("mark");
-        i.dismiss(&[b.clone()]).expect("dismiss");
+        i.mark_read(std::slice::from_ref(&a)).expect("mark");
+        i.dismiss(std::slice::from_ref(&b)).expect("dismiss");
 
         let snap = i.snapshot_user_state().expect("snap");
         assert_eq!(snap.len(), 2);

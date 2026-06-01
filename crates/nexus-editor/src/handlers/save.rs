@@ -69,6 +69,8 @@ fn apply_reflow_after_save(sessions: &SessionMap, relpath: &str) -> Result<(), P
     }
     // Group block ids by source relpath, capturing input order so we
     // can map the reflow result back.
+    // Transient grouping map; a named type alias would obscure more than clarify.
+    #[allow(clippy::type_complexity)]
     let mut groups: HashMap<String, Vec<(usize, uuid::Uuid, u32, u32, u32)>> = HashMap::new();
     for (input_idx, block_id) in guard.tree.root_blocks.clone().into_iter().enumerate() {
         let Some(block) = guard.tree.blocks.get(&block_id) else {
