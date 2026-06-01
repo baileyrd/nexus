@@ -38,10 +38,10 @@ use serde_json::json;
 
 use crate::config::{McpMergeSkipReason, McpServerSpec, McpTransport, McpUnregisterError};
 use crate::ipc::{
-    McpConnectReply, McpDisconnectMissReply, McpPromptEntry, McpRegisterServerArgs,
-    McpRegisterServerReply, McpRegisterToolReply, McpResourceEntry, McpServerArgs, McpServerEntry,
-    McpToolEntry, McpUnregisterServerArgs, McpUnregisterServerReply, McpUnregisterToolArgs,
-    McpUnregisterToolReply,
+    McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply, McpPromptEntry,
+    McpRegisterServerArgs, McpRegisterServerReply, McpRegisterToolReply, McpResourceEntry,
+    McpServerArgs, McpServerEntry, McpToolEntry, McpUnregisterServerArgs, McpUnregisterServerReply,
+    McpUnregisterToolArgs, McpUnregisterToolReply,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{McpClientError, McpHostConfig};
@@ -655,10 +655,29 @@ impl CorePlugin for McpHostPlugin {
             }
 
             HANDLER_CALL_TOOL => {
-                let server = str_arg(args, "server")?;
-                let tool = str_arg(args, "tool")?;
-                let tool_args = args.get("arguments").and_then(|v| v.as_object()).cloned();
+                // #190 / R7 — strict-parse via typed `McpCallToolArgs`
+                // (`deny_unknown_fields`). Same parse-error-surfacing
+                // posture as the other dispatch_async branches.
+                let parsed: Result<McpCallToolArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let McpCallToolArgs {
+                        server,
+                        tool,
+                        arguments,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("call_tool: invalid args: {e}"),
+                    })?;
+                    // `call_tool(name, Option<Map>)`: pass `None` when
+                    // the caller omitted `arguments` (typed default
+                    // = empty map) to preserve the prior wire shape
+                    // — some MCP servers distinguish "no arguments
+                    // field" from "empty object".
+                    let tool_args = if arguments.is_empty() {
+                        None
+                    } else {
+                        Some(arguments)
+                    };
                     let cfg = config_or_err(config.as_ref())?;
                     let client = pool
                         .get_or_connect(&server, &cfg)
@@ -709,23 +728,21 @@ impl CorePlugin for McpHostPlugin {
                              {MAX_TOOL_RESPONSE_BYTES} bytes)"
                         );
                     }
-                    Ok(json!({
-                        "content": content,
-                        "is_error": result.is_error,
-                        "truncated": truncated,
-                    }))
+                    let reply = McpCallToolReply {
+                        content,
+                        is_error: result.is_error.unwrap_or(false),
+                        truncated,
+                    };
+                    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("call_tool: serialize reply: {e}"),
+                    })
                 }))
             }
 
             _ => None,
         }
     }
-}
-
-fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
 }
 
 fn config_or_err(config: Option<&Arc<McpHostConfig>>) -> Result<Arc<McpHostConfig>, PluginError> {
