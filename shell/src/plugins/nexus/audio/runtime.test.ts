@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { setUseWebSpeech, synthesize, transcribe } from './runtime.ts'
+import { getUseWebSpeech, setUseWebSpeech, synthesize, transcribe } from './runtime.ts'
 
 interface InvokeCall {
   plugin: string
@@ -194,8 +194,11 @@ test('synthesize prefers Web Speech API when supported and not forceIpc', async 
   }
 })
 
-test('setUseWebSpeech / getUseWebSpeech toggle the global preference', async () => {
-  const { getUseWebSpeech } = await import('./runtime.ts')
+test('setUseWebSpeech / getUseWebSpeech toggle the global preference', () => {
+  // Use the statically-imported get/set so both touch the SAME module
+  // instance. A dynamic `import('./runtime.ts')` here resolves to a
+  // second instance under Node 20 + tsx (distinct ESM cache key), so
+  // setUseWebSpeech(false) would not be observed by getUseWebSpeech().
   setUseWebSpeech(false)
   assert.equal(getUseWebSpeech(), false)
   setUseWebSpeech(true)
