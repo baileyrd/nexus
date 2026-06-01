@@ -2,7 +2,8 @@
 //! `list_sessions`. Split out of `core_plugin.rs` by SD-03 terminal
 //! chunk 1.
 
-use crate::core_plugin::{SessionIdArgs, TerminalCorePlugin};
+use crate::core_plugin::TerminalCorePlugin;
+use crate::ipc::SessionIdArgs;
 use crate::server::TerminalServer;
 use crate::session::SessionId;
 use nexus_plugins::PluginError;

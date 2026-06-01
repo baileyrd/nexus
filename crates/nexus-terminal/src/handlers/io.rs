@@ -5,10 +5,11 @@
 
 use std::time::Duration;
 
-use crate::core_plugin::{
+use crate::core_plugin::TerminalCorePlugin;
+use crate::ipc::{
     CrossSessionSearchArgs, PumpArgs, PumpResponse, ReadOutputArgs, ReadRawSinceArgs,
-    ReadRawSinceResponse, SearchOutputArgs, SendInputArgs, SendRawInputArgs, TerminalCorePlugin,
-    WaitForPatternArgs, WaitForPatternResponse,
+    ReadRawSinceResponse, SearchOutputArgs, SendInputArgs, SendRawInputArgs, WaitForPatternArgs,
+    WaitForPatternResponse,
 };
 use crate::server::TerminalServer;
 use crate::session::SessionId;

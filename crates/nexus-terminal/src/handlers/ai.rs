@@ -11,7 +11,8 @@ use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 
 use crate::ai::AiSuggestionEngine;
-use crate::core_plugin::{SuggestArgs, SuggestResponse, PLUGIN_ID};
+use crate::core_plugin::PLUGIN_ID;
+use crate::ipc::{SuggestArgs, SuggestResponse};
 use crate::server::InMemoryTerminalServer;
 use crate::session::SessionId;
 

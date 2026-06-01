@@ -4,7 +4,8 @@
 
 use std::path::PathBuf;
 
-use crate::core_plugin::{CreateSessionResponse, RunSavedArgs, TerminalCorePlugin};
+use crate::core_plugin::TerminalCorePlugin;
+use crate::ipc::{CreateSessionResponse, RunSavedArgs};
 use crate::memory::MemoryLimits;
 use crate::server::{ServerSpawnConfig, TerminalServer};
 use crate::shell::ShellSpec;
