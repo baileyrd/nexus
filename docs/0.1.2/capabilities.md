@@ -108,4 +108,4 @@ Every cap-gated call is logged through `nexus-security::audit` and persisted to 
 Live candidates:
 - `com.nexus.ai::resolve_credentials` — returns keyring material; currently restricted via `internal = true` (core-trust only) but a future explicit cap is tracked.
 - `com.nexus.mcp.host::call_tool` — tool side effects happen in the MCP server's process; `connect`'s `process.spawn` gate bounds who can attach a server in the first place.
-- `com.nexus.workflow::{run, run_digest}` — laundering surface; observability shipped (audit-tagged `tracing::warn!` lists implied caller caps on every invocation). Kernel-side enforcement remains the residual gap. Tracked under issue #77 and BL-134 Phase 3.
+- `com.nexus.workflow::{run, run_digest}` — laundering surface; observability shipped (audit-tagged `tracing::warn!` lists implied caller caps on every invocation). Kernel-side enforcement remains the residual gap. Tracked under issue #77 and BL-134 Phase 3; the full threat model + accepted residual risk inventory is in [`amplifier-laundering.md`](amplifier-laundering.md) (#189).
