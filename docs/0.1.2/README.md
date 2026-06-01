@@ -23,6 +23,7 @@ docs/0.1.2/
 ├── implementation-plan.md     ← phased remediation plan for every audit finding (39 items)
 ├── ipc-handlers.md            ← every IPC handler (~280), grouped by plugin
 ├── capabilities.md            ← every security capability (30), every use site
+├── amplifier-laundering.md    ← #189 threat model + accepted residual risk for amplifier plugins
 ├── application-capabilities.md ← what Nexus does, by feature domain
 ├── plugin-capabilities.md     ← per-plugin: what each of the 96 plugins provides
 ├── settings/
@@ -48,7 +49,7 @@ docs/0.1.2/
 - **Architecture orientation:** start at [`architecture.md`](architecture.md), then [`crates.md`](crates.md).
 - **Building a plugin:** [`plugins/community.md`](plugins/community.md) → [`capabilities.md`](capabilities.md) → [`ipc-handlers.md`](ipc-handlers.md).
 - **Adding a setting (the right way):** [`settings/README.md`](settings/README.md) → [`settings/hardcoded-rust.md`](settings/hardcoded-rust.md) / [`settings/hardcoded-shell.md`](settings/hardcoded-shell.md) for already-flagged candidates.
-- **Security review:** [`capabilities.md`](capabilities.md) → [`reference/audit-flags.md`](reference/audit-flags.md).
+- **Security review:** [`capabilities.md`](capabilities.md) → [`amplifier-laundering.md`](amplifier-laundering.md) → [`reference/audit-flags.md`](reference/audit-flags.md).
 
 ## What's not here yet
 
