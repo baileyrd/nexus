@@ -38,8 +38,9 @@ use serde_json::json;
 
 use crate::config::{McpMergeSkipReason, McpServerSpec, McpTransport, McpUnregisterError};
 use crate::ipc::{
-    McpConnectReply, McpDisconnectMissReply, McpPromptEntry, McpRegisterToolReply,
-    McpResourceEntry, McpServerArgs, McpServerEntry, McpToolEntry, McpUnregisterToolArgs,
+    McpConnectReply, McpDisconnectMissReply, McpPromptEntry, McpRegisterServerArgs,
+    McpRegisterServerReply, McpRegisterToolReply, McpResourceEntry, McpServerArgs, McpServerEntry,
+    McpToolEntry, McpUnregisterServerArgs, McpUnregisterServerReply, McpUnregisterToolArgs,
     McpUnregisterToolReply,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
@@ -143,66 +144,46 @@ fn parse_transport(raw: &str) -> McpTransport {
 fn parse_register_server(
     args: &serde_json::Value,
 ) -> Result<(String, McpServerSpec, String), PluginError> {
-    let name = required_string(args, "name")?;
-    let plugin_id = required_string(args, "plugin_id")?;
-    let transport = args
-        .get("transport")
-        .and_then(serde_json::Value::as_str)
-        .map_or(McpTransport::Stdio, parse_transport);
-    let command = args
-        .get("command")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let parse_args = args
-        .get("args")
-        .and_then(serde_json::Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let env = args
-        .get("env")
-        .and_then(serde_json::Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
-                .collect()
-        })
-        .unwrap_or_default();
-    let url = args
-        .get("url")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned);
-    let disabled = args
-        .get("disabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    // #190 / R7 — strict-parse via typed `McpRegisterServerArgs`
+    // (`deny_unknown_fields`) instead of the prior hand-rolled
+    // field-by-field reads off `serde_json::Value`. Defaults for
+    // `transport` ("stdio") / `command` ("") / `args` / `env` /
+    // `disabled` are carried by the serde struct itself; the field
+    // order matches the old shape so callers don't need to change.
+    let typed: McpRegisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
+        PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("register_server: invalid args: {e}"),
+        }
+    })?;
+    if typed.name.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `name`".to_string(),
+        });
+    }
+    if typed.plugin_id.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `plugin_id`".to_string(),
+        });
+    }
     let spec = McpServerSpec {
-        transport,
-        command,
-        args: parse_args,
-        env,
-        url,
-        disabled,
+        transport: parse_transport(&typed.transport),
+        command: typed.command,
+        args: typed.args,
+        env: typed.env.into_iter().collect(),
+        url: typed.url,
+        disabled: typed.disabled,
         ..McpServerSpec::default()
     };
-    Ok((name, spec, plugin_id))
+    Ok((typed.name, spec, typed.plugin_id))
 }
 
-fn required_string(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("missing or empty required field `{key}`"),
-        })
-}
+// #190 — `required_string` helper removed; the register/unregister
+// server handlers now strict-parse via typed `McpRegisterServerArgs`
+// / `McpUnregisterServerArgs`, and inline the non-empty check on
+// the resulting fields.
 
 /// BL-113 Phase 3b — sync IPC handler for `register_server` on
 /// `com.nexus.mcp.host`. Same shape as the DAP / LSP register
@@ -224,39 +205,88 @@ fn handle_register_server(
 ) -> Result<serde_json::Value, PluginError> {
     let (name, spec, plugin_id) = parse_register_server(args)?;
     let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
-    match cfg.register_contributed(name, spec, plugin_id) {
-        Ok(()) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(McpMergeSkipReason::TomlOverride) => {
-            Ok(json!({ "ok": false, "status": "toml_override" }))
-        }
-        Err(McpMergeSkipReason::InvalidName) => {
-            Ok(json!({ "ok": false, "status": "invalid_name" }))
-        }
-        Err(McpMergeSkipReason::Invalid(reason)) => Ok(json!({
-            "ok": false,
-            "status": "invalid",
-            "reason": reason,
-        })),
-    }
+    // #190 / R7 — reply migrates from ad-hoc `json!({"ok": …, "status":
+    // …})` to the typed `McpRegisterServerReply` (`deny_unknown_fields`).
+    let reply = match cfg.register_contributed(name, spec, plugin_id) {
+        Ok(()) => McpRegisterServerReply {
+            ok: true,
+            status: "ok".to_string(),
+            reason: None,
+        },
+        Err(McpMergeSkipReason::TomlOverride) => McpRegisterServerReply {
+            ok: false,
+            status: "toml_override".to_string(),
+            reason: None,
+        },
+        Err(McpMergeSkipReason::InvalidName) => McpRegisterServerReply {
+            ok: false,
+            status: "invalid_name".to_string(),
+            reason: None,
+        },
+        Err(McpMergeSkipReason::Invalid(reason)) => McpRegisterServerReply {
+            ok: false,
+            status: "invalid".to_string(),
+            reason: Some(reason),
+        },
+    };
+    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("register_server: serialize reply: {e}"),
+    })
 }
 
 fn handle_unregister_server(
     config: &Arc<RwLock<McpHostConfig>>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let name = required_string(args, "name")?;
-    let plugin_id = required_string(args, "plugin_id")?;
-    let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
-    match cfg.unregister_contributed(&name, &plugin_id) {
-        Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(McpUnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
-        Err(McpUnregisterError::TomlEntry) => Ok(json!({ "ok": false, "status": "toml_entry" })),
-        Err(McpUnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
-            "ok": false,
-            "status": "not_owned_by_plugin",
-            "actual_owner": actual_owner,
-        })),
+    // #190 / R7 — strict-parse via typed `McpUnregisterServerArgs`. The
+    // typed struct's `deny_unknown_fields` catches typos that the old
+    // `required_string` chain silently passed through.
+    let typed: McpUnregisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
+        PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("unregister_server: invalid args: {e}"),
+        }
+    })?;
+    if typed.name.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "unregister_server: missing or empty required field `name`".to_string(),
+        });
     }
+    if typed.plugin_id.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "unregister_server: missing or empty required field `plugin_id`".to_string(),
+        });
+    }
+    let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
+    let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
+        Ok(_removed) => McpUnregisterServerReply {
+            ok: true,
+            status: "ok".to_string(),
+            actual_owner: None,
+        },
+        Err(McpUnregisterError::NotFound) => McpUnregisterServerReply {
+            ok: false,
+            status: "not_found".to_string(),
+            actual_owner: None,
+        },
+        Err(McpUnregisterError::TomlEntry) => McpUnregisterServerReply {
+            ok: false,
+            status: "toml_entry".to_string(),
+            actual_owner: None,
+        },
+        Err(McpUnregisterError::NotOwnedByPlugin { actual_owner }) => McpUnregisterServerReply {
+            ok: false,
+            status: "not_owned_by_plugin".to_string(),
+            actual_owner: Some(actual_owner),
+        },
+    };
+    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("unregister_server: serialize reply: {e}"),
+    })
 }
 
 impl CorePlugin for McpHostPlugin {
