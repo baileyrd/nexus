@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageCanvasWriteArgs",
+  "description": "Args for `com.nexus.storage::canvas_write`. The inner `canvas`\npass-through stays as `serde_json::Value` because\n[`crate::CanvasFile`] doesn't derive `JsonSchema` / `TS`; the\nhandler still runs `serde_json::from_value::<CanvasFile>` on it.",
+  "type": "object",
+  "properties": {
+    "canvas": {
+      "description": "`crate::CanvasFile` serialised as JSON."
+    },
+    "path": {
+      "description": "Forge-relative path of the `.canvas` file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "canvas"
+  ]
+}

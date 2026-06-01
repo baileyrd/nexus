@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageGraphNeighborsArgs",
+  "description": "Args for `com.nexus.storage::graph_neighbors`.",
+  "type": "object",
+  "properties": {
+    "depth": {
+      "description": "BFS depth — `0` returns the seed only, `1` returns immediate\nneighbours, etc.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "path": {
+      "description": "Forge-relative path of the seed file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "depth"
+  ]
+}

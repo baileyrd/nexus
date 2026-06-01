@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageSettingsWriteArgs",
+  "description": "Args for `com.nexus.storage::settings_write`. `value: null`\nremoves the key.",
+  "type": "object",
+  "properties": {
+    "key": {
+      "description": "Setting key (dotted path inside `app.toml`'s `[settings]` table).",
+      "type": "string"
+    },
+    "value": {
+      "description": "Replacement value. `null` removes the key. Other JSON scalars\n/ objects round-trip through `toml::Value`."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "key",
+    "value"
+  ]
+}

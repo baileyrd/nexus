@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageToggleTaskArgs",
+  "description": "Args for `com.nexus.storage::toggle_task`.",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "description": "Primary key of the task row in the storage index.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "task_id"
+  ]
+}

@@ -399,6 +399,224 @@ pub struct StorageFileExistsResult {
     pub exists: bool,
 }
 
+// ── #190 / R7 — graph.rs handlers ───────────────────────────────────────────
+
+/// Args for `com.nexus.storage::backlinks_to_block`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBacklinksToBlockArgs {
+    /// Forge-relative path of the destination file.
+    pub path: String,
+    /// Stable block identifier within the destination file.
+    pub block_id: String,
+}
+
+/// Args for `com.nexus.storage::graph_neighbors`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageGraphNeighborsArgs {
+    /// Forge-relative path of the seed file.
+    pub path: String,
+    /// BFS depth — `0` returns the seed only, `1` returns immediate
+    /// neighbours, etc.
+    pub depth: u64,
+}
+
+// ── #190 / R7 — canvas.rs + tasks.rs handlers ───────────────────────────────
+
+/// Args for `com.nexus.storage::canvas_write`. The inner `canvas`
+/// pass-through stays as `serde_json::Value` because
+/// [`crate::CanvasFile`] doesn't derive `JsonSchema` / `TS`; the
+/// handler still runs `serde_json::from_value::<CanvasFile>` on it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageCanvasWriteArgs {
+    /// Forge-relative path of the `.canvas` file.
+    pub path: String,
+    /// `crate::CanvasFile` serialised as JSON.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub canvas: serde_json::Value,
+}
+
+/// Args for `com.nexus.storage::canvas_patch`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageCanvasPatchArgs {
+    /// Forge-relative path of the `.canvas` file.
+    pub path: String,
+    /// `Vec<crate::CanvasPatchOp>` serialised as JSON.
+    #[cfg_attr(feature = "ts-export", ts(type = "Array<unknown>"))]
+    pub ops: Vec<serde_json::Value>,
+}
+
+/// Args for `com.nexus.storage::toggle_task`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageToggleTaskArgs {
+    /// Primary key of the task row in the storage index.
+    pub task_id: u64,
+}
+
+// ── #190 / R7 — tree.rs handlers ────────────────────────────────────────────
+
+/// Shared `{ relpath: String }` envelope for the tree handlers
+/// (`create_file`, `create_dir`, `delete_entry`). Distinct from
+/// [`StoragePathArgs`] because the tree subsystem uses `relpath` as
+/// the wire field name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageRelpathArgs {
+    /// Forge-relative path. Empty string is rejected by the engine.
+    pub relpath: String,
+}
+
+/// Args for `com.nexus.storage::rename_entry`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageRenameEntryArgs {
+    /// Forge-relative path of the source.
+    pub from: String,
+    /// Forge-relative path of the destination.
+    pub to: String,
+}
+
+// ── #190 / R7 — search.rs handlers ──────────────────────────────────────────
+
+/// Args for `com.nexus.storage::query_tags`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageQueryTagsArgs {
+    /// Tag name to look up. The engine returns block hits annotated
+    /// with this tag.
+    pub name: String,
+}
+
+// ── #190 / R7 — config.rs handlers ──────────────────────────────────────────
+
+/// Args for `com.nexus.storage::config_read` and
+/// `com.nexus.storage::config_reset`. Both verbs take a `{ kind }`
+/// discriminator; values outside `app | workspace | mcp | ai` are
+/// rejected at the handler boundary (the typed parse accepts any
+/// string here so the handler can emit the precise list as part of
+/// the error message).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageConfigKindArgs {
+    /// One of `"app"`, `"workspace"`, `"mcp"`, `"ai"`.
+    pub kind: String,
+}
+
+/// Reply for `com.nexus.storage::config_read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageConfigContentResult {
+    /// `"toml"` or `"json"`, matching the `kind`'s on-disk format.
+    pub format: String,
+    /// Pretty-printed serialized content.
+    pub content: String,
+}
+
+/// Args for `com.nexus.storage::settings_write`. `value: null`
+/// removes the key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageSettingsWriteArgs {
+    /// Setting key (dotted path inside `app.toml`'s `[settings]` table).
+    pub key: String,
+    /// Replacement value. `null` removes the key. Other JSON scalars
+    /// / objects round-trip through `toml::Value`.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub value: serde_json::Value,
+}
+
 // ── #190 / R7 — import_forge ────────────────────────────────────────────────
 
 /// Conflict-resolution strategy for `com.nexus.storage::import_forge`.
