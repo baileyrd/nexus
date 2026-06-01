@@ -42,9 +42,10 @@ use nexus_storage::ipc::{
     StorageBasePropertyCreateArgs, StorageBasePropertyRenameArgs, StorageBasePropertyUpdateArgs,
     StorageBaseQueryArgs, StorageBaseRecordCreateArgs, StorageBaseRecordIdArgs,
     StorageBaseRecordUpdateArgs, StorageBaseViewArgs, StorageChunkEmbedding,
-    StorageFileExistsResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
-    StorageNoteAppendArgs, StorageNoteAppendResult, StorageOk, StoragePathArgs,
-    StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
+    StorageFileExistsResult, StorageImportConflictStrategy, StorageImportForgeArgs,
+    StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
+    StorageNoteAppendResult, StorageOk, StoragePathArgs, StorageQuerySymbolArgs,
+    StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
     StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
     StorageSymbolRow, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
     StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
@@ -293,6 +294,13 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageBaseCreateArgs>("com_nexus_storage__base_create", "args");
     write_schema::<StorageBaseQueryArgs>("com_nexus_storage__base_query", "args");
     write_schema::<StorageBaseIndexResult>("com_nexus_storage__base_index", "result");
+
+    // ── com.nexus.storage::import_forge (#190) ───────────────────────────
+    write_schema::<StorageImportForgeArgs>("com_nexus_storage__import_forge", "args");
+    write_schema::<StorageImportConflictStrategy>(
+        "com_nexus_storage__import_forge",
+        "conflict_strategy",
+    );
 
     // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
     write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");

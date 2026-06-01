@@ -399,6 +399,55 @@ pub struct StorageFileExistsResult {
     pub exists: bool,
 }
 
+// ── #190 / R7 — import_forge ────────────────────────────────────────────────
+
+/// Conflict-resolution strategy for `com.nexus.storage::import_forge`.
+/// Mirror of [`crate::import::ConflictStrategy`]; the lowercase wire
+/// shape (`"skip"`, `"overwrite"`, `"rename"`) is shared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageImportConflictStrategy {
+    /// Leave the destination unchanged on conflict (default).
+    #[default]
+    Skip,
+    /// Replace the destination with the source bytes.
+    Overwrite,
+    /// Write the source to `<stem>.imported.<n>.<ext>`.
+    Rename,
+}
+
+/// Args for `com.nexus.storage::import_forge`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageImportForgeArgs {
+    /// Absolute (or relative-to-cwd) path of the source forge.
+    pub source: String,
+    /// When `true`, only computes + returns the plan without copying
+    /// anything. Defaults to `false`.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// How to resolve content-hash collisions. Defaults to
+    /// `Skip` per [`StorageImportConflictStrategy::default`].
+    #[serde(default)]
+    pub on_conflict: StorageImportConflictStrategy,
+}
+
 // ── #190 / R7 — bases delete/restore/rename handlers ────────────────────────
 
 /// Args for the three `base_record_{delete,soft_delete,restore}`
