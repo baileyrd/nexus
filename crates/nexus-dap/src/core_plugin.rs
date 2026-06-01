@@ -48,8 +48,11 @@ use serde_json::{json, Value};
 use crate::client::{DapClient, DapClientError, SourceBreakpointSpec};
 use crate::config::{DapAdapterSpec, MergeSkipReason, UnregisterError};
 use crate::ipc::{
-    DapRegisterAdapterArgs, DapRegisterAdapterReply, DapUnregisterAdapterArgs,
-    DapUnregisterAdapterReply,
+    DapAdapterArgs, DapAdapterEntry, DapAttachArgs, DapEvaluateArgs, DapLaunchArgs, DapOk,
+    DapRegisterAdapterArgs, DapRegisterAdapterReply, DapScopesArgs, DapSetBreakpointsArgs,
+    DapSetExceptionBreakpointsArgs, DapSetFunctionBreakpointsArgs, DapSourceBreakpoint,
+    DapStackTraceArgs, DapThreadArgs, DapUnregisterAdapterArgs, DapUnregisterAdapterReply,
+    DapVariablesArgs,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{DapConfigError, DapHostConfig};
@@ -424,23 +427,15 @@ impl CorePlugin for DapCorePlugin {
                 // `dispatch_async` below; this sync arm is the
                 // fallback for the rare invoker that bypasses async).
                 let cfg = self.config.read().expect("DapHostConfig RwLock poisoned");
-                let arr: Vec<Value> = cfg
+                let entries: Vec<DapAdapterEntry> = cfg
                     .adapters
                     .values()
-                    .map(|spec| {
-                        json!({
-                            "name": spec.name,
-                            "command": spec.command,
-                            "args": spec.args,
-                            "adapter_type": spec.adapter_type,
-                            "file_types": spec.file_types,
-                            "disabled": spec.disabled,
-                            "connected": false,
-                            "metadata": spec.metadata,
-                        })
-                    })
+                    .map(|spec| adapter_entry(spec, false))
                     .collect();
-                Ok(Value::Array(arr))
+                serde_json::to_value(&entries).map_err(|e| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: format!("list_adapters: serialize reply: {e}"),
+                })
             }
             HANDLER_REGISTER_ADAPTER => handle_register_adapter(&self.config, args),
             HANDLER_UNREGISTER_ADAPTER => handle_unregister_adapter(&self.config, args),
@@ -468,133 +463,151 @@ impl CorePlugin for DapCorePlugin {
 
         match handler_id {
             HANDLER_LAUNCH => {
-                let adapter = str_arg(args, "adapter")?;
-                let program = str_arg(args, "program")?;
-                let mode = opt_str(args, "mode");
-                let cwd = opt_str(args, "cwd");
-                let stop_on_entry = args
-                    .get("stop_on_entry")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let mut launch_args = json!({
-                    "program": program,
-                    "stopOnEntry": stop_on_entry,
-                });
-                if let Some(m) = mode {
-                    launch_args["mode"] = json!(m);
-                }
-                if let Some(c) = cwd {
-                    launch_args["cwd"] = json!(c);
-                }
-                if let Some(a) = args.get("args").cloned() {
-                    launch_args["args"] = a;
-                }
-                if let Some(e) = args.get("env").cloned() {
-                    launch_args["env"] = e;
-                }
-                if let Some(extra) = args.get("extra").and_then(Value::as_object).cloned() {
-                    if let Value::Object(map) = &mut launch_args {
-                        for (k, v) in extra {
-                            map.entry(k).or_insert(v);
+                // #190 / R7 — strict-parse via typed `DapLaunchArgs`.
+                let parsed: Result<DapLaunchArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapLaunchArgs {
+                        adapter,
+                        program,
+                        mode,
+                        args: launch_args_vec,
+                        cwd,
+                        env,
+                        stop_on_entry,
+                        extra,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("launch: invalid args: {e}"),
+                    })?;
+                    let mut launch_args = json!({
+                        "program": program,
+                        "stopOnEntry": stop_on_entry,
+                    });
+                    if let Some(m) = mode {
+                        launch_args["mode"] = json!(m);
+                    }
+                    if let Some(c) = cwd {
+                        launch_args["cwd"] = json!(c);
+                    }
+                    if !launch_args_vec.is_empty() {
+                        launch_args["args"] = json!(launch_args_vec);
+                    }
+                    if !env.is_empty() {
+                        launch_args["env"] = json!(env);
+                    }
+                    if let Some(Value::Object(extra_map)) = extra {
+                        if let Value::Object(map) = &mut launch_args {
+                            for (k, v) in extra_map {
+                                map.entry(k).or_insert(v);
+                            }
                         }
                     }
-                }
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "launch",
-                    Some(launch_args),
-                ))
+                    run_send_command(pool, config, bus, adapter, "launch", Some(launch_args)).await
+                }))
             }
 
             HANDLER_ATTACH => {
-                let adapter = str_arg(args, "adapter")?;
-                let mut attach_args = serde_json::Map::new();
-                if let Some(pid) = args.get("pid").and_then(Value::as_i64) {
-                    attach_args.insert("pid".to_string(), json!(pid));
-                }
-                if let Some(port) = args.get("port").and_then(Value::as_i64) {
-                    attach_args.insert("port".to_string(), json!(port));
-                }
-                if let Some(extra) = args.get("extra").and_then(Value::as_object).cloned() {
-                    for (k, v) in extra {
-                        attach_args.entry(k).or_insert(v);
+                // #190 / R7 — strict-parse via typed `DapAttachArgs`.
+                let parsed: Result<DapAttachArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapAttachArgs {
+                        adapter,
+                        pid,
+                        port,
+                        extra,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("attach: invalid args: {e}"),
+                    })?;
+                    let mut attach_args = serde_json::Map::new();
+                    if let Some(pid) = pid {
+                        attach_args.insert("pid".to_string(), json!(pid));
                     }
-                }
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "attach",
-                    Some(Value::Object(attach_args)),
-                ))
+                    if let Some(port) = port {
+                        attach_args.insert("port".to_string(), json!(port));
+                    }
+                    if let Some(Value::Object(extra_map)) = extra {
+                        for (k, v) in extra_map {
+                            attach_args.entry(k).or_insert(v);
+                        }
+                    }
+                    run_send_command(
+                        pool,
+                        config,
+                        bus,
+                        adapter,
+                        "attach",
+                        Some(Value::Object(attach_args)),
+                    )
+                    .await
+                }))
             }
 
             HANDLER_CONFIGURATION_DONE => {
-                let adapter = str_arg(args, "adapter")?;
-                Some(send_ack_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "configurationDone",
-                    None,
-                ))
+                // #190 / R7 — strict-parse via typed `DapAdapterArgs`.
+                let parsed: Result<DapAdapterArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapAdapterArgs { adapter, .. } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("configuration_done: invalid args: {e}"),
+                        })?;
+                    run_send_ack(pool, config, bus, adapter, "configurationDone", None).await
+                }))
             }
 
             HANDLER_DISCONNECT => {
-                let adapter = str_arg(args, "adapter")?;
-                let terminate_debuggee = args
-                    .get("terminate_debuggee")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let payload = json!({
-                    "restart": false,
-                    "terminateDebuggee": terminate_debuggee,
-                });
-                Some(send_ack_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "disconnect",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed `DapAdapterArgs`.
+                let parsed: Result<DapAdapterArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapAdapterArgs {
+                        adapter,
+                        terminate_debuggee,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("disconnect: invalid args: {e}"),
+                    })?;
+                    let payload = json!({
+                        "restart": false,
+                        "terminateDebuggee": terminate_debuggee,
+                    });
+                    run_send_ack(pool, config, bus, adapter, "disconnect", Some(payload)).await
+                }))
             }
 
             HANDLER_TERMINATE => {
-                let adapter = str_arg(args, "adapter")?;
-                Some(send_ack_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "terminate",
-                    None,
-                ))
+                // #190 / R7 — strict-parse via typed `DapAdapterArgs`.
+                let parsed: Result<DapAdapterArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapAdapterArgs { adapter, .. } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("terminate: invalid args: {e}"),
+                        })?;
+                    run_send_ack(pool, config, bus, adapter, "terminate", None).await
+                }))
             }
 
             HANDLER_SET_BREAKPOINTS => {
-                let adapter = str_arg(args, "adapter")?;
-                let source_path = str_arg(args, "source_path")?;
-                let breakpoints = args
-                    .get("breakpoints")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let specs: Vec<SourceBreakpointSpec> = breakpoints
-                    .iter()
-                    .filter_map(parse_source_breakpoint)
-                    .collect();
-                let wire_bps: Vec<Value> = specs.iter().map(spec_to_wire).collect();
-                let payload = json!({
-                    "source": { "path": source_path.clone() },
-                    "breakpoints": wire_bps,
-                });
+                // #190 / R7 — strict-parse via typed `DapSetBreakpointsArgs`.
+                let parsed: Result<DapSetBreakpointsArgs, _> =
+                    serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let DapSetBreakpointsArgs {
+                        adapter,
+                        source_path,
+                        breakpoints,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("set_breakpoints: invalid args: {e}"),
+                    })?;
+                    let specs: Vec<SourceBreakpointSpec> =
+                        breakpoints.iter().map(typed_to_spec).collect();
+                    let wire_bps: Vec<Value> = specs.iter().map(spec_to_wire).collect();
+                    let payload = json!({
+                        "source": { "path": source_path.clone() },
+                        "breakpoints": wire_bps,
+                    });
                     let cfg = config_or_err(config.as_ref())?;
                     let result = pool
                         .call_with_reconnect(&adapter, &cfg, move |client| {
@@ -617,152 +630,179 @@ impl CorePlugin for DapCorePlugin {
             }
 
             HANDLER_SET_FUNCTION_BREAKPOINTS => {
-                let adapter = str_arg(args, "adapter")?;
-                let breakpoints = args
-                    .get("breakpoints")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let payload = json!({ "breakpoints": breakpoints });
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "setFunctionBreakpoints",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed
+                // `DapSetFunctionBreakpointsArgs`. Function breakpoints
+                // are sent verbatim — the typed `name` / `condition`
+                // rows match DAP's wire shape.
+                let parsed: Result<DapSetFunctionBreakpointsArgs, _> =
+                    serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapSetFunctionBreakpointsArgs {
+                        adapter,
+                        breakpoints,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("set_function_breakpoints: invalid args: {e}"),
+                    })?;
+                    let payload = json!({ "breakpoints": breakpoints });
+                    run_send_command(
+                        pool,
+                        config,
+                        bus,
+                        adapter,
+                        "setFunctionBreakpoints",
+                        Some(payload),
+                    )
+                    .await
+                }))
             }
 
             HANDLER_SET_EXCEPTION_BREAKPOINTS => {
-                let adapter = str_arg(args, "adapter")?;
-                let filters = args
-                    .get("filters")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let payload = json!({ "filters": filters });
-                Some(send_ack_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "setExceptionBreakpoints",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed
+                // `DapSetExceptionBreakpointsArgs`.
+                let parsed: Result<DapSetExceptionBreakpointsArgs, _> =
+                    serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapSetExceptionBreakpointsArgs { adapter, filters } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("set_exception_breakpoints: invalid args: {e}"),
+                        })?;
+                    let payload = json!({ "filters": filters });
+                    run_send_ack(
+                        pool,
+                        config,
+                        bus,
+                        adapter,
+                        "setExceptionBreakpoints",
+                        Some(payload),
+                    )
+                    .await
+                }))
             }
 
-            HANDLER_CONTINUE => proxy_thread_request(args, config, pool, bus, "continue"),
-            HANDLER_NEXT => proxy_thread_request(args, config, pool, bus, "next"),
-            HANDLER_STEP_IN => proxy_thread_request(args, config, pool, bus, "stepIn"),
-            HANDLER_STEP_OUT => proxy_thread_request(args, config, pool, bus, "stepOut"),
-            HANDLER_PAUSE => proxy_thread_request(args, config, pool, bus, "pause"),
+            HANDLER_CONTINUE => Some(proxy_thread_request(args, config, pool, bus, "continue")),
+            HANDLER_NEXT => Some(proxy_thread_request(args, config, pool, bus, "next")),
+            HANDLER_STEP_IN => Some(proxy_thread_request(args, config, pool, bus, "stepIn")),
+            HANDLER_STEP_OUT => Some(proxy_thread_request(args, config, pool, bus, "stepOut")),
+            HANDLER_PAUSE => Some(proxy_thread_request(args, config, pool, bus, "pause")),
 
             HANDLER_THREADS => {
-                let adapter = str_arg(args, "adapter")?;
-                Some(send_command_future(
-                    pool, config, bus, adapter, "threads", None,
-                ))
+                // #190 / R7 — strict-parse via typed `DapAdapterArgs`.
+                let parsed: Result<DapAdapterArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapAdapterArgs { adapter, .. } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("threads: invalid args: {e}"),
+                        })?;
+                    run_send_command(pool, config, bus, adapter, "threads", None).await
+                }))
             }
 
             HANDLER_STACK_TRACE => {
-                let adapter = str_arg(args, "adapter")?;
-                let thread_id = args.get("thread_id").and_then(Value::as_i64)?;
-                let mut payload = json!({ "threadId": thread_id });
-                if let Some(start) = args.get("start_frame").and_then(Value::as_i64) {
-                    payload["startFrame"] = json!(start);
-                }
-                if let Some(levels) = args.get("levels").and_then(Value::as_i64) {
-                    payload["levels"] = json!(levels);
-                }
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "stackTrace",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed `DapStackTraceArgs`.
+                let parsed: Result<DapStackTraceArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapStackTraceArgs {
+                        adapter,
+                        thread_id,
+                        start_frame,
+                        levels,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("stack_trace: invalid args: {e}"),
+                    })?;
+                    let mut payload = json!({ "threadId": thread_id });
+                    if let Some(start) = start_frame {
+                        payload["startFrame"] = json!(start);
+                    }
+                    if let Some(levels) = levels {
+                        payload["levels"] = json!(levels);
+                    }
+                    run_send_command(pool, config, bus, adapter, "stackTrace", Some(payload)).await
+                }))
             }
 
             HANDLER_SCOPES => {
-                let adapter = str_arg(args, "adapter")?;
-                let frame_id = args.get("frame_id").and_then(Value::as_i64)?;
-                let payload = json!({ "frameId": frame_id });
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "scopes",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed `DapScopesArgs`.
+                let parsed: Result<DapScopesArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapScopesArgs { adapter, frame_id } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("scopes: invalid args: {e}"),
+                        })?;
+                    let payload = json!({ "frameId": frame_id });
+                    run_send_command(pool, config, bus, adapter, "scopes", Some(payload)).await
+                }))
             }
 
             HANDLER_VARIABLES => {
-                let adapter = str_arg(args, "adapter")?;
-                let var_ref = args.get("variables_reference").and_then(Value::as_i64)?;
-                let mut payload = json!({ "variablesReference": var_ref });
-                if let Some(f) = opt_str(args, "filter") {
-                    payload["filter"] = json!(f);
-                }
-                if let Some(s) = args.get("start").and_then(Value::as_i64) {
-                    payload["start"] = json!(s);
-                }
-                if let Some(c) = args.get("count").and_then(Value::as_i64) {
-                    payload["count"] = json!(c);
-                }
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "variables",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed `DapVariablesArgs`.
+                let parsed: Result<DapVariablesArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapVariablesArgs {
+                        adapter,
+                        variables_reference,
+                        filter,
+                        start,
+                        count,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("variables: invalid args: {e}"),
+                    })?;
+                    let mut payload = json!({ "variablesReference": variables_reference });
+                    if let Some(f) = filter {
+                        payload["filter"] = json!(f);
+                    }
+                    if let Some(s) = start {
+                        payload["start"] = json!(s);
+                    }
+                    if let Some(c) = count {
+                        payload["count"] = json!(c);
+                    }
+                    run_send_command(pool, config, bus, adapter, "variables", Some(payload)).await
+                }))
             }
 
             HANDLER_EVALUATE => {
-                let adapter = str_arg(args, "adapter")?;
-                let expression = str_arg(args, "expression")?;
-                let mut payload = json!({ "expression": expression });
-                if let Some(f) = args.get("frame_id").and_then(Value::as_i64) {
-                    payload["frameId"] = json!(f);
-                }
-                if let Some(c) = opt_str(args, "context") {
-                    payload["context"] = json!(c);
-                }
-                Some(send_command_future(
-                    pool,
-                    config,
-                    bus,
-                    adapter,
-                    "evaluate",
-                    Some(payload),
-                ))
+                // #190 / R7 — strict-parse via typed `DapEvaluateArgs`.
+                let parsed: Result<DapEvaluateArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let DapEvaluateArgs {
+                        adapter,
+                        expression,
+                        frame_id,
+                        context,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("evaluate: invalid args: {e}"),
+                    })?;
+                    let mut payload = json!({ "expression": expression });
+                    if let Some(f) = frame_id {
+                        payload["frameId"] = json!(f);
+                    }
+                    if let Some(c) = context {
+                        payload["context"] = json!(c);
+                    }
+                    run_send_command(pool, config, bus, adapter, "evaluate", Some(payload)).await
+                }))
             }
 
             HANDLER_LIST_ADAPTERS => Some(Box::pin(async move {
                 let cfg = config_or_err(config.as_ref())?;
                 let connected: std::collections::HashSet<String> =
                     pool.connected_adapters().await.into_iter().collect();
-                let arr: Vec<Value> = cfg
+                let entries: Vec<DapAdapterEntry> = cfg
                     .adapters
                     .values()
-                    .map(|spec| {
-                        json!({
-                            "name": spec.name,
-                            "command": spec.command,
-                            "args": spec.args,
-                            "adapter_type": spec.adapter_type,
-                            "file_types": spec.file_types,
-                            "disabled": spec.disabled,
-                            "connected": connected.contains(&spec.name),
-                            "metadata": spec.metadata,
-                        })
-                    })
+                    .map(|spec| adapter_entry(spec, connected.contains(&spec.name)))
                     .collect();
-                Ok(Value::Array(arr))
+                serde_json::to_value(&entries).map_err(|e| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: format!("list_adapters: serialize reply: {e}"),
+                })
             })),
 
             _ => None,
@@ -770,83 +810,81 @@ impl CorePlugin for DapCorePlugin {
     }
 }
 
-/// Build a `dispatch_async` future that sends `command` to the
-/// adapter and returns the response `body` (or `Null`). Republishes
-/// any drained events on each attempt.
-fn send_command_future(
+/// Inlined async body for command verbs that return the adapter's
+/// response body (or `Null`). Republishes any drained events on each
+/// attempt. Called from inside a `Box::pin(async move { ... })`.
+async fn run_send_command(
     pool: Arc<ConnectionPool>,
     config: Option<Arc<DapHostConfig>>,
     bus: Option<Arc<EventBus>>,
     adapter: String,
     command: &'static str,
     payload: Option<Value>,
-) -> CorePluginFuture {
-    Box::pin(async move {
-        let cfg = config_or_err(config.as_ref())?;
-        let result = pool
-            .call_with_reconnect(&adapter, &cfg, move |client| {
-                let bus = bus.clone();
-                let payload = payload.clone();
-                Box::pin(async move {
-                    let lock = client.lock().await;
-                    let r = lock.send_request(command, payload).await?;
-                    republish_pending(&lock, bus.as_ref()).await;
-                    Ok(r.unwrap_or(Value::Null))
-                })
-            })
-            .await
-            .map_err(map_client_err)?;
-        Ok(result)
-    })
-}
-
-/// Same as [`send_command_future`] but returns the canonical
-/// `{ "ok": true }` ack — used by fire-and-forget verbs that don't
-/// carry a meaningful response body.
-fn send_ack_future(
-    pool: Arc<ConnectionPool>,
-    config: Option<Arc<DapHostConfig>>,
-    bus: Option<Arc<EventBus>>,
-    adapter: String,
-    command: &'static str,
-    payload: Option<Value>,
-) -> CorePluginFuture {
-    Box::pin(async move {
-        let cfg = config_or_err(config.as_ref())?;
-        pool.call_with_reconnect(&adapter, &cfg, move |client| {
-            let bus = bus.clone();
-            let payload = payload.clone();
-            Box::pin(async move {
-                let lock = client.lock().await;
-                let _ = lock.send_request(command, payload).await?;
-                republish_pending(&lock, bus.as_ref()).await;
-                Ok(())
-            })
+) -> Result<Value, PluginError> {
+    let cfg = config_or_err(config.as_ref())?;
+    pool.call_with_reconnect(&adapter, &cfg, move |client| {
+        let bus = bus.clone();
+        let payload = payload.clone();
+        Box::pin(async move {
+            let lock = client.lock().await;
+            let r = lock.send_request(command, payload).await?;
+            republish_pending(&lock, bus.as_ref()).await;
+            Ok(r.unwrap_or(Value::Null))
         })
-        .await
-        .map_err(map_client_err)?;
-        Ok(json!({ "ok": true }))
+    })
+    .await
+    .map_err(map_client_err)
+}
+
+/// Same as [`run_send_command`] but returns the canonical typed
+/// `DapOk { ok: true }` ack — used by fire-and-forget verbs that
+/// don't carry a meaningful response body.
+async fn run_send_ack(
+    pool: Arc<ConnectionPool>,
+    config: Option<Arc<DapHostConfig>>,
+    bus: Option<Arc<EventBus>>,
+    adapter: String,
+    command: &'static str,
+    payload: Option<Value>,
+) -> Result<Value, PluginError> {
+    let cfg = config_or_err(config.as_ref())?;
+    pool.call_with_reconnect(&adapter, &cfg, move |client| {
+        let bus = bus.clone();
+        let payload = payload.clone();
+        Box::pin(async move {
+            let lock = client.lock().await;
+            let _ = lock.send_request(command, payload).await?;
+            republish_pending(&lock, bus.as_ref()).await;
+            Ok(())
+        })
+    })
+    .await
+    .map_err(map_client_err)?;
+    serde_json::to_value(DapOk { ok: true }).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("serialize ack reply: {e}"),
     })
 }
 
+/// Build the shared `continue` / `next` / `step_in` / `step_out` /
+/// `pause` future. #190 / R7 — strict-parse via typed `DapThreadArgs`.
 fn proxy_thread_request(
     args: &Value,
     config: Option<Arc<DapHostConfig>>,
     pool: Arc<ConnectionPool>,
     bus: Option<Arc<EventBus>>,
     command: &'static str,
-) -> Option<CorePluginFuture> {
-    let adapter = str_arg(args, "adapter")?;
-    let thread_id = args.get("thread_id").and_then(Value::as_i64)?;
-    let payload = json!({ "threadId": thread_id });
-    Some(send_ack_future(
-        pool,
-        config,
-        bus,
-        adapter,
-        command,
-        Some(payload),
-    ))
+) -> CorePluginFuture {
+    let parsed: Result<DapThreadArgs, _> = serde_json::from_value(args.clone());
+    Box::pin(async move {
+        let DapThreadArgs { adapter, thread_id } =
+            parsed.map_err(|e| PluginError::ExecutionFailed {
+                plugin_id: PLUGIN_ID.to_string(),
+                reason: format!("{command}: invalid args: {e}"),
+            })?;
+        let payload = json!({ "threadId": thread_id });
+        run_send_ack(pool, config, bus, adapter, command, Some(payload)).await
+    })
 }
 
 /// Drain any adapter-pushed events and republish them on the kernel
@@ -872,25 +910,20 @@ async fn republish_pending(client: &DapClient, bus: Option<&Arc<EventBus>>) {
     }
 }
 
-fn parse_source_breakpoint(v: &Value) -> Option<SourceBreakpointSpec> {
-    let line = v.get("line").and_then(Value::as_i64)?;
-    Some(SourceBreakpointSpec {
-        line,
-        condition: v
-            .get("condition")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
-        hit_condition: v
-            .get("hit_condition")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
-        log_message: v
-            .get("log_message")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
-    })
+/// Project a typed [`DapSourceBreakpoint`] (`snake_case` wire) into
+/// the internal cached [`SourceBreakpointSpec`]. Owned by the client
+/// for post-reconnect breakpoint resync.
+fn typed_to_spec(b: &DapSourceBreakpoint) -> SourceBreakpointSpec {
+    SourceBreakpointSpec {
+        line: b.line,
+        condition: b.condition.clone(),
+        hit_condition: b.hit_condition.clone(),
+        log_message: b.log_message.clone(),
+    }
 }
 
+/// Convert a cached [`SourceBreakpointSpec`] to the camelCase wire
+/// shape DAP `setBreakpoints` expects.
 fn spec_to_wire(b: &SourceBreakpointSpec) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("line".to_string(), json!(b.line));
@@ -906,16 +939,19 @@ fn spec_to_wire(b: &SourceBreakpointSpec) -> Value {
     Value::Object(obj)
 }
 
-fn str_arg(args: &Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-}
-
-fn opt_str(args: &Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
+/// Build a typed `list_adapters` row from a stored
+/// [`DapAdapterSpec`] + the live connected-state flag.
+fn adapter_entry(spec: &DapAdapterSpec, connected: bool) -> DapAdapterEntry {
+    DapAdapterEntry {
+        name: spec.name.clone(),
+        command: spec.command.clone(),
+        args: spec.args.clone(),
+        adapter_type: spec.adapter_type.clone(),
+        file_types: spec.file_types.clone(),
+        disabled: spec.disabled,
+        connected,
+        metadata: spec.metadata.clone(),
+    }
 }
 
 fn config_or_err(config: Option<&Arc<DapHostConfig>>) -> Result<Arc<DapHostConfig>, PluginError> {
@@ -1069,29 +1105,47 @@ disabled = true
     }
 
     #[test]
-    fn async_handler_without_required_args_returns_none() {
+    fn async_handler_without_required_args_surfaces_strict_parse_error() {
+        // #190 / R7 — previously `str_arg(args, "adapter")?` and similar
+        // returned `None` from `dispatch_async`, the kernel fell back
+        // to sync dispatch, and the sync arm errored with the
+        // misleading "handler_id N requires dispatch_async". Now each
+        // typed `DapXxxArgs` parse surfaces the missing-field error
+        // through the future as a clean
+        // `PluginError::ExecutionFailed { reason: "<verb>: invalid
+        // args: …" }`.
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        // Missing adapter
-        assert!(plugin.dispatch_async(HANDLER_LAUNCH, &json!({})).is_none());
-        // Missing thread_id
-        assert!(plugin
-            .dispatch_async(HANDLER_CONTINUE, &json!({ "adapter": "x" }))
-            .is_none());
-        // Missing frame_id
-        assert!(plugin
-            .dispatch_async(HANDLER_SCOPES, &json!({ "adapter": "x" }))
-            .is_none());
-        // Missing variables_reference
-        assert!(plugin
-            .dispatch_async(HANDLER_VARIABLES, &json!({ "adapter": "x" }))
-            .is_none());
-        // Missing expression
-        assert!(plugin
-            .dispatch_async(HANDLER_EVALUATE, &json!({ "adapter": "x" }))
-            .is_none());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let cases: &[(u32, Value)] = &[
+            // Missing adapter
+            (HANDLER_LAUNCH, json!({})),
+            // Missing thread_id
+            (HANDLER_CONTINUE, json!({ "adapter": "x" })),
+            // Missing frame_id
+            (HANDLER_SCOPES, json!({ "adapter": "x" })),
+            // Missing variables_reference
+            (HANDLER_VARIABLES, json!({ "adapter": "x" })),
+            // Missing expression
+            (HANDLER_EVALUATE, json!({ "adapter": "x" })),
+        ];
+        for (id, args) in cases {
+            let fut = plugin
+                .dispatch_async(*id, args)
+                .expect("dispatch_async must return a future (not None)");
+            let err = runtime
+                .block_on(fut)
+                .expect_err("missing fields must error");
+            assert!(
+                err.to_string().contains("invalid args"),
+                "handler {id} did not surface a strict-parse error: {err}"
+            );
+        }
     }
 
     #[test]
@@ -1113,9 +1167,14 @@ disabled = true
     }
 
     #[test]
-    fn parse_source_breakpoint_minimal_line_only() {
-        let v = json!({"line": 42});
-        let bp = parse_source_breakpoint(&v).unwrap();
+    fn typed_to_spec_minimal_line_only() {
+        let typed = DapSourceBreakpoint {
+            line: 42,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        };
+        let bp = typed_to_spec(&typed);
         assert_eq!(bp.line, 42);
         assert!(bp.condition.is_none());
         assert!(bp.hit_condition.is_none());
@@ -1123,14 +1182,14 @@ disabled = true
     }
 
     #[test]
-    fn parse_source_breakpoint_full_record() {
-        let v = json!({
-            "line": 10,
-            "condition": "i > 0",
-            "hit_condition": "> 5",
-            "log_message": "hit"
-        });
-        let bp = parse_source_breakpoint(&v).unwrap();
+    fn typed_to_spec_full_record() {
+        let typed = DapSourceBreakpoint {
+            line: 10,
+            condition: Some("i > 0".to_string()),
+            hit_condition: Some("> 5".to_string()),
+            log_message: Some("hit".to_string()),
+        };
+        let bp = typed_to_spec(&typed);
         assert_eq!(bp.line, 10);
         assert_eq!(bp.condition.as_deref(), Some("i > 0"));
         assert_eq!(bp.hit_condition.as_deref(), Some("> 5"));
@@ -1138,8 +1197,29 @@ disabled = true
     }
 
     #[test]
-    fn parse_source_breakpoint_rejects_missing_line() {
-        assert!(parse_source_breakpoint(&json!({"condition": "x"})).is_none());
+    fn set_breakpoints_rejects_breakpoint_without_line() {
+        // #190 / R7 — strict-parse via `DapSourceBreakpoint` rejects a
+        // row missing the required `line` field (previously
+        // `parse_source_breakpoint` silently filtered it out).
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        let mut plugin = make_plugin(dir.path());
+        plugin.on_init().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_SET_BREAKPOINTS,
+                &json!({
+                    "adapter": "x",
+                    "source_path": "/tmp/x.rs",
+                    "breakpoints": [{ "condition": "y" }],
+                }),
+            )
+            .expect("dispatch_async must return a future");
+        let err = runtime.block_on(fut).expect_err("missing line must error");
+        assert!(err.to_string().contains("invalid args"));
     }
 
     #[test]
