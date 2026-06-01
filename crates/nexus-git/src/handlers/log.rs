@@ -18,7 +18,9 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{GitDiffHunk, GitDiffLine, GitFileDiff, GitLogArgs, GitLogEntry};
+use crate::ipc::{
+    GitDiffHunk, GitDiffLine, GitFileDiff, GitFileLogArgs, GitLogArgs, GitLogEntry,
+};
 use crate::GitWorkerHandle;
 
 use super::shared::{map_err, parse_args, path_arg, to_value};
@@ -65,20 +67,14 @@ pub(crate) fn file_log(
     args: &Value,
     forge_root: &Path,
 ) -> Result<Value, PluginError> {
-    // Path validation via the existing `path_arg`. `limit` is parsed
-    // off the same `args` value via `as_u64` — keeping the
-    // non-strict shape here because `file_log` accepts both `path`
-    // and `limit` and we can't strict-parse both through a single
-    // `parse_args` without a combined `GitFileLogArgs` shape (a
-    // follow-up can add one).
-    let path = path_arg(args, forge_root)?;
-    let limit = args
-        .get("limit")
-        .and_then(Value::as_u64)
-        .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or_else(|| {
-            usize::try_from(DEFAULT_LOG_LIMIT).expect("default limit fits in usize")
-        });
+    // #190 / R7 — strict-parse via typed `GitFileLogArgs` (path + optional
+    // limit). The original hand-rolled `{path, limit?}` lookup ignored
+    // unknown fields; the typed shape rejects typos like
+    // `{ limitt: 50 }`.
+    let GitFileLogArgs { path, limit } = parse_args(args, "file_log")?;
+    use super::shared::validate_path;
+    let path = validate_path(forge_root, &path)?;
+    let limit = usize::try_from(limit.unwrap_or(DEFAULT_LOG_LIMIT)).unwrap_or(usize::MAX);
     let entries = h.with(move |e| e.log_file(&path, limit)).map_err(map_err)?;
     let arr: Vec<GitLogEntry> = entries.into_iter().map(map_log_entry).collect();
     to_value(&arr, "file_log")

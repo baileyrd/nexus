@@ -651,3 +651,53 @@ pub struct GitConflictVersionsReply {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theirs: Option<Vec<u8>>,
 }
+
+/// Args for `file_log` (handler id `13`). #190 — typed counterpart of
+/// the prior `{path, limit?}` hand-rolled parse. `path` is required;
+/// `limit` defaults to 20 inside the handler when omitted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitFileLogArgs {
+    /// Forge-relative path of the file.
+    pub path: String,
+    /// Maximum number of entries to return, newest first. Omit for
+    /// the default of 20.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+}
+
+/// Return type for `lfs_status` (handler id `36`). #190 — typed
+/// counterpart of the prior `json!({"tracked_patterns": …,
+/// "pointer_files": …, "available_files": …, "git_lfs_installed": …})`
+/// reply.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitLfsStatusReply {
+    /// Patterns listed in `<forge>/.gitattributes` with `filter=lfs`.
+    pub tracked_patterns: Vec<String>,
+    /// LFS-tracked files that are present only as pointers locally.
+    pub pointer_files: Vec<String>,
+    /// LFS-tracked files whose actual bytes are materialised locally.
+    pub available_files: Vec<String>,
+    /// `true` when the `git-lfs` binary is on the host's `PATH`.
+    /// `false` collapses `pointer_files` / `available_files` to empty
+    /// lists (we know LFS is in use here but cannot inspect
+    /// availability).
+    pub git_lfs_installed: bool,
+}
