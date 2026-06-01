@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseViewArgs",
+  "description": "Args for `com.nexus.storage::base_view_create` and\n`com.nexus.storage::base_view_update`. The verbs share `{ path,\nview }` exactly.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    },
+    "view": {
+      "description": "`nexus_types::bases::BaseView` serialised as JSON."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "view"
+  ]
+}

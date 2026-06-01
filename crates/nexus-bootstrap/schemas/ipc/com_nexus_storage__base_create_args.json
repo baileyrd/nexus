@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseCreateArgs",
+  "description": "Args for `com.nexus.storage::base_create`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path of the new `.bases/` directory.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "`nexus_types::bases::BaseSchema` serialised as JSON."
+    },
+    "seed_records": {
+      "description": "Seed `BaseRecord`s to insert at creation time. Defaults to\nthe empty list.",
+      "type": "array",
+      "default": [],
+      "items": true
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "schema"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBasePropertyCreateArgs",
+  "description": "Args for `com.nexus.storage::base_property_create`.",
+  "type": "object",
+  "properties": {
+    "definition": {
+      "description": "Property definition (type + per-type metadata). Pass-through\nfor the property-definition shape the storage engine parses."
+    },
+    "name": {
+      "description": "New property name. Must not collide with an existing property.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "name",
+    "definition"
+  ]
+}

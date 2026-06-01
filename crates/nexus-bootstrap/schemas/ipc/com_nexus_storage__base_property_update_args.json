@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBasePropertyUpdateArgs",
+  "description": "Args for `com.nexus.storage::base_property_update`.",
+  "type": "object",
+  "properties": {
+    "definition": {
+      "description": "Replacement definition."
+    },
+    "migrate_values": {
+      "description": "When `true`, rewrites every record's value for this property\nthrough the new definition's coercion path.",
+      "type": "boolean",
+      "default": false
+    },
+    "name": {
+      "description": "Property name to update.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "name",
+    "definition"
+  ]
+}

@@ -461,6 +461,198 @@ pub struct StorageBasePropertyRenameArgs {
     pub new_name: String,
 }
 
+// ── #190 / R7 — bases create/update/index/query (complex args) ──────────────
+//
+// These typed args envelopes keep the nested domain types
+// (`BaseRecord`, `BaseView`, `BaseSchema`, frontmatter property
+// `definition`) as `serde_json::Value` pass-throughs because the
+// impl types (`nexus_types::bases::*`) don't derive `JsonSchema`
+// / `TS`. The handlers still call `serde_json::from_value` on the
+// inner shapes — the strict gate added here covers the outer
+// `{ path, … }` envelope, which is where the audit's "typo silently
+// accepted" hazard lives.
+
+/// Args for `com.nexus.storage::base_record_create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseRecordCreateArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// `nexus_types::bases::BaseRecord` serialised as JSON. The
+    /// handler runs `serde_json::from_value::<BaseRecord>` on this
+    /// field, so malformed inner shapes still surface as parse
+    /// errors — just inside the handler, not at the envelope.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub record: serde_json::Value,
+}
+
+/// Args for `com.nexus.storage::base_record_update`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseRecordUpdateArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// Stable record identifier (per `BaseRecord::id`).
+    pub record_id: String,
+    /// Field-name → new-value map. Values pass through verbatim.
+    #[cfg_attr(feature = "ts-export", ts(type = "Record<string, unknown>"))]
+    pub fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Args for `com.nexus.storage::base_property_create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBasePropertyCreateArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// New property name. Must not collide with an existing property.
+    pub name: String,
+    /// Property definition (type + per-type metadata). Pass-through
+    /// for the property-definition shape the storage engine parses.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub definition: serde_json::Value,
+}
+
+/// Args for `com.nexus.storage::base_property_update`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBasePropertyUpdateArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// Property name to update.
+    pub name: String,
+    /// Replacement definition.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub definition: serde_json::Value,
+    /// When `true`, rewrites every record's value for this property
+    /// through the new definition's coercion path.
+    #[serde(default)]
+    pub migrate_values: bool,
+}
+
+/// Args for `com.nexus.storage::base_view_create` and
+/// `com.nexus.storage::base_view_update`. The verbs share `{ path,
+/// view }` exactly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseViewArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// `nexus_types::bases::BaseView` serialised as JSON.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub view: serde_json::Value,
+}
+
+/// Args for `com.nexus.storage::base_create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseCreateArgs {
+    /// Forge-relative path of the new `.bases/` directory.
+    pub path: String,
+    /// `nexus_types::bases::BaseSchema` serialised as JSON.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub schema: serde_json::Value,
+    /// Seed `BaseRecord`s to insert at creation time. Defaults to
+    /// the empty list.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "Array<unknown>"))]
+    pub seed_records: Vec<serde_json::Value>,
+}
+
+/// Args for `com.nexus.storage::base_query`. Filters and sorts are
+/// DSL strings parsed by `crate::bases::query::parse_filter` /
+/// `parse_sort`; the handler surfaces parse errors per-clause.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseQueryArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// Filter-DSL strings. Empty == no filters.
+    #[serde(default)]
+    pub filters: Vec<String>,
+    /// Sort-DSL strings. Empty == no sorts (engine-default order).
+    #[serde(default)]
+    pub sorts: Vec<String>,
+    /// Max rows. `None` == engine default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Skip count. `None` == 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+}
+
+/// Reply for `com.nexus.storage::base_index`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseIndexResult {
+    /// Primary key the storage engine assigned to the indexed base.
+    pub base_id: i64,
+}
+
 // ── #190 / R7 — vector store handlers ────────────────────────────────────────
 
 /// Mirror of [`crate::vectorstore::ChunkEmbedding`] — kept in sync

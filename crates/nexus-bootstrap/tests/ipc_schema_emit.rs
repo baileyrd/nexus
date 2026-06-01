@@ -38,14 +38,17 @@ use nexus_storage::ipc::{
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
     ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult,
-    StorageBaseNamedArgs, StorageBasePropertyRenameArgs, StorageBaseRecordIdArgs,
-    StorageChunkEmbedding, StorageFileExistsResult, StorageListDirArgs, StorageListDirEntry,
-    StorageListDirResult, StorageNoteAppendArgs, StorageNoteAppendResult, StorageOk,
-    StoragePathArgs, StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs,
-    StorageReadFileResult, StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit,
-    StorageSearchResult, StorageSymbolRow, StorageVectorInsertArgs, StorageVectorMatch,
-    StorageVectorQueryArgs, StorageVectorstoreCountResult, StorageWriteFileArgs,
-    StorageWriteFileResult, StorageWriteFrontmatterArgs,
+    StorageBaseCreateArgs, StorageBaseIndexResult, StorageBaseNamedArgs,
+    StorageBasePropertyCreateArgs, StorageBasePropertyRenameArgs, StorageBasePropertyUpdateArgs,
+    StorageBaseQueryArgs, StorageBaseRecordCreateArgs, StorageBaseRecordIdArgs,
+    StorageBaseRecordUpdateArgs, StorageBaseViewArgs, StorageChunkEmbedding,
+    StorageFileExistsResult, StorageListDirArgs, StorageListDirEntry, StorageListDirResult,
+    StorageNoteAppendArgs, StorageNoteAppendResult, StorageOk, StoragePathArgs,
+    StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
+    StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
+    StorageSymbolRow, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
+    StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
+    StorageWriteFrontmatterArgs,
 };
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
@@ -264,6 +267,32 @@ fn emit_all_schemas_impl() {
         "com_nexus_storage__base_property_rename",
         "args",
     );
+
+    // ── com.nexus.storage::base_* complex args (#190) ────────────────────
+    // Outer envelopes are strict; inner domain types (BaseRecord,
+    // BaseView, BaseSchema, property definitions) pass through as
+    // `serde_json::Value` because the impl types aren't yet
+    // `JsonSchema`-derive friendly.
+    write_schema::<StorageBaseRecordCreateArgs>(
+        "com_nexus_storage__base_record_create",
+        "args",
+    );
+    write_schema::<StorageBaseRecordUpdateArgs>(
+        "com_nexus_storage__base_record_update",
+        "args",
+    );
+    write_schema::<StorageBasePropertyCreateArgs>(
+        "com_nexus_storage__base_property_create",
+        "args",
+    );
+    write_schema::<StorageBasePropertyUpdateArgs>(
+        "com_nexus_storage__base_property_update",
+        "args",
+    );
+    write_schema::<StorageBaseViewArgs>("com_nexus_storage__base_view", "args");
+    write_schema::<StorageBaseCreateArgs>("com_nexus_storage__base_create", "args");
+    write_schema::<StorageBaseQueryArgs>("com_nexus_storage__base_query", "args");
+    write_schema::<StorageBaseIndexResult>("com_nexus_storage__base_index", "result");
 
     // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
     write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");

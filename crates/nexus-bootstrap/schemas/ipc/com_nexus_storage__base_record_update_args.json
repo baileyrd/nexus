@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseRecordUpdateArgs",
+  "description": "Args for `com.nexus.storage::base_record_update`.",
+  "type": "object",
+  "properties": {
+    "fields": {
+      "description": "Field-name → new-value map. Values pass through verbatim.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    },
+    "record_id": {
+      "description": "Stable record identifier (per `BaseRecord::id`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "record_id",
+    "fields"
+  ]
+}

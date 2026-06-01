@@ -37,10 +37,6 @@ pub(crate) fn relpath_arg(value: &serde_json::Value, command: &str) -> Result<St
     string_arg(value, command, "relpath")
 }
 
-pub(crate) fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
-    string_arg(value, command, "name")
-}
-
 /// True iff `path` is a forge-relative path inside the `.forge/`
 /// metadata directory (the namespace `HANDLER_WRITE_VAULT_FILE` is
 /// documented to own — workspace.json, kv.sqlite3 sidecars, plugin
