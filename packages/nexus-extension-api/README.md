@@ -1,6 +1,9 @@
 # @nexus/extension-api
 
-Stable TypeScript types for authoring Nexus script plugins.
+Forward-looking TypeScript types for authoring Nexus plugins. See
+[`CONTRACT_STATUS.md`](./CONTRACT_STATUS.md) for the current runtime
+divergence vs. the headline `NexusPluginContext` / `ScriptPlugin`
+shapes (#187).
 
 ## Install
 
@@ -8,7 +11,25 @@ Stable TypeScript types for authoring Nexus script plugins.
 npm install --save-dev @nexus/extension-api
 ```
 
-## Usage
+## Status
+
+The `NexusPluginContext` / `ScriptPlugin` shapes this package exports
+are the *target* contract — they are **not** what any current Nexus
+runtime supplies. Today the in-process shell host hands plugins a
+`PluginAPI` (`shell/src/types/plugin.ts`) and the sandbox runtime hands
+plugins a `SandboxedPluginContext` (`./src/sandbox/context.ts`); both
+overlap with the target shape on the verbs that matter but diverge on
+field names and on the sync-versus-async boundary. See
+[`CONTRACT_STATUS.md`](./CONTRACT_STATUS.md) for the per-field
+inventory.
+
+Until reconciliation lands, plugin authors should import the
+runtime-specific context types directly. The `NexusPluginContext`
+example in the next section compiles fine but the resulting plugin
+will not load — `loadScriptPlugin` is not implemented in either
+runtime.
+
+## Aspirational usage (target contract, #187)
 
 ```ts
 import type { ScriptPlugin, NexusPluginContext } from "@nexus/extension-api";
@@ -34,18 +55,21 @@ export default plugin;
 
 ## What this package gives you
 
-- **Type definitions** for `NexusPluginContext` and every contribution DTO
-  (`EditorBlockType`, `Snippet`, `MenuItem`, `UriHandler`,
-  `WebviewPanelConfig`, `TreeDataProvider`, `PanelNode`, …).
-- **The `ScriptPlugin` shape** your default export must satisfy.
-- A **stable import surface** — the Nexus host already implements these
-  shapes, so TypeScript will flag contract drift before you ship.
+- **Forward-looking type definitions** for `NexusPluginContext` and
+  every contribution DTO (`EditorBlockType`, `Snippet`, `MenuItem`,
+  `UriHandler`, `WebviewPanelConfig`, `TreeDataProvider`, `PanelNode`,
+  …).
+- **The aspirational `ScriptPlugin` shape** a plugin's default export
+  will eventually satisfy.
+- **Sandbox-side runtime contracts** (`SandboxedPlugin`,
+  `SandboxedPluginContext`) — these *are* implemented today by the
+  iframe sandbox runtime and are safe to depend on.
 
 ## What it does *not* give you
 
-- A runtime. The `ctx` passed to your `dispatch` / lifecycle hooks is
-  supplied by the Nexus host at load time. There is nothing to
-  instantiate from this package.
+- A runtime for the headline `NexusPluginContext` / `ScriptPlugin`
+  shapes. Neither the in-process shell nor the sandbox runtime
+  implements them; see Status above.
 - React. Plugins that ship JSX must depend on `react` themselves; we
   intentionally avoid the dependency so the type package stays small.
 - CodeMirror 6 extension types. Plugins that contribute decorations
@@ -55,10 +79,14 @@ export default plugin;
 
 ## Versioning
 
-This package follows semver. A `1.x` tag means every exported shape is
-frozen for the life of the major; new surfaces are additive. Breaking
-changes land in a new major and are paired with a migration note in
-`DEPRECATED.md` at the repo root.
+The current `1.0.0` tag predates the runtime audit that surfaced the
+divergence above; it does **not** yet imply structural freeze. A
+future release will cut the line cleanly once one runtime shape is
+canonical and the others adopt it. Until then, treat the headline
+shapes as forward-looking documentation rather than as a stability
+guarantee. The sandbox-side shapes (`SandboxedPlugin`,
+`SandboxedPluginContext`) are tracked separately and *are* the live
+contract for sandboxed plugins.
 
 ## Sandboxed Community Plugins
 

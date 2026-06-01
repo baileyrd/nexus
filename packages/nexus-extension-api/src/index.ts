@@ -1,21 +1,39 @@
 /**
  * Public TypeScript surface for Nexus script-plugin authors (UI F-2.1.1).
  *
+ * ## Status — pre-1.0, two runtime contracts diverge (#187)
+ *
+ * The `NexusPluginContext` / `ScriptPlugin` shapes below are the
+ * *target* contract this package will eventually freeze at `1.x`. They
+ * are **not** what any current runtime supplies:
+ *
+ * | Runtime | Actual context type | Source |
+ * |---|---|---|
+ * | In-process shell host | `PluginAPI` | `shell/src/types/plugin.ts` |
+ * | Sandboxed community plugins | `SandboxedPluginContext` | `./sandbox/context.ts` |
+ *
+ * `PluginAPI` and `SandboxedPluginContext` overlap with
+ * `NexusPluginContext` on the verbs that matter (commands, events,
+ * notifications, settings, ipc / kernel.invoke) but neither satisfies
+ * it structurally — the field names and async-versus-sync split differ.
+ * See [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md) for the per-field
+ * inventory.
+ *
+ * Until the contracts are reconciled, treat `NexusPluginContext` and
+ * `ScriptPlugin` as forward-looking documentation, not as a substitute
+ * for the runtime-specific contracts.
+ *
  * ## Versioning
  *
- * This package ships with semver discipline. The `0.x` line mirrors
- * whatever the shell happens to expose today; a `1.0.0` tag signals
- * that every exported shape is frozen and future `1.x` releases add
- * surface but never change existing signatures.
+ * The current `1.0.0` package tag predates the runtime audit that
+ * surfaced the divergence above; it does not yet imply structural
+ * freeze. A future `2.0.0` (or a clean re-cut to `0.x` for the next
+ * major) will hold the line once one runtime shape is canonical and
+ * the others adopt it.
  *
  * ## Runtime
  *
- * This package is **types-only**. Plugins import the shapes from here
- * so TypeScript catches accidental contract drift when the shell is
- * updated, but the `NexusPluginContext` instance passed to
- * `dispatch` / `onInit` / `onStart` / `onStop` at runtime is still
- * supplied by the Nexus host. There is nothing to `new` from this
- * package.
+ * This package is **types-only**. There is nothing to `new` from it.
  *
  * ## What's in scope
  *
@@ -203,6 +221,20 @@ export interface MdxComponent {
 
 // ─── Host-provided context ───────────────────────────────────────────────────
 
+/**
+ * **Status (#187): aspirational, not yet runtime-backed.** No in-tree
+ * runtime exposes a context that satisfies this interface today. The
+ * in-process shell host hands plugins a `PluginAPI`
+ * (`shell/src/types/plugin.ts`) and the sandbox runtime hands them a
+ * `SandboxedPluginContext` (`./sandbox/context.ts`). Both overlap with
+ * the verbs declared below but diverge on field names and on the
+ * sync-versus-async boundary — see [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md).
+ *
+ * Treat this shape as the target contract once one runtime is chosen
+ * canonical. Plugin authors targeting today's host should import
+ * `PluginAPI` (in-process) or `SandboxedPluginContext` (sandboxed)
+ * directly until the divergence is closed.
+ */
 export interface NexusPluginContext {
   pluginId: string;
 
@@ -436,6 +468,15 @@ export interface WorkspaceAPI {
  * Failures in any hook are logged to the Running Extensions settings
  * tab but do not propagate to other plugins — the contribution bridge
  * keeps going with the next plugin in the snapshot.
+ *
+ * **Status (#187): aspirational, not yet runtime-backed.** No
+ * `loadScriptPlugin` entry point exists in the current shell or
+ * sandbox runtime. The in-process shell loads first-party plugins via
+ * a different protocol (see `shell/src/host/extensionHost.ts`); the
+ * sandbox runtime calls `SandboxedPlugin.activate` /
+ * `SandboxedPlugin.deactivate` (see `./sandbox/plugin.ts`). Plugin
+ * authors targeting today's host should implement the runtime-specific
+ * shape, not this one. See [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md).
  */
 export interface ScriptPlugin {
   dispatch(
