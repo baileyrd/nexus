@@ -178,12 +178,11 @@ fn handle_register_server(
     // ignored unknown fields and let typos like `{ commandd: "..." }`
     // through. Non-empty checks for `name` / `command` / `plugin_id`
     // are now inlined on the typed fields.
-    let typed: LspRegisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: LspRegisterServerArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("register_server: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -250,12 +249,11 @@ fn handle_unregister_server(
     // #190 / R7 — strict-parse via typed `LspUnregisterServerArgs`,
     // typed `LspUnregisterServerReply`. The prior `parse_string_field`
     // chain silently passed unknown fields through.
-    let typed: LspUnregisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: LspUnregisterServerArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("unregister_server: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -548,11 +546,14 @@ impl CorePlugin for LspCorePlugin {
                 // explicitly.
                 let parsed: Result<LspChangeFileArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
-                    let LspChangeFileArgs { path, content, version } =
-                        parsed.map_err(|e| PluginError::ExecutionFailed {
-                            plugin_id: PLUGIN_ID.to_string(),
-                            reason: format!("change_file: invalid args: {e}"),
-                        })?;
+                    let LspChangeFileArgs {
+                        path,
+                        content,
+                        version,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("change_file: invalid args: {e}"),
+                    })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -1042,13 +1043,17 @@ disabled = true
         let fut = plugin
             .dispatch_async(HANDLER_HOVER, &json!({}))
             .expect("dispatch_async must return a future (not None)");
-        let err = runtime.block_on(fut).expect_err("missing fields must error");
+        let err = runtime
+            .block_on(fut)
+            .expect_err("missing fields must error");
         assert!(err.to_string().contains("invalid args"));
         // Path supplied, but missing `line` / `character`.
         let fut = plugin
             .dispatch_async(HANDLER_HOVER, &json!({ "path": "/tmp/x.rs" }))
             .expect("dispatch_async must return a future (not None)");
-        let err = runtime.block_on(fut).expect_err("missing line/character must error");
+        let err = runtime
+            .block_on(fut)
+            .expect_err("missing line/character must error");
         assert!(err.to_string().contains("invalid args"));
     }
 

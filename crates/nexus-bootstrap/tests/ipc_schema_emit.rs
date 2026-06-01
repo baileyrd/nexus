@@ -277,14 +277,8 @@ fn emit_all_schemas_impl() {
     // BaseView, BaseSchema, property definitions) pass through as
     // `serde_json::Value` because the impl types aren't yet
     // `JsonSchema`-derive friendly.
-    write_schema::<StorageBaseRecordCreateArgs>(
-        "com_nexus_storage__base_record_create",
-        "args",
-    );
-    write_schema::<StorageBaseRecordUpdateArgs>(
-        "com_nexus_storage__base_record_update",
-        "args",
-    );
+    write_schema::<StorageBaseRecordCreateArgs>("com_nexus_storage__base_record_create", "args");
+    write_schema::<StorageBaseRecordUpdateArgs>("com_nexus_storage__base_record_update", "args");
     write_schema::<StorageBasePropertyCreateArgs>(
         "com_nexus_storage__base_property_create",
         "args",
@@ -319,10 +313,7 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageCanvasWriteArgs>("com_nexus_storage__canvas_write", "args");
     write_schema::<StorageCanvasPatchArgs>("com_nexus_storage__canvas_patch", "args");
     write_schema::<StorageToggleTaskArgs>("com_nexus_storage__toggle_task", "args");
-    write_schema::<StorageBacklinksToBlockArgs>(
-        "com_nexus_storage__backlinks_to_block",
-        "args",
-    );
+    write_schema::<StorageBacklinksToBlockArgs>("com_nexus_storage__backlinks_to_block", "args");
     write_schema::<StorageGraphNeighborsArgs>("com_nexus_storage__graph_neighbors", "args");
 
     // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────

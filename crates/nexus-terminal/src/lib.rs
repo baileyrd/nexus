@@ -61,9 +61,9 @@ mod core_plugin;
 mod env;
 mod error;
 // R8 / #191 — wire-mirror IPC types lifted out of `core_plugin.rs`.
-pub mod ipc;
 mod external_terminal;
 mod handlers;
+pub mod ipc;
 mod job_object;
 mod lines;
 mod manager;
@@ -104,6 +104,12 @@ pub use core_plugin::{
 // R8 / #191 — wire-mirror IPC types live in `ipc.rs`; re-export so
 // external imports `use nexus_terminal::{CreateSessionArgs, …}` are
 // unchanged.
+pub use env::{
+    interpolate_env, is_secret_key, mask_secrets, parse_env_file, parse_env_text, resolve_env,
+    REDACTED,
+};
+pub use error::TerminalError;
+pub use external_terminal::{parse_kind as parse_terminal_kind, TerminalKind, DEFAULT_PRIORITY};
 pub use ipc::{
     AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CreateSessionArgs, CreateSessionResponse,
     CrossSessionSearchArgs, OutputStreamPayload, PumpArgs, PumpResponse, ReadOutputArgs,
@@ -112,12 +118,6 @@ pub use ipc::{
     SendRawInputArgs, SessionIdArgs, SuggestArgs, SuggestResponse, WaitForPatternArgs,
     WaitForPatternResponse,
 };
-pub use env::{
-    interpolate_env, is_secret_key, mask_secrets, parse_env_file, parse_env_text, resolve_env,
-    REDACTED,
-};
-pub use error::TerminalError;
-pub use external_terminal::{parse_kind as parse_terminal_kind, TerminalKind, DEFAULT_PRIORITY};
 pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};

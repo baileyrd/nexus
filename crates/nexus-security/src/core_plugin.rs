@@ -200,9 +200,9 @@ impl CorePlugin for SecurityCorePlugin {
                 let key = format!("{}:{}", typed.plugin_id, typed.name);
                 let value = match self.vault.retrieve(&key) {
                     Ok(v) => Some(v),
-                    Err(
-                        SecurityError::CredentialNotFound(_) | SecurityError::KeyringDisabled,
-                    ) => None,
+                    Err(SecurityError::CredentialNotFound(_) | SecurityError::KeyringDisabled) => {
+                        None
+                    }
                     Err(e) => return Err(map_err(e)),
                 };
                 to_typed(&crate::ipc::GetSecretResult { value }, "get_secret")
@@ -228,8 +228,7 @@ impl CorePlugin for SecurityCorePlugin {
                 to_typed(&crate::ipc::DeleteSecretResult { ok }, "delete_secret")
             }
             HANDLER_LIST_SECRET_NAMES => {
-                let typed: crate::ipc::ListSecretNamesArgs =
-                    parse_args(args, "list_secret_names")?;
+                let typed: crate::ipc::ListSecretNamesArgs = parse_args(args, "list_secret_names")?;
                 let prefix = format!("{}:", typed.plugin_id);
                 let names: Vec<String> = self
                     .known_names
@@ -289,10 +288,7 @@ where
 
 /// Serialise a typed reply to `serde_json::Value`, mapping
 /// serialisation errors to `PluginError::ExecutionFailed`.
-fn to_typed<T: serde::Serialize>(
-    reply: &T,
-    verb: &str,
-) -> Result<serde_json::Value, PluginError> {
+fn to_typed<T: serde::Serialize>(reply: &T, verb: &str) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(reply).map_err(|e| PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: format!("{verb}: serialize reply: {e}"),

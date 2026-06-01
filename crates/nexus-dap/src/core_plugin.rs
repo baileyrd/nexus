@@ -203,12 +203,11 @@ fn handle_register_adapter(
     // `parse_register_adapter_spec` + `parse_string_field` silently
     // accepted unknown fields and let typos like
     // `{ commandd: "..." }` through.
-    let typed: DapRegisterAdapterArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: DapRegisterAdapterArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("register_adapter: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -276,12 +275,11 @@ fn handle_unregister_adapter(
 ) -> Result<Value, PluginError> {
     // #190 / R7 — strict-parse via typed `DapUnregisterAdapterArgs`,
     // typed `DapUnregisterAdapterReply`.
-    let typed: DapUnregisterAdapterArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: DapUnregisterAdapterArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("unregister_adapter: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -590,8 +588,7 @@ impl CorePlugin for DapCorePlugin {
 
             HANDLER_SET_BREAKPOINTS => {
                 // #190 / R7 — strict-parse via typed `DapSetBreakpointsArgs`.
-                let parsed: Result<DapSetBreakpointsArgs, _> =
-                    serde_json::from_value(args.clone());
+                let parsed: Result<DapSetBreakpointsArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
                     let DapSetBreakpointsArgs {
                         adapter,

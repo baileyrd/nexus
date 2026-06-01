@@ -13,9 +13,7 @@
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{
-    GitOk, GitStashEntry, GitStashIndexArgs, GitStashPushArgs, GitStashPushReply,
-};
+use crate::ipc::{GitOk, GitStashEntry, GitStashIndexArgs, GitStashPushArgs, GitStashPushReply};
 use crate::GitWorkerHandle;
 
 use super::shared::{map_err, parse_args, to_value};
@@ -25,7 +23,13 @@ pub(crate) fn stash_push(h: &GitWorkerHandle, args: &Value) -> Result<Value, Plu
     let idx = h
         .with(move |e| e.stash_push(message.as_deref()))
         .map_err(map_err)?;
-    to_value(&GitStashPushReply { ok: true, index: idx }, "stash_push")
+    to_value(
+        &GitStashPushReply {
+            ok: true,
+            index: idx,
+        },
+        "stash_push",
+    )
 }
 
 pub(crate) fn stash_list(h: &GitWorkerHandle) -> Result<Value, PluginError> {
