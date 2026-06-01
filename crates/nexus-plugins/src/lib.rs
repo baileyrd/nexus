@@ -152,8 +152,9 @@ pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 #[doc(hidden)]
 pub mod __testing {
     pub use crate::host_fns::{
-        register_host_fns, HOST_BUFFER_OVERFLOW, HOST_CAPABILITY_DENIED, HOST_ERROR,
-        HOST_INTERNAL_ONLY, HOST_OK,
+        host_code_for_ipc_kind, register_host_fns, HOST_BUFFER_OVERFLOW, HOST_CAPABILITY_DENIED,
+        HOST_ERROR, HOST_ERR_CANCELLED, HOST_ERR_DISPATCH_FAILED, HOST_ERR_PLUGIN_CRASHED,
+        HOST_ERR_SERIALIZATION, HOST_ERR_TIMEOUT, HOST_ERR_UNKNOWN, HOST_INTERNAL_ONLY, HOST_OK,
     };
 }
 pub use hot_reload::{HotReloader, ReloadEvent};

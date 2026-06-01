@@ -7,7 +7,7 @@ use std::path::Path;
 
 use wasmtime::{Caller, Linker};
 
-use nexus_kernel::{audit, Capability};
+use nexus_kernel::{audit, Capability, IpcErrorEnvelope, IpcErrorKind};
 use nexus_types::PathValidationError;
 
 use crate::{sandbox::PluginData, PluginError};
@@ -34,6 +34,60 @@ pub const HOST_BUFFER_OVERFLOW: i32 = -1002;
 /// can distinguish "you're missing a cap I could grant" from "this
 /// handler is out of reach to sandboxed plugins regardless of caps".
 pub const HOST_INTERNAL_ONLY: i32 = -1003;
+
+// #186 / R3 — distinct codes per [`IpcErrorKind`] so a sandboxed WASM
+// guest can branch on dispatch outcomes without parsing a serialized
+// envelope. The audit's two acceptable remedies were "serialised
+// `IpcErrorEnvelope`" *or* "distinct codes per `IpcErrorKind`"; this
+// crate ships the latter — strictly typed, no wire-format change to
+// the host function signature.
+//
+// Each constant maps 1:1 onto a variant of
+// [`nexus_kernel::IpcErrorKind`]. `CapabilityDenied` re-uses the
+// existing [`HOST_CAPABILITY_DENIED`] above so guests written against
+// the pre-#186 contract keep their semantics.
+
+/// `IpcErrorKind::Timeout` — the target handler exceeded the kernel's
+/// per-call deadline. Retryable from the guest's perspective.
+pub const HOST_ERR_TIMEOUT: i32 = -1010;
+/// `IpcErrorKind::PluginCrashed` — the target plugin panicked or
+/// returned a `PluginError::ExecutionFailed`. Includes the "command
+/// not found" and "reentrant call" cases that surface as
+/// `PluginCrashedDuringCall` through the `SharedPluginLoader`
+/// dispatcher.
+pub const HOST_ERR_PLUGIN_CRASHED: i32 = -1011;
+/// `IpcErrorKind::DispatchFailed` — the dispatcher could not route
+/// the call (plugin not found, dispatcher uninitialised, …).
+pub const HOST_ERR_DISPATCH_FAILED: i32 = -1012;
+/// `IpcErrorKind::Serialization` — the args could not be serialised
+/// into the kernel-side IPC envelope, or the reply could not be
+/// deserialised back.
+pub const HOST_ERR_SERIALIZATION: i32 = -1013;
+/// `IpcErrorKind::Cancelled` — the call was cancelled cooperatively
+/// (via the dispatch's `CancellationToken`). Distinct from
+/// `HOST_ERR_TIMEOUT` so guests can avoid retry on user cancel.
+pub const HOST_ERR_CANCELLED: i32 = -1014;
+/// `IpcErrorKind::Unknown` — a future `IpcError` variant the envelope
+/// mapper didn't recognise. Old guests still see *some* signal so the
+/// failure isn't silently masked.
+pub const HOST_ERR_UNKNOWN: i32 = -1015;
+
+/// #186 / R3 — Project an [`IpcErrorEnvelope::kind`] onto the
+/// corresponding `HOST_ERR_*` (or `HOST_CAPABILITY_DENIED`) code so
+/// the sandboxed guest can branch on `IpcErrorKind` without parsing
+/// a serialised envelope.
+#[must_use]
+pub fn host_code_for_ipc_kind(kind: IpcErrorKind) -> i32 {
+    match kind {
+        IpcErrorKind::CapabilityDenied => HOST_CAPABILITY_DENIED,
+        IpcErrorKind::Timeout => HOST_ERR_TIMEOUT,
+        IpcErrorKind::PluginCrashed => HOST_ERR_PLUGIN_CRASHED,
+        IpcErrorKind::DispatchFailed => HOST_ERR_DISPATCH_FAILED,
+        IpcErrorKind::Serialization => HOST_ERR_SERIALIZATION,
+        IpcErrorKind::Cancelled => HOST_ERR_CANCELLED,
+        IpcErrorKind::Unknown => HOST_ERR_UNKNOWN,
+    }
+}
 
 // ─── Audit-helper shims ───────────────────────────────────────────────────────
 
@@ -636,16 +690,30 @@ fn register_host_invoke_command(linker: &mut Linker<PluginData>) -> Result<(), P
                 }
 
                 // Dispatch to target plugin.
+                //
+                // #186 / R3 — failures map onto a distinct `HOST_ERR_*`
+                // per [`IpcErrorKind`] (see `host_code_for_ipc_kind`)
+                // so a sandboxed guest can branch on the failure mode
+                // without parsing a serialised `IpcErrorEnvelope`. The
+                // prior collapse-to-`HOST_ERROR` lost timeout /
+                // serialization / cancelled signals — the audit's R3
+                // remedy was either a serialised envelope or distinct
+                // codes; this crate ships the latter.
                 let result = match dispatcher.dispatch(&target_plugin_id, &command_id, &args) {
                     Ok(v) => v,
                     Err(e) => {
+                        let envelope = IpcErrorEnvelope::from_ipc_error(&e);
+                        let code = host_code_for_ipc_kind(envelope.kind);
                         tracing::warn!(
                             caller = %caller_plugin_id,
                             target = %target_plugin_id,
                             command = %command_id,
+                            kind = ?envelope.kind,
+                            code,
+                            retryable = envelope.retryable,
                             "host::invoke_command: dispatch failed: {e}"
                         );
-                        return HOST_ERROR;
+                        return code;
                     }
                 };
 
@@ -900,12 +968,63 @@ mod tests {
 
     #[test]
     fn error_codes_are_distinct() {
-        assert_ne!(HOST_OK, HOST_ERROR);
-        assert_ne!(HOST_OK, HOST_CAPABILITY_DENIED);
-        assert_ne!(HOST_OK, HOST_BUFFER_OVERFLOW);
-        assert_ne!(HOST_OK, HOST_INTERNAL_ONLY);
-        assert_ne!(HOST_ERROR, HOST_CAPABILITY_DENIED);
-        assert_ne!(HOST_CAPABILITY_DENIED, HOST_INTERNAL_ONLY);
-        assert_ne!(HOST_BUFFER_OVERFLOW, HOST_INTERNAL_ONLY);
+        let codes = [
+            HOST_OK,
+            HOST_ERROR,
+            HOST_CAPABILITY_DENIED,
+            HOST_BUFFER_OVERFLOW,
+            HOST_INTERNAL_ONLY,
+            HOST_ERR_TIMEOUT,
+            HOST_ERR_PLUGIN_CRASHED,
+            HOST_ERR_DISPATCH_FAILED,
+            HOST_ERR_SERIALIZATION,
+            HOST_ERR_CANCELLED,
+            HOST_ERR_UNKNOWN,
+        ];
+        let mut sorted = codes.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            codes.len(),
+            "every HOST_* error code must be distinct"
+        );
+    }
+
+    /// #186 / R3 — `host_code_for_ipc_kind` is the contract surface the
+    /// audit's remedy hangs off of. Each [`IpcErrorKind`] variant must
+    /// project onto a distinct `HOST_*` code so guests can branch on
+    /// the failure mode. Locking this here means a future addition to
+    /// `IpcErrorKind` that forgets to add a new HOST code breaks CI.
+    #[test]
+    fn every_ipc_error_kind_maps_to_a_distinct_host_code() {
+        // CapabilityDenied re-uses the legacy HOST_CAPABILITY_DENIED so
+        // pre-#186 guests keep their semantics; every other variant
+        // gets a fresh HOST_ERR_* code.
+        let mapped = [
+            (IpcErrorKind::Timeout, HOST_ERR_TIMEOUT),
+            (IpcErrorKind::CapabilityDenied, HOST_CAPABILITY_DENIED),
+            (IpcErrorKind::PluginCrashed, HOST_ERR_PLUGIN_CRASHED),
+            (IpcErrorKind::DispatchFailed, HOST_ERR_DISPATCH_FAILED),
+            (IpcErrorKind::Serialization, HOST_ERR_SERIALIZATION),
+            (IpcErrorKind::Cancelled, HOST_ERR_CANCELLED),
+            (IpcErrorKind::Unknown, HOST_ERR_UNKNOWN),
+        ];
+        for (kind, expected) in mapped {
+            assert_eq!(
+                host_code_for_ipc_kind(kind),
+                expected,
+                "IpcErrorKind::{kind:?} must map to {expected}"
+            );
+        }
+        let codes: Vec<i32> = mapped.iter().map(|(_, c)| *c).collect();
+        let mut sorted = codes.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            codes.len(),
+            "each IpcErrorKind variant must project onto a distinct HOST_* code"
+        );
     }
 }
