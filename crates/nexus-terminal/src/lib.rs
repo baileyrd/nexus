@@ -60,6 +60,8 @@ mod compound;
 mod core_plugin;
 mod env;
 mod error;
+// R8 / #191 — wire-mirror IPC types lifted out of `core_plugin.rs`.
+pub mod ipc;
 mod external_terminal;
 mod handlers;
 mod job_object;
@@ -89,12 +91,7 @@ pub use compound::{
     SkipReason, StepOutcome,
 };
 pub use core_plugin::{
-    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CreateSessionArgs, CreateSessionResponse,
-    CrossSessionSearchArgs, OutputStreamPayload, PumpArgs, PumpResponse, ReadOutputArgs,
-    ReadRawSinceArgs, ReadRawSinceResponse, ReplEvalArgs, ReplInfo, ReplStartArgs,
-    ReplStartResponse, ResizeArgs, RunSavedArgs, SearchOutputArgs, SendInputArgs, SendRawInputArgs,
-    SessionIdArgs, SuggestArgs, SuggestResponse, TerminalCorePlugin, WaitForPatternArgs,
-    WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX, HANDLER_ADHOC_DELETE,
+    TerminalCorePlugin, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX, HANDLER_ADHOC_DELETE,
     HANDLER_ADHOC_GET, HANDLER_ADHOC_LIST, HANDLER_ADHOC_PROMOTE, HANDLER_CLOSE_SESSION,
     HANDLER_CREATE_SESSION, HANDLER_CROSS_SESSION_SEARCH, HANDLER_GET_SESSION_INFO,
     HANDLER_LIST_SESSIONS, HANDLER_OPEN_IN_TERMINAL, HANDLER_PUMP, HANDLER_READ_OUTPUT,
@@ -103,6 +100,17 @@ pub use core_plugin::{
     HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER, HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT,
     HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT, HANDLER_SUGGEST, HANDLER_WAIT_FOR_PATTERN,
     IPC_HANDLERS, MANIFEST_DEPS, PLUGIN_ID,
+};
+// R8 / #191 — wire-mirror IPC types live in `ipc.rs`; re-export so
+// external imports `use nexus_terminal::{CreateSessionArgs, …}` are
+// unchanged.
+pub use ipc::{
+    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CreateSessionArgs, CreateSessionResponse,
+    CrossSessionSearchArgs, OutputStreamPayload, PumpArgs, PumpResponse, ReadOutputArgs,
+    ReadRawSinceArgs, ReadRawSinceResponse, RenameSessionArgs, ReplEvalArgs, ReplInfo,
+    ReplStartArgs, ReplStartResponse, ResizeArgs, RunSavedArgs, SearchOutputArgs, SendInputArgs,
+    SendRawInputArgs, SessionIdArgs, SuggestArgs, SuggestResponse, WaitForPatternArgs,
+    WaitForPatternResponse,
 };
 pub use env::{
     interpolate_env, is_secret_key, mask_secrets, parse_env_file, parse_env_text, resolve_env,

@@ -2,7 +2,8 @@
 //! `adhoc_get`, `adhoc_delete`, `adhoc_promote`. Split out of
 //! `core_plugin.rs` by SD-03 terminal chunk 1.
 
-use crate::core_plugin::{AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, TerminalCorePlugin};
+use crate::core_plugin::TerminalCorePlugin;
+use crate::ipc::{AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs};
 use crate::saved::{promote_adhoc_to_saved, PromoteOptions};
 use nexus_plugins::PluginError;
 

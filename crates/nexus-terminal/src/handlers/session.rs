@@ -4,9 +4,9 @@
 
 use std::path::PathBuf;
 
-use crate::core_plugin::{
+use crate::core_plugin::TerminalCorePlugin;
+use crate::ipc::{
     CreateSessionArgs, CreateSessionResponse, RenameSessionArgs, ResizeArgs, SessionIdArgs,
-    TerminalCorePlugin,
 };
 use crate::server::{ServerSpawnConfig, TerminalServer};
 use crate::session::SessionId;

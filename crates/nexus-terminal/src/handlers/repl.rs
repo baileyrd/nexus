@@ -4,9 +4,8 @@
 
 use std::path::PathBuf;
 
-use crate::core_plugin::{
-    ReplEvalArgs, ReplInfo, ReplStartArgs, ReplStartResponse, SessionIdArgs, TerminalCorePlugin,
-};
+use crate::core_plugin::TerminalCorePlugin;
+use crate::ipc::{ReplEvalArgs, ReplInfo, ReplStartArgs, ReplStartResponse, SessionIdArgs};
 use crate::server::{ServerSpawnConfig, TerminalServer};
 use crate::session::SessionId;
 use crate::shell::ShellSpec;
