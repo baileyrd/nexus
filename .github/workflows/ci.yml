@@ -47,6 +47,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # This job runs clippy --all-targets AND cargo test --workspace, whose
+      # combined target/ exceeds the runner's default free disk — linking the
+      # test binaries SIGBUS'd ("ld terminated with signal 7 [Bus error]").
+      # Reclaim ~25 GB of preinstalled toolchains this job never touches.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
