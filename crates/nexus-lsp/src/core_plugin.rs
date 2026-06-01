@@ -46,6 +46,10 @@ use serde_json::{json, Value};
 
 use crate::client::LspClientError;
 use crate::config::{LspServerSpec, MergeSkipReason, UnregisterError};
+use crate::ipc::{
+    LspRegisterServerArgs, LspRegisterServerReply, LspUnregisterServerArgs,
+    LspUnregisterServerReply,
+};
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{LspConfigError, LspHostConfig};
 
@@ -166,16 +170,68 @@ fn handle_register_server(
     config: &Arc<RwLock<LspHostConfig>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let spec = parse_register_server_spec(args)?;
-    let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
-    let status = match cfg.register_contributed(spec, plugin_id) {
-        Ok(()) => ("ok", true),
-        Err(MergeSkipReason::TomlOverride) => ("toml_override", false),
-        Err(MergeSkipReason::InvalidName) => ("invalid_name", false),
-        Err(MergeSkipReason::InvalidCommand) => ("invalid_command", false),
+    // #190 / R7 — strict-parse via typed `LspRegisterServerArgs`
+    // (`deny_unknown_fields`). The prior hand-rolled
+    // `parse_register_server_spec` + `parse_string_field` silently
+    // ignored unknown fields and let typos like `{ commandd: "..." }`
+    // through. Non-empty checks for `name` / `command` / `plugin_id`
+    // are now inlined on the typed fields.
+    let typed: LspRegisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
+        PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("register_server: invalid args: {e}"),
+        }
+    })?;
+    if typed.name.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `name`".to_string(),
+        });
+    }
+    if typed.command.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `command`".to_string(),
+        });
+    }
+    if typed.plugin_id.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `plugin_id`".to_string(),
+        });
+    }
+    let spec = LspServerSpec {
+        name: typed.name,
+        command: typed.command,
+        args: typed.args,
+        file_types: typed.file_types,
+        root_markers: typed.root_markers,
+        disabled: typed.disabled,
+        env: typed.env,
     };
-    Ok(json!({ "ok": status.1, "status": status.0 }))
+    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
+    let reply = match cfg.register_contributed(spec, typed.plugin_id) {
+        Ok(()) => LspRegisterServerReply {
+            ok: true,
+            status: "ok".to_string(),
+        },
+        Err(MergeSkipReason::TomlOverride) => LspRegisterServerReply {
+            ok: false,
+            status: "toml_override".to_string(),
+        },
+        Err(MergeSkipReason::InvalidName) => LspRegisterServerReply {
+            ok: false,
+            status: "invalid_name".to_string(),
+        },
+        Err(MergeSkipReason::InvalidCommand) => LspRegisterServerReply {
+            ok: false,
+            status: "invalid_command".to_string(),
+        },
+    };
+    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("register_server: serialize reply: {e}"),
+    })
 }
 
 /// BL-113 Phase 2b — sync IPC handler for `unregister_server`.
@@ -189,69 +245,60 @@ fn handle_unregister_server(
     config: &Arc<RwLock<LspHostConfig>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let name = parse_string_field(args, "name")?;
-    let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
-    match cfg.unregister_contributed(&name, &plugin_id) {
-        Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(UnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
-        Err(UnregisterError::TomlEntry) => Ok(json!({ "ok": false, "status": "toml_entry" })),
-        Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
-            "ok": false,
-            "status": "not_owned_by_plugin",
-            "actual_owner": actual_owner,
-        })),
-    }
-}
-
-fn parse_string_field(args: &Value, key: &str) -> Result<String, PluginError> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| PluginError::ExecutionFailed {
+    // #190 / R7 — strict-parse via typed `LspUnregisterServerArgs`,
+    // typed `LspUnregisterServerReply`. The prior `parse_string_field`
+    // chain silently passed unknown fields through.
+    let typed: LspUnregisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
+        PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("missing or empty required field `{key}`"),
-        })
-}
-
-fn parse_register_server_spec(args: &Value) -> Result<LspServerSpec, PluginError> {
-    let name = parse_string_field(args, "name")?;
-    let command = parse_string_field(args, "command")?;
-    let parse_str_array = |key: &str| {
-        args.get(key)
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+            reason: format!("unregister_server: invalid args: {e}"),
+        }
+    })?;
+    if typed.name.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "unregister_server: missing or empty required field `name`".to_string(),
+        });
+    }
+    if typed.plugin_id.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "unregister_server: missing or empty required field `plugin_id`".to_string(),
+        });
+    }
+    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
+    let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
+        Ok(_removed) => LspUnregisterServerReply {
+            ok: true,
+            status: "ok".to_string(),
+            actual_owner: None,
+        },
+        Err(UnregisterError::NotFound) => LspUnregisterServerReply {
+            ok: false,
+            status: "not_found".to_string(),
+            actual_owner: None,
+        },
+        Err(UnregisterError::TomlEntry) => LspUnregisterServerReply {
+            ok: false,
+            status: "toml_entry".to_string(),
+            actual_owner: None,
+        },
+        Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => LspUnregisterServerReply {
+            ok: false,
+            status: "not_owned_by_plugin".to_string(),
+            actual_owner: Some(actual_owner),
+        },
     };
-    let disabled = args
-        .get("disabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let env = args
-        .get("env")
-        .and_then(Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(LspServerSpec {
-        name,
-        command,
-        args: parse_str_array("args"),
-        file_types: parse_str_array("file_types"),
-        root_markers: parse_str_array("root_markers"),
-        disabled,
-        env,
+    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("unregister_server: serialize reply: {e}"),
     })
 }
+
+// #190 — `parse_string_field` and `parse_register_server_spec` helpers
+// removed; both `handle_register_server` and `handle_unregister_server`
+// now strict-parse via typed `LspRegisterServerArgs` /
+// `LspUnregisterServerArgs` and inline the non-empty checks.
 
 impl CorePlugin for LspCorePlugin {
     fn on_init(&mut self) -> Result<(), PluginError> {
