@@ -6,28 +6,36 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{StorageQueryTagsArgs, StorageSearchArgs};
 use crate::StorageEngine;
 
-use super::shared::{exec_err, to_value};
+use super::shared::{exec_err, parse_args, to_value};
+
+/// Default match count when the caller omits `limit`. Kept identical
+/// to the pre-#190 hand-rolled default for wire-compat.
+const DEFAULT_SEARCH_LIMIT: usize = 50;
 
 pub(crate) fn search(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let query = args
-        .get("query")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("search: missing 'query' string".to_string()))?;
-    let limit = args
-        .get("limit")
-        .and_then(serde_json::Value::as_u64)
+    // #190 / R7 — strict-parse via existing `StorageSearchArgs`.
+    let StorageSearchArgs { query, limit } = parse_args(args, "search")?;
+    let limit = limit
         .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(50);
+        .unwrap_or(DEFAULT_SEARCH_LIMIT);
     let results = engine
-        .search(query, limit)
+        .search(&query, limit)
         .map_err(|e| exec_err(format!("search: {e}")))?;
     to_value(&results, "search")
 }
 
 pub(crate) fn query_symbol(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let filter: crate::code_index::SymbolFilter = super::shared::parse_args(args, "query_symbol")?;
+    // SymbolFilter already round-trips through `parse_args` (the
+    // args side is strict — `deny_unknown_fields`). The reply wire
+    // shape `{"symbols": [...]}` matches the typed
+    // `crate::ipc::StorageQuerySymbolResult`; `SymbolRecord`
+    // serialises field-for-field as `StorageSymbolRow` (pinned by
+    // the `ipc_schema_emit` invariant), so the existing `json!`
+    // envelope here IS the typed wire shape.
+    let filter: crate::code_index::SymbolFilter = parse_args(args, "query_symbol")?;
     let symbols = engine
         .query_symbols(&filter)
         .map_err(|e| exec_err(format!("query_symbol: {e}")))?;
@@ -35,12 +43,10 @@ pub(crate) fn query_symbol(engine: &StorageEngine, args: &Value) -> Result<Value
 }
 
 pub(crate) fn query_tags(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let name = args
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("query_tags: missing 'name' string".to_string()))?;
+    // #190 / R7 — strict-parse via typed `StorageQueryTagsArgs`.
+    let StorageQueryTagsArgs { name } = parse_args(args, "query_tags")?;
     let tags = engine
-        .query_tags(name)
+        .query_tags(&name)
         .map_err(|e| exec_err(format!("query_tags: {e}")))?;
     to_value(&tags, "query_tags")
 }

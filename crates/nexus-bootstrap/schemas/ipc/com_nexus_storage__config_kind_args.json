@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageConfigKindArgs",
+  "description": "Args for `com.nexus.storage::config_read` and\n`com.nexus.storage::config_reset`. Both verbs take a `{ kind }`\ndiscriminator; values outside `app | workspace | mcp | ai` are\nrejected at the handler boundary (the typed parse accepts any\nstring here so the handler can emit the precise list as part of\nthe error message).",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "One of `\"app\"`, `\"workspace\"`, `\"mcp\"`, `\"ai\"`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind"
+  ]
+}

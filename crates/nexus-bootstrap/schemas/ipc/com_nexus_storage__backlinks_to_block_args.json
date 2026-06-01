@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBacklinksToBlockArgs",
+  "description": "Args for `com.nexus.storage::backlinks_to_block`.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "Stable block identifier within the destination file.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Forge-relative path of the destination file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "block_id"
+  ]
+}

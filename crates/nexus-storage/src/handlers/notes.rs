@@ -6,16 +6,19 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{
+    StorageNoteAppendArgs, StorageOk, StorageReadFrontmatterArgs, StorageWriteFrontmatterArgs,
+};
 use crate::StorageEngine;
 
-use super::shared::{exec_err, path_arg, to_value};
+use super::shared::{exec_err, parse_args, to_value};
 
 pub(crate) fn note_append(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "note_append")?;
-    let snippet = args
-        .get("snippet")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err(format!("note_append '{path}': missing 'snippet' string")))?;
+    // #190 / R7 — strict-parse via typed `StorageNoteAppendArgs`
+    // (`deny_unknown_fields`). `FileMetadata`'s wire shape already
+    // matches `StorageNoteAppendResult` field-for-field, so the
+    // existing `to_value(&meta, …)` reply path is already typed.
+    let StorageNoteAppendArgs { path, snippet } = parse_args(args, "note_append")?;
     // Path confinement is enforced by `read_file` and `write_file` via
     // `resolve_within` — absolute paths and `..` traversal are rejected
     // at the engine boundary (see issue #72). The `read_file` call
@@ -32,7 +35,7 @@ pub(crate) fn note_append(engine: &StorageEngine, args: &Value) -> Result<Value,
             "note_append '{path}': existing file is not valid UTF-8: {e}"
         ))
     })?;
-    let combined = build_appended(existing_text, snippet);
+    let combined = build_appended(existing_text, &snippet);
     let meta = engine
         .write_file(&path, combined.as_bytes())
         .map_err(|e| exec_err(format!("note_append '{path}' write: {e}")))?;
@@ -68,7 +71,8 @@ pub(crate) fn build_appended(existing: &str, snippet: &str) -> String {
 /// `{ status: null, fields: {} }` so callers can branch on `status`
 /// without a separate existence check.
 pub(crate) fn read_frontmatter(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "read_frontmatter")?;
+    // #190 / R7 — strict-parse via typed `StorageReadFrontmatterArgs`.
+    let StorageReadFrontmatterArgs { path } = parse_args(args, "read_frontmatter")?;
     let result = read_frontmatter_for_path(forge_root, &path);
     to_value(&result, "read_frontmatter")
 }
@@ -86,29 +90,20 @@ pub(crate) fn write_frontmatter(
     forge_root: &Path,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let path = path_arg(args, "write_frontmatter")?;
-    let key = args
-        .get("key")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err(format!("write_frontmatter '{path}': missing 'key' string")))?
-        .to_string();
-    // `value: null` removes the key (no-op when absent). Any other
-    // type is rejected — we only round-trip scalars through the
-    // user-facing add-property flow.
-    let value: Option<String> = match args.get("value") {
-        None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::String(s)) => Some(s.clone()),
-        Some(other) => {
-            return Err(exec_err(format!(
-            "write_frontmatter '{path}' key='{key}': 'value' must be string or null, got {other:?}"
-        )))
-        }
-    };
+    // #190 / R7 — strict-parse via typed `StorageWriteFrontmatterArgs`
+    // (`deny_unknown_fields`). `value: None` deletes the key; any non-
+    // string `value` is rejected at the typed-parse boundary rather
+    // than inside the handler. The prior hand-rolled lookup silently
+    // accepted unknown fields and reshaped malformed `value`s into a
+    // custom error string; both paths now route through the standard
+    // strictness gate.
+    let StorageWriteFrontmatterArgs { path, key, value } =
+        parse_args(args, "write_frontmatter")?;
     let current = std::fs::read_to_string(forge_root.join(&path))
         .map_err(|e| exec_err(format!("write_frontmatter '{path}' key='{key}' read: {e}")))?;
     let next = crate::core_plugin::apply_frontmatter_edit(&current, &key, value.as_deref());
     engine
         .write_file(&path, next.as_bytes())
         .map_err(|e| exec_err(format!("write_frontmatter '{path}' key='{key}' write: {e}")))?;
-    Ok(serde_json::json!({ "ok": true }))
+    to_value(&StorageOk { ok: true }, "write_frontmatter")
 }

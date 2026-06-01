@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageQueryTagsArgs",
+  "description": "Args for `com.nexus.storage::query_tags`.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Tag name to look up. The engine returns block hits annotated\nwith this tag.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

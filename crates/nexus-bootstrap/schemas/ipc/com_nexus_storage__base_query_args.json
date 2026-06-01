@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseQueryArgs",
+  "description": "Args for `com.nexus.storage::base_query`. Filters and sorts are\nDSL strings parsed by `crate::bases::query::parse_filter` /\n`parse_sort`; the handler surfaces parse errors per-clause.",
+  "type": "object",
+  "properties": {
+    "filters": {
+      "description": "Filter-DSL strings. Empty == no filters.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "limit": {
+      "description": "Max rows. `None` == engine default.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "offset": {
+      "description": "Skip count. `None` == 0.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    },
+    "sorts": {
+      "description": "Sort-DSL strings. Empty == no sorts (engine-default order).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

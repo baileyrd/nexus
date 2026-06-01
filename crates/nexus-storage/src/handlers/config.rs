@@ -6,11 +6,17 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use super::shared::{config_kind, exec_err};
+use crate::ipc::{
+    StorageConfigContentResult, StorageConfigKindArgs, StorageOk, StorageSettingsWriteArgs,
+};
+
+use super::shared::{exec_err, parse_args, to_value};
 
 pub(crate) fn read(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let kind = config_kind(args)?;
-    let (format, content) = match kind {
+    // #190 / R7 — strict-parse via `StorageConfigKindArgs`; reply
+    // via typed `StorageConfigContentResult`.
+    let StorageConfigKindArgs { kind } = parse_args(args, "config_read")?;
+    let (format, content) = match kind.as_str() {
         "app" => {
             let cfg = crate::config::load_app_config(forge_root)
                 .map_err(|e| exec_err(format!("config_read: {e}")))?;
@@ -53,12 +59,19 @@ pub(crate) fn read(forge_root: &Path, args: &Value) -> Result<Value, PluginError
             )))
         }
     };
-    Ok(serde_json::json!({ "format": format, "content": content }))
+    to_value(
+        &StorageConfigContentResult {
+            format: format.to_string(),
+            content,
+        },
+        "config_read",
+    )
 }
 
 pub(crate) fn reset(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let kind = config_kind(args)?;
-    match kind {
+    // #190 / R7 — strict-parse via `StorageConfigKindArgs`.
+    let StorageConfigKindArgs { kind } = parse_args(args, "config_reset")?;
+    match kind.as_str() {
         "app" => crate::config::save_app_config(forge_root, &crate::config::AppConfig::default())
             .map_err(|e| exec_err(format!("config_reset: {e}")))?,
         "workspace" => crate::config::save_workspace_state(
@@ -76,7 +89,7 @@ pub(crate) fn reset(forge_root: &Path, args: &Value) -> Result<Value, PluginErro
             )))
         }
     }
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "config_reset")
 }
 
 pub(crate) fn settings_read(forge_root: &Path) -> Result<Value, PluginError> {
@@ -89,27 +102,22 @@ pub(crate) fn settings_read(forge_root: &Path) -> Result<Value, PluginError> {
 }
 
 pub(crate) fn settings_write(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
-    let key = args
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| exec_err("settings_write: missing 'key' (string)".to_string()))?
-        .to_string();
-    let value = args
-        .get("value")
-        .ok_or_else(|| exec_err("settings_write: missing 'value'".to_string()))?;
-
+    // #190 / R7 — strict-parse via `StorageSettingsWriteArgs`.
+    // `value: null` removes the key; any other JSON value (scalar
+    // or object) round-trips through `toml::Value`.
+    let StorageSettingsWriteArgs { key, value } = parse_args(args, "settings_write")?;
     let mut cfg = crate::config::load_app_config(forge_root)
         .map_err(|e| exec_err(format!("settings_write: load: {e}")))?;
 
     if value.is_null() {
         cfg.settings.remove(&key);
     } else {
-        let toml_value: toml::Value = serde_json::from_value(value.clone())
+        let toml_value: toml::Value = serde_json::from_value(value)
             .map_err(|e| exec_err(format!("settings_write: value→toml: {e}")))?;
         cfg.settings.insert(key, toml_value);
     }
 
     crate::config::save_app_config(forge_root, &cfg)
         .map_err(|e| exec_err(format!("settings_write: save: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "settings_write")
 }

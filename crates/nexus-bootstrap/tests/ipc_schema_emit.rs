@@ -37,11 +37,22 @@ use nexus_storage::ipc::{
     EntityMergeArgs, EntityMergeResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
-    ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult, StorageListDirArgs,
-    StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs, StorageNoteAppendResult,
-    StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
-    StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
-    StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
+    ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult,
+    StorageBacklinksToBlockArgs, StorageBaseCreateArgs, StorageBaseIndexResult,
+    StorageBaseNamedArgs, StorageBasePropertyCreateArgs, StorageBasePropertyRenameArgs,
+    StorageBasePropertyUpdateArgs, StorageBaseQueryArgs, StorageBaseRecordCreateArgs,
+    StorageBaseRecordIdArgs, StorageBaseRecordUpdateArgs, StorageBaseViewArgs,
+    StorageCanvasPatchArgs, StorageCanvasWriteArgs, StorageChunkEmbedding,
+    StorageConfigContentResult, StorageConfigKindArgs, StorageFileExistsResult,
+    StorageGraphNeighborsArgs, StorageImportConflictStrategy, StorageImportForgeArgs,
+    StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
+    StorageNoteAppendResult, StorageOk, StoragePathArgs, StorageQuerySymbolArgs,
+    StorageQuerySymbolResult, StorageQueryTagsArgs, StorageReadFileArgs, StorageReadFileResult,
+    StorageReadFrontmatterArgs, StorageRelpathArgs, StorageRenameEntryArgs, StorageSearchArgs,
+    StorageSearchHit, StorageSearchResult, StorageSettingsWriteArgs, StorageSymbolRow,
+    StorageToggleTaskArgs, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
+    StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
+    StorageWriteFrontmatterArgs,
 };
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
@@ -235,6 +246,84 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.storage::read_frontmatter (BL-053 Phase 4) ─────────────
     write_schema::<StorageReadFrontmatterArgs>("com_nexus_storage__read_frontmatter", "args");
     write_schema::<ReadFrontmatterResult>("com_nexus_storage__read_frontmatter", "result");
+
+    // ── com.nexus.storage::write_frontmatter (#190) ──────────────────────
+    write_schema::<StorageWriteFrontmatterArgs>("com_nexus_storage__write_frontmatter", "args");
+    write_schema::<StorageOk>("com_nexus_storage__write_frontmatter", "result");
+
+    // ── com.nexus.storage::delete_file / file_exists / write_vault_file (#190) ──
+    // All three share `StoragePathArgs` for the request shape; only
+    // `file_exists` carries a non-`StorageOk` reply.
+    write_schema::<StoragePathArgs>("com_nexus_storage__path_args", "shared");
+    write_schema::<StorageFileExistsResult>("com_nexus_storage__file_exists", "result");
+
+    // ── com.nexus.storage::vector_* (#190) ───────────────────────────────
+    write_schema::<StorageChunkEmbedding>("com_nexus_storage__vector", "chunk");
+    write_schema::<StorageVectorInsertArgs>("com_nexus_storage__vector_insert", "args");
+    write_schema::<StorageVectorQueryArgs>("com_nexus_storage__vector_query", "args");
+    write_schema::<StorageVectorMatch>("com_nexus_storage__vector_query", "match");
+    write_schema::<StorageVectorstoreCountResult>("com_nexus_storage__vectorstore_count", "result");
+
+    // ── com.nexus.storage::base_record_* delete/restore + base_*_delete + rename (#190) ──
+    write_schema::<StorageBaseRecordIdArgs>("com_nexus_storage__base_record_id", "args");
+    write_schema::<StorageBaseNamedArgs>("com_nexus_storage__base_named", "args");
+    write_schema::<StorageBasePropertyRenameArgs>(
+        "com_nexus_storage__base_property_rename",
+        "args",
+    );
+
+    // ── com.nexus.storage::base_* complex args (#190) ────────────────────
+    // Outer envelopes are strict; inner domain types (BaseRecord,
+    // BaseView, BaseSchema, property definitions) pass through as
+    // `serde_json::Value` because the impl types aren't yet
+    // `JsonSchema`-derive friendly.
+    write_schema::<StorageBaseRecordCreateArgs>(
+        "com_nexus_storage__base_record_create",
+        "args",
+    );
+    write_schema::<StorageBaseRecordUpdateArgs>(
+        "com_nexus_storage__base_record_update",
+        "args",
+    );
+    write_schema::<StorageBasePropertyCreateArgs>(
+        "com_nexus_storage__base_property_create",
+        "args",
+    );
+    write_schema::<StorageBasePropertyUpdateArgs>(
+        "com_nexus_storage__base_property_update",
+        "args",
+    );
+    write_schema::<StorageBaseViewArgs>("com_nexus_storage__base_view", "args");
+    write_schema::<StorageBaseCreateArgs>("com_nexus_storage__base_create", "args");
+    write_schema::<StorageBaseQueryArgs>("com_nexus_storage__base_query", "args");
+    write_schema::<StorageBaseIndexResult>("com_nexus_storage__base_index", "result");
+
+    // ── com.nexus.storage::import_forge (#190) ───────────────────────────
+    write_schema::<StorageImportForgeArgs>("com_nexus_storage__import_forge", "args");
+    write_schema::<StorageImportConflictStrategy>(
+        "com_nexus_storage__import_forge",
+        "conflict_strategy",
+    );
+
+    // ── com.nexus.storage::tree handlers (#190) ──────────────────────────
+    write_schema::<StorageRelpathArgs>("com_nexus_storage__relpath_args", "shared");
+    write_schema::<StorageRenameEntryArgs>("com_nexus_storage__rename_entry", "args");
+
+    // ── com.nexus.storage::query_tags / config_* / settings_write (#190) ─
+    write_schema::<StorageQueryTagsArgs>("com_nexus_storage__query_tags", "args");
+    write_schema::<StorageConfigKindArgs>("com_nexus_storage__config_kind", "args");
+    write_schema::<StorageConfigContentResult>("com_nexus_storage__config_read", "result");
+    write_schema::<StorageSettingsWriteArgs>("com_nexus_storage__settings_write", "args");
+
+    // ── com.nexus.storage::canvas / tasks / graph (#190) ─────────────────
+    write_schema::<StorageCanvasWriteArgs>("com_nexus_storage__canvas_write", "args");
+    write_schema::<StorageCanvasPatchArgs>("com_nexus_storage__canvas_patch", "args");
+    write_schema::<StorageToggleTaskArgs>("com_nexus_storage__toggle_task", "args");
+    write_schema::<StorageBacklinksToBlockArgs>(
+        "com_nexus_storage__backlinks_to_block",
+        "args",
+    );
+    write_schema::<StorageGraphNeighborsArgs>("com_nexus_storage__graph_neighbors", "args");
 
     // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
     write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");

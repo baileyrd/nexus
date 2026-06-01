@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBasePropertyRenameArgs",
+  "description": "Args for `base_property_rename`.",
+  "type": "object",
+  "properties": {
+    "new_name": {
+      "description": "Replacement property name. Must not collide with another\nexisting property in the same base.",
+      "type": "string"
+    },
+    "old_name": {
+      "description": "Current property name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "old_name",
+    "new_name"
+  ]
+}

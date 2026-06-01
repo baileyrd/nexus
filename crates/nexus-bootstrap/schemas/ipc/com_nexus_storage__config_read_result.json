@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageConfigContentResult",
+  "description": "Reply for `com.nexus.storage::config_read`.",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "Pretty-printed serialized content.",
+      "type": "string"
+    },
+    "format": {
+      "description": "`\"toml\"` or `\"json\"`, matching the `kind`'s on-disk format.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "content"
+  ]
+}

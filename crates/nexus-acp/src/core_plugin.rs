@@ -44,6 +44,10 @@ use serde_json::{json, Value};
 
 use crate::client::AcpClientError;
 use crate::config::{AcpAdapterSpec, AcpHostConfig, MergeSkipReason, UnregisterError};
+use crate::ipc::{
+    AcpAgentArgs, AcpAgentEntry, AcpDecisionArgs, AcpProposeArgs, AcpRegisterServerArgs,
+    AcpRegisterServerReply, AcpUnregisterServerArgs, AcpUnregisterServerReply,
+};
 use crate::pool::{ConnectionPool, PoolConfig};
 
 /// Reverse-DNS identifier.
@@ -110,90 +114,122 @@ fn snapshot_config(cell: &Arc<RwLock<AcpHostConfig>>) -> Arc<AcpHostConfig> {
 /// BL-113 Phase 4 — sync handler for `register_server`. Same
 /// authorisation model as the LSP / DAP / MCP handlers (declarative
 /// pipeline; no verb-level capability gate).
+///
+/// #190 — strict-parse via typed `AcpRegisterServerArgs`. The prior
+/// hand-rolled `parse_register_server_spec` + `parse_string_field`
+/// helpers silently accepted unknown fields and let typos like
+/// `{ commandd: "..." }` through.
 fn handle_register_server(
     config: &Arc<RwLock<AcpHostConfig>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let spec = parse_register_server_spec(args)?;
-    let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
-    let status = match cfg.register_contributed(spec, plugin_id) {
-        Ok(()) => ("ok", true),
-        Err(MergeSkipReason::AlreadyRegistered) => ("already_registered", false),
-        Err(MergeSkipReason::InvalidName) => ("invalid_name", false),
-        Err(MergeSkipReason::InvalidCommand) => ("invalid_command", false),
+    let typed: AcpRegisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
+        PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("register_server: invalid args: {e}"),
+        }
+    })?;
+    // Only reject *empty* strings at the parse boundary —
+    // whitespace-only values flow through to `register_contributed`
+    // and surface as a `MergeSkipReason::Invalid{Name,Command}`
+    // "skip" status, matching the prior hand-rolled behaviour the
+    // tests depend on.
+    if typed.name.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `name`".to_string(),
+        });
+    }
+    if typed.command.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `command`".to_string(),
+        });
+    }
+    if typed.plugin_id.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "register_server: missing or empty required field `plugin_id`".to_string(),
+        });
+    }
+    let spec = AcpAdapterSpec {
+        name: typed.name,
+        command: typed.command,
+        args: typed.args,
+        capabilities: typed.capabilities,
+        disabled: typed.disabled,
+        env: typed.env,
+        metadata: typed.metadata,
     };
-    Ok(json!({ "ok": status.1, "status": status.0 }))
+    let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
+    let reply = match cfg.register_contributed(spec, typed.plugin_id) {
+        Ok(()) => AcpRegisterServerReply {
+            ok: true,
+            status: "ok".to_string(),
+        },
+        Err(MergeSkipReason::AlreadyRegistered) => AcpRegisterServerReply {
+            ok: false,
+            status: "already_registered".to_string(),
+        },
+        Err(MergeSkipReason::InvalidName) => AcpRegisterServerReply {
+            ok: false,
+            status: "invalid_name".to_string(),
+        },
+        Err(MergeSkipReason::InvalidCommand) => AcpRegisterServerReply {
+            ok: false,
+            status: "invalid_command".to_string(),
+        },
+    };
+    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("register_server: serialize reply: {e}"),
+    })
 }
 
 fn handle_unregister_server(
     config: &Arc<RwLock<AcpHostConfig>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let name = parse_string_field(args, "name")?;
-    let plugin_id = parse_string_field(args, "plugin_id")?;
-    let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
-    match cfg.unregister_contributed(&name, &plugin_id) {
-        Ok(_removed) => Ok(json!({ "ok": true, "status": "ok" })),
-        Err(UnregisterError::NotFound) => Ok(json!({ "ok": false, "status": "not_found" })),
-        Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => Ok(json!({
-            "ok": false,
-            "status": "not_owned_by_plugin",
-            "actual_owner": actual_owner,
-        })),
-    }
-}
-
-fn parse_string_field(args: &Value, key: &str) -> Result<String, PluginError> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| PluginError::ExecutionFailed {
+    // #190 — strict-parse via typed `AcpUnregisterServerArgs`.
+    let typed: AcpUnregisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
+        PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("missing or empty required field `{key}`"),
-        })
-}
-
-fn parse_register_server_spec(args: &Value) -> Result<AcpAdapterSpec, PluginError> {
-    let name = parse_string_field(args, "name")?;
-    let command = parse_string_field(args, "command")?;
-    let parse_str_array = |key: &str| {
-        args.get(key)
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+            reason: format!("unregister_server: invalid args: {e}"),
+        }
+    })?;
+    if typed.name.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "unregister_server: missing or empty required field `name`".to_string(),
+        });
+    }
+    if typed.plugin_id.is_empty() {
+        return Err(PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "unregister_server: missing or empty required field `plugin_id`".to_string(),
+        });
+    }
+    let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
+    let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
+        Ok(_removed) => AcpUnregisterServerReply {
+            ok: true,
+            status: "ok".to_string(),
+            actual_owner: None,
+        },
+        Err(UnregisterError::NotFound) => AcpUnregisterServerReply {
+            ok: false,
+            status: "not_found".to_string(),
+            actual_owner: None,
+        },
+        Err(UnregisterError::NotOwnedByPlugin { actual_owner }) => AcpUnregisterServerReply {
+            ok: false,
+            status: "not_owned_by_plugin".to_string(),
+            actual_owner: Some(actual_owner),
+        },
     };
-    let disabled = args
-        .get("disabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let env = args
-        .get("env")
-        .and_then(Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
-                .collect()
-        })
-        .unwrap_or_default();
-    let metadata = args
-        .get("metadata")
-        .cloned()
-        .and_then(|v| if v.is_null() { None } else { Some(v) });
-    Ok(AcpAdapterSpec {
-        name,
-        command,
-        args: parse_str_array("args"),
-        capabilities: parse_str_array("capabilities"),
-        disabled,
-        env,
-        metadata,
+    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("unregister_server: serialize reply: {e}"),
     })
 }
 
@@ -269,27 +305,21 @@ impl CorePlugin for AcpCorePlugin {
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_AGENTS => {
+                // #190 — typed `Vec<AcpAgentEntry>` reply via shared
+                // `agent_entry` projector. The sync handler can't
+                // await `pool.connected_agents()`, so `connected`
+                // is always `false`; an async list variant can land
+                // when a real use case needs the merged view.
                 let cfg = self.config.read().expect("AcpHostConfig RwLock poisoned");
-                // `pool.connected_agents()` is async; the sync handler
-                // can't await it. We surface the registry shape only;
-                // a future "connected" column rides on an async list
-                // variant if a real use case appears.
-                let arr: Vec<Value> = cfg
+                let entries: Vec<AcpAgentEntry> = cfg
                     .adapters
                     .values()
-                    .map(|spec| {
-                        json!({
-                            "name": spec.name,
-                            "command": spec.command,
-                            "args": spec.args,
-                            "capabilities": spec.capabilities,
-                            "disabled": spec.disabled,
-                            "connected": false,
-                            "metadata": spec.metadata,
-                        })
-                    })
+                    .map(|spec| agent_entry(spec, false))
                     .collect();
-                Ok(Value::Array(arr))
+                serde_json::to_value(&entries).map_err(|e| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: format!("list_agents: serialize reply: {e}"),
+                })
             }
             HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
             HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
@@ -312,8 +342,14 @@ impl CorePlugin for AcpCorePlugin {
 
         match handler_id {
             HANDLER_INITIALIZE => {
-                let agent = str_arg(args, "agent")?;
+                // #190 — strict-parse via typed `AcpAgentArgs`.
+                let parsed: Result<AcpAgentArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let AcpAgentArgs { agent } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("initialize: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let result = pool
                         .call_with_reconnect(&agent, &cfg, move |client| {
@@ -331,10 +367,17 @@ impl CorePlugin for AcpCorePlugin {
                 }))
             }
             HANDLER_PROPOSE => {
-                let agent = str_arg(args, "agent")?;
-                let action = str_arg(args, "action")?;
-                let params = args.get("params").cloned().unwrap_or(Value::Null);
+                // #190 — strict-parse via typed `AcpProposeArgs`.
+                let parsed: Result<AcpProposeArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let AcpProposeArgs {
+                        agent,
+                        action,
+                        params,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("propose: invalid args: {e}"),
+                    })?;
                     let cfg = config_or_err(config.as_ref())?;
                     proxy_request(&pool, &cfg, &agent, bus, &action, params)
                         .await
@@ -342,18 +385,22 @@ impl CorePlugin for AcpCorePlugin {
                 }))
             }
             HANDLER_ACCEPT | HANDLER_REJECT => {
-                let agent = str_arg(args, "agent")?;
-                let proposal_id = str_arg(args, "proposal_id")?;
-                let reason = args
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
+                // #190 — strict-parse via typed `AcpDecisionArgs`.
+                let parsed: Result<AcpDecisionArgs, _> = serde_json::from_value(args.clone());
                 let method = if handler_id == HANDLER_ACCEPT {
                     "accept"
                 } else {
                     "reject"
                 };
                 Some(Box::pin(async move {
+                    let AcpDecisionArgs {
+                        agent,
+                        proposal_id,
+                        reason,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("{method}: invalid args: {e}"),
+                    })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let mut payload = json!({ "proposalId": proposal_id });
                     if let Some(r) = reason {
@@ -365,8 +412,14 @@ impl CorePlugin for AcpCorePlugin {
                 }))
             }
             HANDLER_DISCONNECT => {
-                let agent = str_arg(args, "agent")?;
+                // #190 — strict-parse via typed `AcpAgentArgs`.
+                let parsed: Result<AcpAgentArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let AcpAgentArgs { agent } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("disconnect: invalid args: {e}"),
+                        })?;
                     let dropped = pool.disconnect(&agent).await;
                     Ok(json!({ "agent": agent, "dropped": dropped }))
                 }))
@@ -424,10 +477,18 @@ async fn republish_pending(client: &crate::client::AcpClient, bus: Option<&Arc<E
     }
 }
 
-fn str_arg(args: &Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
+/// Project a stored [`AcpAdapterSpec`] + live `connected` flag into
+/// the typed `list_agents` row.
+fn agent_entry(spec: &AcpAdapterSpec, connected: bool) -> AcpAgentEntry {
+    AcpAgentEntry {
+        name: spec.name.clone(),
+        command: spec.command.clone(),
+        args: spec.args.clone(),
+        capabilities: spec.capabilities.clone(),
+        disabled: spec.disabled,
+        connected,
+        metadata: spec.metadata.clone(),
+    }
 }
 
 fn config_or_err(config: Option<&Arc<AcpHostConfig>>) -> Result<Arc<AcpHostConfig>, PluginError> {

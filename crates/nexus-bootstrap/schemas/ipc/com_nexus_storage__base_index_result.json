@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseIndexResult",
+  "description": "Reply for `com.nexus.storage::base_index`.",
+  "type": "object",
+  "properties": {
+    "base_id": {
+      "description": "Primary key the storage engine assigned to the indexed base.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "base_id"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageWriteFrontmatterArgs",
+  "description": "Args for `com.nexus.storage::write_frontmatter`. Mirrors the\nhand-rolled shape the dispatch previously parsed by hand.\n`value: None` deletes the key (no-op when absent); a present\n`Some(_)` writes the literal string. Non-scalar `value`s are\nrejected at the typed-parse boundary — the prior implementation\nrejected them inside the handler with a custom error message.",
+  "type": "object",
+  "properties": {
+    "key": {
+      "description": "Frontmatter key to write / delete.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Forge-relative path to the markdown file. Path confinement is\nenforced at the engine boundary.",
+      "type": "string"
+    },
+    "value": {
+      "description": "New value for the key. `None` deletes the key (no-op if absent).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "key"
+  ]
+}

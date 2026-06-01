@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageFileExistsResult",
+  "description": "Reply for `com.nexus.storage::file_exists`.",
+  "type": "object",
+  "properties": {
+    "exists": {
+      "description": "`true` iff the file exists at the given forge-relative path.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "exists"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageRenameEntryArgs",
+  "description": "Args for `com.nexus.storage::rename_entry`.",
+  "type": "object",
+  "properties": {
+    "from": {
+      "description": "Forge-relative path of the source.",
+      "type": "string"
+    },
+    "to": {
+      "description": "Forge-relative path of the destination.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "from",
+    "to"
+  ]
+}

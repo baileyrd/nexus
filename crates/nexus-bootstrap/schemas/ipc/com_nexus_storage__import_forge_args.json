@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageImportForgeArgs",
+  "description": "Args for `com.nexus.storage::import_forge`.",
+  "type": "object",
+  "properties": {
+    "dry_run": {
+      "description": "When `true`, only computes + returns the plan without copying\nanything. Defaults to `false`.",
+      "type": "boolean",
+      "default": false
+    },
+    "on_conflict": {
+      "description": "How to resolve content-hash collisions. Defaults to\n`Skip` per [`StorageImportConflictStrategy::default`].",
+      "$ref": "#/$defs/StorageImportConflictStrategy",
+      "default": "skip"
+    },
+    "source": {
+      "description": "Absolute (or relative-to-cwd) path of the source forge.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source"
+  ],
+  "$defs": {
+    "StorageImportConflictStrategy": {
+      "description": "Conflict-resolution strategy for `com.nexus.storage::import_forge`.\nMirror of [`crate::import::ConflictStrategy`]; the lowercase wire\nshape (`\"skip\"`, `\"overwrite\"`, `\"rename\"`) is shared.",
+      "oneOf": [
+        {
+          "description": "Leave the destination unchanged on conflict (default).",
+          "type": "string",
+          "const": "skip"
+        },
+        {
+          "description": "Replace the destination with the source bytes.",
+          "type": "string",
+          "const": "overwrite"
+        },
+        {
+          "description": "Write the source to `<stem>.imported.<n>.<ext>`.",
+          "type": "string",
+          "const": "rename"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageRelpathArgs",
+  "description": "Shared `{ relpath: String }` envelope for the tree handlers\n(`create_file`, `create_dir`, `delete_entry`). Distinct from\n[`StoragePathArgs`] because the tree subsystem uses `relpath` as\nthe wire field name.",
+  "type": "object",
+  "properties": {
+    "relpath": {
+      "description": "Forge-relative path. Empty string is rejected by the engine.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath"
+  ]
+}

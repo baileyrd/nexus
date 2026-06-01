@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageCanvasPatchArgs",
+  "description": "Args for `com.nexus.storage::canvas_patch`.",
+  "type": "object",
+  "properties": {
+    "ops": {
+      "description": "`Vec<crate::CanvasPatchOp>` serialised as JSON.",
+      "type": "array",
+      "items": true
+    },
+    "path": {
+      "description": "Forge-relative path of the `.canvas` file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "ops"
+  ]
+}

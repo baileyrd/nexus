@@ -4,12 +4,14 @@
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{StorageCanvasPatchArgs, StorageCanvasWriteArgs, StoragePathArgs};
 use crate::StorageEngine;
 
-use super::shared::{exec_err, path_arg, to_value};
+use super::shared::{exec_err, parse_args, to_value};
 
 pub(crate) fn read(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "canvas_read")?;
+    // #190 / R7 — strict-parse via shared `StoragePathArgs`.
+    let StoragePathArgs { path } = parse_args(args, "canvas_read")?;
     let canvas_file = engine
         .read_canvas(&path)
         .map_err(|e| exec_err(format!("canvas_read: {e}")))?;
@@ -17,14 +19,12 @@ pub(crate) fn read(engine: &StorageEngine, args: &Value) -> Result<Value, Plugin
 }
 
 pub(crate) fn write(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "canvas_write")?;
-    let canvas_file: crate::CanvasFile = args
-        .get("canvas")
-        .ok_or_else(|| exec_err("canvas_write: missing 'canvas'".to_string()))
-        .and_then(|v| {
-            serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("canvas_write: canvas decode: {e}")))
-        })?;
+    // #190 / R7 — strict-parse outer envelope via
+    // `StorageCanvasWriteArgs`. Inner `canvas` decodes via
+    // `from_value::<CanvasFile>`.
+    let StorageCanvasWriteArgs { path, canvas } = parse_args(args, "canvas_write")?;
+    let canvas_file: crate::CanvasFile = serde_json::from_value(canvas)
+        .map_err(|e| exec_err(format!("canvas_write: canvas decode: {e}")))?;
     let meta = engine
         .write_canvas(&path, &canvas_file)
         .map_err(|e| exec_err(format!("canvas_write: {e}")))?;
@@ -32,14 +32,11 @@ pub(crate) fn write(engine: &StorageEngine, args: &Value) -> Result<Value, Plugi
 }
 
 pub(crate) fn patch(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "canvas_patch")?;
-    let ops: Vec<crate::CanvasPatchOp> = args
-        .get("ops")
-        .ok_or_else(|| exec_err("canvas_patch: missing 'ops'".to_string()))
-        .and_then(|v| {
-            serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("canvas_patch: ops decode: {e}")))
-        })?;
+    // #190 / R7 — strict-parse outer envelope; inner `ops` decode
+    // via `from_value::<Vec<CanvasPatchOp>>`.
+    let StorageCanvasPatchArgs { path, ops } = parse_args(args, "canvas_patch")?;
+    let ops: Vec<crate::CanvasPatchOp> = serde_json::from_value(Value::Array(ops))
+        .map_err(|e| exec_err(format!("canvas_patch: ops decode: {e}")))?;
     let meta = engine
         .patch_canvas(&path, &ops)
         .map_err(|e| exec_err(format!("canvas_patch: {e}")))?;
@@ -47,7 +44,7 @@ pub(crate) fn patch(engine: &StorageEngine, args: &Value) -> Result<Value, Plugi
 }
 
 pub(crate) fn nodes(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "canvas_nodes")?;
+    let StoragePathArgs { path } = parse_args(args, "canvas_nodes")?;
     let nodes = engine
         .canvas_nodes_by_path(&path)
         .map_err(|e| exec_err(format!("canvas_nodes: {e}")))?;
@@ -55,7 +52,7 @@ pub(crate) fn nodes(engine: &StorageEngine, args: &Value) -> Result<Value, Plugi
 }
 
 pub(crate) fn edges(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "canvas_edges")?;
+    let StoragePathArgs { path } = parse_args(args, "canvas_edges")?;
     let edges = engine
         .canvas_edges_by_path(&path)
         .map_err(|e| exec_err(format!("canvas_edges: {e}")))?;

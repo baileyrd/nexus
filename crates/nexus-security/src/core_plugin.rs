@@ -195,58 +195,60 @@ impl CorePlugin for SecurityCorePlugin {
     ) -> Result<serde_json::Value, PluginError> {
         match handler_id {
             HANDLER_GET_SECRET => {
-                let key = vault_key(args)?;
-                match self.vault.retrieve(&key) {
-                    Ok(value) => Ok(json!({ "value": value })),
-                    Err(SecurityError::CredentialNotFound(_))
-                    | Err(SecurityError::KeyringDisabled) => Ok(json!({ "value": null })),
-                    Err(e) => Err(map_err(e)),
-                }
+                // #190 spirit — strict-parse via typed `GetSecretArgs`.
+                let typed: crate::ipc::GetSecretArgs = parse_args(args, "get_secret")?;
+                let key = format!("{}:{}", typed.plugin_id, typed.name);
+                let value = match self.vault.retrieve(&key) {
+                    Ok(v) => Some(v),
+                    Err(
+                        SecurityError::CredentialNotFound(_) | SecurityError::KeyringDisabled,
+                    ) => None,
+                    Err(e) => return Err(map_err(e)),
+                };
+                to_typed(&crate::ipc::GetSecretResult { value }, "get_secret")
             }
             HANDLER_SET_SECRET => {
-                let key = vault_key(args)?;
-                let value = string_arg(args, "value")?;
-                self.vault.store(&key, &value).map_err(map_err)?;
+                let typed: crate::ipc::SetSecretArgs = parse_args(args, "set_secret")?;
+                let key = format!("{}:{}", typed.plugin_id, typed.name);
+                self.vault.store(&key, &typed.value).map_err(map_err)?;
                 self.known_names.insert(key);
-                Ok(json!({ "ok": true }))
+                to_typed(&crate::ipc::SetSecretResult { ok: true }, "set_secret")
             }
             HANDLER_DELETE_SECRET => {
-                let key = vault_key(args)?;
-                match self.vault.delete(&key) {
+                let typed: crate::ipc::DeleteSecretArgs = parse_args(args, "delete_secret")?;
+                let key = format!("{}:{}", typed.plugin_id, typed.name);
+                let ok = match self.vault.delete(&key) {
                     Ok(()) | Err(SecurityError::CredentialNotFound(_)) => {
                         self.known_names.remove(&key);
-                        Ok(json!({ "ok": true }))
+                        true
                     }
-                    Err(SecurityError::KeyringDisabled) => Ok(json!({ "ok": false })),
-                    Err(e) => Err(map_err(e)),
-                }
+                    Err(SecurityError::KeyringDisabled) => false,
+                    Err(e) => return Err(map_err(e)),
+                };
+                to_typed(&crate::ipc::DeleteSecretResult { ok }, "delete_secret")
             }
             HANDLER_LIST_SECRET_NAMES => {
-                let plugin_id = string_arg(args, "plugin_id")?;
-                let prefix = format!("{plugin_id}:");
+                let typed: crate::ipc::ListSecretNamesArgs =
+                    parse_args(args, "list_secret_names")?;
+                let prefix = format!("{}:", typed.plugin_id);
                 let names: Vec<String> = self
                     .known_names
                     .iter()
                     .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
                     .collect();
-                Ok(json!({ "names": names }))
+                to_typed(
+                    &crate::ipc::ListSecretNamesResult { names },
+                    "list_secret_names",
+                )
             }
             HANDLER_QUERY_AUDIT_LOG => {
-                // Each filter is optional; missing → None → no constraint.
+                // #190 spirit — strict-parse via typed `QueryAuditLogArgs`.
+                let typed: crate::ipc::QueryAuditLogArgs = parse_args(args, "query_audit_log")?;
                 let filter = nexus_kernel::audit_store::AuditQuery {
-                    event_type: args
-                        .get("event_type")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    plugin_id: args
-                        .get("plugin_id")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    since_ts: args.get("since_ts").and_then(serde_json::Value::as_i64),
-                    limit: args
-                        .get("limit")
-                        .and_then(serde_json::Value::as_u64)
-                        .and_then(|n| u32::try_from(n).ok()),
+                    event_type: typed.event_type,
+                    plugin_id: typed.plugin_id,
+                    since_ts: typed.since_ts,
+                    limit: typed.limit,
                 };
                 let entries = nexus_kernel::audit_store::query(&filter);
                 Ok(serde_json::to_value(&entries).unwrap_or(json!([])))
@@ -257,15 +259,12 @@ impl CorePlugin for SecurityCorePlugin {
                 Ok(serde_json::to_value(&snap).unwrap_or(json!(null)))
             }
             HANDLER_CLEAR_AUDIT_LOG => {
-                let before_ts = args
-                    .get("before_ts")
-                    .and_then(serde_json::Value::as_i64)
-                    .ok_or_else(|| PluginError::ExecutionFailed {
-                        plugin_id: PLUGIN_ID.to_string(),
-                        reason: "missing 'before_ts' argument".to_string(),
-                    })?;
-                let removed = nexus_kernel::audit_store::clear(before_ts);
-                Ok(json!({ "removed": removed }))
+                let typed: crate::ipc::ClearAuditLogArgs = parse_args(args, "clear_audit_log")?;
+                let removed = nexus_kernel::audit_store::clear(typed.before_ts);
+                to_typed(
+                    &crate::ipc::ClearAuditLogResult { removed },
+                    "clear_audit_log",
+                )
             }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
@@ -275,22 +274,29 @@ impl CorePlugin for SecurityCorePlugin {
     }
 }
 
-/// Build the namespaced vault key `"{plugin_id}:{name}"` from IPC args.
-fn vault_key(args: &serde_json::Value) -> Result<String, PluginError> {
-    let plugin_id = string_arg(args, "plugin_id")?;
-    let name = string_arg(args, "name")?;
-    Ok(format!("{plugin_id}:{name}"))
+/// Strict-parse `args` into the typed envelope `T` (must be
+/// `deny_unknown_fields`). Surfaces parse failures as
+/// `PluginError::ExecutionFailed { reason: "<verb>: invalid args: …" }`.
+fn parse_args<T>(args: &serde_json::Value, verb: &str) -> Result<T, PluginError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("{verb}: invalid args: {e}"),
+    })
 }
 
-/// Extract a required string argument by key.
-fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("missing '{key}' argument"),
-        })
+/// Serialise a typed reply to `serde_json::Value`, mapping
+/// serialisation errors to `PluginError::ExecutionFailed`.
+fn to_typed<T: serde::Serialize>(
+    reply: &T,
+    verb: &str,
+) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(reply).map_err(|e| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: format!("{verb}: serialize reply: {e}"),
+    })
 }
 
 /// Map a `SecurityError` to a `PluginError` for IPC return.

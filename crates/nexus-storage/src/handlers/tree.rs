@@ -4,16 +4,15 @@
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{StorageListDirArgs, StorageOk, StorageRelpathArgs, StorageRenameEntryArgs};
 use crate::StorageEngine;
 
-use super::shared::{exec_err, relpath_arg, to_value};
+use super::shared::{exec_err, parse_args, to_value};
 
 pub(crate) fn list_dir(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let relpath = args
-        .get("relpath")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    // #190 / R7 — strict-parse via existing `StorageListDirArgs`
+    // (already typed; `relpath` defaults to "" via `#[serde(default)]`).
+    let StorageListDirArgs { relpath } = parse_args(args, "list_dir")?;
     let entries = engine
         .list_dir(&relpath)
         .map_err(|e| exec_err(format!("list_dir: {e}")))?;
@@ -21,40 +20,35 @@ pub(crate) fn list_dir(engine: &StorageEngine, args: &Value) -> Result<Value, Pl
 }
 
 pub(crate) fn create_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "create_file")?;
+    // #190 / R7 — strict-parse via shared `StorageRelpathArgs`.
+    let StorageRelpathArgs { relpath } = parse_args(args, "create_file")?;
     engine
         .create_file(&relpath)
         .map_err(|e| exec_err(format!("create_file: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "create_file")
 }
 
 pub(crate) fn create_dir(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "create_dir")?;
+    let StorageRelpathArgs { relpath } = parse_args(args, "create_dir")?;
     engine
         .create_dir(&relpath)
         .map_err(|e| exec_err(format!("create_dir: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "create_dir")
 }
 
 pub(crate) fn rename_entry(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let from = args
-        .get("from")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("rename_entry: missing 'from' string".to_string()))?;
-    let to = args
-        .get("to")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("rename_entry: missing 'to' string".to_string()))?;
+    // #190 / R7 — strict-parse via `StorageRenameEntryArgs`.
+    let StorageRenameEntryArgs { from, to } = parse_args(args, "rename_entry")?;
     engine
-        .rename_entry(from, to)
+        .rename_entry(&from, &to)
         .map_err(|e| exec_err(format!("rename_entry: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "rename_entry")
 }
 
 pub(crate) fn delete_entry(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "delete_entry")?;
+    let StorageRelpathArgs { relpath } = parse_args(args, "delete_entry")?;
     engine
         .delete_entry(&relpath)
         .map_err(|e| exec_err(format!("delete_entry: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "delete_entry")
 }
