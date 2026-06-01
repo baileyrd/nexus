@@ -58,8 +58,8 @@ pub const COLLAB_TOPIC_PREFIX: &str = "com.nexus.collab.";
 
 /// Cursor / focus location carried inside a [`PresenceEvent`].
 ///
-/// Phase 1.3 shipped `relpath` + `block_id`. Phase 2.2 added `offset`
-/// + `selection_end` so the CM6 caret position rides on the wire.
+/// Phase 1.3 shipped `relpath` + `block_id`. Phase 2.2 added `offset` +
+/// `selection_end` so the CM6 caret position rides on the wire.
 /// All three optional fields are `#[serde(default,
 /// skip_serializing_if = "Option::is_none")]` so the wire stays
 /// compatible in both directions — Phase 1.3 peers see Phase 2.2

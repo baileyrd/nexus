@@ -123,12 +123,11 @@ fn handle_register_server(
     config: &Arc<RwLock<AcpHostConfig>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let typed: AcpRegisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: AcpRegisterServerArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("register_server: invalid args: {e}"),
-        }
-    })?;
+        })?;
     // Only reject *empty* strings at the parse boundary —
     // whitespace-only values flow through to `register_contributed`
     // and surface as a `MergeSkipReason::Invalid{Name,Command}`
@@ -191,12 +190,11 @@ fn handle_unregister_server(
     args: &Value,
 ) -> Result<Value, PluginError> {
     // #190 — strict-parse via typed `AcpUnregisterServerArgs`.
-    let typed: AcpUnregisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: AcpUnregisterServerArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("unregister_server: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),

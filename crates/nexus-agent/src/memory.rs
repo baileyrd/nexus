@@ -369,7 +369,7 @@ pub fn format_memory_preamble(
     // Pre-sort newest-first so the take() below picks the most recent
     // entries from each pool.
     let mut sorted: Vec<&MemoryEntry> = entries.iter().collect();
-    sorted.sort_by(|a, b| b.timestamp_ms().cmp(&a.timestamp_ms()));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
 
     let mut decisions: Vec<&MemoryEntry> = Vec::new();
     let mut recent: Vec<&MemoryEntry> = Vec::new();

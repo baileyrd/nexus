@@ -65,12 +65,13 @@ pub const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 /// right syntax for that shell's "previous command's exit code"
 /// expansion plus a print primitive that doesn't mangle the
 /// number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShellFamily {
     /// `bash`, `zsh`, `dash`, `sh`, `ksh`, `fish` (with caveats —
     /// fish doesn't support `$?` so users typically run pre-commands
     /// inside a POSIX subshell). Sentinel form:
     /// `printf '<sentinel> %d\n' $?`
+    #[default]
     Posix,
     /// Windows `cmd.exe`. Sentinel form:
     /// `echo <sentinel> %ERRORLEVEL%`. The `%ERRORLEVEL%` token
@@ -100,10 +101,7 @@ impl ShellFamily {
     /// and miss the basename.
     #[must_use]
     pub fn detect_from_path(shell_path: &str) -> Self {
-        let basename = shell_path
-            .rsplit(|c: char| c == '/' || c == '\\')
-            .next()
-            .unwrap_or(shell_path);
+        let basename = shell_path.rsplit(['/', '\\']).next().unwrap_or(shell_path);
         let basename = basename
             .strip_suffix(".exe")
             .or_else(|| basename.strip_suffix(".EXE"))
@@ -146,12 +144,6 @@ impl ShellFamily {
                 format!("{command}\r\nWrite-Host \"{sentinel} $LASTEXITCODE\"\r\n")
             }
         }
-    }
-}
-
-impl Default for ShellFamily {
-    fn default() -> Self {
-        Self::Posix
     }
 }
 

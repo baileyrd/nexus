@@ -59,7 +59,10 @@ pub(crate) fn count(engine: &StorageEngine) -> Result<Value, PluginError> {
     // usize → u64 only ever truncates on hypothetical 128-bit hosts;
     // saturate rather than panic.
     let count = u64::try_from(count).unwrap_or(u64::MAX);
-    to_value(&StorageVectorstoreCountResult { count }, "vectorstore_count")
+    to_value(
+        &StorageVectorstoreCountResult { count },
+        "vectorstore_count",
+    )
 }
 
 /// Project a typed `StorageChunkEmbedding` into the internal

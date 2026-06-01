@@ -273,12 +273,8 @@ mod tests {
         let driver = CannedDriver::new(Proposal::default());
         let agent = LlmAgent::new(driver);
         let err = agent.plan("anything").await.unwrap_err();
-        match err {
-            AgentError::PlanningFailed(msg) => {
-                assert!(msg.contains("no tool calls"));
-            }
-            _ => panic!("unexpected error"),
-        }
+        let AgentError::PlanningFailed(msg) = err;
+        assert!(msg.contains("no tool calls"));
     }
 
     #[tokio::test]

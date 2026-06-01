@@ -1587,4 +1587,3 @@ pub(crate) enum TermCommand {
     /// appear, Ctrl-C to exit.
     Shell,
 }
-

@@ -1,0 +1,99 @@
+# R1 (#184) — the PR-gated test/lint/format enforcement that was absent.
+#
+# Before this workflow, `.github/workflows/` held only the IPC drift-check and
+# the Windows release build; none of the ~4,200 Rust tests, clippy, rustfmt, or
+# the pnpm typecheck/lint/test ran on PRs, so merges to `main` were gated on
+# nothing. That is the root cause the expert review (R1) called out — it let
+# the IPC-binding drift (R2) slip through.
+#
+# Scope split:
+#   * IPC-schema drift           — ipc-drift-check.yml (already runs every PR
+#                                  after the #194 follow-up broadened its trigger).
+#   * everything else (here)     — fmt, clippy (warnings-as-errors), the Rust
+#                                  test suite, and the shell + extension-api
+#                                  TypeScript checks.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  # Cancel a PR's in-flight run when a new push supersedes it (`head_ref` is set
+  # only for pull_request events). Push events fall back to the unique run_id, so
+  # `main` builds are never cancelled by a later commit.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  rust-fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      # No compile, no cache — formatting is a pure source-text check, so this
+      # job gives near-instant feedback ahead of the slower clippy/test job.
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  rust:
+    name: clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+      # git2 (vendored-libgit2) and rusqlite (bundled) build their C sources
+      # in-tree, so the only system requirement is the C toolchain ubuntu-latest
+      # already ships — no apt step needed.
+      #
+      # `-D warnings` makes rustc + default clippy lints (correctness, suspicious,
+      # complexity, perf, style) hard errors. `--force-warn clippy::pedantic`
+      # then pins the pedantic group back to a *warning*: every crate opts into
+      # `#![warn(clippy::pedantic)]` deliberately (advisory, not blocking), and a
+      # ~300-item pedantic backlog (missing_panics_doc, too_many_lines, casts, …)
+      # is tracked separately rather than gating every PR on it. Drop the
+      # force-warn once that backlog is drained to make pedantic blocking too.
+      - name: cargo clippy (deny real warnings; pedantic stays advisory)
+        run: cargo clippy --workspace --all-targets -- -D warnings --force-warn clippy::pedantic
+      - name: cargo test
+        run: cargo test --workspace
+
+  web:
+    name: pnpm typecheck + lint + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      # The shell consumes @nexus/extension-api's built output, so build and
+      # typecheck the package first, then lint/typecheck/test the shell itself.
+      - name: Build @nexus/extension-api
+        run: pnpm --filter @nexus/extension-api build
+      - name: Typecheck @nexus/extension-api
+        run: pnpm --filter @nexus/extension-api check
+      - name: Lint shell
+        run: pnpm --filter nexus-shell lint
+      - name: Typecheck shell
+        run: pnpm --filter nexus-shell typecheck
+      - name: Test shell
+        run: pnpm --filter nexus-shell test

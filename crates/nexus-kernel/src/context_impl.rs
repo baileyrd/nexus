@@ -1009,7 +1009,7 @@ mod tests {
 
         let mid = in_flight_sync_dispatches();
         assert!(
-            mid >= baseline + 1,
+            mid > baseline,
             "expected in-flight count to rise by at least 1; baseline={baseline}, mid={mid}",
         );
 
@@ -1021,7 +1021,7 @@ mod tests {
 
         let post = in_flight_sync_dispatches();
         assert!(
-            post <= mid - 1,
+            post < mid,
             "expected at least one decrement after task completion; \
              mid={mid}, post={post}",
         );

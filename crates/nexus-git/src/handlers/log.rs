@@ -18,9 +18,7 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{
-    GitDiffHunk, GitDiffLine, GitFileDiff, GitFileLogArgs, GitLogArgs, GitLogEntry,
-};
+use crate::ipc::{GitDiffHunk, GitDiffLine, GitFileDiff, GitFileLogArgs, GitLogArgs, GitLogEntry};
 use crate::GitWorkerHandle;
 
 use super::shared::{map_err, parse_args, path_arg, to_value};

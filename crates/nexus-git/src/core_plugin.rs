@@ -668,13 +668,8 @@ fn run_auto_committer(
 
         // Drain file-modified events — each one refreshes the idle timer.
         if let Some(ref mut s) = sub {
-            loop {
-                match s.try_recv() {
-                    Ok(Some(_)) => {
-                        last_modified = Some(Instant::now());
-                    }
-                    Ok(None) | Err(_) => break,
-                }
+            while let Ok(Some(_)) = s.try_recv() {
+                last_modified = Some(Instant::now());
             }
         }
 

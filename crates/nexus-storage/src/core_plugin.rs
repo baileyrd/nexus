@@ -809,7 +809,7 @@ pub fn apply_frontmatter_edit(content: &str, key: &str, value: Option<&str>) -> 
     let mut found = false;
     let mut rebuilt = String::with_capacity(yaml_src.len() + 32);
     for line in yaml_src.split_inclusive('\n') {
-        let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+        let trimmed = line.trim_start_matches([' ', '\t']);
         if !found && trimmed.starts_with(&prefix) {
             found = true;
             if let Some(v) = value {
@@ -1457,7 +1457,7 @@ mod tests {
             .expect("results array");
         // alice's description mentions "nexus" so it matches alongside
         // the canonical "nexus" project entity — but nexus ranks higher.
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
         assert_eq!(results[0].get("id").and_then(|v| v.as_str()), Some("nexus"));
 
         let typed = plugin

@@ -121,7 +121,7 @@ async fn ipc_call_round_trips_to_storage_list_files() {
             json!({
                 "plugin_id": "com.nexus.storage",
                 "command": "list_dir",
-                "args": { "path": "" },
+                "args": { "relpath": "" },
             }),
         ),
     )
@@ -238,7 +238,7 @@ async fn event_subscribe_streams_publishes_and_unsubscribe_stops_them() {
             json!({
                 "plugin_id": "com.nexus.storage",
                 "command": "list_dir",
-                "args": { "path": "" },
+                "args": { "relpath": "" },
             }),
         ),
     )

@@ -63,7 +63,7 @@ fn write_signed_manifest(dir: &std::path::Path, id: &str, key_id: &str, sk: &Sig
         "{unsigned}\n[signature]\nalgorithm = \"ed25519\"\nsigner_key_id = \"{key_id}\"\nsignature = \"{sig_b64}\"\n"
     );
     fs::write(dir.join("manifest.toml"), final_text).expect("write manifest");
-    fs::write(dir.join("plugin.wasm"), &[0u8; 0]).expect("write wasm");
+    fs::write(dir.join("plugin.wasm"), [0u8; 0]).expect("write wasm");
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn loader_rejects_unsigned_when_require_signatures_is_on() {
         unsigned_community_manifest("com.example.unsigned"),
     )
     .unwrap();
-    fs::write(plugin_dir.join("plugin.wasm"), &[0u8; 0]).unwrap();
+    fs::write(plugin_dir.join("plugin.wasm"), [0u8; 0]).unwrap();
 
     let mut loader = PluginLoader::new(plugins_dir.path());
     loader.set_require_signatures(true);

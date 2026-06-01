@@ -97,8 +97,7 @@ pub(crate) fn write_frontmatter(
     // accepted unknown fields and reshaped malformed `value`s into a
     // custom error string; both paths now route through the standard
     // strictness gate.
-    let StorageWriteFrontmatterArgs { path, key, value } =
-        parse_args(args, "write_frontmatter")?;
+    let StorageWriteFrontmatterArgs { path, key, value } = parse_args(args, "write_frontmatter")?;
     let current = std::fs::read_to_string(forge_root.join(&path))
         .map_err(|e| exec_err(format!("write_frontmatter '{path}' key='{key}' read: {e}")))?;
     let next = crate::core_plugin::apply_frontmatter_edit(&current, &key, value.as_deref());

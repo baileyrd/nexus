@@ -58,7 +58,12 @@ async fn ipc_call_round_trips_through_the_client() {
     let (client, _forge, _server) = boot_pair().await;
 
     let v: Value = client
-        .ipc_call("com.nexus.storage", "list_dir", json!({ "path": "" }), None)
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "relpath": "" }),
+            None,
+        )
         .await
         .expect("ipc_call");
 
@@ -99,7 +104,7 @@ async fn ipc_call_with_per_call_timeout_overrides_default() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Some(Duration::from_millis(1)),
         )
         .await;
@@ -126,7 +131,12 @@ async fn subscribe_unsubscribe_round_trips() {
     // don't depend on a specific event — only that we either see one
     // (validating delivery wire shape) or don't (still OK).
     let _ = client
-        .ipc_call("com.nexus.storage", "list_dir", json!({ "path": "" }), None)
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "relpath": "" }),
+            None,
+        )
         .await
         .expect("ipc_call");
 
@@ -209,7 +219,12 @@ async fn shutdown_wakes_pending_calls_via_router_drop() {
     let (client, _forge, _server) = boot_pair().await;
     // Make one normal call to confirm the channel works.
     let _ = client
-        .ipc_call("com.nexus.storage", "list_dir", json!({ "path": "" }), None)
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            json!({ "relpath": "" }),
+            None,
+        )
         .await
         .expect("first call");
 
@@ -221,7 +236,7 @@ async fn shutdown_wakes_pending_calls_via_router_drop() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Some(Duration::from_secs(1)),
         )
         .await

@@ -26,6 +26,8 @@ impl ForgeTemplate {
     /// Parse a template name from a CLI flag value or IPC arg. Unknown
     /// names return `None` — callers turn that into a user-facing error
     /// in whichever style suits their surface.
+    // Inherent `from_str` returns `Option`, not the `Result`-based `std::str::FromStr`.
+    #[allow(clippy::should_implement_trait)]
     #[must_use]
     pub fn from_str(name: &str) -> Option<Self> {
         match name {

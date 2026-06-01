@@ -150,12 +150,11 @@ fn parse_register_server(
     // `transport` ("stdio") / `command` ("") / `args` / `env` /
     // `disabled` are carried by the serde struct itself; the field
     // order matches the old shape so callers don't need to change.
-    let typed: McpRegisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: McpRegisterServerArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("register_server: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -242,12 +241,11 @@ fn handle_unregister_server(
     // #190 / R7 — strict-parse via typed `McpUnregisterServerArgs`. The
     // typed struct's `deny_unknown_fields` catches typos that the old
     // `required_string` chain silently passed through.
-    let typed: McpUnregisterServerArgs = serde_json::from_value(args.clone()).map_err(|e| {
-        PluginError::ExecutionFailed {
+    let typed: McpUnregisterServerArgs =
+        serde_json::from_value(args.clone()).map_err(|e| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!("unregister_server: invalid args: {e}"),
-        }
-    })?;
+        })?;
     if typed.name.is_empty() {
         return Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -442,10 +440,12 @@ impl CorePlugin for McpHostPlugin {
                 // `{ namee: "foo" }` instead of silently meaning
                 // "missing 'name' arg") and emit the typed
                 // `McpUnregisterToolReply` reply.
-                let McpUnregisterToolArgs { name } = serde_json::from_value(args.clone())
-                    .map_err(|e| PluginError::ExecutionFailed {
-                        plugin_id: PLUGIN_ID.to_string(),
-                        reason: format!("unregister_tool: invalid args: {e}"),
+                let McpUnregisterToolArgs { name } =
+                    serde_json::from_value(args.clone()).map_err(|e| {
+                        PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("unregister_tool: invalid args: {e}"),
+                        }
                     })?;
                 let removed = crate::dynamic_tools::global().unregister(&name);
                 serde_json::to_value(&McpUnregisterToolReply { removed, name }).map_err(|e| {
@@ -530,12 +530,12 @@ impl CorePlugin for McpHostPlugin {
                             reason: format!("disconnect: invalid args: {e}"),
                         })?;
                     if pool.disconnect(&server).await {
-                        serde_json::to_value(&McpConnectReply { ok: true, server }).map_err(
-                            |e| PluginError::ExecutionFailed {
+                        serde_json::to_value(&McpConnectReply { ok: true, server }).map_err(|e| {
+                            PluginError::ExecutionFailed {
                                 plugin_id: PLUGIN_ID.to_string(),
                                 reason: format!("disconnect: serialize reply: {e}"),
-                            },
-                        )
+                            }
+                        })
                     } else {
                         serde_json::to_value(&McpDisconnectMissReply {
                             ok: false,
@@ -862,7 +862,9 @@ disabled = true
         plugin.on_init().unwrap();
         let fut = plugin
             .dispatch_async(HANDLER_LIST_TOOLS, &json!({}))
-            .expect("dispatch_async must return a future (not None) so the parse error reaches the caller");
+            .expect(
+            "dispatch_async must return a future (not None) so the parse error reaches the caller",
+        );
         let err = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()

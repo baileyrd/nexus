@@ -108,9 +108,9 @@ use crate::adhoc::SqliteAdHocStore;
 // reach across the split keep resolving. The `*Response` shapes are
 // only touched by the `#[cfg(test)]` block below, so they're gated to
 // avoid a non-test "unused import" warning.
-use crate::ipc::{OutputStreamPayload, ReplInfo};
 #[cfg(test)]
 use crate::ipc::{CreateSessionResponse, PumpResponse, SuggestResponse, WaitForPatternResponse};
+use crate::ipc::{OutputStreamPayload, ReplInfo};
 use crate::memory::{MemoryLimitAction, MemoryLimits, MemoryMonitor};
 use crate::persist::SqliteSessionStore;
 #[cfg(test)]
@@ -330,7 +330,6 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
 // lifecycle + dispatch. The wire shapes are re-exported from the crate
 // root (`lib.rs`), so external imports (`use nexus_terminal::{…}`) are
 // unchanged.
-
 
 // ── The plugin ───────────────────────────────────────────────────────────────
 

@@ -22,7 +22,6 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-
 /// Arguments for `create_session`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]

@@ -25,7 +25,7 @@ use nexus_fuzz::{
 
 const PARSER_ITERATIONS: usize = 10_000;
 const PATH_ITERATIONS: usize = 1_000;
-const SEED: u64 = 0xB1_03_F0_22_5E_ED_BEEF;
+const SEED: u64 = 0xB103_F022_5EED_BEEF;
 
 fn seed_rng() -> StdRng {
     // Fixed seed so a reproducer of any failure is one `cargo test

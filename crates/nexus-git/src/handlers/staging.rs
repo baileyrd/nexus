@@ -64,9 +64,7 @@ fn hunk_indices_usize(indices: Vec<u64>, command: &str) -> Result<Vec<usize>, Pl
         .into_iter()
         .map(|n| {
             usize::try_from(n).map_err(|_| {
-                super::shared::exec_err(format!(
-                    "{command}: hunk_indices entry {n} exceeds usize"
-                ))
+                super::shared::exec_err(format!("{command}: hunk_indices entry {n} exceeds usize"))
             })
         })
         .collect()

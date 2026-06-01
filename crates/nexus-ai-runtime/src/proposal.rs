@@ -516,10 +516,6 @@ mod tests {
         Uuid::new_v4()
     }
 
-    fn token_with(caps: impl IntoIterator<Item = nexus_plugin_api::Capability>) -> CapabilityToken {
-        CapabilityToken::new(session_id(), CapabilitySet::from_iter(caps))
-    }
-
     fn fs_write_action() -> ProposedAction {
         ProposedAction::FsWrite {
             path: "notes/test.md".into(),

@@ -285,7 +285,8 @@ fn emoji_for_callout(kind: &str) -> &'static str {
         "danger" => "🛑",
         "info" => "ℹ️",
         "quote" => "💬",
-        "note" | _ => "💡",
+        // "note" and any unrecognised callout fall back to the bulb.
+        _ => "💡",
     }
 }
 
@@ -390,9 +391,9 @@ fn parse_wikilink(s: &str, start: usize) -> Option<(&str, Option<&str>, usize)> 
 }
 
 fn utf8_char_len(b: u8) -> usize {
-    if b < 0x80 {
-        1
-    } else if b < 0xC0 {
+    if b < 0xC0 {
+        // ASCII (< 0x80) and UTF-8 continuation bytes (0x80..=0xBF) both
+        // count as one byte here.
         1
     } else if b < 0xE0 {
         2

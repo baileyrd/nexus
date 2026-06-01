@@ -192,10 +192,12 @@ impl AudioConfig {
             RawConfig::default()
         };
         let raw = raw.audio.unwrap_or_default();
-        let mut out = Self::default();
         // Anchor the default model dir to the forge root so local-audio
         // works regardless of cwd. TOML can still override (next block).
-        out.local_model_dir = forge_root.join(".forge").join(".audio").join("models");
+        let mut out = Self {
+            local_model_dir: forge_root.join(".forge").join(".audio").join("models"),
+            ..Self::default()
+        };
         if let Some(name) = raw.stt_backend {
             out.stt_backend = name.parse()?;
         }
