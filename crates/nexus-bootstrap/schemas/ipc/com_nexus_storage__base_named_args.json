@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseNamedArgs",
+  "description": "Args for `base_property_delete` + `base_view_delete`. Both verbs\ntake `{ path, name }` and return [`StorageOk`].",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Property name or view name (per the verb's contract).",
+      "type": "string"
+    },
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "name"
+  ]
+}

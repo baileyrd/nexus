@@ -399,6 +399,68 @@ pub struct StorageFileExistsResult {
     pub exists: bool,
 }
 
+// ── #190 / R7 — bases delete/restore/rename handlers ────────────────────────
+
+/// Args for the three `base_record_{delete,soft_delete,restore}`
+/// verbs. They share `{ path, record_id }` exactly; one type avoids
+/// three identical mirrors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseRecordIdArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// Stable record identifier (per [`nexus_types::bases::BaseRecord`]).
+    pub record_id: String,
+}
+
+/// Args for `base_property_delete` + `base_view_delete`. Both verbs
+/// take `{ path, name }` and return [`StorageOk`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBaseNamedArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// Property name or view name (per the verb's contract).
+    pub name: String,
+}
+
+/// Args for `base_property_rename`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBasePropertyRenameArgs {
+    /// Forge-relative path of the `.bases/` directory.
+    pub path: String,
+    /// Current property name.
+    pub old_name: String,
+    /// Replacement property name. Must not collide with another
+    /// existing property in the same base.
+    pub new_name: String,
+}
+
 // ── #190 / R7 — vector store handlers ────────────────────────────────────────
 
 /// Mirror of [`crate::vectorstore::ChunkEmbedding`] — kept in sync

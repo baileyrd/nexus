@@ -11,9 +11,12 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
+use crate::ipc::{
+    StorageBaseNamedArgs, StorageBasePropertyRenameArgs, StorageBaseRecordIdArgs, StorageOk,
+};
 use crate::StorageEngine;
 
-use super::shared::{exec_err, name_arg, path_arg, to_value};
+use super::shared::{exec_err, name_arg, parse_args, path_arg, to_value};
 
 // ── Records ─────────────────────────────────────────────────────────────────
 
@@ -50,44 +53,32 @@ pub(crate) fn record_update(engine: &StorageEngine, args: &Value) -> Result<Valu
 }
 
 pub(crate) fn record_delete(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "base_record_delete")?;
-    let record_id = args
-        .get("record_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("base_record_delete: missing 'record_id' string".to_string()))?;
+    // #190 / R7 — strict-parse via `StorageBaseRecordIdArgs` +
+    // `StorageOk` reply.
+    let StorageBaseRecordIdArgs { path, record_id } = parse_args(args, "base_record_delete")?;
     engine
-        .base_record_delete(&path, record_id)
+        .base_record_delete(&path, &record_id)
         .map_err(|e| exec_err(format!("base_record_delete: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "base_record_delete")
 }
 
 pub(crate) fn record_soft_delete(
     engine: &StorageEngine,
     args: &Value,
 ) -> Result<Value, PluginError> {
-    let path = path_arg(args, "base_record_soft_delete")?;
-    let record_id = args
-        .get("record_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            exec_err("base_record_soft_delete: missing 'record_id' string".to_string())
-        })?;
+    let StorageBaseRecordIdArgs { path, record_id } = parse_args(args, "base_record_soft_delete")?;
     engine
-        .base_record_soft_delete(&path, record_id)
+        .base_record_soft_delete(&path, &record_id)
         .map_err(|e| exec_err(format!("base_record_soft_delete: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "base_record_soft_delete")
 }
 
 pub(crate) fn record_restore(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "base_record_restore")?;
-    let record_id = args
-        .get("record_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("base_record_restore: missing 'record_id' string".to_string()))?;
+    let StorageBaseRecordIdArgs { path, record_id } = parse_args(args, "base_record_restore")?;
     engine
-        .base_record_restore(&path, record_id)
+        .base_record_restore(&path, &record_id)
         .map_err(|e| exec_err(format!("base_record_restore: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "base_record_restore")
 }
 
 // ── Properties ──────────────────────────────────────────────────────────────
@@ -123,30 +114,25 @@ pub(crate) fn property_update(engine: &StorageEngine, args: &Value) -> Result<Va
 }
 
 pub(crate) fn property_delete(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "base_property_delete")?;
-    let name = name_arg(args, "base_property_delete")?;
+    // #190 / R7 — strict-parse via the shared `StorageBaseNamedArgs`.
+    let StorageBaseNamedArgs { path, name } = parse_args(args, "base_property_delete")?;
     engine
         .base_property_delete(&path, &name)
         .map_err(|e| exec_err(format!("base_property_delete: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "base_property_delete")
 }
 
 pub(crate) fn property_rename(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "base_property_rename")?;
-    let old_name = args
-        .get("old_name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("base_property_rename: missing 'old_name' string".to_string()))?
-        .to_string();
-    let new_name = args
-        .get("new_name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| exec_err("base_property_rename: missing 'new_name' string".to_string()))?
-        .to_string();
+    // #190 / R7 — strict-parse via `StorageBasePropertyRenameArgs`.
+    let StorageBasePropertyRenameArgs {
+        path,
+        old_name,
+        new_name,
+    } = parse_args(args, "base_property_rename")?;
     engine
         .base_property_rename(&path, &old_name, &new_name)
         .map_err(|e| exec_err(format!("base_property_rename: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "base_property_rename")
 }
 
 // ── Views ───────────────────────────────────────────────────────────────────
@@ -182,12 +168,12 @@ pub(crate) fn view_update(engine: &StorageEngine, args: &Value) -> Result<Value,
 }
 
 pub(crate) fn view_delete(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let path = path_arg(args, "base_view_delete")?;
-    let name = name_arg(args, "base_view_delete")?;
+    // #190 / R7 — shares `StorageBaseNamedArgs` with `property_delete`.
+    let StorageBaseNamedArgs { path, name } = parse_args(args, "base_view_delete")?;
     engine
         .base_view_delete(&path, &name)
         .map_err(|e| exec_err(format!("base_view_delete: {e}")))?;
-    Ok(serde_json::json!({}))
+    to_value(&StorageOk { ok: true }, "base_view_delete")
 }
 
 // ── Base lifecycle + load/list/query ────────────────────────────────────────

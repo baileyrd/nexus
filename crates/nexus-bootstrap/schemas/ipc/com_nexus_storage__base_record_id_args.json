@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageBaseRecordIdArgs",
+  "description": "Args for the three `base_record_{delete,soft_delete,restore}`\nverbs. They share `{ path, record_id }` exactly; one type avoids\nthree identical mirrors.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path of the `.bases/` directory.",
+      "type": "string"
+    },
+    "record_id": {
+      "description": "Stable record identifier (per [`nexus_types::bases::BaseRecord`]).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "record_id"
+  ]
+}
