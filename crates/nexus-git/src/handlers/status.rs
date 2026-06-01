@@ -15,7 +15,7 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::{json, Value};
 
-use crate::ipc::{GitBlameEntry, GitFileStatus, GitStatusReply};
+use crate::ipc::{GitBlameEntry, GitFileStatus, GitLfsStatusReply, GitStatusReply};
 use crate::GitWorkerHandle;
 
 use super::shared::{map_err, path_arg, to_value};
@@ -95,6 +95,14 @@ pub(crate) fn blame(
 /// empty (signalling "we know LFS is in use here but cannot inspect
 /// availability").
 pub(crate) fn lfs_status(forge_root: &Path) -> Value {
+    // #190 / R7 — typed wire shape via `GitLfsStatusReply`
+    // (`deny_unknown_fields`). The signature stays `-> Value` rather
+    // than `-> Result<Value, PluginError>` to avoid churning the
+    // dispatch call site in `core_plugin.rs`; the serialization is
+    // infallible for this shape (no `Vec<u8>` fields, no custom
+    // serializer) so the `unwrap_or` fallback to `Value::Null` is
+    // unreachable in practice and just documents that the runtime
+    // never panics on this path.
     let tracked_patterns = read_lfs_patterns(forge_root);
     let git_lfs_installed = std::process::Command::new("git")
         .args(["lfs", "version"])
@@ -128,12 +136,13 @@ pub(crate) fn lfs_status(forge_root: &Path) -> Value {
         (Vec::new(), Vec::new())
     };
 
-    json!({
-        "tracked_patterns": tracked_patterns,
-        "pointer_files": pointer_files,
-        "available_files": available_files,
-        "git_lfs_installed": git_lfs_installed,
-    })
+    let reply = GitLfsStatusReply {
+        tracked_patterns,
+        pointer_files,
+        available_files,
+        git_lfs_installed,
+    };
+    serde_json::to_value(&reply).unwrap_or(Value::Null)
 }
 
 fn read_lfs_patterns(forge_root: &Path) -> Vec<String> {
