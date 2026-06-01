@@ -38,6 +38,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const COMMENTS_PLUGIN_ID: &str = "com.nexus.comments";
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
 const GIT_PLUGIN_ID: &str = "com.nexus.git";
+const MCP_PLUGIN_ID: &str = "com.nexus.mcp.host";
 
 fn scratch_forge() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -182,6 +183,56 @@ async fn git_switch_branch_rejects_unknown_field() {
         } => {
             assert_eq!(plugin_id, GIT_PLUGIN_ID);
             assert_eq!(command, "switch_branch");
+        }
+        other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
+    }
+}
+
+/// #190 / R7 — `com.nexus.mcp.host::unregister_tool` was previously a
+/// hand-rolled `str_arg(args, "name")` lookup that ignored unknown
+/// fields. It migrated to typed `McpUnregisterToolArgs` /
+/// `McpUnregisterToolReply`. This test fires `{ name, namee }` and
+/// asserts the strict deser rejects the typo. Sync handler — no
+/// runtime to spin up beyond the standard scratch forge.
+#[tokio::test]
+async fn mcp_unregister_tool_rejects_unknown_field() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // Baseline: the strict shape returns `{ removed: false, name }`
+    // when no such registration exists. (No prior `register_tool`
+    // call, so the unregister is a no-op success.)
+    runtime
+        .context
+        .ipc_call(
+            MCP_PLUGIN_ID,
+            "unregister_tool",
+            serde_json::json!({ "name": "no-such-tool" }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect("baseline unregister_tool with strict args succeeds");
+
+    let err = runtime
+        .context
+        .ipc_call(
+            MCP_PLUGIN_ID,
+            "unregister_tool",
+            serde_json::json!({
+                "name": "no-such-tool",
+                "namee": "typo",
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect_err("unknown field must be rejected");
+
+    match err {
+        IpcError::PluginCrashedDuringCall {
+            plugin_id, command, ..
+        } => {
+            assert_eq!(plugin_id, MCP_PLUGIN_ID);
+            assert_eq!(command, "unregister_tool");
         }
         other => panic!("expected PluginCrashedDuringCall on unknown field, got {other:?}"),
     }

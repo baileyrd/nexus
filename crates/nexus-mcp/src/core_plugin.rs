@@ -38,8 +38,9 @@ use serde_json::json;
 
 use crate::config::{McpMergeSkipReason, McpServerSpec, McpTransport, McpUnregisterError};
 use crate::ipc::{
-    McpConnectReply, McpDisconnectMissReply, McpPromptEntry, McpResourceEntry, McpServerArgs,
-    McpServerEntry, McpToolEntry,
+    McpConnectReply, McpDisconnectMissReply, McpPromptEntry, McpRegisterToolReply,
+    McpResourceEntry, McpServerArgs, McpServerEntry, McpToolEntry, McpUnregisterToolArgs,
+    McpUnregisterToolReply,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{McpClientError, McpHostConfig};
@@ -382,6 +383,11 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
             HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
             HANDLER_REGISTER_TOOL => {
+                // #190 / R7 — `DynamicTool` already deserializes via its
+                // own typed deser; the args side is therefore already
+                // strict. The reply migrates from ad-hoc
+                // `json!({"ok": true})` to the typed `McpRegisterToolReply`
+                // so the schemars generator sees the wire shape.
                 let tool: crate::dynamic_tools::DynamicTool = serde_json::from_value(args.clone())
                     .map_err(|e| PluginError::ExecutionFailed {
                         plugin_id: PLUGIN_ID.to_string(),
@@ -393,15 +399,31 @@ impl CorePlugin for McpHostPlugin {
                         reason: format!("register_tool: {e}"),
                     }
                 })?;
-                Ok(json!({ "ok": true }))
+                serde_json::to_value(&McpRegisterToolReply { ok: true }).map_err(|e| {
+                    PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("register_tool: serialize reply: {e}"),
+                    }
+                })
             }
             HANDLER_UNREGISTER_TOOL => {
-                let name = str_arg(args, "name").ok_or_else(|| PluginError::ExecutionFailed {
-                    plugin_id: PLUGIN_ID.to_string(),
-                    reason: "unregister_tool: missing 'name' arg".to_string(),
-                })?;
+                // #190 / R7 — strict-parse args via typed
+                // `McpUnregisterToolArgs` (rejects typos like
+                // `{ namee: "foo" }` instead of silently meaning
+                // "missing 'name' arg") and emit the typed
+                // `McpUnregisterToolReply` reply.
+                let McpUnregisterToolArgs { name } = serde_json::from_value(args.clone())
+                    .map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("unregister_tool: invalid args: {e}"),
+                    })?;
                 let removed = crate::dynamic_tools::global().unregister(&name);
-                Ok(json!({ "removed": removed, "name": name }))
+                serde_json::to_value(&McpUnregisterToolReply { removed, name }).map_err(|e| {
+                    PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("unregister_tool: serialize reply: {e}"),
+                    }
+                })
             }
             HANDLER_LIST_DYNAMIC_TOOLS => {
                 let tools = crate::dynamic_tools::global().list();
