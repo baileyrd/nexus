@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageOk",
+  "description": "Canonical `{ \"ok\": true }` reply for storage verbs that don't\ncarry a meaningful response body (`write_frontmatter`,\n`delete_file`, `write_vault_file`, …). Adopted opportunistically\nper #190 so the schemars generator sees the same wire shape the\nhandlers emit.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `true`. The kernel surfaces failure via\n`PluginError::ExecutionFailed`, not via this flag.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok"
+  ]
+}

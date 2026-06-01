@@ -360,6 +360,56 @@ pub struct ReadFrontmatterResult {
     pub fields: std::collections::BTreeMap<String, String>,
 }
 
+// ── #190 / R7 — write_frontmatter ────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::write_frontmatter`. Mirrors the
+/// hand-rolled shape the dispatch previously parsed by hand.
+/// `value: None` deletes the key (no-op when absent); a present
+/// `Some(_)` writes the literal string. Non-scalar `value`s are
+/// rejected at the typed-parse boundary — the prior implementation
+/// rejected them inside the handler with a custom error message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageWriteFrontmatterArgs {
+    /// Forge-relative path to the markdown file. Path confinement is
+    /// enforced at the engine boundary.
+    pub path: String,
+    /// Frontmatter key to write / delete.
+    pub key: String,
+    /// New value for the key. `None` deletes the key (no-op if absent).
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+/// Canonical `{ "ok": true }` reply for storage verbs that don't
+/// carry a meaningful response body (`write_frontmatter`,
+/// `delete_file`, `write_vault_file`, …). Adopted opportunistically
+/// per #190 so the schemars generator sees the same wire shape the
+/// handlers emit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageOk {
+    /// Always `true`. The kernel surfaces failure via
+    /// `PluginError::ExecutionFailed`, not via this flag.
+    pub ok: bool,
+}
+
 /// Parse a markdown source's YAML frontmatter into a
 /// [`ReadFrontmatterResult`]. Exported for unit tests and for the
 /// `read_frontmatter` IPC dispatch in [`crate::core_plugin`]. Files

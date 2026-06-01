@@ -39,9 +39,10 @@ use nexus_storage::ipc::{
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
     ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult, StorageListDirArgs,
     StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs, StorageNoteAppendResult,
-    StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs, StorageReadFileResult,
-    StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
-    StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
+    StorageOk, StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageReadFileArgs,
+    StorageReadFileResult, StorageReadFrontmatterArgs, StorageSearchArgs, StorageSearchHit,
+    StorageSearchResult, StorageSymbolRow, StorageWriteFileArgs, StorageWriteFileResult,
+    StorageWriteFrontmatterArgs,
 };
 use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 // Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
@@ -235,6 +236,10 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.storage::read_frontmatter (BL-053 Phase 4) ─────────────
     write_schema::<StorageReadFrontmatterArgs>("com_nexus_storage__read_frontmatter", "args");
     write_schema::<ReadFrontmatterResult>("com_nexus_storage__read_frontmatter", "result");
+
+    // ── com.nexus.storage::write_frontmatter (#190) ──────────────────────
+    write_schema::<StorageWriteFrontmatterArgs>("com_nexus_storage__write_frontmatter", "args");
+    write_schema::<StorageOk>("com_nexus_storage__write_frontmatter", "result");
 
     // ── com.nexus.storage::query_symbol (BL-114) ─────────────────────────
     write_schema::<StorageQuerySymbolArgs>("com_nexus_storage__query_symbol", "args");
