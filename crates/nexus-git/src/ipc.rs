@@ -497,3 +497,157 @@ pub struct GitBlameEntry {
     /// 1-based end line of the blame hunk in the current file.
     pub end_line: u32,
 }
+
+// ── #190: merge / rebase / cherry-pick wire shapes ──────────────────────────
+
+/// Args for `merge` (handler id `25`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitMergeArgs {
+    /// Branch name to merge into HEAD.
+    pub branch: String,
+}
+
+/// Return type for `merge` (handler id `25`). Wire mirror of
+/// [`crate::types::MergeResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitMergeReply {
+    /// `true` if the merge was a fast-forward.
+    pub fast_forward: bool,
+    /// Files with unresolved conflicts (empty if none).
+    pub conflicts: Vec<String>,
+    /// Commit hash of the merge commit; `null` on conflict or up-to-date.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_hash: Option<String>,
+}
+
+/// Args for `rebase` (handler id `27`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitRebaseArgs {
+    /// Commit / branch to rebase onto.
+    pub onto: String,
+}
+
+/// Return type for `rebase` (handler id `27`). Wire mirror of
+/// [`crate::types::RebaseResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitRebaseReply {
+    /// Number of commits successfully replayed onto the new base.
+    pub commits_rebased: u32,
+    /// Files with unresolved conflicts.
+    pub conflicts: Vec<String>,
+}
+
+/// Args for `cherry_pick` (handler id `29`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitCherryPickArgs {
+    /// Commit hash to cherry-pick onto HEAD.
+    pub commit: String,
+}
+
+/// Return type for `cherry_pick` (handler id `29`). Wire mirror of
+/// [`crate::types::CherryPickResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitCherryPickReply {
+    /// Files with unresolved conflicts.
+    pub conflicts: Vec<String>,
+    /// Hash of the new commit; `null` on conflicts or noop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_hash: Option<String>,
+}
+
+/// Return type for `conflict_files` (handler id `31`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitConflictFilesReply {
+    /// Forge-relative paths of every file with unresolved conflicts.
+    pub files: Vec<String>,
+}
+
+/// Return type for `conflict_versions` (handler id `32`). Bytes go
+/// over the wire as JSON arrays of u8; the shell decodes to a
+/// `Uint8Array` then to text / binary preview as appropriate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitConflictVersionsReply {
+    /// Common ancestor (stage 1). `null` when there is no shared base.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<Vec<u8>>,
+    /// HEAD side (stage 2 — "ours"). `null` when the file was deleted
+    /// on our side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ours: Option<Vec<u8>>,
+    /// Incoming side (stage 3 — "theirs"). `null` when the file was
+    /// deleted on the incoming side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theirs: Option<Vec<u8>>,
+}

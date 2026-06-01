@@ -50,22 +50,9 @@ pub(crate) fn validate_path(forge_root: &Path, raw: &str) -> Result<PathBuf, Plu
     Ok(PathBuf::from(raw))
 }
 
-// #190 — `hunk_indices_arg` removed; the staging handlers now
-// parse via `GitHunkArgs` and convert `Vec<u64>` → `Vec<usize>`
-// inline.
-
-/// Extract a plain string argument by its key name.
-///
-/// Distinct from the macro-emitted `string_arg(value, command, field)`
-/// which requires a command name for error messages. Keeping the
-/// historical two-arg shape here means existing call sites don't have
-/// to thread a command label.
-pub(crate) fn key_string(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| exec_err(format!("missing '{key}' argument")))
-}
+// #190 — `hunk_indices_arg` and `key_string` helpers removed; all
+// callers now use typed `parse_args::<GitFooArgs>(...)` per-handler
+// parsing instead.
 
 // Passed as a function pointer to `.map_err(map_err)`; wrapping in a
 // closure would re-trip `redundant_closure`.
