@@ -47,8 +47,9 @@ use serde_json::{json, Value};
 use crate::client::LspClientError;
 use crate::config::{LspServerSpec, MergeSkipReason, UnregisterError};
 use crate::ipc::{
-    LspChangeFileArgs, LspOk, LspOpenFileArgs, LspOpenFileReply, LspPathArgs,
-    LspRegisterServerArgs, LspRegisterServerReply, LspServerEntry, LspUnregisterServerArgs,
+    LspChangeFileArgs, LspCodeActionsArgs, LspExecuteCommandArgs, LspOk, LspOpenFileArgs,
+    LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRegisterServerArgs,
+    LspRegisterServerReply, LspRenameArgs, LspServerEntry, LspUnregisterServerArgs,
     LspUnregisterServerReply,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
@@ -588,14 +589,18 @@ impl CorePlugin for LspCorePlugin {
                 proxy_position_request(args, config, pool, bus, "textDocument/definition")
             }
             HANDLER_REFERENCES => {
-                let path = str_arg(args, "path")?;
-                let line = args.get("line").and_then(Value::as_i64)?;
-                let character = args.get("character").and_then(Value::as_i64)?;
-                let include_declaration = args
-                    .get("include_declaration")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
+                // #190 / R7 — strict-parse via typed `LspReferencesArgs`.
+                let parsed: Result<LspReferencesArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspReferencesArgs {
+                        path,
+                        line,
+                        character,
+                        include_declaration,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("references: invalid args: {e}"),
+                    })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -620,11 +625,18 @@ impl CorePlugin for LspCorePlugin {
                 }))
             }
             HANDLER_RENAME => {
-                let path = str_arg(args, "path")?;
-                let line = args.get("line").and_then(Value::as_i64)?;
-                let character = args.get("character").and_then(Value::as_i64)?;
-                let new_name = str_arg(args, "new_name")?;
+                // #190 / R7 — strict-parse via typed `LspRenameArgs`.
+                let parsed: Result<LspRenameArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspRenameArgs {
+                        path,
+                        line,
+                        character,
+                        new_name,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("rename: invalid args: {e}"),
+                    })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -649,14 +661,18 @@ impl CorePlugin for LspCorePlugin {
                 }))
             }
             HANDLER_CODE_ACTIONS => {
-                let path = str_arg(args, "path")?;
-                let range = args.get("range").cloned().unwrap_or_else(|| {
-                    json!({
-                        "start": { "line": 0, "character": 0 },
-                        "end": { "line": 0, "character": 0 },
-                    })
-                });
+                // #190 / R7 — strict-parse via typed `LspCodeActionsArgs`.
+                // The `range` field is intentionally `serde_json::Value`
+                // on the typed struct since the LSP `Range` shape isn't
+                // mirrored. Strict on `{ path, range }`; typos like
+                // `{ rangee: ... }` now error.
+                let parsed: Result<LspCodeActionsArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspCodeActionsArgs { path, range } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("code_actions: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -681,8 +697,18 @@ impl CorePlugin for LspCorePlugin {
                 }))
             }
             HANDLER_FORMAT => {
-                let path = str_arg(args, "path")?;
+                // #190 / R7 — strict-parse via typed `LspPathArgs` (just
+                // `{ path }`). Note: formatting options (tabSize,
+                // insertSpaces) are hardcoded in the payload — that's
+                // pre-existing behavior; a follow-up could thread them
+                // through a richer args shape.
+                let parsed: Result<LspPathArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspPathArgs { path } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("format: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -709,17 +735,20 @@ impl CorePlugin for LspCorePlugin {
                 }))
             }
             HANDLER_EXECUTE_COMMAND => {
-                let path = str_arg(args, "path")?;
-                let command = str_arg(args, "command")?;
-                // Optional. LSP spec is `LSPAny[]`; we forward the
-                // shape the caller supplied verbatim. Default to the
-                // empty array so a server that requires the field
-                // doesn't reject the call.
-                let arguments = args
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| Value::Array(Vec::new()));
+                // #190 / R7 — strict-parse via typed `LspExecuteCommandArgs`.
+                // `arguments` defaults to empty Vec when omitted (typed
+                // default), preserving the prior behavior of forwarding
+                // an empty array for servers that require the field.
+                let parsed: Result<LspExecuteCommandArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspExecuteCommandArgs {
+                        path,
+                        command,
+                        arguments,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("execute_command: invalid args: {e}"),
+                    })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -748,6 +777,13 @@ impl CorePlugin for LspCorePlugin {
 
 /// Build the closure for completions / hover / definition — the three
 /// position-only requests share an identical wire shape.
+///
+/// #190 / R7 — strict-parse args via typed `LspPositionArgs`
+/// (`deny_unknown_fields`). Parse errors surface through the future
+/// as `PluginError::ExecutionFailed` instead of the prior quiet
+/// `str_arg(...)?`-returns-`None` mode. The reply body is the raw
+/// LSP-protocol JSON the upstream server emits; that's per-LSP-spec
+/// and stays untyped on purpose.
 fn proxy_position_request(
     args: &Value,
     config: Option<Arc<LspHostConfig>>,
@@ -755,10 +791,16 @@ fn proxy_position_request(
     bus: Option<Arc<EventBus>>,
     method: &'static str,
 ) -> Option<CorePluginFuture> {
-    let path = str_arg(args, "path")?;
-    let line = args.get("line").and_then(Value::as_i64)?;
-    let character = args.get("character").and_then(Value::as_i64)?;
+    let parsed: Result<LspPositionArgs, _> = serde_json::from_value(args.clone());
     Some(Box::pin(async move {
+        let LspPositionArgs {
+            path,
+            line,
+            character,
+        } = parsed.map_err(|e| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("{method}: invalid args: {e}"),
+        })?;
         let cfg = config_or_err(config.as_ref())?;
         let Some(server) = cfg.server_for_path(&path) else {
             return Ok(Value::Null);
@@ -828,11 +870,8 @@ async fn republish_pending(client: &crate::client::LspClient, bus: Option<&Arc<E
     }
 }
 
-fn str_arg(args: &Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-}
+// #190 — `str_arg` removed; all callers now strict-parse via typed
+// `Lsp*Args` shapes from `crate::ipc`.
 
 fn config_or_err(config: Option<&Arc<LspHostConfig>>) -> Result<Arc<LspHostConfig>, PluginError> {
     config.cloned().ok_or_else(|| PluginError::ExecutionFailed {
@@ -982,17 +1021,35 @@ disabled = true
     }
 
     #[test]
-    fn async_handler_without_required_args_returns_none() {
+    fn async_handler_without_required_args_surfaces_strict_parse_error() {
+        // #190 / R7 — previously `str_arg(args, "path")?` and
+        // `args.get("line").as_i64()?` returned `None` from
+        // `dispatch_async`, the kernel fell back to sync dispatch,
+        // and the sync arm errored with the misleading
+        // "handler_id N requires dispatch_async". Now the typed
+        // `LspPositionArgs` parse surfaces the missing-field error
+        // through the future as a clean
+        // `PluginError::ExecutionFailed { reason: "<method>: invalid
+        // args: …" }`.
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
         let mut plugin = make_plugin(dir.path());
         plugin.on_init().unwrap();
-        // Missing path → str_arg → None → dispatch_async returns None
-        assert!(plugin.dispatch_async(HANDLER_HOVER, &json!({})).is_none());
-        // Missing line → as_i64 → None
-        assert!(plugin
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        // Missing every field — strict parse hits "missing field `path`".
+        let fut = plugin
+            .dispatch_async(HANDLER_HOVER, &json!({}))
+            .expect("dispatch_async must return a future (not None)");
+        let err = runtime.block_on(fut).expect_err("missing fields must error");
+        assert!(err.to_string().contains("invalid args"));
+        // Path supplied, but missing `line` / `character`.
+        let fut = plugin
             .dispatch_async(HANDLER_HOVER, &json!({ "path": "/tmp/x.rs" }))
-            .is_none());
+            .expect("dispatch_async must return a future (not None)");
+        let err = runtime.block_on(fut).expect_err("missing line/character must error");
+        assert!(err.to_string().contains("invalid args"));
     }
 
     #[test]
