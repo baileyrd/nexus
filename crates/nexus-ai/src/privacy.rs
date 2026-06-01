@@ -213,10 +213,7 @@ impl Redactor {
             // search position after each replacement because the
             // placeholder length differs from the match length.
             let mut search_start = 0usize;
-            loop {
-                let Some(m) = regex.find_at(input, search_start) else {
-                    break;
-                };
+            while let Some(m) = regex.find_at(input, search_start) {
                 let start = m.start();
                 let end = m.end();
                 events.push(Redaction {

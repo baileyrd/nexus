@@ -138,7 +138,7 @@ impl SemanticStore {
             .values()
             .filter(|e| e.key.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q))
             .collect();
-        results.sort_by(|a, b| b.stored_at.cmp(&a.stored_at));
+        results.sort_by_key(|b| std::cmp::Reverse(b.stored_at));
         results.into_iter().take(limit).cloned().collect()
     }
 

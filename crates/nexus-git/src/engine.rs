@@ -993,10 +993,7 @@ impl GitEngine {
             .rebase(Some(&branch), Some(&onto), Some(&onto), None)?;
 
         let mut commits_rebased: u32 = 0;
-        loop {
-            let Some(op_result) = rebase.next() else {
-                break;
-            };
+        while let Some(op_result) = rebase.next() {
             let _op = op_result?;
 
             // Conflicts surface as a non-empty index conflicts iter.

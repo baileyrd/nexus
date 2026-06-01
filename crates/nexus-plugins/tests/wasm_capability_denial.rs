@@ -24,8 +24,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexus_kernel::{Capability, CapabilitySet};
-use nexus_plugins::PluginData;
 use nexus_plugins::__testing::{register_host_fns, HOST_CAPABILITY_DENIED};
+use nexus_plugins::PluginData;
 use tracing_subscriber::layer::SubscriberExt;
 use wasmtime::{Engine, Instance, Linker, Module, Store};
 
