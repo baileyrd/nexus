@@ -10,15 +10,17 @@ import type {
   FencedRenderer,
   Snippet,
 } from '../types/plugin'
-import { fencedCodeRegistry } from '../plugins/nexus/editor/cm/fencedCodeRegistry'
 import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 import { contextKeyService } from './ContextKeyService'
 import { eventBus } from './EventBus'
 import { workspace, viewRegistry } from '../workspace'
-import { useEditorStore } from '../plugins/nexus/editor/editorStore'
-import { computeActiveEditor, activeEditorEquals } from './activeEditor'
+// R10 / #193 — `api.editor` delegates to a runtime-registered seam
+// instead of statically importing the editor plugin's store + fenced-code
+// registry. This inverts the host→plugin dependency so the host no longer
+// fails to load when the editor plugin is absent.
+import { getEditorHostSurface } from './EditorHostSurface'
 import { KernelIpcError } from './KernelIpcError'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -539,7 +541,7 @@ export function buildPluginAPI(
     },
 
     // ─── Active editor (OI-14) ─────────────────────────────────────────────
-    // Typed read-only surface over `useEditorStore` so plugins don't reach
+    // Typed read-only surface over the editor plugin so plugins don't reach
     // into the editor's internal command ids (`com.nexus.editor::open` etc.)
     // for the most basic question — "what's the user looking at?". The
     // `revision` field is sourced from the kernel's `sessionRevision` and
@@ -547,23 +549,39 @@ export function buildPluginAPI(
     // active tab changes OR the active buffer's revision advances; the
     // returned disposer is idempotent and tracked so plugin unload sweeps
     // it (mirrors `kernel.on`'s subscription handling).
+    //
+    // R10 / #193 — these delegate to the runtime-registered
+    // `EditorHostSurface` (populated by the editor plugin's `activate()`)
+    // rather than importing the editor plugin's store directly. When the
+    // editor plugin is absent: reads return `null`, subscriptions never
+    // fire, and `registerFencedCodeRenderer` throws (a dropped
+    // registration must not fail silently).
     editor: {
       active(): ActiveEditor | null {
-        return computeActiveEditor(useEditorStore.getState())
+        return getEditorHostSurface()?.getActiveEditor() ?? null
       },
       onChange(handler: (active: ActiveEditor | null) => void): () => void {
-        let lastSnapshot = computeActiveEditor(useEditorStore.getState())
-        const unsubInner = useEditorStore.subscribe((state) => {
-          const next = computeActiveEditor(state)
-          if (activeEditorEquals(next, lastSnapshot)) return
-          lastSnapshot = next
+        const surface = getEditorHostSurface()
+        if (!surface) {
+          // No editor plugin active — the subscription can never fire.
+          // Track a no-op disposer so plugin-unload sweeping stays
+          // uniform regardless of editor presence.
+          clientLogger.warn(
+            `[api.editor.onChange] no editor host surface registered; ` +
+              `subscription for ${pluginId} will never fire`,
+          )
+          const noop = () => {}
+          registry.trackSubscription(pluginId, noop)
+          return noop
+        }
+        let disposed = false
+        const unsubInner = surface.subscribeActiveEditor((next) => {
           try {
             handler(next)
           } catch (err) {
             clientLogger.warn(`[api.editor.onChange] handler for ${pluginId} threw`, err)
           }
         })
-        let disposed = false
         const unsub = () => {
           if (disposed) return
           disposed = true
@@ -573,7 +591,17 @@ export function buildPluginAPI(
         return unsub
       },
       registerFencedCodeRenderer(language: string, renderer: FencedRenderer): () => void {
-        const inner = fencedCodeRegistry.register(language, renderer)
+        const surface = getEditorHostSurface()
+        if (!surface) {
+          // Registrations must fail loudly — silently dropping a fenced
+          // renderer would leave the caller's blocks un-rendered with no
+          // signal (R10's "fail loudly" remedy for missing services).
+          throw new Error(
+            `api.editor.registerFencedCodeRenderer('${language}') requires the editor ` +
+              `plugin to be active, but no editor host surface is registered.`,
+          )
+        }
+        const inner = surface.registerFencedCodeRenderer(language, renderer)
         let disposed = false
         const unsub = () => {
           if (disposed) return
