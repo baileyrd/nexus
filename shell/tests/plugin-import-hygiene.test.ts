@@ -58,7 +58,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   // truly needs a bespoke Tauri command, allow it in `shell/src/src-tauri/`
   // and document." A future WI may migrate some of these to kernel IPC.
   'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // shell-internal (WI-31): get/set_plugin_granted_capabilities
-  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // plugin-dialog.open for the "load theme from file" picker (the three `kernel_invoke` calls were migrated to `api.kernel.invoke` in the A6 drain; this entry stays only because PlatformDialog has no `open()` surface yet)
+  'shell/src/plugins/core/settings/SettingsCells.tsx',             // plugin-dialog.open for the "load theme from file" picker — relocated here from SettingsPanelView.tsx in the #191 SettingsPanelView split (the three `kernel_invoke` calls were migrated to `api.kernel.invoke` in the A6 drain; this entry stays only because PlatformDialog has no `open()` surface yet). SettingsPanelView.tsx no longer imports @tauri-apps, so its row left this list — a net move, not a growth.
   'shell/src/plugins/nexus/launcher/launcherState.ts',             // shell-internal: get/write/forget shell_state (recents)
   'shell/src/plugins/nexus/memory/index.ts',                       // BL-043: tauri-plugin-global-shortcut — no @nexus/extension-api global-hotkey surface yet
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
@@ -93,6 +93,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/bases/BasesTable.tsx',                  // host/ContextKeyService — BL-031 publishes `bases.editing` for the cell-clipboard `when:` clauses; same drain plan as BasesView (WI-25)
   'shell/src/plugins/nexus/canvas/CanvasView.tsx',                 // host/ContextKeyService
   'shell/src/plugins/nexus/editor/EditorView.tsx',                 // host/EventBus + shellRegistry
+  'shell/src/plugins/nexus/editor/index.ts',                       // #193/R10 inversion seam — registerEditorHostSurface (host/EditorHostSurface) lets the editor plugin REGISTER its surface with the host (the correct plugin→host direction, not a reach into host internals) + the activeEditor projection helpers (host/activeEditor) extracted in #191 so they stay unit-testable without dragging in @tauri-apps. By design; cannot move to @nexus/extension-api without re-coupling the host to the plugin.
   'shell/src/plugins/nexus/graph/GraphGlobalView.tsx',             // host/EventBus
   'shell/src/plugins/nexus/graph/GraphView.tsx',                   // host/EventBus
   'shell/src/plugins/nexus/outline/OutlineView.tsx',               // host/EventBus
