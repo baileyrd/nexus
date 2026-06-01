@@ -282,7 +282,7 @@ fn splice_excerpts(old: &str, mut splices: Vec<ExcerptSplice>) -> String {
     // file toward the start so a splice that grows or shrinks one
     // range never invalidates the line numbers of a not-yet-applied
     // splice further up the file.
-    splices.sort_by(|a, b| b.line_start.cmp(&a.line_start));
+    splices.sort_by_key(|b| std::cmp::Reverse(b.line_start));
     let trailing_nl = old.ends_with('\n');
     let mut lines: Vec<String> = old.lines().map(String::from).collect();
     for sp in splices {

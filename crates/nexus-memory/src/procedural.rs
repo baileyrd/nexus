@@ -141,7 +141,7 @@ impl ProceduralStore {
                     .any(|p| t.contains(&p.to_lowercase()))
             })
             .collect();
-        results.sort_by(|a, b| b.use_count.cmp(&a.use_count));
+        results.sort_by_key(|b| std::cmp::Reverse(b.use_count));
         results.into_iter().cloned().collect()
     }
 

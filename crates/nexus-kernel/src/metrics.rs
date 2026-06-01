@@ -120,7 +120,7 @@ impl Histogram {
         HistogramSnapshot {
             count,
             sum_ns,
-            mean_ns: if count == 0 { 0 } else { sum_ns / count },
+            mean_ns: sum_ns.checked_div(count).unwrap_or(0),
             p50_ns: percentile(&buckets, count, 0.50),
             p95_ns: percentile(&buckets, count, 0.95),
             p99_ns: percentile(&buckets, count, 0.99),

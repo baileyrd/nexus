@@ -370,10 +370,10 @@ impl Store {
                 RunStatus::Running if row.started_at.is_none() => {
                     row.started_at = Some(Utc::now());
                 }
-                RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled => {
-                    if row.finished_at.is_none() {
-                        row.finished_at = Some(Utc::now());
-                    }
+                RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+                    if row.finished_at.is_none() =>
+                {
+                    row.finished_at = Some(Utc::now());
                 }
                 _ => {}
             }
@@ -434,7 +434,7 @@ impl Store {
                     .is_none_or(|since| r.submitted_at >= *since)
             })
             .collect();
-        rows.sort_by(|a, b| b.submitted_at.cmp(&a.submitted_at));
+        rows.sort_by_key(|b| std::cmp::Reverse(b.submitted_at));
         let limit = args.limit.map_or(usize::MAX, |n| n as usize);
         rows.into_iter()
             .take(limit)
