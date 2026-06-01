@@ -129,7 +129,7 @@ async fn subscription_replays_after_transport_drop() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await

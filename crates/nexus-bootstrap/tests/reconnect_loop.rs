@@ -116,7 +116,7 @@ async fn invoker_recovers_after_first_transport_dies() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -135,7 +135,7 @@ async fn invoker_recovers_after_first_transport_dies() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -199,7 +199,7 @@ async fn schedule_exhaustion_surfaces_final_transport_error() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -214,7 +214,7 @@ async fn schedule_exhaustion_surfaces_final_transport_error() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -258,7 +258,7 @@ async fn state_transitions_emit_on_reconnect_lifecycle() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -277,7 +277,7 @@ async fn state_transitions_emit_on_reconnect_lifecycle() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -315,7 +315,7 @@ async fn schedule_exhaustion_emits_disconnected() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -330,7 +330,7 @@ async fn schedule_exhaustion_emits_disconnected() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await

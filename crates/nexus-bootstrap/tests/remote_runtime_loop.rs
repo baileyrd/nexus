@@ -72,7 +72,7 @@ async fn invoker_routes_ipc_call_over_the_remote_loop() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -117,7 +117,7 @@ async fn invoker_timeout_returns_typed_timeout_variant() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_millis(1),
         )
         .await;
@@ -147,7 +147,7 @@ async fn shutdown_makes_subsequent_calls_fail_fast() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_secs(5),
         )
         .await
@@ -159,7 +159,7 @@ async fn shutdown_makes_subsequent_calls_fail_fast() {
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            json!({ "path": "" }),
+            json!({ "relpath": "" }),
             Duration::from_millis(500),
         )
         .await;
