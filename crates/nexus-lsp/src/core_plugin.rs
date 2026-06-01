@@ -47,7 +47,8 @@ use serde_json::{json, Value};
 use crate::client::LspClientError;
 use crate::config::{LspServerSpec, MergeSkipReason, UnregisterError};
 use crate::ipc::{
-    LspRegisterServerArgs, LspRegisterServerReply, LspUnregisterServerArgs,
+    LspChangeFileArgs, LspOk, LspOpenFileArgs, LspOpenFileReply, LspPathArgs,
+    LspRegisterServerArgs, LspRegisterServerReply, LspServerEntry, LspUnregisterServerArgs,
     LspUnregisterServerReply,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
@@ -394,21 +395,25 @@ impl CorePlugin for LspCorePlugin {
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_LIST_SERVERS => {
+                // #190 / R7 — materialize into typed `Vec<LspServerEntry>`
+                // so the schemars schema generator sees the same fields
+                // the runtime emits.
                 let cfg = self.config.read().expect("LspHostConfig RwLock poisoned");
-                let arr: Vec<Value> = cfg
+                let arr: Vec<LspServerEntry> = cfg
                     .servers
                     .values()
-                    .map(|spec| {
-                        json!({
-                            "name": spec.name,
-                            "command": spec.command,
-                            "args": spec.args,
-                            "file_types": spec.file_types,
-                            "disabled": spec.disabled,
-                        })
+                    .map(|spec| LspServerEntry {
+                        name: spec.name.clone(),
+                        command: spec.command.clone(),
+                        args: spec.args.clone(),
+                        file_types: spec.file_types.clone(),
+                        disabled: spec.disabled,
                     })
                     .collect();
-                Ok(Value::Array(arr))
+                serde_json::to_value(&arr).map_err(|e| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: format!("list_servers: serialize: {e}"),
+                })
             }
             HANDLER_REGISTER_SERVER => handle_register_server(&self.config, args),
             HANDLER_UNREGISTER_SERVER => handle_unregister_server(&self.config, args),
@@ -446,14 +451,23 @@ impl CorePlugin for LspCorePlugin {
 
         match handler_id {
             HANDLER_OPEN_FILE => {
-                let path = str_arg(args, "path")?;
-                let content = str_arg(args, "content")?;
-                let language_id = args
-                    .get("language_id")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let version = args.get("version").and_then(Value::as_i64).unwrap_or(1);
+                // #190 / R7 — strict-parse args via typed `LspOpenFileArgs`,
+                // typed reply via `LspOpenFileReply`. Parse errors surface
+                // through the future as `PluginError::ExecutionFailed`
+                // instead of the prior quiet `str_arg(...)?`-returns-`None`
+                // fallback.
+                let parsed: Result<LspOpenFileArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspOpenFileArgs {
+                        path,
+                        content,
+                        language_id,
+                        version,
+                    } = parsed.map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("open_file: invalid args: {e}"),
+                    })?;
+                    let version = version.unwrap_or(1);
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -475,13 +489,27 @@ impl CorePlugin for LspCorePlugin {
                     })
                     .await
                     .map_err(map_client_err)?;
-                    Ok(json!({ "uri": file_uri_from_path(&path), "server": server_name }))
+                    let reply = LspOpenFileReply {
+                        uri: file_uri_from_path(&path),
+                        server: server_name,
+                    };
+                    serde_json::to_value(&reply).map_err(|e| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason: format!("open_file: serialize reply: {e}"),
+                    })
                 }))
             }
 
             HANDLER_CLOSE_FILE => {
-                let path = str_arg(args, "path")?;
+                // #190 / R7 — strict-parse via typed `LspPathArgs`,
+                // typed `LspOk` reply.
+                let parsed: Result<LspPathArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspPathArgs { path } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("close_file: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -500,15 +528,30 @@ impl CorePlugin for LspCorePlugin {
                     })
                     .await
                     .map_err(map_client_err)?;
-                    Ok(json!({ "ok": true }))
+                    serde_json::to_value(&LspOk { ok: true }).map_err(|e| {
+                        PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("close_file: serialize reply: {e}"),
+                        }
+                    })
                 }))
             }
 
             HANDLER_CHANGE_FILE => {
-                let path = str_arg(args, "path")?;
-                let content = str_arg(args, "content")?;
-                let version = args.get("version").and_then(Value::as_i64).unwrap_or(2);
+                // #190 / R7 — strict-parse via typed `LspChangeFileArgs`.
+                // Note: `LspChangeFileArgs.version` is `i64` (required);
+                // the prior `args.get("version").as_i64().unwrap_or(2)`
+                // silently defaulted to 2 on missing/malformed input,
+                // which would have produced a stale-version did_change
+                // call. Strict parse means callers must supply a version
+                // explicitly.
+                let parsed: Result<LspChangeFileArgs, _> = serde_json::from_value(args.clone());
                 Some(Box::pin(async move {
+                    let LspChangeFileArgs { path, content, version } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("change_file: invalid args: {e}"),
+                        })?;
                     let cfg = config_or_err(config.as_ref())?;
                     let Some(server) = cfg.server_for_path(&path) else {
                         return Ok(Value::Null);
@@ -528,7 +571,12 @@ impl CorePlugin for LspCorePlugin {
                     })
                     .await
                     .map_err(map_client_err)?;
-                    Ok(json!({ "ok": true }))
+                    serde_json::to_value(&LspOk { ok: true }).map_err(|e| {
+                        PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("change_file: serialize reply: {e}"),
+                        }
+                    })
                 }))
             }
 
