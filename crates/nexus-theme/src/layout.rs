@@ -1075,7 +1075,12 @@ fn rewrite_remove(node: LayoutNode, target: &PaneId) -> (Option<LayoutNode>, boo
 
             let result = match new_children.len() {
                 0 => None,
-                1 => Some(new_children.into_iter().next().unwrap()),
+                1 => Some(
+                    new_children
+                        .into_iter()
+                        .next()
+                        .expect("len() == 1 verified by match arm"),
+                ),
                 _ => {
                     renormalize_sizes(&mut new_sizes);
                     Some(LayoutNode::Split {

@@ -97,8 +97,14 @@ fn replace_tokens(body: &str, resolved: &HashMap<String, String>) -> String {
                 }
             }
         }
-        out.push(body[i..].chars().next().unwrap());
-        i += body[i..].chars().next().unwrap().len_utf8();
+        // `i < bytes.len()` per the loop guard, so the remaining slice
+        // is non-empty and has at least one char.
+        let ch = body[i..]
+            .chars()
+            .next()
+            .expect("loop guard i < bytes.len() guarantees a char");
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }
