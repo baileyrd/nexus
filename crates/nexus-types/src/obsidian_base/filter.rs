@@ -367,7 +367,10 @@ fn parse_literal(src: &str) -> Result<Literal, String> {
     }
     let first = s.as_bytes()[0];
     if first == b'"' || first == b'\'' {
-        let last = *s.as_bytes().last().unwrap();
+        let last = *s
+            .as_bytes()
+            .last()
+            .expect("first byte read above proves len() >= 1");
         if last != first || s.len() < 2 {
             return Err(format!("unterminated string literal: {s}"));
         }

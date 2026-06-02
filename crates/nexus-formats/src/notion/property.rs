@@ -55,7 +55,11 @@ pub fn extract_property_table(input: &str) -> (Option<BTreeMap<String, String>>,
         Some((idx, l)) if is_table_row(l) && count_columns(l) == 2 => *idx,
         _ => return (None, input.to_string()),
     };
-    let first_row_line = lines.next().unwrap().1.to_string();
+    let first_row_line = lines
+        .next()
+        .expect("peek above returned Some — the iterator hasn't been advanced since")
+        .1
+        .to_string();
 
     let separator_ok = matches!(
         lines.peek(),

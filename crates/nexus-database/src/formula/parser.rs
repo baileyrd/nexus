@@ -237,9 +237,11 @@ impl Parser<'_> {
                                 return Err(self.error("if() requires exactly 3 arguments"));
                             }
                             let mut args = args;
-                            let else_branch = args.pop().unwrap();
-                            let then_branch = args.pop().unwrap();
-                            let condition = args.pop().unwrap();
+                            // `args.len() == 3` checked immediately above; the
+                            // three pops are guaranteed-Some.
+                            let else_branch = args.pop().expect("args.len() == 3 verified above");
+                            let then_branch = args.pop().expect("args.len() == 3 verified above");
+                            let condition = args.pop().expect("args.len() == 3 verified above");
                             return Ok(Expr::If {
                                 condition: Box::new(condition),
                                 then_branch: Box::new(then_branch),
