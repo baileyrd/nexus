@@ -747,11 +747,16 @@ test('bridge core: a keystroke arriving during an in-flight apply waits + drains
   st = tr.state
 
   // Drain the first apply's promise chain. The post-apply handler
-  // drains the queued second update synchronously.
-  await Promise.resolve()
-  await Promise.resolve()
-  await new Promise((r) => setTimeout(r, 0))
-  await Promise.resolve()
+  // drains the queued second update synchronously. The wait is
+  // bounded by an applyCount check rather than a fixed microtask
+  // burst so the test doesn't flake on slower CI runners (GHA's
+  // ubuntu-latest has been observed taking >4 microtasks between
+  // ack and queued-flush; see #244 follow-up). A 2-second deadline
+  // is generous — under load the queue normally drains in <5 ms.
+  const deadline = Date.now() + 2000
+  while (applyCount < 2 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 0))
+  }
 
   assert.equal(applyCount, 2, 'both keystrokes were applied to the kernel')
   assert.equal(view.state.doc.toString(), 'oldXY', 'CM doc preserved through the round-trip')
