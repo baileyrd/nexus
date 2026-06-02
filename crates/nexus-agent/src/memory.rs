@@ -703,22 +703,24 @@ pub fn prune_entries(
 pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    writeln!(out, "# Memory for agent `{agent_id}`").unwrap();
-    writeln!(out).unwrap();
-    writeln!(out, "{} entries.", entries.len()).unwrap();
-    writeln!(out).unwrap();
+    writeln!(out, "# Memory for agent `{agent_id}`").expect("writeln! to String is infallible");
+    writeln!(out).expect("writeln! to String is infallible");
+    writeln!(out, "{} entries.", entries.len()).expect("writeln! to String is infallible");
+    writeln!(out).expect("writeln! to String is infallible");
     for entry in entries {
         let ts = entry.timestamp_ms();
         match entry {
             MemoryEntry::UserGoal { text, .. } => {
-                writeln!(out, "- [{ts}] **goal:** {text}").unwrap();
+                writeln!(out, "- [{ts}] **goal:** {text}")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::AgentPlan {
                 plan_id,
                 step_count,
                 ..
             } => {
-                writeln!(out, "- [{ts}] plan `{plan_id}` ({step_count} steps)").unwrap();
+                writeln!(out, "- [{ts}] plan `{plan_id}` ({step_count} steps)")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::StepExecution {
                 step_id,
@@ -727,7 +729,8 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
                 ..
             } => {
                 let ok = if *success { "✓" } else { "✗" };
-                writeln!(out, "- [{ts}] {ok} step `{step_id}` — {summary}").unwrap();
+                writeln!(out, "- [{ts}] {ok} step `{step_id}` — {summary}")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::ToolCall {
                 tool,
@@ -736,27 +739,33 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
                 ..
             } => {
                 let ok = if *success { "✓" } else { "✗" };
-                writeln!(out, "- [{ts}] {ok} tool `{tool}` ({duration_ms}ms)").unwrap();
+                writeln!(out, "- [{ts}] {ok} tool `{tool}` ({duration_ms}ms)")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::UserFeedback { text, .. } => {
-                writeln!(out, "- [{ts}] **feedback:** {text}").unwrap();
+                writeln!(out, "- [{ts}] **feedback:** {text}")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::Error {
                 message, step_id, ..
             } => {
                 let s = step_id.as_deref().unwrap_or("-");
-                writeln!(out, "- [{ts}] ✗ error in step `{s}`: {message}").unwrap();
+                writeln!(out, "- [{ts}] ✗ error in step `{s}`: {message}")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::Decision {
                 summary, rationale, ..
             } => {
-                writeln!(out, "- [{ts}] **decision:** {summary}").unwrap();
-                writeln!(out, "  - rationale: {rationale}").unwrap();
+                writeln!(out, "- [{ts}] **decision:** {summary}")
+                    .expect("writeln! to String is infallible");
+                writeln!(out, "  - rationale: {rationale}")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::Artifact {
                 path, description, ..
             } => {
-                writeln!(out, "- [{ts}] artifact `{path}` — {description}").unwrap();
+                writeln!(out, "- [{ts}] artifact `{path}` — {description}")
+                    .expect("writeln! to String is infallible");
             }
             MemoryEntry::CompactedTurns {
                 rounds_compressed,
@@ -767,7 +776,7 @@ pub fn export_markdown(agent_id: &str, entries: &[MemoryEntry]) -> String {
                     out,
                     "- [{ts}] **compacted {rounds_compressed} rounds:** {summary}"
                 )
-                .unwrap();
+                .expect("writeln! to String is infallible");
             }
         }
     }
