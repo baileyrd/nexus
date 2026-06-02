@@ -75,6 +75,14 @@ jobs:
       # force-warn once that backlog is drained to make pedantic blocking too.
       - name: cargo clippy (deny real warnings; pedantic stays advisory)
         run: cargo clippy --workspace --all-targets -- -D warnings --force-warn clippy::pedantic
+      # Locks the #198 (R15) gain. `unwrap_used` is `restriction`-group
+      # (allow-by-default), so `-D warnings` above doesn't cover it. The audit's
+      # complaint was about *production* unwraps — `--lib --bins` skips tests,
+      # where unwrap is idiomatic. PR #243 + #246 took the workspace count to 0;
+      # this step prevents a regression. `-A warnings` keeps the gate
+      # single-purpose so it can't double-fail on warnings already caught above.
+      - name: cargo clippy --lib --bins (deny clippy::unwrap_used — lock #198)
+        run: cargo clippy --workspace --lib --bins -- -A warnings -D clippy::unwrap_used
       - name: cargo test
         run: cargo test --workspace
 
