@@ -223,10 +223,11 @@ pub fn execute(conn: &Connection, query: &Query) -> Result<QueryResult> {
         format!("SELECT data_json FROM bases_records WHERE {where_clause}{order_clause}");
 
     if let Some(limit) = query.limit {
-        write!(data_sql, " LIMIT {limit}").unwrap();
+        // `write!` to a `String` is infallible per `std::fmt::Write for String`.
+        write!(data_sql, " LIMIT {limit}").expect("write! to String is infallible");
     }
     if let Some(offset) = query.offset {
-        write!(data_sql, " OFFSET {offset}").unwrap();
+        write!(data_sql, " OFFSET {offset}").expect("write! to String is infallible");
     }
 
     // Execute.

@@ -1796,7 +1796,8 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
     }
 
     // Rule 1: ID format.
-    let id_re = Regex::new(r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$").unwrap();
+    let id_re = Regex::new(r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$")
+        .expect("static plugin-id regex pattern is valid");
     if !id_re.is_match(id) {
         return Err(PluginError::ManifestValidation {
             plugin_id: id.clone(),

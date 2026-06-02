@@ -308,7 +308,9 @@ fn require_date_str(func: &str, val: &FormulaValue) -> Result<chrono::NaiveDateT
         return Ok(dt);
     }
     if let Ok(d) = chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
-        return Ok(d.and_hms_opt(0, 0, 0).unwrap());
+        return Ok(d
+            .and_hms_opt(0, 0, 0)
+            .expect("0,0,0 is always a valid hour/minute/second triple"));
     }
 
     Err(formula_err(func, &format!("cannot parse '{s}' as date")))
