@@ -11,10 +11,10 @@
 | Severity | Open |
 |----------|------|
 | High | 1 (V5, partially closed) |
-| Medium | 4 (V9–V12) |
-| Low | 7 (V13–V19) |
+| Medium | 2 (V9 — needs maintainer decision; V10 — deferred pending profiling) |
+| Low | 2 (V15 residual; V19 — maintainer decision) |
 
-> **Status as of 2026-06-10 (same day):** V1–V4, V6–V8 executed and closed; V5 partially closed (boundary guard now CI-enforced; Windows E2E deferred pending spec fixes). Remaining open: V5 (residual), V9–V19.
+> **Status as of 2026-06-10 (same day):** V1–V4, V6–V8, V11–V14, V16–V18 executed and closed; V5 and V15 partially closed. Remaining: V5 residual (Windows E2E once the golden-path specs pass), V9 (#187 — canonical-contract decision), V10 (profile first), V15 residual (panic-log/git/lsp/dap density), V19 (#188 — wiring decision).
 
 ---
 
@@ -94,28 +94,28 @@ Seven public `StorageEngine` graph methods are documented "Panics if the interna
 **Fix:** Apply the same `PoisonError::into_inner()` + `tracing::error!` recovery to the graph read paths; these are the highest-value sites for closing #199.
 
 ### V9. Extension-API contract divergence (#187) is the main remaining plugin-author risk
-- [ ] **Open** · High effort
+- [ ] **Open** · High effort · **needs a maintainer decision** — execution recommendation (2026-06-10): make the sandbox `SandboxedPluginContext` the canonical base (the security boundary can't widen later without breaking), express the in-process `PluginAPI` as a superset, delete the unimplemented "target" `NexusPluginContext`, and re-cut the package as `0.x` until one runtime ships the frozen shape.
 
 `packages/nexus-extension-api/src/index.ts:1-32` now honestly documents that three plugin-context shapes coexist (`NexusPluginContext` vs sandbox `plugin.ts:13` vs shell `types/plugin.ts:177`) — good interim state from `3b66d4d` — but the package still ships `1.0.0` with `publishConfig.access: public` and has zero tests, so nothing prevents further drift.
 
 **Fix:** Pick the canonical shape, add a type-level conformance test (`Satisfies`-style assertion that the sandbox runtime implements the exported contract), and re-version as `0.x` until it's true.
 
 ### V10. Storage write path holds a sync `Mutex<rusqlite::Connection>`
-- [ ] **Open** · Medium effort · benchmark first
+- [ ] **Open** · Medium effort · deliberately deferred (2026-06-10): no observed contention; profile under concurrent write load before changing the locking shape.
 
 `crates/nexus-storage/src/lib.rs:144` guards the write connection with `std::sync::Mutex`. Writes run on `spawn_blocking`, so this is correct but serializes all writers and can stall on slow filesystems (NFS/encrypted home dirs). Not a bug; a scaling ceiling.
 
 **Fix:** Benchmark under concurrent write load; if it matters, move to a dedicated writer thread + channel (the SQLite-idiomatic shape) rather than an async mutex.
 
 ### V11. `context_impl.rs` is 27% of the kernel
-- [ ] **Open** · Medium effort
+- [x] ✅ Closed (`48e3cd2`) — split to 527 LoC: `Ipc` impl + blocking-pool statics → `context_dispatch.rs`, internal tests → `context_impl_tests.rs` (both `#[path]` child modules; pure code motion, 86 kernel tests unchanged).
 
 1,110 lines (`crates/nexus-kernel/src/context_impl.rs`): context struct + the dense `ipc_call_inner` dispatch (timeout/cancel/panic-mapping) + tests in one file. It's the best-engineered code in the repo and the hardest to read.
 
 **Fix:** Extract dispatch into `dispatch.rs` and move the test module out, mirroring the #191 splits done elsewhere.
 
 ### V12. Audit log is readable by any IPC-capable plugin
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (`df89759`) — new `security.audit.read` cap (Medium risk) gates `query_audit_log`; capabilities.md rationale updated with the cross-plugin-telemetry carve-out. Reverting that single commit restores the old posture if the trade-off is judged wrong.
 
 `query_audit_log` is effectively unrestricted in the cap matrix, so any plugin holding `ipc.call` can read the full audit trail — including other plugins' denial events and credential-access records (names, not values). Information disclosure, not escalation.
 
@@ -126,22 +126,22 @@ Seven public `StorageEngine` graph methods are documented "Panics if the interna
 ## Low
 
 ### V13. Linkpreview DNS-rebinding TOCTOU (documented residual)
-- [ ] **Open** — `crates/nexus-linkpreview/src/lib.rs:166-177` validates resolved IPs, then reqwest re-resolves at connect time. The SSRF guard is otherwise exemplary (per-redirect validation, metadata-IP blocks, body cap). Pin the validated resolution into the client (`resolve()` override) to close the window.
+- [x] ✅ Closed (`7bfd66c`) — single-resolution validation + per-hop `ClientBuilder::resolve()` pinning; redirects followed manually with per-hop validation and pinning.
 
 ### V14. TLS pinning defaults off
-- [ ] **Open** — `KernelConfig::tls_pinning_enabled` defaults `false`; consider auto-enabling for known AI provider endpoints when credentials are present, or a startup warning.
+- [x] ✅ Closed (`1f76c4e`) — one-shot audit-tagged warning when a remote provider has credentials and pinning is off. The default itself stays opt-in (BL-102 posture: pinning without seeded pins fails closed).
 
 ### V15. Test-density cold spots
-- [ ] **Open** — `nexus-linkpreview` (1 test; the OG/Twitter-card HTML parsing is untested), `nexus-panic-log` (1 test), and `nexus-git`/`nexus-lsp`/`nexus-dap` sit well below workspace median. Linkpreview parsing is the highest-value target (untrusted HTML input).
+- [ ] **Open (partially closed — `7bfd66c`)** — the highest-value target (linkpreview's untrusted-HTML parsing) now has 22 characterization tests; `nexus-panic-log` and `nexus-git`/`nexus-lsp`/`nexus-dap` remain below median.
 
 ### V16. Shell chrome imports a plugin store directly
-- [ ] **Open** — `shell/src/App.tsx` imports `useWorkspaceStore` from `plugins/nexus/workspace`, the residual empty-shell violation already flagged as §S-A in [`../architecture-adherence.md`](../architecture-adherence.md). Same inversion-seam treatment as #193's `EditorHostSurface` would close it.
+- [x] ✅ Closed (2026-06-10) — the residual host→plugin imports (the chain ran App.tsx → `shell/src/workspace/{workspaceStore,ForgeSelector,RightPanelFooter}` → `plugins/nexus/workspace/workspaceStore`) inverted via the #193-style seam: new `shell/src/host/WorkspaceHostSurface.ts` (the plugin registers its root-path adapter in `activate()`), `useWorkspaceRootPath()` hook for the chrome components, `workspace.forgeRoot()` reads the seam. Locked in by `shell/tests/workspace-host-surface.test.ts` plus a new host-must-not-import-plugin-internals rule in `plugin-import-hygiene.test.ts`. See [`../architecture-adherence.md`](../architecture-adherence.md) §S-E.
 
 ### V17. ~32 `as any` casts in shell test files
-- [ ] **Open** — concentrated in `marginSuggest`/`marginSuggestTrigger` tests; replace with typed mock helpers so the strict-mode signal stays clean.
+- [x] ✅ Closed (2026-06-10) — all 19 remaining `as any` casts in `shell/src/**/*.test.ts*` removed (the count had already shrunk from ~32 since the review): `marginSuggest` (9), `cmdIRuntime` (5), `debuggerStore` (2), `marginSuggestTrigger` (1), `enrichRuntime` (1), `outline.eventDriven` (1). New helper `shell/src/testing/typedStubs.ts` provides `DeepPartial<T>` + `stubPluginAPI()` — stubs are now structurally type-checked against the real `PluginAPI` and widened in exactly one audited place. The handful of remaining conversions are typed (`as T` inside generic mock methods, one commented `as unknown as T` config-bridge in `enrichRuntime.test.ts`); zero `as any` left in shell test files.
 
 ### V18. No release process documentation
-- [ ] **Open** — no CHANGELOG.md, no RELEASE.md, Windows-only release builds (`release-windows.yml`), no checksums/signing. Fine for pre-0.2, worth writing down before external users arrive.
+- [x] ✅ Closed (`46c2018`) — `RELEASE.md` (process-as-it-exists + preflight checklist + known gaps) and `CHANGELOG.md` (Keep-a-Changelog, starting at Unreleased). Multi-platform builds/signing remain listed as gaps, not promised.
 
 ### V19. Staging-crate wiring decision (#188) still pending
 - [ ] **Open** — re-verified: `nexus-memory`/`nexus-context`/`nexus-protocol` are healthy, fully-tested libraries (not rot), now honestly framed as staging libraries (`2a65225`) with `bootstrap_coverage.rs` guarding consumer presence. The remaining work is simply the Phase-2 integration decision; keep #188 as the tracking issue.

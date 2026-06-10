@@ -28,6 +28,12 @@ lives in the git log and in `docs/0.1.2/audits/`.
   DNS-rebinding TOCTOU.
 - `scripts/` reduced to the five portable value-add helpers; the
   single-machine cargo wrappers were removed.
+- Shell chrome no longer imports workspace-plugin internals: new
+  `WorkspaceHostSurface` seam (plugin registers at activation), with the
+  host→plugin import direction now test-enforced.
+- Shell test stubs are structurally type-checked (`stubPluginAPI`);
+  zero `as any` remain in shell test files.
+- Kernel `context_impl.rs` split into focused modules (pure code motion).
 
 ### Security
 - See Added/Changed: audit-log read gating, supply-chain CI gate,
