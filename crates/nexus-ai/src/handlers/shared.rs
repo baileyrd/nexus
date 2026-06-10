@@ -110,7 +110,37 @@ nexus_plugins::define_dispatch_helpers!(pub(crate));
 
 // ─── Provider factories ─────────────────────────────────────────────────────
 
+/// V14 (`repo-review-2026-06-10.md`) — latch so the unpinned-remote
+/// warning fires once per process, not on every provider rebuild.
+static TLS_PINNING_WARNED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// One-shot operator warning when a remote provider will send API
+/// credentials over a connection without TLS certificate pinning.
+/// Pinning stays opt-in (BL-102 default-off shipping posture) because
+/// it requires seeded per-host pins — but the trade-off should be a
+/// conscious choice, not default silence.
+fn warn_if_unpinned_remote_provider(cfg: &AiConfig) {
+    let remote = matches!(cfg.provider.as_str(), "anthropic" | "openai");
+    let has_key = cfg.api_key.as_deref().is_some_and(|k| !k.is_empty());
+    if remote
+        && has_key
+        && !tls_pinning_effective(Some(cfg))
+        && !TLS_PINNING_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        tracing::warn!(
+            audit = true,
+            provider = %cfg.provider,
+            "AI provider credentials will be sent without TLS certificate \
+             pinning (standard WebPKI validation only). Pinning is opt-in \
+             (BL-102): seed pins and set tls_pinning_enabled = true in \
+             ai.toml, or export NEXUS_TLS_PINNING=1.",
+        );
+    }
+}
+
 pub(crate) fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, String> {
+    warn_if_unpinned_remote_provider(cfg);
     // P2-04: per-provider default model. cfg.model is the per-request
     // override; the per-provider field is the forge-level default
     // (ai.toml). Either falls through to the provider's built-in
