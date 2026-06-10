@@ -33,7 +33,7 @@ scripts/check_ipc_drift.sh
 
 It regenerates `packages/nexus-extension-api/src/generated/ipc/*.ts` (via ts-rs) and `crates/nexus-bootstrap/schemas/ipc/*.json` (via schemars) and fails if `git diff` is non-empty.
 
-The other `scripts/test_*.sh` and `scripts/check_*.sh` helpers are thin wrappers around `cargo test -p <crate>` / `cargo check -p <crate>` with a hard-coded WSL path — prefer running cargo directly unless reproducing CI behaviour.
+The remaining `scripts/` are repo-root-agnostic value-add helpers: `check_ipc_docs_drift.sh` (hand-maintained IPC docs vs the cap matrix), `check_token_usage.sh` (legacy CSS token audit), `download_fonts.sh`, `seed_fixtures.sh` / `seed_notes.sh` (test-forge seeding), and `migrate-shell-state.ts`. The old thin `cargo test`/`cargo check` wrapper scripts with hard-coded WSL paths were removed (V7, 2026-06-10) — run cargo directly; CI is the reproducible runner.
 
 ## Architecture
 
