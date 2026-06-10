@@ -27,7 +27,11 @@ import type {
   WorkspaceParent,
 } from './types.ts'
 import { LeafImpl } from './Leaf.ts'
-import { useWorkspaceStore as useForgeStore } from '../plugins/nexus/workspace/workspaceStore.ts'
+// V16 — `forgeRoot()` reads through the host-owned WorkspaceHostSurface
+// seam (populated by the workspace plugin's activate()) instead of
+// importing the plugin's zustand store. Keeps this host module loadable
+// when the workspace plugin is absent.
+import { getWorkspaceRootPath } from '../host/WorkspaceHostSurface.ts'
 
 type Listener = (payload?: unknown) => void
 type EmitFn = (event: string, payload?: unknown) => void
@@ -1302,8 +1306,9 @@ export const workspace = {
   },
   // OI-14 — typed accessor for the active forge root, so plugins don't
   // need to reach into the forge zustand store directly. Returns null
-  // between `workspace:closed` and the next `workspace:opened`.
+  // between `workspace:closed` and the next `workspace:opened` (and when
+  // the workspace plugin hasn't registered its host surface — V16).
   forgeRoot(): string | null {
-    return useForgeStore.getState().rootPath
+    return getWorkspaceRootPath()
   },
 }

@@ -6,7 +6,9 @@
 import { useMemo } from 'react'
 import { useEditorStore } from '../plugins/nexus/editor/editorStore'
 import { useBacklinksDataStore } from '../plugins/nexus/noteContext/backlinksDataStore'
-import { useWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
+// V16 — root path comes through the host-owned WorkspaceHostSurface seam
+// (via this hook), not the workspace plugin's store.
+import { useWorkspaceRootPath } from './useWorkspaceRootPath'
 
 const SEP_STYLE: React.CSSProperties = {
   opacity: 0.35,
@@ -19,7 +21,7 @@ export function RightPanelFooter(): JSX.Element {
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
   const backlinksCount = useBacklinksDataStore((s) => s.links.length)
   const backlinksLoading = useBacklinksDataStore((s) => s.loading)
-  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const rootPath = useWorkspaceRootPath()
   const synced = rootPath !== null
 
   const activeTab = useMemo(
