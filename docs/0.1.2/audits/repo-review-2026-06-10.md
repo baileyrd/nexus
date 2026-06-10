@@ -10,30 +10,32 @@
 
 | Severity | Open |
 |----------|------|
-| High | 2 |
-| Medium | 7 |
-| Low | 7 |
+| High | 1 (V5, partially closed) |
+| Medium | 4 (V9–V12) |
+| Low | 7 (V13–V19) |
+
+> **Status as of 2026-06-10 (same day):** V1–V4, V6–V8 executed and closed; V5 partially closed (boundary guard now CI-enforced; Windows E2E deferred pending spec fixes). Remaining open: V5 (residual), V9–V19.
 
 ---
 
 ## Tracker / doc synchronization (do these first — 30 minutes total)
 
 ### V1. The 2026-05-31 audit doc was never updated as its issues closed
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (`b21f6e0`) — all 19 items annotated with closure SHAs / open status.
 
 `expert-review-2026-05-31.md` still shows all 19 items `[ ]` open, while 15 of the corresponding issues (#184–#202) are closed on GitHub. Its own status legend mandates `[x] ✅ Closed` + commit SHA. Anyone reading the doc tree concludes CI is still missing (R1) and bindings are still drifted (R2) — both false.
 
 **Fix:** Mark R1, R2, R6–R15, R17–R19 closed with their landing SHAs (e.g. R1 → `5f46689`, R15 → `de9de82`/`da41404`). Leave R3/R4/R5/R16 open, with R3 re-scoped per V2.
 
 ### V2. Issue #186 (R3) is ~80% fixed in-tree but the issue text still describes the original full gap
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (2026-06-10) — #186 retitled to the remaining async-dispatch scope, with a verification comment documenting the landed capability-parity and error-code work.
 
 `host::invoke_command` now enforces per-handler caps via `required_caller_caps_for_args` and rejects `internal = true` handlers for sandboxed callers (`crates/nexus-plugins/src/host_fns.rs:651-690`), and distinct `HOST_ERR_*` codes per `IpcErrorKind` landed in `59d2fc9` (`host_fns.rs:36-89`). The only remaining leg is that dispatch is still the sync `dispatch()` (`host_fns.rs:702`) — no async path, no timeout, no cancellation for WASM-originated IPC.
 
 **Fix:** Re-scope #186 to "async dispatch + timeout/cancellation for the WASM bridge" so the closed capability-parity work is visible, or close it and open a narrower issue.
 
 ### V3. CONTRIBUTING.md has drifted badly from the code
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (`b21f6e0`) — hard counts replaced with links to the canonical docs.
 
 `CONTRIBUTING.md:41-43` says the bridge registers **22** commands at `lib.rs:443-466` grouped "7 kernel, 5 plugin-management, 4 persistence, 1 utility, 5 popout"; actual is **29** at `shell/src-tauri/src/lib.rs:735-765` grouped 10/5/6/3/5. `CONTRIBUTING.md:59` says the workspace is **24** crates; actual is **38**. This is the first document a new contributor reads. (#194 fixed these counts in CLAUDE.md/docs but missed CONTRIBUTING.md.)
 
@@ -44,7 +46,7 @@
 ## High
 
 ### V4. Outbound HTTP clients have no timeouts (AI providers, notifications)
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (`eb1e2fb`) — 10s connect + 300s read backstop in `build_pinned_client` (both paths); connect-only for Ollama (cold model loads); 10s/30s for webhook transports.
 
 - `nexus_security::tls::build_pinned_client` (`crates/nexus-security/src/tls.rs`) — used by the Anthropic and OpenAI providers via `crates/nexus-ai/src/http_client.rs:12` — sets **no** `.timeout()` / `.connect_timeout()`.
 - Ollama uses a bare `reqwest::Client::new()` (`crates/nexus-ai/src/ollama.rs:74`).
@@ -56,7 +58,7 @@ A hung provider endpoint stalls an AI handler until the OS TCP timeout (minutes)
 **Fix:** Set `.connect_timeout(~10s)` in `build_pinned_client` and per-request timeouts at call sites (overall `.timeout()` is wrong for streaming completions — use connect + idle-read semantics there). Give ollama/notifications the same treatment.
 
 ### V5. Built test infrastructure that never runs: shell-side Rust tests; E2E is Windows-only
-- [ ] **Open (partially closed)** · Medium effort
+- [ ] **Open (partially closed — `dbf0098`)** · remaining: Windows E2E workflow once the golden-path specs pass
 
 Corrections from execution (2026-06-10) — two of the original three sub-claims were wrong on closer inspection:
 
@@ -71,21 +73,21 @@ Corrections from execution (2026-06-10) — two of the original three sub-claims
 ## Medium
 
 ### V6. No supply-chain gate in CI
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (`4668dcd`) — `deny.toml` + `cargo-deny` CI job. Surfaced one real advisory: `serde_yml` is unsound/unmaintained (RUSTSEC-2025-0068) — migration tracked in #248.
 
 70+ external deps (`wasmtime`, `reqwest`, `rusqlite`, `tauri`, …) with no `cargo deny` / `cargo audit` job, and no Dependabot/Renovate config. For a project whose core claim is sandboxing untrusted plugins, an unpatched advisory in wasmtime is a headline risk.
 
 **Fix:** Commit a `deny.toml` (advisories + licenses + duplicate bans) and add a `cargo deny check` job to `ci.yml`.
 
 ### V7. All 29 `scripts/*.sh` are single-machine artifacts
-- [ ] **Open** · Low effort
+- [x] ✅ Closed (`deaf65b`) — 29 wrappers/session-debris deleted; `seed_notes.sh` made root-agnostic; five value-add scripts kept; CLAUDE.md updated.
 
 Every script hard-codes `/mnt/c/Users/baile/dev/Nexus` or `/home/baileyrd/.cargo/bin` (e.g. `scripts/check_all.sh:3`, `scripts/bench_build.sh:2`); only 3 of 29 set `set -euo pipefail`; shebangs are inconsistent. CLAUDE.md already tells people not to use most of them.
 
 **Fix:** Delete the thin `test_*.sh`/`check_*.sh` cargo wrappers outright (CI is now the reproducible runner), and parameterize the few value-add scripts (`check_ipc_drift.sh` is already the model: root-agnostic + strict mode) via `REPO_ROOT="$(git rev-parse --show-toplevel)"`.
 
 ### V8. Knowledge-graph lock-poison panics in storage public API (open #199 made concrete)
-- [ ] **Open** · Medium effort
+- [x] ✅ Closed (`aea9cba`) — seven read paths recover via `graph_read()` (tier-1, logged); four write sites keep tier-2 panic semantics with policy comments.
 
 Seven public `StorageEngine` graph methods are documented "Panics if the internal graph RwLock is poisoned" (`crates/nexus-storage/src/lib.rs:1509,1524,1542,1556,1570,1584,1598`). With `panic = "abort"` in the release profile (`Cargo.toml:242`), one poisoned lock aborts the whole desktop app. `context_impl.rs:145-174` already implements the tier-1 recover-and-log pattern the architecture policy (`docs/0.1.2/architecture.md:144-151`) prescribes for read paths.
 
