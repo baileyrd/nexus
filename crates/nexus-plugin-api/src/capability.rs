@@ -425,8 +425,9 @@ mod tests {
         // + 2 audio.* (BL-117) + 3 ai.runtime.* (BL-134) + 2
         // notifications.inbox.* (BL-136) + 1 protocol.host.* (BL-113
         // follow-up) + 3 P1-01/P1-07 follow-ups (security.write,
-        // security.audit.write, network.bind).
-        assert_eq!(Capability::ALL.len(), 33);
+        // security.audit.write, network.bind) + 1 security.audit.read
+        // (V12, repo-review-2026-06-10).
+        assert_eq!(Capability::ALL.len(), 34);
     }
 
     #[test]

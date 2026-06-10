@@ -253,10 +253,11 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | Command | Caps | Note |
 |---------|------|------|
 | `get_secret` | — | namespace-prefixed lookup; cross-plugin reads blocked |
-| `set_secret` / `delete_secret` | — | **AUDIT** — highest-severity row; candidate for dedicated `security.*` cap |
+| `set_secret` / `delete_secret` | `security.write` | P1-01 — keyring writes |
 | `list_secret_names` | — | names only (no values) |
-| `query_audit_log` / `metrics_snapshot` | — | read-only observability |
-| `clear_audit_log` | — | **AUDIT** — destroys audit history; candidate for `security.audit.write` |
+| `query_audit_log` | `security.audit.read` | V12 (2026-06-10) — log discloses cross-plugin telemetry; previously unrestricted |
+| `metrics_snapshot` | — | read-only observability |
+| `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
 
 ---
 
