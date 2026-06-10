@@ -4,7 +4,9 @@
 // here, so this row stays focused on forge identity + recents.
 
 import { useEffect, useRef, useState } from 'react'
-import { useWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
+// V16 — root path comes through the host-owned WorkspaceHostSurface seam
+// (via this hook), not the workspace plugin's store.
+import { useWorkspaceRootPath } from './useWorkspaceRootPath'
 import { useLauncherStore } from '../plugins/nexus/launcher/launcherState'
 import { getRegistry } from '../host/shellRegistry'
 import { Ic } from '../shell/icons'
@@ -20,7 +22,7 @@ function basename(path: string): string {
 }
 
 export function ForgeSelector(): JSX.Element {
-  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const rootPath = useWorkspaceRootPath()
   const recents = useLauncherStore((s) => s.recents)
   const [menuOpen, setMenuOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement | null>(null)

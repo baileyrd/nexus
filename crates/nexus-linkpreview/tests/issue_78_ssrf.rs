@@ -9,10 +9,16 @@
 //! body could OOM the host.
 //!
 //! These tests cover the pure SSRF guard helper exhaustively. The
-//! redirect-policy path and the streaming-cap fix are exercised by
-//! the wider integration smoke (production fetch); we don't stand up
+//! redirect path and the streaming-cap fix are exercised by the
+//! wider integration smoke (production fetch); we don't stand up
 //! an HTTP server here because the audit's primary concern is the
 //! address-class denylist, and that's a pure function.
+//!
+//! Redirects are now followed in-crate with per-hop validation, and
+//! each hop's connection is DNS-pinned to the IP that passed this
+//! guard (`ClientBuilder::resolve`), closing the rebinding TOCTOU
+//! flagged as review item V13. The pinning plumbing is unit-tested
+//! in `src/lib.rs` (`dns_pin_*` tests) without real DNS.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

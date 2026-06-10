@@ -23,7 +23,7 @@
 | `com.nexus.workflow` | 12 |
 | `com.nexus.mcp.host` | 12 |
 | `com.nexus.theme` | 11 |
-| `com.nexus.ai.runtime` | 9 |
+| `com.nexus.ai.runtime` | 12 |
 | `com.nexus.skills` | 8 |
 | `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
@@ -35,7 +35,7 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 2 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **332** |
+| **Total** | **335** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -226,7 +226,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.ai.runtime (9)
+## com.nexus.ai.runtime (12)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -234,6 +234,8 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `cancel` | `ai.runtime.control` | signals CancelGate |
 | `pause` / `resume` | `ai.runtime.control` | unsupported for Session tasks at v0.1.2; cap reserved |
 | `get` / `list` / `events` / `pool_stats` / `wait_for` | `ai.runtime.observe` | read-only observation |
+| `register_trigger` / `unregister_trigger` | `ai.runtime.control` | BL-134 Phase 7 — ambient trigger management |
+| `list_triggers` | `ai.runtime.observe` | BL-134 Phase 7 — read-only trigger listing |
 
 ---
 
@@ -253,10 +255,11 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | Command | Caps | Note |
 |---------|------|------|
 | `get_secret` | — | namespace-prefixed lookup; cross-plugin reads blocked |
-| `set_secret` / `delete_secret` | — | **AUDIT** — highest-severity row; candidate for dedicated `security.*` cap |
+| `set_secret` / `delete_secret` | `security.write` | P1-01 — keyring writes |
 | `list_secret_names` | — | names only (no values) |
-| `query_audit_log` / `metrics_snapshot` | — | read-only observability |
-| `clear_audit_log` | — | **AUDIT** — destroys audit history; candidate for `security.audit.write` |
+| `query_audit_log` | `security.audit.read` | V12 (2026-06-10) — log discloses cross-plugin telemetry; previously unrestricted |
+| `metrics_snapshot` | — | read-only observability |
+| `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
 
 ---
 

@@ -71,8 +71,7 @@ function emptySnapshot(relpath: string, revision = 0): EditorSnapshot {
 
 interface CapturedHandler {
   topic: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: (topic: string, payload: any) => void
+  handler: (topic: string, payload: unknown) => void
 }
 
 interface MockCtx {
@@ -102,8 +101,9 @@ function makeMockApi(initialOpenSnapshot: EditorSnapshot): MockCtx {
     ): Promise<() => void> {
       captured.push({
         topic: topicPrefix,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        handler: handler as any,
+        // Erase the subscription's payload generic for storage; the test
+        // replays concrete payloads through it.
+        handler: handler as (topic: string, payload: unknown) => void,
       })
       return () => {}
     },

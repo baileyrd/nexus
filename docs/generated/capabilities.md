@@ -42,6 +42,7 @@ mirror.
 | `protocol.host.contribute` | `ProtocolHostContribute` | **High** |
 | `security.write` | `SecurityWrite` | **High** |
 | `security.audit.write` | `SecurityAuditWrite` | **High** |
+| `security.audit.read` | `SecurityAuditRead` | Medium |
 | `network.bind` | `NetworkBind` | **High** |
 
-_Total: 33 capabilities._
+_Total: 34 capabilities._

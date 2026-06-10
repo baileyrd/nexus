@@ -941,7 +941,8 @@ unrestricted = "read-only list of keyring entry names (no values returned)"
 [[handler]]
 plugin = "com.nexus.security"
 command = "query_audit_log"
-unrestricted = "read-only audit log query (sibling of clear_audit_log which is gated by security.audit.write — reads return metadata about what happened; truncation is the dangerous direction)"
+caps = ["security.audit.read"]
+note = "V12 (repo-review-2026-06-10) — previously unrestricted. The log discloses cross-plugin metadata (which caps other plugins were denied, which credential names were accessed), so reads are reconnaissance surface even though truncation (security.audit.write) remains the dangerous direction. Core-trust frontends hold ALL caps; community plugins now need an explicit grant."
 
 [[handler]]
 plugin = "com.nexus.security"

@@ -37,6 +37,8 @@ Still open:
 | File | Line | Value | Suggested setting key |
 |------|------|-------|----------------------|
 | `crates/nexus-ai/src/local_embedding.rs` | 44 | `"bge-small-en-v1.5-int8"` | already env-overridable; surface in settings UI |
+| `crates/nexus-security/src/tls.rs` | 182 | `10s` connect / `300s` read outbound timeouts (`OUTBOUND_*_TIMEOUT`, V4 2026-06-10) | `net.connect_timeout_secs` / `net.read_timeout_secs` |
+| `crates/nexus-notifications/src/lib.rs` | 240 | `10s` connect / `30s` total webhook timeouts (`WEBHOOK_*_TIMEOUT`, V4 2026-06-10) | `notifications.webhook_timeout_secs` |
 
 > `AiConfig.model`/`max_tokens`/`context_window` are already user-tunable in `ai.toml`; the per-provider defaults above were promoted in P2-04.
 

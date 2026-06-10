@@ -40,6 +40,7 @@ The kernel grants capabilities at IPC dispatch. A plugin's `manifest.capabilitie
 | `protocol.host.contribute` | `ProtocolHostContribute` | **High** | The DAP/LSP/MCP-host/ACP `register_*` and `unregister_*` lifecycle verbs — invoker-only via `TrustLevel::Core => Capability::ALL`. Blocks community plugins from forging contributions records. |
 | `security.write` | `SecurityWrite` | **High** | `com.nexus.security::{set_secret, delete_secret}` — keyring writes |
 | `security.audit.write` | `SecurityAuditWrite` | **High** | `com.nexus.security::clear_audit_log` — log truncation |
+| `security.audit.read` | `SecurityAuditRead` | Medium | `com.nexus.security::query_audit_log` — read-only audit-log access (V12, 2026-06-10; previously unrestricted) |
 | `network.bind` | `NetworkBind` | **High** | `com.nexus.collab::start_relay` — opens a 0.0.0.0 listener so other peers can join the in-process collaboration relay |
 
 ## Risk classification
@@ -47,7 +48,7 @@ The kernel grants capabilities at IPC dispatch. A plugin's `manifest.capabilitie
 `crates/nexus-security/src/risk.rs::risk_level(Capability) -> RiskLevel`.
 
 - **High** (orange/red in install-time UI): `fs.{read,write}.external`, `net.http`, `process.spawn`, `ipc.call`, `ai.config.write`, `audio.record`, `protocol.host.contribute`, `security.write`, `security.audit.write`, `network.bind`.
-- **Medium**: `fs.write`, `net.http.localhost`, `db.{query,write}`, `events.publish`, `ai.chat`, `ai.activity.write`, `ai.tools.{write,mcp}`, `ai.runtime.{submit,control}`.
+- **Medium**: `fs.write`, `net.http.localhost`, `db.{query,write}`, `events.publish`, `ai.chat`, `ai.activity.write`, `ai.tools.{write,mcp}`, `ai.runtime.{submit,control}`, `security.audit.read`.
 - **Low**: `fs.read`, `kv.{read,write}`, `ui.notify`, `ai.{index, session.read, session.write}`, `ai.runtime.observe`, `audio.synthesize`, `notifications.inbox.{read,write}`.
 
 ## Design rationale: granularity vs aggregation
@@ -71,17 +72,18 @@ A new handler that shares a sensitivity class with an existing singleton should 
 
 ### Read/write asymmetry: reads stay unrestricted when they don't leak secrets
 
-Three handler pairs have a gated write and an `unrestricted` read:
+Two handler pairs have a gated write and an `unrestricted` read:
 
 | Pair | Write gate | Read classification | Why reads are unrestricted |
 |------|-----------|---------------------|-----------------------------|
 | `ai::set_config` / `ai::config` | `ai.config.write` | `unrestricted` | `ai::config` returns the active provider config **with secrets stripped** — the settings UI needs read access at every load. Reading the config doesn't leak credentials. |
 | `ai::activity_clear` / `ai::activity_list` | `ai.activity.write` | `unrestricted` | The activity log records *what* the AI was asked to do, not the contents — entries are forge-local and don't expose secrets. The settings observability tab needs read access; gating reads would force a cap prompt on every settings open. |
-| `security::clear_audit_log` / `security::query_audit_log` | `security.audit.write` | `unrestricted` | The audit log is the operator's record of cap-gated calls and denials. Reading it is exactly what an operator needs to triage; gating reads would defeat the purpose. Truncation is the dangerous direction. |
 
-The pattern: **writes are gated by sensitivity; reads are gated only when the read itself returns sensitive material.** `ai.session.read` / `notifications.inbox.read` exist because session contents and inbox payloads ARE the sensitive material; activity and audit logs index metadata about other operations, not the operations' payloads.
+The pattern: **writes are gated by sensitivity; reads are gated only when the read itself returns sensitive material.** `ai.session.read` / `notifications.inbox.read` exist because session contents and inbox payloads ARE the sensitive material; the activity log indexes metadata about other operations, not the operations' payloads.
 
 A new pair should follow the same test: if a read returns plaintext secrets / model output / user input, it earns a `.read` cap. If it returns metadata about what happened, it stays `unrestricted` with a `sibling of <write_cap>` note in `cap_matrix.toml`.
+
+**Exception — cross-plugin security telemetry (V12, 2026-06-10).** `security::query_audit_log` was originally `unrestricted` under the metadata test, but its metadata is *about other plugins' security posture*: which capabilities each plugin was denied, which credential names were accessed, when path-traversal attempts were rejected. For a hostile plugin that is reconnaissance, not triage — so it now sits behind `security.audit.read` (Medium). Operator-facing frontends (CLI/TUI/shell) are unaffected: they run at `TrustLevel::Core`, which carries `Capability::ALL`. Community plugins that legitimately need audit access request the cap through the standard grant flow.
 
 ## How a plugin gets a capability
 

@@ -12,7 +12,7 @@
 | **Capabilities gate everything** | ✅ | All ~280 IPC handlers classified in `cap_matrix.toml`. `cap_matrix_complete` test runs unconditionally. |
 | **Single-target shell** | ✅ | Legacy `app/` + `crates/nexus-app/` retired; only benign references remain (docs, tests that enforce non-existence, fixture content). |
 | **Thin Tauri bridge** | ⚠️ | 29 commands (up from 25 documented earlier — see correction §S-B). One borderline-feature command (`notify_desktop`) is a deliberate exception. |
-| **Empty-by-default chrome** | ⚠️ | App.tsx mounts only slot/workspace containers, BUT imports a state hook from `plugins/nexus/workspace` directly — dependency-inversion smell. |
+| **Empty-by-default chrome** | ✅ | App.tsx mounts only slot/workspace containers. The residual host→`plugins/nexus/workspace` store imports were inverted via `WorkspaceHostSurface` and the direction is now test-enforced (V16, 2026-06-10 — see §S-E). |
 | **Iframe sandbox + pluginId boundary** | (not deeply verified) | Sandbox modules exist under `shell/src/host/sandbox/`; F-8.1.2 `assertValidPluginId` shipped per `docs/PRDs/IMPLEMENTATION_STATUS.md` archive. A focused security audit pass would be the next layer. |
 
 ---
@@ -133,7 +133,7 @@ Dynamic topics (computed at runtime) are reported separately but don't fail the 
 Tests:
 - `crates/nexus-bootstrap/tests/plugin_contract_purity.rs` — verifies the bootstrap doesn't accidentally re-introduce legacy `nexus-app` contracts
 - `shell/tests/plugin-import-hygiene.test.ts` — verifies shell plugins don't import host internals (mentions `notify_desktop` as one of the few approved bridge commands)
-- `shell/src-tauri/tests/tauri_command_boundary.rs` — referenced from the existing audit; tests the Tauri command boundary
+- `crates/nexus-bootstrap/tests/tauri_command_boundary.rs` — pins the registered Tauri command set and asserts every declared `#[tauri::command]` is registered. Lives in bootstrap rather than `shell/src-tauri/tests/` so `cargo test --workspace` actually runs it on CI — `nexus-shell` is outside the cargo workspace and no Linux CI job compiles it (V5, 2026-06-10).
 
 ### S-A. Single-target invariant
 
@@ -203,17 +203,15 @@ No subsystem crates. ✅
 
 External tauri-plugin-* deps are limited to: `fs`, `dialog`, `deep-link`, `window-state`, `global-shortcut`, `notification`. Each is a documented Tauri capability the bridge wraps.
 
-### S-E. Empty-by-default chrome — **violation flagged**
+### S-E. Empty-by-default chrome — **violation closed (V16, 2026-06-10)**
 
-`shell/src/shell/App.tsx:8`:
+Originally flagged: `App.tsx` imported `useWorkspaceStore` from `plugins/nexus/workspace/workspaceStore`, coupling the shell chrome to a specific plugin's store. AA-04/P3-03 fixed the *direct* App.tsx read (it consumes the `nexus.workspace.rootPath` context key), but App.tsx still depended on the plugin store **transitively** through host code under `shell/src/workspace/`: `workspaceStore.ts:30` (`forgeRoot()`), `ForgeSelector.tsx:7`, and `RightPanelFooter.tsx:9` all imported the plugin's store directly. That residue was re-flagged as V16 in [`audits/repo-review-2026-06-10.md`](audits/repo-review-2026-06-10.md).
 
-```typescript
-import { useWorkspaceStore as useNexusWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
-```
+**Closed (V16, 2026-06-10)** with the same inversion-seam treatment as #193's `EditorHostSurface`:
 
-The root `App` component reaches **into a specific plugin's store** to read `rootPath`. This couples the shell chrome to the `nexus.workspace` plugin's existence — if that plugin were uninstalled, the shell wouldn't compile.
-
-**Verdict:** small dependency-inversion violation of the "shell starts empty" principle. The fix: expose `rootPath` via a shell-owned slot/store that `nexus.workspace` *publishes to*, rather than the shell *importing from* the plugin.
+- `shell/src/host/WorkspaceHostSurface.ts` — host-owned seam (`getRootPath()` / `subscribeRootPath()`). The workspace plugin registers an adapter over its own store at the top of `activate()`; absent-surface reads return `null` ("no forge open") and subscriptions bind lazily when the surface registers.
+- `shell/src/workspace/useWorkspaceRootPath.ts` — `useSyncExternalStore` hook over the seam for `ForgeSelector` / `RightPanelFooter`; `workspace.forgeRoot()` reads the seam snapshot.
+- Enforced by two tests: `shell/tests/workspace-host-surface.test.ts` (seam behaviour, no workspace-plugin import) and a new rule in `shell/tests/plugin-import-hygiene.test.ts` — production host/chrome code must not import `plugins/{core,nexus,community}/` internals (allowlist holds the remaining known host→plugin imports: `main.tsx` composition root, `communityPluginLoader.ts`, `WorkspaceRenderer.tsx`/`RightPanelFooter.tsx` editor-store reads, `ForgeSelector.tsx` launcher recents — each annotated with its drain path).
 
 Everything else in App.tsx is fine — it mounts `<Workspace>` (leaf-tree container), `<SlotSurface>` (overlay/status/activity slot containers), `<ErrorBoundary>`. Real UI content comes from contributions registered via `ExtensionHost`.
 

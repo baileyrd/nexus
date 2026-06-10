@@ -42,6 +42,8 @@ test('CAPABILITY_INFO covers every Capability variant', () => {
     'ProtocolHostContribute',
     // P1-01 keyring + audit-log mutation, P1-07 network bind
     'SecurityWrite', 'SecurityAuditWrite', 'NetworkBind',
+    // V12 (2026-06-10) read-only audit-log access
+    'SecurityAuditRead',
   ]
   for (const variant of expected) {
     assert.ok(

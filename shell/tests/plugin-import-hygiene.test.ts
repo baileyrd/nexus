@@ -100,6 +100,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // host/communityPluginLoader
   'shell/src/plugins/nexus/processes/index.ts',                    // host/communityPluginLoader
   'shell/src/plugins/nexus/viewBuilder/ViewBuilderView.tsx',       // BL-067: introspection tool — host/layoutSnapshot is exactly the surface this panel exists to surface; no @nexus/extension-api equivalent, by design (the builder reads the shell, it doesn't run inside its sandbox)
+  'shell/src/plugins/nexus/workspace/index.ts',                    // V16 inversion seam — registerWorkspaceHostSurface (host/WorkspaceHostSurface) lets the workspace plugin REGISTER its root-path surface with the host (plugin→host direction, same shape as the editor seam above). By design; cannot move to @nexus/extension-api without re-coupling the host to the plugin.
 ])
 
 /**
@@ -115,16 +116,42 @@ const REGISTRY_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/viewBuilder/ViewBuilderView.tsx',       // BL-067: introspection tool — reads SlotRegistry to surface chrome contributions in its inventory pane. Same rationale as the HOST_INTERNALS allowlist entry.
 ])
 
+/**
+ * V16 — the INVERSE direction: host/chrome code (everything under
+ * `shell/src/` EXCEPT `src/plugins/`) must not import plugin internals
+ * (`plugins/{core,nexus,community}/...`). The shell starts empty; plugins
+ * register their surfaces with the host (EditorHostSurface,
+ * WorkspaceHostSurface), never the other way round. `plugins/catalog` is
+ * exempt by the regex — it IS the composition root the host loads.
+ *
+ * Each entry should eventually be replaced by a host-owned seam the
+ * plugin registers into (the WorkspaceHostSurface treatment, V16) or a
+ * context key the plugin publishes (the AA-04/P3-03 treatment).
+ */
+const HOST_TO_PLUGIN_ALLOWLIST: ReadonlySet<string> = new Set([
+  'shell/src/main.tsx',                                            // composition root — runInstallTimeConsent (capabilityPrompt) runs BEFORE the ExtensionHost exists, so there is no plugin-registered seam to call through yet
+  'shell/src/host/communityPluginLoader.ts',                       // pluginsMgmt/capabilityInfo — parseManifestCapabilities is pure manifest parsing that should live host-side; extract it from the pluginsMgmt plugin to drain this entry
+  'shell/src/workspace/WorkspaceRenderer.tsx',                     // editor/editorStore — dirty-tab close guard reads isDirty; needs an EditorHostSurface extension (isDirty by relpath) to drain
+  'shell/src/workspace/RightPanelFooter.tsx',                      // editor/editorStore + noteContext/backlinksDataStore — per-document stats footer; needs EditorHostSurface content stats + a backlinks seam to drain
+  'shell/src/workspace/ForgeSelector.tsx',                         // launcher/launcherState — recents list for the forge-switcher menu; needs a launcher-owned seam (or recents moving host-side) to drain
+])
+
 // `from '@tauri-apps/...'` — covers default, named, and type-only imports.
 const TAURI_RE = /from\s+['"]@tauri-apps\//
 // `from '../../host/...'`, `from '../../../host/...'`, etc. — any number of `../`.
 const HOST_RE = /from\s+['"](?:\.\.\/)+host\/|from\s+['"]@\/host\//
 const REGISTRY_RE = /from\s+['"](?:\.\.\/)+registry\/|from\s+['"]@\/registry\//
 
+// V16 — `from '../plugins/nexus/...'`, `from './plugins/core/...'`,
+// `from '@/plugins/community/...'`, etc. Deliberately does NOT match
+// `plugins/catalog` (the composition root).
+const PLUGIN_INTERNALS_RE = /from\s+['"][^'"]*\bplugins\/(?:core|nexus|community)\//
+
 /** Bare-specifier side-effect imports of the same surfaces (e.g. `import '@tauri-apps/...'`). */
 const TAURI_SIDE_EFFECT_RE = /import\s+['"]@tauri-apps\//
 const HOST_SIDE_EFFECT_RE = /import\s+['"](?:\.\.\/)+host\/|import\s+['"]@\/host\//
 const REGISTRY_SIDE_EFFECT_RE = /import\s+['"](?:\.\.\/)+registry\/|import\s+['"]@\/registry\//
+const PLUGIN_INTERNALS_SIDE_EFFECT_RE = /import\s+['"][^'"]*\bplugins\/(?:core|nexus|community)\//
 
 /** Recursively yield .ts/.tsx files under `dir`, skipping dotfiles and node_modules. */
 function* walk(dir: string): Generator<string> {
@@ -159,10 +186,15 @@ interface Rule {
   readonly allowlist: ReadonlySet<string>
 }
 
-function findViolations(rule: Rule): string[] {
+function findViolations(
+  rule: Rule,
+  root: string = PLUGINS_ROOT,
+  skip?: (rel: string) => boolean,
+): string[] {
   const out: string[] = []
-  for (const file of walk(PLUGINS_ROOT)) {
+  for (const file of walk(root)) {
     const rel = toRepoRel(file)
+    if (skip?.(rel)) continue
     if (rule.allowlist.has(rel)) continue
     const src = readFileSync(file, 'utf8')
     if (rule.importRe.test(src) || rule.sideEffectRe.test(src)) {
@@ -212,6 +244,38 @@ test('no plugin reaches into shell host/ internals outside the allowlist', () =>
     0,
     `Plugin reached into shell/src/host/* internals. Plugins must talk to the
 kernel through @nexus/extension-api, not by importing host modules directly.
+
+Violators:
+${violations.join('\n')}
+${HELP_FOOTER}`,
+  )
+})
+
+test('host/chrome code does not import plugin internals outside the allowlist (V16)', () => {
+  const SRC_ROOT = join(SHELL_DIR, 'src')
+  const violations = findViolations(
+    {
+      importRe: PLUGIN_INTERNALS_RE,
+      sideEffectRe: PLUGIN_INTERNALS_SIDE_EFFECT_RE,
+      allowlist: HOST_TO_PLUGIN_ALLOWLIST,
+    },
+    SRC_ROOT,
+    (rel) =>
+      // Plugins importing each other is governed by the rules above, not
+      // this one. Colocated host *tests* may exercise plugin internals on
+      // purpose (PluginAPI.editor.test.ts validates the projection helpers
+      // against the REAL editor store) — production host code may not.
+      rel.startsWith('shell/src/plugins/') ||
+      rel.endsWith('.test.ts') ||
+      rel.endsWith('.test.tsx'),
+  )
+  assert.equal(
+    violations.length,
+    0,
+    `Host/chrome code imported plugin internals. The shell starts empty:
+plugins register their surfaces with the host (see host/EditorHostSurface.ts
+and host/WorkspaceHostSurface.ts) or publish context keys — the host never
+imports from shell/src/plugins/{core,nexus,community}/.
 
 Violators:
 ${violations.join('\n')}

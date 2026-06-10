@@ -71,7 +71,14 @@ impl OllamaProvider {
         fim_temperature: Option<f32>,
     ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            // V4 (`repo-review-2026-06-10.md`): connect timeout only.
+            // No read timeout here — a cold Ollama model load holds the
+            // response silent for however long the weights take to page
+            // in, which legitimately exceeds any reasonable backstop.
+            client: reqwest::Client::builder()
+                .connect_timeout(nexus_security::tls::OUTBOUND_CONNECT_TIMEOUT)
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
             chat_model: chat_model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
             embedding_model: embedding_model.unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),

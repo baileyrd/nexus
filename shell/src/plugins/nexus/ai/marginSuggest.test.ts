@@ -10,6 +10,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import type { PluginAPI } from '../../../types/plugin.ts'
+import { stubPluginAPI } from '../../../testing/typedStubs.ts'
 import {
   _resetForTests,
   buildSuggestionPrompt,
@@ -31,17 +33,20 @@ function reset(): void {
   useMarginSuggestStore.getState().clear()
 }
 
-function stubApi(invokeImpl: (call: InvokeCall) => Promise<unknown>) {
+function stubApi(invokeImpl: (call: InvokeCall) => Promise<unknown>): {
+  api: PluginAPI
+  calls: InvokeCall[]
+} {
   const calls: InvokeCall[] = []
   return {
-    api: {
+    api: stubPluginAPI({
       kernel: {
-        invoke: async (
+        invoke: async <T>(
           pluginId: string,
           commandId: string,
-          args: unknown,
+          args?: unknown,
           timeoutMs?: number,
-        ) => {
+        ): Promise<T> => {
           const call: InvokeCall = {
             pluginId,
             commandId,
@@ -49,10 +54,12 @@ function stubApi(invokeImpl: (call: InvokeCall) => Promise<unknown>) {
             timeoutMs,
           }
           calls.push(call)
-          return invokeImpl(call)
+          // T is the production call site's expectation; the test's
+          // invokeImpl owns the payload shape.
+          return (await invokeImpl(call)) as T
         },
       },
-    },
+    }),
     calls,
   }
 }
@@ -216,8 +223,7 @@ test('parseSuggestionsResponse: line is 1-based and tracks newlines', () => {
 test('requestPass: invokes com.nexus.ai::stream_chat with margin- session id', async () => {
   reset()
   const { api, calls } = stubApi(async () => ({ text: '[]' }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await requestPass(api as any, 'note.md', 'hello world')
+  await requestPass(api, 'note.md', 'hello world')
   assert.equal(calls.length, 1)
   assert.equal(calls[0].pluginId, 'com.nexus.ai')
   assert.equal(calls[0].commandId, 'stream_chat')
@@ -239,8 +245,7 @@ test('requestPass: parses success and writes the store', async () => {
     { kind: 'tighten', original: 'quick brown', replacement: 'fast', message: 'shorter' },
   ])
   const { api } = stubApi(async () => ({ text: json }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await requestPass(api as any, 'note.md', doc)
+  const result = await requestPass(api, 'note.md', doc)
   assert.equal(result.length, 1)
   const s = useMarginSuggestStore.getState()
   assert.equal(s.status, 'done')
@@ -256,8 +261,7 @@ test('requestPass: writes setError on transport failure and resolves []', async 
   const { api } = stubApi(async () => {
     throw new Error('Transport: kernel down')
   })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await requestPass(api as any, 'note.md', 'hello')
+  const result = await requestPass(api, 'note.md', 'hello')
   assert.deepEqual(result, [], 'engine swallows errors so background callers can fire-and-forget')
   const s = useMarginSuggestStore.getState()
   assert.equal(s.status, 'error')
@@ -268,14 +272,11 @@ test('requestPass: writes setError on transport failure and resolves []', async 
 test('requestPass: bumps generation per call', async () => {
   reset()
   const { api } = stubApi(async () => ({ text: '[]' }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await requestPass(api as any, 'note.md', 'a')
+  await requestPass(api, 'note.md', 'a')
   assert.equal(useMarginSuggestStore.getState().currentGeneration, 1)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await requestPass(api as any, 'note.md', 'b')
+  await requestPass(api, 'note.md', 'b')
   assert.equal(useMarginSuggestStore.getState().currentGeneration, 2)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await requestPass(api as any, 'note.md', 'c')
+  await requestPass(api, 'note.md', 'c')
   assert.equal(useMarginSuggestStore.getState().currentGeneration, 3)
 })
 
@@ -296,13 +297,11 @@ test('requestPass: stale result from a superseded pass is dropped by the store',
   }
   const { api } = stubApi(stubInvoke)
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const firstP = requestPass(api as any, 'note.md', 'foo bar')
+  const firstP = requestPass(api, 'note.md', 'foo bar')
   // Detach the resolver so the second pass takes the immediate path.
   const captured = resolveFirst
   resolveFirst = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await requestPass(api as any, 'note.md', 'foo bar')
+  await requestPass(api, 'note.md', 'foo bar')
   // Now resolve the first pass with a payload that, were it not
   // stale, WOULD populate suggestions.
   captured!({
@@ -321,8 +320,7 @@ test('requestPass: stale result from a superseded pass is dropped by the store',
 test('requestPass: missing/invalid result.text yields zero suggestions but status=done', async () => {
   reset()
   const { api } = stubApi(async () => ({})) // no text field at all
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await requestPass(api as any, 'note.md', 'doc body')
+  const result = await requestPass(api, 'note.md', 'doc body')
   assert.deepEqual(result, [])
   const s = useMarginSuggestStore.getState()
   assert.equal(s.status, 'done', 'empty/bad text is not a transport error — it just means zero suggestions')

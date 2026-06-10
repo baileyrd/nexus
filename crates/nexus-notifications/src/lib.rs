@@ -235,6 +235,27 @@ impl Transport for DesktopTransport {
     }
 }
 
+/// TCP connect deadline for webhook transports (V4,
+/// `repo-review-2026-06-10.md`).
+const WEBHOOK_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Overall request deadline for webhook transports. Webhook posts are
+/// small fire-and-forget JSON bodies, so unlike the streaming AI
+/// clients a total timeout is appropriate here.
+const WEBHOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Build the lazy blocking client for webhook transports with connect
+/// and overall timeouts. Falls back to a stock client if the builder
+/// fails (it has no fallible inputs in practice) so `send` never
+/// loses its transport.
+fn blocking_webhook_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(WEBHOOK_CONNECT_TIMEOUT)
+        .timeout(WEBHOOK_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
+
 /// Discord webhook transport. Posts `{ "username": "Nexus", "content":
 /// "<title or default>\n<message>" }` to the configured URL with
 /// `Content-Type: application/json`. The 2000-char content limit is
@@ -285,7 +306,7 @@ impl Transport for DiscordWebhook {
         );
         let resp = self
             .client
-            .get_or_init(reqwest::blocking::Client::new)
+            .get_or_init(blocking_webhook_client)
             .post(&self.webhook_url)
             .json(&serde_json::json!({ "username": "Nexus", "content": body }))
             .send()
@@ -399,7 +420,7 @@ impl Transport for TelegramBot {
         for chunk in Self::split_at_byte_limit(&body, self.max_bytes) {
             let resp = self
                 .client
-                .get_or_init(reqwest::blocking::Client::new)
+                .get_or_init(blocking_webhook_client)
                 .post(&url)
                 .json(&serde_json::json!({
                     "chat_id": self.chat_id,

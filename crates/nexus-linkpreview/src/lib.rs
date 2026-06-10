@@ -16,7 +16,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::io::Read;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
 use regex_lite::Regex;
@@ -30,10 +30,11 @@ use ts_rs::TS;
 
 pub mod core_plugin;
 
-/// Request timeout — covers DNS + connect + read. Kept short because
-/// the caller is a user action (hovering/opening a canvas) and we
-/// prefer a fast fallback card over a laggy UI waiting on a slow
-/// host.
+/// Per-hop request timeout — covers DNS + connect + read for one
+/// redirect hop (redirects are followed in-crate, see V13). Kept
+/// short because the caller is a user action (hovering/opening a
+/// canvas) and we prefer a fast fallback card over a laggy UI
+/// waiting on a slow host.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Hard cap on the HTML body we parse. Anything larger is almost
 /// certainly not a plain web page (big images, PDFs, zip files) and
@@ -43,6 +44,9 @@ const MAX_BODY_BYTES: usize = 512 * 1024;
 /// of a bot-challenge page.
 const USER_AGENT: &str =
     "Mozilla/5.0 (Nexus Canvas) AppleWebKit/537.36 (KHTML, like Gecko) Nexus/0.1";
+/// Redirect-hop ceiling. Matches the cap the old reqwest redirect
+/// policy enforced before redirects moved in-crate (see V13).
+const MAX_REDIRECTS: usize = 5;
 
 /// Structured metadata extracted from a web page. Every field is
 /// optional — the shell renders whatever it gets and falls back to
@@ -143,14 +147,13 @@ pub fn is_blocked_address(ip: IpAddr) -> bool {
 
 /// Resolve `host` and `port` to socket addresses, returning an error
 /// if any resolved address is non-public per [`is_blocked_address`].
-/// Returns the first allowed address so the caller can record it.
+/// Returns the first allowed address so the caller can pin it.
 fn resolve_public_address(host: &str, port: u16) -> Result<IpAddr, FetchError> {
-    let addrs = (host, port)
+    let addrs: Vec<SocketAddr> = (host, port)
         .to_socket_addrs()
-        .map_err(|e| FetchError::Request(format!("DNS resolution failed for {host}: {e}")))?;
-    let mut found_any = false;
-    for addr in addrs {
-        found_any = true;
+        .map_err(|e| FetchError::Request(format!("DNS resolution failed for {host}: {e}")))?
+        .collect();
+    for addr in &addrs {
         let ip = addr.ip();
         if is_blocked_address(ip) {
             return Err(FetchError::InvalidUrl(format!(
@@ -158,28 +161,22 @@ fn resolve_public_address(host: &str, port: u16) -> Result<IpAddr, FetchError> {
             )));
         }
     }
-    if !found_any {
-        return Err(FetchError::Request(format!(
-            "host {host} resolved to no addresses"
-        )));
-    }
-    // We re-resolve at the redirect-policy callback for each redirect
-    // hop, so returning the first IP here is informational only — the
-    // actual outbound connection re-resolves through reqwest. There's
-    // a residual TOCTOU between this check and the connection
-    // (DNS rebinding); locking reqwest to a specific IP is a deeper
-    // change and is documented as residual risk on issue #78.
-    (host, port)
-        .to_socket_addrs()
-        .ok()
-        .and_then(|mut iter| iter.next())
-        .map(|s| s.ip())
+    // The returned IP comes from the *same* resolution that was just
+    // validated — never a second lookup — and the caller pins it into
+    // the per-hop reqwest client via `ClientBuilder::resolve`, so the
+    // socket connects to exactly this address. That closes the DNS-
+    // rebinding TOCTOU that used to live between this check and
+    // reqwest's own connect-time re-resolution (issue #78, review
+    // item V13).
+    addrs
+        .first()
+        .map(SocketAddr::ip)
         .ok_or_else(|| FetchError::Request(format!("host {host} resolved to no addresses")))
 }
 
 /// Validate that `url` (already known to be http/https) doesn't
-/// resolve to a non-public address. Returns the resolved IP for
-/// audit/logging purposes.
+/// resolve to a non-public address. Returns the validated IP so the
+/// caller can pin the connection to it (see [`dns_pin`], V13).
 fn validate_url_target(url: &reqwest::Url) -> Result<IpAddr, FetchError> {
     let host = url
         .host_str()
@@ -200,6 +197,65 @@ fn validate_url_target(url: &reqwest::Url) -> Result<IpAddr, FetchError> {
     resolve_public_address(host, port)
 }
 
+/// Compute the DNS pin for `url` given the IP that just passed the
+/// SSRF guard: the `(domain, socket_addr)` pair to feed into
+/// `ClientBuilder::resolve` so reqwest connects to exactly the
+/// validated address instead of re-resolving (DNS rebinding, V13).
+///
+/// Returns `None` when the URL's host is an IP literal — there's no
+/// DNS lookup to rebind, so no pin is needed. Pure helper so the
+/// plumbing can be unit-tested without real DNS.
+fn dns_pin(url: &reqwest::Url, validated_ip: IpAddr) -> Option<(String, SocketAddr)> {
+    let host = url.host_str()?;
+    // IPv6 literals arrive bracketed (`[::1]`) from `host_str`; strip
+    // before the literal-IP check so they're recognised as literals.
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    if bare.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    let port = url
+        .port_or_known_default()
+        .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+    Some((host.to_string(), SocketAddr::new(validated_ip, port)))
+}
+
+/// Build a one-hop client: redirects disabled (the caller follows
+/// them manually with per-hop validation + pinning, V13) and, for
+/// domain hosts, DNS pinned to the validated IP.
+fn build_pinned_client(
+    url: &reqwest::Url,
+    validated_ip: IpAddr,
+) -> Result<reqwest::blocking::Client, FetchError> {
+    let mut builder = reqwest::blocking::Client::builder()
+        .timeout(FETCH_TIMEOUT)
+        .user_agent(USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some((domain, addr)) = dns_pin(url, validated_ip) {
+        builder = builder.resolve(&domain, addr);
+    }
+    builder
+        .build()
+        .map_err(|e| FetchError::Request(e.to_string()))
+}
+
+/// The redirect statuses reqwest's default policy follows. We follow
+/// the same set so moving redirects in-crate (V13) didn't change
+/// which responses count as "a redirect" vs "the final answer".
+fn is_followable_redirect(status: reqwest::StatusCode) -> bool {
+    use reqwest::StatusCode as S;
+    matches!(
+        status,
+        S::MOVED_PERMANENTLY
+            | S::FOUND
+            | S::SEE_OTHER
+            | S::TEMPORARY_REDIRECT
+            | S::PERMANENT_REDIRECT
+    )
+}
+
 /// Fetch `url`, parse metadata, return a [`LinkPreview`]. Blocks
 /// the calling thread — run from a kernel handler thread rather
 /// than from async contexts.
@@ -217,35 +273,56 @@ pub fn fetch_blocking(url: &str) -> Result<LinkPreview, FetchError> {
         return Err(FetchError::InvalidUrl(url.to_string()));
     }
 
-    // SSRF guard #1 — initial URL. Resolve the hostname and refuse
-    // anything that lands on a loopback / link-local / private /
-    // metadata IP. See `is_blocked_address`.
-    let _ = validate_url_target(&parsed)?;
-
-    // SSRF guard #2 — every redirect hop. Reqwest follows up to 10
-    // redirects by default; without this check, the initial URL
-    // could be public but a redirect could be `http://169.254.169.254/...`
-    // (AWS metadata) and reqwest would happily follow.
-    let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
-        if attempt.previous().len() >= 5 {
-            return attempt.error("too many redirects");
+    // Redirects are followed manually (rather than via a reqwest
+    // redirect policy) so that *every* hop — initial URL included —
+    // gets the same treatment: validate the target, then pin the
+    // connection to the validated IP. With a policy callback we could
+    // validate each hop but reqwest would still re-resolve at connect
+    // time, leaving a DNS-rebinding TOCTOU between check and connect.
+    // Building a fresh client per hop with `ClientBuilder::resolve`
+    // closes that window (issue #78, review item V13).
+    let mut current = parsed;
+    let mut hops = 0usize;
+    let resp = loop {
+        // SSRF guard — refuse any hop that lands on a loopback /
+        // link-local / private / metadata IP. See `is_blocked_address`.
+        let validated_ip = validate_url_target(&current)?;
+        let client = build_pinned_client(&current, validated_ip)?;
+        let resp = client
+            .get(current.clone())
+            .send()
+            .map_err(|e| FetchError::Request(e.to_string()))?;
+        if !is_followable_redirect(resp.status()) {
+            break resp;
         }
-        match validate_url_target(attempt.url()) {
-            Ok(_) => attempt.follow(),
-            Err(e) => attempt.error(e.to_string()),
+        hops += 1;
+        if hops > MAX_REDIRECTS {
+            return Err(FetchError::Request(format!(
+                "too many redirects (more than {MAX_REDIRECTS})"
+            )));
         }
-    });
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .user_agent(USER_AGENT)
-        .redirect(redirect_policy)
-        .build()
-        .map_err(|e| FetchError::Request(e.to_string()))?;
-    let resp = client
-        .get(parsed)
-        .send()
-        .map_err(|e| FetchError::Request(e.to_string()))?;
+        let location = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                FetchError::Request(format!(
+                    "redirect ({}) without a usable Location header",
+                    resp.status()
+                ))
+            })?;
+        // Resolve relative Locations against the current hop, exactly
+        // as reqwest's built-in follower would.
+        let next = current
+            .join(location)
+            .map_err(|_| FetchError::InvalidUrl(format!("invalid redirect target: {location}")))?;
+        if !matches!(next.scheme(), "http" | "https") {
+            return Err(FetchError::InvalidUrl(format!(
+                "redirect to unsupported scheme: {next}"
+            )));
+        }
+        current = next;
+    };
     let status = resp.status();
     if !status.is_success() {
         return Err(FetchError::Status(status.as_u16()));
@@ -566,5 +643,235 @@ mod tests {
         assert!(matches!(err, FetchError::InvalidUrl(_)));
         let err = fetch_blocking("javascript:alert(1)").unwrap_err();
         assert!(matches!(err, FetchError::InvalidUrl(_)));
+    }
+
+    // ---- V13: DNS-pinning plumbing (no network / no real DNS) ----
+
+    #[test]
+    fn dns_pin_pins_domain_hosts_to_validated_ip() {
+        let ip: IpAddr = "93.184.216.34".parse().expect("valid IPv4");
+        let url = reqwest::Url::parse("https://example.com/page").expect("valid URL");
+        assert_eq!(
+            dns_pin(&url, ip),
+            Some(("example.com".to_string(), SocketAddr::new(ip, 443)))
+        );
+        // http defaults to port 80.
+        let url = reqwest::Url::parse("http://example.com/").expect("valid URL");
+        assert_eq!(dns_pin(&url, ip).map(|(_, a)| a.port()), Some(80));
+        // Explicit non-default ports survive into the pin.
+        let url = reqwest::Url::parse("https://example.com:8443/").expect("valid URL");
+        assert_eq!(dns_pin(&url, ip).map(|(_, a)| a.port()), Some(8443));
+    }
+
+    #[test]
+    fn dns_pin_skips_ip_literal_hosts() {
+        // Literal-IP hosts involve no DNS lookup, so there's nothing
+        // to rebind and no pin is emitted.
+        let ip: IpAddr = "1.2.3.4".parse().expect("valid IPv4");
+        let url = reqwest::Url::parse("http://8.8.8.8/").expect("valid URL");
+        assert!(dns_pin(&url, ip).is_none());
+        // IPv6 literals arrive bracketed from `host_str`.
+        let url = reqwest::Url::parse("http://[2001:db8::1]/").expect("valid URL");
+        assert!(dns_pin(&url, ip).is_none());
+    }
+
+    #[test]
+    fn followable_redirect_statuses_match_reqwest_defaults() {
+        for code in [301u16, 302, 303, 307, 308] {
+            let status = reqwest::StatusCode::from_u16(code).expect("valid status");
+            assert!(is_followable_redirect(status), "{code} should be followed");
+        }
+        for code in [200u16, 204, 300, 304, 404, 500] {
+            let status = reqwest::StatusCode::from_u16(code).expect("valid status");
+            assert!(
+                !is_followable_redirect(status),
+                "{code} must not be followed"
+            );
+        }
+    }
+
+    // ---- V15: OG/Twitter-card parsing characterization tests ----
+    //
+    // These pin down what the regex parser does *today*, including
+    // its quirks (comment-blindness, quote-truncation, no entity
+    // decoding for meta content). If one of these breaks, either the
+    // parser changed behaviour deliberately — update the test — or
+    // a regression slipped in.
+
+    #[test]
+    fn og_tags_take_precedence_over_twitter_and_title() {
+        let html = r#"
+            <meta property="og:title" content="OG Title">
+            <meta name="twitter:title" content="TW Title">
+            <meta property="og:description" content="OG desc">
+            <meta name="twitter:description" content="TW desc">
+            <meta property="og:image" content="https://a.com/og.png">
+            <meta name="twitter:image" content="https://a.com/tw.png">
+            <title>HTML Title</title>
+        "#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("OG Title"));
+        assert_eq!(p.description.as_deref(), Some("OG desc"));
+        assert_eq!(p.image_url.as_deref(), Some("https://a.com/og.png"));
+    }
+
+    #[test]
+    fn description_precedence_twitter_over_plain_name() {
+        let html = r#"
+            <meta name="twitter:description" content="TW desc">
+            <meta name="description" content="Plain desc">
+        "#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.description.as_deref(), Some("TW desc"));
+    }
+
+    #[test]
+    fn multiple_og_title_tags_first_wins() {
+        let html = r#"
+            <meta property="og:title" content="First">
+            <meta property="og:title" content="Second">
+        "#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("First"));
+    }
+
+    #[test]
+    fn first_title_tag_wins() {
+        let html = "<title>One</title><title>Two</title>";
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("One"));
+    }
+
+    #[test]
+    fn single_quoted_attributes_parse() {
+        let html = "<meta property='og:title' content='Singles'>";
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Singles"));
+    }
+
+    #[test]
+    fn unquoted_attribute_values_are_not_matched() {
+        // Current behaviour: the regexes require quoted values, so an
+        // unquoted content attr is invisible and we fall through to
+        // the <title> fallback.
+        let html = "<meta property=og:title content=Bare><title>Fallback</title>";
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Fallback"));
+    }
+
+    #[test]
+    fn apostrophe_inside_double_quoted_content_truncates() {
+        // Current behaviour (quirk): the content capture excludes
+        // *both* quote kinds, so an apostrophe inside a double-quoted
+        // value terminates the capture early.
+        let html = r#"<meta property="og:title" content="It's fine">"#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("It"));
+    }
+
+    #[test]
+    fn mismatched_quote_styles_still_match() {
+        // Current behaviour (quirk): opening and closing quotes are
+        // matched independently, so `"og:title'` is accepted.
+        let html = r#"<meta property="og:title' content="Mismatch">"#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Mismatch"));
+    }
+
+    #[test]
+    fn unclosed_meta_tag_still_matches() {
+        // The pattern never requires the closing `>`, so a tag
+        // truncated after the content value (e.g. body cut at
+        // MAX_BODY_BYTES) still yields its value …
+        let html = r#"<meta property="og:title" content="Unclosed""#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Unclosed"));
+        // … but the closing quote itself is required: a value cut
+        // mid-string is dropped rather than half-captured.
+        let html = r#"<meta property="og:title" content="Cut mid-val"#;
+        let p = parse_html("https://a.com/", html);
+        assert!(p.title.is_none());
+    }
+
+    #[test]
+    fn meta_inside_html_comment_is_still_parsed() {
+        // Current behaviour (documented quirk): the regex parser has
+        // no notion of comments, so commented-out metadata is honoured.
+        let html = r#"<!-- <meta property="og:title" content="Ghost"> -->"#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Ghost"));
+    }
+
+    #[test]
+    fn tag_and_attribute_matching_is_case_insensitive() {
+        let html = r#"<META PROPERTY="OG:TITLE" CONTENT="Loud">"#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Loud"));
+    }
+
+    #[test]
+    fn meta_tag_spanning_multiple_lines_parses() {
+        let html = "<meta\n  property=\"og:title\"\n  content=\"Spread\"\n>";
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("Spread"));
+    }
+
+    #[test]
+    fn meta_content_entities_are_not_decoded() {
+        // Current behaviour: only the <title> fallback decodes
+        // entities; meta content is passed through verbatim.
+        let html = r#"<meta property="og:title" content="A &amp; B">"#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("A &amp; B"));
+    }
+
+    #[test]
+    fn content_whitespace_is_trimmed() {
+        let html = r#"<meta property="og:title" content="  padded  ">"#;
+        let p = parse_html("https://a.com/", html);
+        assert_eq!(p.title.as_deref(), Some("padded"));
+    }
+
+    #[test]
+    fn whitespace_only_content_produces_none() {
+        let html = "<meta property=\"og:title\" content=\"   \t  \">";
+        let p = parse_html("https://a.com/", html);
+        assert!(p.title.is_none());
+    }
+
+    #[test]
+    fn very_long_content_is_extracted_in_full() {
+        let long = "x".repeat(50_000);
+        let html = format!(r#"<meta property="og:title" content="{long}">"#);
+        let p = parse_html("https://a.com/", &html);
+        assert_eq!(p.title.as_deref(), Some(long.as_str()));
+    }
+
+    #[test]
+    fn empty_html_yields_all_none() {
+        let p = parse_html("https://a.com/", "");
+        assert_eq!(p.url, "https://a.com/");
+        assert!(p.title.is_none());
+        assert!(p.description.is_none());
+        assert!(p.image_url.is_none());
+        assert!(p.site_name.is_none());
+        assert!(p.favicon_url.is_none());
+    }
+
+    #[test]
+    fn lossy_decoded_non_utf8_input_is_handled() {
+        // `fetch_blocking` feeds the body through `from_utf8_lossy`;
+        // replacement characters inside content survive verbatim.
+        let bytes = b"<meta property=\"og:title\" content=\"Caf\xFF\xE9\">";
+        let html = String::from_utf8_lossy(bytes);
+        let p = parse_html("https://a.com/", &html);
+        assert_eq!(p.title.as_deref(), Some("Caf\u{FFFD}\u{FFFD}"));
+    }
+
+    #[test]
+    fn twitter_image_relative_url_is_absolutised() {
+        let html = r#"<meta name="twitter:image" content="/img/card.png">"#;
+        let p = parse_html("https://a.com/post/1", html);
+        assert_eq!(p.image_url.as_deref(), Some("https://a.com/img/card.png"));
     }
 }

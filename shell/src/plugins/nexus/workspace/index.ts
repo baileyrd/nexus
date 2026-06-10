@@ -4,6 +4,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { clientLogger } from '../../../clientLogger'
 import { useWorkspaceStore } from './workspaceStore'
 import { WorkspaceStatusItem } from './WorkspaceStatusItem'
+// V16 — register this plugin's root-path surface with the host seam so
+// host chrome (ForgeSelector, RightPanelFooter, workspace facade) reads
+// it via the seam instead of importing this plugin's store directly.
+// Mirrors the editor plugin's EditorHostSurface registration (R10/#193).
+import { registerWorkspaceHostSurface } from '../../../host/WorkspaceHostSurface'
 
 const STORAGE_KEY = 'rootPath'
 const CONTEXT_KEY_ROOT = 'nexus.workspace.rootPath'
@@ -85,6 +90,25 @@ export const workspacePlugin: Plugin = {
 
   async activate(api: PluginAPI) {
     const store = useWorkspaceStore.getState()
+
+    // V16 — publish the root-path surface the host's workspace chrome
+    // delegates to. The host owns the seam; this plugin owns the store
+    // and the de-dup. Registered at the top of activate() so consumers
+    // bind as early as possible. The returned disposer is discarded:
+    // the surface lives for the plugin's lifetime, matching every other
+    // long-lived registration in this file (no plugin-deactivate hook
+    // exists yet) — same convention as the editor plugin's seam.
+    void registerWorkspaceHostSurface({
+      getRootPath: () => useWorkspaceStore.getState().rootPath,
+      subscribeRootPath: (handler) => {
+        let last = useWorkspaceStore.getState().rootPath
+        return useWorkspaceStore.subscribe((state) => {
+          if (state.rootPath === last) return
+          last = state.rootPath
+          handler(state.rootPath)
+        })
+      },
+    })
 
     // Single source of truth for every workspace state transition. Each
     // transition pairs store/context/storage/event updates with the matching

@@ -136,6 +136,15 @@ pub enum Capability {
     /// its tracks, so it sits in its own cap rather than folding into
     /// `security.write`.
     SecurityAuditWrite,
+    /// Read the security audit log via
+    /// `com.nexus.security::query_audit_log` (V12,
+    /// `repo-review-2026-06-10.md`). Previously unrestricted; gated
+    /// because the log discloses cross-plugin metadata — which
+    /// capabilities other plugins were denied, which credential names
+    /// were accessed — useful reconnaissance for a hostile plugin.
+    /// MEDIUM risk (read-only, no values), so community plugins get
+    /// the standard grant flow rather than the HIGH-risk prompt.
+    SecurityAuditRead,
     /// Bind a network listener (P1-07). Required by
     /// `com.nexus.collab::start_relay`, which opens a WebSocket
     /// listener on `0.0.0.0` so other peers can join the in-process
@@ -196,6 +205,7 @@ impl Capability {
         Capability::ProtocolHostContribute,
         Capability::SecurityWrite,
         Capability::SecurityAuditWrite,
+        Capability::SecurityAuditRead,
         Capability::NetworkBind,
     ];
 
@@ -256,6 +266,7 @@ impl Capability {
             Capability::ProtocolHostContribute => "protocol.host.contribute",
             Capability::SecurityWrite => "security.write",
             Capability::SecurityAuditWrite => "security.audit.write",
+            Capability::SecurityAuditRead => "security.audit.read",
             Capability::NetworkBind => "network.bind",
         }
     }
@@ -300,6 +311,7 @@ impl Capability {
             "protocol.host.contribute" => Ok(Capability::ProtocolHostContribute),
             "security.write" => Ok(Capability::SecurityWrite),
             "security.audit.write" => Ok(Capability::SecurityAuditWrite),
+            "security.audit.read" => Ok(Capability::SecurityAuditRead),
             "network.bind" => Ok(Capability::NetworkBind),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
@@ -413,8 +425,9 @@ mod tests {
         // + 2 audio.* (BL-117) + 3 ai.runtime.* (BL-134) + 2
         // notifications.inbox.* (BL-136) + 1 protocol.host.* (BL-113
         // follow-up) + 3 P1-01/P1-07 follow-ups (security.write,
-        // security.audit.write, network.bind).
-        assert_eq!(Capability::ALL.len(), 33);
+        // security.audit.write, network.bind) + 1 security.audit.read
+        // (V12, repo-review-2026-06-10).
+        assert_eq!(Capability::ALL.len(), 34);
     }
 
     #[test]

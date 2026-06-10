@@ -31,6 +31,7 @@
 //! think.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
@@ -174,8 +175,31 @@ pub fn pinned_client_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
+/// TCP connect deadline for outbound provider HTTPS (V4,
+/// `repo-review-2026-06-10.md`). Without one, a half-open connection
+/// hangs the caller until the OS TCP timeout fires — minutes. This is
+/// the load-bearing timeout; keep it tight.
+pub const OUTBOUND_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Per-read-operation deadline for outbound provider HTTPS (V4).
+/// Deliberately generous: streaming chat completions emit periodic
+/// SSE chunks well inside this window, but non-streaming work
+/// (audio STT on long files) can sit silent for minutes before the
+/// body arrives. This is a hang backstop, not a latency budget — an
+/// overall `.timeout()` would cut off long streamed generations and
+/// is intentionally *not* set here.
+pub const OUTBOUND_READ_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Base outbound client builder: timeouts only, no TLS customisation.
+fn outbound_builder() -> reqwest::ClientBuilder {
+    reqwest::ClientBuilder::new()
+        .connect_timeout(OUTBOUND_CONNECT_TIMEOUT)
+        .read_timeout(OUTBOUND_READ_TIMEOUT)
+}
+
 /// Build an outbound `reqwest::Client`, optionally with TLS pinning
-/// enabled via [`pinned_client_config`].
+/// enabled via [`pinned_client_config`]. Both variants carry
+/// [`OUTBOUND_CONNECT_TIMEOUT`] and [`OUTBOUND_READ_TIMEOUT`].
 ///
 /// `NEXUS_TLS_PINNING=1` in the environment also enables pinning
 /// regardless of the flag — useful when operators want to opt in
@@ -192,13 +216,19 @@ pub fn build_pinned_client(tls_pinning_enabled: bool) -> reqwest::Client {
         .map(|v| v == "1")
         .unwrap_or(false);
     if !tls_pinning_enabled && !env_opt_in {
-        return reqwest::Client::new();
+        return match outbound_builder().build() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "V4: failed to build outbound reqwest client with timeouts; falling back to stock client",
+                );
+                reqwest::Client::new()
+            }
+        };
     }
     let cfg = pinned_client_config();
-    match reqwest::ClientBuilder::new()
-        .use_preconfigured_tls(cfg)
-        .build()
-    {
+    match outbound_builder().use_preconfigured_tls(cfg).build() {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(
