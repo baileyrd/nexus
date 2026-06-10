@@ -42,6 +42,17 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
+  ipc-docs-drift:
+    name: IPC docs drift (hand-maintained docs vs cap matrix)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pure-text check, no toolchain. Found rotted within a day of the
+      # 2026-06-10 review wiring it up (ai.runtime 9 → 12) — same V5
+      # lesson as the boundary guard: an unenforced checker is decoration.
+      - name: check_ipc_docs_drift.sh
+        run: bash scripts/check_ipc_docs_drift.sh
+
   cargo-deny:
     name: cargo-deny (advisories, licenses, bans, sources)
     runs-on: ubuntu-latest
