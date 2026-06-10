@@ -132,6 +132,12 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // alongside `process.spawn` / `net.http`.
         Capability::SecurityWrite | Capability::SecurityAuditWrite => RiskLevel::High,
 
+        // V12 — security.audit.read gates query_audit_log. Read-only
+        // disclosure of cross-plugin metadata (denied caps, credential
+        // names — never values): reconnaissance, not mutation, so it
+        // sits below the High band.
+        Capability::SecurityAuditRead => RiskLevel::Medium,
+
         // P1-07 — network.bind gates opening a TCP/WS listener
         // (currently only `com.nexus.collab::start_relay`). High by
         // analogy with `process.spawn`: a hostile binder can pivot

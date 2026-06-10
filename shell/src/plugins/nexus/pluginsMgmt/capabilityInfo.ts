@@ -102,6 +102,9 @@ export const CAPABILITY_INFO: Record<Capability, CapabilityMeta> = {
   // ── P1-01 — keyring + audit-log mutation ────────────────────────
   SecurityWrite:      { risk: 'high', description: 'Write/delete OS keyring entries (passwords, API tokens)' },
   SecurityAuditWrite: { risk: 'high', description: 'Truncate the security audit log' },
+  // V12 — read-only audit-log access (event metadata: denied caps,
+  // credential names — never values). Reconnaissance surface.
+  SecurityAuditRead:  { risk: 'medium', description: 'Read the security audit log (event metadata only)' },
 
   // ── P1-07 — network listener ───────────────────────────────────
   NetworkBind: { risk: 'high', description: 'Bind a network listener (collab relay, etc.)' },

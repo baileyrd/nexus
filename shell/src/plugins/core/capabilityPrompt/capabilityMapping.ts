@@ -60,6 +60,8 @@ export const CAPABILITY_TO_KERNEL_STRING: Record<Capability, string> = {
   // P1-01 — keyring + audit-log mutation.
   SecurityWrite:           'security.write',
   SecurityAuditWrite:      'security.audit.write',
+  // V12 — read-only audit-log access.
+  SecurityAuditRead:       'security.audit.read',
   // P1-07 — bind a network listener.
   NetworkBind:             'network.bind',
 }
