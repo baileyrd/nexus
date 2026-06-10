@@ -133,7 +133,7 @@ Dynamic topics (computed at runtime) are reported separately but don't fail the 
 Tests:
 - `crates/nexus-bootstrap/tests/plugin_contract_purity.rs` — verifies the bootstrap doesn't accidentally re-introduce legacy `nexus-app` contracts
 - `shell/tests/plugin-import-hygiene.test.ts` — verifies shell plugins don't import host internals (mentions `notify_desktop` as one of the few approved bridge commands)
-- `shell/src-tauri/tests/tauri_command_boundary.rs` — referenced from the existing audit; tests the Tauri command boundary
+- `crates/nexus-bootstrap/tests/tauri_command_boundary.rs` — pins the registered Tauri command set and asserts every declared `#[tauri::command]` is registered. Lives in bootstrap rather than `shell/src-tauri/tests/` so `cargo test --workspace` actually runs it on CI — `nexus-shell` is outside the cargo workspace and no Linux CI job compiles it (V5, 2026-06-10).
 
 ### S-A. Single-target invariant
 

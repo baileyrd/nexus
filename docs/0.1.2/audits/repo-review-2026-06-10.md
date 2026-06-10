@@ -55,16 +55,16 @@ A hung provider endpoint stalls an AI handler until the OS TCP timeout (minutes)
 
 **Fix:** Set `.connect_timeout(~10s)` in `build_pinned_client` and per-request timeouts at call sites (overall `.timeout()` is wrong for streaming completions — use connect + idle-read semantics there). Give ollama/notifications the same treatment.
 
-### V5. Built test infrastructure that never runs: fuzz targets and shell E2E
-- [ ] **Open** · Medium effort
+### V5. Built test infrastructure that never runs: shell-side Rust tests; E2E is Windows-only
+- [ ] **Open (partially closed)** · Medium effort
 
-- `crates/nexus-fuzz` exists with 3 fuzz targets (BL-103) — not wired to any workflow.
-- `shell/e2e/` has a full WebdriverIO setup (`wdio.conf.ts`, specs) — not run in CI.
-- `shell/src-tauri/tests/` contains a single stub, and `docs/0.1.2/architecture-adherence.md:136` cites a `tauri_command_boundary.rs` test that does not exist.
+Corrections from execution (2026-06-10) — two of the original three sub-claims were wrong on closer inspection:
 
-This is R1's lesson in miniature: authored-but-unenforced QA decays silently.
+- ~~`crates/nexus-fuzz` not wired to CI~~ — **wrong**: the stable-Rust smoke runner (`tests/smoke.rs`, deterministic seeds + corpus replay) runs under `cargo test --workspace` on every PR. Coverage-guided libFuzzer runs are *deliberately* operator-side per the crate README (nightly + `cargo fuzz`). No action needed.
+- `shell/src-tauri/tests/tauri_command_boundary.rs` **existed** — but never ran: `nexus-shell` is outside the cargo workspace and no CI job compiles it on Linux (webkit2gtk deps). ✅ Fixed: moved to `crates/nexus-bootstrap/tests/tauri_command_boundary.rs` (it's a source-text check, the `dep_invariants.rs` pattern) and strengthened with a declared-vs-registered command assertion, so it now runs on every PR.
+- `shell/e2e/` (WebdriverIO) genuinely never runs in CI — but it is **Windows-only by design** (tauri-driver wraps msedgedriver/WebView2) and its own README records 1/3 specs passing with the failures being product-level semantics. Wiring it into PR CI today would be permanently red.
 
-**Fix:** Add a scheduled (or PR-labeled) CI job running each fuzz target for a bounded time; add a smoke-level E2E job (headless WebKit/X11); either write `tauri_command_boundary.rs` (assert the 29 registered commands + popout/leaf-ID injection guards) or remove the doc claim.
+**Remaining fix:** when the two failing golden-path specs are resolved at the product level, add a `windows-latest` workflow (manual/scheduled, not PR-gating) that builds the e2e shape and runs the suite.
 
 ---
 
