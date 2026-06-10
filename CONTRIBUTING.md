@@ -38,12 +38,14 @@ History remains recoverable via git (`v0.1.0-legacy-shell` tag).
   contribution.
 - Do **not** add bespoke `#[tauri::command]` handlers in `shell/src-tauri/`
   for new feature capability. Route it through `kernel_invoke` → `ipc_call`
-  in a service crate. The bridge today registers 22 commands
-  (`shell/src-tauri/src/lib.rs:443-466`), grouped by intent:
-  7 kernel, 5 plugin-management, 4 persistence, 1 utility, and 5 popout
-  (per [ADR 0020](docs/adr/0020-popout-window-architecture.md)). Shell-
-  intrinsic commands (popout, persistence) are fine; feature commands
-  belong in a service crate behind IPC.
+  in a service crate. The bridge intentionally stays thin — kernel/bridge,
+  plugin-management, persistence, host-platform-primitive utility, and
+  popout commands only (per
+  [ADR 0020](docs/adr/0020-popout-window-architecture.md)). The canonical
+  per-command breakdown lives in
+  [`docs/0.1.2/shell.md`](docs/0.1.2/shell.md). Shell-intrinsic commands
+  (popout, persistence) are fine; feature commands belong in a service
+  crate behind IPC.
 
 ---
 
@@ -56,8 +58,9 @@ History remains recoverable via git (`v0.1.0-legacy-shell` tag).
 - `crates/nexus-<service>/` — service plugins (AI, agent, comments,
   editor, git, linkpreview, skills, terminal, theme, workflow, etc.).
   Each is a `CorePlugin` registered by `nexus-bootstrap` in a
-  deterministic order. The full Cargo workspace is 24 crates; see
-  `Cargo.toml` for the authoritative list.
+  deterministic order. See `Cargo.toml` for the authoritative workspace
+  member list and [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for the
+  one-row-per-crate inventory.
 - `crates/nexus-bootstrap/` — the orchestrator. Assembles a `Runtime`
   (kernel + registered plugins + invoker context) for any frontend.
 - `crates/nexus-cli/` / `crates/nexus-tui/` — frontends that consume
@@ -65,8 +68,10 @@ History remains recoverable via git (`v0.1.0-legacy-shell` tag).
   through `context.ipc_call(...)`. The MCP server is a `nexus mcp`
   subcommand of the CLI (the `nexus-mcp` crate is a library only).
 - `shell/src-tauri/` (crate `nexus-shell`) — the active desktop Tauri
-  host. The bridge registers 22 commands (kernel / plugin-mgmt /
-  persistence / utility / popout) — see the guardrail above.
+  host. The bridge registers a small, fixed command set (kernel /
+  plugin-mgmt / persistence / utility / popout) — see the guardrail
+  above and [`docs/0.1.2/shell.md`](docs/0.1.2/shell.md) for the
+  current breakdown.
 - `shell/src/` — the active desktop frontend. `ExtensionHost` loads
   plugins from `shell/src/plugins/{core, nexus, community}/`. The shell
   starts **empty** — every visible UI element is a plugin contribution.
