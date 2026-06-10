@@ -262,6 +262,9 @@ impl StorageEngine {
 
             // Update knowledge graph: file-type nodes create links.
             {
+                // #199 tier-2: panic on poison. A writer that panicked
+                // mid-mutation may have torn the graph; mutating on top of
+                // that could persist the tear. Reads recover (graph_read).
                 let mut g = self.graph.write().expect("graph lock poisoned");
                 g.add_note(path);
                 g.remove_links_from(path);
@@ -324,6 +327,7 @@ impl StorageEngine {
 
             // Update knowledge graph.
             {
+                // #199 tier-2: panic on poison (see write_file above).
                 let mut g = self.graph.write().expect("graph lock poisoned");
                 g.add_note(path);
                 g.remove_links_from(path);
@@ -997,6 +1001,7 @@ impl StorageEngine {
         // Remove from graph. `remove_note` is a no-op for unknown
         // paths, so it's safe even if the file was never indexed.
         {
+            // #199 tier-2: panic on poison — mutation path.
             let mut g = self.graph.write().expect("graph lock poisoned");
             g.remove_note(path);
         }
@@ -1213,6 +1218,7 @@ impl StorageEngine {
             // file was actually indexed — otherwise add_note(to) would
             // create a node we don't want.
             if was_indexed {
+                // #199 tier-2: panic on poison — mutation path.
                 let mut g = self.graph.write().expect("graph lock poisoned");
                 g.remove_note(from);
                 g.add_note(to);
@@ -1498,17 +1504,36 @@ impl StorageEngine {
 
     // ── Graph queries ────────────────────────────────────────────────────────
 
+    /// Acquire the graph read lock, recovering from poison.
+    ///
+    /// #199 tier-1 (see `docs/0.1.2/architecture.md` "Lock-poison
+    /// policy"): graph queries are hot-path reads over *derived* state —
+    /// the graph is rebuilt from disk by `rebuild_index`/`reconcile`, so
+    /// the worst case after a writer panicked mid-mutation is a stale or
+    /// partially-updated query result, never data loss. With
+    /// `panic = "abort"` in release, the previous `.expect()` here turned
+    /// one subsystem panic into a whole-process abort; recover and log
+    /// instead so the audit trail records it.
+    fn graph_read(&self) -> std::sync::RwLockReadGuard<'_, graph::KnowledgeGraph> {
+        self.graph.read().unwrap_or_else(|poisoned| {
+            tracing::error!(
+                "graph RwLock poisoned by a prior panic; recovering for a read-only \
+                 query (#199 tier-1). Graph is derived state — run reconcile or \
+                 rebuild_index if results look stale."
+            );
+            poisoned.into_inner()
+        })
+    }
+
     /// Return all files that link to the file at `path`.
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn backlinks(&self, path: &str) -> Result<Vec<graph::BacklinkResult>, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.backlinks(path))
     }
 
@@ -1517,17 +1542,15 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn backlinks_to_block(
         &self,
         path: &str,
         block_id: &str,
     ) -> Result<Vec<graph::BacklinkResult>, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.backlinks_to_block(path, block_id))
     }
 
@@ -1535,13 +1558,11 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn outgoing_links(&self, path: &str) -> Result<Vec<graph::OutgoingLink>, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.outgoing_links(path))
     }
 
@@ -1549,13 +1570,11 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn unresolved_links(&self) -> Result<Vec<graph::UnresolvedLink>, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.unresolved_links())
     }
 
@@ -1563,13 +1582,11 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn graph_stats(&self) -> Result<graph::GraphStats, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.stats())
     }
 
@@ -1577,13 +1594,11 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn list_all_links(&self) -> Result<graph::GraphSnapshot, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.snapshot())
     }
 
@@ -1591,13 +1606,11 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] if the graph lock is poisoned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal graph `RwLock` is poisoned.
+    /// Reserved for future fallible queries — the current implementation
+    /// recovers from graph-lock poisoning (#199 tier-1, see
+    /// [`Self::graph_read`]) and does not error.
     pub fn graph_neighbors(&self, path: &str, depth: usize) -> Result<Vec<String>, StorageError> {
-        let g = self.graph.read().expect("graph lock poisoned");
+        let g = self.graph_read();
         Ok(g.neighbors(path, depth))
     }
 
