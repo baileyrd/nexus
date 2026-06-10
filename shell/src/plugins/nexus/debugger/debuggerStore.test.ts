@@ -20,8 +20,7 @@ function makeKernel(
   const api: DapKernelAPI = {
     async invoke<T>(_p: string, command: string, args?: unknown): Promise<T> {
       calls.push({ command, args })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const r = (replies as any)[command]
+      const r = replies[command]
       // Default replies for verbs we don't override per test — keep
       // the surface honest without forcing every test to stub every
       // verb.
@@ -44,8 +43,9 @@ function makeKernel(
         return { ok: true } as T
       }
       if (typeof r === 'function') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return (r as any)(args) as T
+        // Per-test reply overrides are stored as `unknown`; a function
+        // entry is by convention `(args) => reply`.
+        return (r as (args?: unknown) => unknown)(args) as T
       }
       return r as T
     },

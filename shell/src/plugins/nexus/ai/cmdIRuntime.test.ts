@@ -10,6 +10,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import type { PluginAPI } from '../../../types/plugin.ts'
+import { stubPluginAPI } from '../../../testing/typedStubs.ts'
 import {
   contextContributors,
 } from './contextContributors.ts'
@@ -44,26 +46,31 @@ function reset(): void {
 /** Build a stub `PluginAPI` with just enough surface for the runtime
  *  to exercise. The kernel.invoke implementation captures the call so
  *  the test can assert on what was sent. */
-function stubApi(invokeImpl: (call: InvokeCall) => Promise<unknown>) {
+function stubApi(invokeImpl: (call: InvokeCall) => Promise<unknown>): {
+  api: PluginAPI
+  calls: InvokeCall[]
+} {
   const calls: InvokeCall[] = []
   return {
-    api: {
+    api: stubPluginAPI({
       kernel: {
-        invoke: async (
+        invoke: async <T>(
           pluginId: string,
           commandId: string,
-          args: unknown,
-        ) => {
+          args?: unknown,
+        ): Promise<T> => {
           const call: InvokeCall = {
             pluginId,
             commandId,
             args: args as Record<string, unknown>,
           }
           calls.push(call)
-          return invokeImpl(call)
+          // T is the production call site's expectation; the test's
+          // invokeImpl owns the payload shape.
+          return (await invokeImpl(call)) as T
         },
       },
-    },
+    }),
     calls,
   }
 }
@@ -96,8 +103,7 @@ test('submitCmdI: empty prompt is a no-op', async () => {
   useCmdIStore.getState().open()
   useCmdIStore.getState().setPrompt('   ')
   const { api, calls } = stubApi(async () => ({ text: 'never' }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await submitCmdI(api as any)
+  const result = await submitCmdI(api)
   assert.equal(result, null)
   assert.equal(calls.length, 0)
 })
@@ -116,8 +122,7 @@ test('submitCmdI: assembles context, mints a cmdi- session id, calls stream_chat
     text: 'It defines foo.',
     session_id: 'echoed',
   }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await submitCmdI(api as any)
+  const result = await submitCmdI(api)
 
   assert.ok(result, 'submit should return assembled prompt')
   assert.equal(calls.length, 1)
@@ -152,8 +157,7 @@ test('submitCmdI: kernel rejection flips status → error', async () => {
   const { api } = stubApi(async () => {
     throw new Error('provider unavailable')
   })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await submitCmdI(api as any)
+  await submitCmdI(api)
   const s = useCmdIStore.getState()
   assert.equal(s.status, 'error')
   assert.equal(s.error?.message, 'provider unavailable')
@@ -171,8 +175,7 @@ test('submitCmdI: single-flight — call while submitting is a no-op', async () 
   useCmdIStore.getState().beginSubmit('cmdi-existing')
 
   const { api, calls } = stubApi(async () => ({ text: 'unused' }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await submitCmdI(api as any)
+  const result = await submitCmdI(api)
   assert.equal(result, null)
   assert.equal(calls.length, 0)
 
@@ -201,8 +204,7 @@ test('submitCmdI: removed chip is omitted from the assembled prompt (BL-033)', a
   useCmdIStore.getState().removeChip('editor:selection:foo.md:0-5')
 
   const { api, calls } = stubApi(async () => ({ text: 'ok' }))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await submitCmdI(api as any)
+  const result = await submitCmdI(api)
   assert.ok(result)
   const sent = (calls[0].args as { messages: Array<{ content: string }> })
     .messages[0].content

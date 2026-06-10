@@ -33,6 +33,7 @@ import {
   type MarginSuggestSettings,
 } from './marginSuggestTrigger.ts'
 import { useConfigStore } from '../../../../stores/configStore.ts'
+import { stubPluginAPI } from '../../../../testing/typedStubs.ts'
 import {
   _resetMarginApiForTests,
   setMarginApi,
@@ -125,27 +126,28 @@ function stubMarginApi(
   responseText = '[]',
 ): { calls: CapturedInvoke[]; install: () => void } {
   const calls: CapturedInvoke[] = []
-  const api = {
+  const api = stubPluginAPI({
     kernel: {
-      invoke: async (
+      invoke: async <T>(
         pluginId: string,
         commandId: string,
-        args: unknown,
-      ) => {
+        args?: unknown,
+      ): Promise<T> => {
         calls.push({
           pluginId,
           commandId,
           args: args as Record<string, unknown>,
         })
-        return { text: responseText }
+        // T is the production call site's expectation (StreamChatResult);
+        // the test owns the payload shape.
+        return { text: responseText } as T
       },
     },
-  }
+  })
   return {
     calls,
     install: () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setMarginApi(api as any)
+      setMarginApi(api)
     },
   }
 }

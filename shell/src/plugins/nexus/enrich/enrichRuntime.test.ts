@@ -21,6 +21,8 @@ import {
   isInInboxScope,
 } from './enrichRuntime.ts'
 import { useEnrichStore, type EnrichmentProposal } from './enrichStore.ts'
+import type { PluginAPI } from '../../../types/plugin.ts'
+import { stubPluginAPI } from '../../../testing/typedStubs.ts'
 
 interface InvokeCall {
   pluginId: string
@@ -43,56 +45,70 @@ function stubApi(opts: {
   enrichImpl?: (call: InvokeCall) => Promise<unknown>
   applyImpl?: (call: InvokeCall) => Promise<unknown>
   active?: { relpath: string; revision: number } | null
-} = {}) {
+} = {}): {
+  api: PluginAPI
+  calls: InvokeCall[]
+  notifications: Array<{ type: string; message: string }>
+} {
   const calls: InvokeCall[] = []
   const inbox = opts.inboxPath
   const tagFiles = opts.tagFiles ?? []
   const notifications: Array<{ type: string; message: string }> = []
-  const api = {
+  /** Untyped routing core — `invoke<T>` below casts its result to the
+   *  production call site's expectation; the test owns the payloads. */
+  const route = async (call: InvokeCall): Promise<unknown> => {
+    const { pluginId, commandId } = call
+    if (pluginId === 'com.nexus.storage' && commandId === 'query_tags') {
+      if (opts.tagsThrows) throw new Error('storage offline')
+      return tagFiles.map((p) => ({ file_path: p, name: 'inbox', count: 1 }))
+    }
+    if (pluginId === 'com.nexus.ai' && commandId === 'enrich_file') {
+      if (opts.enrichImpl) return opts.enrichImpl(call)
+      return null
+    }
+    if (pluginId === 'com.nexus.ai' && commandId === 'enrich_apply') {
+      if (opts.applyImpl) return opts.applyImpl(call)
+      return { applied: true }
+    }
+    return null
+  }
+  const api = stubPluginAPI({
     kernel: {
-      invoke: async (
+      invoke: async <T>(
         pluginId: string,
         commandId: string,
-        args: unknown,
-      ): Promise<unknown> => {
+        args?: unknown,
+      ): Promise<T> => {
         const call: InvokeCall = {
           pluginId,
           commandId,
           args: (args ?? {}) as Record<string, unknown>,
         }
         calls.push(call)
-        if (pluginId === 'com.nexus.storage' && commandId === 'query_tags') {
-          if (opts.tagsThrows) throw new Error('storage offline')
-          return tagFiles.map((p) => ({ file_path: p, name: 'inbox', count: 1 }))
-        }
-        if (pluginId === 'com.nexus.ai' && commandId === 'enrich_file') {
-          if (opts.enrichImpl) return opts.enrichImpl(call)
-          return null
-        }
-        if (pluginId === 'com.nexus.ai' && commandId === 'enrich_apply') {
-          if (opts.applyImpl) return opts.applyImpl(call)
-          return { applied: true }
-        }
-        return null
+        return (await route(call)) as T
       },
     },
     configuration: {
-      getValue: <T,>(key: string, def: T): T => {
+      getValue: <T>(key: string, def: T): T => {
         if (key === 'memory.inboxPath') {
-          return (inbox === undefined ? def : (inbox as unknown as T)) as T
+          // The test fixes this key's runtime type to string|null; the
+          // production call site's T is unresolved here, so the bridge
+          // cast is deliberate.
+          return inbox === undefined ? def : (inbox as unknown as T)
         }
         return def
       },
     },
     notifications: {
-      show: (msg: { type: string; message: string }) => notifications.push(msg),
+      show: (msg) => {
+        notifications.push({ type: msg.type ?? 'info', message: msg.message })
+      },
     },
     editor: {
       active: () => opts.active ?? null,
     },
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { api: api as any, calls, notifications }
+  })
+  return { api, calls, notifications }
 }
 
 beforeEach(() => {
