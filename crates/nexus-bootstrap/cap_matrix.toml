@@ -1074,6 +1074,12 @@ plugin = "com.nexus.memory"
 command = "vector_sync"
 unrestricted = "backfills embeddings for the plugin's own memory rows via the plugin's own capability-gated context (AI embed + storage vector upsert)"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "sync"
+caps = ["net.http"]
+note = "push/pull the memory store to a caller-configured nexus-memory-hub; outbound HTTP"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]
