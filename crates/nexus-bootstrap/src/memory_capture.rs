@@ -26,6 +26,16 @@ use tokio::task::JoinHandle;
 /// runtime (the bootstrap `build` path is, same as collab's relay).
 #[must_use]
 pub fn start_capture(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHandle<()>> {
+    // Best-effort: capture only runs inside a tokio runtime (the CLI/TUI/shell
+    // boot path). Synchronous callers without a runtime (some tests, `forge init`)
+    // would otherwise panic inside `tokio::spawn` — skip cleanly instead.
+    let rt = match tokio::runtime::Handle::try_current() {
+        Ok(rt) => rt,
+        Err(_) => {
+            tracing::debug!("memory capture: no tokio runtime; capture disabled");
+            return None;
+        }
+    };
     let dir = forge_root.join(".forge").join("memory");
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(error = %e, "memory capture: cannot create memory dir; capture disabled");
@@ -39,7 +49,7 @@ pub fn start_capture(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHandle
         }
     };
     let mut sub = bus.subscribe(EventFilter::All);
-    Some(tokio::spawn(async move {
+    Some(rt.spawn(async move {
         loop {
             match sub.recv().await {
                 Ok(ev) => {
