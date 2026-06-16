@@ -20,6 +20,11 @@
       ],
       "format": "uint32",
       "minimum": 0
+    },
+    "namespace": {
+      "description": "Collection to search (e.g. `notes`, `memory`). Defaults to `notes`.",
+      "type": "string",
+      "default": "notes"
     }
   },
   "additionalProperties": false,

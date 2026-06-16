@@ -5,8 +5,8 @@ use nexus_plugins::PluginError;
 use serde_json::Value;
 
 use crate::ipc::{
-    StorageChunkEmbedding, StorageOk, StoragePathArgs, StorageVectorInsertArgs,
-    StorageVectorQueryArgs, StorageVectorstoreCountResult,
+    StorageChunkEmbedding, StorageOk, StorageVectorCountArgs, StorageVectorDeleteArgs,
+    StorageVectorInsertArgs, StorageVectorQueryArgs, StorageVectorstoreCountResult,
 };
 use crate::StorageEngine;
 
@@ -19,11 +19,15 @@ const DEFAULT_QUERY_LIMIT: usize = 5;
 
 pub(crate) fn insert(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     // #190 / R7 — strict-parse via typed `StorageVectorInsertArgs`.
-    let StorageVectorInsertArgs { file_path, chunks } = parse_args(args, "vector_insert")?;
+    let StorageVectorInsertArgs {
+        namespace,
+        file_path,
+        chunks,
+    } = parse_args(args, "vector_insert")?;
     let impl_chunks: Vec<crate::vectorstore::ChunkEmbedding> =
         chunks.into_iter().map(chunk_to_impl).collect();
     engine
-        .vector_insert(&file_path, &impl_chunks)
+        .vector_insert(&namespace, &file_path, &impl_chunks)
         .map_err(|e| exec_err(format!("vector_insert: {e}")))?;
     to_value(&StorageOk { ok: true }, "vector_insert")
 }
@@ -33,28 +37,33 @@ pub(crate) fn query(engine: &StorageEngine, args: &Value) -> Result<Value, Plugi
     // The reply still serializes `Vec<ChunkMatch>`; its wire shape
     // matches `Vec<StorageVectorMatch>` field-for-field (compared
     // via `cargo test -p nexus-bootstrap --test ipc_schema_emit`).
-    let StorageVectorQueryArgs { embedding, limit } = parse_args(args, "vector_query")?;
+    let StorageVectorQueryArgs {
+        namespace,
+        embedding,
+        limit,
+    } = parse_args(args, "vector_query")?;
     let limit = limit
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(DEFAULT_QUERY_LIMIT);
     let matches = engine
-        .vector_query(&embedding, limit)
+        .vector_query(&namespace, &embedding, limit)
         .map_err(|e| exec_err(format!("vector_query: {e}")))?;
     to_value(&matches, "vector_query")
 }
 
 pub(crate) fn delete_by_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    // #190 / R7 — strict-parse via the shared `StoragePathArgs`.
-    let StoragePathArgs { path } = parse_args(args, "vector_delete_by_file")?;
+    let StorageVectorDeleteArgs { namespace, path } =
+        parse_args(args, "vector_delete_by_file")?;
     engine
-        .vector_delete_by_file(&path)
+        .vector_delete_by_file(&namespace, &path)
         .map_err(|e| exec_err(format!("vector_delete_by_file: {e}")))?;
     to_value(&StorageOk { ok: true }, "vector_delete_by_file")
 }
 
-pub(crate) fn count(engine: &StorageEngine) -> Result<Value, PluginError> {
+pub(crate) fn count(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let StorageVectorCountArgs { namespace } = parse_args(args, "vectorstore_count")?;
     let count = engine
-        .vectorstore_count()
+        .vectorstore_count(&namespace)
         .map_err(|e| exec_err(format!("vectorstore_count: {e}")))?;
     // usize → u64 only ever truncates on hypothetical 128-bit hosts;
     // saturate rather than panic.

@@ -1802,11 +1802,12 @@ impl StorageEngine {
     /// Panics if the internal write-connection mutex is poisoned.
     pub fn vector_insert(
         &self,
+        namespace: &str,
         file_path: &str,
         chunks: &[vectorstore::ChunkEmbedding],
     ) -> Result<(), StorageError> {
         let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
-        vectorstore::upsert(&conn, file_path, chunks)
+        vectorstore::upsert(&conn, namespace, file_path, chunks)
     }
 
     /// Search the vector store for the `limit` most similar chunks.
@@ -1816,11 +1817,12 @@ impl StorageEngine {
     /// Returns [`StorageError`] if the underlying query fails.
     pub fn vector_query(
         &self,
+        namespace: &str,
         query_embedding: &[f32],
         limit: usize,
     ) -> Result<Vec<vectorstore::ChunkMatch>, StorageError> {
         let conn = self.pool_connection()?;
-        vectorstore::search(&conn, query_embedding, limit)
+        vectorstore::search(&conn, namespace, query_embedding, limit)
     }
 
     /// Delete every embedding row for `file_path`.
@@ -1832,9 +1834,13 @@ impl StorageEngine {
     /// # Panics
     ///
     /// Panics if the internal write-connection mutex is poisoned.
-    pub fn vector_delete_by_file(&self, file_path: &str) -> Result<(), StorageError> {
+    pub fn vector_delete_by_file(
+        &self,
+        namespace: &str,
+        file_path: &str,
+    ) -> Result<(), StorageError> {
         let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
-        vectorstore::delete_by_file(&conn, file_path)
+        vectorstore::delete_by_file(&conn, namespace, file_path)
     }
 
     /// Count all stored embeddings.
@@ -1842,9 +1848,9 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the count query fails.
-    pub fn vectorstore_count(&self) -> Result<usize, StorageError> {
+    pub fn vectorstore_count(&self, namespace: &str) -> Result<usize, StorageError> {
         let conn = self.pool_connection()?;
-        vectorstore::count(&conn)
+        vectorstore::count(&conn, namespace)
     }
 }
 

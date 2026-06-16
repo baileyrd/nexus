@@ -960,7 +960,12 @@ pub struct StorageChunkEmbedding {
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageVectorInsertArgs {
-    /// Forge-relative path of the source file. Used as the dedup key.
+    /// Collection the vectors belong to (e.g. `notes`, `memory`). Defaults to
+    /// `notes` so existing callers that omit it keep their current behaviour.
+    #[serde(default = "default_vector_namespace")]
+    pub namespace: String,
+    /// Forge-relative path of the source file. Used as the dedup key
+    /// (scoped to `namespace`).
     pub file_path: String,
     /// Replacement chunk set. Empty array clears all chunks for the
     /// file without inserting new ones.
@@ -979,11 +984,59 @@ pub struct StorageVectorInsertArgs {
 )]
 #[serde(deny_unknown_fields)]
 pub struct StorageVectorQueryArgs {
+    /// Collection to search (e.g. `notes`, `memory`). Defaults to `notes`.
+    #[serde(default = "default_vector_namespace")]
+    pub namespace: String,
     /// Query embedding (same dimensionality as the stored vectors).
     pub embedding: Vec<f32>,
     /// Maximum number of matches to return. Defaults to 5 when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+}
+
+/// Default vector-store namespace for IPC args that omit one. `notes` keeps
+/// every pre-namespacing caller (the AI/RAG indexer) operating on the same
+/// collection it always has.
+fn default_vector_namespace() -> String {
+    "notes".to_string()
+}
+
+/// Args for `com.nexus.storage::vector_delete_by_file`. Deletes all chunks for
+/// `path` within `namespace`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorDeleteArgs {
+    /// Collection to delete from (e.g. `notes`, `memory`). Defaults to `notes`.
+    #[serde(default = "default_vector_namespace")]
+    pub namespace: String,
+    /// Forge-relative path whose chunks are removed.
+    pub path: String,
+}
+
+/// Args for `com.nexus.storage::vectorstore_count`. Counts the chunks in one
+/// collection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorCountArgs {
+    /// Collection to count (e.g. `notes`, `memory`). Defaults to `notes`.
+    #[serde(default = "default_vector_namespace")]
+    pub namespace: String,
 }
 
 /// One match row in a `vector_query` reply. Mirror of

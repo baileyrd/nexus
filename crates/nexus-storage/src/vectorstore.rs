@@ -54,39 +54,44 @@ pub struct ChunkMatch {
 /// fails.
 pub fn upsert(
     conn: &Connection,
+    namespace: &str,
     file_path: &str,
     chunks: &[ChunkEmbedding],
 ) -> Result<(), StorageError> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "DELETE FROM embeddings WHERE file_path = ?1;",
-        params![file_path],
+        "DELETE FROM embeddings WHERE namespace = ?1 AND file_path = ?2;",
+        params![namespace, file_path],
     )?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO embeddings (file_path, block_id, chunk_text, embedding, created_at)
-             VALUES (?1, ?2, ?3, ?4, unixepoch());",
+            "INSERT INTO embeddings (namespace, file_path, block_id, chunk_text, embedding, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, unixepoch());",
         )?;
         for chunk in chunks {
             let blob = embedding_to_blob(&chunk.embedding);
             #[allow(clippy::cast_possible_wrap)]
             let block_id = chunk.block_id as i64;
-            stmt.execute(params![chunk.file_path, block_id, chunk.chunk_text, blob,])?;
+            stmt.execute(params![namespace, chunk.file_path, block_id, chunk.chunk_text, blob,])?;
         }
     }
     tx.commit()?;
     Ok(())
 }
 
-/// Delete all embeddings associated with `file_path`.
+/// Delete all embeddings associated with `file_path` within `namespace`.
 ///
 /// # Errors
 ///
 /// Returns [`StorageError::Database`] if the delete statement fails.
-pub fn delete_by_file(conn: &Connection, file_path: &str) -> Result<(), StorageError> {
+pub fn delete_by_file(
+    conn: &Connection,
+    namespace: &str,
+    file_path: &str,
+) -> Result<(), StorageError> {
     conn.execute(
-        "DELETE FROM embeddings WHERE file_path = ?1;",
-        params![file_path],
+        "DELETE FROM embeddings WHERE namespace = ?1 AND file_path = ?2;",
+        params![namespace, file_path],
     )?;
     Ok(())
 }
@@ -102,14 +107,15 @@ pub fn delete_by_file(conn: &Connection, file_path: &str) -> Result<(), StorageE
 /// Returns [`StorageError::Database`] if the underlying query fails.
 pub fn search(
     conn: &Connection,
+    namespace: &str,
     query_embedding: &[f32],
     limit: usize,
 ) -> Result<Vec<ChunkMatch>, StorageError> {
-    let mut stmt =
-        conn.prepare("SELECT file_path, block_id, chunk_text, embedding FROM embeddings;")?;
+    let mut stmt = conn
+        .prepare("SELECT file_path, block_id, chunk_text, embedding FROM embeddings WHERE namespace = ?1;")?;
 
     let mut matches: Vec<ChunkMatch> = stmt
-        .query_map([], |row| {
+        .query_map(params![namespace], |row| {
             let file_path: String = row.get(0)?;
             let block_id: i64 = row.get(1)?;
             let chunk_text: String = row.get(2)?;
@@ -144,8 +150,12 @@ pub fn search(
 /// # Errors
 ///
 /// Returns [`StorageError::Database`] if the count query fails.
-pub fn count(conn: &Connection) -> Result<usize, StorageError> {
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM embeddings;", [], |r| r.get(0))?;
+pub fn count(conn: &Connection, namespace: &str) -> Result<usize, StorageError> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM embeddings WHERE namespace = ?1;",
+        params![namespace],
+        |r| r.get(0),
+    )?;
     usize::try_from(n).map_err(|_| StorageError::IndexInconsistency {
         details: "embedding count overflowed usize".into(),
     })
@@ -239,12 +249,56 @@ mod tests {
             },
         ];
 
-        upsert(&conn, "a.md", &chunks).unwrap();
+        upsert(&conn, "notes", "a.md", &chunks).unwrap();
 
-        let results = search(&conn, &[0.9, 0.1, 0.0], 5).unwrap();
+        let results = search(&conn, "notes", &[0.9, 0.1, 0.0], 5).unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].chunk_text, "Rust is great");
         assert!(results[0].score > 0.9);
+    }
+
+    #[test]
+    fn namespaces_are_isolated() {
+        let conn = setup_db();
+        upsert(
+            &conn,
+            "notes",
+            "a.md",
+            &[ChunkEmbedding {
+                file_path: "a.md".into(),
+                block_id: 1,
+                chunk_text: "a note".into(),
+                embedding: vec![1.0, 0.0],
+            }],
+        )
+        .unwrap();
+        upsert(
+            &conn,
+            "memory",
+            "memory://x",
+            &[ChunkEmbedding {
+                file_path: "memory://x".into(),
+                block_id: 0,
+                chunk_text: "a memory".into(),
+                embedding: vec![1.0, 0.0],
+            }],
+        )
+        .unwrap();
+
+        // Each namespace sees only its own rows.
+        assert_eq!(count(&conn, "notes").unwrap(), 1);
+        assert_eq!(count(&conn, "memory").unwrap(), 1);
+        let notes = search(&conn, "notes", &[1.0, 0.0], 5).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].chunk_text, "a note");
+        let mem = search(&conn, "memory", &[1.0, 0.0], 5).unwrap();
+        assert_eq!(mem.len(), 1);
+        assert_eq!(mem[0].chunk_text, "a memory");
+
+        // Deleting in one namespace leaves the other intact.
+        delete_by_file(&conn, "memory", "memory://x").unwrap();
+        assert_eq!(count(&conn, "memory").unwrap(), 0);
+        assert_eq!(count(&conn, "notes").unwrap(), 1);
     }
 
     #[test]
@@ -257,8 +311,8 @@ mod tests {
             chunk_text: "old".into(),
             embedding: vec![1.0, 0.0],
         }];
-        upsert(&conn, "b.md", &v1).unwrap();
-        assert_eq!(count(&conn).unwrap(), 1);
+        upsert(&conn, "notes", "b.md", &v1).unwrap();
+        assert_eq!(count(&conn, "notes").unwrap(), 1);
 
         let v2 = vec![ChunkEmbedding {
             file_path: "b.md".into(),
@@ -266,8 +320,8 @@ mod tests {
             chunk_text: "new".into(),
             embedding: vec![0.0, 1.0],
         }];
-        upsert(&conn, "b.md", &v2).unwrap();
-        assert_eq!(count(&conn).unwrap(), 1);
+        upsert(&conn, "notes", "b.md", &v2).unwrap();
+        assert_eq!(count(&conn, "notes").unwrap(), 1);
     }
 
     #[test]
@@ -280,10 +334,10 @@ mod tests {
             chunk_text: "data".into(),
             embedding: vec![1.0],
         }];
-        upsert(&conn, "c.md", &chunks).unwrap();
-        assert_eq!(count(&conn).unwrap(), 1);
+        upsert(&conn, "notes", "c.md", &chunks).unwrap();
+        assert_eq!(count(&conn, "notes").unwrap(), 1);
 
-        delete_by_file(&conn, "c.md").unwrap();
-        assert_eq!(count(&conn).unwrap(), 0);
+        delete_by_file(&conn, "notes", "c.md").unwrap();
+        assert_eq!(count(&conn, "notes").unwrap(), 0);
     }
 }

@@ -12,8 +12,13 @@
       }
     },
     "file_path": {
-      "description": "Forge-relative path of the source file. Used as the dedup key.",
+      "description": "Forge-relative path of the source file. Used as the dedup key\n(scoped to `namespace`).",
       "type": "string"
+    },
+    "namespace": {
+      "description": "Collection the vectors belong to (e.g. `notes`, `memory`). Defaults to\n`notes` so existing callers that omit it keep their current behaviour.",
+      "type": "string",
+      "default": "notes"
     }
   },
   "additionalProperties": false,

@@ -7,7 +7,13 @@ import type { StorageChunkEmbedding } from "./StorageChunkEmbedding";
  */
 export type StorageVectorInsertArgs = { 
 /**
- * Forge-relative path of the source file. Used as the dedup key.
+ * Collection the vectors belong to (e.g. `notes`, `memory`). Defaults to
+ * `notes` so existing callers that omit it keep their current behaviour.
+ */
+namespace: string, 
+/**
+ * Forge-relative path of the source file. Used as the dedup key
+ * (scoped to `namespace`).
  */
 file_path: string, 
 /**
