@@ -17,6 +17,7 @@ const CMD_SEARCH = 'nexus.memory.search'
 const CMD_RECENT = 'nexus.memory.recent'
 const CMD_FACTS = 'nexus.memory.facts'
 const CMD_ENTITIES = 'nexus.memory.entities'
+const CMD_TAGS = 'nexus.memory.tags'
 const CMD_STATS = 'nexus.memory.stats'
 
 const LIST_LIMIT = 30
@@ -130,6 +131,7 @@ export const memoryDashboardPlugin: Plugin = {
         { id: CMD_RECENT, title: 'Memory: Recent', category: 'Memory' },
         { id: CMD_FACTS, title: 'Memory: Facts', category: 'Memory' },
         { id: CMD_ENTITIES, title: 'Memory: Entities', category: 'Memory' },
+        { id: CMD_TAGS, title: 'Memory: Tags', category: 'Memory' },
         { id: CMD_STATS, title: 'Memory: Stats', category: 'Memory' },
       ],
     },
@@ -207,6 +209,35 @@ export const memoryDashboardPlugin: Plugin = {
         .invoke<unknown>(MEMORY_PLUGIN, 'facts', { subject: picked.key, limit: LIST_LIMIT })
         .catch(() => [] as unknown)
       await presentMemories(api, decodeMemories(factsRaw), `No facts with "${picked.key}" as subject.`)
+    })
+
+    api.commands.register(CMD_TAGS, async () => {
+      const raw = await api.kernel
+        .invoke<unknown>(MEMORY_PLUGIN, 'tags', { limit: LIST_LIMIT })
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Memory tags failed: ${String(e)}`, type: 'error' })
+          return [] as unknown
+        })
+      const tags = decodeCounts(raw)
+      if (tags.length === 0) {
+        api.notifications.show({ message: 'No tags yet — add memories with tags first.', type: 'info' })
+        return
+      }
+      const items: PickItem<CountRow>[] = tags.map((t) => ({
+        label: t.key,
+        description: `${t.count} memor${t.count === 1 ? 'y' : 'ies'}`,
+        value: t,
+      }))
+      const picked = await api.input.pick(items, {
+        title: `Tags (${tags.length})`,
+        placeholder: 'Select a tag to list the memories carrying it',
+      })
+      if (!picked) return
+      // Drill down: list memories carrying the chosen tag.
+      const taggedRaw = await api.kernel
+        .invoke<unknown>(MEMORY_PLUGIN, 'list', { tag: picked.key, limit: LIST_LIMIT })
+        .catch(() => [] as unknown)
+      await presentMemories(api, decodeMemories(taggedRaw), `No memories tagged "${picked.key}".`)
     })
 
     api.commands.register(CMD_STATS, async () => {
