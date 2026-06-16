@@ -31,5 +31,11 @@ schemars = { workspace = true, optional = true }
 # `ipc.rs`. Off by default; enabled by `scripts/check_ipc_drift.sh`.
 ts-export = ["dep:ts-rs", "dep:schemars"]
 
+# OS process sandbox enforcement (Phase 4 F1). Landlock is Linux-only; other
+# platforms get the no-op stub in `os_sandbox.rs`. macOS seatbelt / Windows
+# restricted-token backends land later.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
