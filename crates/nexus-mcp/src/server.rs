@@ -998,6 +998,19 @@ impl NexusMcpServer {
     }
 
     #[tool(
+        name = "nexus_memory_export",
+        description = "Export every stored memory as full records (oldest first), suitable for backup or re-import into another store"
+    )]
+    async fn memory_export(&self) -> Json<MemoryListOutput> {
+        match self.memory_call::<serde_json::Value>("export", serde_json::json!({})).await {
+            Ok(memories) => Json(MemoryListOutput { memories }),
+            Err(e) => Json(MemoryListOutput {
+                memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
         name = "nexus_list_notes",
         description = "List notes in the forge, optionally filtered by a path prefix"
     )]

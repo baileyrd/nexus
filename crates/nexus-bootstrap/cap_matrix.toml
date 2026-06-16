@@ -1044,6 +1044,11 @@ plugin = "com.nexus.memory"
 command = "entities"
 unrestricted = "read-only distinct-entity aggregation over the plugin's own memory store"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "export"
+unrestricted = "read-only full dump of the plugin's own memory store for portability"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]
