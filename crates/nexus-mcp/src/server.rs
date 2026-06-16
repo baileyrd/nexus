@@ -874,6 +874,40 @@ struct MemoryWikiOutput {
     result: serde_json::Value,
 }
 
+/// Input for `nexus_memory_capture`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryCaptureInput {
+    /// The text/turn to capture verbatim.
+    content: String,
+    /// Also decompose it into atomic child facts via the LLM.
+    #[serde(default)]
+    decompose: Option<bool>,
+    /// Originating client/provider label.
+    #[serde(default)]
+    client: Option<String>,
+    /// Category for the captured memories.
+    #[serde(default)]
+    category: Option<String>,
+}
+
+/// Input for `nexus_memory_consolidate`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryConsolidateInput {
+    /// Restrict to one category.
+    #[serde(default)]
+    category: Option<String>,
+    /// Report what would be merged without changing anything.
+    #[serde(default)]
+    dry_run: Option<bool>,
+}
+
+/// Wraps a memory operation's JSON reply (or `{ "error": … }` on failure).
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryResultOutput {
+    /// The memory plugin's reply.
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MemoryFactsInput {
@@ -1234,6 +1268,45 @@ impl NexusMcpServer {
         match self.memory_call::<serde_json::Value>("wiki_list", serde_json::json!({})).await {
             Ok(result) => Json(MemoryWikiOutput { result }),
             Err(e) => Json(MemoryWikiOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_capture",
+        description = "Capture a conversation turn / note as a memory; optionally decompose it into atomic facts (LLM). The deliberate 'remember this' call"
+    )]
+    async fn memory_capture(
+        &self,
+        Parameters(input): Parameters<MemoryCaptureInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({
+            "content": input.content,
+            "decompose": input.decompose,
+            "client": input.client,
+            "category": input.category,
+        });
+        match self.memory_call::<serde_json::Value>("auto_capture", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_consolidate",
+        description = "Deduplicate memories: supersede exact (normalized) duplicates, keeping the freshest. Use dry_run to preview"
+    )]
+    async fn memory_consolidate(
+        &self,
+        Parameters(input): Parameters<MemoryConsolidateInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({ "category": input.category, "dry_run": input.dry_run });
+        match self.memory_call::<serde_json::Value>("consolidate", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
                 result: serde_json::json!({ "error": e }),
             }),
         }
