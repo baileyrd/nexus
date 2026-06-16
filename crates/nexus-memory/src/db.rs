@@ -382,6 +382,26 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// All memories in a capture's lineage: the parent (`capture_id`) plus any
+    /// decomposed children (`source_capture_id`), oldest first.
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure.
+    pub fn list_by_capture(&self, capture_id: &str) -> Result<Vec<Memory>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m \
+             WHERE m.capture_id = ?1 OR m.source_capture_id = ?1 \
+             ORDER BY m.created_at ASC, m.id ASC"
+        ))?;
+        let out = stmt
+            .query_map(params![capture_id], |row| {
+                row_to_memory(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(out)
+    }
+
     /// List memories filtered by optional `category` / `memory_type` / `status`
     /// / `tag`, newest first. Filters are bound parameters (`None` means "any");
     /// the column names are fixed literals, so the dynamic `WHERE` is
@@ -1051,6 +1071,29 @@ mod tests {
         // Upsert overwrites.
         db.sync_state_set("cursor", "later").unwrap();
         assert_eq!(db.sync_state_get("cursor").unwrap().as_deref(), Some("later"));
+    }
+
+    #[test]
+    fn list_by_capture_returns_parent_and_children() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        let cap = "cap-123";
+        // Parent capture.
+        let mut parent = Memory::new("the whole turn");
+        parent.capture_id = Some(cap.to_string());
+        db.insert(&parent).unwrap();
+        // Two decomposed children.
+        for c in ["fact one", "fact two"] {
+            let mut child = Memory::new(c);
+            child.source_capture_id = Some(cap.to_string());
+            db.insert(&child).unwrap();
+        }
+        // An unrelated memory.
+        db.insert(&Memory::new("unrelated")).unwrap();
+
+        let lineage = db.list_by_capture(cap).unwrap();
+        assert_eq!(lineage.len(), 3);
+        assert_eq!(lineage[0].content, "the whole turn"); // parent inserted first
+        assert!(db.list_by_capture("nope").unwrap().is_empty());
     }
 
     #[test]

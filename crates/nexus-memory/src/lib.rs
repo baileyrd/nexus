@@ -37,6 +37,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod capture;
+pub mod capture_pipeline;
 pub mod core_plugin;
 pub mod db;
 pub mod episodic;

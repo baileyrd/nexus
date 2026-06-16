@@ -1101,6 +1101,16 @@ plugin = "com.nexus.memory"
 command = "wiki_list"
 unrestricted = "lists wiki pages in the forge via the plugin's own context"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "auto_capture"
+unrestricted = "stores a turn in the plugin's own store; the optional decompose step reaches the AI provider through the plugin's own gated context, not the caller's (mirrors recall)"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "get_capture"
+unrestricted = "read-only fetch of a capture's lineage from the plugin's own store"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]
