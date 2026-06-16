@@ -26,12 +26,12 @@ Serde tags are kebab-case (`"mode": "workspace-write"`) with snake_case fields, 
 
 Path checks in the model are **lexical** — the enforcement layer canonicalizes paths (resolving symlinks) before consulting the policy.
 
-## Enforcement backends — *(roadmap)*
+## Enforcement backends
 
-The model is platform-agnostic; the per-OS enforcement lands in `nexus-security`:
+The model is platform-agnostic; the per-OS enforcement lives in [`nexus-security::os_sandbox`](../../crates/nexus-security/src/os_sandbox.rs). `apply_to_current_thread(policy, cwd)` confines the calling thread (and any child it then `exec`s) and reports a [`SandboxStatus`](../../crates/nexus-security/src/os_sandbox.rs) — `FullyEnforced`, `PartiallyEnforced`, `NotEnforced` (kernel lacks the backend), `Skipped` (`danger-full-access`), or `Unsupported` (no backend on this OS). Enforcement is **best-effort**: where the kernel can't enforce, callers see the status rather than a hard failure.
 
-- **Linux** — [landlock](https://docs.kernel.org/userspace-api/landlock.html) for filesystem path restrictions + seccomp to block network syscalls when `network_access` is off.
-- **macOS** — a seatbelt (`sandbox_init`) profile generated from the policy.
-- **Windows** — restricted tokens + job objects.
+- **Linux** — ✅ [Landlock](https://docs.kernel.org/userspace-api/landlock.html) (ABI v1) for filesystem path restrictions: full-disk read, write only under the workspace roots. Landlock is *grant-only*, so the `.git` read-only carve-out is not enforced at this layer (honoured by macOS seatbelt + higher-layer edit tooling). Landlock restrictions are **irreversible for the calling thread** — apply on the thread that will `exec` the child (e.g. a `pre_exec` hook). seccomp (network syscall blocking when `network_access` is off) is still to come.
+- **macOS** — *(roadmap)* a seatbelt (`sandbox_init`) profile generated from the policy.
+- **Windows** — *(roadmap)* restricted tokens + job objects.
 
-Wiring into the spawn path (`nexus-terminal`, agent tool exec) and **permissioned downloads** (explicit, approved network egress under an otherwise network-off policy) follow once the backends land.
+Wiring into the spawn path (`nexus-terminal`, agent tool exec) and **permissioned downloads** (explicit, approved network egress under an otherwise network-off policy) follow once seccomp lands.

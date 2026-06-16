@@ -157,6 +157,9 @@ serde_yml = "0.0.12"
 
 # System interfaces
 libc = "0.2"
+# OS process sandbox (Linux) — Landlock LSM filesystem restrictions. See
+# crates/nexus-security/src/os_sandbox.rs and docs/0.1.2/os-sandbox.md.
+landlock = "0.4"
 
 # File time manipulation
 filetime = "0.2"

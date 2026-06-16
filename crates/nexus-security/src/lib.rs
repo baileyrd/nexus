@@ -19,6 +19,8 @@ mod credential;
 mod error;
 /// IPC wire types for `com.nexus.security`.
 pub mod ipc;
+/// OS process sandbox enforcement (Phase 4 F1) for `nexus_types::SandboxPolicy`.
+pub mod os_sandbox;
 mod path;
 mod risk;
 /// TLS pinning verifier for outbound HTTPS (BL-102).
@@ -29,5 +31,6 @@ pub mod tls_pins;
 pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
 pub use error::SecurityError;
+pub use os_sandbox::{apply_to_current_thread, SandboxError, SandboxStatus};
 pub use path::ForgePathValidator;
 pub use risk::{risk_level, RiskLevel};
