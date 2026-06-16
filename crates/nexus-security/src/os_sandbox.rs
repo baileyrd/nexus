@@ -1,11 +1,13 @@
 //! OS process sandbox **enforcement** for [`SandboxPolicy`].
 //!
 //! Applies a policy to the current thread so that it — and any child process it
-//! `exec`s afterwards — is confined at the kernel level. On Linux this uses the
-//! [Landlock](https://docs.kernel.org/userspace-api/landlock.html) LSM for
-//! filesystem path restrictions; other platforms currently return
-//! [`SandboxStatus::Unsupported`] (macOS seatbelt and Windows restricted tokens
-//! land later, as does Linux seccomp for the network dimension).
+//! `exec`s afterwards — is confined at the kernel level. On Linux the
+//! filesystem dimension uses the
+//! [Landlock](https://docs.kernel.org/userspace-api/landlock.html) LSM
+//! ([`apply_to_current_thread`]) and the network dimension uses seccomp-bpf to
+//! deny IP socket creation ([`block_inet_sockets`]); other platforms currently
+//! return the `Unsupported` status (macOS seatbelt and Windows restricted
+//! tokens land later).
 //!
 //! Landlock restrictions are **irreversible for the calling thread**, so apply
 //! them on the thread that will immediately `exec` the sandboxed child (e.g. a
@@ -46,12 +48,26 @@ impl SandboxStatus {
     }
 }
 
+/// Outcome of installing the network block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkStatus {
+    /// A seccomp filter denying inet socket creation was installed.
+    Blocked,
+    /// No network backend on this platform yet.
+    Unsupported,
+}
+
 /// Errors applying a sandbox policy.
 #[derive(Debug, thiserror::Error)]
 pub enum SandboxError {
     /// The kernel sandbox API is present but rejected the ruleset.
     #[error("landlock ruleset error: {0}")]
     Ruleset(String),
+    /// The seccomp network filter could not be built or installed. On Linux a
+    /// failure here means **network access was not contained** — the caller
+    /// must decide whether to proceed or refuse the spawn.
+    #[error("seccomp network filter error: {0}")]
+    Seccomp(String),
 }
 
 /// Apply `policy` (resolved against working directory `cwd`) to the **current
@@ -76,6 +92,115 @@ pub fn apply_to_current_thread(
     {
         let _ = cwd;
         Ok(SandboxStatus::Unsupported)
+    }
+}
+
+/// Install a seccomp-bpf filter on the **current thread** that denies creation
+/// of IP sockets (`AF_INET` / `AF_INET6` / `AF_PACKET`) with `EPERM`, while
+/// leaving `AF_UNIX` (local IPC) and every other syscall untouched. Apply when
+/// a policy disallows network access, *after* [`apply_to_current_thread`], on
+/// the thread that will `exec` the child. Irreversible for that thread.
+///
+/// Compose the two dimensions per policy:
+///
+/// ```no_run
+/// use nexus_security::os_sandbox::{apply_to_current_thread, block_inet_sockets};
+/// # use nexus_types::SandboxPolicy;
+/// # use std::path::Path;
+/// # fn confine(policy: &SandboxPolicy, cwd: &Path) -> Result<(), Box<dyn std::error::Error>> {
+/// apply_to_current_thread(policy, cwd)?; // filesystem (landlock)
+/// if !policy.has_full_network_access() {
+///     block_inet_sockets()?;             // network (seccomp)
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+/// Returns [`SandboxError::Seccomp`] if the filter cannot be built or the
+/// kernel rejects it — meaning network access was **not** contained.
+pub fn block_inet_sockets() -> Result<NetworkStatus, SandboxError> {
+    #[cfg(target_os = "linux")]
+    {
+        linux_net::block()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(NetworkStatus::Unsupported)
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_net {
+    use std::collections::BTreeMap;
+
+    use seccompiler::{
+        apply_filter, BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition,
+        SeccompFilter, SeccompRule, TargetArch,
+    };
+
+    use super::{NetworkStatus, SandboxError};
+
+    // The `Option` is meaningful on unsupported architectures; clippy only sees
+    // the always-`Some` branch for the current compile target.
+    #[allow(clippy::unnecessary_wraps)]
+    fn target_arch() -> Option<TargetArch> {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Some(TargetArch::x86_64)
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            Some(TargetArch::aarch64)
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            None
+        }
+    }
+
+    pub(super) fn block() -> Result<NetworkStatus, SandboxError> {
+        let seccomp_err = |e: &dyn std::fmt::Display| SandboxError::Seccomp(e.to_string());
+        let arch = target_arch()
+            .ok_or_else(|| SandboxError::Seccomp("unsupported CPU architecture".to_string()))?;
+
+        // A rule matching `socket(domain == family, …)`. AF_* constants are
+        // non-negative, so `try_from` documents the invariant without a
+        // sign-losing cast.
+        let deny_family = |family: libc::c_int| -> Result<SeccompRule, SandboxError> {
+            let value = u64::try_from(family)
+                .map_err(|_| SandboxError::Seccomp("negative socket family".to_string()))?;
+            SeccompRule::new(vec![SeccompCondition::new(
+                0,
+                SeccompCmpArgLen::Dword,
+                SeccompCmpOp::Eq,
+                value,
+            )
+            .map_err(|e| seccomp_err(&e))?])
+            .map_err(|e| seccomp_err(&e))
+        };
+
+        let rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::from([(
+            libc::SYS_socket,
+            vec![
+                deny_family(libc::AF_INET)?,
+                deny_family(libc::AF_INET6)?,
+                deny_family(libc::AF_PACKET)?,
+            ],
+        )]);
+
+        // Default-allow; matched inet `socket()` calls get EPERM.
+        let filter = SeccompFilter::new(
+            rules,
+            SeccompAction::Allow,
+            SeccompAction::Errno(libc::EPERM as u32),
+            arch,
+        )
+        .map_err(|e| seccomp_err(&e))?;
+
+        let program: BpfProgram = filter.try_into().map_err(|e| seccomp_err(&e))?;
+        apply_filter(&program).map_err(|e| seccomp_err(&e))?;
+        Ok(NetworkStatus::Blocked)
     }
 }
 
@@ -152,6 +277,42 @@ mod tests {
     fn non_linux_is_unsupported() {
         let st = apply_to_current_thread(&SandboxPolicy::ReadOnly, Path::new("/")).unwrap();
         assert_eq!(st, SandboxStatus::Unsupported);
+        assert_eq!(block_inet_sockets().unwrap(), NetworkStatus::Unsupported);
+    }
+
+    // Like the landlock tests, the seccomp filter is irreversible for the
+    // calling thread, so it runs in a discarded thread. Asserts the deny only
+    // when the kernel actually installed the filter (CI portability).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn block_inet_sockets_denies_ip_but_allows_unix_when_enforced() {
+        let outcome = std::thread::spawn(|| match block_inet_sockets() {
+            Ok(NetworkStatus::Blocked) => {
+                let inet = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+                let inet_denied = inet < 0;
+                if inet >= 0 {
+                    unsafe { libc::close(inet) };
+                }
+                let unix = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+                let unix_ok = unix >= 0;
+                if unix >= 0 {
+                    unsafe { libc::close(unix) };
+                }
+                Some((inet_denied, unix_ok))
+            }
+            // seccomp unavailable in this environment.
+            Ok(NetworkStatus::Unsupported) | Err(_) => None,
+        })
+        .join()
+        .unwrap();
+
+        match outcome {
+            Some((inet_denied, unix_ok)) => {
+                assert!(inet_denied, "inet socket creation must be denied after the block");
+                assert!(unix_ok, "AF_UNIX sockets must remain available");
+            }
+            None => eprintln!("seccomp network block not enforced/available in this env"),
+        }
     }
 
     // Landlock restricts the *calling thread* irreversibly, so every enforcing

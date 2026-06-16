@@ -31,6 +31,8 @@ pub mod tls_pins;
 pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
 pub use error::SecurityError;
-pub use os_sandbox::{apply_to_current_thread, SandboxError, SandboxStatus};
+pub use os_sandbox::{
+    apply_to_current_thread, block_inet_sockets, NetworkStatus, SandboxError, SandboxStatus,
+};
 pub use path::ForgePathValidator;
 pub use risk::{risk_level, RiskLevel};
