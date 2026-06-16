@@ -35,4 +35,13 @@ The model is platform-agnostic; the per-OS enforcement lives in [`nexus-security
 - **macOS** — *(roadmap)* a seatbelt (`sandbox_init`) profile generated from the policy.
 - **Windows** — *(roadmap)* restricted tokens + job objects.
 
-Both Linux restrictions are **irreversible for the calling thread** — apply on the thread that will `exec` the child (a `pre_exec` hook): filesystem via `apply_to_current_thread`, then network via `block_inet_sockets`. Wiring into the spawn path (`nexus-terminal`, agent tool exec) and **permissioned downloads** (explicit, approved network egress under an otherwise network-off policy) follow next.
+Both Linux restrictions are **irreversible for the calling thread**, so apply them on the thread that will do the untrusted work (or `exec` the untrusted child). `confine_current_thread(policy, cwd)` composes both per policy — filesystem via `apply_to_current_thread`, then `block_inet_sockets` unless the policy grants network — and is the entry point a sandboxed worker applies to itself.
+
+### Wiring into the spawn path — *(next, with care)*
+
+Confining a *spawned child* (terminal command, agent tool) is the goal, but it carries a real hazard: applying landlock/seccomp from a `std::process::Command::pre_exec` hook runs **after `fork()` in a multithreaded parent**, where heap allocation is not async-signal-safe (another thread may hold the allocator lock at the moment of `fork`). The ruleset/BPF construction allocates. Two safe shapes:
+
+1. **Build-in-parent, apply-in-child** — construct the landlock `RulesetCreated` and the seccomp `BpfProgram` *before* fork, move them into the `pre_exec` closure, and call only the (allocation-free) `restrict_self` / `apply_filter` syscalls in the child.
+2. **Helper binary** (Codex's approach) — `exec` a small single-threaded `nexus-sandbox` helper that applies the policy to itself and then `exec`s the real argv. No fork-alloc hazard at all.
+
+`portable-pty` (the terminal backend) does not expose `pre_exec`, so the helper-binary shape is the likely path there. **Permissioned downloads** — explicit, approved network egress under an otherwise network-off policy — layer on once a spawn path is confined.
