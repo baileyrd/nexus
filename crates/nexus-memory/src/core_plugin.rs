@@ -124,6 +124,15 @@ pub struct ListArgs {
     /// Maximum rows to return (default 50).
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Optional category filter.
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Optional memory-type filter (`episodic` | `semantic` | `procedural` | `unclassified`).
+    #[serde(default)]
+    pub memory_type: Option<String>,
+    /// Optional lifecycle-status filter (`active` | `archived` | `superseded`).
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 /// Args for `com.nexus.memory::search` (handler id `4`).
@@ -229,7 +238,12 @@ impl MemoryCorePlugin {
         let a: ListArgs = parse_args(args, "list")?;
         let mems = self
             .db
-            .list(a.limit.unwrap_or(DEFAULT_LIST_LIMIT))
+            .list_filtered(
+                a.category.as_deref(),
+                a.memory_type.as_deref(),
+                a.status.as_deref(),
+                a.limit.unwrap_or(DEFAULT_LIST_LIMIT),
+            )
             .map_err(db_err)?;
         to_value(&mems, "list")
     }
