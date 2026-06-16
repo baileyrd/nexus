@@ -446,6 +446,30 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// Active memories ranked by a freshly-computed [`compute_vitality`] score
+    /// (highest first), top `limit`. Read-only: the score is computed on the
+    /// fly and returned in each [`Memory::vitality`] field; the stored column
+    /// is left untouched. v1 computes over all active rows in memory — fine for
+    /// typical stores; a recency pre-filter can bound it later.
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure.
+    pub fn vitality_report(&self, limit: usize) -> Result<Vec<Memory>> {
+        let conn = self.pool.get()?;
+        let mut stmt =
+            conn.prepare(&format!("SELECT {COLS} FROM memories m WHERE m.status = 'active'"))?;
+        let mut mems: Vec<Memory> = stmt
+            .query_map([], |row| row_to_memory(row).map_err(|e| into_rusqlite(&e)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let now = Utc::now();
+        for m in &mut mems {
+            m.vitality = compute_vitality(m, now);
+        }
+        mems.sort_by(|a, b| b.vitality.total_cmp(&a.vitality));
+        mems.truncate(limit);
+        Ok(mems)
+    }
+
     /// Replace a memory's mutable fields (matched by id), bumping `updated_at`
     /// to now. Returns `true` if a row was changed.
     ///
@@ -536,6 +560,20 @@ fn grouped_count(conn: &rusqlite::Connection, column: &str) -> Result<Vec<Catego
 
 fn clamp_limit(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)
+}
+
+/// Heuristic vitality score (ACT-R-inspired): rewards frequent and recent
+/// access, decaying with age at the memory's own `decay_rate`. This is a v1
+/// proxy over the stored fields (access count + last access); full ACT-R
+/// base-level activation over the whole access history can refine it later.
+///
+/// `base_weight * (1 + access_count) / (1 + decay_rate * age_days)`, where
+/// `age_days` is measured from the last access (or creation if never accessed).
+#[allow(clippy::cast_precision_loss)] // counts/durations are small; f64 is ample.
+fn compute_vitality(m: &Memory, now: DateTime<Utc>) -> f64 {
+    let last = m.accessed_at.unwrap_or(m.created_at);
+    let age_days = (now - last).num_seconds().max(0) as f64 / 86_400.0;
+    m.base_weight * (1.0 + m.access_count as f64) / (1.0 + m.decay_rate * age_days)
 }
 
 /// Wrap a decode error as a `rusqlite::Error` so it can flow out of a
@@ -806,6 +844,33 @@ mod tests {
 
         // Missing id stays None (no panic, no write).
         assert!(db.get_recording_access(Uuid::now_v7()).unwrap().is_none());
+    }
+
+    #[test]
+    fn vitality_report_ranks_frequent_recent_first_and_excludes_archived() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        // Stale: accessed long ago, never re-accessed.
+        let mut stale = Memory::new("stale");
+        stale.accessed_at = Some(Utc::now() - chrono::Duration::days(60));
+        stale.access_count = 1;
+        db.insert(&stale).unwrap();
+        // Hot: accessed just now, many times.
+        let mut hot = Memory::new("hot");
+        hot.accessed_at = Some(Utc::now());
+        hot.access_count = 20;
+        db.insert(&hot).unwrap();
+        // Archived: would score high but is excluded from the report.
+        let mut archived = Memory::new("archived");
+        archived.accessed_at = Some(Utc::now());
+        archived.access_count = 99;
+        archived.status = MemoryStatus::Archived;
+        db.insert(&archived).unwrap();
+
+        let report = db.vitality_report(10).unwrap();
+        assert_eq!(report.len(), 2); // archived excluded
+        assert_eq!(report[0].content, "hot"); // frequent + recent ranks first
+        assert_eq!(report[1].content, "stale");
+        assert!(report[0].vitality > report[1].vitality);
     }
 
     #[test]

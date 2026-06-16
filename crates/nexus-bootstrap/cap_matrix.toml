@@ -1054,6 +1054,11 @@ plugin = "com.nexus.memory"
 command = "tags"
 unrestricted = "read-only distinct-tag aggregation over the plugin's own memory store"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "vitality_report"
+unrestricted = "read-only vitality ranking computed over the plugin's own memory store"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]

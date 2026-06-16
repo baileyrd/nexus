@@ -19,9 +19,10 @@
 //! | 9  | `entities` | `{ limit? }`                | Distinct entities + fact counts  |
 //! | 10 | `export` | `{}`                          | Dump every memory, oldest first  |
 //! | 11 | `tags`   | `{ limit? }`                  | Distinct tags + memory counts    |
+//! | 12 | `vitality_report` | `{ limit? }`         | Active memories ranked by vitality |
 //!
 //! Ids are append-only. Hybrid vector recall and the remaining `remind_me` parity
-//! commands (capture/wiki/lifecycle) land in later phases.
+//! commands (capture/wiki/consolidate) land in later phases.
 
 use std::path::Path;
 
@@ -63,6 +64,8 @@ pub const HANDLER_ENTITIES: u32 = 9;
 pub const HANDLER_EXPORT: u32 = 10;
 /// `tags` handler id.
 pub const HANDLER_TAGS: u32 = 11;
+/// `vitality_report` handler id.
+pub const HANDLER_VITALITY_REPORT: u32 = 12;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -78,6 +81,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("entities", HANDLER_ENTITIES),
     ("export", HANDLER_EXPORT),
     ("tags", HANDLER_TAGS),
+    ("vitality_report", HANDLER_VITALITY_REPORT),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -266,6 +270,20 @@ pub struct TagsArgs {
     pub limit: Option<usize>,
 }
 
+/// Args for `com.nexus.memory::vitality_report` (handler id `12`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct VitalityReportArgs {
+    /// Maximum memories to return (default 50).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 /// Core plugin wrapping a [`MemoryDb`].
@@ -436,6 +454,15 @@ impl MemoryCorePlugin {
             .map_err(db_err)?;
         to_value(&tags, "tags")
     }
+
+    fn vitality_report(&self, args: &Value) -> Result<Value, PluginError> {
+        let a: VitalityReportArgs = parse_args(args, "vitality_report")?;
+        let mems = self
+            .db
+            .vitality_report(a.limit.unwrap_or(DEFAULT_LIST_LIMIT))
+            .map_err(db_err)?;
+        to_value(&mems, "vitality_report")
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -452,6 +479,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_ENTITIES => self.entities(args),
             HANDLER_EXPORT => self.export(),
             HANDLER_TAGS => self.tags(args),
+            HANDLER_VITALITY_REPORT => self.vitality_report(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -686,6 +714,24 @@ mod tests {
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["key"], "infra");
         assert_eq!(arr[0]["count"], 2);
+    }
+
+    #[test]
+    fn vitality_report_ranks_accessed_memories_first() {
+        let mut p = plugin();
+        // Two memories; recall one of them several times so it outranks.
+        let hot = p.dispatch(HANDLER_ADD, &json!({ "content": "hot" })).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "cold" })).unwrap();
+        for _ in 0..5 {
+            p.dispatch(HANDLER_GET, &json!({ "id": hot })).unwrap();
+        }
+        let report = p.dispatch(HANDLER_VITALITY_REPORT, &json!({})).unwrap();
+        let arr = report.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["content"], "hot"); // most-accessed ranks first
     }
 
     #[test]
