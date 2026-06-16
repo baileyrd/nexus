@@ -16,6 +16,7 @@
 //! | 6  | `delete` | `{ id }`                      | Remove a memory                  |
 //! | 7  | `stats`  | `{}`                          | Store statistics (count)         |
 //! | 8  | `facts`  | `{ subject?, predicate?, … }` | Recall SPO entity facts          |
+//! | 9  | `entities` | `{ limit? }`                | Distinct entities + fact counts  |
 //!
 //! Ids are append-only. Hybrid vector recall and the remaining `remind_me` parity
 //! commands (capture/wiki/lifecycle) land in later phases.
@@ -54,6 +55,8 @@ pub const HANDLER_DELETE: u32 = 6;
 pub const HANDLER_STATS: u32 = 7;
 /// `facts` handler id.
 pub const HANDLER_FACTS: u32 = 8;
+/// `entities` handler id.
+pub const HANDLER_ENTITIES: u32 = 9;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -66,6 +69,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("delete", HANDLER_DELETE),
     ("stats", HANDLER_STATS),
     ("facts", HANDLER_FACTS),
+    ("entities", HANDLER_ENTITIES),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -223,6 +227,20 @@ pub struct FactsArgs {
     pub limit: Option<usize>,
 }
 
+/// Args for `com.nexus.memory::entities` (handler id `9`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct EntitiesArgs {
+    /// Maximum entities to return (default 50).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 /// Core plugin wrapping a [`MemoryDb`].
@@ -368,6 +386,15 @@ impl MemoryCorePlugin {
             .map_err(db_err)?;
         to_value(&mems, "facts")
     }
+
+    fn entities(&self, args: &Value) -> Result<Value, PluginError> {
+        let a: EntitiesArgs = parse_args(args, "entities")?;
+        let ents = self
+            .db
+            .list_entities(a.limit.unwrap_or(DEFAULT_LIST_LIMIT))
+            .map_err(db_err)?;
+        to_value(&ents, "entities")
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -381,6 +408,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_DELETE => self.delete(args),
             HANDLER_STATS => self.stats(),
             HANDLER_FACTS => self.facts(args),
+            HANDLER_ENTITIES => self.entities(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -543,6 +571,29 @@ mod tests {
         let facts = p.dispatch(HANDLER_FACTS, &json!({ "predicate": "knows" })).unwrap();
         assert_eq!(facts.as_array().unwrap().len(), 1);
         assert_eq!(facts[0]["subject"], "ada");
+    }
+
+    #[test]
+    fn entities_lists_distinct_entities_with_counts() {
+        let mut p = plugin();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "no entity here" })).unwrap();
+        p.dispatch(
+            HANDLER_ADD,
+            &json!({ "content": "Ada writes Rust", "subject": "ada", "predicate": "writes", "object": "rust" }),
+        )
+        .unwrap();
+        p.dispatch(
+            HANDLER_ADD,
+            &json!({ "content": "Ada writes Ada", "subject": "ada", "predicate": "writes", "object": "ada-lang" }),
+        )
+        .unwrap();
+
+        let ents = p.dispatch(HANDLER_ENTITIES, &json!({})).unwrap();
+        let arr = ents.as_array().unwrap();
+        // ada(2, as subject twice) + rust(1) + ada-lang(1) = 3 distinct.
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["key"], "ada");
+        assert_eq!(arr[0]["count"], 2);
     }
 
     #[test]

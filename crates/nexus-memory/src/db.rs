@@ -321,6 +321,34 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// Distinct entities mentioned by SPO facts — every non-null `subject` and
+    /// `object` — with the number of facts that mention each, most-frequent
+    /// first (ties broken alphabetically). The `key` of each [`CategoryCount`]
+    /// is the entity name.
+    ///
+    /// # Errors
+    /// Returns an error on a query failure.
+    pub fn list_entities(&self, limit: usize) -> Result<Vec<CategoryCount>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT name AS k, COUNT(*) AS c FROM (
+                 SELECT subject AS name FROM memories WHERE subject IS NOT NULL
+                 UNION ALL
+                 SELECT object AS name FROM memories WHERE object IS NOT NULL
+             ) GROUP BY name ORDER BY c DESC, k ASC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![clamp_limit(limit)], |r| {
+                let count: i64 = r.get("c")?;
+                Ok(CategoryCount {
+                    key: r.get("k")?,
+                    count: u64::try_from(count).unwrap_or(0),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Full-text search over content/category/tags, best matches first.
     ///
     /// # Errors
@@ -606,6 +634,33 @@ mod tests {
         assert_eq!(hit[0].content, "Ada writes Rust");
         // No match.
         assert_eq!(db.list_facts(Some("grace"), None, None, 10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_entities_counts_subjects_and_objects() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        db.insert(&Memory::new("plain note")).unwrap(); // no entity
+        for (s, p, o) in [
+            ("ada", "writes", "rust"),
+            ("ada", "lives_in", "london"),
+            ("grace", "writes", "cobol"),
+        ] {
+            let mut m = Memory::new(format!("{s} {p} {o}"));
+            m.subject = Some(s.to_string());
+            m.predicate = Some(p.to_string());
+            m.object = Some(o.to_string());
+            db.insert(&m).unwrap();
+        }
+        let ents = db.list_entities(10).unwrap();
+        // ada(2) + grace(1) + rust(1) + london(1) + cobol(1) = 5 distinct.
+        assert_eq!(ents.len(), 5);
+        // Most-frequent first: ada appears in two facts.
+        assert_eq!(ents[0].key, "ada");
+        assert_eq!(ents[0].count, 2);
+        // The rest each appear once.
+        assert!(ents[1..].iter().all(|e| e.count == 1));
+        // limit is honoured.
+        assert_eq!(db.list_entities(2).unwrap().len(), 2);
     }
 
     #[test]
