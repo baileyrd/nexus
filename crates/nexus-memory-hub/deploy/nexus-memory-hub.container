@@ -1,0 +1,26 @@
+# Podman Quadlet — Nexus memory sync hub (SQLite-backed, single container).
+#
+# Install to ~/.config/containers/systemd/nexus-memory-hub.container, then:
+#   systemctl --user daemon-reload && systemctl --user start nexus-memory-hub
+#
+# The shared secret lives in ~/nexus-memory-hub/hub.env (see hub.env.example).
+# The SQLite database persists in ~/nexus-memory-hub/data/. Published on
+# localhost only — front it with a reverse proxy or an SSH/Tailscale tunnel for
+# remote clients.
+[Unit]
+Description=Nexus Memory Sync Hub
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=nexus-memory-hub
+Image=localhost/nexus-memory-hub:latest
+PublishPort=127.0.0.1:8765:8765
+Volume=%h/nexus-memory-hub/data:/var/lib/nexus-hub:Z
+EnvironmentFile=%h/nexus-memory-hub/hub.env
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

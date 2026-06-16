@@ -1,0 +1,27 @@
+# systemd unit for a host-installed nexus-memory-hub binary (no container).
+#
+# Install:
+#   cargo build --release -p nexus-memory-hub
+#   sudo install -m755 target/release/nexus-memory-hub /usr/local/bin/
+#   sudo install -d /etc/nexus-memory-hub
+#   echo "SYNC_SECRET=$(openssl rand -hex 32)" | sudo tee /etc/nexus-memory-hub/hub.env
+#   sudo chmod 600 /etc/nexus-memory-hub/hub.env
+#   sudo cp crates/nexus-memory-hub/deploy/nexus-memory-hub.service /etc/systemd/system/
+#   sudo systemctl enable --now nexus-memory-hub
+#
+# DynamicUser + StateDirectory give the hub a private, persistent
+# /var/lib/nexus-hub owned by a transient system user.
+[Unit]
+Description=Nexus Memory Sync Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/nexus-memory-hub --bind 0.0.0.0:8765 --db /var/lib/nexus-hub/hub.sqlite3
+EnvironmentFile=/etc/nexus-memory-hub/hub.env
+DynamicUser=yes
+StateDirectory=nexus-hub
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
