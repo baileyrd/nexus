@@ -28,7 +28,7 @@
 | `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.memory` | 11 |
+| `com.nexus.memory` | 12 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -307,7 +307,7 @@ All `unrestricted`. `list`, `get`, `render`, `apply` (downstream `fs.write`), `r
 
 ---
 
-## com.nexus.memory (11)
+## com.nexus.memory (12)
 
 Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search and SPO entity facts; all handlers are `unrestricted` — the plugin operates only on its own `.forge/memory/memory.db`.
 
@@ -324,6 +324,7 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 | `entities` | — | distinct entities (fact subjects + objects) with fact counts |
 | `export` | — | full dump of every memory, oldest first (for portability / re-import) |
 | `tags` | — | distinct tags with the number of memories carrying each |
+| `vitality_report` | — | active memories ranked by computed ACT-R-style vitality (frequency + recency) |
 
 ---
 
