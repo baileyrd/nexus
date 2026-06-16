@@ -18,6 +18,7 @@
 const BOOT_ORDER: &[&str] = &[
     "com.nexus.security",
     "com.nexus.storage",
+    "com.nexus.memory",
     "com.nexus.database",
     "com.nexus.editor",
     "com.nexus.theme",
@@ -105,12 +106,12 @@ fn manifest_deps_load_before_consumer() {
 
 #[test]
 fn boot_order_constant_length_matches_register_all() {
-    // Sanity check — BOOT_ORDER should list 23 plugins. If the
+    // Sanity check — BOOT_ORDER should list 24 plugins. If the
     // microkernel grows or shrinks, update both this constant and
     // `register_all` together.
     assert_eq!(
         BOOT_ORDER.len(),
-        23,
+        24,
         "BOOT_ORDER must match the count in register_all"
     );
 }

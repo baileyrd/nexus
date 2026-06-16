@@ -27,6 +27,7 @@ mod git;
 mod linkpreview;
 mod lsp;
 mod mcp;
+mod memory;
 mod notifications;
 mod security;
 mod skills;
@@ -48,6 +49,9 @@ pub(crate) fn register_all(
 ) -> Result<()> {
     security::register(loader, forge_root, event_bus)?;
     storage::register(loader, forge_root, event_bus)?;
+    // Native memory engine — owns its own .forge/memory store, no inter-plugin
+    // deps, so it loads right after storage.
+    memory::register(loader, forge_root, event_bus)?;
     database::register(loader, forge_root, event_bus)?;
     editor::register(loader, forge_root, event_bus)?;
     theme::register(loader, forge_root, event_bus)?;

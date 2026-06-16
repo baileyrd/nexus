@@ -56,11 +56,6 @@ const EXEMPT_CRATES: &[(&str, &str)] = &[
     // pulls it in or a deliberate decision to surface it as a CorePlugin
     // (which would in turn need an IPC handler design + cap-matrix entry).
     (
-        "nexus-memory",
-        "library: episodic / semantic / procedural memory stores. Planned \
-         consumer: nexus-ai-runtime per-session state (#188).",
-    ),
-    (
         "nexus-context",
         "library: typed context-assembly pipeline. Already consumes \
          nexus-memory; planned consumer: nexus-ai-runtime per-tick context \

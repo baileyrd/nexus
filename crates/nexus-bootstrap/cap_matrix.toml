@@ -997,6 +997,43 @@ plugin = "com.nexus.skills"
 command = "reload"
 unrestricted = "rescans the forge for skill files — read-only fs traversal"
 
+# ─── com.nexus.memory ────────────────────────────────────────────────
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "add"
+unrestricted = "writes to the plugin's own .forge/memory store; no kernel-mediated resource"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "get"
+unrestricted = "read-only fetch from the plugin's own memory store"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "list"
+unrestricted = "read-only listing of the plugin's own memory store"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "search"
+unrestricted = "read-only full-text search over the plugin's own memory store"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "update"
+unrestricted = "patches a row in the plugin's own memory store; no kernel-mediated resource"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "delete"
+unrestricted = "removes a row from the plugin's own memory store"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "stats"
+unrestricted = "read-only row count of the plugin's own memory store"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]

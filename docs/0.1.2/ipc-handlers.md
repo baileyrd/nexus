@@ -28,6 +28,7 @@
 | `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
 | `com.nexus.comments` | 7 |
+| `com.nexus.memory` | 7 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -35,7 +36,7 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 2 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **335** |
+| **Total** | **342** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -303,6 +304,22 @@ All `unrestricted` — pure compute and serialization. Downstream `fs.write` via
 ## com.nexus.templates (5)
 
 All `unrestricted`. `list`, `get`, `render`, `apply` (downstream `fs.write`), `reload`.
+
+---
+
+## com.nexus.memory (7)
+
+Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search; all handlers are `unrestricted` — the plugin operates only on its own `.forge/memory/memory.db`.
+
+| Command | Caps | Note |
+|---------|------|------|
+| `add` | — | store a memory; returns it |
+| `get` | — | fetch one by id |
+| `list` | — | recent memories, newest first |
+| `search` | — | FTS5 full-text search |
+| `update` | — | patch mutable fields |
+| `delete` | — | remove a memory |
+| `stats` | — | store row count |
 
 ---
 
