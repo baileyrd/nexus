@@ -36,7 +36,9 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod db;
 pub mod episodic;
+pub mod model;
 pub mod procedural;
 pub mod semantic;
 
@@ -45,6 +47,9 @@ pub use episodic::{
 };
 pub use procedural::{ProceduralEntry, ProceduralId, ProceduralStore};
 pub use semantic::{SemanticEntry, SemanticId, SemanticStore};
+
+pub use db::{MemoryDb, MemoryDbError};
+pub use model::{Memory, MemoryStatus, MemoryType};
 
 /// Unified memory handle carrying all three memory kinds.
 ///
