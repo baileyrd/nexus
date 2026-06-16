@@ -22,6 +22,8 @@ const CMD_ENTITIES = 'nexus.memory.entities'
 const CMD_TAGS = 'nexus.memory.tags'
 const CMD_VITALITY = 'nexus.memory.vitality'
 const CMD_SYNC = 'nexus.memory.sync'
+const CMD_CAPTURE = 'nexus.memory.capture'
+const CMD_CONSOLIDATE = 'nexus.memory.consolidate'
 const CMD_WIKI_COMPILE = 'nexus.memory.wikiCompile'
 const CMD_WIKI_PAGES = 'nexus.memory.wikiPages'
 const CMD_STATS = 'nexus.memory.stats'
@@ -169,6 +171,8 @@ export const memoryDashboardPlugin: Plugin = {
         { id: CMD_TAGS, title: 'Memory: Tags', category: 'Memory' },
         { id: CMD_VITALITY, title: 'Memory: Vitality', category: 'Memory' },
         { id: CMD_SYNC, title: 'Memory: Sync Now', category: 'Memory' },
+        { id: CMD_CAPTURE, title: 'Memory: Capture Turn', category: 'Memory' },
+        { id: CMD_CONSOLIDATE, title: 'Memory: Consolidate (dedupe)', category: 'Memory' },
         { id: CMD_WIKI_COMPILE, title: 'Memory: Compile Wiki Page', category: 'Memory' },
         { id: CMD_WIKI_PAGES, title: 'Memory: Wiki Pages', category: 'Memory' },
         { id: CMD_STATS, title: 'Memory: Stats', category: 'Memory' },
@@ -329,6 +333,47 @@ export const memoryDashboardPlugin: Plugin = {
       const pulled = typeof res.pulled === 'number' ? res.pulled : 0
       api.notifications.show({
         message: `Memory synced — pushed ${pushed}, pulled ${pulled}.`,
+        type: 'info',
+      })
+    })
+
+    api.commands.register(CMD_CAPTURE, async () => {
+      const content = await api.input.prompt('Capture to memory', 'Text / turn to remember')
+      if (content === null) return
+      const trimmed = content.trim()
+      if (!trimmed) return
+      const res = await api.kernel
+        .invoke<{ capture_id?: string; children?: string[] }>(
+          MEMORY_PLUGIN,
+          'auto_capture',
+          { content: trimmed, decompose: true },
+        )
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Capture failed: ${String(e)}`, type: 'error' })
+          return null
+        })
+      if (res === null) return
+      const facts = Array.isArray(res.children) ? res.children.length : 0
+      api.notifications.show({
+        message: `Captured${facts ? ` and decomposed into ${facts} fact${facts === 1 ? '' : 's'}` : ''}.`,
+        type: 'info',
+      })
+    })
+
+    api.commands.register(CMD_CONSOLIDATE, async () => {
+      const res = await api.kernel
+        .invoke<{ clusters?: number; superseded?: number }>(MEMORY_PLUGIN, 'consolidate', {})
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Consolidate failed: ${String(e)}`, type: 'error' })
+          return null
+        })
+      if (res === null) return
+      const superseded = typeof res.superseded === 'number' ? res.superseded : 0
+      api.notifications.show({
+        message:
+          superseded > 0
+            ? `Consolidated — superseded ${superseded} duplicate${superseded === 1 ? '' : 's'}.`
+            : 'No duplicate memories to consolidate.',
         type: 'info',
       })
     })
