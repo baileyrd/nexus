@@ -36,6 +36,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod core_plugin;
 pub mod db;
 pub mod episodic;
 pub mod import;
@@ -50,6 +51,7 @@ pub use procedural::{ProceduralEntry, ProceduralId, ProceduralStore};
 pub use semantic::{SemanticEntry, SemanticId, SemanticStore};
 
 pub use db::{MemoryDb, MemoryDbError};
+pub use core_plugin::MemoryCorePlugin;
 pub use import::{import_remind_me_db, ImportReport};
 pub use model::{Memory, MemoryStatus, MemoryType};
 

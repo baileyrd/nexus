@@ -16,6 +16,15 @@ rusqlite = { workspace = true }
 r2d2 = { workspace = true }
 r2d2_sqlite = { workspace = true }
 thiserror = { workspace = true }
+nexus-plugins = { path = "../nexus-plugins" }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Emit JSON Schema + TypeScript bindings for the IPC arg types (off by
+# default so normal builds don't pull ts-rs / schemars). Mirrors the
+# per-service `ts-export` feature used across the workspace.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
