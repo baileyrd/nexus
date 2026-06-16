@@ -1064,6 +1064,16 @@ plugin = "com.nexus.memory"
 command = "vitality_report"
 unrestricted = "read-only vitality ranking computed over the plugin's own memory store"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "recall"
+unrestricted = "reads the plugin's own memory store; the optional vector arm calls AI/storage via the plugin's own capability-gated context, not the caller's"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "vector_sync"
+unrestricted = "backfills embeddings for the plugin's own memory rows via the plugin's own capability-gated context (AI embed + storage vector upsert)"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]

@@ -44,6 +44,7 @@ pub mod import;
 pub mod model;
 pub mod procedural;
 pub mod semantic;
+pub mod vector;
 
 pub use episodic::{
     EpisodicEntry, EpisodicId, EpisodicKind, EpisodicStore, DEFAULT_EPISODIC_CAPACITY,

@@ -8,6 +8,7 @@ description = "AI-native memory layer for Nexus: episodic, semantic, and procedu
 
 [dependencies]
 nexus-plugin-api = { path = "../nexus-plugin-api" }
+nexus-kernel = { path = "../nexus-kernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
@@ -28,3 +29,4 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true }
