@@ -32,7 +32,7 @@ use tokio::sync::mpsc::UnboundedSender;
 // Re-export shared helpers so the in-file test modules (which use
 // `super::*`) keep seeing the same symbols they did pre-split.
 use crate::handlers::activity::{handle_activity_clear, handle_activity_list};
-use crate::handlers::ask::handle_ask;
+use crate::handlers::ask::{handle_ask, handle_generate};
 use crate::handlers::config::handle_set_config;
 use crate::handlers::enrich::{handle_enrich_apply, handle_enrich_file};
 use crate::handlers::entity::{handle_enrich_entity, handle_infer_entity_relations};
@@ -235,6 +235,10 @@ pub const HANDLER_PREDICT: u32 = 26;
 /// engine) reuse the one embedding path rather than carrying their own model.
 pub const HANDLER_EMBED_TEXT: u32 = 27;
 
+/// `generate` — plain prompt → text completion via the chat provider, no RAG.
+/// The synthesis primitive behind memory's LLM-wiki pages.
+pub const HANDLER_GENERATE: u32 = 28;
+
 /// Plugin ids this plugin requires already loaded. `ai-runtime` is
 /// hard — `wire_context` grabs the shared tokio worker-pool handle
 /// the runtime publishes. `storage` underwrites every RAG / vector
@@ -277,6 +281,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("enrich_entity", HANDLER_ENRICH_ENTITY),
     ("infer_entity_relations", HANDLER_INFER_ENTITY_RELATIONS),
     ("embed_text", HANDLER_EMBED_TEXT),
+    ("generate", HANDLER_GENERATE),
 ];
 
 /// Core plugin for AI integration.
@@ -520,6 +525,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
                 HANDLER_SEMANTIC_SEARCH => handle_semantic_search(&ctx, embed_cfg, &args).await,
                 HANDLER_EMBED_TEXT => handle_embed_text(embed_cfg, &args).await,
+                HANDLER_GENERATE => handle_generate(ai_cfg, &args).await,
                 HANDLER_ENRICH_FILE => handle_enrich_file(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_ENRICH_APPLY => handle_enrich_apply(&ctx, &args).await,
                 HANDLER_PROPOSE_TOOL_CALLS => {
@@ -1478,6 +1484,37 @@ mod semantic_search_dispatch_tests {
     #[test]
     fn embed_text_handler_id_is_twentyseven() {
         assert_eq!(HANDLER_EMBED_TEXT, 27);
+    }
+
+    #[tokio::test]
+    async fn generate_handler_requires_chat_provider() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_GENERATE, &serde_json::json!({ "prompt": "hi" }))
+            .expect("HANDLER_GENERATE must be async");
+        let err = fut.await.expect_err("no chat cfg should error");
+        assert!(
+            format!("{err}").contains("no AI chat provider configured"),
+            "expected chat-cfg error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_handler_rejects_missing_prompt() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_GENERATE, &serde_json::json!({}))
+            .expect("HANDLER_GENERATE must be async");
+        let err = fut.await.expect_err("missing prompt should error");
+        assert!(
+            format!("{err}").contains("missing 'prompt'"),
+            "expected missing-prompt error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn generate_handler_id_is_twentyeight() {
+        assert_eq!(HANDLER_GENERATE, 28);
     }
 
     #[tokio::test]
