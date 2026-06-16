@@ -20,13 +20,20 @@
 //! | 10 | `export` | `{}`                          | Dump every memory, oldest first  |
 //! | 11 | `tags`   | `{ limit? }`                  | Distinct tags + memory counts    |
 //! | 12 | `vitality_report` | `{ limit? }`         | Active memories ranked by vitality |
+//! | 13 | `recall` | `{ query, limit? }`           | Hybrid FTS + vector recall (RRF)  |
+//! | 14 | `vector_sync` | `{ limit? }`             | Backfill memory embeddings        |
 //!
-//! Ids are append-only. Hybrid vector recall and the remaining `remind_me` parity
-//! commands (capture/wiki/consolidate) land in later phases.
+//! Handlers 13–14 are **async** (they make nested `ipc_call`s to
+//! `com.nexus.ai::embed_text` and `com.nexus.storage`'s namespaced vector
+//! store) and dispatch through [`CorePlugin::dispatch_async`]; the rest are
+//! synchronous. Ids are append-only. The remaining `remind_me` parity commands
+//! (capture/wiki/consolidate) land in later phases.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use nexus_plugins::{CorePlugin, PluginError};
+use nexus_kernel::KernelPluginContext;
+use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -66,6 +73,10 @@ pub const HANDLER_EXPORT: u32 = 10;
 pub const HANDLER_TAGS: u32 = 11;
 /// `vitality_report` handler id.
 pub const HANDLER_VITALITY_REPORT: u32 = 12;
+/// `recall` handler id (async).
+pub const HANDLER_RECALL: u32 = 13;
+/// `vector_sync` handler id (async).
+pub const HANDLER_VECTOR_SYNC: u32 = 14;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -82,6 +93,8 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("export", HANDLER_EXPORT),
     ("tags", HANDLER_TAGS),
     ("vitality_report", HANDLER_VITALITY_REPORT),
+    ("recall", HANDLER_RECALL),
+    ("vector_sync", HANDLER_VECTOR_SYNC),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -289,6 +302,11 @@ pub struct VitalityReportArgs {
 /// Core plugin wrapping a [`MemoryDb`].
 pub struct MemoryCorePlugin {
     db: MemoryDb,
+    /// Plugin-facing kernel context, installed via [`CorePlugin::wire_context`].
+    /// `Some` once bootstrap wires it; the async handlers (`recall`,
+    /// `vector_sync`) use it to `ipc_call` the AI + storage plugins. `None`
+    /// during early bootstrap / unit tests — `recall` then runs FTS-only.
+    context: Option<Arc<KernelPluginContext>>,
 }
 
 impl MemoryCorePlugin {
@@ -302,13 +320,13 @@ impl MemoryCorePlugin {
         let dir = forge_root.join(".forge").join("memory");
         std::fs::create_dir_all(&dir)?;
         let db = MemoryDb::open(&dir.join("memory.db"))?;
-        Ok(Self { db })
+        Ok(Self { db, context: None })
     }
 
     /// Construct directly over an existing [`MemoryDb`] (tests / embedding).
     #[must_use]
     pub fn with_db(db: MemoryDb) -> Self {
-        Self { db }
+        Self { db, context: None }
     }
 
     fn add(&self, args: &Value) -> Result<Value, PluginError> {
@@ -482,6 +500,30 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_VITALITY_REPORT => self.vitality_report(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
+    }
+
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
+        // Only the hybrid-recall handlers are async — they `ipc_call`
+        // `com.nexus.ai::embed_text` and `com.nexus.storage`'s vector store.
+        // Everything else falls through to the synchronous `dispatch`.
+        if handler_id != HANDLER_RECALL && handler_id != HANDLER_VECTOR_SYNC {
+            return None;
+        }
+        let db = self.db.clone();
+        let ctx = self.context.clone();
+        let args = args.clone();
+        Some(Box::pin(async move {
+            let result = match handler_id {
+                HANDLER_RECALL => crate::vector::recall(db, ctx, &args).await,
+                HANDLER_VECTOR_SYNC => crate::vector::vector_sync(db, ctx, &args).await,
+                _ => unreachable!("guarded above"),
+            };
+            result.map_err(exec_err)
+        }))
+    }
+
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        self.context = Some(ctx);
     }
 }
 

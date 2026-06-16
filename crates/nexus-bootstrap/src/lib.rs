@@ -317,6 +317,26 @@ fn build(
         .wire_context("com.nexus.ai", Arc::new(ai_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire AI plugin context: {e}"))?;
 
+    // Memory plugin needs its own context so the async `recall` / `vector_sync`
+    // handlers can `ipc_call` `com.nexus.ai::embed_text` (embed query/content)
+    // and `com.nexus.storage`'s namespaced vector store. Core trust + full caps
+    // mirror the AI plugin: the nested `embed_text` call is itself `ai.chat`-
+    // gated, so the memory context must hold that cap to reach it.
+    let memory_ctx = KernelPluginContext::new(
+        "com.nexus.memory",
+        env!("CARGO_PKG_VERSION"),
+        all_caps(),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.memory")?
+    .with_trust_level(nexus_kernel::TrustLevel::Core);
+    shared
+        .wire_context("com.nexus.memory", Arc::new(memory_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire memory plugin context: {e}"))?;
+
     // Agent plugin needs its own context for two reasons: driving
     // `com.nexus.ai::stream_chat` for planning, and dispatching every
     // `ToolCall` the resulting plan emits to whatever target plugin
