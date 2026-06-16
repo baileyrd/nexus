@@ -23,13 +23,16 @@
 //! | 13 | `recall` | `{ query, limit? }`           | Hybrid FTS + vector recall (RRF)  |
 //! | 14 | `vector_sync` | `{ limit? }`             | Backfill memory embeddings        |
 //! | 15 | `sync`   | `{ hub_url, secret, node_id }` | Push/pull with a memory hub      |
+//! | 16 | `wiki_compile` | `{ topic, query?, limit? }` | Synthesize a wiki page from memories |
+//! | 17 | `wiki_read` | `{ topic }`                | Read a wiki page's Markdown      |
+//! | 18 | `wiki_list` | `{}`                       | List wiki pages                  |
 //!
-//! Handlers 13–15 are **async** and dispatch through
-//! [`CorePlugin::dispatch_async`]: 13–14 make nested `ipc_call`s to
-//! `com.nexus.ai::embed_text` and `com.nexus.storage`'s namespaced vector
-//! store; 15 (`sync`) makes outbound HTTP to a `nexus-memory-hub`. The rest are
-//! synchronous. Ids are append-only. The remaining `remind_me` parity commands
-//! (capture/wiki/consolidate) land in later phases.
+//! Handlers 13–18 are **async** and dispatch through
+//! [`CorePlugin::dispatch_async`]: 13–14 and 16–18 make nested `ipc_call`s to
+//! `com.nexus.ai` (`embed_text`/`generate`) and `com.nexus.storage` (vector
+//! store / wiki files); 15 (`sync`) makes outbound HTTP to a
+//! `nexus-memory-hub`. The rest are synchronous. Ids are append-only. The
+//! remaining `remind_me` parity commands (capture/consolidate) land later.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -81,6 +84,12 @@ pub const HANDLER_RECALL: u32 = 13;
 pub const HANDLER_VECTOR_SYNC: u32 = 14;
 /// `sync` handler id (async; HTTP push/pull with a memory hub).
 pub const HANDLER_SYNC: u32 = 15;
+/// `wiki_compile` handler id (async; AI synthesis + storage write).
+pub const HANDLER_WIKI_COMPILE: u32 = 16;
+/// `wiki_read` handler id (async; storage read).
+pub const HANDLER_WIKI_READ: u32 = 17;
+/// `wiki_list` handler id (async; storage list).
+pub const HANDLER_WIKI_LIST: u32 = 18;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -100,6 +109,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("recall", HANDLER_RECALL),
     ("vector_sync", HANDLER_VECTOR_SYNC),
     ("sync", HANDLER_SYNC),
+    ("wiki_compile", HANDLER_WIKI_COMPILE),
+    ("wiki_read", HANDLER_WIKI_READ),
+    ("wiki_list", HANDLER_WIKI_LIST),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -508,13 +520,18 @@ impl CorePlugin for MemoryCorePlugin {
     }
 
     fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
-        // The async handlers: recall/vector_sync `ipc_call` AI + storage;
+        // The async handlers: recall/vector_sync/wiki_* `ipc_call` AI + storage;
         // sync makes outbound HTTP to a memory hub. Everything else falls
         // through to the synchronous `dispatch`.
-        if handler_id != HANDLER_RECALL
-            && handler_id != HANDLER_VECTOR_SYNC
-            && handler_id != HANDLER_SYNC
-        {
+        if !matches!(
+            handler_id,
+            HANDLER_RECALL
+                | HANDLER_VECTOR_SYNC
+                | HANDLER_SYNC
+                | HANDLER_WIKI_COMPILE
+                | HANDLER_WIKI_READ
+                | HANDLER_WIKI_LIST
+        ) {
             return None;
         }
         let db = self.db.clone();
@@ -525,6 +542,9 @@ impl CorePlugin for MemoryCorePlugin {
                 HANDLER_RECALL => crate::vector::recall(db, ctx, &args).await,
                 HANDLER_VECTOR_SYNC => crate::vector::vector_sync(db, ctx, &args).await,
                 HANDLER_SYNC => crate::sync::sync(db, &args).await,
+                HANDLER_WIKI_COMPILE => crate::wiki::wiki_compile(db, ctx, &args).await,
+                HANDLER_WIKI_READ => crate::wiki::wiki_read(ctx, &args).await,
+                HANDLER_WIKI_LIST => crate::wiki::wiki_list(ctx, &args).await,
                 _ => unreachable!("guarded above"),
             };
             result.map_err(exec_err)

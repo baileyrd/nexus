@@ -1085,6 +1085,22 @@ command = "sync"
 caps = ["net.http"]
 note = "push/pull the memory store to a caller-configured nexus-memory-hub; outbound HTTP"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "wiki_compile"
+caps = ["ai.chat"]
+note = "synthesizes a wiki page from memories via the AI provider, then writes it through the plugin's own context"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "wiki_read"
+unrestricted = "reads a wiki page from the forge via the plugin's own context"
+
+[[handler]]
+plugin = "com.nexus.memory"
+command = "wiki_list"
+unrestricted = "lists wiki pages in the forge via the plugin's own context"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]
