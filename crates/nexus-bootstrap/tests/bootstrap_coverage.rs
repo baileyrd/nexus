@@ -67,6 +67,12 @@ const EXEMPT_CRATES: &[(&str, &str)] = &[
          in-tree consumers; staging until the agent loop adopts typed \
          messages (#188).",
     ),
+    (
+        "nexus-memory-hub",
+        "standalone HTTP sync-hub server (separate deployable binary); not a \
+         CorePlugin — Nexus instances reach it over the network, not via the \
+         in-process IPC registry (#188).",
+    ),
 ];
 
 #[test]
