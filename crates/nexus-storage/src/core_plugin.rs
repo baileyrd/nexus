@@ -718,7 +718,7 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_VECTOR_INSERT => crate::handlers::vector::insert(engine, args),
             HANDLER_VECTOR_QUERY => crate::handlers::vector::query(engine, args),
             HANDLER_VECTOR_DELETE_BY_FILE => crate::handlers::vector::delete_by_file(engine, args),
-            HANDLER_VECTORSTORE_COUNT => crate::handlers::vector::count(engine),
+            HANDLER_VECTORSTORE_COUNT => crate::handlers::vector::count(engine, args),
             HANDLER_QUERY_BLOCKS => crate::handlers::tasks::query_blocks(engine, args),
             HANDLER_BASE_INDEX => crate::handlers::bases::index(engine, &self.forge_root, args),
             HANDLER_BASE_LOAD => crate::handlers::bases::load(&self.forge_root, args),

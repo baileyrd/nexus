@@ -5,6 +5,10 @@
  */
 export type StorageVectorQueryArgs = { 
 /**
+ * Collection to search (e.g. `notes`, `memory`). Defaults to `notes`.
+ */
+namespace: string, 
+/**
  * Query embedding (same dimensionality as the stored vectors).
  */
 embedding: Array<number>, 

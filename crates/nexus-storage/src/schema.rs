@@ -21,7 +21,7 @@ use rusqlite::Connection;
 /// `#[allow(dead_code)]` documents the intentional unused-locally
 /// state without leaking the suppression to the rest of the module.
 #[allow(dead_code)]
-pub const CURRENT_VERSION: u32 = 8;
+pub const CURRENT_VERSION: u32 = 9;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -147,6 +147,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         tx.commit()?;
     }
 
+    if current < 9 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_009(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (9, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
     // Re-read the authoritative version from the table.
     let version: u32 = conn.query_row(
         "SELECT COALESCE(MAX(version), 0) FROM _schema_version;",
@@ -266,6 +276,20 @@ fn apply_migration_004(conn: &Connection) -> Result<(), StorageError> {
             created_at  INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(file_path);",
+    )?;
+    Ok(())
+}
+
+/// Add a `namespace` column to `embeddings` so the vector store can hold
+/// multiple independent collections (e.g. forge `notes` and cross-model
+/// `memory`) without one polluting the other's similarity search. Existing
+/// rows default to `notes`, preserving all current RAG behaviour. The composite
+/// index serves both the namespace-scoped search (`WHERE namespace = ?`) and the
+/// upsert/delete key (`WHERE namespace = ? AND file_path = ?`).
+fn apply_migration_009(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "ALTER TABLE embeddings ADD COLUMN namespace TEXT NOT NULL DEFAULT 'notes';
+        CREATE INDEX IF NOT EXISTS idx_embeddings_ns_file ON embeddings(namespace, file_path);",
     )?;
     Ok(())
 }
