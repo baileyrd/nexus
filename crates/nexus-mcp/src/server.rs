@@ -846,6 +846,34 @@ struct MemorySyncOutput {
     result: serde_json::Value,
 }
 
+/// Input for `nexus_memory_wiki_compile`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryWikiCompileInput {
+    /// The page topic (also the slug + H1 title).
+    topic: String,
+    /// Optional search query for the source memories (defaults to `topic`).
+    #[serde(default)]
+    query: Option<String>,
+    /// Max memories to synthesize from (default 30).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Input for `nexus_memory_wiki_read`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryWikiReadInput {
+    /// The page topic/slug to read.
+    topic: String,
+}
+
+/// Wraps a wiki handler reply (page metadata, content, or page list — or
+/// `{ "error": … }` on failure).
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryWikiOutput {
+    /// The memory plugin's wiki reply.
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MemoryFactsInput {
@@ -1155,6 +1183,57 @@ impl NexusMcpServer {
         match self.memory_call::<serde_json::Value>("sync", args).await {
             Ok(result) => Json(MemorySyncOutput { result }),
             Err(e) => Json(MemorySyncOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_wiki_compile",
+        description = "Synthesize a Markdown wiki page about a topic from related memories (saved to wiki/<slug>.md in the forge) and return its metadata"
+    )]
+    async fn memory_wiki_compile(
+        &self,
+        Parameters(input): Parameters<MemoryWikiCompileInput>,
+    ) -> Json<MemoryWikiOutput> {
+        let args = serde_json::json!({
+            "topic": input.topic,
+            "query": input.query,
+            "limit": input.limit,
+        });
+        match self.memory_call::<serde_json::Value>("wiki_compile", args).await {
+            Ok(result) => Json(MemoryWikiOutput { result }),
+            Err(e) => Json(MemoryWikiOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_wiki_read",
+        description = "Read a synthesized wiki page's Markdown by topic/slug"
+    )]
+    async fn memory_wiki_read(
+        &self,
+        Parameters(input): Parameters<MemoryWikiReadInput>,
+    ) -> Json<MemoryWikiOutput> {
+        let args = serde_json::json!({ "topic": input.topic });
+        match self.memory_call::<serde_json::Value>("wiki_read", args).await {
+            Ok(result) => Json(MemoryWikiOutput { result }),
+            Err(e) => Json(MemoryWikiOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_wiki_list",
+        description = "List the synthesized wiki pages (slugs + paths)"
+    )]
+    async fn memory_wiki_list(&self) -> Json<MemoryWikiOutput> {
+        match self.memory_call::<serde_json::Value>("wiki_list", serde_json::json!({})).await {
+            Ok(result) => Json(MemoryWikiOutput { result }),
+            Err(e) => Json(MemoryWikiOutput {
                 result: serde_json::json!({ "error": e }),
             }),
         }
