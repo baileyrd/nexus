@@ -354,6 +354,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description: 'Persistent agent memory store — long-term facts surfaced to AI features.',
     load: () => import('./nexus/memory').then(m => m.memoryPlugin),
   },
+  {
+    id: 'nexus.memoryDashboard', name: 'Memory Dashboard',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.memory'],
+    description: 'Search, browse, and view the native memory store from the command palette.',
+    load: () => import('./nexus/memoryDashboard').then(m => m.memoryDashboardPlugin),
+  },
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────
