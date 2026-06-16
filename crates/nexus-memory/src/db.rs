@@ -99,6 +99,9 @@ pub enum MemoryDbError {
     /// Connection-pool error.
     #[error("pool: {0}")]
     Pool(#[from] r2d2::Error),
+    /// Filesystem error (e.g. creating the database directory).
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
     /// A stored value could not be decoded into its model type.
     #[error("decode: {0}")]
     Decode(String),
