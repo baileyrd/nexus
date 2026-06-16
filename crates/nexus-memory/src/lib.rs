@@ -38,6 +38,7 @@
 
 pub mod db;
 pub mod episodic;
+pub mod import;
 pub mod model;
 pub mod procedural;
 pub mod semantic;
@@ -49,6 +50,7 @@ pub use procedural::{ProceduralEntry, ProceduralId, ProceduralStore};
 pub use semantic::{SemanticEntry, SemanticId, SemanticStore};
 
 pub use db::{MemoryDb, MemoryDbError};
+pub use import::{import_remind_me_db, ImportReport};
 pub use model::{Memory, MemoryStatus, MemoryType};
 
 /// Unified memory handle carrying all three memory kinds.
