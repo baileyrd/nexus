@@ -26,13 +26,15 @@
 //! | 16 | `wiki_compile` | `{ topic, query?, limit? }` | Synthesize a wiki page from memories |
 //! | 17 | `wiki_read` | `{ topic }`                | Read a wiki page's Markdown      |
 //! | 18 | `wiki_list` | `{}`                       | List wiki pages                  |
+//! | 19 | `auto_capture` | `{ content, decompose? }` | Capture a turn (+LLM decompose)  |
+//! | 20 | `get_capture` | `{ capture_id }`          | A capture's parent + children    |
 //!
-//! Handlers 13–18 are **async** and dispatch through
-//! [`CorePlugin::dispatch_async`]: 13–14 and 16–18 make nested `ipc_call`s to
-//! `com.nexus.ai` (`embed_text`/`generate`) and `com.nexus.storage` (vector
+//! Handlers 13–19 are **async** and dispatch through
+//! [`CorePlugin::dispatch_async`]: 13–14, 16–18 and 19 make nested `ipc_call`s
+//! to `com.nexus.ai` (`embed_text`/`generate`) and `com.nexus.storage` (vector
 //! store / wiki files); 15 (`sync`) makes outbound HTTP to a
-//! `nexus-memory-hub`. The rest are synchronous. Ids are append-only. The
-//! remaining `remind_me` parity commands (capture/consolidate) land later.
+//! `nexus-memory-hub`. `get_capture` (20) and the rest are synchronous. Ids are
+//! append-only. The remaining `remind_me` parity command (consolidate) lands later.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -90,6 +92,10 @@ pub const HANDLER_WIKI_COMPILE: u32 = 16;
 pub const HANDLER_WIKI_READ: u32 = 17;
 /// `wiki_list` handler id (async; storage list).
 pub const HANDLER_WIKI_LIST: u32 = 18;
+/// `auto_capture` handler id (async; capture a turn, optional LLM decompose).
+pub const HANDLER_AUTO_CAPTURE: u32 = 19;
+/// `get_capture` handler id (sync; a capture's lineage).
+pub const HANDLER_GET_CAPTURE: u32 = 20;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -112,6 +118,8 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("wiki_compile", HANDLER_WIKI_COMPILE),
     ("wiki_read", HANDLER_WIKI_READ),
     ("wiki_list", HANDLER_WIKI_LIST),
+    ("auto_capture", HANDLER_AUTO_CAPTURE),
+    ("get_capture", HANDLER_GET_CAPTURE),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -498,6 +506,15 @@ impl MemoryCorePlugin {
             .map_err(db_err)?;
         to_value(&mems, "vitality_report")
     }
+
+    fn get_capture(&self, args: &Value) -> Result<Value, PluginError> {
+        let capture_id = args
+            .get("capture_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| exec_err("get_capture: missing 'capture_id' string".to_string()))?;
+        let mems = self.db.list_by_capture(capture_id).map_err(db_err)?;
+        to_value(&mems, "get_capture")
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -515,6 +532,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_EXPORT => self.export(),
             HANDLER_TAGS => self.tags(args),
             HANDLER_VITALITY_REPORT => self.vitality_report(args),
+            HANDLER_GET_CAPTURE => self.get_capture(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -531,6 +549,7 @@ impl CorePlugin for MemoryCorePlugin {
                 | HANDLER_WIKI_COMPILE
                 | HANDLER_WIKI_READ
                 | HANDLER_WIKI_LIST
+                | HANDLER_AUTO_CAPTURE
         ) {
             return None;
         }
@@ -545,6 +564,7 @@ impl CorePlugin for MemoryCorePlugin {
                 HANDLER_WIKI_COMPILE => crate::wiki::wiki_compile(db, ctx, &args).await,
                 HANDLER_WIKI_READ => crate::wiki::wiki_read(ctx, &args).await,
                 HANDLER_WIKI_LIST => crate::wiki::wiki_list(ctx, &args).await,
+                HANDLER_AUTO_CAPTURE => crate::capture_pipeline::auto_capture(db, ctx, &args).await,
                 _ => unreachable!("guarded above"),
             };
             result.map_err(exec_err)
