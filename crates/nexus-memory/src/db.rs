@@ -280,6 +280,47 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// List SPO entity facts — rows whose `subject` is populated — filtered by
+    /// optional `subject` / `predicate` / `object`, newest first. Filters are
+    /// bound parameters (`None` means "any"); the column names are fixed
+    /// literals, so the dynamic `WHERE` is injection-safe.
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure.
+    pub fn list_facts(
+        &self,
+        subject: Option<&str>,
+        predicate: Option<&str>,
+        object: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
+        // A fact is any row with a subject; the optional equality filters narrow it.
+        let mut conds: Vec<String> = vec!["m.subject IS NOT NULL".to_string()];
+        let mut vals: Vec<String> = Vec::new();
+        for (col, val) in [
+            ("m.subject", subject),
+            ("m.predicate", predicate),
+            ("m.object", object),
+        ] {
+            if let Some(v) = val {
+                vals.push(v.to_string());
+                conds.push(format!("{col} = ?{}", vals.len()));
+            }
+        }
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m WHERE {} ORDER BY m.created_at DESC LIMIT {}",
+            conds.join(" AND "),
+            clamp_limit(limit)
+        ))?;
+        let out = stmt
+            .query_map(rusqlite::params_from_iter(vals.iter()), |row| {
+                row_to_memory(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(out)
+    }
+
     /// Full-text search over content/category/tags, best matches first.
     ///
     /// # Errors
@@ -535,6 +576,36 @@ mod tests {
         assert_eq!(combined[0].content, "ops semantic");
         assert_eq!(db.list_filtered(None, None, Some("active"), 10).unwrap().len(), 3);
         assert_eq!(db.list_filtered(None, None, Some("archived"), 10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_facts_returns_only_spo_rows_and_filters() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        // A plain memory (no subject) — must never appear in fact queries.
+        db.insert(&Memory::new("just a note")).unwrap();
+        let mut fact_a = Memory::new("Ada writes Rust");
+        fact_a.subject = Some("ada".to_string());
+        fact_a.predicate = Some("writes".to_string());
+        fact_a.object = Some("rust".to_string());
+        db.insert(&fact_a).unwrap();
+        let mut fact_b = Memory::new("Ada lives in London");
+        fact_b.subject = Some("ada".to_string());
+        fact_b.predicate = Some("lives_in".to_string());
+        fact_b.object = Some("london".to_string());
+        db.insert(&fact_b).unwrap();
+
+        // No filter -> both facts, the plain note excluded.
+        assert_eq!(db.list_facts(None, None, None, 10).unwrap().len(), 2);
+        // Subject filter -> both Ada facts.
+        assert_eq!(db.list_facts(Some("ada"), None, None, 10).unwrap().len(), 2);
+        // Predicate filter -> one.
+        assert_eq!(db.list_facts(None, Some("writes"), None, 10).unwrap().len(), 1);
+        // Combined subject + object -> one exact fact.
+        let hit = db.list_facts(Some("ada"), None, Some("rust"), 10).unwrap();
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].content, "Ada writes Rust");
+        // No match.
+        assert_eq!(db.list_facts(Some("grace"), None, None, 10).unwrap().len(), 0);
     }
 
     #[test]

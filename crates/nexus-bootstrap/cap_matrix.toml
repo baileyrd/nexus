@@ -1034,6 +1034,11 @@ plugin = "com.nexus.memory"
 command = "stats"
 unrestricted = "read-only row count of the plugin's own memory store"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "facts"
+unrestricted = "read-only SPO entity-fact recall from the plugin's own memory store"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]

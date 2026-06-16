@@ -15,9 +15,10 @@
 //! | 5  | `update` | `{ id, content?, … }`         | Patch mutable fields             |
 //! | 6  | `delete` | `{ id }`                      | Remove a memory                  |
 //! | 7  | `stats`  | `{}`                          | Store statistics (count)         |
+//! | 8  | `facts`  | `{ subject?, predicate?, … }` | Recall SPO entity facts          |
 //!
-//! Ids are append-only. Hybrid vector recall and the `remind_me` parity commands
-//! (capture/entity/wiki/lifecycle) land in later phases.
+//! Ids are append-only. Hybrid vector recall and the remaining `remind_me` parity
+//! commands (capture/wiki/lifecycle) land in later phases.
 
 use std::path::Path;
 
@@ -51,6 +52,8 @@ pub const HANDLER_UPDATE: u32 = 5;
 pub const HANDLER_DELETE: u32 = 6;
 /// `stats` handler id.
 pub const HANDLER_STATS: u32 = 7;
+/// `facts` handler id.
+pub const HANDLER_FACTS: u32 = 8;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -62,6 +65,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("update", HANDLER_UPDATE),
     ("delete", HANDLER_DELETE),
     ("stats", HANDLER_STATS),
+    ("facts", HANDLER_FACTS),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -97,6 +101,15 @@ pub struct AddArgs {
     /// Optional originating client/provider (e.g. `claude`, `openai`, `ollama`).
     #[serde(default)]
     pub client: Option<String>,
+    /// Optional subject of an SPO entity fact (e.g. `ada`).
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// Optional predicate of an SPO entity fact (e.g. `writes`).
+    #[serde(default)]
+    pub predicate: Option<String>,
+    /// Optional object of an SPO entity fact (e.g. `rust`).
+    #[serde(default)]
+    pub object: Option<String>,
 }
 
 /// Args for handlers that address a single memory by id (`get`, `delete`).
@@ -175,6 +188,39 @@ pub struct UpdateArgs {
     /// New lifecycle status (`active` | `archived` | `superseded`), if changing.
     #[serde(default)]
     pub status: Option<String>,
+    /// New SPO subject, if changing.
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// New SPO predicate, if changing.
+    #[serde(default)]
+    pub predicate: Option<String>,
+    /// New SPO object, if changing.
+    #[serde(default)]
+    pub object: Option<String>,
+}
+
+/// Args for `com.nexus.memory::facts` (handler id `8`). Recalls SPO entity
+/// facts; each provided field narrows the result (omitted = any).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct FactsArgs {
+    /// Optional subject filter.
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// Optional predicate filter.
+    #[serde(default)]
+    pub predicate: Option<String>,
+    /// Optional object filter.
+    #[serde(default)]
+    pub object: Option<String>,
+    /// Maximum rows to return (default 50).
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -221,6 +267,15 @@ impl MemoryCorePlugin {
         }
         if let Some(c) = a.client {
             m.client = c;
+        }
+        if a.subject.is_some() {
+            m.subject = a.subject;
+        }
+        if a.predicate.is_some() {
+            m.predicate = a.predicate;
+        }
+        if a.object.is_some() {
+            m.object = a.object;
         }
         self.db.insert(&m).map_err(db_err)?;
         to_value(&m, "add")
@@ -277,6 +332,15 @@ impl MemoryCorePlugin {
         if let Some(s) = a.status {
             m.status = MemoryStatus::from_db(&s);
         }
+        if a.subject.is_some() {
+            m.subject = a.subject;
+        }
+        if a.predicate.is_some() {
+            m.predicate = a.predicate;
+        }
+        if a.object.is_some() {
+            m.object = a.object;
+        }
         let updated = self.db.update(&m).map_err(db_err)?;
         Ok(json!({ "updated": updated }))
     }
@@ -290,6 +354,20 @@ impl MemoryCorePlugin {
     fn stats(&self) -> Result<Value, PluginError> {
         to_value(&self.db.stats().map_err(db_err)?, "stats")
     }
+
+    fn facts(&self, args: &Value) -> Result<Value, PluginError> {
+        let a: FactsArgs = parse_args(args, "facts")?;
+        let mems = self
+            .db
+            .list_facts(
+                a.subject.as_deref(),
+                a.predicate.as_deref(),
+                a.object.as_deref(),
+                a.limit.unwrap_or(DEFAULT_LIST_LIMIT),
+            )
+            .map_err(db_err)?;
+        to_value(&mems, "facts")
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -302,6 +380,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_UPDATE => self.update(args),
             HANDLER_DELETE => self.delete(args),
             HANDLER_STATS => self.stats(),
+            HANDLER_FACTS => self.facts(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -410,6 +489,60 @@ mod tests {
             PluginError::ExecutionFailed { reason, .. } => assert!(reason.contains("invalid memory id")),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn add_stores_spo_fact_and_facts_recalls_it() {
+        let mut p = plugin();
+        // A plain memory and two SPO facts.
+        p.dispatch(HANDLER_ADD, &json!({ "content": "loose note" })).unwrap();
+        let fact = p
+            .dispatch(
+                HANDLER_ADD,
+                &json!({
+                    "content": "Ada writes Rust",
+                    "subject": "ada", "predicate": "writes", "object": "rust",
+                }),
+            )
+            .unwrap();
+        assert_eq!(fact["subject"], "ada");
+        assert_eq!(fact["object"], "rust");
+        p.dispatch(
+            HANDLER_ADD,
+            &json!({ "content": "Ada lives in London", "subject": "ada", "predicate": "lives_in", "object": "london" }),
+        )
+        .unwrap();
+
+        // facts with no filter excludes the plain note.
+        let all = p.dispatch(HANDLER_FACTS, &json!({})).unwrap();
+        assert_eq!(all.as_array().unwrap().len(), 2);
+        // Narrow by subject + object.
+        let one = p
+            .dispatch(HANDLER_FACTS, &json!({ "subject": "ada", "object": "rust" }))
+            .unwrap();
+        assert_eq!(one.as_array().unwrap().len(), 1);
+        assert_eq!(one[0]["content"], "Ada writes Rust");
+    }
+
+    #[test]
+    fn update_can_set_spo_fields() {
+        let mut p = plugin();
+        let id = p
+            .dispatch(HANDLER_ADD, &json!({ "content": "Ada knows Lovelace" }))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Not a fact yet.
+        assert_eq!(p.dispatch(HANDLER_FACTS, &json!({})).unwrap().as_array().unwrap().len(), 0);
+        p.dispatch(
+            HANDLER_UPDATE,
+            &json!({ "id": id, "subject": "ada", "predicate": "knows", "object": "lovelace" }),
+        )
+        .unwrap();
+        let facts = p.dispatch(HANDLER_FACTS, &json!({ "predicate": "knows" })).unwrap();
+        assert_eq!(facts.as_array().unwrap().len(), 1);
+        assert_eq!(facts[0]["subject"], "ada");
     }
 
     #[test]
