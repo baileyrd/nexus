@@ -52,4 +52,12 @@ let status = cmd.status()?; // runs `rustc --version` confined by `policy`
 
 `sandbox_command(helper, policy, cwd, program, args)` returns a `std::process::Command` that runs `nexus-sandbox <policy-json> <cwd> -- <program> [args…]`. `default_helper_path()` locates the helper next to the current executable. This also works where `pre_exec` is unavailable — notably `portable-pty` (the terminal backend).
 
-What remains: have the real spawn paths (`nexus-terminal`, agent tool exec) route through `sandbox_command`, plus **permissioned downloads** — explicit, approved network egress under an otherwise network-off policy.
+### Permissioned downloads
+
+A network-off policy denies raw sockets outright (seccomp). Rather than poke a hole in that, the [`downloads`](../../crates/nexus-security/src/downloads.rs) broker performs *specific, allowlisted* fetches on the confined process's behalf and drops the result into a writable root. `validate(request, policy, writable_roots)` (pure, fully tested) enforces the rules — downloads must be **enabled**, the scheme **https**, the host on the **allowlist**, and the destination inside a **writable root** — and `fetch` streams the validated download with a size cap.
+
+`DownloadPolicy { enabled, allowed_hosts, max_bytes }` is **off by default** (mirroring network-off-by-default); an operator opts in and names allowed hosts.
+
+### What remains
+
+Route the real spawn paths (`nexus-terminal`, agent tool exec) through `sandbox_command`, surface `DownloadPolicy` + `SandboxPolicy` in config, and expose the broker over IPC. The enforcement primitives themselves are complete.
