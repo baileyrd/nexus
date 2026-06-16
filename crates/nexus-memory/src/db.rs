@@ -125,6 +125,13 @@ impl std::fmt::Debug for MemoryDb {
     }
 }
 
+/// Per-connection setup run on every pooled connection: WAL journal mode plus
+/// a busy timeout, so the bus-capture pump and the IPC handlers can write the
+/// same database file concurrently without hitting `database is locked`.
+fn init_conn(conn: &mut rusqlite::Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("PRAGMA journal_mode=WAL;\nPRAGMA busy_timeout=5000;")
+}
+
 impl MemoryDb {
     /// Open (creating if needed) a memory database at `path` and apply the schema.
     ///
@@ -132,7 +139,7 @@ impl MemoryDb {
     /// Returns an error if the connection pool cannot be built or the schema
     /// fails to apply.
     pub fn open(path: &Path) -> Result<Self> {
-        let manager = SqliteConnectionManager::file(path);
+        let manager = SqliteConnectionManager::file(path).with_init(init_conn);
         let db = Self {
             pool: Pool::new(manager)?,
         };
@@ -146,7 +153,7 @@ impl MemoryDb {
     /// Returns an error if the connection pool cannot be built or the schema
     /// fails to apply.
     pub fn open_in_memory() -> Result<Self> {
-        let manager = SqliteConnectionManager::memory();
+        let manager = SqliteConnectionManager::memory().with_init(init_conn);
         let db = Self {
             pool: Pool::builder().max_size(1).build(manager)?,
         };
