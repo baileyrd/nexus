@@ -36,6 +36,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod capture;
 pub mod core_plugin;
 pub mod db;
 pub mod episodic;
@@ -50,6 +51,7 @@ pub use episodic::{
 pub use procedural::{ProceduralEntry, ProceduralId, ProceduralStore};
 pub use semantic::{SemanticEntry, SemanticId, SemanticStore};
 
+pub use capture::event_to_memory;
 pub use db::{MemoryDb, MemoryDbError};
 pub use core_plugin::MemoryCorePlugin;
 pub use import::{import_chat_log, import_remind_me_db, ImportReport};
