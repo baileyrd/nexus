@@ -36,6 +36,8 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 # restricted-token backends land later.
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = { workspace = true }
+seccompiler = { workspace = true }
+libc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
