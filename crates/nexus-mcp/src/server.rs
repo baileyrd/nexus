@@ -42,8 +42,9 @@ const GIT_PLUGIN: &str = plugin_ids::GIT;
 /// security plugin's `metrics_snapshot` handler is the canonical
 /// IPC surface for the global metrics registry. Read-only.
 const SECURITY_PLUGIN: &str = plugin_ids::SECURITY;
-/// Memory engine — the `nexus_memory_*` tools call its `search`/`add`/`list`
-/// IPC handlers. No centralized `plugin_ids` const yet, so the id is inline.
+/// Memory engine — the `nexus_memory_*` tools call its
+/// `search`/`add`/`list`/`facts`/`entities` IPC handlers. No centralized
+/// `plugin_ids` const yet, so the id is inline.
 const MEMORY_PLUGIN: &str = "com.nexus.memory";
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
@@ -752,6 +753,15 @@ struct MemoryAddInput {
     /// Optional cognitive type: `episodic` | `semantic` | `procedural` | `unclassified`.
     #[serde(default)]
     memory_type: Option<String>,
+    /// Optional subject of an SPO entity fact (e.g. `ada`).
+    #[serde(default)]
+    subject: Option<String>,
+    /// Optional predicate of an SPO entity fact (e.g. `writes`).
+    #[serde(default)]
+    predicate: Option<String>,
+    /// Optional object of an SPO entity fact (e.g. `rust`).
+    #[serde(default)]
+    object: Option<String>,
 }
 
 /// Input for `nexus_memory_recent`.
@@ -760,6 +770,39 @@ struct MemoryRecentInput {
     /// Max results (default 50).
     #[serde(default)]
     limit: Option<u32>,
+}
+
+/// Input for `nexus_memory_facts` — recall SPO entity facts.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryFactsInput {
+    /// Optional subject filter (e.g. `ada`).
+    #[serde(default)]
+    subject: Option<String>,
+    /// Optional predicate filter (e.g. `writes`).
+    #[serde(default)]
+    predicate: Option<String>,
+    /// Optional object filter (e.g. `rust`).
+    #[serde(default)]
+    object: Option<String>,
+    /// Max results (default 50).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Input for `nexus_memory_entities` — list distinct entities with fact counts.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryEntitiesInput {
+    /// Max entities to return (default 50).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// A list of entities with fact counts.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryEntitiesOutput {
+    /// Distinct entities as `{ key, count }` objects (or an `{ "error": … }`
+    /// object on failure), as returned by the memory store.
+    entities: serde_json::Value,
 }
 
 /// A list of memories (raw store objects).
@@ -886,6 +929,9 @@ impl NexusMcpServer {
             "category": input.category,
             "tags": input.tags.unwrap_or_default(),
             "memory_type": input.memory_type,
+            "subject": input.subject,
+            "predicate": input.predicate,
+            "object": input.object,
         });
         match self.memory_call::<serde_json::Value>("add", args).await {
             Ok(memory) => Json(MemoryItemOutput { memory }),
@@ -908,6 +954,45 @@ impl NexusMcpServer {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
                 memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_facts",
+        description = "Recall SPO entity facts from memory, optionally filtered by subject, predicate, and/or object"
+    )]
+    async fn memory_facts(
+        &self,
+        Parameters(input): Parameters<MemoryFactsInput>,
+    ) -> Json<MemoryListOutput> {
+        let args = serde_json::json!({
+            "subject": input.subject,
+            "predicate": input.predicate,
+            "object": input.object,
+            "limit": input.limit,
+        });
+        match self.memory_call::<serde_json::Value>("facts", args).await {
+            Ok(memories) => Json(MemoryListOutput { memories }),
+            Err(e) => Json(MemoryListOutput {
+                memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_entities",
+        description = "List the distinct entities mentioned by memory's SPO facts, each with its fact count (most-frequent first)"
+    )]
+    async fn memory_entities(
+        &self,
+        Parameters(input): Parameters<MemoryEntitiesInput>,
+    ) -> Json<MemoryEntitiesOutput> {
+        let args = serde_json::json!({ "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("entities", args).await {
+            Ok(entities) => Json(MemoryEntitiesOutput { entities }),
+            Err(e) => Json(MemoryEntitiesOutput {
+                entities: serde_json::json!({ "error": e }),
             }),
         }
     }
