@@ -274,7 +274,7 @@ impl MemoryCorePlugin {
     }
 
     fn stats(&self) -> Result<Value, PluginError> {
-        Ok(json!({ "count": self.db.count().map_err(db_err)? }))
+        to_value(&self.db.stats().map_err(db_err)?, "stats")
     }
 }
 
@@ -338,6 +338,9 @@ mod tests {
 
         let stats = p.dispatch(HANDLER_STATS, &json!({})).unwrap();
         assert_eq!(stats["count"], 1);
+        assert_eq!(stats["by_category"][0]["key"], "ops");
+        assert_eq!(stats["by_category"][0]["count"], 1);
+        assert_eq!(stats["by_memory_type"][0]["key"], "semantic");
     }
 
     #[test]

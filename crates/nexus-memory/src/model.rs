@@ -208,3 +208,25 @@ impl Memory {
         self
     }
 }
+
+/// One `(key, count)` bucket in a [`MemoryStats`] breakdown.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryCount {
+    /// The grouped value — a category name, memory type, or source.
+    pub key: String,
+    /// Number of memories in this bucket.
+    pub count: u64,
+}
+
+/// Aggregate statistics over the memory store.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryStats {
+    /// Total number of stored memories.
+    pub count: u64,
+    /// Counts grouped by `category`, most frequent first.
+    pub by_category: Vec<CategoryCount>,
+    /// Counts grouped by `memory_type`, most frequent first.
+    pub by_memory_type: Vec<CategoryCount>,
+    /// Counts grouped by `source`, most frequent first.
+    pub by_source: Vec<CategoryCount>,
+}
