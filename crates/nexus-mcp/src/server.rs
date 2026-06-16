@@ -799,6 +799,31 @@ struct MemoryVitalityInput {
     limit: Option<u32>,
 }
 
+/// Input for `nexus_memory_recall` — hybrid lexical + semantic recall.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryRecallInput {
+    /// What to recall. Fused across full-text and (when available) vector search.
+    query: String,
+    /// Max results (default 20).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Input for `nexus_memory_vector_sync` — embedding backfill.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryVectorSyncInput {
+    /// Max memories to (re)index this call (default 1000).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Result of `nexus_memory_vector_sync`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryVectorSyncOutput {
+    /// The store's reply (`{ "indexed": n }`, or `{ "error": … }` on failure).
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MemoryFactsInput {
@@ -1054,6 +1079,40 @@ impl NexusMcpServer {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
                 memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_recall",
+        description = "Hybrid recall over memory: fuses full-text and semantic (vector) search via Reciprocal Rank Fusion. The best general way to find relevant memories"
+    )]
+    async fn memory_recall(
+        &self,
+        Parameters(input): Parameters<MemoryRecallInput>,
+    ) -> Json<MemoryListOutput> {
+        let args = serde_json::json!({ "query": input.query, "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("recall", args).await {
+            Ok(memories) => Json(MemoryListOutput { memories }),
+            Err(e) => Json(MemoryListOutput {
+                memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_vector_sync",
+        description = "Backfill embeddings for stored memories so semantic recall has data to search. Run once after importing or bulk-adding memories"
+    )]
+    async fn memory_vector_sync(
+        &self,
+        Parameters(input): Parameters<MemoryVectorSyncInput>,
+    ) -> Json<MemoryVectorSyncOutput> {
+        let args = serde_json::json!({ "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("vector_sync", args).await {
+            Ok(result) => Json(MemoryVectorSyncOutput { result }),
+            Err(e) => Json(MemoryVectorSyncOutput {
+                result: serde_json::json!({ "error": e }),
             }),
         }
     }

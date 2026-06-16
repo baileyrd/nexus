@@ -14,6 +14,8 @@ import type { Plugin, PluginAPI, PickItem } from '../../../types/plugin'
 const MEMORY_PLUGIN = 'com.nexus.memory'
 
 const CMD_SEARCH = 'nexus.memory.search'
+const CMD_RECALL = 'nexus.memory.recall'
+const CMD_REINDEX = 'nexus.memory.reindex'
 const CMD_RECENT = 'nexus.memory.recent'
 const CMD_FACTS = 'nexus.memory.facts'
 const CMD_ENTITIES = 'nexus.memory.entities'
@@ -156,6 +158,8 @@ export const memoryDashboardPlugin: Plugin = {
     contributes: {
       commands: [
         { id: CMD_SEARCH, title: 'Memory: Search', category: 'Memory' },
+        { id: CMD_RECALL, title: 'Memory: Recall (hybrid)', category: 'Memory' },
+        { id: CMD_REINDEX, title: 'Memory: Reindex Vectors', category: 'Memory' },
         { id: CMD_RECENT, title: 'Memory: Recent', category: 'Memory' },
         { id: CMD_FACTS, title: 'Memory: Facts', category: 'Memory' },
         { id: CMD_ENTITIES, title: 'Memory: Entities', category: 'Memory' },
@@ -179,6 +183,33 @@ export const memoryDashboardPlugin: Plugin = {
           return [] as unknown
         })
       await presentMemories(api, decodeMemories(raw), `No memories match "${trimmed}".`)
+    })
+
+    api.commands.register(CMD_RECALL, async () => {
+      const query = await api.input.prompt('Recall memory', 'What do you want to recall?')
+      if (query === null) return
+      const trimmed = query.trim()
+      if (!trimmed) return
+      const raw = await api.kernel
+        .invoke<unknown>(MEMORY_PLUGIN, 'recall', { query: trimmed, limit: LIST_LIMIT })
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Memory recall failed: ${String(e)}`, type: 'error' })
+          return [] as unknown
+        })
+      await presentMemories(api, decodeMemories(raw), `Nothing recalled for "${trimmed}".`)
+    })
+
+    api.commands.register(CMD_REINDEX, async () => {
+      api.notifications.show({ message: 'Reindexing memory vectors…', type: 'info' })
+      const res = await api.kernel
+        .invoke<{ indexed?: number }>(MEMORY_PLUGIN, 'vector_sync', {})
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Vector reindex failed: ${String(e)}`, type: 'error' })
+          return null
+        })
+      if (res === null) return
+      const indexed = typeof res.indexed === 'number' ? res.indexed : 0
+      api.notifications.show({ message: `Reindexed ${indexed} memories for semantic recall.`, type: 'info' })
     })
 
     api.commands.register(CMD_RECENT, async () => {
