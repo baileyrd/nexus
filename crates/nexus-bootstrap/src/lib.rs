@@ -50,6 +50,8 @@ pub mod forge_template;
 /// IPC dispatch. The CLI consumes this trait so the same subcommand
 /// body works against both shapes.
 pub mod invoker;
+/// AI-first-class capture: pumps every kernel event into the native memory store.
+pub mod memory_capture;
 mod plugins;
 /// BL-113 / ADR 0027 — manifest-side `ContributedAdapter` → host-side
 /// `{Lsp,Mcp}ServerSpec` converters. Phase 2a/3a primitive; the
@@ -442,6 +444,11 @@ fn build(
     // (i.e. the process), which is the right shape until BL-143 Phase
     // 1.5 wires explicit reconnect / shutdown.
     let _ = collab::start_if_enabled(forge_root, Arc::clone(&event_bus));
+
+    // AI-first-class capture: feed every bus event into the native memory store
+    // (loop-guarded + secret-redacted by nexus_memory::event_to_memory). Detached
+    // like the collab relay; best-effort, never fatal to boot.
+    let _ = memory_capture::start_capture(forge_root, Arc::clone(&event_bus));
 
     let context = KernelPluginContext::new(
         invoker_id,
