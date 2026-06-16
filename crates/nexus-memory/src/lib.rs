@@ -52,7 +52,7 @@ pub use semantic::{SemanticEntry, SemanticId, SemanticStore};
 
 pub use db::{MemoryDb, MemoryDbError};
 pub use core_plugin::MemoryCorePlugin;
-pub use import::{import_remind_me_db, ImportReport};
+pub use import::{import_chat_log, import_remind_me_db, ImportReport};
 pub use model::{Memory, MemoryStatus, MemoryType};
 
 /// Unified memory handle carrying all three memory kinds.
