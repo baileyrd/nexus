@@ -237,9 +237,10 @@ impl MemoryDb {
         Ok(out)
     }
 
-    /// List memories filtered by optional `category` / `memory_type` / `status`,
-    /// newest first. Filters are bound parameters (`None` means "any"); the
-    /// column names are fixed literals, so the dynamic `WHERE` is injection-safe.
+    /// List memories filtered by optional `category` / `memory_type` / `status`
+    /// / `tag`, newest first. Filters are bound parameters (`None` means "any");
+    /// the column names are fixed literals, so the dynamic `WHERE` is
+    /// injection-safe. `tag` matches rows whose JSON `tags` array contains it.
     ///
     /// # Errors
     /// Returns an error on a query or decode failure.
@@ -248,6 +249,7 @@ impl MemoryDb {
         category: Option<&str>,
         memory_type: Option<&str>,
         status: Option<&str>,
+        tag: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Memory>> {
         let mut conds: Vec<String> = Vec::new();
@@ -261,6 +263,13 @@ impl MemoryDb {
                 vals.push(v.to_string());
                 conds.push(format!("{col} = ?{}", vals.len()));
             }
+        }
+        if let Some(t) = tag {
+            vals.push(t.to_string());
+            conds.push(format!(
+                "EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ?{})",
+                vals.len()
+            ));
         }
         let where_clause = if conds.is_empty() {
             String::new()
@@ -352,6 +361,30 @@ impl MemoryDb {
                  UNION ALL
                  SELECT object AS name FROM memories WHERE object IS NOT NULL
              ) GROUP BY name ORDER BY c DESC, k ASC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![clamp_limit(limit)], |r| {
+                let count: i64 = r.get("c")?;
+                Ok(CategoryCount {
+                    key: r.get("k")?,
+                    count: u64::try_from(count).unwrap_or(0),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Distinct tags across all memories, with the number of memories carrying
+    /// each, most-frequent first (ties alphabetical). The `key` of each
+    /// [`CategoryCount`] is the tag.
+    ///
+    /// # Errors
+    /// Returns an error on a query failure.
+    pub fn list_tags(&self, limit: usize) -> Result<Vec<CategoryCount>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT je.value AS k, COUNT(*) AS c FROM memories m, json_each(m.tags) je \
+             GROUP BY je.value ORDER BY c DESC, k ASC LIMIT ?1",
         )?;
         let rows = stmt
             .query_map(params![clamp_limit(limit)], |r| {
@@ -605,21 +638,51 @@ mod tests {
     #[test]
     fn list_filtered_applies_filters() {
         let db = MemoryDb::open_in_memory().unwrap();
-        db.insert(&Memory::new("ops semantic").with_category("ops").with_type(MemoryType::Semantic))
-            .unwrap();
+        db.insert(
+            &Memory::new("ops semantic")
+                .with_category("ops")
+                .with_type(MemoryType::Semantic)
+                .with_tags(["infra", "k8s"]),
+        )
+        .unwrap();
         db.insert(&Memory::new("ops episodic").with_category("ops").with_type(MemoryType::Episodic))
             .unwrap();
-        db.insert(&Memory::new("prefs semantic").with_category("prefs").with_type(MemoryType::Semantic))
-            .unwrap();
+        db.insert(
+            &Memory::new("prefs semantic")
+                .with_category("prefs")
+                .with_type(MemoryType::Semantic)
+                .with_tags(["infra"]),
+        )
+        .unwrap();
 
-        assert_eq!(db.list_filtered(None, None, None, 10).unwrap().len(), 3);
-        assert_eq!(db.list_filtered(Some("ops"), None, None, 10).unwrap().len(), 2);
-        assert_eq!(db.list_filtered(None, Some("semantic"), None, 10).unwrap().len(), 2);
-        let combined = db.list_filtered(Some("ops"), Some("semantic"), None, 10).unwrap();
+        assert_eq!(db.list_filtered(None, None, None, None, 10).unwrap().len(), 3);
+        assert_eq!(db.list_filtered(Some("ops"), None, None, None, 10).unwrap().len(), 2);
+        assert_eq!(db.list_filtered(None, Some("semantic"), None, None, 10).unwrap().len(), 2);
+        let combined = db.list_filtered(Some("ops"), Some("semantic"), None, None, 10).unwrap();
         assert_eq!(combined.len(), 1);
         assert_eq!(combined[0].content, "ops semantic");
-        assert_eq!(db.list_filtered(None, None, Some("active"), 10).unwrap().len(), 3);
-        assert_eq!(db.list_filtered(None, None, Some("archived"), 10).unwrap().len(), 0);
+        assert_eq!(db.list_filtered(None, None, Some("active"), None, 10).unwrap().len(), 3);
+        assert_eq!(db.list_filtered(None, None, Some("archived"), None, 10).unwrap().len(), 0);
+        // Tag filter: "infra" tags two rows, "k8s" tags one; combined with a
+        // category filter it narrows further.
+        assert_eq!(db.list_filtered(None, None, None, Some("infra"), 10).unwrap().len(), 2);
+        assert_eq!(db.list_filtered(None, None, None, Some("k8s"), 10).unwrap().len(), 1);
+        assert_eq!(db.list_filtered(Some("prefs"), None, None, Some("infra"), 10).unwrap().len(), 1);
+        assert_eq!(db.list_filtered(None, None, None, Some("absent"), 10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_tags_counts_distinct_tags() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        db.insert(&Memory::new("a").with_tags(["infra", "k8s"])).unwrap();
+        db.insert(&Memory::new("b").with_tags(["infra"])).unwrap();
+        db.insert(&Memory::new("c")).unwrap(); // untagged
+        let tags = db.list_tags(10).unwrap();
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].key, "infra"); // most-frequent first
+        assert_eq!(tags[0].count, 2);
+        assert_eq!(tags[1].key, "k8s");
+        assert_eq!(tags[1].count, 1);
     }
 
     #[test]

@@ -18,6 +18,7 @@
 //! | 8  | `facts`  | `{ subject?, predicate?, … }` | Recall SPO entity facts          |
 //! | 9  | `entities` | `{ limit? }`                | Distinct entities + fact counts  |
 //! | 10 | `export` | `{}`                          | Dump every memory, oldest first  |
+//! | 11 | `tags`   | `{ limit? }`                  | Distinct tags + memory counts    |
 //!
 //! Ids are append-only. Hybrid vector recall and the remaining `remind_me` parity
 //! commands (capture/wiki/lifecycle) land in later phases.
@@ -60,6 +61,8 @@ pub const HANDLER_FACTS: u32 = 8;
 pub const HANDLER_ENTITIES: u32 = 9;
 /// `export` handler id.
 pub const HANDLER_EXPORT: u32 = 10;
+/// `tags` handler id.
+pub const HANDLER_TAGS: u32 = 11;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -74,6 +77,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("facts", HANDLER_FACTS),
     ("entities", HANDLER_ENTITIES),
     ("export", HANDLER_EXPORT),
+    ("tags", HANDLER_TAGS),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -154,6 +158,9 @@ pub struct ListArgs {
     /// Optional lifecycle-status filter (`active` | `archived` | `superseded`).
     #[serde(default)]
     pub status: Option<String>,
+    /// Optional tag filter — matches memories whose tag list contains it.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 /// Args for `com.nexus.memory::search` (handler id `4`).
@@ -245,6 +252,20 @@ pub struct EntitiesArgs {
     pub limit: Option<usize>,
 }
 
+/// Args for `com.nexus.memory::tags` (handler id `11`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+#[serde(deny_unknown_fields)]
+pub struct TagsArgs {
+    /// Maximum tags to return (default 50).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 /// Core plugin wrapping a [`MemoryDb`].
@@ -319,6 +340,7 @@ impl MemoryCorePlugin {
                 a.category.as_deref(),
                 a.memory_type.as_deref(),
                 a.status.as_deref(),
+                a.tag.as_deref(),
                 a.limit.unwrap_or(DEFAULT_LIST_LIMIT),
             )
             .map_err(db_err)?;
@@ -403,6 +425,15 @@ impl MemoryCorePlugin {
     fn export(&self) -> Result<Value, PluginError> {
         to_value(&self.db.export_all().map_err(db_err)?, "export")
     }
+
+    fn tags(&self, args: &Value) -> Result<Value, PluginError> {
+        let a: TagsArgs = parse_args(args, "tags")?;
+        let tags = self
+            .db
+            .list_tags(a.limit.unwrap_or(DEFAULT_LIST_LIMIT))
+            .map_err(db_err)?;
+        to_value(&tags, "tags")
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -418,6 +449,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_FACTS => self.facts(args),
             HANDLER_ENTITIES => self.entities(args),
             HANDLER_EXPORT => self.export(),
+            HANDLER_TAGS => self.tags(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -615,6 +647,27 @@ mod tests {
         assert_eq!(arr.len(), 2);
         // Full records: ids and content present, ready for re-import.
         assert!(arr.iter().all(|m| m["id"].is_string() && m["content"].is_string()));
+    }
+
+    #[test]
+    fn list_filters_by_tag_and_tags_lists_facets() {
+        let mut p = plugin();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "a", "tags": ["infra", "k8s"] })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "b", "tags": ["infra"] })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "c" })).unwrap();
+
+        // list with a tag filter.
+        let infra = p.dispatch(HANDLER_LIST, &json!({ "tag": "infra" })).unwrap();
+        assert_eq!(infra.as_array().unwrap().len(), 2);
+        let k8s = p.dispatch(HANDLER_LIST, &json!({ "tag": "k8s" })).unwrap();
+        assert_eq!(k8s.as_array().unwrap().len(), 1);
+
+        // tags facet, most-frequent first.
+        let tags = p.dispatch(HANDLER_TAGS, &json!({})).unwrap();
+        let arr = tags.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["key"], "infra");
+        assert_eq!(arr[0]["count"], 2);
     }
 
     #[test]

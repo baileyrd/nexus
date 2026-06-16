@@ -28,7 +28,7 @@
 | `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.memory` | 10 |
+| `com.nexus.memory` | 11 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -307,7 +307,7 @@ All `unrestricted`. `list`, `get`, `render`, `apply` (downstream `fs.write`), `r
 
 ---
 
-## com.nexus.memory (10)
+## com.nexus.memory (11)
 
 Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search and SPO entity facts; all handlers are `unrestricted` — the plugin operates only on its own `.forge/memory/memory.db`.
 
@@ -315,7 +315,7 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 |---------|------|------|
 | `add` | — | store a memory (incl. optional `subject`/`predicate`/`object` fact); returns it |
 | `get` | — | fetch one by id |
-| `list` | — | recent memories, newest first; optional `category`/`memory_type`/`status` filters |
+| `list` | — | recent memories, newest first; optional `category`/`memory_type`/`status`/`tag` filters |
 | `search` | — | FTS5 full-text search |
 | `update` | — | patch mutable fields (content/category/tags/status/SPO) |
 | `delete` | — | remove a memory |
@@ -323,6 +323,7 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 | `facts` | — | recall SPO entity facts; optional `subject`/`predicate`/`object` filters |
 | `entities` | — | distinct entities (fact subjects + objects) with fact counts |
 | `export` | — | full dump of every memory, oldest first (for portability / re-import) |
+| `tags` | — | distinct tags with the number of memories carrying each |
 
 ---
 
