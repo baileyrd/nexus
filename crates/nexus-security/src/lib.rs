@@ -16,6 +16,8 @@ pub use nexus_kernel::audit;
 /// Core plugin (`com.nexus.security`) and IPC handler constants.
 pub mod core_plugin;
 mod credential;
+/// Permissioned download broker (approved egress for the network-off sandbox).
+pub mod downloads;
 mod error;
 /// IPC wire types for `com.nexus.security`.
 pub mod ipc;
@@ -30,6 +32,7 @@ pub mod tls_pins;
 
 pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
+pub use downloads::{DownloadError, DownloadPolicy, DownloadRequest};
 pub use error::SecurityError;
 pub use os_sandbox::{
     apply_to_current_thread, block_inet_sockets, confine_current_thread, default_helper_path,
