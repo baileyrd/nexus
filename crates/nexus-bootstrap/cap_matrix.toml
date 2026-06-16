@@ -86,6 +86,11 @@ caps = ["ai.chat"]
 
 [[handler]]
 plugin = "com.nexus.ai"
+command = "embed_text"
+caps = ["ai.chat"]
+
+[[handler]]
+plugin = "com.nexus.ai"
 command = "enrich_file"
 caps = ["ai.chat"]
 

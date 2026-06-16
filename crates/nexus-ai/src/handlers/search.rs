@@ -43,6 +43,46 @@ pub(crate) async fn handle_semantic_search(
     Ok(serde_json::json!({ "matches": matches }))
 }
 
+/// Embed one or more strings with the configured embedding provider and
+/// return the dense vectors. Accepts `{ "texts": ["…", …] }` or a single
+/// `{ "text": "…" }`; replies `{ "embeddings": [[f32]], "dimension": n }`.
+///
+/// This exposes the one embedding path so other plugins (notably the memory
+/// engine) can vectorise their own content/queries without linking a model —
+/// they embed here, then store/search through `nexus-storage`'s namespaced
+/// vector handlers.
+pub(crate) async fn handle_embed_text(
+    embed_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let texts: Vec<String> =
+        if let Some(arr) = args.get("texts").and_then(serde_json::Value::as_array) {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else if let Some(s) = args.get("text").and_then(serde_json::Value::as_str) {
+            vec![s.to_string()]
+        } else {
+            return Err(exec_err(
+                "embed_text: missing 'texts' array or 'text' string".to_string(),
+            ));
+        };
+    if texts.is_empty() {
+        return Ok(serde_json::json!({ "embeddings": [], "dimension": 0 }));
+    }
+
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("embed_text: no AI embedding provider configured".to_string()))?;
+    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    let embeddings = embedder
+        .embed(&texts)
+        .await
+        .map_err(|e| exec_err(format!("embed_text ({} texts): {e}", texts.len())))?;
+    let dimension = embeddings.first().map_or(0, Vec::len);
+    Ok(serde_json::json!({ "embeddings": embeddings, "dimension": dimension }))
+}
+
 /// BL-128 close — semantic recall over the `entities/` corpus.
 ///
 /// Pipeline: embed `query` → query shared chunk vectorstore with a
