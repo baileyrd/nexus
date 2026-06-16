@@ -1111,6 +1111,11 @@ plugin = "com.nexus.memory"
 command = "get_capture"
 unrestricted = "read-only fetch of a capture's lineage from the plugin's own store"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "consolidate"
+unrestricted = "supersedes duplicate rows in the plugin's own memory store (deterministic; no AI/network)"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]
