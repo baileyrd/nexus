@@ -310,11 +310,11 @@ fn into_rusqlite(e: &MemoryDbError) -> rusqlite::Error {
     )))
 }
 
-fn parse_uuid(s: &str) -> Result<Uuid> {
+pub(crate) fn parse_uuid(s: &str) -> Result<Uuid> {
     Uuid::parse_str(s).map_err(|e| MemoryDbError::Decode(format!("uuid {s:?}: {e}")))
 }
 
-fn parse_dt(s: &str) -> Result<DateTime<Utc>> {
+pub(crate) fn parse_dt(s: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| MemoryDbError::Decode(format!("timestamp {s:?}: {e}")))
