@@ -280,6 +280,15 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Serve the hub over `listener` until the task is dropped. A thin wrapper over
+/// [`router`] + `axum::serve` so embedders and tests need not depend on axum.
+///
+/// # Errors
+/// Propagates the server's I/O error, if any.
+pub async fn serve(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
+    axum::serve(listener, router(state)).await
+}
+
 /// Constant-time byte-equality so token checks don't leak length-prefix timing.
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {

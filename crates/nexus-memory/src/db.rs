@@ -355,6 +355,33 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// List memories strictly after the `(after_updated_at, after_id)` keyset
+    /// cursor, ordered by `(updated_at, id)` — the push arm of sync. Pass
+    /// `("1970-01-01T00:00:00+00:00", "")` to start from the beginning.
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure.
+    pub fn list_since(
+        &self,
+        after_updated_at: &str,
+        after_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m \
+             WHERE m.updated_at > ?1 OR (m.updated_at = ?1 AND m.id > ?2) \
+             ORDER BY m.updated_at ASC, m.id ASC LIMIT {}",
+            clamp_limit(limit)
+        ))?;
+        let out = stmt
+            .query_map(params![after_updated_at, after_id], |row| {
+                row_to_memory(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(out)
+    }
+
     /// List memories filtered by optional `category` / `memory_type` / `status`
     /// / `tag`, newest first. Filters are bound parameters (`None` means "any");
     /// the column names are fixed literals, so the dynamic `WHERE` is
@@ -987,6 +1014,29 @@ mod tests {
         // FTS reflects the applied update.
         assert_eq!(db.search("v2", 5).unwrap().len(), 1);
         assert_eq!(db.search("v1", 5).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_since_keyset_walks_in_order() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        for (content, secs) in [("a", 100), ("b", 200), ("c", 300)] {
+            let mut m = Memory::new(content);
+            m.created_at = DateTime::from_timestamp(secs, 0).unwrap();
+            m.updated_at = DateTime::from_timestamp(secs, 0).unwrap();
+            db.insert(&m).unwrap();
+        }
+        // From the beginning, page size 2 → a, b (oldest-updated first).
+        let page1 = db.list_since("1970-01-01T00:00:00+00:00", "", 2).unwrap();
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page1[0].content, "a");
+        assert_eq!(page1[1].content, "b");
+        // Resume after b → c.
+        let last = &page1[1];
+        let page2 = db
+            .list_since(&last.updated_at.to_rfc3339(), &last.id.to_string(), 2)
+            .unwrap();
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0].content, "c");
     }
 
     #[test]

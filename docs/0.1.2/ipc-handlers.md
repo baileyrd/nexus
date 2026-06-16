@@ -28,7 +28,7 @@
 | `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.memory` | 14 |
+| `com.nexus.memory` | 15 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -307,9 +307,9 @@ All `unrestricted`. `list`, `get`, `render`, `apply` (downstream `fs.write`), `r
 
 ---
 
-## com.nexus.memory (14)
+## com.nexus.memory (15)
 
-Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search and SPO entity facts; all handlers are `unrestricted` — the plugin operates only on its own `.forge/memory/memory.db` (the async `recall`/`vector_sync` reach AI + storage through the plugin's *own* capability-gated context, not the caller's).
+Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search and SPO entity facts. Every handler is `unrestricted` (operating only on its own `.forge/memory/memory.db`) **except `sync`**, which is gated by `net.http` for its outbound calls to a memory hub. The async `recall`/`vector_sync` reach AI + storage through the plugin's *own* capability-gated context, not the caller's.
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -327,6 +327,7 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 | `vitality_report` | — | active memories ranked by computed ACT-R-style vitality (frequency + recency) |
 | `recall` | — | **async** — hybrid FTS + vector recall fused via Reciprocal Rank Fusion; falls back to FTS-only when no embedder/vectors |
 | `vector_sync` | — | **async** — backfill embeddings for stored memories into the `memory` vector namespace |
+| `sync` | `net.http` | **async** — push/pull the store to a caller-configured `nexus-memory-hub` (LWW, keyset cursors) |
 
 ---
 

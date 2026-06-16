@@ -22,10 +22,12 @@
 //! | 12 | `vitality_report` | `{ limit? }`         | Active memories ranked by vitality |
 //! | 13 | `recall` | `{ query, limit? }`           | Hybrid FTS + vector recall (RRF)  |
 //! | 14 | `vector_sync` | `{ limit? }`             | Backfill memory embeddings        |
+//! | 15 | `sync`   | `{ hub_url, secret, node_id }` | Push/pull with a memory hub      |
 //!
-//! Handlers 13–14 are **async** (they make nested `ipc_call`s to
+//! Handlers 13–15 are **async** and dispatch through
+//! [`CorePlugin::dispatch_async`]: 13–14 make nested `ipc_call`s to
 //! `com.nexus.ai::embed_text` and `com.nexus.storage`'s namespaced vector
-//! store) and dispatch through [`CorePlugin::dispatch_async`]; the rest are
+//! store; 15 (`sync`) makes outbound HTTP to a `nexus-memory-hub`. The rest are
 //! synchronous. Ids are append-only. The remaining `remind_me` parity commands
 //! (capture/wiki/consolidate) land in later phases.
 
@@ -77,6 +79,8 @@ pub const HANDLER_VITALITY_REPORT: u32 = 12;
 pub const HANDLER_RECALL: u32 = 13;
 /// `vector_sync` handler id (async).
 pub const HANDLER_VECTOR_SYNC: u32 = 14;
+/// `sync` handler id (async; HTTP push/pull with a memory hub).
+pub const HANDLER_SYNC: u32 = 15;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -95,6 +99,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("vitality_report", HANDLER_VITALITY_REPORT),
     ("recall", HANDLER_RECALL),
     ("vector_sync", HANDLER_VECTOR_SYNC),
+    ("sync", HANDLER_SYNC),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -503,10 +508,13 @@ impl CorePlugin for MemoryCorePlugin {
     }
 
     fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
-        // Only the hybrid-recall handlers are async — they `ipc_call`
-        // `com.nexus.ai::embed_text` and `com.nexus.storage`'s vector store.
-        // Everything else falls through to the synchronous `dispatch`.
-        if handler_id != HANDLER_RECALL && handler_id != HANDLER_VECTOR_SYNC {
+        // The async handlers: recall/vector_sync `ipc_call` AI + storage;
+        // sync makes outbound HTTP to a memory hub. Everything else falls
+        // through to the synchronous `dispatch`.
+        if handler_id != HANDLER_RECALL
+            && handler_id != HANDLER_VECTOR_SYNC
+            && handler_id != HANDLER_SYNC
+        {
             return None;
         }
         let db = self.db.clone();
@@ -516,6 +524,7 @@ impl CorePlugin for MemoryCorePlugin {
             let result = match handler_id {
                 HANDLER_RECALL => crate::vector::recall(db, ctx, &args).await,
                 HANDLER_VECTOR_SYNC => crate::vector::vector_sync(db, ctx, &args).await,
+                HANDLER_SYNC => crate::sync::sync(db, &args).await,
                 _ => unreachable!("guarded above"),
             };
             result.map_err(exec_err)

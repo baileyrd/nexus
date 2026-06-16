@@ -44,6 +44,7 @@ pub mod import;
 pub mod model;
 pub mod procedural;
 pub mod semantic;
+pub mod sync;
 pub mod vector;
 
 pub use episodic::{
