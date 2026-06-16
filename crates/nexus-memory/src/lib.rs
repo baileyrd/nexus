@@ -38,6 +38,7 @@
 
 pub mod capture;
 pub mod capture_pipeline;
+pub mod consolidate;
 pub mod core_plugin;
 pub mod db;
 pub mod episodic;

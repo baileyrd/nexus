@@ -636,6 +636,22 @@ impl MemoryDb {
         Ok(n > 0)
     }
 
+    /// Mark a memory superseded by `by`, stamping `superseded_by` and bumping
+    /// `updated_at`. Returns `true` if a row changed. Used by `consolidate` to
+    /// retire duplicates in favour of a canonical memory.
+    ///
+    /// # Errors
+    /// Returns an error on a write failure.
+    pub fn mark_superseded(&self, id: Uuid, by: Uuid) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let n = conn.execute(
+            "UPDATE memories SET status = 'superseded', superseded_by = ?2, updated_at = ?3 \
+             WHERE id = ?1 AND status != 'superseded'",
+            params![id.to_string(), by.to_string(), Utc::now().to_rfc3339()],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Delete a memory by id. Returns `true` if a row was removed.
     ///
     /// # Errors
@@ -1071,6 +1087,23 @@ mod tests {
         // Upsert overwrites.
         db.sync_state_set("cursor", "later").unwrap();
         assert_eq!(db.sync_state_get("cursor").unwrap().as_deref(), Some("later"));
+    }
+
+    #[test]
+    fn mark_superseded_sets_status_and_pointer() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        let loser = Memory::new("dup");
+        let canonical = Memory::new("dup");
+        db.insert(&loser).unwrap();
+        db.insert(&canonical).unwrap();
+        assert!(db.mark_superseded(loser.id, canonical.id).unwrap());
+        let got = db.get(loser.id).unwrap().unwrap();
+        assert_eq!(got.status, MemoryStatus::Superseded);
+        assert_eq!(got.superseded_by, Some(canonical.id));
+        // Idempotent: a second supersede is a no-op (already superseded).
+        assert!(!db.mark_superseded(loser.id, canonical.id).unwrap());
+        // Excluded from the active-only vitality report.
+        assert!(db.vitality_report(10).unwrap().iter().all(|m| m.id != loser.id));
     }
 
     #[test]

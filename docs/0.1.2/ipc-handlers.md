@@ -28,7 +28,7 @@
 | `com.nexus.acp` | 8 |
 | `com.nexus.security` | 7 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.memory` | 20 |
+| `com.nexus.memory` | 21 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -307,7 +307,7 @@ All `unrestricted`. `list`, `get`, `render`, `apply` (downstream `fs.write`), `r
 
 ---
 
-## com.nexus.memory (20)
+## com.nexus.memory (21)
 
 Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search and SPO entity facts. Handlers operate on the plugin's own `.forge/memory/memory.db` and are `unrestricted`, **except** `sync` (gated by `net.http` for outbound hub calls) and `wiki_compile` (gated by `ai.chat` for the synthesis round-trip). The async `recall`/`vector_sync`/`wiki_*` reach AI + storage through the plugin's *own* capability-gated context, not the caller's.
 
@@ -333,6 +333,7 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 | `wiki_list` | — | **async** — list the wiki pages |
 | `auto_capture` | — | **async** — capture a turn as a memory; optional LLM `decompose` into atomic child facts |
 | `get_capture` | — | a capture's lineage (parent + decomposed children) by `capture_id` |
+| `consolidate` | — | dedupe: supersede exact normalized-content duplicates, keeping the freshest (`dry_run?`, `category?`) |
 
 ---
 

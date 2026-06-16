@@ -28,6 +28,7 @@
 //! | 18 | `wiki_list` | `{}`                       | List wiki pages                  |
 //! | 19 | `auto_capture` | `{ content, decompose? }` | Capture a turn (+LLM decompose)  |
 //! | 20 | `get_capture` | `{ capture_id }`          | A capture's parent + children    |
+//! | 21 | `consolidate` | `{ category?, dry_run? }` | Dedupe: supersede duplicate memories |
 //!
 //! Handlers 13–19 are **async** and dispatch through
 //! [`CorePlugin::dispatch_async`]: 13–14, 16–18 and 19 make nested `ipc_call`s
@@ -96,6 +97,8 @@ pub const HANDLER_WIKI_LIST: u32 = 18;
 pub const HANDLER_AUTO_CAPTURE: u32 = 19;
 /// `get_capture` handler id (sync; a capture's lineage).
 pub const HANDLER_GET_CAPTURE: u32 = 20;
+/// `consolidate` handler id (sync; supersede duplicate memories).
+pub const HANDLER_CONSOLIDATE: u32 = 21;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -120,6 +123,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("wiki_list", HANDLER_WIKI_LIST),
     ("auto_capture", HANDLER_AUTO_CAPTURE),
     ("get_capture", HANDLER_GET_CAPTURE),
+    ("consolidate", HANDLER_CONSOLIDATE),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -515,6 +519,36 @@ impl MemoryCorePlugin {
         let mems = self.db.list_by_capture(capture_id).map_err(db_err)?;
         to_value(&mems, "get_capture")
     }
+
+    fn consolidate(&self, args: &Value) -> Result<Value, PluginError> {
+        let category = args.get("category").and_then(Value::as_str);
+        let dry_run = args.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(10_000);
+        let mems = self
+            .db
+            .list_filtered(category, None, Some("active"), None, limit)
+            .map_err(db_err)?;
+        let clusters = crate::consolidate::cluster_duplicates(mems);
+        let mut superseded = 0_u64;
+        for cluster in &clusters {
+            let canonical = cluster[0].id;
+            for loser in &cluster[1..] {
+                let changed = if dry_run {
+                    true
+                } else {
+                    self.db.mark_superseded(loser.id, canonical).map_err(db_err)?
+                };
+                if changed {
+                    superseded += 1;
+                }
+            }
+        }
+        Ok(json!({ "clusters": clusters.len(), "superseded": superseded, "dry_run": dry_run }))
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -533,6 +567,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_TAGS => self.tags(args),
             HANDLER_VITALITY_REPORT => self.vitality_report(args),
             HANDLER_GET_CAPTURE => self.get_capture(args),
+            HANDLER_CONSOLIDATE => self.consolidate(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -823,6 +858,38 @@ mod tests {
         let arr = report.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["content"], "hot"); // most-accessed ranks first
+    }
+
+    #[test]
+    fn consolidate_supersedes_duplicates() {
+        let mut p = plugin();
+        // Three exact (normalized) duplicates + one unique.
+        p.dispatch(HANDLER_ADD, &json!({ "content": "likes Rust" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "LIKES   rust" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "likes rust" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "uses Go" })).unwrap();
+
+        // Dry run reports without changing anything.
+        let dry = p.dispatch(HANDLER_CONSOLIDATE, &json!({ "dry_run": true })).unwrap();
+        assert_eq!(dry["clusters"], 1);
+        assert_eq!(dry["superseded"], 2);
+        // All four still active after a dry run.
+        assert_eq!(
+            p.dispatch(HANDLER_LIST, &json!({ "status": "active", "limit": 50 }))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+
+        // Real run supersedes the two non-canonical duplicates.
+        let res = p.dispatch(HANDLER_CONSOLIDATE, &json!({})).unwrap();
+        assert_eq!(res["superseded"], 2);
+        let active = p.dispatch(HANDLER_LIST, &json!({ "status": "active", "limit": 50 })).unwrap();
+        assert_eq!(active.as_array().unwrap().len(), 2); // one canonical + "uses Go"
+        // Re-running is a no-op (the duplicates are already superseded).
+        assert_eq!(p.dispatch(HANDLER_CONSOLIDATE, &json!({})).unwrap()["superseded"], 0);
     }
 
     #[test]
