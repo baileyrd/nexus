@@ -32,7 +32,8 @@ pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
 pub use error::SecurityError;
 pub use os_sandbox::{
-    apply_to_current_thread, block_inet_sockets, NetworkStatus, SandboxError, SandboxStatus,
+    apply_to_current_thread, block_inet_sockets, confine_current_thread, NetworkStatus,
+    SandboxError, SandboxStatus,
 };
 pub use path::ForgePathValidator;
 pub use risk::{risk_level, RiskLevel};

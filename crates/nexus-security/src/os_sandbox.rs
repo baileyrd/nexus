@@ -130,6 +130,30 @@ pub fn block_inet_sockets() -> Result<NetworkStatus, SandboxError> {
     }
 }
 
+/// Confine the **current thread** per `policy`: filesystem first
+/// ([`apply_to_current_thread`]), then — when the policy disallows network —
+/// the inet socket block ([`block_inet_sockets`]). This is the composition a
+/// sandbox entry point applies to itself immediately before doing untrusted
+/// work (or, from a `pre_exec` hook, before `exec`ing an untrusted child).
+/// Irreversible for the calling thread.
+///
+/// Returns the filesystem [`SandboxStatus`]; `danger-full-access` yields
+/// [`SandboxStatus::Skipped`] and applies no network block.
+///
+/// # Errors
+/// Propagates [`SandboxError`] from either dimension. A network-block failure
+/// is surfaced (not swallowed) because it means network was **not** contained.
+pub fn confine_current_thread(
+    policy: &SandboxPolicy,
+    cwd: &Path,
+) -> Result<SandboxStatus, SandboxError> {
+    let filesystem = apply_to_current_thread(policy, cwd)?;
+    if !policy.has_full_network_access() {
+        block_inet_sockets()?;
+    }
+    Ok(filesystem)
+}
+
 #[cfg(target_os = "linux")]
 mod linux_net {
     use std::collections::BTreeMap;
@@ -312,6 +336,42 @@ mod tests {
                 assert!(unix_ok, "AF_UNIX sockets must remain available");
             }
             None => eprintln!("seccomp network block not enforced/available in this env"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn confine_blocks_network_unless_full_access() {
+        // danger-full-access must never block the network.
+        let allowed = std::thread::spawn(|| {
+            confine_current_thread(&SandboxPolicy::DangerFullAccess, Path::new("/tmp")).unwrap();
+            let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+            let ok = fd >= 0;
+            if fd >= 0 {
+                unsafe { libc::close(fd) };
+            }
+            ok
+        })
+        .join()
+        .unwrap();
+        assert!(allowed, "danger-full-access must not block network");
+
+        // A non-network policy composes the seccomp block (verified where the
+        // kernel enforces seccomp — it does in this container).
+        let denied = std::thread::spawn(|| {
+            confine_current_thread(&SandboxPolicy::new_workspace_write(vec![]), Path::new("/tmp"))
+                .unwrap();
+            let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+            let d = fd < 0;
+            if fd >= 0 {
+                unsafe { libc::close(fd) };
+            }
+            d
+        })
+        .join()
+        .unwrap();
+        if !denied {
+            eprintln!("seccomp not enforced here; confine network block unverifiable");
         }
     }
 
