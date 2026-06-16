@@ -770,6 +770,25 @@ struct MemoryRecentInput {
     /// Max results (default 50).
     #[serde(default)]
     limit: Option<u32>,
+    /// Optional tag filter — only memories carrying this tag.
+    #[serde(default)]
+    tag: Option<String>,
+}
+
+/// Input for `nexus_memory_tags`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryTagsInput {
+    /// Max tags to return (default 50).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// A list of tags with memory counts.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryTagsOutput {
+    /// Distinct tags as `{ key, count }` objects (or an `{ "error": … }`
+    /// object on failure), as returned by the memory store.
+    tags: serde_json::Value,
 }
 
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
@@ -949,7 +968,7 @@ impl NexusMcpServer {
         &self,
         Parameters(input): Parameters<MemoryRecentInput>,
     ) -> Json<MemoryListOutput> {
-        let args = serde_json::json!({ "limit": input.limit });
+        let args = serde_json::json!({ "limit": input.limit, "tag": input.tag });
         match self.memory_call::<serde_json::Value>("list", args).await {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
@@ -993,6 +1012,23 @@ impl NexusMcpServer {
             Ok(entities) => Json(MemoryEntitiesOutput { entities }),
             Err(e) => Json(MemoryEntitiesOutput {
                 entities: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_tags",
+        description = "List the distinct tags across memories, each with the number of memories carrying it (most-frequent first)"
+    )]
+    async fn memory_tags(
+        &self,
+        Parameters(input): Parameters<MemoryTagsInput>,
+    ) -> Json<MemoryTagsOutput> {
+        let args = serde_json::json!({ "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("tags", args).await {
+            Ok(tags) => Json(MemoryTagsOutput { tags }),
+            Err(e) => Json(MemoryTagsOutput {
+                tags: serde_json::json!({ "error": e }),
             }),
         }
     }
