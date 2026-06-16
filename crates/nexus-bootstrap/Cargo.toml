@@ -73,6 +73,7 @@ nexus-notifications = { path = "../nexus-notifications" }
 nexus-comments = { path = "../nexus-comments" }
 nexus-audio = { path = "../nexus-audio" }
 nexus-collab = { path = "../nexus-collab" }
+nexus-memory = { path = "../nexus-memory" }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

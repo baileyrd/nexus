@@ -55,6 +55,7 @@ const OWNERS: &[(&str, &str)] = &[
     ("nexus-linkpreview", "com.nexus.linkpreview"),
     ("nexus-lsp", "com.nexus.lsp"),
     ("nexus-mcp", "com.nexus.mcp.host"),
+    ("nexus-memory", "com.nexus.memory"),
     ("nexus-notifications", "com.nexus.notifications"),
     ("nexus-security", "com.nexus.security"),
     ("nexus-skills", "com.nexus.skills"),
