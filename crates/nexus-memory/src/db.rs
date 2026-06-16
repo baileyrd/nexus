@@ -221,6 +221,36 @@ impl MemoryDb {
         }
     }
 
+    /// Fetch a memory by id **and record the access** — bumps `access_count`
+    /// and sets `accessed_at` to now (the ACT-R vitality input). The bump is
+    /// best-effort: a read-only or contended database still returns the memory,
+    /// just without recording the access. Use [`get`](Self::get) for an
+    /// internal load that must not count as a recall (e.g. read-modify-write).
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure of the fetch itself.
+    pub fn get_recording_access(&self, id: Uuid) -> Result<Option<Memory>> {
+        let Some(mut m) = self.get(id)? else {
+            return Ok(None);
+        };
+        let now = Utc::now();
+        // A recall must not fail because the access bump can't be written.
+        if let Ok(conn) = self.pool.get() {
+            if conn
+                .execute(
+                    "UPDATE memories SET access_count = access_count + 1, accessed_at = ?2 \
+                     WHERE id = ?1",
+                    params![id.to_string(), now.to_rfc3339()],
+                )
+                .is_ok()
+            {
+                m.access_count += 1;
+                m.accessed_at = Some(now);
+            }
+        }
+        Ok(Some(m))
+    }
+
     /// List the most recently created memories, newest first.
     ///
     /// # Errors
@@ -754,6 +784,28 @@ mod tests {
         let dump = db.export_all().unwrap();
         let order: Vec<&str> = dump.iter().map(|m| m.content.as_str()).collect();
         assert_eq!(order, ["oldest", "middle", "newest"]);
+    }
+
+    #[test]
+    fn get_recording_access_bumps_count_while_plain_get_does_not() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        let m = Memory::new("recall me");
+        db.insert(&m).unwrap();
+
+        // Plain get never records an access.
+        assert_eq!(db.get(m.id).unwrap().unwrap().access_count, 0);
+        assert!(db.get(m.id).unwrap().unwrap().accessed_at.is_none());
+
+        // Recording get bumps the count and stamps accessed_at each call.
+        let first = db.get_recording_access(m.id).unwrap().unwrap();
+        assert_eq!(first.access_count, 1);
+        assert!(first.accessed_at.is_some());
+        assert_eq!(db.get_recording_access(m.id).unwrap().unwrap().access_count, 2);
+        // The bump is durable, not just reflected in the returned struct.
+        assert_eq!(db.get(m.id).unwrap().unwrap().access_count, 2);
+
+        // Missing id stays None (no panic, no write).
+        assert!(db.get_recording_access(Uuid::now_v7()).unwrap().is_none());
     }
 
     #[test]
