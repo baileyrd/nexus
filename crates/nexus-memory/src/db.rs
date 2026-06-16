@@ -16,7 +16,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Row};
 use uuid::Uuid;
 
-use crate::model::{Memory, MemoryStatus, MemoryType};
+use crate::model::{CategoryCount, Memory, MemoryStats, MemoryStatus, MemoryType};
 
 /// Schema applied on open. Idempotent via `IF NOT EXISTS`. The full
 /// `remind_me`-parity column set is created up front (columns are cheap); the
@@ -305,6 +305,42 @@ impl MemoryDb {
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
         Ok(u64::try_from(n).unwrap_or(0))
     }
+
+    /// Aggregate statistics: total count plus counts grouped by category,
+    /// memory type, and source (each most-frequent first).
+    ///
+    /// # Errors
+    /// Returns an error on a query failure.
+    pub fn stats(&self) -> Result<MemoryStats> {
+        let conn = self.pool.get()?;
+        let total: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
+        Ok(MemoryStats {
+            count: u64::try_from(total).unwrap_or(0),
+            by_category: grouped_count(&conn, "category")?,
+            by_memory_type: grouped_count(&conn, "memory_type")?,
+            by_source: grouped_count(&conn, "source")?,
+        })
+    }
+}
+
+/// Count rows grouped by a fixed column (`category` / `memory_type` /
+/// `source`), most-frequent first. `column` is an internal literal supplied by
+/// [`MemoryDb::stats`] — never user input — so interpolating it is safe.
+fn grouped_count(conn: &rusqlite::Connection, column: &str) -> Result<Vec<CategoryCount>> {
+    let sql = format!(
+        "SELECT {column} AS k, COUNT(*) AS c FROM memories GROUP BY {column} ORDER BY c DESC, k ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map([], |r| {
+            let count: i64 = r.get("c")?;
+            Ok(CategoryCount {
+                key: r.get("k")?,
+                count: u64::try_from(count).unwrap_or(0),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 fn clamp_limit(limit: usize) -> i64 {
