@@ -36,18 +36,27 @@ struct HubConfig {
     node_id: String,
 }
 
+/// Resolve hub config: explicit `args` first, then `NEXUS_MEMORY_*` env vars.
+/// Letting the secret come from the environment means callers (dashboard, MCP,
+/// a scheduler) can trigger `sync` without passing it in IPC args.
 fn parse_config(args: &Value) -> Result<HubConfig, String> {
-    let field = |k: &str| {
-        args.get(k)
+    let resolve = |arg_key: &str, env_key: &str| -> Option<String> {
+        args.get(arg_key)
             .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
             .map(str::to_string)
-            .ok_or_else(|| format!("sync: missing '{k}'"))
+            .or_else(|| std::env::var(env_key).ok())
+            .filter(|s| !s.trim().is_empty())
     };
+    let url = resolve("hub_url", "NEXUS_MEMORY_HUB_URL")
+        .ok_or_else(|| "sync: no hub_url (pass it or set NEXUS_MEMORY_HUB_URL)".to_string())?;
+    let secret = resolve("secret", "NEXUS_MEMORY_SYNC_SECRET")
+        .ok_or_else(|| "sync: no secret (pass it or set NEXUS_MEMORY_SYNC_SECRET)".to_string())?;
+    let node_id = resolve("node_id", "NEXUS_MEMORY_NODE_ID")
+        .ok_or_else(|| "sync: no node_id (pass it or set NEXUS_MEMORY_NODE_ID)".to_string())?;
     Ok(HubConfig {
-        url: field("hub_url")?.trim_end_matches('/').to_string(),
-        secret: field("secret")?,
-        node_id: field("node_id")?,
+        url: url.trim_end_matches('/').to_string(),
+        secret,
+        node_id,
     })
 }
 
@@ -183,14 +192,21 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn sync_requires_hub_config() {
+    async fn sync_reports_unreachable_hub() {
         let db = MemoryDb::open_in_memory().unwrap();
-        let err = sync(db, &json!({ "node_id": "a", "secret": "s" })).await.unwrap_err();
-        assert!(err.contains("missing 'hub_url'"), "got: {err}");
+        db.insert(&Memory::new("to push")).unwrap();
+        // Port 1 refuses fast — deterministic connection failure.
+        let err = sync(
+            db,
+            &json!({ "hub_url": "http://127.0.0.1:1", "secret": "s", "node_id": "n" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("sync push") || err.contains("sync pull"), "got: {err}");
     }
 
     #[test]
-    fn parse_config_trims_trailing_slash() {
+    fn parse_config_prefers_args_and_trims_trailing_slash() {
         let cfg = parse_config(&json!({
             "hub_url": "http://host:8765/",
             "secret": "s",
@@ -198,5 +214,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(cfg.url, "http://host:8765");
+        assert_eq!(cfg.secret, "s");
+        assert_eq!(cfg.node_id, "n");
     }
 }

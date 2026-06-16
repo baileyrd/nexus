@@ -40,7 +40,23 @@ new ones need no hub change. There is no node registry — any `node_id` with th
 shared secret is accepted. Conflict resolution is last-write-wins on the
 canonical ISO-8601-UTC `updated_at` string.
 
-The matching Nexus-side sync engine (outbox + push/pull loop) and deployment
-units (Containerfile / systemd) land in follow-up changes.
+## Client (a Nexus instance)
+
+Each Nexus instance syncs through its memory plugin's `sync` command
+(`com.nexus.memory::sync`, also surfaced as **Memory: Sync Now** in the shell
+and the `nexus_memory_sync` MCP tool). Config resolves from the call's args, or
+these environment variables on the Nexus process:
+
+| Env var | Meaning |
+|---------|---------|
+| `NEXUS_MEMORY_HUB_URL` | hub base URL, e.g. `http://127.0.0.1:8765` |
+| `NEXUS_MEMORY_SYNC_SECRET` | the shared `SYNC_SECRET` |
+| `NEXUS_MEMORY_NODE_ID` | this instance's stable node id |
+
+Each sync runs one push (local memories newer than a keyset cursor, authored
+here) + one pull (everyone else's, last-write-wins), resuming from cursors kept
+in the forge's `memory.db`.
+
+Deployment units (Containerfile / systemd) land in a follow-up change.
 
 [`remind_me`]: https://github.com/baileyrd/remind_me

@@ -824,6 +824,28 @@ struct MemoryVectorSyncOutput {
     result: serde_json::Value,
 }
 
+/// Input for `nexus_memory_sync` — push/pull with a memory hub. All fields are
+/// optional; omitted ones fall back to the `NEXUS_MEMORY_*` environment vars.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemorySyncInput {
+    /// Hub base URL (else `NEXUS_MEMORY_HUB_URL`).
+    #[serde(default)]
+    hub_url: Option<String>,
+    /// Shared bearer secret (else `NEXUS_MEMORY_SYNC_SECRET`).
+    #[serde(default)]
+    secret: Option<String>,
+    /// This node's id (else `NEXUS_MEMORY_NODE_ID`).
+    #[serde(default)]
+    node_id: Option<String>,
+}
+
+/// Result of `nexus_memory_sync`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemorySyncOutput {
+    /// The engine's reply (`{ "pushed": n, "pulled": n }`, or `{ "error": … }`).
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MemoryFactsInput {
@@ -1112,6 +1134,27 @@ impl NexusMcpServer {
         match self.memory_call::<serde_json::Value>("vector_sync", args).await {
             Ok(result) => Json(MemoryVectorSyncOutput { result }),
             Err(e) => Json(MemoryVectorSyncOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_sync",
+        description = "Sync the memory store with a central memory hub (push local + pull remote, last-write-wins). Hub URL/secret/node default to NEXUS_MEMORY_* env vars"
+    )]
+    async fn memory_sync(
+        &self,
+        Parameters(input): Parameters<MemorySyncInput>,
+    ) -> Json<MemorySyncOutput> {
+        let args = serde_json::json!({
+            "hub_url": input.hub_url,
+            "secret": input.secret,
+            "node_id": input.node_id,
+        });
+        match self.memory_call::<serde_json::Value>("sync", args).await {
+            Ok(result) => Json(MemorySyncOutput { result }),
+            Err(e) => Json(MemorySyncOutput {
                 result: serde_json::json!({ "error": e }),
             }),
         }

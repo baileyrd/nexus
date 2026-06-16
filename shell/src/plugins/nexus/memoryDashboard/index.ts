@@ -21,6 +21,7 @@ const CMD_FACTS = 'nexus.memory.facts'
 const CMD_ENTITIES = 'nexus.memory.entities'
 const CMD_TAGS = 'nexus.memory.tags'
 const CMD_VITALITY = 'nexus.memory.vitality'
+const CMD_SYNC = 'nexus.memory.sync'
 const CMD_STATS = 'nexus.memory.stats'
 
 const LIST_LIMIT = 30
@@ -165,6 +166,7 @@ export const memoryDashboardPlugin: Plugin = {
         { id: CMD_ENTITIES, title: 'Memory: Entities', category: 'Memory' },
         { id: CMD_TAGS, title: 'Memory: Tags', category: 'Memory' },
         { id: CMD_VITALITY, title: 'Memory: Vitality', category: 'Memory' },
+        { id: CMD_SYNC, title: 'Memory: Sync Now', category: 'Memory' },
         { id: CMD_STATS, title: 'Memory: Stats', category: 'Memory' },
       ],
     },
@@ -308,6 +310,23 @@ export const memoryDashboardPlugin: Plugin = {
           return [] as unknown
         })
       await presentMemories(api, decodeMemories(raw), 'No active memories yet.')
+    })
+
+    api.commands.register(CMD_SYNC, async () => {
+      api.notifications.show({ message: 'Syncing memory with hub…', type: 'info' })
+      const res = await api.kernel
+        .invoke<{ pushed?: number; pulled?: number }>(MEMORY_PLUGIN, 'sync', {})
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Memory sync failed: ${String(e)}`, type: 'error' })
+          return null
+        })
+      if (res === null) return
+      const pushed = typeof res.pushed === 'number' ? res.pushed : 0
+      const pulled = typeof res.pulled === 'number' ? res.pulled : 0
+      api.notifications.show({
+        message: `Memory synced — pushed ${pushed}, pulled ${pulled}.`,
+        type: 'info',
+      })
     })
 
     api.commands.register(CMD_STATS, async () => {
