@@ -237,6 +237,49 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// List memories filtered by optional `category` / `memory_type` / `status`,
+    /// newest first. Filters are bound parameters (`None` means "any"); the
+    /// column names are fixed literals, so the dynamic `WHERE` is injection-safe.
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure.
+    pub fn list_filtered(
+        &self,
+        category: Option<&str>,
+        memory_type: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
+        let mut conds: Vec<String> = Vec::new();
+        let mut vals: Vec<String> = Vec::new();
+        for (col, val) in [
+            ("m.category", category),
+            ("m.memory_type", memory_type),
+            ("m.status", status),
+        ] {
+            if let Some(v) = val {
+                vals.push(v.to_string());
+                conds.push(format!("{col} = ?{}", vals.len()));
+            }
+        }
+        let where_clause = if conds.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conds.join(" AND "))
+        };
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m {where_clause} ORDER BY m.created_at DESC LIMIT {}",
+            clamp_limit(limit)
+        ))?;
+        let out = stmt
+            .query_map(rusqlite::params_from_iter(vals.iter()), |row| {
+                row_to_memory(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(out)
+    }
+
     /// Full-text search over content/category/tags, best matches first.
     ///
     /// # Errors
@@ -472,6 +515,26 @@ mod tests {
         let all = db.list(10).unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].content, "second");
+    }
+
+    #[test]
+    fn list_filtered_applies_filters() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        db.insert(&Memory::new("ops semantic").with_category("ops").with_type(MemoryType::Semantic))
+            .unwrap();
+        db.insert(&Memory::new("ops episodic").with_category("ops").with_type(MemoryType::Episodic))
+            .unwrap();
+        db.insert(&Memory::new("prefs semantic").with_category("prefs").with_type(MemoryType::Semantic))
+            .unwrap();
+
+        assert_eq!(db.list_filtered(None, None, None, 10).unwrap().len(), 3);
+        assert_eq!(db.list_filtered(Some("ops"), None, None, 10).unwrap().len(), 2);
+        assert_eq!(db.list_filtered(None, Some("semantic"), None, 10).unwrap().len(), 2);
+        let combined = db.list_filtered(Some("ops"), Some("semantic"), None, 10).unwrap();
+        assert_eq!(combined.len(), 1);
+        assert_eq!(combined[0].content, "ops semantic");
+        assert_eq!(db.list_filtered(None, None, Some("active"), 10).unwrap().len(), 3);
+        assert_eq!(db.list_filtered(None, None, Some("archived"), 10).unwrap().len(), 0);
     }
 
     #[test]
