@@ -18,5 +18,7 @@ pub mod obsidian_base;
 pub mod path_validator;
 pub mod paths;
 pub mod plugin_ids;
+pub mod sandbox;
 
 pub use path_validator::{ForgePathValidator, PathValidationError};
+pub use sandbox::{SandboxPolicy, WritableRoot};
