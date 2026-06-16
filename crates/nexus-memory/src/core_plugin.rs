@@ -326,7 +326,9 @@ impl MemoryCorePlugin {
 
     fn get(&self, args: &Value) -> Result<Value, PluginError> {
         let a: IdArgs = parse_args(args, "get")?;
-        match self.db.get(parse_id(&a.id)?).map_err(db_err)? {
+        // A `get` by id is a deliberate recall, so it records the access
+        // (bumps access_count / accessed_at) — the ACT-R vitality input.
+        match self.db.get_recording_access(parse_id(&a.id)?).map_err(db_err)? {
             Some(m) => to_value(&m, "get"),
             None => Err(exec_err(format!("no memory with id '{}'", a.id))),
         }
@@ -522,6 +524,22 @@ mod tests {
         assert_eq!(got["content"], "new");
         assert_eq!(got["status"], "archived");
         assert_eq!(got["category"], "a"); // untouched
+    }
+
+    #[test]
+    fn get_records_access_each_call() {
+        let mut p = plugin();
+        let id = p
+            .dispatch(HANDLER_ADD, &json!({ "content": "remember this" }))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let first = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
+        assert_eq!(first["access_count"], 1);
+        assert!(first["accessed_at"].is_string());
+        let second = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
+        assert_eq!(second["access_count"], 2);
     }
 
     #[test]
