@@ -19,7 +19,9 @@
 //! and by higher-layer edit tooling). Filesystem confinement — "write only
 //! under the workspace roots" — is enforced.
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use nexus_types::SandboxPolicy;
 
@@ -68,6 +70,9 @@ pub enum SandboxError {
     /// must decide whether to proceed or refuse the spawn.
     #[error("seccomp network filter error: {0}")]
     Seccomp(String),
+    /// The policy could not be serialized for the `nexus-sandbox` helper.
+    #[error("sandbox policy encode error: {0}")]
+    Encode(String),
 }
 
 /// Apply `policy` (resolved against working directory `cwd`) to the **current
@@ -152,6 +157,42 @@ pub fn confine_current_thread(
         block_inet_sockets()?;
     }
     Ok(filesystem)
+}
+
+/// Best-effort path to the `nexus-sandbox` helper: the binary named
+/// `nexus-sandbox` alongside the current executable. Callers that ship the
+/// helper elsewhere should pass an explicit path to [`sandbox_command`].
+#[must_use]
+pub fn default_helper_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.with_file_name("nexus-sandbox"))
+}
+
+/// Build a [`Command`] that runs `program` (with `args`) confined by `policy`,
+/// by way of the `nexus-sandbox` helper at `helper`. The helper applies the
+/// policy to *itself* — single-threaded — and `exec`s the target, avoiding the
+/// after-`fork()` allocation hazard a `pre_exec` hook would have in this
+/// (potentially multithreaded) process. See the module docs.
+///
+/// # Errors
+/// Returns [`SandboxError::Encode`] if the policy cannot be serialized.
+pub fn sandbox_command<P, A>(
+    helper: &Path,
+    policy: &SandboxPolicy,
+    cwd: &Path,
+    program: P,
+    args: A,
+) -> Result<Command, SandboxError>
+where
+    P: AsRef<OsStr>,
+    A: IntoIterator,
+    A::Item: AsRef<OsStr>,
+{
+    let policy_json =
+        serde_json::to_string(policy).map_err(|e| SandboxError::Encode(e.to_string()))?;
+    let mut cmd = Command::new(helper);
+    cmd.arg(policy_json).arg(cwd).arg("--").arg(program).args(args);
+    Ok(cmd)
 }
 
 #[cfg(target_os = "linux")]
@@ -287,6 +328,29 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_command_builds_helper_invocation() {
+        let policy = SandboxPolicy::new_workspace_write(vec![]);
+        let cmd = sandbox_command(
+            Path::new("/opt/nexus-sandbox"),
+            &policy,
+            Path::new("/work"),
+            "echo",
+            ["hi", "there"],
+        )
+        .unwrap();
+        assert_eq!(cmd.get_program(), OsStr::new("/opt/nexus-sandbox"));
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        // [policy-json, cwd, "--", program, args…]
+        assert_eq!(args.len(), 6);
+        assert!(args[0].to_str().unwrap().contains("workspace-write"));
+        assert_eq!(args[1], OsStr::new("/work"));
+        assert_eq!(args[2], OsStr::new("--"));
+        assert_eq!(args[3], OsStr::new("echo"));
+        assert_eq!(args[4], OsStr::new("hi"));
+        assert_eq!(args[5], OsStr::new("there"));
+    }
 
     #[test]
     fn unrestricted_policy_is_skipped() {

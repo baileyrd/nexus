@@ -39,5 +39,12 @@ landlock = { workspace = true }
 seccompiler = { workspace = true }
 libc = { workspace = true }
 
+# The OS-sandbox helper: a single-threaded sidecar that applies a SandboxPolicy
+# to itself and execs the target command, avoiding the after-fork allocation
+# hazard of a pre_exec hook. See crates/nexus-security/src/bin/nexus-sandbox.rs.
+[[bin]]
+name = "nexus-sandbox"
+path = "src/bin/nexus-sandbox.rs"
+
 [dev-dependencies]
 tempfile = { workspace = true }

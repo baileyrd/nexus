@@ -37,11 +37,19 @@ The model is platform-agnostic; the per-OS enforcement lives in [`nexus-security
 
 Both Linux restrictions are **irreversible for the calling thread**, so apply them on the thread that will do the untrusted work (or `exec` the untrusted child). `confine_current_thread(policy, cwd)` composes both per policy — filesystem via `apply_to_current_thread`, then `block_inet_sockets` unless the policy grants network — and is the entry point a sandboxed worker applies to itself.
 
-### Wiring into the spawn path — *(next, with care)*
+### Confining a spawned child — `nexus-sandbox` helper
 
-Confining a *spawned child* (terminal command, agent tool) is the goal, but it carries a real hazard: applying landlock/seccomp from a `std::process::Command::pre_exec` hook runs **after `fork()` in a multithreaded parent**, where heap allocation is not async-signal-safe (another thread may hold the allocator lock at the moment of `fork`). The ruleset/BPF construction allocates. Two safe shapes:
+Confining a *spawned child* (terminal command, agent tool) carries a real hazard: applying landlock/seccomp from a `std::process::Command::pre_exec` hook runs **after `fork()` in a multithreaded parent**, where heap allocation is not async-signal-safe (another thread may hold the allocator lock at the moment of `fork`), and the ruleset/BPF construction allocates.
 
-1. **Build-in-parent, apply-in-child** — construct the landlock `RulesetCreated` and the seccomp `BpfProgram` *before* fork, move them into the `pre_exec` closure, and call only the (allocation-free) `restrict_self` / `apply_filter` syscalls in the child.
-2. **Helper binary** (Codex's approach) — `exec` a small single-threaded `nexus-sandbox` helper that applies the policy to itself and then `exec`s the real argv. No fork-alloc hazard at all.
+Nexus takes Codex's **helper-binary** approach, which sidesteps the hazard entirely: [`nexus-sandbox`](../../crates/nexus-security/src/bin/nexus-sandbox.rs) is a single-threaded sidecar that `confine_current_thread`s *itself* and then `exec`s the real argv (the Landlock domain + seccomp filter survive `execve`). Build the invocation with [`sandbox_command`](../../crates/nexus-security/src/os_sandbox.rs):
 
-`portable-pty` (the terminal backend) does not expose `pre_exec`, so the helper-binary shape is the likely path there. **Permissioned downloads** — explicit, approved network egress under an otherwise network-off policy — layer on once a spawn path is confined.
+```rust
+use nexus_security::{sandbox_command, default_helper_path};
+let helper = default_helper_path().expect("nexus-sandbox alongside the exe");
+let mut cmd = sandbox_command(&helper, &policy, cwd, "rustc", ["--version"])?;
+let status = cmd.status()?; // runs `rustc --version` confined by `policy`
+```
+
+`sandbox_command(helper, policy, cwd, program, args)` returns a `std::process::Command` that runs `nexus-sandbox <policy-json> <cwd> -- <program> [args…]`. `default_helper_path()` locates the helper next to the current executable. This also works where `pre_exec` is unavailable — notably `portable-pty` (the terminal backend).
+
+What remains: have the real spawn paths (`nexus-terminal`, agent tool exec) route through `sandbox_command`, plus **permissioned downloads** — explicit, approved network egress under an otherwise network-off policy.
