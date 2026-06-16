@@ -41,7 +41,7 @@ use crate::handlers::index::{
 };
 use crate::handlers::predict::handle_predict;
 use crate::handlers::propose::handle_propose_tool_calls;
-use crate::handlers::search::{handle_entity_recall, handle_semantic_search};
+use crate::handlers::search::{handle_embed_text, handle_entity_recall, handle_semantic_search};
 use crate::handlers::session::{
     handle_session_delete, handle_session_list, handle_session_load, handle_session_save,
 };
@@ -230,6 +230,11 @@ pub const HANDLER_INFER_ENTITY_RELATIONS: u32 = 25;
 /// back to a chat-shaped FIM prompt for OpenAI / Anthropic.
 pub const HANDLER_PREDICT: u32 = 26;
 
+/// `embed_text` — embed one or more strings with the configured embedding
+/// provider and return the dense vectors. Lets other plugins (e.g. the memory
+/// engine) reuse the one embedding path rather than carrying their own model.
+pub const HANDLER_EMBED_TEXT: u32 = 27;
+
 /// Plugin ids this plugin requires already loaded. `ai-runtime` is
 /// hard — `wire_context` grabs the shared tokio worker-pool handle
 /// the runtime publishes. `storage` underwrites every RAG / vector
@@ -271,6 +276,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("entity_recall", HANDLER_ENTITY_RECALL),
     ("enrich_entity", HANDLER_ENRICH_ENTITY),
     ("infer_entity_relations", HANDLER_INFER_ENTITY_RELATIONS),
+    ("embed_text", HANDLER_EMBED_TEXT),
 ];
 
 /// Core plugin for AI integration.
@@ -513,6 +519,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
                 HANDLER_SEMANTIC_SEARCH => handle_semantic_search(&ctx, embed_cfg, &args).await,
+                HANDLER_EMBED_TEXT => handle_embed_text(embed_cfg, &args).await,
                 HANDLER_ENRICH_FILE => handle_enrich_file(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_ENRICH_APPLY => handle_enrich_apply(&ctx, &args).await,
                 HANDLER_PROPOSE_TOOL_CALLS => {
@@ -1428,6 +1435,49 @@ mod semantic_search_dispatch_tests {
             msg.contains("no AI embedding provider configured"),
             "expected embed-cfg error, got: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn embed_text_handler_requires_embed_provider() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_EMBED_TEXT, &serde_json::json!({ "text": "hello" }))
+            .expect("HANDLER_EMBED_TEXT must be async");
+        let err = fut.await.expect_err("no embed cfg should error");
+        assert!(
+            format!("{err}").contains("no AI embedding provider configured"),
+            "expected embed-cfg error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_text_handler_rejects_missing_input() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_EMBED_TEXT, &serde_json::json!({}))
+            .expect("HANDLER_EMBED_TEXT must be async");
+        let err = fut.await.expect_err("missing texts/text should error");
+        assert!(
+            format!("{err}").contains("missing 'texts'"),
+            "expected missing-input error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_text_handler_empty_texts_returns_empty_without_provider() {
+        // Empty input short-circuits before the provider is needed.
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_EMBED_TEXT, &serde_json::json!({ "texts": [] }))
+            .expect("HANDLER_EMBED_TEXT must be async");
+        let value = fut.await.expect("empty input must succeed");
+        assert_eq!(value.get("embeddings"), Some(&serde_json::json!([])));
+        assert_eq!(value.get("dimension"), Some(&serde_json::json!(0)));
+    }
+
+    #[test]
+    fn embed_text_handler_id_is_twentyseven() {
+        assert_eq!(HANDLER_EMBED_TEXT, 27);
     }
 
     #[tokio::test]
