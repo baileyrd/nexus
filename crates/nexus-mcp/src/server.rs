@@ -42,6 +42,9 @@ const GIT_PLUGIN: &str = plugin_ids::GIT;
 /// security plugin's `metrics_snapshot` handler is the canonical
 /// IPC surface for the global metrics registry. Read-only.
 const SECURITY_PLUGIN: &str = plugin_ids::SECURITY;
+/// Memory engine — the `nexus_memory_*` tools call its `search`/`add`/`list`
+/// IPC handlers. No centralized `plugin_ids` const yet, so the id is inline.
+const MEMORY_PLUGIN: &str = "com.nexus.memory";
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
 /// Override via a future `[mcp.timeouts] ipc_secs = N` block
@@ -707,9 +710,71 @@ impl NexusMcpServer {
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
     }
+
+    /// `com.nexus.memory` IPC client for the `nexus_memory_*` tools.
+    async fn memory_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(MEMORY_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
 }
 
 // ── Tool implementations ─────────────────────────────────────────────────────
+
+/// Input for `nexus_memory_search`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemorySearchInput {
+    /// Full-text query over captured/stored memories.
+    query: String,
+    /// Max results (default 20).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Input for `nexus_memory_add`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryAddInput {
+    /// The memory text to store.
+    content: String,
+    /// Optional category (default `general`).
+    #[serde(default)]
+    category: Option<String>,
+    /// Optional tags.
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    /// Optional cognitive type: `episodic` | `semantic` | `procedural` | `unclassified`.
+    #[serde(default)]
+    memory_type: Option<String>,
+}
+
+/// Input for `nexus_memory_recent`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryRecentInput {
+    /// Max results (default 50).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// A list of memories (raw store objects).
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryListOutput {
+    /// Matching memories as returned by the memory store.
+    memories: serde_json::Value,
+}
+
+/// A single stored memory.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MemoryItemOutput {
+    /// The stored memory object (or an `{ "error": … }` object on failure).
+    memory: serde_json::Value,
+}
 
 #[tool_router]
 impl NexusMcpServer {
@@ -788,6 +853,62 @@ impl NexusMcpServer {
                 tracing::error!("delete_note failed for {}: {e}", input.path);
                 Json(DeleteNoteOutput { deleted: false })
             }
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_search",
+        description = "Full-text search the persistent cross-model memory store"
+    )]
+    async fn memory_search(
+        &self,
+        Parameters(input): Parameters<MemorySearchInput>,
+    ) -> Json<MemoryListOutput> {
+        let args = serde_json::json!({ "query": input.query, "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("search", args).await {
+            Ok(memories) => Json(MemoryListOutput { memories }),
+            Err(e) => Json(MemoryListOutput {
+                memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_add",
+        description = "Store a new memory in the persistent cross-model memory store"
+    )]
+    async fn memory_add(
+        &self,
+        Parameters(input): Parameters<MemoryAddInput>,
+    ) -> Json<MemoryItemOutput> {
+        let args = serde_json::json!({
+            "content": input.content,
+            "category": input.category,
+            "tags": input.tags.unwrap_or_default(),
+            "memory_type": input.memory_type,
+        });
+        match self.memory_call::<serde_json::Value>("add", args).await {
+            Ok(memory) => Json(MemoryItemOutput { memory }),
+            Err(e) => Json(MemoryItemOutput {
+                memory: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_recent",
+        description = "List the most recent memories, newest first"
+    )]
+    async fn memory_recent(
+        &self,
+        Parameters(input): Parameters<MemoryRecentInput>,
+    ) -> Json<MemoryListOutput> {
+        let args = serde_json::json!({ "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("list", args).await {
+            Ok(memories) => Json(MemoryListOutput { memories }),
+            Err(e) => Json(MemoryListOutput {
+                memories: serde_json::json!({ "error": e }),
+            }),
         }
     }
 
