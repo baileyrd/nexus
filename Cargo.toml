@@ -38,6 +38,7 @@ members = [
     "crates/nexus-audio",
     "crates/nexus-collab",
     "crates/nexus-memory",
+    "crates/nexus-memory-hub",
     "crates/nexus-context",
     "crates/nexus-protocol",
 ]
@@ -190,6 +191,9 @@ petgraph = "0.7"
 
 # HTTP client (AI provider calls)
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2"] }
+
+# HTTP server — used only by the standalone `nexus-memory-hub` sync server.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 
 # SMTP client (BL-133 follow-up: email notification transport).
 # `rustls-tls` keeps the TLS stack aligned with reqwest's rustls + ring
