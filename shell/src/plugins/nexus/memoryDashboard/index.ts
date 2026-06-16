@@ -22,6 +22,8 @@ const CMD_ENTITIES = 'nexus.memory.entities'
 const CMD_TAGS = 'nexus.memory.tags'
 const CMD_VITALITY = 'nexus.memory.vitality'
 const CMD_SYNC = 'nexus.memory.sync'
+const CMD_WIKI_COMPILE = 'nexus.memory.wikiCompile'
+const CMD_WIKI_PAGES = 'nexus.memory.wikiPages'
 const CMD_STATS = 'nexus.memory.stats'
 
 const LIST_LIMIT = 30
@@ -167,6 +169,8 @@ export const memoryDashboardPlugin: Plugin = {
         { id: CMD_TAGS, title: 'Memory: Tags', category: 'Memory' },
         { id: CMD_VITALITY, title: 'Memory: Vitality', category: 'Memory' },
         { id: CMD_SYNC, title: 'Memory: Sync Now', category: 'Memory' },
+        { id: CMD_WIKI_COMPILE, title: 'Memory: Compile Wiki Page', category: 'Memory' },
+        { id: CMD_WIKI_PAGES, title: 'Memory: Wiki Pages', category: 'Memory' },
         { id: CMD_STATS, title: 'Memory: Stats', category: 'Memory' },
       ],
     },
@@ -326,6 +330,55 @@ export const memoryDashboardPlugin: Plugin = {
       api.notifications.show({
         message: `Memory synced — pushed ${pushed}, pulled ${pulled}.`,
         type: 'info',
+      })
+    })
+
+    api.commands.register(CMD_WIKI_COMPILE, async () => {
+      const topic = await api.input.prompt('Compile wiki page', 'Topic to synthesize from memories')
+      if (topic === null) return
+      const trimmed = topic.trim()
+      if (!trimmed) return
+      api.notifications.show({ message: `Synthesizing wiki page for "${trimmed}"…`, type: 'info' })
+      type WikiCompileResult = { path?: string; sources?: number; error?: string }
+      const res: WikiCompileResult = await api.kernel
+        .invoke<WikiCompileResult>(MEMORY_PLUGIN, 'wiki_compile', { topic: trimmed })
+        .catch((e: unknown): WikiCompileResult => ({ error: String(e) }))
+      if (res.error) {
+        api.notifications.show({ message: `Wiki compile failed: ${res.error}`, type: 'error' })
+        return
+      }
+      api.notifications.show({
+        message: `Wrote ${res.path ?? 'wiki page'} from ${res.sources ?? 0} memories.`,
+        type: 'info',
+      })
+    })
+
+    api.commands.register(CMD_WIKI_PAGES, async () => {
+      const raw = await api.kernel
+        .invoke<{ pages?: { slug?: string; path?: string }[] }>(MEMORY_PLUGIN, 'wiki_list', {})
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Wiki list failed: ${String(e)}`, type: 'error' })
+          return { pages: [] }
+        })
+      const pages = Array.isArray(raw.pages) ? raw.pages : []
+      const slugs = pages.map((p) => p.slug).filter((s): s is string => typeof s === 'string')
+      if (slugs.length === 0) {
+        api.notifications.show({ message: 'No wiki pages yet — compile one first.', type: 'info' })
+        return
+      }
+      const items: PickItem<string>[] = slugs.map((slug) => ({ label: slug, value: slug }))
+      const picked = await api.input.pick(items, {
+        title: `Wiki (${slugs.length})`,
+        placeholder: 'Select a page to read',
+      })
+      if (!picked) return
+      const page = await api.kernel
+        .invoke<{ content?: string }>(MEMORY_PLUGIN, 'wiki_read', { topic: picked })
+        .catch(() => ({ content: undefined }))
+      api.notifications.show({
+        message: page.content ? excerpt(page.content, 400) : `(empty page "${picked}")`,
+        type: 'info',
+        duration: 12000,
       })
     })
 
