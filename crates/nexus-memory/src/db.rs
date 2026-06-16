@@ -321,6 +321,22 @@ impl MemoryDb {
         Ok(out)
     }
 
+    /// Export every stored memory as a full record, **oldest first** — the
+    /// stable order suitable for a reproducible dump that can be fed back
+    /// through an importer (round-trips the `remind_me`-parity schema).
+    ///
+    /// # Errors
+    /// Returns an error on a query or decode failure.
+    pub fn export_all(&self) -> Result<Vec<Memory>> {
+        let conn = self.pool.get()?;
+        let mut stmt =
+            conn.prepare(&format!("SELECT {COLS} FROM memories m ORDER BY m.created_at ASC, m.id ASC"))?;
+        let out = stmt
+            .query_map([], |row| row_to_memory(row).map_err(|e| into_rusqlite(&e)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(out)
+    }
+
     /// Distinct entities mentioned by SPO facts — every non-null `subject` and
     /// `object` — with the number of facts that mention each, most-frequent
     /// first (ties broken alphabetically). The `key` of each [`CategoryCount`]
@@ -661,6 +677,20 @@ mod tests {
         assert!(ents[1..].iter().all(|e| e.count == 1));
         // limit is honoured.
         assert_eq!(db.list_entities(2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn export_all_returns_every_row_oldest_first() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        // Insert with explicit, out-of-order timestamps to pin the ordering.
+        for (content, secs) in [("middle", 200), ("oldest", 100), ("newest", 300)] {
+            let mut m = Memory::new(content);
+            m.created_at = DateTime::from_timestamp(secs, 0).unwrap();
+            db.insert(&m).unwrap();
+        }
+        let dump = db.export_all().unwrap();
+        let order: Vec<&str> = dump.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(order, ["oldest", "middle", "newest"]);
     }
 
     #[test]

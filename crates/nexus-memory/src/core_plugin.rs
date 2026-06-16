@@ -17,6 +17,7 @@
 //! | 7  | `stats`  | `{}`                          | Store statistics (count)         |
 //! | 8  | `facts`  | `{ subject?, predicate?, … }` | Recall SPO entity facts          |
 //! | 9  | `entities` | `{ limit? }`                | Distinct entities + fact counts  |
+//! | 10 | `export` | `{}`                          | Dump every memory, oldest first  |
 //!
 //! Ids are append-only. Hybrid vector recall and the remaining `remind_me` parity
 //! commands (capture/wiki/lifecycle) land in later phases.
@@ -57,6 +58,8 @@ pub const HANDLER_STATS: u32 = 7;
 pub const HANDLER_FACTS: u32 = 8;
 /// `entities` handler id.
 pub const HANDLER_ENTITIES: u32 = 9;
+/// `export` handler id.
+pub const HANDLER_EXPORT: u32 = 10;
 
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
@@ -70,6 +73,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("stats", HANDLER_STATS),
     ("facts", HANDLER_FACTS),
     ("entities", HANDLER_ENTITIES),
+    ("export", HANDLER_EXPORT),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -395,6 +399,10 @@ impl MemoryCorePlugin {
             .map_err(db_err)?;
         to_value(&ents, "entities")
     }
+
+    fn export(&self) -> Result<Value, PluginError> {
+        to_value(&self.db.export_all().map_err(db_err)?, "export")
+    }
 }
 
 impl CorePlugin for MemoryCorePlugin {
@@ -409,6 +417,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_STATS => self.stats(),
             HANDLER_FACTS => self.facts(args),
             HANDLER_ENTITIES => self.entities(args),
+            HANDLER_EXPORT => self.export(),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -594,6 +603,18 @@ mod tests {
         assert_eq!(arr.len(), 3);
         assert_eq!(arr[0]["key"], "ada");
         assert_eq!(arr[0]["count"], 2);
+    }
+
+    #[test]
+    fn export_returns_all_memories() {
+        let mut p = plugin();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "one" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "two" })).unwrap();
+        let dump = p.dispatch(HANDLER_EXPORT, &json!({})).unwrap();
+        let arr = dump.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        // Full records: ids and content present, ready for re-import.
+        assert!(arr.iter().all(|m| m["id"].is_string() && m["content"].is_string()));
     }
 
     #[test]
