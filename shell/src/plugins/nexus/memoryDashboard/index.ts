@@ -34,10 +34,18 @@ interface MemoryRow {
   object?: string
 }
 
-/** One `{ key, count }` bucket from `stats`/`entities`. */
+/** One `{ key, count }` bucket from `stats`/`entities`/`tags`. */
 interface CountRow {
   key: string
   count: number
+}
+
+/** Aggregate statistics from the `stats` handler. */
+interface MemoryStats {
+  count: number
+  by_category: CountRow[]
+  by_memory_type: CountRow[]
+  by_source: CountRow[]
 }
 
 /** Coerce a `search`/`list`/`facts` response (a JSON array of memory objects). */
@@ -60,7 +68,7 @@ function decodeMemories(raw: unknown): MemoryRow[] {
   return out
 }
 
-/** Coerce an `entities` response (a JSON array of `{ key, count }`). */
+/** Coerce an `entities`/`tags` response (a JSON array of `{ key, count }`). */
 function decodeCounts(raw: unknown): CountRow[] {
   if (!Array.isArray(raw)) return []
   const out: CountRow[] = []
@@ -71,6 +79,25 @@ function decodeCounts(raw: unknown): CountRow[] {
     out.push({ key: r.key, count: typeof r.count === 'number' ? r.count : 0 })
   }
   return out
+}
+
+/** Coerce a `stats` response into a [`MemoryStats`]. */
+function decodeStats(raw: unknown): MemoryStats {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return {
+    count: typeof r.count === 'number' ? r.count : 0,
+    by_category: decodeCounts(r.by_category),
+    by_memory_type: decodeCounts(r.by_memory_type),
+    by_source: decodeCounts(r.by_source),
+  }
+}
+
+/** Render up to `n` `{key, count}` buckets as `key (count)` for a summary line. */
+function topBuckets(rows: CountRow[], n = 3): string {
+  return rows
+    .slice(0, n)
+    .map((r) => `${r.key} (${r.count})`)
+    .join(', ')
 }
 
 /** Single-line excerpt of `s`, collapsed and clipped to `n` chars. */
@@ -253,11 +280,21 @@ export const memoryDashboardPlugin: Plugin = {
     })
 
     api.commands.register(CMD_STATS, async () => {
-      const stats = await api.kernel
-        .invoke<{ count?: number }>(MEMORY_PLUGIN, 'stats', {})
-        .catch(() => ({}) as { count?: number })
-      const count = typeof stats.count === 'number' ? stats.count : 0
-      api.notifications.show({ message: `${count} memories stored.`, type: 'info' })
+      const raw = await api.kernel
+        .invoke<unknown>(MEMORY_PLUGIN, 'stats', {})
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Memory stats failed: ${String(e)}`, type: 'error' })
+          return null
+        })
+      if (raw === null) return
+      const stats = decodeStats(raw)
+      const lines = [
+        `${stats.count} memories stored.`,
+        topBuckets(stats.by_category) ? `Categories: ${topBuckets(stats.by_category)}` : '',
+        topBuckets(stats.by_memory_type) ? `Types: ${topBuckets(stats.by_memory_type)}` : '',
+        topBuckets(stats.by_source) ? `Sources: ${topBuckets(stats.by_source)}` : '',
+      ].filter(Boolean)
+      api.notifications.show({ message: lines.join('\n'), type: 'info', duration: 8000 })
     })
   },
 }
