@@ -791,6 +791,14 @@ struct MemoryTagsOutput {
     tags: serde_json::Value,
 }
 
+/// Input for `nexus_memory_vitality` — most-vital memories first.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MemoryVitalityInput {
+    /// Max results (default 50).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MemoryFactsInput {
@@ -1029,6 +1037,23 @@ impl NexusMcpServer {
             Ok(tags) => Json(MemoryTagsOutput { tags }),
             Err(e) => Json(MemoryTagsOutput {
                 tags: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_vitality",
+        description = "List active memories ranked by vitality (frequency + recency of recall) — the ones most likely to matter right now"
+    )]
+    async fn memory_vitality(
+        &self,
+        Parameters(input): Parameters<MemoryVitalityInput>,
+    ) -> Json<MemoryListOutput> {
+        let args = serde_json::json!({ "limit": input.limit });
+        match self.memory_call::<serde_json::Value>("vitality_report", args).await {
+            Ok(memories) => Json(MemoryListOutput { memories }),
+            Err(e) => Json(MemoryListOutput {
+                memories: serde_json::json!({ "error": e }),
             }),
         }
     }

@@ -18,6 +18,7 @@ const CMD_RECENT = 'nexus.memory.recent'
 const CMD_FACTS = 'nexus.memory.facts'
 const CMD_ENTITIES = 'nexus.memory.entities'
 const CMD_TAGS = 'nexus.memory.tags'
+const CMD_VITALITY = 'nexus.memory.vitality'
 const CMD_STATS = 'nexus.memory.stats'
 
 const LIST_LIMIT = 30
@@ -132,6 +133,7 @@ export const memoryDashboardPlugin: Plugin = {
         { id: CMD_FACTS, title: 'Memory: Facts', category: 'Memory' },
         { id: CMD_ENTITIES, title: 'Memory: Entities', category: 'Memory' },
         { id: CMD_TAGS, title: 'Memory: Tags', category: 'Memory' },
+        { id: CMD_VITALITY, title: 'Memory: Vitality', category: 'Memory' },
         { id: CMD_STATS, title: 'Memory: Stats', category: 'Memory' },
       ],
     },
@@ -238,6 +240,16 @@ export const memoryDashboardPlugin: Plugin = {
         .invoke<unknown>(MEMORY_PLUGIN, 'list', { tag: picked.key, limit: LIST_LIMIT })
         .catch(() => [] as unknown)
       await presentMemories(api, decodeMemories(taggedRaw), `No memories tagged "${picked.key}".`)
+    })
+
+    api.commands.register(CMD_VITALITY, async () => {
+      const raw = await api.kernel
+        .invoke<unknown>(MEMORY_PLUGIN, 'vitality_report', { limit: LIST_LIMIT })
+        .catch((e: unknown) => {
+          api.notifications.show({ message: `Memory vitality failed: ${String(e)}`, type: 'error' })
+          return [] as unknown
+        })
+      await presentMemories(api, decodeMemories(raw), 'No active memories yet.')
     })
 
     api.commands.register(CMD_STATS, async () => {
