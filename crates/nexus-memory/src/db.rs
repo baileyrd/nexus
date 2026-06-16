@@ -81,6 +81,11 @@ CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 ";
 
 /// Column list (table-qualified, in [`row_to_memory`] order) shared by all
@@ -203,6 +208,89 @@ impl MemoryDb {
                 m.vitality,
                 m.base_weight,
             ],
+        )?;
+        Ok(())
+    }
+
+    /// Insert `m`, or overwrite an existing row with the same id **only if** `m`
+    /// is newer (`updated_at` strictly greater) — last-write-wins. Returns
+    /// `true` when a row was inserted or updated, `false` when an older/equal
+    /// `m` was ignored. Used to apply records pulled from the sync hub.
+    /// `created_at` is preserved on update (creation time is immutable).
+    ///
+    /// # Errors
+    /// Returns an error on a write failure.
+    pub fn upsert_lww(&self, m: &Memory) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let n = conn.execute(
+            "INSERT INTO memories (id, content, category, tags, source, metadata, \
+                created_at, updated_at, client, node_id, capture_id, source_capture_id, \
+                memory_type, status, superseded_by, subject, predicate, object, \
+                accessed_at, access_count, decay_rate, vitality, base_weight) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23) \
+             ON CONFLICT(id) DO UPDATE SET \
+                content=excluded.content, category=excluded.category, tags=excluded.tags, \
+                source=excluded.source, metadata=excluded.metadata, updated_at=excluded.updated_at, \
+                client=excluded.client, node_id=excluded.node_id, capture_id=excluded.capture_id, \
+                source_capture_id=excluded.source_capture_id, memory_type=excluded.memory_type, \
+                status=excluded.status, superseded_by=excluded.superseded_by, subject=excluded.subject, \
+                predicate=excluded.predicate, object=excluded.object, accessed_at=excluded.accessed_at, \
+                access_count=excluded.access_count, decay_rate=excluded.decay_rate, \
+                vitality=excluded.vitality, base_weight=excluded.base_weight \
+             WHERE excluded.updated_at > memories.updated_at",
+            params![
+                m.id.to_string(),
+                m.content,
+                m.category,
+                serde_json::to_string(&m.tags).unwrap_or_else(|_| "[]".to_string()),
+                m.source,
+                serde_json::to_string(&m.metadata).unwrap_or_else(|_| "{}".to_string()),
+                m.created_at.to_rfc3339(),
+                m.updated_at.to_rfc3339(),
+                m.client,
+                m.node_id,
+                m.capture_id,
+                m.source_capture_id,
+                m.memory_type.as_str(),
+                m.status.as_str(),
+                m.superseded_by.map(|u| u.to_string()),
+                m.subject,
+                m.predicate,
+                m.object,
+                m.accessed_at.map(|t| t.to_rfc3339()),
+                m.access_count,
+                m.decay_rate,
+                m.vitality,
+                m.base_weight,
+            ],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Read a sync cursor/state value by key (`None` if unset).
+    ///
+    /// # Errors
+    /// Returns an error on a query failure.
+    pub fn sync_state_get(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare("SELECT value FROM sync_state WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Write a sync cursor/state value (upserting by key).
+    ///
+    /// # Errors
+    /// Returns an error on a write failure.
+    pub fn sync_state_set(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.pool.get()?;
+        conn.execute(
+            "INSERT INTO sync_state (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
         )?;
         Ok(())
     }
@@ -871,6 +959,48 @@ mod tests {
         assert_eq!(report[0].content, "hot"); // frequent + recent ranks first
         assert_eq!(report[1].content, "stale");
         assert!(report[0].vitality > report[1].vitality);
+    }
+
+    #[test]
+    fn upsert_lww_inserts_then_applies_only_newer() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        let mut m = Memory::new("v1");
+        m.updated_at = DateTime::from_timestamp(1000, 0).unwrap();
+        // First upsert inserts.
+        assert!(db.upsert_lww(&m).unwrap());
+        assert_eq!(db.get(m.id).unwrap().unwrap().content, "v1");
+
+        // An older update is ignored (LWW).
+        let mut older = m.clone();
+        older.content = "stale".to_string();
+        older.updated_at = DateTime::from_timestamp(500, 0).unwrap();
+        assert!(!db.upsert_lww(&older).unwrap());
+        assert_eq!(db.get(m.id).unwrap().unwrap().content, "v1");
+
+        // A newer update wins.
+        let mut newer = m.clone();
+        newer.content = "v2".to_string();
+        newer.updated_at = DateTime::from_timestamp(2000, 0).unwrap();
+        assert!(db.upsert_lww(&newer).unwrap());
+        assert_eq!(db.get(m.id).unwrap().unwrap().content, "v2");
+        assert_eq!(db.count().unwrap(), 1);
+        // FTS reflects the applied update.
+        assert_eq!(db.search("v2", 5).unwrap().len(), 1);
+        assert_eq!(db.search("v1", 5).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn sync_state_round_trips() {
+        let db = MemoryDb::open_in_memory().unwrap();
+        assert!(db.sync_state_get("cursor").unwrap().is_none());
+        db.sync_state_set("cursor", "2026-01-01T00:00:00+00:00|m1").unwrap();
+        assert_eq!(
+            db.sync_state_get("cursor").unwrap().as_deref(),
+            Some("2026-01-01T00:00:00+00:00|m1")
+        );
+        // Upsert overwrites.
+        db.sync_state_set("cursor", "later").unwrap();
+        assert_eq!(db.sync_state_get("cursor").unwrap().as_deref(), Some("later"));
     }
 
     #[test]
