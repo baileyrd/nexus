@@ -1,0 +1,29 @@
+# Container image for the Nexus memory sync hub.
+#
+# Build from the repository root (the build needs the Cargo workspace):
+#   podman build -f crates/nexus-memory-hub/Containerfile -t nexus-memory-hub .
+#
+# Run (SYNC_SECRET is required, supply it at runtime):
+#   podman run -p 127.0.0.1:8765:8765 -v nexus-hub:/var/lib/nexus-hub \
+#     -e SYNC_SECRET=$(openssl rand -hex 32) nexus-memory-hub
+
+FROM docker.io/library/rust:1-slim-bookworm AS build
+# rusqlite's `bundled` feature compiles the SQLite amalgamation → needs a C compiler.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+RUN cargo build --release -p nexus-memory-hub
+
+FROM docker.io/library/debian:bookworm-slim
+RUN useradd --system --uid 10001 hub \
+ && mkdir -p /var/lib/nexus-hub \
+ && chown hub /var/lib/nexus-hub
+COPY --from=build /src/target/release/nexus-memory-hub /usr/local/bin/nexus-memory-hub
+USER hub
+EXPOSE 8765
+# SYNC_SECRET must be provided at runtime (env / --secret); the server refuses
+# to start without it.
+ENTRYPOINT ["nexus-memory-hub"]
+CMD ["--bind", "0.0.0.0:8765", "--db", "/var/lib/nexus-hub/hub.sqlite3"]

@@ -16,6 +16,25 @@ SYNC_SECRET=$(openssl rand -hex 32) \
   nexus-memory-hub --bind 0.0.0.0:8765 --db /var/lib/nexus-hub/hub.sqlite3
 ```
 
+## Deploy
+
+Ready-made units live in [`deploy/`](deploy/):
+
+- **Container** — `Containerfile` (multi-stage Rust build → `debian-slim`). Build
+  from the repo root and run with a Podman Quadlet:
+  ```sh
+  podman build -f crates/nexus-memory-hub/Containerfile -t nexus-memory-hub .
+  mkdir -p ~/nexus-memory-hub/data
+  cp crates/nexus-memory-hub/deploy/hub.env.example ~/nexus-memory-hub/hub.env  # set SYNC_SECRET
+  cp crates/nexus-memory-hub/deploy/nexus-memory-hub.container ~/.config/containers/systemd/
+  systemctl --user daemon-reload && systemctl --user start nexus-memory-hub
+  ```
+- **Host binary** — `deploy/nexus-memory-hub.service` (systemd `DynamicUser` +
+  `StateDirectory`); install steps are in the unit's header comment.
+
+Both publish on `127.0.0.1:8765` by default — front with a reverse proxy or an
+SSH/Tailscale tunnel for remote clients, and keep `hub.env` at `chmod 600`.
+
 | Flag / env | Default | Meaning |
 |------------|---------|---------|
 | `--bind` | `127.0.0.1:8765` | `ip:port` to listen on |
