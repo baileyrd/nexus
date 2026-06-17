@@ -12,7 +12,7 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 72 |
+| `com.nexus.storage` | 73 |
 | `com.nexus.git` | 38 |
 | `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 28 |
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (72)
+## com.nexus.storage (73)
 
 ### Read
 
@@ -75,6 +75,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | Command | Caps | Note |
 |---------|------|------|
 | `write_file` / `write_vault_file` / `write_default_gitignore` / `note_append` | — | text writes |
+| `edit` | — | apply a hashline patch (content-hash-anchored edits), then write through `write_file` |
 | `create_file` / `create_dir` / `delete_file` / `delete_entry` / `rename_entry` | — | fs ops |
 | `toggle_task` | — | inline task checkbox toggle |
 | `replace_in_files` | — | find/replace across files |

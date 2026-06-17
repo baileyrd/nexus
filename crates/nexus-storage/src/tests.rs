@@ -970,3 +970,85 @@ fn open_nonexistent_forge_returns_error() {
         "expected FileNotFound, got: {result:?}"
     );
 }
+
+// ── Phase 5.1 (RFC 0005): com.nexus.storage::edit (hashline) ───────────────
+
+/// Build the `edit` args JSON for a single-section patch against the live
+/// content of `path` (TAG computed from what the engine currently stores).
+fn edit_args(engine: &StorageEngine, path: &str, ops: &str) -> serde_json::Value {
+    let stored = engine.read_file(path).expect("read for tag");
+    let text = String::from_utf8(stored).expect("utf8");
+    let tag = nexus_hashline::tag(&text);
+    serde_json::json!({ "patch": format!("[{path}#{tag}]\n{ops}") })
+}
+
+#[test]
+fn edit_applies_hashline_patch_and_reindexes() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine
+        .write_file("notes/edit.md", b"alpha\nbeta\ngamma\n")
+        .expect("write");
+
+    let args = edit_args(&engine, "notes/edit.md", "SWAP 2.=2:\n+BETA\n");
+    let reply = crate::handlers::files::edit_file(&engine, &args).expect("edit ok");
+
+    // Result reports one applied file, no conflicts.
+    assert_eq!(reply["files"].as_array().unwrap().len(), 1);
+    assert_eq!(reply["files"][0]["path"], "notes/edit.md");
+    assert_eq!(reply["files"][0]["status"], "applied");
+    assert_eq!(reply["conflicts"].as_array().unwrap().len(), 0);
+
+    // The file on disk reflects the patch.
+    let after = engine.read_file("notes/edit.md").expect("read back");
+    assert_eq!(after, b"alpha\nBETA\ngamma\n");
+}
+
+#[test]
+fn edit_is_atomic_across_sections() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/a.md", b"one\n").expect("write a");
+    engine.write_file("notes/b.md", b"two\n").expect("write b");
+
+    // Section for a.md is valid; section for b.md carries a stale TAG.
+    let tag_a = nexus_hashline::tag("one\n");
+    let patch = format!("[notes/a.md#{tag_a}]\nSWAP 1.=1:\n+ONE\n\n[notes/b.md#0000]\nSWAP 1.=1:\n+TWO\n");
+    let err = crate::handlers::files::edit_file(
+        &engine,
+        &serde_json::json!({ "patch": patch }),
+    )
+    .unwrap_err();
+    assert!(format!("{err:?}").contains("notes/b.md"), "error names the stale file");
+
+    // Neither file was written (all-or-nothing): a.md is untouched.
+    assert_eq!(engine.read_file("notes/a.md").unwrap(), b"one\n");
+}
+
+#[test]
+fn edit_stale_tag_errors_without_writing() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/s.md", b"current\n").expect("write");
+
+    let patch = "[notes/s.md#0000]\nSWAP 1.=1:\n+x\n";
+    let err = crate::handlers::files::edit_file(
+        &engine,
+        &serde_json::json!({ "patch": patch }),
+    )
+    .unwrap_err();
+    assert!(format!("{err:?}").to_lowercase().contains("tag"), "stale-tag error: {err:?}");
+    assert_eq!(engine.read_file("notes/s.md").unwrap(), b"current\n");
+}
+
+#[test]
+fn edit_rejects_malformed_patch() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    let err = crate::handlers::files::edit_file(
+        &engine,
+        &serde_json::json!({ "patch": "not a patch" }),
+    )
+    .unwrap_err();
+    assert!(format!("{err:?}").contains("malformed"), "got: {err:?}");
+}

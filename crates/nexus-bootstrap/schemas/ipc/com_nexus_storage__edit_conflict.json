@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageEditConflict",
+  "description": "A section whose 3-way merge could not be resolved cleanly (reserved for\nPR B2; always empty while snapshots are unavailable).",
+  "type": "object",
+  "properties": {
+    "markers": {
+      "description": "Merged content carrying diff3 conflict markers.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Vault-relative path that conflicted.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "markers"
+  ]
+}

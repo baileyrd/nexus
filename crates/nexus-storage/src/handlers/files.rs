@@ -5,6 +5,7 @@ use nexus_plugins::PluginError;
 use serde_json::Value;
 
 use crate::ipc::{
+    StorageEditArgs, StorageEditConflict, StorageEditFileResult, StorageEditResult,
     StorageFileExistsResult, StorageOk, StoragePathArgs, StorageReadFileArgs,
     StorageReadFileResult, StorageWriteFileArgs,
 };
@@ -51,6 +52,71 @@ pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, 
         .write_file(&path, &bytes)
         .map_err(|e| exec_err(format!("write_file '{path}' ({} bytes): {e}", bytes.len())))?;
     to_value(&meta, "write_file")
+}
+
+/// `com.nexus.storage::edit` (handler id `73`) — apply a hashline patch.
+///
+/// Phase 5.1 PR B (RFC 0005): each `[PATH#TAG]` section is applied against the
+/// current file when the TAG matches, then written through the engine (so the
+/// index/FTS/graph stay in sync, identical to `write_file`). The patch is
+/// **all-or-nothing**: every section is resolved before anything is written, so
+/// a stale TAG or parse error leaves the forge untouched. Snapshot-backed
+/// 3-way-merge recovery (the `merged`/`conflict` paths) is a follow-up (PR B2);
+/// here a stale TAG surfaces as an error so the caller re-reads and retries.
+pub(crate) fn edit_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let StorageEditArgs { patch } = parse_args(args, "edit")?;
+    let parsed = nexus_hashline::parse(&patch)
+        .map_err(|e| exec_err(format!("edit: malformed hashline patch: {e}")))?;
+
+    // Resolve every section first; only touch disk once all succeed.
+    // PR B has no SnapshotStore, so a stale TAG yields `StaleTag` rather than a
+    // 3-way merge.
+    let snapshots = nexus_hashline::SnapshotStore::new();
+    let mut staged: Vec<(String, String)> = Vec::with_capacity(parsed.sections.len());
+    for section in &parsed.sections {
+        let bytes = engine.read_file(&section.path).map_err(|e| {
+            exec_err(format!("edit: cannot read '{}': {e}", section.path))
+        })?;
+        let current = String::from_utf8(bytes).map_err(|_| {
+            exec_err(format!("edit: '{}' is not valid UTF-8", section.path))
+        })?;
+        match nexus_hashline::apply_section(section, &current, &snapshots)
+            .map_err(|e| exec_err(format!("edit '{}': {e}", section.path)))?
+        {
+            nexus_hashline::EditOutcome::Applied { content }
+            | nexus_hashline::EditOutcome::Merged { content } => {
+                staged.push((section.path.clone(), content));
+            }
+            // Unreachable until snapshots are wired (PR B2): no base means a
+            // mismatch returns `StaleTag` above rather than a conflict.
+            nexus_hashline::EditOutcome::Conflict { .. } => {
+                return Err(exec_err(format!(
+                    "edit '{}': unexpected merge conflict without a recorded base",
+                    section.path
+                )));
+            }
+        }
+    }
+
+    let mut files = Vec::with_capacity(staged.len());
+    for (path, content) in staged {
+        let meta = engine
+            .write_file(&path, content.as_bytes())
+            .map_err(|e| exec_err(format!("edit: write '{path}': {e}")))?;
+        files.push(StorageEditFileResult {
+            path: meta.path,
+            status: "applied".to_string(),
+            size_bytes: meta.size_bytes,
+        });
+    }
+
+    to_value(
+        &StorageEditResult {
+            files,
+            conflicts: Vec::<StorageEditConflict>::new(),
+        },
+        "edit",
+    )
 }
 
 pub(crate) fn delete_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {

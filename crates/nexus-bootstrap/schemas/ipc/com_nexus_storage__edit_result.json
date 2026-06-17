@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageEditResult",
+  "description": "Return type for `com.nexus.storage::edit`.\n\nAll-or-nothing: when `conflicts` is non-empty no file is written, so the\ncaller can resolve and retry without a partially-applied patch.",
+  "type": "object",
+  "properties": {
+    "conflicts": {
+      "description": "Unresolved sections (empty in Phase 5.1 PR B).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StorageEditConflict"
+      }
+    },
+    "files": {
+      "description": "Files written, in patch order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StorageEditFileResult"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "files",
+    "conflicts"
+  ],
+  "$defs": {
+    "StorageEditConflict": {
+      "description": "A section whose 3-way merge could not be resolved cleanly (reserved for\nPR B2; always empty while snapshots are unavailable).",
+      "type": "object",
+      "properties": {
+        "markers": {
+          "description": "Merged content carrying diff3 conflict markers.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Vault-relative path that conflicted.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "markers"
+      ]
+    },
+    "StorageEditFileResult": {
+      "description": "One file successfully written by `edit`.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Vault-relative path written.",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "New file size in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "status": {
+          "description": "How the patch resolved: `\"applied\"` (TAG matched) or `\"merged\"`\n(recovered via 3-way merge — reserved for PR B2).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "status",
+        "size_bytes"
+      ]
+    }
+  }
+}

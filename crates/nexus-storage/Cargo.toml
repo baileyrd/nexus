@@ -12,6 +12,8 @@ nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
 nexus-database = { path = "../nexus-database" }
 nexus-formats = { path = "../nexus-formats" }
+# Phase 5.1 (RFC 0005) — hashline `edit` handler.
+nexus-hashline = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

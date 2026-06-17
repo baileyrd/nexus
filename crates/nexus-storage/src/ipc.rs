@@ -188,6 +188,91 @@ pub struct StorageWriteFileResult {
     pub content_hash: String,
 }
 
+// ── com.nexus.storage::edit ──────────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::edit` (handler id `73`).
+///
+/// Applies a [hashline](nexus_hashline) patch — one or more `[PATH#TAG]`
+/// sections — against the current forge files. Phase 5.1 (RFC 0005): line and
+/// whole-file insert operations on TAG-fresh files. A stale TAG returns an
+/// error (re-read and retry); snapshot-backed 3-way-merge recovery is a
+/// follow-up (PR B2). Block operations are rejected until tree-sitter lands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageEditArgs {
+    /// The hashline patch text.
+    pub patch: String,
+}
+
+/// One file successfully written by `edit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageEditFileResult {
+    /// Vault-relative path written.
+    pub path: String,
+    /// How the patch resolved: `"applied"` (TAG matched) or `"merged"`
+    /// (recovered via 3-way merge — reserved for PR B2).
+    pub status: String,
+    /// New file size in bytes.
+    pub size_bytes: u64,
+}
+
+/// A section whose 3-way merge could not be resolved cleanly (reserved for
+/// PR B2; always empty while snapshots are unavailable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageEditConflict {
+    /// Vault-relative path that conflicted.
+    pub path: String,
+    /// Merged content carrying diff3 conflict markers.
+    pub markers: String,
+}
+
+/// Return type for `com.nexus.storage::edit`.
+///
+/// All-or-nothing: when `conflicts` is non-empty no file is written, so the
+/// caller can resolve and retry without a partially-applied patch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageEditResult {
+    /// Files written, in patch order.
+    pub files: Vec<StorageEditFileResult>,
+    /// Unresolved sections (empty in Phase 5.1 PR B).
+    pub conflicts: Vec<StorageEditConflict>,
+}
+
 // ── com.nexus.storage::note_append ───────────────────────────────────────────
 
 /// Args for `com.nexus.storage::note_append` (handler id `54`).

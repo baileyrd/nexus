@@ -368,6 +368,12 @@ pub const HANDLER_LIST_DRAFT_RELATIONS: u32 = 71;
 /// Returns `{ "ok": true }`.
 pub const HANDLER_WRITE_FRONTMATTER: u32 = 72;
 
+/// Handler id for `edit` — apply a [hashline](nexus_hashline) patch. Args:
+/// [`crate::ipc::StorageEditArgs`] (`{ "patch": String }`); Returns
+/// [`crate::ipc::StorageEditResult`]. Phase 5.1 / RFC 0005: writes through
+/// [`crate::StorageEngine::write_file`] so the index/FTS/graph stay in sync.
+pub const HANDLER_EDIT_FILE: u32 = 73;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -401,6 +407,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("rebuild_index", HANDLER_REBUILD_INDEX),
     ("search", HANDLER_SEARCH),
     ("write_file", HANDLER_WRITE_FILE),
+    ("edit", HANDLER_EDIT_FILE),
     ("note_append", HANDLER_NOTE_APPEND),
     ("write_vault_file", HANDLER_WRITE_VAULT_FILE),
     ("delete_file", HANDLER_DELETE_FILE),
@@ -684,6 +691,7 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_SEARCH => crate::handlers::search::search(engine, args),
             HANDLER_QUERY_SYMBOL => crate::handlers::search::query_symbol(engine, args),
             HANDLER_WRITE_FILE => crate::handlers::files::write_file(engine, args),
+            HANDLER_EDIT_FILE => crate::handlers::files::edit_file(engine, args),
             HANDLER_NOTE_APPEND => crate::handlers::notes::note_append(engine, args),
             HANDLER_WRITE_VAULT_FILE => crate::handlers::files::write_vault_file(engine, args),
             HANDLER_DELETE_FILE => crate::handlers::files::delete_file(engine, args),
@@ -1176,6 +1184,7 @@ mod tests {
                 HANDLER_ENTITY_FIND_DUPLICATES,
             ),
             ("HANDLER_WRITE_FRONTMATTER", HANDLER_WRITE_FRONTMATTER),
+            ("HANDLER_EDIT_FILE", HANDLER_EDIT_FILE),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {
