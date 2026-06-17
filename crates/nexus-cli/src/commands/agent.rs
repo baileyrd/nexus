@@ -19,6 +19,7 @@ use nexus_types::plugin_ids;
 use serde_json::Value;
 
 use crate::app::App;
+use crate::output::OutputFormat;
 
 const AGENT_PLUGIN: &str = plugin_ids::AGENT;
 
@@ -53,6 +54,9 @@ pub fn run(
     interactive: bool,
     notify_after_secs: u64,
 ) -> Result<()> {
+    // Capture the format before the `&mut app` borrows below; it drives
+    // whether we render the human transcript or emit the raw session JSON.
+    let format = app.format();
     let mut args = goal_args(goal, archetype);
     if let Some(map) = args.as_object_mut() {
         // BL-132: `auto_approve = false` engages BusBridgePolicy
@@ -75,8 +79,27 @@ pub fn run(
             eprintln!("[agent] notification dispatch failed: {err}");
         }
     }
-    print_session(&response);
+    emit_session(format, &response);
     Ok(())
+}
+
+/// Render a completed session. `--format json` / `jsonl` emit the raw session
+/// transcript (the `session_run` reply verbatim) so machine consumers — most
+/// notably a headless subagent's parent process (RFC 0007) — can parse the
+/// outcome; every other format renders the human-readable transcript.
+fn emit_session(format: OutputFormat, response: &Value) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(response).unwrap_or_default()
+            );
+        }
+        OutputFormat::Jsonl => {
+            println!("{}", serde_json::to_string(response).unwrap_or_default());
+        }
+        OutputFormat::Text | OutputFormat::Table => print_session(response),
+    }
 }
 
 /// BL-133 follow-up — dispatch `com.nexus.notifications::send` with

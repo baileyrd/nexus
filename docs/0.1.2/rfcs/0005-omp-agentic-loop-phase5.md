@@ -206,5 +206,29 @@ Backlog items spun out of the shipped work (not blockers):
   **Option A, process-level**: spin a child agent runtime on a worktree forge
   root, run it OS-sandboxed, and merge its delta back into the parent forge. This
   is the architecturally significant build (child-process orchestration, headless
-  run + result plumbing, worktree merge / conflict surfacing) and wants a design
-  proposal of its own before coding — deferred to backlog rather than started now.
+  run + result plumbing, worktree merge / conflict surfacing). **In flight:** the
+  build design is [RFC 0007](0007-subagent-process-isolation.md); PR 1 (headless
+  spawn primitive) and PR 2 (worktree harness + `git worktree_commit` + merge-back)
+  are built, with PR 3 (OS-sandbox the child) and PR 4 (conflict surfacing,
+  concurrency, `nexus_bin` setting) queued.
+
+## Other open RFCs — not yet started (beyond Phase 5)
+
+Cross-cutting design proposals outside the omp / Phase 5 thread, tracked here so
+the backlog is complete in one place. Authoritative list + statuses live in
+[`rfcs/README.md`](README.md).
+
+- **[RFC 0001](0001-workflow-cap-delegation.md) — workflow cap delegation.**
+  Security: workflow steps currently dispatch under the *workflow plugin's* own
+  capabilities rather than the triggering principal's — a capability-laundering
+  surface. Standalone (unrelated to omp); no design decision or code yet.
+- **[RFC 0002](0002-bundled-shell-rush.md) — bundled shell (`rush`)** and
+  **[RFC 0003](0003-terminal-emulator-rusty-term.md) — `rusty_term`.** Both were
+  assessed **adopt** (rush as a staged, opt-in sandboxed shell; rusty_term's
+  headless VT grid core + OSC 133 introspection — *not* its GUI, per ADR 0011).
+  Gated behind the OS-sandbox: the natural first consumer is
+  [RFC 0007](0007-subagent-process-isolation.md) PR 3 (sandbox the subagent
+  child), so these follow that work rather than starting independently.
+- **[RFC 0004](0004-lsp-framework-rusty-lsp.md) — `rusty_lsp`.** Assessed
+  **don't incorporate** — recorded as decided-no, *not* a backlog item; listed
+  only so the set is complete.

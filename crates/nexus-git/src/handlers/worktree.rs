@@ -12,7 +12,8 @@ use nexus_plugins::PluginError;
 use serde_json::Value;
 
 use crate::ipc::{
-    GitOk, GitWorktreeCreateArgs, GitWorktreeListReply, GitWorktreeRemoveArgs,
+    GitOk, GitWorktreeCommitArgs, GitWorktreeCommitReply, GitWorktreeCreateArgs,
+    GitWorktreeListReply, GitWorktreeRemoveArgs,
 };
 use crate::GitWorkerHandle;
 
@@ -50,6 +51,14 @@ pub(crate) fn worktree_remove(h: &GitWorkerHandle, args: &Value) -> Result<Value
     let GitWorktreeRemoveArgs { name, force } = parse_args(args, "worktree_remove")?;
     h.with(move |e| e.remove_worktree(&name, force)).map_err(map_err)?;
     to_value(&GitOk { ok: true }, "worktree_remove")
+}
+
+pub(crate) fn worktree_commit(h: &GitWorkerHandle, args: &Value) -> Result<Value, PluginError> {
+    let GitWorktreeCommitArgs { name, message } = parse_args(args, "worktree_commit")?;
+    let commit_hash = h
+        .with(move |e| e.commit_worktree(&name, &message))
+        .map_err(map_err)?;
+    to_value(&GitWorktreeCommitReply { commit_hash }, "worktree_commit")
 }
 
 fn is_valid_worktree_name(name: &str) -> bool {
