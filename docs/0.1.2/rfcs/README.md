@@ -16,6 +16,7 @@ is a snapshot of intent at its `Created` date, not a maintained spec.
 | [0004](0004-lsp-framework-rusty-lsp.md) | `rusty_lsp` LSP framework | Draft — assessment | **Don't incorporate.** Nexus *hosts* language servers, it doesn't *build* them; its JSON-RPC core is already (deliberately) duplicated per protocol. Revisit only for a future forge-as-LSP-server. |
 | [0005](0005-omp-agentic-loop-phase5.md) | Phase 5 — omp agentic loop | Draft — plan | **Enrich, don't rebuild.** `nexus-agent` already has the autonomous loop; `rusty_omp` is a blueprint, not code. Phased small-PR plan to close the gap (hashline editing → tool catalog → subagent isolation → session tree), starting with hashline. |
 | [0006](0006-subagent-workspace-isolation.md) | Phase 5.3 — subagent workspace isolation | Draft — design | Isolate a delegated subagent's edits (git worktree) and merge the delta back. Deeper in Nexus than omp (storage is forge-root-bound); options A/B/C, recommends process-level isolation, with option-agnostic worktree primitives shipping first. |
+| [0007](0007-subagent-process-isolation.md) | Phase 5.3 Step 2 — process-level subagent isolation (build) | Draft — design | Build design for RFC 0006 Option A: run a delegated subagent as a headless child `nexus` process on a git-worktree forge root (forced child-process by the layering rule + irreversible per-thread sandbox), then merge the worktree branch back. Phased PR 1 (spawn primitive) → 2 (worktree harness) → 3 (OS-sandbox) → 4 (polish). |
 
 ## Assessment series (0002–0004)
 

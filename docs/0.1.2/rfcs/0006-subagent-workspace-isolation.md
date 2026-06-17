@@ -1,6 +1,6 @@
 # RFC 0006 — Phase 5.3: subagent workspace isolation
 
-- **Status:** Step 1 shipped (#313); decision = Option A; Step 2 in backlog
+- **Status:** Step 1 shipped (#313); decision = Option A; Step 2 build design = [RFC 0007](0007-subagent-process-isolation.md)
 - **Owner:** unassigned
 - **Created:** 2026-06-17
 - **Tracks:** [RFC 0005](0005-omp-agentic-loop-phase5.md) Phase 5.3; omp blueprint `docs/17-subagents-and-tasks.md`
@@ -92,8 +92,10 @@ reshaping the storage model, and it is the natural home for the OS-sandbox +
 bundled-shell work already scoped in RFCs 0002/0003: a subagent becomes "a
 confined runtime on a worktree whose delta we merge." It is the biggest build
 (child-process orchestration, headless run + result plumbing, worktree
-merge / conflict surfacing), so it is **in the backlog** ([RFC 0005](0005-omp-agentic-loop-phase5.md))
-pending its own design proposal before coding.
+merge / conflict surfacing), so its build design is captured separately in
+[RFC 0007](0007-subagent-process-isolation.md), which resolves the open
+questions below (child process, require-git, merge-the-branch) and phases the
+build PR 1 (spawn primitive) → 2 (worktree harness) → 3 (OS-sandbox) → 4 (polish).
 
 ## Open questions (for the decision)
 
