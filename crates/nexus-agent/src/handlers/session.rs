@@ -615,7 +615,7 @@ async fn load_session_node(
 /// Assemble a node's full transcript by walking its parent chain (RFC 0008): a
 /// root node returns as-is; a forked node prepends `parent.rounds[..=bp]`.
 /// Boxed so the `async` recursion compiles.
-fn assemble_session(
+pub(crate) fn assemble_session(
     ctx: &KernelPluginContext,
     id: String,
     depth: usize,
@@ -672,7 +672,7 @@ fn delta_rounds(
 /// Resolve a fork verb's target round: `None` forks at the parent's `tip`
 /// (resume); `Some(k)` forks at round `k`, which must be in `1..=tip`
 /// (branch / rewind). Pure.
-fn resolve_fork_point(up_to_round: Option<u32>, tip: u32) -> Result<u32, String> {
+pub(crate) fn resolve_fork_point(up_to_round: Option<u32>, tip: u32) -> Result<u32, String> {
     match up_to_round {
         Some(k) if k == 0 || k > tip => {
             Err(format!("at_round {k} out of range 1..={tip}"))

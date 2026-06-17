@@ -406,6 +406,21 @@ unrestricted = "read-only fts query over transcript history"
 
 [[handler]]
 plugin = "com.nexus.agent"
+command = "session_checkpoint"
+unrestricted = "names a (session, round) location — metadata write gated downstream by storage write"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_checkpoints"
+unrestricted = "read-only list of named checkpoints"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_checkpoint_delete"
+unrestricted = "removes a named checkpoint — metadata write gated downstream by storage write"
+
+[[handler]]
+plugin = "com.nexus.agent"
 command = "session_get"
 unrestricted = "read-only fetch of a stored agent session"
 

@@ -17,7 +17,7 @@
 | `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 28 |
 | `com.nexus.dap` | 21 |
-| `com.nexus.agent` | 23 |
+| `com.nexus.agent` | 26 |
 | `com.nexus.editor` | 15 |
 | `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
@@ -160,11 +160,12 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.agent (23)
+## com.nexus.agent (26)
 
 | Command | Caps | Note |
 |---------|------|------|
 | `session_run` / `session_resume` / `session_branch` / `session_rewind` / `round_decide` | `ai.chat` | drives the tool loop; the session-tree fork verbs (resume = fork at tip, branch = fork at a round, rewind = non-destructive redo) all lower to one `fork(parent, k, message)` primitive — RFC 0008 |
+| `session_checkpoint` / `session_checkpoints` / `session_checkpoint_delete` | — | named `(session, round)` bookmarks in `checkpoints.json` — RFC 0008 |
 | `ask` / `ask_respond` | `ai.chat` | interactive prompt during the loop (publishes `ask_requested`, awaits a frontend reply) |
 | `delegate` / `plan` | — | **AUDIT** — drives chat under the hood; candidate for `ai.chat` |
 | `history_get` / `history_list` / `history_delete` / `search_transcripts` | — | transcript surface |

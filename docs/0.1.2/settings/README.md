@@ -95,6 +95,8 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 | `.forge/procmgr.sqlite` | Terminal process manager | `nexus-bootstrap/src/plugins/terminal.rs:26` |
 | `.forge/sessions.sqlite` | Terminal session scrollback | bootstrap terminal:72 |
 | `.forge/agent/transcripts.sqlite` | Agent conversation transcripts | bootstrap |
+| `.forge/agent/sessions/<id>.json` | Agent session transcripts; forked nodes (resume/branch/rewind) store only their delta rounds + `parent_id`/`branch_point` | `nexus-agent/src/handlers/session.rs` (RFC 0008) |
+| `.forge/agent/sessions/checkpoints.json` | Named `(session, round)` checkpoints — a JSON array of `SessionCheckpoint` | `nexus-agent/src/handlers/checkpoint.rs` (RFC 0008) |
 | `.forge/agents/<agent_id>/` | Per-agent memory (history.jsonl etc.) | `nexus-agent/src/memory.rs:40` |
 | `.forge/ai-runtime/runs.db` | AI runtime execution logs (reserved) | bootstrap |
 | `.forge/ai-activity.log` | AI surface activity log (chat, ask, cmd-i, ghost) | `nexus-ai/src/activity_log.rs:42` |

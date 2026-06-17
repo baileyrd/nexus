@@ -137,10 +137,14 @@ inherited prefix isn't re-indexed. Append-only invariants hold.
   markers) / `show <id>` (assembled transcript) / `resume <id> <msg>` /
   `branch <id> <round> <msg>` / `rewind <id> <round> [msg]` — the whole backend,
   usable from the terminal. *(Shipped.)*
-- **PR 5 — checkpoints + shell tree UI (remaining).** `session_checkpoint`
-  markers (a per-forge `checkpoints.json` index); a shell plugin under
+- **PR 5 — checkpoints.** `session_checkpoint` / `session_checkpoints` /
+  `session_checkpoint_delete` — named `(session, round)` bookmarks in a per-forge
+  `checkpoints.json` array, with CLI `agent checkpoint[s]` / `checkpoint-rm`.
+  *(Shipped — a checkpoint stores no transcript; the coordinate is the
+  snapshot.)*
+- **PR 6 — shell tree UI (remaining).** A shell plugin under
   `shell/src/plugins/nexus/sessions/` that renders the forest from
-  `session_list` and drives resume/branch/rewind via `ipc_call`.
+  `session_list` and drives resume/branch/rewind/checkpoint via `ipc_call`.
 
 ## Open questions
 

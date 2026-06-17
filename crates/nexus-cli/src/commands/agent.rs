@@ -169,6 +169,66 @@ pub fn rewind(
     Ok(())
 }
 
+/// RFC 0008 — `nexus agent checkpoint <id> <round> <name>`: name a location.
+pub fn checkpoint(app: &mut App, session_id: &str, round: u32, name: &str) -> Result<()> {
+    let format = app.format();
+    let args = serde_json::json!({
+        "session_id": session_id,
+        "round": round,
+        "name": name,
+    });
+    let response = call(app, "session_checkpoint", args)?;
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).unwrap_or_default()
+            );
+        }
+        OutputFormat::Jsonl => {
+            println!("{}", serde_json::to_string(&response).unwrap_or_default());
+        }
+        OutputFormat::Text | OutputFormat::Table => {
+            println!("✓ checkpoint '{name}' → {session_id} @ round {round}");
+        }
+    }
+    Ok(())
+}
+
+/// RFC 0008 — `nexus agent checkpoints`: list named checkpoints.
+pub fn checkpoints(app: &mut App) -> Result<()> {
+    let format = app.format();
+    let response = call(app, "session_checkpoints", Value::Object(serde_json::Map::new()))?;
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).unwrap_or_default()
+            );
+        }
+        OutputFormat::Jsonl => {
+            println!("{}", serde_json::to_string(&response).unwrap_or_default());
+        }
+        OutputFormat::Text | OutputFormat::Table => print_checkpoint_list(&response),
+    }
+    Ok(())
+}
+
+/// RFC 0008 — `nexus agent checkpoint-rm <name>`: remove a named checkpoint.
+pub fn checkpoint_rm(app: &mut App, name: &str) -> Result<()> {
+    let response = call(app, "session_checkpoint_delete", serde_json::json!({ "name": name }))?;
+    let deleted = response
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if deleted {
+        println!("Removed checkpoint '{name}'.");
+    } else {
+        println!("No checkpoint named '{name}'.");
+    }
+    Ok(())
+}
+
 /// Best-effort completion notification shared by run / resume / branch /
 /// rewind. The label is the session's goal (read from the reply). A failure
 /// is non-fatal — the session already succeeded — so it only warns on stderr.
@@ -641,6 +701,22 @@ fn print_session_list(list: &Value) {
                 .unwrap_or_default();
             println!("    forked from {p}{at}");
         }
+    }
+}
+
+/// Render `session_checkpoints` (RFC 0008): one line per named bookmark.
+fn print_checkpoint_list(list: &Value) {
+    let arr = list.as_array().cloned().unwrap_or_default();
+    if arr.is_empty() {
+        println!("No checkpoints.");
+        return;
+    }
+    println!("{} checkpoint(s):", arr.len());
+    for c in &arr {
+        let name = c.get("name").and_then(Value::as_str).unwrap_or("?");
+        let sid = c.get("session_id").and_then(Value::as_str).unwrap_or("?");
+        let round = c.get("round").and_then(Value::as_u64).unwrap_or(0);
+        println!("  {name}  →  {sid} @ round {round}");
     }
 }
 
