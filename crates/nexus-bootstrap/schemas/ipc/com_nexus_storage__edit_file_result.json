@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageEditFileResult",
+  "description": "One file successfully written by `edit`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Vault-relative path written.",
+      "type": "string"
+    },
+    "size_bytes": {
+      "description": "New file size in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "status": {
+      "description": "How the patch resolved: `\"applied\"` (TAG matched) or `\"merged\"`\n(recovered via 3-way merge — reserved for PR B2).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "status",
+    "size_bytes"
+  ]
+}

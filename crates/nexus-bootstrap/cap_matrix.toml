@@ -1313,6 +1313,11 @@ unrestricted = "writes a forge-relative file — gated downstream by the storage
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "edit"
+unrestricted = "applies a hashline patch then writes through write_file — same downstream fs.write check; external paths rejected there"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "write_frontmatter"
 unrestricted = "frontmatter splice over an existing markdown file — routes through write_file's fs.write check downstream"
 

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageEditArgs",
+  "description": "Args for `com.nexus.storage::edit` (handler id `73`).\n\nApplies a [hashline](nexus_hashline) patch — one or more `[PATH#TAG]`\nsections — against the current forge files. Phase 5.1 (RFC 0005): line and\nwhole-file insert operations on TAG-fresh files. A stale TAG returns an\nerror (re-read and retry); snapshot-backed 3-way-merge recovery is a\nfollow-up (PR B2). Block operations are rejected until tree-sitter lands.",
+  "type": "object",
+  "properties": {
+    "patch": {
+      "description": "The hashline patch text.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "patch"
+  ]
+}

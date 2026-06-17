@@ -43,7 +43,8 @@ use nexus_storage::ipc::{
     StorageBasePropertyUpdateArgs, StorageBaseQueryArgs, StorageBaseRecordCreateArgs,
     StorageBaseRecordIdArgs, StorageBaseRecordUpdateArgs, StorageBaseViewArgs,
     StorageCanvasPatchArgs, StorageCanvasWriteArgs, StorageChunkEmbedding,
-    StorageConfigContentResult, StorageConfigKindArgs, StorageFileExistsResult,
+    StorageConfigContentResult, StorageConfigKindArgs, StorageEditArgs, StorageEditConflict,
+    StorageEditFileResult, StorageEditResult, StorageFileExistsResult,
     StorageGraphNeighborsArgs, StorageImportConflictStrategy, StorageImportForgeArgs,
     StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
     StorageNoteAppendResult, StorageOk, StoragePathArgs, StorageQuerySymbolArgs,
@@ -233,6 +234,12 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.storage::write_file ────────────────────────────────────
     write_schema::<StorageWriteFileArgs>("com_nexus_storage__write_file", "args");
     write_schema::<StorageWriteFileResult>("com_nexus_storage__write_file", "result");
+
+    // ── com.nexus.storage::edit (Phase 5.1 / RFC 0005) ───────────────────
+    write_schema::<StorageEditArgs>("com_nexus_storage__edit", "args");
+    write_schema::<StorageEditFileResult>("com_nexus_storage__edit", "file_result");
+    write_schema::<StorageEditConflict>("com_nexus_storage__edit", "conflict");
+    write_schema::<StorageEditResult>("com_nexus_storage__edit", "result");
 
     // ── com.nexus.storage::note_append (BL-043) ──────────────────────────
     write_schema::<StorageNoteAppendArgs>("com_nexus_storage__note_append", "args");
