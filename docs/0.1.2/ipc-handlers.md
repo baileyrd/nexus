@@ -12,7 +12,7 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 73 |
+| `com.nexus.storage` | 74 |
 | `com.nexus.git` | 38 |
 | `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 28 |
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (73)
+## com.nexus.storage (74)
 
 ### Read
 
@@ -52,6 +52,7 @@
 |---------|------|------|
 | `query_files` | — | file enumeration with filters |
 | `read_file` | — | downstream `fs.read` if path resolves external |
+| `read_lines` | — | line-range read (1-based, inclusive) for large files; returns the slice + total lines + the file's hashline tag |
 | `read_frontmatter` | — | frontmatter extraction |
 | `find_in_files` | — | ripgrep-style content search |
 | `search` | — | Tantivy FTS query |

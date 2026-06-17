@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageReadLinesResult",
+  "description": "Return type for `com.nexus.storage::read_lines`.",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "The requested line slice (joined by `\\n`), `\"\"` when the range is empty,\nor `null` when the file is missing or not UTF-8.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "end": {
+      "description": "Last line actually returned (1-based, inclusive); `0` when the slice is\nempty (e.g. `start` is past the end of the file).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "start": {
+      "description": "First line actually returned (1-based; echoes the clamped `start`).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "tag": {
+      "description": "The 4-uppercase-hex hashline TAG of the *whole* file (for the `edit`\nhandler), or `null` for a missing or non-UTF-8 file.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "total_lines": {
+      "description": "Total number of lines in the file.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "start",
+    "end",
+    "total_lines"
+  ]
+}

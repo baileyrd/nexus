@@ -1141,6 +1141,11 @@ unrestricted = "read-only forge-relative file read; downstream fs.read check app
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "read_lines"
+unrestricted = "read-only line-range file read; same downstream fs.read posture as read_file"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "read_frontmatter"
 unrestricted = "read-only frontmatter extraction"
 

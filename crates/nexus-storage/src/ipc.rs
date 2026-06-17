@@ -144,6 +144,61 @@ pub struct StorageReadFileResult {
     pub tag: Option<String>,
 }
 
+// ── com.nexus.storage::read_lines ────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::read_lines` (handler id `74`).
+///
+/// A context-efficient partial read: returns a 1-based, inclusive line range of
+/// a text file rather than the whole thing. Phase 5.2 / RFC 0005.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageReadLinesArgs {
+    /// Forge-relative path of the file to read.
+    pub path: String,
+    /// First line to return (1-based). Defaults to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<u32>,
+    /// Last line to return (1-based, inclusive). Defaults to `start + 199`
+    /// (a 200-line window), clamped to the end of the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<u32>,
+}
+
+/// Return type for `com.nexus.storage::read_lines`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageReadLinesResult {
+    /// The requested line slice (joined by `\n`), `""` when the range is empty,
+    /// or `null` when the file is missing or not UTF-8.
+    pub content: Option<String>,
+    /// First line actually returned (1-based; echoes the clamped `start`).
+    pub start: u32,
+    /// Last line actually returned (1-based, inclusive); `0` when the slice is
+    /// empty (e.g. `start` is past the end of the file).
+    pub end: u32,
+    /// Total number of lines in the file.
+    pub total_lines: u32,
+    /// The 4-uppercase-hex hashline TAG of the *whole* file (for the `edit`
+    /// handler), or `null` for a missing or non-UTF-8 file.
+    pub tag: Option<String>,
+}
+
 // ── com.nexus.storage::write_file ────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::write_file` (handler id `8`).

@@ -1150,3 +1150,63 @@ fn edit_surfaces_conflict_without_writing() {
     // Conflict ⇒ nothing written; the external change stands.
     assert_eq!(engine.read_file("notes/c.md").unwrap(), b"theirs\n");
 }
+
+// ── Phase 5.2: com.nexus.storage::read_lines ──────────────────────────────
+
+fn read_lines(engine: &StorageEngine, args: serde_json::Value) -> serde_json::Value {
+    let mut snaps = nexus_hashline::SnapshotStore::new();
+    crate::handlers::files::read_lines(engine, &mut snaps, &args).expect("read_lines ok")
+}
+
+#[test]
+fn read_lines_returns_requested_inclusive_range() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine
+        .write_file("notes/big.md", b"l1\nl2\nl3\nl4\nl5\n")
+        .expect("write");
+
+    let r = read_lines(&engine, serde_json::json!({ "path": "notes/big.md", "start": 2, "end": 4 }));
+    assert_eq!(r["content"], "l2\nl3\nl4");
+    assert_eq!(r["start"], 2);
+    assert_eq!(r["end"], 4);
+    assert_eq!(r["total_lines"], 5);
+    // The whole-file tag is surfaced for editing.
+    assert_eq!(r["tag"].as_str().unwrap(), nexus_hashline::tag("l1\nl2\nl3\nl4\nl5\n"));
+}
+
+#[test]
+fn read_lines_defaults_to_first_window_and_clamps_end() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/s.md", b"a\nb\nc\n").expect("write");
+
+    // No start/end → from line 1; end clamps to the 3-line total.
+    let r = read_lines(&engine, serde_json::json!({ "path": "notes/s.md" }));
+    assert_eq!(r["content"], "a\nb\nc");
+    assert_eq!(r["start"], 1);
+    assert_eq!(r["end"], 3);
+    assert_eq!(r["total_lines"], 3);
+}
+
+#[test]
+fn read_lines_past_eof_is_empty_not_an_error() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/s.md", b"a\nb\n").expect("write");
+
+    let r = read_lines(&engine, serde_json::json!({ "path": "notes/s.md", "start": 9 }));
+    assert_eq!(r["content"], ""); // empty slice, not null
+    assert_eq!(r["end"], 0);
+    assert_eq!(r["total_lines"], 2);
+}
+
+#[test]
+fn read_lines_missing_file_yields_nulls() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    let r = read_lines(&engine, serde_json::json!({ "path": "notes/nope.md" }));
+    assert!(r["content"].is_null());
+    assert!(r["tag"].is_null());
+    assert_eq!(r["total_lines"], 0);
+}
