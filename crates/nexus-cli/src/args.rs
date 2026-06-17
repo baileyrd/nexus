@@ -1565,6 +1565,33 @@ pub(crate) struct TermArgs {
     pub(crate) command: TermCommand,
 }
 
+// ---------------------------------------------------------------------------
+// Sandbox (Phase 4 — OS process sandbox)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub(crate) struct SandboxArgs {
+    #[command(subcommand)]
+    pub(crate) command: SandboxCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SandboxCommand {
+    /// Print the active OS-sandbox config (`.forge/sandbox.toml`): process
+    /// confinement mode, writable roots, network access, download allowlist.
+    Policy,
+    /// Perform a brokered, allowlisted download into a sandbox writable root.
+    Download {
+        /// Source URL (https + on the sandbox allowlist).
+        url: String,
+        /// Destination path (inside a sandbox writable root).
+        dest: String,
+        /// Working dir for resolving writable roots (default: dest's parent).
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+}
+
 #[derive(Subcommand)]
 pub(crate) enum TermCommand {
     /// Print the default shell nexus-terminal would pick on this host.
