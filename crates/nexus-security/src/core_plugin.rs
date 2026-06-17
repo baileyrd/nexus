@@ -42,6 +42,9 @@ pub const HANDLER_CLEAR_AUDIT_LOG: u32 = 6;
 /// are ignored; returns the full `MetricsSnapshot` JSON.
 pub const HANDLER_METRICS_SNAPSHOT: u32 = 7;
 
+/// `sandbox_policy` handler id — return the active OS-sandbox config.
+pub const HANDLER_SANDBOX_POLICY: u32 = 8;
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::security::register`.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
@@ -52,6 +55,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("query_audit_log", HANDLER_QUERY_AUDIT_LOG),
     ("clear_audit_log", HANDLER_CLEAR_AUDIT_LOG),
     ("metrics_snapshot", HANDLER_METRICS_SNAPSHOT),
+    ("sandbox_policy", HANDLER_SANDBOX_POLICY),
 ];
 
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
@@ -81,6 +85,9 @@ pub struct SecurityCorePlugin {
     /// does not support enumeration. Cleared on plugin restart — names from
     /// previous sessions are still retrievable by exact name but not listable.
     known_names: HashSet<String>,
+    /// OS-sandbox configuration (`<forge>/.forge/sandbox.toml`); exposed via the
+    /// `sandbox_policy` handler and consumed by the download broker.
+    sandbox_config: crate::SandboxConfig,
 }
 
 impl SecurityCorePlugin {
@@ -93,7 +100,16 @@ impl SecurityCorePlugin {
             keyring_probe: default_keyring_probe(),
             vault: CredentialVault::new(),
             known_names: HashSet::new(),
+            sandbox_config: crate::SandboxConfig::default(),
         }
+    }
+
+    /// Set the OS-sandbox configuration (loaded from `sandbox.toml` by
+    /// bootstrap). Builder-style so existing call sites need no change.
+    #[must_use]
+    pub fn with_sandbox_config(mut self, config: crate::SandboxConfig) -> Self {
+        self.sandbox_config = config;
+        self
     }
 
     /// Create a plugin with an injected keyring probe. Used by tests to
@@ -109,6 +125,7 @@ impl SecurityCorePlugin {
             keyring_probe: Box::new(probe),
             vault: CredentialVault::disabled(),
             known_names: HashSet::new(),
+            sandbox_config: crate::SandboxConfig::default(),
         }
     }
 
@@ -265,6 +282,10 @@ impl CorePlugin for SecurityCorePlugin {
                     "clear_audit_log",
                 )
             }
+            HANDLER_SANDBOX_POLICY => {
+                // Read-only introspection of the active OS-sandbox config.
+                Ok(serde_json::to_value(&self.sandbox_config).unwrap_or(json!(null)))
+            }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler id {handler_id}"),
@@ -385,6 +406,26 @@ mod tests {
         let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
         let result = plugin.dispatch(42, &serde_json::json!({}));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn dispatch_sandbox_policy_returns_active_config() {
+        // Default: closed (read-only, downloads off).
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let out = plugin.dispatch(HANDLER_SANDBOX_POLICY, &json!({})).unwrap();
+        assert_eq!(out["policy"]["mode"], "read-only");
+        assert_eq!(out["downloads"]["enabled"], false);
+
+        // Reflects an injected workspace-write config.
+        let cfg = crate::SandboxConfig {
+            policy: nexus_types::SandboxPolicy::new_workspace_write(vec![]),
+            downloads: crate::DownloadPolicy { enabled: true, ..Default::default() },
+        };
+        let mut plugin =
+            SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);
+        let out = plugin.dispatch(HANDLER_SANDBOX_POLICY, &json!({})).unwrap();
+        assert_eq!(out["policy"]["mode"], "workspace-write");
+        assert_eq!(out["downloads"]["enabled"], true);
     }
 
     #[test]

@@ -26,7 +26,7 @@
 | `com.nexus.ai.runtime` | 12 |
 | `com.nexus.skills` | 8 |
 | `com.nexus.acp` | 8 |
-| `com.nexus.security` | 7 |
+| `com.nexus.security` | 8 |
 | `com.nexus.comments` | 7 |
 | `com.nexus.memory` | 21 |
 | `com.nexus.database` | 6 |
@@ -251,7 +251,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.security (7)
+## com.nexus.security (8)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -261,6 +261,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `query_audit_log` | `security.audit.read` | V12 (2026-06-10) — log discloses cross-plugin telemetry; previously unrestricted |
 | `metrics_snapshot` | — | read-only observability |
 | `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
+| `sandbox_policy` | — | read-only introspection of the active OS-sandbox config (`sandbox.toml`) |
 
 ---
 
