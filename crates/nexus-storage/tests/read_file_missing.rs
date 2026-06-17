@@ -37,7 +37,7 @@ fn read_file_on_missing_path_returns_bytes_null() {
 
     assert_eq!(
         resp,
-        serde_json::json!({ "bytes": null }),
+        serde_json::json!({ "bytes": null, "tag": null }),
         "missing file must surface as typed null, not as an error",
     );
 }
@@ -71,4 +71,14 @@ fn read_file_on_existing_path_returns_bytes_array() {
         .map(|v| u8::try_from(v.as_u64().unwrap()).unwrap())
         .collect();
     assert_eq!(decoded, b"hello world");
+
+    // Phase 5.1 — read_file surfaces the hashline TAG for the `edit` handler.
+    // (Exact value is checked by the in-crate unit test; here we assert shape
+    // to avoid pulling nexus-hashline into this integration crate.)
+    let tag = resp
+        .get("tag")
+        .and_then(|v| v.as_str())
+        .expect("tag must be present for an existing text file");
+    assert_eq!(tag.len(), 4, "tag is 4 hex digits, got {tag:?}");
+    assert!(tag.bytes().all(|b| b.is_ascii_hexdigit()));
 }

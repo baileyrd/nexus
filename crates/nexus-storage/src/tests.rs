@@ -1074,8 +1074,10 @@ fn read_file_handler_records_snapshot_for_later_merge() {
     .expect("read");
     // The handler still returns the file bytes …
     assert!(reply["bytes"].is_array());
-    // … and a snapshot is now available, keyed by the content TAG.
+    // … surfaces the content TAG for the `edit` handler …
     let tag = nexus_hashline::tag("hello\n");
+    assert_eq!(reply["tag"].as_str().unwrap(), tag);
+    // … and a snapshot is now available, keyed by that TAG.
     assert_eq!(snaps.get_by_tag("notes/r.md", &tag).unwrap().content, "hello\n");
 }
 

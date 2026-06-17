@@ -11,4 +11,10 @@ export type StorageReadFileResult = {
 /**
  * Raw bytes of the file content, or `null` if the file does not exist.
  */
-bytes: Array<number> | null, };
+bytes: Array<number> | null, 
+/**
+ * The 4-uppercase-hex hashline TAG of the (UTF-8) content, or `null` for a
+ * missing or non-UTF-8 file. Pass this in a `[path#TAG]` section to the
+ * `edit` handler to make precise, drift-safe edits (Phase 5.1 / RFC 0005).
+ */
+tag: string | null, };

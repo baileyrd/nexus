@@ -40,6 +40,11 @@ rather than describing what you would do. Prefer fewer, broader tool \
 calls over many tiny ones. If the goal is purely informational, \
 respond with text and no tool calls.\n\
 \n\
+To change part of an existing file, prefer `edit` over `write_file`: \
+read the file first (its reply carries a hashline `tag`), then send an \
+`edit` patch whose `[path#TAG]` header uses that tag. Reserve \
+`write_file` for creating a file or replacing it wholesale.\n\
+\n\
 When a goal involves running a shell command (build, test, dev \
 server, lint), prefer the terminal tools: `terminal_run_saved` to \
 launch the user's saved command by slug, `terminal_get_status` to \

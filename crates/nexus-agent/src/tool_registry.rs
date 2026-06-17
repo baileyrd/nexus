@@ -492,7 +492,10 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
     vec![
         AgentToolSpec {
             name: "read_file".to_string(),
-            description: "Read the UTF-8 contents of a forge-relative file.".to_string(),
+            description: "Read the UTF-8 contents of a forge-relative file. The reply \
+                includes the file's hashline `tag` — pass it to `edit` to make a precise \
+                in-place change."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": { "path": { "type": "string" } },
@@ -507,7 +510,9 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
         },
         AgentToolSpec {
             name: "write_file".to_string(),
-            description: "Write or overwrite a forge-relative file.".to_string(),
+            description: "Write or overwrite a whole forge-relative file. To change part \
+                of an existing file, prefer `edit`."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -522,6 +527,31 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
             command_id: "write_file".to_string(),
+        },
+        AgentToolSpec {
+            name: "edit".to_string(),
+            description: "Apply a hashline patch — the precise way to change part of a \
+                file (prefer over write_file for edits). A patch is one or more sections, \
+                each headed by `[PATH#TAG]` where TAG is the 4-hex `tag` from read_file. \
+                Operations use 1-based, inclusive line numbers: `SWAP a.=b:` followed by \
+                `+`-prefixed replacement lines; `DEL a.=b`; `INS.PRE n:` / `INS.POST n:` \
+                / `INS.HEAD:` / `INS.TAIL:` followed by `+` lines. A bare `+` is a blank \
+                line. Multiple `[PATH#TAG]` sections edit several files atomically. If the \
+                file changed since you read it, a 3-way merge is attempted; unresolved \
+                sections come back as `conflicts` and nothing is written, so re-read and \
+                retry."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "patch": { "type": "string" } },
+                "required": ["patch"],
+                "additionalProperties": false
+            }),
+            requires_approval: true,
+            estimated_duration_ms: 100,
+            required_capabilities: vec![Capability::FileSystemWrite],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "edit".to_string(),
         },
         AgentToolSpec {
             name: "search_forge".to_string(),

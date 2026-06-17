@@ -16,6 +16,13 @@
         "maximum": 255,
         "minimum": 0
       }
+    },
+    "tag": {
+      "description": "The 4-uppercase-hex hashline TAG of the (UTF-8) content, or `null` for a\nmissing or non-UTF-8 file. Pass this in a `[path#TAG]` section to the\n`edit` handler to make precise, drift-safe edits (Phase 5.1 / RFC 0005).",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "additionalProperties": false
