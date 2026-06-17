@@ -138,6 +138,10 @@ pub struct StorageReadFileArgs {
 pub struct StorageReadFileResult {
     /// Raw bytes of the file content, or `null` if the file does not exist.
     pub bytes: Option<Vec<u8>>,
+    /// The 4-uppercase-hex hashline TAG of the (UTF-8) content, or `null` for a
+    /// missing or non-UTF-8 file. Pass this in a `[path#TAG]` section to the
+    /// `edit` handler to make precise, drift-safe edits (Phase 5.1 / RFC 0005).
+    pub tag: Option<String>,
 }
 
 // ── com.nexus.storage::write_file ────────────────────────────────────────────

@@ -46,16 +46,22 @@ pub(crate) fn read_file(
         Err(crate::StorageError::FileNotFound(_)) => None,
         Err(e) => return Err(exec_err(format!("read_file '{path}': {e}"))),
     };
-    // Phase 5.1 PR B2 — record a snapshot of text content so a later `edit`
-    // whose TAG has gone stale can recover via a 3-way merge against this base.
-    // Binary and missing files are skipped; the store self-bounds (size +
-    // path/version caps), so recording every read is cheap and bounded.
-    if let Some(ref raw) = bytes {
-        if let Ok(text) = std::str::from_utf8(raw) {
-            snapshots.record(&path, text);
-        }
-    }
-    to_value(&StorageReadFileResult { bytes }, "read_file")
+    // Phase 5.1 — for text content, record a snapshot so a later `edit` whose
+    // TAG has gone stale can recover via a 3-way merge, and surface the TAG to
+    // the caller so it can author a `[path#TAG]` patch. Binary and missing
+    // files have no TAG; the snapshot store self-bounds (size + path/version
+    // caps), so recording every read is cheap and bounded.
+    let tag = match bytes {
+        Some(ref raw) => match std::str::from_utf8(raw) {
+            Ok(text) => {
+                snapshots.record(&path, text);
+                Some(nexus_hashline::tag(text))
+            }
+            Err(_) => None,
+        },
+        None => None,
+    };
+    to_value(&StorageReadFileResult { bytes, tag }, "read_file")
 }
 
 pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
