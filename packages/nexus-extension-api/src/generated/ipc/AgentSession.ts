@@ -44,4 +44,17 @@ outcome: SessionOutcome,
  * produced. Empty for sessions where compression never
  * triggered (the default unless `SessionConfig::max_context_tokens > 0`).
  */
-compactions?: Array<CompactionEvent>, };
+compactions?: Array<CompactionEvent>, 
+/**
+ * RFC 0008 (Phase 5.4) — the parent session this node forked from
+ * (resume / branch / rewind); `None` for a root session. A forked node
+ * persists only its **own** new rounds; the inherited prefix lives in the
+ * parent, and `session_get` assembles the full transcript by walking the
+ * chain.
+ */
+parent_id?: string | null, 
+/**
+ * RFC 0008 — the parent round index this node forked at (the inclusive
+ * length of the inherited prefix); `None` for a root session.
+ */
+branch_point?: number | null, };

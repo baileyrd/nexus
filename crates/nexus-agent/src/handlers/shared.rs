@@ -830,10 +830,13 @@ impl crate::SessionPolicy for BusBridgePolicy {
     }
 }
 
-/// DG-36 follow-up — run a session with an optional
-/// [`crate::ManifestPolicyGate`] wrapping the base policy.
+/// DG-36 follow-up + RFC 0008 (Phase 5.4) — run a (possibly resumed / forked)
+/// session with an optional [`crate::ManifestPolicyGate`] wrapping the base
+/// policy. Drives [`crate::session::run_session_resumed`] with an inherited
+/// `seed_rounds` prefix and an optional `follow_up` message; an empty seed +
+/// no follow-up is an ordinary fresh run.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_session_optionally_gated<D, P, T>(
+pub(crate) async fn run_session_optionally_gated_resumed<D, P, T>(
     driver: &D,
     dispatcher: &T,
     base_policy: P,
@@ -843,6 +846,8 @@ pub(crate) async fn run_session_optionally_gated<D, P, T>(
     archetype: Option<String>,
     id: String,
     config: crate::SessionConfig,
+    seed_rounds: Vec<crate::RoundRecord>,
+    follow_up: Option<String>,
 ) -> crate::session::AgentSession
 where
     D: crate::ChatDriver + ?Sized,
@@ -852,13 +857,14 @@ where
     match manifest_policy {
         Some(mp) => {
             let wrapped = crate::ManifestPolicyGate::new(base_policy, mp);
-            crate::session::run_session_with_config(
-                driver, dispatcher, &wrapped, goal, system, archetype, id, config,
+            crate::session::run_session_resumed(
+                driver, dispatcher, &wrapped, goal, system, archetype, id, config, seed_rounds,
+                follow_up,
             )
             .await
         }
         None => {
-            crate::session::run_session_with_config(
+            crate::session::run_session_resumed(
                 driver,
                 dispatcher,
                 &base_policy,
@@ -867,6 +873,8 @@ where
                 archetype,
                 id,
                 config,
+                seed_rounds,
+                follow_up,
             )
             .await
         }

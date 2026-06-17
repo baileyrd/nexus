@@ -383,6 +383,17 @@ pub struct AgentSession {
     /// triggered (the default unless `SessionConfig::max_context_tokens > 0`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compactions: Vec<crate::compression::CompactionEvent>,
+    /// RFC 0008 (Phase 5.4) — the parent session this node forked from
+    /// (resume / branch / rewind); `None` for a root session. A forked node
+    /// persists only its **own** new rounds; the inherited prefix lives in the
+    /// parent, and `session_get` assembles the full transcript by walking the
+    /// chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// RFC 0008 — the parent round index this node forked at (the inclusive
+    /// length of the inherited prefix); `None` for a root session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_point: Option<u32>,
 }
 
 /// Run a session against `driver` (the LLM) and `dispatcher` (the
@@ -553,6 +564,10 @@ where
         rounds: seed_rounds,
         outcome: SessionOutcome::Complete,
         compactions: Vec::new(),
+        // The loop is linkage-agnostic; the resume/branch/rewind handlers set
+        // `parent_id` / `branch_point` on the returned session (RFC 0008).
+        parent_id: None,
+        branch_point: None,
     };
 
     if goal.trim().is_empty() {
