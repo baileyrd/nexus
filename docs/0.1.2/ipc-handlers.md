@@ -17,7 +17,7 @@
 | `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 28 |
 | `com.nexus.dap` | 21 |
-| `com.nexus.agent` | 18 |
+| `com.nexus.agent` | 20 |
 | `com.nexus.editor` | 15 |
 | `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
@@ -159,11 +159,12 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.agent (18)
+## com.nexus.agent (20)
 
 | Command | Caps | Note |
 |---------|------|------|
 | `session_run` / `round_decide` | `ai.chat` | drives the tool loop |
+| `ask` / `ask_respond` | `ai.chat` | interactive prompt during the loop (publishes `ask_requested`, awaits a frontend reply) |
 | `delegate` / `plan` | — | **AUDIT** — drives chat under the hood; candidate for `ai.chat` |
 | `history_get` / `history_list` / `history_delete` / `search_transcripts` | — | transcript surface |
 | `list_archetypes` / `list_custom` / `list_tools` | — | catalog |

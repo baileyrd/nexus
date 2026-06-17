@@ -101,6 +101,49 @@ pub(crate) fn insert_pending_bounded(
     evicted
 }
 
+/// Default interactive `ask` wait. Kept under [`DEFAULT_TOOL_TIMEOUT`] (60 s) so
+/// the tool-dispatch ceiling never cuts a wait off mid-flight; a longer
+/// interactive window needs a per-tool dispatch timeout (follow-up).
+pub(crate) const DEFAULT_ASK_TIMEOUT_SECS: u64 = 50;
+
+/// One pending `ask`, paired with its insert time for aging — mirrors
+/// [`PendingEntry`]. The oneshot carries the frontend's answers as raw JSON.
+pub(crate) struct AskEntry {
+    pub(crate) tx: tokio::sync::oneshot::Sender<serde_json::Value>,
+    pub(crate) inserted_at: std::time::Instant,
+}
+
+/// Map of pending `ask` awaits keyed by a fresh ask id. Same bound + aging
+/// posture as [`PendingApprovals`].
+pub(crate) type PendingAsks = std::sync::Mutex<std::collections::HashMap<String, AskEntry>>;
+
+/// Bounded insert into the pending-asks map; mirrors [`insert_pending_bounded`].
+pub(crate) fn insert_ask_bounded(
+    map: &mut std::collections::HashMap<String, AskEntry>,
+    ask_id: String,
+    tx: tokio::sync::oneshot::Sender<serde_json::Value>,
+) -> usize {
+    let now = std::time::Instant::now();
+    let max_age = std::time::Duration::from_secs(MAX_APPROVAL_TIMEOUT_SECS);
+    let before = map.len();
+    map.retain(|_, entry| now.duration_since(entry.inserted_at) < max_age);
+    let mut evicted = before - map.len();
+    while map.len() >= PENDING_APPROVALS_CAP {
+        if let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, e)| e.inserted_at)
+            .map(|(k, _)| k.clone())
+        {
+            map.remove(&oldest);
+            evicted += 1;
+        } else {
+            break;
+        }
+    }
+    map.insert(ask_id, AskEntry { tx, inserted_at: now });
+    evicted
+}
+
 // ── Error / serde plumbing — SD-01 ───────────────────────────────────────────
 
 nexus_plugins::define_dispatch_helpers!(pub(crate));

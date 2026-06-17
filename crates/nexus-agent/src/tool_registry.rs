@@ -725,6 +725,42 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             command_id: "todo".to_string(),
         },
         AgentToolSpec {
+            name: "ask".to_string(),
+            description: "Ask the user one or more questions and wait for their answers — use \
+                only when you genuinely need a decision or missing information you cannot infer. \
+                `questions: [{ id, prompt, options?: [..], multi?: bool }]`; reply is \
+                `{ answers: [{ id, selected: [..], custom_input? }], timed_out }`. If no one is \
+                available (headless run) it returns `timed_out: true` quickly — proceed with a \
+                sensible default in that case."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "prompt": { "type": "string" },
+                                "options": { "type": "array", "items": { "type": "string" } },
+                                "multi": { "type": "boolean" }
+                            },
+                            "required": ["id", "prompt"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["questions"],
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 30_000,
+            required_capabilities: vec![],
+            target_plugin_id: "com.nexus.agent".to_string(),
+            command_id: "ask".to_string(),
+        },
+        AgentToolSpec {
             name: "git_log".to_string(),
             description: "Most-recent N commits on the current branch.".to_string(),
             input_schema: serde_json::json!({

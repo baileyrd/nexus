@@ -184,6 +184,18 @@ command = "round_decide"
 caps = ["ai.chat"]
 note = "reply to round_proposed — pinned to match session_run"
 
+[[handler]]
+plugin = "com.nexus.agent"
+command = "ask"
+caps = ["ai.chat"]
+note = "interactive prompt during the tool loop — pinned to match session_run"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "ask_respond"
+caps = ["ai.chat"]
+note = "reply to ask_requested — pinned to match ask"
+
 # ─── com.nexus.audio — microphone / speaker reach (BL-117) ───────────
 
 [[handler]]
