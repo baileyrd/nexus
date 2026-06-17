@@ -21,4 +21,4 @@ pub mod plugin_ids;
 pub mod sandbox;
 
 pub use path_validator::{ForgePathValidator, PathValidationError};
-pub use sandbox::{SandboxPolicy, WritableRoot};
+pub use sandbox::{default_helper_path, sandbox_argv, SandboxPolicy, WritableRoot};

@@ -36,9 +36,12 @@ pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
 pub use downloads::{DownloadError, DownloadPolicy, DownloadRequest};
 pub use error::SecurityError;
+// Spawn-site helpers live in the leaf `nexus-types` (so a spawn site can wrap
+// a command without linking this engine); re-exported here for convenience.
+pub use nexus_types::{default_helper_path, sandbox_argv};
 pub use os_sandbox::{
-    apply_to_current_thread, block_inet_sockets, confine_current_thread, default_helper_path,
-    sandbox_command, NetworkStatus, SandboxError, SandboxStatus,
+    apply_to_current_thread, block_inet_sockets, confine_current_thread, sandbox_command,
+    NetworkStatus, SandboxError, SandboxStatus,
 };
 pub use sandbox_config::{SandboxConfig, SANDBOX_CONFIG_RELPATH};
 pub use path::ForgePathValidator;

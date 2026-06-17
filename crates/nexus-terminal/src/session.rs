@@ -11,11 +11,13 @@
 //! plugin that wraps it can choose its own concurrency shape.
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use nexus_types::SandboxPolicy;
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use serde::{Deserialize, Serialize};
 
@@ -154,6 +156,42 @@ pub struct SessionConfig {
     pub initial_size: Option<PtySize>,
     /// Extra env vars merged on top of the inherited environment.
     pub env: Vec<(String, String)>,
+    /// OS-sandbox policy to confine the session under. `None` (the default)
+    /// runs the shell directly — interactive sessions are unaffected unless a
+    /// caller opts in. When set to an enforcing policy, the shell is launched
+    /// through the `nexus-sandbox` helper (filesystem + network confinement).
+    pub sandbox: Option<SandboxPolicy>,
+}
+
+/// Decide the actual `(program, args)` to spawn: the shell directly, or the
+/// `nexus-sandbox` helper wrapping it when an *enforcing* sandbox policy is
+/// set. Fails **closed** — if a policy is requested but the helper can't be
+/// located, this errors rather than silently running unsandboxed.
+fn resolve_spawn_target(
+    shell: &ShellSpec,
+    sandbox: Option<&SandboxPolicy>,
+    working_dir: Option<&Path>,
+) -> Result<(PathBuf, Vec<OsString>), String> {
+    match sandbox {
+        // `danger-full-access` is unrestricted — no point routing through the
+        // helper, so treat it like the unsandboxed case.
+        Some(policy) if !policy.is_unrestricted() => {
+            let helper = nexus_types::default_helper_path().ok_or_else(|| {
+                "sandbox requested but the nexus-sandbox helper could not be located".to_string()
+            })?;
+            let cwd = working_dir
+                .map(Path::to_path_buf)
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_default();
+            let argv = nexus_types::sandbox_argv(policy, &cwd, &shell.program, &shell.args)
+                .map_err(|e| e.to_string())?;
+            Ok((helper, argv))
+        }
+        _ => Ok((
+            shell.program.clone(),
+            shell.args.iter().map(|a| a.as_str().into()).collect(),
+        )),
+    }
 }
 
 /// Live terminal session — a PTY master + a child process we spawned on
@@ -219,8 +257,15 @@ impl Session {
             .openpty(size)
             .map_err(|e| TerminalError::PtyAlloc(e.to_string()))?;
 
-        let mut cmd = CommandBuilder::new(&shell.program);
-        for a in &shell.args {
+        // Either the shell directly, or the nexus-sandbox helper wrapping it.
+        let (program, args) =
+            resolve_spawn_target(&shell, config.sandbox.as_ref(), config.working_dir.as_deref())
+                .map_err(|reason| TerminalError::Spawn {
+                    shell: shell_display.clone(),
+                    reason,
+                })?;
+        let mut cmd = CommandBuilder::new(&program);
+        for a in &args {
             cmd.arg(a);
         }
         if let Some(ref wd) = config.working_dir {
@@ -686,6 +731,36 @@ impl Drop for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_spawn_target_runs_shell_directly_when_unsandboxed() {
+        let shell = ShellSpec { program: "/bin/sh".into(), args: vec!["-l".into()] };
+        // No policy → run the shell directly.
+        let (prog, args) = resolve_spawn_target(&shell, None, None).unwrap();
+        assert_eq!(prog, PathBuf::from("/bin/sh"));
+        assert_eq!(args, vec![OsString::from("-l")]);
+        // danger-full-access is unrestricted → also runs directly.
+        let (prog, _) =
+            resolve_spawn_target(&shell, Some(&SandboxPolicy::DangerFullAccess), None).unwrap();
+        assert_eq!(prog, PathBuf::from("/bin/sh"));
+    }
+
+    #[test]
+    fn resolve_spawn_target_wraps_with_helper_when_confined() {
+        let shell = ShellSpec { program: "/bin/sh".into(), args: vec!["-l".into()] };
+        let policy = SandboxPolicy::new_workspace_write(vec![]);
+        // Helper discovery is best-effort; only assert wrapping when located.
+        if nexus_types::default_helper_path().is_some() {
+            let (prog, args) =
+                resolve_spawn_target(&shell, Some(&policy), Some(Path::new("/work"))).unwrap();
+            assert!(prog.ends_with("nexus-sandbox"));
+            // [policy-json, cwd, "--", shell, shell-args…]
+            assert_eq!(args[1], OsString::from("/work"));
+            assert_eq!(args[2], OsString::from("--"));
+            assert_eq!(args[3], OsString::from("/bin/sh"));
+            assert_eq!(args[4], OsString::from("-l"));
+        }
+    }
 
     fn unix_only(test_name: &str) -> bool {
         if !cfg!(unix) {

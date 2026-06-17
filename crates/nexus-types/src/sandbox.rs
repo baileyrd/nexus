@@ -15,6 +15,7 @@
 //! canonicalization or symlink resolution. The enforcement layer is responsible
 //! for canonicalizing paths before consulting the policy.
 
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -207,9 +208,68 @@ impl SandboxPolicy {
     }
 }
 
+/// Best-effort path to the `nexus-sandbox` helper sidecar: the binary named
+/// `nexus-sandbox` alongside the current executable. Spawn sites that ship the
+/// helper elsewhere should supply their own path. Pure path math — does no I/O
+/// beyond reading the current exe path.
+#[must_use]
+pub fn default_helper_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.with_file_name("nexus-sandbox"))
+}
+
+/// The argv to pass to the `nexus-sandbox` helper (everything *after* the
+/// helper program): `[policy-json, cwd, "--", program, args…]`. Frontend-
+/// agnostic, so both `std::process::Command` and portable-pty's `CommandBuilder`
+/// can wrap a command the same way. Lives here (not in `nexus-security`) so a
+/// spawn site can request sandboxing without linking the enforcement engine.
+///
+/// # Errors
+/// Returns the `serde_json::Error` if the policy cannot be serialized (it
+/// cannot, in practice — `SandboxPolicy` is a plain derived `Serialize`).
+pub fn sandbox_argv<P, A>(
+    policy: &SandboxPolicy,
+    cwd: &Path,
+    program: P,
+    args: A,
+) -> Result<Vec<OsString>, serde_json::Error>
+where
+    P: AsRef<OsStr>,
+    A: IntoIterator,
+    A::Item: AsRef<OsStr>,
+{
+    let policy_json = serde_json::to_string(policy)?;
+    let mut argv: Vec<OsString> = Vec::with_capacity(5);
+    argv.push(OsString::from(policy_json));
+    argv.push(cwd.as_os_str().to_owned());
+    argv.push(OsString::from("--"));
+    argv.push(program.as_ref().to_owned());
+    argv.extend(args.into_iter().map(|a| a.as_ref().to_owned()));
+    Ok(argv)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_argv_has_expected_layout() {
+        let argv = sandbox_argv(
+            &SandboxPolicy::ReadOnly,
+            Path::new("/work"),
+            "ls",
+            ["-la", "/tmp"],
+        )
+        .unwrap();
+        // [policy-json, cwd, "--", program, args…]
+        assert_eq!(argv.len(), 6);
+        assert!(argv[0].to_str().unwrap().contains("read-only"));
+        assert_eq!(argv[1], OsStr::new("/work"));
+        assert_eq!(argv[2], OsStr::new("--"));
+        assert_eq!(argv[3], OsStr::new("ls"));
+        assert_eq!(argv[4], OsStr::new("-la"));
+        assert_eq!(argv[5], OsStr::new("/tmp"));
+    }
 
     #[test]
     fn default_is_read_only() {
