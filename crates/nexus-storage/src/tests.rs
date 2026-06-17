@@ -991,7 +991,8 @@ fn edit_applies_hashline_patch_and_reindexes() {
         .expect("write");
 
     let args = edit_args(&engine, "notes/edit.md", "SWAP 2.=2:\n+BETA\n");
-    let reply = crate::handlers::files::edit_file(&engine, &args).expect("edit ok");
+    let snaps = nexus_hashline::SnapshotStore::new();
+    let reply = crate::handlers::files::edit_file(&engine, &snaps, &args).expect("edit ok");
 
     // Result reports one applied file, no conflicts.
     assert_eq!(reply["files"].as_array().unwrap().len(), 1);
@@ -1016,6 +1017,7 @@ fn edit_is_atomic_across_sections() {
     let patch = format!("[notes/a.md#{tag_a}]\nSWAP 1.=1:\n+ONE\n\n[notes/b.md#0000]\nSWAP 1.=1:\n+TWO\n");
     let err = crate::handlers::files::edit_file(
         &engine,
+        &nexus_hashline::SnapshotStore::new(),
         &serde_json::json!({ "patch": patch }),
     )
     .unwrap_err();
@@ -1034,6 +1036,7 @@ fn edit_stale_tag_errors_without_writing() {
     let patch = "[notes/s.md#0000]\nSWAP 1.=1:\n+x\n";
     let err = crate::handlers::files::edit_file(
         &engine,
+        &nexus_hashline::SnapshotStore::new(),
         &serde_json::json!({ "patch": patch }),
     )
     .unwrap_err();
@@ -1047,8 +1050,101 @@ fn edit_rejects_malformed_patch() {
     let engine = StorageEngine::init(dir.path()).expect("init");
     let err = crate::handlers::files::edit_file(
         &engine,
+        &nexus_hashline::SnapshotStore::new(),
         &serde_json::json!({ "patch": "not a patch" }),
     )
     .unwrap_err();
     assert!(format!("{err:?}").contains("malformed"), "got: {err:?}");
+}
+
+// ── Phase 5.1 PR B2: read-snapshot store + 3-way-merge recovery ────────────
+
+#[test]
+fn read_file_handler_records_snapshot_for_later_merge() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/r.md", b"hello\n").expect("write");
+
+    let mut snaps = nexus_hashline::SnapshotStore::new();
+    let reply = crate::handlers::files::read_file(
+        &engine,
+        &mut snaps,
+        &serde_json::json!({ "path": "notes/r.md" }),
+    )
+    .expect("read");
+    // The handler still returns the file bytes …
+    assert!(reply["bytes"].is_array());
+    // … and a snapshot is now available, keyed by the content TAG.
+    let tag = nexus_hashline::tag("hello\n");
+    assert_eq!(snaps.get_by_tag("notes/r.md", &tag).unwrap().content, "hello\n");
+}
+
+#[test]
+fn edit_recovers_via_three_way_merge_after_external_change() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/m.md", b"a\nb\nc\nd\ne\n").expect("write");
+
+    // Agent reads the file — records the base snapshot.
+    let mut snaps = nexus_hashline::SnapshotStore::new();
+    crate::handlers::files::read_file(
+        &engine,
+        &mut snaps,
+        &serde_json::json!({ "path": "notes/m.md" }),
+    )
+    .expect("read");
+    let base_tag = snaps.latest("notes/m.md").expect("snapshot").tag.clone();
+
+    // The file changes underneath (line 4) before the agent's edit lands.
+    engine
+        .write_file("notes/m.md", b"a\nb\nc\nd-changed\ne\n")
+        .expect("external change");
+
+    // The agent edits line 2 against the now-stale base TAG.
+    let patch = format!("[notes/m.md#{base_tag}]\nSWAP 2.=2:\n+b-edited\n");
+    let reply = crate::handlers::files::edit_file(
+        &engine,
+        &snaps,
+        &serde_json::json!({ "patch": patch }),
+    )
+    .expect("edit");
+
+    assert_eq!(reply["files"][0]["status"], "merged");
+    assert_eq!(reply["conflicts"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        engine.read_file("notes/m.md").unwrap(),
+        b"a\nb-edited\nc\nd-changed\ne\n"
+    );
+}
+
+#[test]
+fn edit_surfaces_conflict_without_writing() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine.write_file("notes/c.md", b"shared\n").expect("write");
+
+    let mut snaps = nexus_hashline::SnapshotStore::new();
+    crate::handlers::files::read_file(
+        &engine,
+        &mut snaps,
+        &serde_json::json!({ "path": "notes/c.md" }),
+    )
+    .expect("read");
+    let base_tag = snaps.latest("notes/c.md").expect("snapshot").tag.clone();
+
+    // Both sides change the same single line — unresolvable.
+    engine.write_file("notes/c.md", b"theirs\n").expect("external");
+    let patch = format!("[notes/c.md#{base_tag}]\nSWAP 1.=1:\n+ours\n");
+    let reply = crate::handlers::files::edit_file(
+        &engine,
+        &snaps,
+        &serde_json::json!({ "patch": patch }),
+    )
+    .expect("edit");
+
+    assert_eq!(reply["files"].as_array().unwrap().len(), 0);
+    assert_eq!(reply["conflicts"].as_array().unwrap().len(), 1);
+    assert_eq!(reply["conflicts"][0]["path"], "notes/c.md");
+    // Conflict ⇒ nothing written; the external change stands.
+    assert_eq!(engine.read_file("notes/c.md").unwrap(), b"theirs\n");
 }

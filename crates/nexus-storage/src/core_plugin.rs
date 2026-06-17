@@ -500,6 +500,13 @@ pub struct StorageCorePlugin {
     /// thread signals stop through `commit_stop_tx`.
     commit_stop_tx: Option<mpsc::SyncSender<()>>,
     commit_thread: Option<std::thread::JoinHandle<()>>,
+    /// Phase 5.1 PR B2 (RFC 0005) — bounded in-memory snapshots of files as
+    /// they were last read (keyed by path). `read_file` records into it; the
+    /// `edit` handler reads from it to drive a hashline 3-way merge when a
+    /// patch TAG no longer matches the live file. Mutated only while the
+    /// per-plugin dispatch mutex (`backend.lock()`) is held, so it needs no
+    /// inner lock.
+    snapshots: nexus_hashline::SnapshotStore,
 }
 
 impl StorageCorePlugin {
@@ -519,7 +526,20 @@ impl StorageCorePlugin {
             bridge_thread: None,
             commit_stop_tx: None,
             commit_thread: None,
+            snapshots: nexus_hashline::SnapshotStore::new(),
         }
+    }
+
+    /// Clone the engine handle, or error if `on_init` has not run. Lets the
+    /// `read_file` / `edit` arms hold an owned `Arc` so they can also borrow
+    /// `self.snapshots` without a borrow conflict.
+    fn engine_handle(&self) -> Result<Arc<StorageEngine>, PluginError> {
+        self.engine
+            .clone()
+            .ok_or_else(|| PluginError::ExecutionFailed {
+                plugin_id: PLUGIN_ID.to_string(),
+                reason: "storage engine not initialised (on_init did not run)".to_string(),
+            })
     }
 
     /// Direct access to the underlying engine for the bootstrap/CLI during
@@ -666,6 +686,19 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_LIST_DRAFT_RELATIONS => {
                 return crate::handlers::entity::list_draft_relations(root, args)
             }
+            // read_file / edit are handled here (rather than in the
+            // engine-borrow block below) so they can also touch
+            // `self.snapshots`: read_file records a snapshot, edit reads
+            // it for a hashline 3-way merge. Cloning the engine `Arc`
+            // first frees `self` for the snapshot borrow.
+            HANDLER_READ_FILE => {
+                let engine = self.engine_handle()?;
+                return crate::handlers::files::read_file(&engine, &mut self.snapshots, args);
+            }
+            HANDLER_EDIT_FILE => {
+                let engine = self.engine_handle()?;
+                return crate::handlers::files::edit_file(&engine, &self.snapshots, args);
+            }
             _ => {}
         }
 
@@ -682,7 +715,6 @@ impl CorePlugin for StorageCorePlugin {
 
         match handler_id {
             HANDLER_QUERY_FILES => crate::handlers::files::query_files(engine, args),
-            HANDLER_READ_FILE => crate::handlers::files::read_file(engine, args),
             HANDLER_BACKLINKS => crate::handlers::graph::backlinks(engine, args),
             HANDLER_BACKLINKS_TO_BLOCK => crate::handlers::graph::backlinks_to_block(engine, args),
             HANDLER_QUERY_TASKS => crate::handlers::tasks::query_tasks(engine, args),
@@ -691,7 +723,6 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_SEARCH => crate::handlers::search::search(engine, args),
             HANDLER_QUERY_SYMBOL => crate::handlers::search::query_symbol(engine, args),
             HANDLER_WRITE_FILE => crate::handlers::files::write_file(engine, args),
-            HANDLER_EDIT_FILE => crate::handlers::files::edit_file(engine, args),
             HANDLER_NOTE_APPEND => crate::handlers::notes::note_append(engine, args),
             HANDLER_WRITE_VAULT_FILE => crate::handlers::files::write_vault_file(engine, args),
             HANDLER_DELETE_FILE => crate::handlers::files::delete_file(engine, args),
