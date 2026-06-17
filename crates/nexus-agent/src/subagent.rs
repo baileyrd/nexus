@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+use nexus_types::SandboxPolicy;
 use serde_json::Value;
 use tokio::process::Command;
 
@@ -30,6 +31,18 @@ pub const DEFAULT_SUBAGENT_TIMEOUT: Duration = Duration::from_secs(2 * 3600);
 #[derive(Debug, Clone)]
 pub struct SubagentRunner {
     nexus_bin: PathBuf,
+    /// When set, the subagent is spawned through the `nexus-sandbox` helper
+    /// under this confinement (RFC 0007 PR 3); `None` runs it directly.
+    sandbox: Option<SandboxLaunch>,
+}
+
+/// OS-sandbox confinement for a spawned subagent: run it through the
+/// `nexus-sandbox` helper sidecar (which self-confines, then execs the target)
+/// under `policy`.
+#[derive(Debug, Clone)]
+struct SandboxLaunch {
+    helper: PathBuf,
+    policy: SandboxPolicy,
 }
 
 /// Failure resolving the `nexus` binary path.
@@ -104,7 +117,18 @@ impl SubagentRunner {
     /// Use an explicit path to the `nexus` binary.
     #[must_use]
     pub fn with_binary(nexus_bin: PathBuf) -> Self {
-        Self { nexus_bin }
+        Self {
+            nexus_bin,
+            sandbox: None,
+        }
+    }
+
+    /// Spawn the subagent through the `nexus-sandbox` helper at `helper` under
+    /// `policy` (RFC 0007 PR 3) instead of running the `nexus` binary directly.
+    #[must_use]
+    pub(crate) fn with_sandbox(mut self, helper: PathBuf, policy: SandboxPolicy) -> Self {
+        self.sandbox = Some(SandboxLaunch { helper, policy });
+        self
     }
 
     /// Resolve the `nexus` binary: prefer `override_bin`, otherwise fall back to
@@ -168,17 +192,70 @@ impl SubagentRunner {
     ///
     /// stdin is closed (a headless run never prompts), stdout / stderr are
     /// captured. `NEXUS_FORGE_PATH` is cleared from the child environment so it
-    /// cannot shadow the explicit `--forge-path` the isolation relies on.
+    /// cannot shadow the explicit `--forge-path` the isolation relies on. When a
+    /// sandbox is configured the child is launched through the `nexus-sandbox`
+    /// helper (RFC 0007 PR 3).
     ///
     /// # Errors
     /// Propagates the `std::io::Error` from spawning the child (e.g. the
     /// resolved binary does not exist or is not executable).
     pub async fn run(&self, spec: &SubagentSpec) -> std::io::Result<SubagentOutcome> {
-        let mut cmd = Command::new(&self.nexus_bin);
-        cmd.args(Self::build_argv(spec));
+        let (program, argv) = self.spawn_invocation(spec)?;
+        let mut cmd = Command::new(program);
+        cmd.args(argv);
         cmd.env_remove("NEXUS_FORGE_PATH");
         run_capture(cmd, spec.timeout).await
     }
+
+    /// Resolve the `(program, argv)` to spawn for `spec`: the `nexus` binary
+    /// directly, or — when a sandbox is configured — the `nexus-sandbox` helper
+    /// wrapping it (`[policy-json, cwd, "--", nexus-bin, agent-args…]`, with the
+    /// worktree as the policy cwd). Pure; unit-tested without spawning.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` if the sandbox policy cannot be serialized (it
+    /// cannot in practice — `SandboxPolicy` is a plain derived `Serialize`).
+    fn spawn_invocation(&self, spec: &SubagentSpec) -> std::io::Result<(PathBuf, Vec<OsString>)> {
+        let target = Self::build_argv(spec);
+        match &self.sandbox {
+            None => Ok((self.nexus_bin.clone(), target)),
+            Some(sb) => {
+                let argv =
+                    nexus_types::sandbox_argv(&sb.policy, &spec.forge_root, &self.nexus_bin, target)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+                Ok((sb.helper.clone(), argv))
+            }
+        }
+    }
+}
+
+/// Derive the OS-sandbox policy for an isolated subagent from the parent
+/// forge's policy (RFC 0007 PR 3): confine writes to the subagent's `worktree`
+/// (a `workspace-write` policy), inheriting the parent's network posture. The
+/// caller skips this entirely for a `danger-full-access` parent (operator opted
+/// out of sandboxing).
+#[must_use]
+pub(crate) fn derive_subagent_policy(parent: &SandboxPolicy, worktree: &Path) -> SandboxPolicy {
+    SandboxPolicy::WorkspaceWrite {
+        writable_roots: vec![worktree.to_path_buf()],
+        network_access: parent.has_full_network_access(),
+        exclude_tmpdir_env_var: false,
+        exclude_slash_tmp: false,
+    }
+}
+
+/// Locate the `nexus-sandbox` helper sidecar next to the `nexus` binary, or
+/// `None` if it isn't present (e.g. not built, or a host without the helper).
+/// Callers fall back to an unconfined spawn when this returns `None`.
+#[must_use]
+pub(crate) fn locate_sandbox_helper(nexus_bin: &Path) -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "nexus-sandbox.exe"
+    } else {
+        "nexus-sandbox"
+    };
+    let helper = nexus_bin.with_file_name(name);
+    helper.exists().then_some(helper)
 }
 
 /// Spawn `cmd`, capture stdout/stderr, and enforce `timeout` by killing the
@@ -301,6 +378,78 @@ mod tests {
         assert_eq!(as_str.last().map(String::as_str), Some("-x marks the spot"));
         let sep = as_str.iter().position(|a| a == "--").expect("separator");
         assert_eq!(sep, as_str.len() - 2, "`--` must immediately precede goal");
+    }
+
+    // ── spawn_invocation + sandbox (RFC 0007 PR 3) ───────────────────────────
+
+    #[test]
+    fn spawn_invocation_plain_runs_nexus_directly() {
+        let runner = SubagentRunner::with_binary(PathBuf::from("/opt/nexus"));
+        let (program, argv) = runner.spawn_invocation(&spec("do it")).unwrap();
+        assert_eq!(program, PathBuf::from("/opt/nexus"));
+        assert_eq!(argv, SubagentRunner::build_argv(&spec("do it")));
+    }
+
+    #[test]
+    fn spawn_invocation_sandboxed_wraps_helper() {
+        let runner = SubagentRunner::with_binary(PathBuf::from("/opt/nexus")).with_sandbox(
+            PathBuf::from("/opt/nexus-sandbox"),
+            SandboxPolicy::new_workspace_write(vec![PathBuf::from("/tmp/wt")]),
+        );
+        let (program, argv) = runner.spawn_invocation(&spec("do it")).unwrap();
+        assert_eq!(program, PathBuf::from("/opt/nexus-sandbox"));
+        // Helper argv: [policy-json, cwd, "--", nexus-bin, agent, run, …].
+        let as_str: Vec<String> = argv
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            as_str[0].contains("workspace-write"),
+            "policy json comes first: {}",
+            as_str[0]
+        );
+        assert_eq!(as_str[1], "/tmp/wt", "cwd is the worktree (spec.forge_root)");
+        assert_eq!(as_str[2], "--");
+        assert_eq!(as_str[3], "/opt/nexus", "wrapped program is the nexus binary");
+        assert_eq!(as_str[4], "agent");
+        assert_eq!(as_str[5], "run");
+    }
+
+    #[test]
+    fn derive_subagent_policy_scopes_writes_to_worktree() {
+        let wt = Path::new("/forge/.forge/worktrees/subagent-abc");
+        match derive_subagent_policy(&SandboxPolicy::ReadOnly, wt) {
+            SandboxPolicy::WorkspaceWrite {
+                writable_roots,
+                network_access,
+                ..
+            } => {
+                assert_eq!(writable_roots, vec![wt.to_path_buf()]);
+                assert!(!network_access, "a read-only parent grants no network");
+            }
+            other => panic!("expected workspace-write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn derive_subagent_policy_inherits_parent_network() {
+        let wt = Path::new("/wt");
+        let net_parent = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![PathBuf::from("/elsewhere")],
+            network_access: true,
+            exclude_tmpdir_env_var: false,
+            exclude_slash_tmp: false,
+        };
+        assert!(derive_subagent_policy(&net_parent, wt).has_full_network_access());
+        assert!(derive_subagent_policy(&SandboxPolicy::DangerFullAccess, wt).has_full_network_access());
+    }
+
+    #[test]
+    fn locate_sandbox_helper_absent_is_none() {
+        // A binary in a temp dir with no sibling helper resolves to None.
+        let dir = std::env::temp_dir().join("nexus-subagent-test-no-helper");
+        let bin = dir.join("nexus");
+        assert!(locate_sandbox_helper(&bin).is_none());
     }
 
     // ── resolve ──────────────────────────────────────────────────────────────
