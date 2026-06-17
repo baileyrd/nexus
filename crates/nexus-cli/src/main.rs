@@ -128,6 +128,8 @@ enum Commands {
     Proc(ProcArgs),
     /// Terminal / PTY session operations (PRD-09)
     Term(TermArgs),
+    /// OS process sandbox: inspect the policy, run brokered downloads
+    Sandbox(SandboxArgs),
     /// MCP (Model Context Protocol): run server or operate as host
     Mcp(McpArgs),
     /// ACP (Agent Communication Protocol — BL-145 / Hermes Feature 7):
@@ -618,6 +620,12 @@ fn main() {
                 Ok(code) => std::process::exit(code),
                 Err(e) => Err(e),
             },
+        },
+        Commands::Sandbox(args) => match args.command {
+            SandboxCommand::Policy => commands::sandbox::policy(&mut app),
+            SandboxCommand::Download { url, dest, cwd } => {
+                commands::sandbox::download(&mut app, &url, &dest, cwd.as_deref())
+            }
         },
         Commands::Mcp(args) => match args.command {
             McpCommand::Serve => commands::mcp::serve(&app),
