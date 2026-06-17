@@ -29,7 +29,10 @@ pub(super) fn register(
                 &with_v1_aliases(nexus_security::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
-            Box::new(SecurityCorePlugin::new(Some(Arc::clone(event_bus)))),
+            Box::new(
+                SecurityCorePlugin::new(Some(Arc::clone(event_bus)))
+                    .with_sandbox_config(nexus_security::SandboxConfig::load(forge_root)),
+            ),
         )
         // Security is critical: capability gates and audit emission
         // depend on it. A degraded boot without security would either

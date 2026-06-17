@@ -23,6 +23,7 @@ sha2 = { workspace = true }
 # Outbound HTTPS client builder used by both nexus-ai and nexus-audio.
 # Lives here so both subsystems share one pin policy.
 reqwest = { workspace = true }
+toml = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 

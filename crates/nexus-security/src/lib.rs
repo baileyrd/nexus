@@ -25,6 +25,8 @@ pub mod ipc;
 pub mod os_sandbox;
 mod path;
 mod risk;
+/// OS-sandbox configuration loaded from `<forge>/.forge/sandbox.toml`.
+pub mod sandbox_config;
 /// TLS pinning verifier for outbound HTTPS (BL-102).
 pub mod tls;
 /// Per-host TLS pin table (BL-102).
@@ -38,5 +40,6 @@ pub use os_sandbox::{
     apply_to_current_thread, block_inet_sockets, confine_current_thread, default_helper_path,
     sandbox_command, NetworkStatus, SandboxError, SandboxStatus,
 };
+pub use sandbox_config::{SandboxConfig, SANDBOX_CONFIG_RELPATH};
 pub use path::ForgePathValidator;
 pub use risk::{risk_level, RiskLevel};
