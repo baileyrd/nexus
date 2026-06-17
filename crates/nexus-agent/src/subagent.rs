@@ -16,16 +16,36 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use nexus_types::SandboxPolicy;
 use serde_json::Value;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 /// Default wall-clock ceiling for a single headless subagent run. Matches the
 /// `SESSION_RUN_TIMEOUT` the ai-runtime applies to an in-process session so an
 /// isolated subagent isn't killed sooner than its shared-forge sibling.
 pub const DEFAULT_SUBAGENT_TIMEOUT: Duration = Duration::from_secs(2 * 3600);
+
+/// Env var overriding the `nexus` binary used to spawn isolated subagents
+/// (RFC 0007 PR 4). The binary location is *install*-specific, not forge-
+/// specific — the same forge opened from the CLI vs the Tauri shell needs a
+/// different binary — so it's an env var rather than a per-forge `.forge`
+/// setting. Frontends whose own `current_exe()` isn't the `nexus` CLI (shell,
+/// MCP) set this so subagent isolation can locate the CLI.
+pub const NEXUS_SUBAGENT_BIN_ENV: &str = "NEXUS_SUBAGENT_BIN";
+
+/// Env var capping how many isolated subagents may run concurrently in this
+/// process (RFC 0007 PR 4). Each is a full child `nexus` process, so the cap is
+/// a host-resource guard; defaults to [`DEFAULT_MAX_CONCURRENT_SUBAGENTS`].
+pub const NEXUS_SUBAGENT_MAX_CONCURRENT_ENV: &str = "NEXUS_SUBAGENT_MAX_CONCURRENT";
+
+/// Default ceiling on concurrent isolated subagents per process. Conservative
+/// because each is a full child runtime (its own storage engine + index), far
+/// heavier than an in-process ai-runtime session.
+pub const DEFAULT_MAX_CONCURRENT_SUBAGENTS: usize = 4;
 
 /// Resolved location of the `nexus` binary used to spawn a subagent.
 #[derive(Debug, Clone)]
@@ -131,24 +151,20 @@ impl SubagentRunner {
         self
     }
 
-    /// Resolve the `nexus` binary: prefer `override_bin`, otherwise fall back to
-    /// the currently-running executable.
+    /// Resolve the `nexus` binary in precedence order: explicit `override_bin`,
+    /// then the [`NEXUS_SUBAGENT_BIN_ENV`] env var, then the currently-running
+    /// executable.
     ///
     /// The `current_exe()` fallback is correct only when the delegating process
     /// *is* the `nexus` CLI (CLI / TUI). The Tauri shell and the MCP server run
-    /// a different binary and must pass an explicit override — RFC 0007 promotes
-    /// that override to an `agent.subagent.nexus_bin` setting in PR 4.
+    /// a different binary and must set [`NEXUS_SUBAGENT_BIN_ENV`] (RFC 0007
+    /// PR 4) so subagent isolation can locate the CLI.
     ///
     /// # Errors
-    /// [`ResolveError::CurrentExe`] if no override is given and `current_exe()`
-    /// cannot be determined.
+    /// [`ResolveError::CurrentExe`] if neither an override nor the env var is
+    /// set and `current_exe()` cannot be determined.
     pub fn resolve(override_bin: Option<PathBuf>) -> Result<Self, ResolveError> {
-        match override_bin {
-            Some(p) => Ok(Self::with_binary(p)),
-            None => std::env::current_exe()
-                .map(Self::with_binary)
-                .map_err(ResolveError::CurrentExe),
-        }
+        resolve_binary(override_bin, std::env::var_os(NEXUS_SUBAGENT_BIN_ENV)).map(Self::with_binary)
     }
 
     /// The resolved `nexus` binary path.
@@ -256,6 +272,60 @@ pub(crate) fn locate_sandbox_helper(nexus_bin: &Path) -> Option<PathBuf> {
     };
     let helper = nexus_bin.with_file_name(name);
     helper.exists().then_some(helper)
+}
+
+/// Pure precedence core of [`SubagentRunner::resolve`]: `override_bin`, then the
+/// env var value, then `current_exe()`. Split out so the precedence is
+/// unit-testable without mutating the process environment.
+fn resolve_binary(
+    override_bin: Option<PathBuf>,
+    env_bin: Option<OsString>,
+) -> Result<PathBuf, ResolveError> {
+    if let Some(p) = override_bin {
+        return Ok(p);
+    }
+    if let Some(e) = env_bin {
+        if !e.is_empty() {
+            return Ok(PathBuf::from(e));
+        }
+    }
+    std::env::current_exe().map_err(ResolveError::CurrentExe)
+}
+
+/// Parse the [`NEXUS_SUBAGENT_MAX_CONCURRENT_ENV`] value: a positive integer, or
+/// [`DEFAULT_MAX_CONCURRENT_SUBAGENTS`] when unset / empty / non-positive /
+/// unparseable. Pure so it's unit-testable without env mutation.
+#[must_use]
+fn parse_max_concurrent(raw: Option<&str>) -> usize {
+    raw.and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_SUBAGENTS)
+}
+
+/// Process-wide semaphore bounding concurrent isolated subagents (RFC 0007
+/// PR 4). Initialised once from [`NEXUS_SUBAGENT_MAX_CONCURRENT_ENV`]; the limit
+/// spans every parent session in the process because the constraint is the host
+/// (each subagent is a full child `nexus` process).
+fn subagent_semaphore() -> &'static Semaphore {
+    static SEM: OnceLock<Semaphore> = OnceLock::new();
+    SEM.get_or_init(|| {
+        let limit = parse_max_concurrent(
+            std::env::var(NEXUS_SUBAGENT_MAX_CONCURRENT_ENV)
+                .ok()
+                .as_deref(),
+        );
+        Semaphore::new(limit)
+    })
+}
+
+/// Acquire a slot to run one isolated subagent, blocking until one frees up.
+/// Hold the returned permit for the lifetime of the spawn + merge; dropping it
+/// (including on an early return) releases the slot.
+pub(crate) async fn acquire_subagent_slot() -> tokio::sync::SemaphorePermit<'static> {
+    subagent_semaphore()
+        .acquire()
+        .await
+        .expect("subagent semaphore is never closed")
 }
 
 /// Spawn `cmd`, capture stdout/stderr, and enforce `timeout` by killing the
@@ -467,6 +537,36 @@ mod tests {
         // resolves to *some* path (the test runner) rather than erroring.
         let runner = SubagentRunner::resolve(None).expect("current_exe resolves in tests");
         assert!(runner.binary().is_absolute() || runner.binary().exists());
+    }
+
+    #[test]
+    fn resolve_binary_precedence_override_then_env_then_exe() {
+        // Explicit override beats the env var.
+        let r = resolve_binary(
+            Some(PathBuf::from("/a/nexus")),
+            Some(OsString::from("/b/nexus")),
+        )
+        .unwrap();
+        assert_eq!(r, PathBuf::from("/a/nexus"));
+        // Env var used when there's no override.
+        let r = resolve_binary(None, Some(OsString::from("/b/nexus"))).unwrap();
+        assert_eq!(r, PathBuf::from("/b/nexus"));
+        // An empty env value is ignored, falling through to current_exe.
+        let r = resolve_binary(None, Some(OsString::new())).unwrap();
+        assert!(r.is_absolute() || r.exists());
+        // Neither set → current_exe.
+        let r = resolve_binary(None, None).unwrap();
+        assert!(r.is_absolute() || r.exists());
+    }
+
+    #[test]
+    fn parse_max_concurrent_defaults_and_overrides() {
+        assert_eq!(parse_max_concurrent(None), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+        assert_eq!(parse_max_concurrent(Some("")), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+        assert_eq!(parse_max_concurrent(Some("0")), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+        assert_eq!(parse_max_concurrent(Some("nope")), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+        assert_eq!(parse_max_concurrent(Some("  8 ")), 8);
+        assert_eq!(parse_max_concurrent(Some("1")), 1);
     }
 
     // ── parse_transcript (pure) ──────────────────────────────────────────────

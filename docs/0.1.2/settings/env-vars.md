@@ -13,6 +13,8 @@
 | `NEXUS_NO_KEYRING` | `nexus-plugins/src/grants_crypto.rs:49` | _(off)_ | Disable OS-keyring sealing of granted_caps.json (development only). |
 | `NEXUS_SHELL_BIN` | `nexus-cli/src/commands/desktop.rs:52` | searched on PATH | Path to `nexus-shell` executable; consulted by `nexus desktop`. |
 | `NEXUS_TUI_LOG` | `nexus-tui/src/lib.rs:107` | `$TEMP/nexus-tui.log` | TUI log file path. |
+| `NEXUS_SUBAGENT_BIN` | `nexus-agent/src/subagent.rs` (`SubagentRunner::resolve`) | _(current_exe)_ | Path to the `nexus` CLI used to spawn isolated subagents (RFC 0007, `delegate isolation="worktree"`). The binary location is install-specific, so it's an env var, not a forge setting. Frontends whose own `current_exe()` isn't the CLI (Tauri shell, MCP) set this. |
+| `NEXUS_SUBAGENT_MAX_CONCURRENT` | `nexus-agent/src/subagent.rs` (`subagent_semaphore`) | `4` | Cap on isolated subagents (each a full child `nexus` process) running concurrently in one process. Non-positive / unparseable values fall back to the default. |
 
 ## AI provider detection (read directly by `nexus-ai`)
 
