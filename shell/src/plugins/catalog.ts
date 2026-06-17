@@ -420,6 +420,12 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/agent').then(m => m.agentPlugin),
   },
   {
+    id: 'nexus.sessions', name: 'Session Tree',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Navigate stored agent sessions as a forest — resume, branch, rewind, and checkpoint (RFC 0008).',
+    load: () => import('./nexus/sessions').then(m => m.sessionsPlugin),
+  },
+  {
     id: 'nexus.mcp', name: 'MCP',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Model Context Protocol bridge — connect external MCP servers as tools and resources.',

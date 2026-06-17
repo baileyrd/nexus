@@ -61,7 +61,7 @@ Plugin tiers visible to the host:
 Domain groupings (folder names under `shell/src/plugins/nexus/`):
 
 - **Editing & content:** `editor`, `outline`, `tags`, `templates`, `comments`, `crdtConflict`, `multibufferSync`, `linkSuggest`, `enrich`
-- **AI surfaces:** `ai`, `agent`, `recall`, `semanticSearch`, `viewBuilder`, `dreamCycle`, `memory`
+- **AI surfaces:** `ai`, `agent`, `sessions` (session-tree navigator — resume/branch/rewind/checkpoint, RFC 0008), `recall`, `semanticSearch`, `viewBuilder`, `dreamCycle`, `memory`
 - **Navigation:** `backlinks`, `outgoingLinks`, `files`, `search`, `searchPanel`, `bookmarks`, `launcher`, `paneMode`, `workspace`, `pick`
 - **Visualisation:** `canvas`, `graph`, `bases`, `osArchitecture`, `activityTimeline`
 - **Tools / processes:** `processes`, `terminal`, `git`/`gitPanel`/`gitStatus`, `mcp`, `skills`, `workflow`, `debugger`

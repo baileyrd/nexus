@@ -1,6 +1,6 @@
 # RFC 0008 — Phase 5.4: agent session tree (resume / branch / rewind / checkpoint)
 
-- **Status:** Draft — design (immutable fork-nodes; non-destructive rewind)
+- **Status:** Implemented (PRs 1–6) — immutable fork-nodes; non-destructive rewind
 - **Owner:** unassigned
 - **Created:** 2026-06-17
 - **Tracks:** [RFC 0005](0005-omp-agentic-loop-phase5.md) Phase 5.4; omp blueprint (session JSONL tree with branch/rewind)
@@ -142,9 +142,11 @@ inherited prefix isn't re-indexed. Append-only invariants hold.
   `checkpoints.json` array, with CLI `agent checkpoint[s]` / `checkpoint-rm`.
   *(Shipped — a checkpoint stores no transcript; the coordinate is the
   snapshot.)*
-- **PR 6 — shell tree UI (remaining).** A shell plugin under
-  `shell/src/plugins/nexus/sessions/` that renders the forest from
-  `session_list` and drives resume/branch/rewind/checkpoint via `ipc_call`.
+- **PR 6 — shell tree UI.** The `nexus.sessions` plugin under
+  `shell/src/plugins/nexus/sessions/` renders the forest from `session_list`
+  (pure `buildForest` over `parent_id`/`branch_point`) and drives
+  resume/branch/rewind/checkpoint via `ipc_call`. *(Shipped — closes Phase
+  5.4.)*
 
 ## Open questions
 
