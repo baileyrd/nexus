@@ -145,6 +145,10 @@ pub const HANDLER_ASK: u32 = 26;
 /// `ask_respond` (Phase 5.2) — a frontend delivers answers for a pending `ask`.
 pub const HANDLER_ASK_RESPOND: u32 = 27;
 
+/// `session_resume` (RFC 0008 / Phase 5.4) — continue an existing session with a
+/// new user message, forking a child session at the parent's tip.
+pub const HANDLER_SESSION_RESUME: u32 = 28;
+
 /// Plugin ids this plugin invokes during planning + tool dispatch.
 /// `mcp.host` is intentionally omitted — it loads after agent in
 /// `register_all`, so its dynamic tool fan-out happens once both
@@ -183,6 +187,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("search_transcripts", HANDLER_SEARCH_TRANSCRIPTS),
     ("ask", HANDLER_ASK),
     ("ask_respond", HANDLER_ASK_RESPOND),
+    ("session_resume", HANDLER_SESSION_RESUME),
 ];
 
 /// Core plugin instance.
@@ -299,6 +304,9 @@ impl CorePlugin for AgentCorePlugin {
                 }
                 HANDLER_SESSION_RUN => {
                     handlers::session::handle_session_run(ctx, pending_approvals, &args).await
+                }
+                HANDLER_SESSION_RESUME => {
+                    handlers::session::handle_session_resume(ctx, pending_approvals, &args).await
                 }
                 HANDLER_SESSION_LIST => handlers::session::handle_session_list(ctx).await,
                 HANDLER_SESSION_GET => handlers::session::handle_session_get(ctx, &args).await,

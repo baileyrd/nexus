@@ -180,6 +180,12 @@ note = "drives the same tool-loop machinery as stream_chat"
 
 [[handler]]
 plugin = "com.nexus.agent"
+command = "session_resume"
+caps = ["ai.chat"]
+note = "RFC 0008 — fork+continue a session; same tool-loop as session_run"
+
+[[handler]]
+plugin = "com.nexus.agent"
 command = "round_decide"
 caps = ["ai.chat"]
 note = "reply to round_proposed — pinned to match session_run"

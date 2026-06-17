@@ -1061,6 +1061,8 @@ mod tests {
                 .collect(),
             outcome,
             compactions,
+            parent_id: None,
+            branch_point: None,
         }
     }
 
