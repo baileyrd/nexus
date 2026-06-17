@@ -14,6 +14,7 @@ is a snapshot of intent at its `Created` date, not a maintained spec.
 | [0002](0002-bundled-shell-rush.md) | Bundled shell (`rush`) | Draft — assessment | **Incorporate, staged & opt-in.** Vendor `baileyrd/rush` as a workspace library crate and run it as the bundled shell for *sandboxed* terminal sessions; system shell stays the default. |
 | [0003](0003-terminal-emulator-rusty-term.md) | `rusty_term` terminal emulator | Draft — assessment | **Selectively adopt.** Not the GUI (conflicts with ADR 0011); do adopt the headless VT grid core + OSC 133 / terminal-as-MCP-resource agent introspection. |
 | [0004](0004-lsp-framework-rusty-lsp.md) | `rusty_lsp` LSP framework | Draft — assessment | **Don't incorporate.** Nexus *hosts* language servers, it doesn't *build* them; its JSON-RPC core is already (deliberately) duplicated per protocol. Revisit only for a future forge-as-LSP-server. |
+| [0005](0005-omp-agentic-loop-phase5.md) | Phase 5 — omp agentic loop | Draft — plan | **Enrich, don't rebuild.** `nexus-agent` already has the autonomous loop; `rusty_omp` is a blueprint, not code. Phased small-PR plan to close the gap (hashline editing → tool catalog → subagent isolation → session tree), starting with hashline. |
 
 ## Assessment series (0002–0004)
 
@@ -26,8 +27,9 @@ through-line: a bundled shell (0002) plus OSC 133 command/exit-code capture
 (0003 Track A) would give the sandbox a fully Nexus-owned, agent-observable
 shell + terminal stack.
 
-Repos still unassessed at time of writing: `rusty_omp`, `remind_me`
-(the latter's engine already landed as `com.nexus.memory` — see
+`rusty_omp` is examined separately in RFC 0005 (it is a docs-only blueprint for
+the omp agentic loop, not a repo to incorporate). Repos still unassessed at time
+of writing: `remind_me` (its engine already landed as `com.nexus.memory` — see
 [`../memory.md`](../memory.md)).
 
 ## Conventions
