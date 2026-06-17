@@ -674,6 +674,31 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             command_id: "query_symbol".to_string(),
         },
         AgentToolSpec {
+            name: "ast_query".to_string(),
+            description: "Structural code search via a tree-sitter query (an S-expression \
+                pattern with `@capture`s) over one `language` (rust, typescript, tsx, \
+                javascript, jsx, python, go). Matches code *shape*, not text — e.g. \
+                `(function_item name: (identifier) @fn)` finds every Rust function name. \
+                Returns each capture's path, line, name, and text. Scope with `path`."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "language": { "type": "string" },
+                    "query": { "type": "string" },
+                    "path": { "type": "string" },
+                    "max_results": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["language", "query"],
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 400,
+            required_capabilities: vec![Capability::SearchForge],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "ast_query".to_string(),
+        },
+        AgentToolSpec {
             name: "git_log".to_string(),
             description: "Most-recent N commits on the current branch.".to_string(),
             input_schema: serde_json::json!({
@@ -1123,6 +1148,8 @@ mod tests {
             ("list_dir", "list_dir"),
             ("grep", "find_in_files"),
             ("find_symbol", "query_symbol"),
+            ("ast_query", "ast_query"),
+            ("read_lines", "read_lines"),
             ("edit", "edit"),
         ] {
             let spec = catalog
@@ -1132,8 +1159,8 @@ mod tests {
             assert_eq!(spec.target_plugin_id, "com.nexus.storage");
             assert_eq!(spec.command_id, command);
         }
-        // The three navigation tools are read-only (no approval gate); edit is not.
-        for name in ["list_dir", "grep", "find_symbol"] {
+        // The navigation/search tools are read-only (no approval gate); edit is not.
+        for name in ["list_dir", "grep", "find_symbol", "ast_query", "read_lines"] {
             let spec = catalog.iter().find(|s| s.name == name).unwrap();
             assert!(!spec.requires_approval, "{name} must be read-only");
         }

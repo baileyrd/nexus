@@ -199,6 +199,78 @@ pub struct StorageReadLinesResult {
     pub tag: Option<String>,
 }
 
+// ── com.nexus.storage::ast_query ─────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::ast_query` (handler id `75`).
+///
+/// Runs a [tree-sitter query] over the forge's code files of one `language`.
+/// Phase 5.2 / RFC 0005.
+///
+/// [tree-sitter query]: https://tree-sitter.github.io/tree-sitter/using-parsers#query-syntax
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageAstQueryArgs {
+    /// Grammar to parse with: `rust`, `typescript`, `tsx`, `javascript`,
+    /// `jsx`, `python`, or `go`. Only files of this language are searched.
+    pub language: String,
+    /// A tree-sitter query (S-expression pattern with `@capture`s).
+    pub query: String,
+    /// Optional forge-relative file or directory prefix to scope the search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Maximum matches to return. Defaults to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<u32>,
+}
+
+/// One capture from an `ast_query` match.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageAstQueryMatch {
+    /// Forge-relative path of the matching file.
+    pub path: String,
+    /// 1-based line where the captured node begins.
+    pub line: u32,
+    /// The `@capture` name (empty for an unnamed capture).
+    pub capture: String,
+    /// The captured node's source text (truncated to 240 bytes).
+    pub text: String,
+}
+
+/// Return type for `com.nexus.storage::ast_query`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageAstQueryResult {
+    /// Matches in file/scan order.
+    pub matches: Vec<StorageAstQueryMatch>,
+    /// True when the result hit `max_results` and more matches exist.
+    pub truncated: bool,
+}
+
 // ── com.nexus.storage::write_file ────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::write_file` (handler id `8`).

@@ -52,6 +52,8 @@ tree-sitter-typescript = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-go = { workspace = true }
 tree-sitter-javascript = { workspace = true }
+# Phase 5.2 — iterate tree-sitter query matches (ast_query structural search).
+streaming-iterator = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 schemars = { workspace = true, optional = true }
 

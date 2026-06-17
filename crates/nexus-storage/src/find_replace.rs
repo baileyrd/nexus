@@ -585,7 +585,7 @@ pub fn replace_in_files(
 /// non-ignored regular file. Symlinks are skipped (consistent with
 /// BL-082's reconcile policy). Order is the OS's `read_dir` order
 /// per directory; the caller sorts the final result.
-fn collect_text_files(forge_root: &Path) -> Result<Vec<PathBuf>, StorageError> {
+pub(crate) fn collect_text_files(forge_root: &Path) -> Result<Vec<PathBuf>, StorageError> {
     let mut out = Vec::new();
     walk_into(forge_root, forge_root, &mut out)?;
     Ok(out)

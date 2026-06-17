@@ -62,6 +62,15 @@ pub(crate) fn find_in_files(forge_root: &Path, args: &Value) -> Result<Value, Pl
     to_value(&hits, "find_in_files")
 }
 
+/// `com.nexus.storage::ast_query` (handler id `75`) — tree-sitter structural
+/// code search. Phase 5.2 / RFC 0005.
+pub(crate) fn ast_query(forge_root: &Path, args: &Value) -> Result<Value, PluginError> {
+    let parsed: crate::ipc::StorageAstQueryArgs = parse_args(args, "ast_query")?;
+    let result = crate::ast_query::ast_query(forge_root, &parsed)
+        .map_err(|e| exec_err(format!("ast_query: {e}")))?;
+    to_value(&result, "ast_query")
+}
+
 /// BL-078 — pass-through to [`crate::replace_in_files`]. After a
 /// successful replacement we trigger an index rebuild so search /
 /// graph stay consistent with the rewritten files.

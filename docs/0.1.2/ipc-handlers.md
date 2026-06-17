@@ -12,7 +12,7 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 74 |
+| `com.nexus.storage` | 75 |
 | `com.nexus.git` | 38 |
 | `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 28 |
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (74)
+## com.nexus.storage (75)
 
 ### Read
 
@@ -55,6 +55,7 @@
 | `read_lines` | — | line-range read (1-based, inclusive) for large files; returns the slice + total lines + the file's hashline tag |
 | `read_frontmatter` | — | frontmatter extraction |
 | `find_in_files` | — | ripgrep-style content search |
+| `ast_query` | — | tree-sitter structural code search (S-expression query with `@capture`s) over one language |
 | `search` | — | Tantivy FTS query |
 | `file_exists` | — | existence check |
 | `list_dir` | — | directory enumeration |
