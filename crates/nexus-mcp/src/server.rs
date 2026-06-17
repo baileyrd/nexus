@@ -908,6 +908,30 @@ struct MemoryResultOutput {
     result: serde_json::Value,
 }
 
+/// Input for `nexus_sandbox_policy`. No parameters.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct SandboxPolicyInput {}
+
+/// Input for `nexus_sandbox_download`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct SandboxDownloadInput {
+    /// Source URL (must be https and on the sandbox download allowlist).
+    url: String,
+    /// Destination path (must be inside a sandbox writable root).
+    dest: String,
+    /// Working directory for resolving writable roots; defaults to the
+    /// destination's parent.
+    #[serde(default)]
+    cwd: Option<String>,
+}
+
+/// Wraps a sandbox handler's JSON reply (or `{ "error": … }` on failure).
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SandboxResultOutput {
+    /// The security plugin's reply.
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_memory_facts` — recall SPO entity facts.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MemoryFactsInput {
@@ -1268,6 +1292,42 @@ impl NexusMcpServer {
         match self.memory_call::<serde_json::Value>("wiki_list", serde_json::json!({})).await {
             Ok(result) => Json(MemoryWikiOutput { result }),
             Err(e) => Json(MemoryWikiOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_sandbox_policy",
+        description = "Show the active OS-sandbox configuration (from sandbox.toml): the process-confinement mode (read-only / workspace-write / danger-full-access), writable roots, network access, and the brokered-download allowlist. Read-only introspection"
+    )]
+    async fn sandbox_policy(
+        &self,
+        Parameters(_input): Parameters<SandboxPolicyInput>,
+    ) -> Json<SandboxResultOutput> {
+        match self
+            .security_call::<serde_json::Value>("sandbox_policy", serde_json::json!({}))
+            .await
+        {
+            Ok(result) => Json(SandboxResultOutput { result }),
+            Err(e) => Json(SandboxResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_sandbox_download",
+        description = "Perform a brokered, allowlisted download into a sandbox writable root on behalf of a network-confined process. Doubly gated: the net.http capability plus the sandbox.toml host allowlist + writable-root checks. Returns { bytes_written }"
+    )]
+    async fn sandbox_download(
+        &self,
+        Parameters(input): Parameters<SandboxDownloadInput>,
+    ) -> Json<SandboxResultOutput> {
+        let args = serde_json::json!({ "url": input.url, "dest": input.dest, "cwd": input.cwd });
+        match self.security_call::<serde_json::Value>("download", args).await {
+            Ok(result) => Json(SandboxResultOutput { result }),
+            Err(e) => Json(SandboxResultOutput {
                 result: serde_json::json!({ "error": e }),
             }),
         }
