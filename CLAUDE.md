@@ -54,7 +54,7 @@ Nexus is a **microkernel** Rust workspace. Authoritative current docs are under 
 
 - `crates/nexus-kernel/` — event bus, IPC dispatcher, capability system, plugin lifecycle. Keep small.
 - `crates/nexus-storage/` — file-as-truth, SQLite, Tantivy, file watcher, knowledge graph. Owns the forge.
-- `crates/nexus-<service>/` — service plugins (`ai`, `ai-runtime`, `agent`, `comments`, `editor`, `git`, `linkpreview`, `mcp`, `lsp`, `dap`, `acp`, `skills`, `templates`, `terminal`, `theme`, `workflow`, `database`, `kv`, `security`, `formats`, `notifications`, `audio`, `collab`, `crdt`, `panic-log`, `remote`, `fuzz`). Each `CorePlugin` is registered by `nexus-bootstrap` in deterministic order. The full Cargo workspace has 38 members (includes three not-yet-wired crates — `nexus-memory`, `nexus-context`, `nexus-protocol` — tracked by #188); see `Cargo.toml` for the authoritative list and [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for a one-row-per-crate inventory.
+- `crates/nexus-<service>/` — service plugins (`ai`, `ai-runtime`, `agent`, `comments`, `editor`, `git`, `linkpreview`, `mcp`, `memory`, `lsp`, `dap`, `acp`, `skills`, `templates`, `terminal`, `theme`, `workflow`, `database`, `kv`, `security`, `formats`, `notifications`, `audio`, `collab`, `crdt`, `panic-log`, `remote`, `fuzz`). Each `CorePlugin` is registered by `nexus-bootstrap` in deterministic order. The full Cargo workspace has 39 members — including two not-yet-wired staging libraries (`nexus-context`, `nexus-protocol`, tracked by #188) and the standalone `nexus-memory-hub` sync server (a deployable HTTP binary, not a bootstrap plugin). `nexus-memory` is now wired as the `com.nexus.memory` service plugin (full remind_me parity — see [`docs/0.1.2/memory.md`](docs/0.1.2/memory.md)). See `Cargo.toml` for the authoritative list and [`docs/0.1.2/crates.md`](docs/0.1.2/crates.md) for a one-row-per-crate inventory.
 - `crates/nexus-bootstrap/` — the orchestrator. Frontends call `build_cli_runtime(forge_root)` / `build_tui_runtime(forge_root)` to get a `Runtime` (kernel + registered plugins + invoker context).
 - `crates/nexus-cli/` (`nexus`), `crates/nexus-tui/` (`nexus-tui`), `crates/nexus-mcp/` — frontends. They consume `nexus-bootstrap` and route through `context.ipc_call(...)`.
 - `shell/` + `shell/src-tauri/` (crate `nexus-shell`) — the **single** active desktop target per ADR 0011. The legacy tri-pane `app/` + `crates/nexus-app` was retired in v0.4.0 (recoverable via `v0.1.0-legacy-shell` git tag).
@@ -70,7 +70,7 @@ Nexus is a **microkernel** Rust workspace. Authoritative current docs are under 
 
 ## Plugin tiers
 
-- **Core plugins** — native Rust crates registered at bootstrap, full access. 23 in-tree — list at [`docs/0.1.2/plugins/core.md`](docs/0.1.2/plugins/core.md).
+- **Core plugins** — native Rust crates registered at bootstrap, full access. 24 in-tree — list at [`docs/0.1.2/plugins/core.md`](docs/0.1.2/plugins/core.md).
 - **Community plugins** — WASM-sandboxed via wasmtime or JS-sandboxed via iframe, capability-gated. See [`docs/0.1.2/plugins/community.md`](docs/0.1.2/plugins/community.md). Scaffold via `nexus plugin scaffold --type wasm ...` or `--type script ...`.
 
 ## Forge layout
