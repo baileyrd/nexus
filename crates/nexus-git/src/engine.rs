@@ -612,6 +612,47 @@ impl GitEngine {
         Ok(())
     }
 
+    /// Stage every change in the worktree named `name` and commit it to that
+    /// worktree's checked-out branch (RFC 0007). Returns the short commit hash,
+    /// or `None` when the worktree had no changes (its staged tree already
+    /// matched `HEAD`).
+    ///
+    /// This opens the worktree's *own* repository handle so the commit lands on
+    /// the worktree's branch — the bound engine's [`Self::commit`] would commit
+    /// the parent's index instead. Staging mirrors [`Self::stage_all`]
+    /// (`add_all`, which also records deletions).
+    ///
+    /// # Errors
+    /// Returns [`GitError`] on any libgit2 failure (unknown worktree, signature
+    /// unavailable, …).
+    pub fn commit_worktree(&self, name: &str, message: &str) -> Result<Option<String>, GitError> {
+        let wt = self.repo.find_worktree(name)?;
+        let wt_repo = git2::Repository::open_from_worktree(&wt)?;
+
+        let mut index = wt_repo.index()?;
+        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+        let tree_id = index.write_tree()?;
+
+        // Skip the commit when nothing changed — the staged tree matches HEAD.
+        let head_commit = wt_repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok());
+        if let Some(parent) = &head_commit {
+            if parent.tree_id() == tree_id {
+                return Ok(None);
+            }
+        }
+
+        let tree = wt_repo.find_tree(tree_id)?;
+        let sig = wt_repo.signature()?;
+        let parents: Vec<git2::Commit<'_>> = head_commit.into_iter().collect();
+        let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+        let oid = wt_repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)?;
+        Ok(Some(oid.to_string()[..7].to_string()))
+    }
+
     /// Switch to an existing branch.
     ///
     /// # Errors
@@ -1504,6 +1545,50 @@ mod tests {
                 .any(|w| w.name == "task1"),
             "worktree should be gone after a forced remove"
         );
+    }
+
+    #[test]
+    fn commit_worktree_commits_delta_then_noops_when_clean() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("a.txt"), "hello").unwrap();
+        make_commit(&engine, "init");
+
+        let base = dir.path().join(".forge").join("worktrees");
+        fs::create_dir_all(&base).unwrap();
+        let wt_path = base.join("task1");
+        engine
+            .create_worktree("task1", &wt_path, Some("nexus/subagent/1"))
+            .unwrap();
+
+        // A fresh worktree has nothing to commit.
+        assert_eq!(
+            engine.commit_worktree("task1", "noop").unwrap(),
+            None,
+            "a pristine worktree has no delta to commit"
+        );
+
+        // Edit a file inside the worktree, then commit it to the task branch.
+        fs::write(wt_path.join("a.txt"), "hello from subagent").unwrap();
+        fs::write(wt_path.join("new.md"), "# new").unwrap();
+        let hash = engine
+            .commit_worktree("task1", "subagent: edits")
+            .unwrap()
+            .expect("a delta should produce a commit");
+        assert_eq!(hash.len(), 7, "short hash");
+
+        // The task branch now points at the new commit; the parent's HEAD is
+        // untouched (still the init commit).
+        let branch_tip = engine
+            .repo
+            .find_branch("nexus/subagent/1", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap();
+        assert_eq!(branch_tip.message(), Some("subagent: edits"));
+
+        // Committing again with no further changes is a no-op.
+        assert_eq!(engine.commit_worktree("task1", "noop2").unwrap(), None);
     }
 
     #[test]

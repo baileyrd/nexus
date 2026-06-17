@@ -227,6 +227,10 @@ pub const HANDLER_WORKTREE_CREATE: u32 = 40;
 /// `worktree_remove` — remove a worktree. Args:
 /// [`crate::ipc::GitWorktreeRemoveArgs`].
 pub const HANDLER_WORKTREE_REMOVE: u32 = 41;
+/// `worktree_commit` (RFC 0007) — stage + commit a worktree's changes to its
+/// branch. Args: [`crate::ipc::GitWorktreeCommitArgs`]; returns
+/// [`crate::ipc::GitWorktreeCommitReply`].
+pub const HANDLER_WORKTREE_COMMIT: u32 = 42;
 
 /// Plugin ids this plugin requires already loaded — `nexus-security`
 /// provides the capability + credential types this crate uses.
@@ -278,6 +282,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("worktree_list", HANDLER_WORKTREE_LIST),
     ("worktree_create", HANDLER_WORKTREE_CREATE),
     ("worktree_remove", HANDLER_WORKTREE_REMOVE),
+    ("worktree_commit", HANDLER_WORKTREE_COMMIT),
 ];
 
 /// P2-06 — interval the background git-state watcher sleeps between
@@ -471,6 +476,7 @@ impl CorePlugin for GitCorePlugin {
             HANDLER_WORKTREE_LIST => worktree::worktree_list(&h),
             HANDLER_WORKTREE_CREATE => worktree::worktree_create(&h, args, root),
             HANDLER_WORKTREE_REMOVE => worktree::worktree_remove(&h, args),
+            HANDLER_WORKTREE_COMMIT => worktree::worktree_commit(&h, args),
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),

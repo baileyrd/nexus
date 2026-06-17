@@ -744,6 +744,11 @@ unrestricted = "removes a git worktree — mutates .git inside forge root"
 
 [[handler]]
 plugin = "com.nexus.git"
+command = "worktree_commit"
+unrestricted = "stages + commits a worktree's changes to its branch — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
 command = "delete_branch"
 unrestricted = "deletes a branch ref — mutates .git inside forge root"
 

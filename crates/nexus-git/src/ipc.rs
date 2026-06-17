@@ -359,6 +359,43 @@ pub struct GitWorktreeListReply {
     pub worktrees: Vec<GitWorktreeInfo>,
 }
 
+/// Args for `worktree_commit` (handler id `42`, RFC 0007) — stage every change
+/// in a worktree's working tree and commit it to that worktree's checked-out
+/// branch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitWorktreeCommitArgs {
+    /// Worktree name to commit (as passed to `worktree_create`).
+    pub name: String,
+    /// Commit message.
+    pub message: String,
+}
+
+/// Reply for `worktree_commit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitWorktreeCommitReply {
+    /// Short hash of the new commit, or `None` when the worktree had no
+    /// changes to commit (the staged tree matched its `HEAD`).
+    pub commit_hash: Option<String>,
+}
+
 /// One entry in the `stash_list` response (handler id `24`). Mirrors
 /// [`crate::types::StashEntry`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
