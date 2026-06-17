@@ -70,17 +70,116 @@ pub fn run(
     } else {
         call(app, "session_run", args)?
     };
-    let elapsed = started.elapsed();
-    if notify_after_secs > 0 && elapsed >= Duration::from_secs(notify_after_secs) {
-        if let Err(err) = dispatch_completion_notification(app, goal, elapsed, &response) {
-            // Notification failure is non-fatal — the session itself
-            // already succeeded. Surface on stderr so the user can
-            // see why their toast didn't appear, without aborting.
-            eprintln!("[agent] notification dispatch failed: {err}");
-        }
-    }
+    maybe_notify(app, started.elapsed(), notify_after_secs, &response);
     emit_session(format, &response);
     Ok(())
+}
+
+/// RFC 0008 (Phase 5.4) — `nexus agent sessions`: list stored sessions.
+pub fn sessions(app: &mut App) -> Result<()> {
+    let format = app.format();
+    let response = call(app, "session_list", Value::Object(serde_json::Map::new()))?;
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).unwrap_or_default()
+            );
+        }
+        OutputFormat::Jsonl => {
+            println!("{}", serde_json::to_string(&response).unwrap_or_default());
+        }
+        OutputFormat::Text | OutputFormat::Table => print_session_list(&response),
+    }
+    Ok(())
+}
+
+/// RFC 0008 — `nexus agent show <id>`: print a session's assembled transcript.
+pub fn show(app: &mut App, session_id: &str) -> Result<()> {
+    let format = app.format();
+    let response = call(app, "session_get", serde_json::json!({ "id": session_id }))?;
+    emit_session(format, &response);
+    Ok(())
+}
+
+/// RFC 0008 — `nexus agent resume <id> <message>`: fork at the parent's tip.
+pub fn resume(
+    app: &mut App,
+    session_id: &str,
+    message: &str,
+    notify_after_secs: u64,
+) -> Result<()> {
+    let format = app.format();
+    let args = serde_json::json!({
+        "session_id": session_id,
+        "message": message,
+        "auto_approve": true,
+    });
+    let started = Instant::now();
+    let response = call(app, "session_resume", args)?;
+    maybe_notify(app, started.elapsed(), notify_after_secs, &response);
+    emit_session(format, &response);
+    Ok(())
+}
+
+/// RFC 0008 — `nexus agent branch <id> <round> <message>`: fork at a round.
+pub fn branch(
+    app: &mut App,
+    session_id: &str,
+    at_round: u32,
+    message: &str,
+    notify_after_secs: u64,
+) -> Result<()> {
+    let format = app.format();
+    let args = serde_json::json!({
+        "session_id": session_id,
+        "at_round": at_round,
+        "message": message,
+        "auto_approve": true,
+    });
+    let started = Instant::now();
+    let response = call(app, "session_branch", args)?;
+    maybe_notify(app, started.elapsed(), notify_after_secs, &response);
+    emit_session(format, &response);
+    Ok(())
+}
+
+/// RFC 0008 — `nexus agent rewind <id> <round> [message]`: non-destructive
+/// re-run from `round`. Omitting the message simply redoes from that point.
+pub fn rewind(
+    app: &mut App,
+    session_id: &str,
+    at_round: u32,
+    message: Option<&str>,
+    notify_after_secs: u64,
+) -> Result<()> {
+    let format = app.format();
+    let mut args = serde_json::json!({
+        "session_id": session_id,
+        "at_round": at_round,
+        "auto_approve": true,
+    });
+    if let (Some(msg), Some(map)) = (message, args.as_object_mut()) {
+        map.insert("message".into(), Value::String(msg.into()));
+    }
+    let started = Instant::now();
+    let response = call(app, "session_rewind", args)?;
+    maybe_notify(app, started.elapsed(), notify_after_secs, &response);
+    emit_session(format, &response);
+    Ok(())
+}
+
+/// Best-effort completion notification shared by run / resume / branch /
+/// rewind. The label is the session's goal (read from the reply). A failure
+/// is non-fatal — the session already succeeded — so it only warns on stderr.
+fn maybe_notify(app: &mut App, elapsed: Duration, notify_after_secs: u64, response: &Value) {
+    if notify_after_secs == 0 || elapsed < Duration::from_secs(notify_after_secs) {
+        return;
+    }
+    let goal = response.get("goal").and_then(Value::as_str).unwrap_or("");
+    if let Err(err) = dispatch_completion_notification(app, goal, elapsed, response) {
+        eprintln!("[agent] notification dispatch failed: {err}");
+    }
 }
 
 /// Render a completed session. `--format json` / `jsonl` emit the raw session
@@ -518,6 +617,45 @@ fn print_session(session: &Value) {
     }
 }
 
+/// Render `session_list` (RFC 0008): one line per session, with a `↳` marker +
+/// "forked from" line for child sessions so the forest is legible in a terminal.
+fn print_session_list(list: &Value) {
+    let arr = list.as_array().cloned().unwrap_or_default();
+    if arr.is_empty() {
+        println!("No sessions.");
+        return;
+    }
+    println!("{} session(s):", arr.len());
+    for s in &arr {
+        let id = s.get("id").and_then(Value::as_str).unwrap_or("?");
+        let outcome = s.get("outcome").and_then(Value::as_str).unwrap_or("?");
+        let goal = s.get("goal").and_then(Value::as_str).unwrap_or("");
+        let parent = s.get("parent_id").and_then(Value::as_str);
+        let marker = if parent.is_some() { "↳" } else { "•" };
+        println!("{marker} {id}  [{outcome}]  {}", truncate_str(goal, 60));
+        if let Some(p) = parent {
+            let at = s
+                .get("branch_point")
+                .and_then(Value::as_u64)
+                .map(|b| format!(" @ round {b}"))
+                .unwrap_or_default();
+            println!("    forked from {p}{at}");
+        }
+    }
+}
+
+/// Truncate `s` to at most `max` chars on a char boundary, appending `…`.
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut cut = max;
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…", &s[..cut])
+}
+
 fn preview_json(v: &Value, max: usize) -> String {
     let full = v.to_string();
     if full.len() <= max {
@@ -544,6 +682,26 @@ mod tests {
     use super::*;
 
     // ── BL-132 — interactive prompt helpers ──────────────────────
+
+    // ── RFC 0008 (Phase 5.4) — session-surface helpers ───────────
+
+    #[test]
+    fn truncate_str_passes_short_through_and_ellipsizes_long() {
+        assert_eq!(truncate_str("short goal", 60), "short goal");
+        let long = "x".repeat(80);
+        let out = truncate_str(&long, 60);
+        assert_eq!(out.chars().count(), 61); // 60 chars + ellipsis
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_str_respects_char_boundaries() {
+        // A multi-byte char straddling the cut must not panic or split.
+        let s = "ααααα"; // each α is 2 bytes
+        let out = truncate_str(s, 3); // 3 bytes lands mid-char → backs off to 2
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with('α'));
+    }
 
     #[test]
     fn parse_yes_accepts_y_and_yes_case_insensitive() {

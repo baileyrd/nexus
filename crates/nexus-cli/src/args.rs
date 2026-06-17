@@ -505,6 +505,51 @@ pub(crate) enum AgentCommand {
     /// List custom agents defined in `<forge>/.forge/agents/*/agent.toml`
     /// (PRD-15 §9 — DG-36).
     ListCustom,
+    /// List stored agent sessions (id, outcome, goal; fork linkage).
+    /// RFC 0008 (Phase 5.4).
+    Sessions,
+    /// Show a stored session's full transcript by id. A forked session
+    /// (resume / branch / rewind) is shown with its inherited rounds
+    /// assembled in. RFC 0008.
+    Show {
+        /// Session id (as listed by `agent sessions`).
+        session_id: String,
+    },
+    /// Resume a finished session with a follow-up message — forks a child
+    /// at the parent's tip, seeded with its full transcript. RFC 0008.
+    Resume {
+        /// Session id to resume.
+        session_id: String,
+        /// Follow-up message that drives the continued run.
+        message: String,
+        /// Dispatch a desktop notification when the run takes longer than
+        /// this many seconds. `0` disables. Default 30s.
+        #[arg(long, default_value_t = 30)]
+        notify_after_secs: u64,
+    },
+    /// Branch a parallel line from an earlier round of a session. RFC 0008.
+    Branch {
+        /// Session id to branch from.
+        session_id: String,
+        /// Round to fork from (1-based, inclusive); new rounds continue after.
+        at_round: u32,
+        /// Message that drives the new branch.
+        message: String,
+        #[arg(long, default_value_t = 30)]
+        notify_after_secs: u64,
+    },
+    /// Non-destructively re-run a session from an earlier round — the
+    /// original line is preserved. RFC 0008.
+    Rewind {
+        /// Session id to rewind.
+        session_id: String,
+        /// Round to fork from (1-based, inclusive).
+        at_round: u32,
+        /// Optional new message; omit to simply redo from that round.
+        message: Option<String>,
+        #[arg(long, default_value_t = 30)]
+        notify_after_secs: u64,
+    },
 }
 
 // ---------------------------------------------------------------------------
