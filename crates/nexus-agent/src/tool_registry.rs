@@ -699,6 +699,32 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             command_id: "ast_query".to_string(),
         },
         AgentToolSpec {
+            name: "todo".to_string(),
+            description: "Track a short task list for THIS session (ephemeral — it is not \
+                saved). Ops: `init` replaces the list with `items: [text, …]`; `append` adds \
+                one `text`; `start` moves `id` to in_progress (only one task may be \
+                in_progress at a time); `done` marks `id` completed; `drop` marks `id` \
+                abandoned; `view` returns the list. Each op returns the updated list. Use it \
+                to plan and check off multi-step work."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "op": { "type": "string", "enum": ["init", "append", "start", "done", "drop", "view"] },
+                    "items": { "type": "array", "items": { "type": "string" } },
+                    "text": { "type": "string" },
+                    "id": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["op"],
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 5,
+            required_capabilities: vec![],
+            target_plugin_id: "com.nexus.agent".to_string(),
+            command_id: "todo".to_string(),
+        },
+        AgentToolSpec {
             name: "git_log".to_string(),
             description: "Most-recent N commits on the current branch.".to_string(),
             input_schema: serde_json::json!({
@@ -1139,6 +1165,20 @@ mod tests {
             .find(|s| s.name == "write_file")
             .expect("write_file in catalog");
         assert!(spec.requires_approval);
+    }
+
+    #[test]
+    fn todo_is_session_local_and_read_only() {
+        let spec = default_tool_catalog()
+            .into_iter()
+            .find(|s| s.name == "todo")
+            .expect("todo in catalog");
+        // Advertised under the agent id but handled inline by TodoDispatcher;
+        // never approval-gated, never an IPC handler.
+        assert_eq!(spec.command_id, crate::todo::TODO_COMMAND);
+        assert_eq!(spec.target_plugin_id, crate::todo::TODO_TARGET);
+        assert!(!spec.requires_approval);
+        assert!(spec.required_capabilities.is_empty());
     }
 
     #[test]

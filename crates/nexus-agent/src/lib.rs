@@ -53,6 +53,7 @@ mod llm;
 pub mod memory;
 pub mod session;
 pub mod tool_registry;
+mod todo;
 
 pub use agents::EchoAgent;
 pub use archetypes::{
