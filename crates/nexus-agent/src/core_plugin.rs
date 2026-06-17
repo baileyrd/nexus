@@ -155,6 +155,15 @@ pub const HANDLER_SESSION_BRANCH: u32 = 29;
 /// `session_rewind` (RFC 0008) — non-destructively re-run from an earlier round.
 pub const HANDLER_SESSION_REWIND: u32 = 30;
 
+/// `session_checkpoint` (RFC 0008) — name a `(session, round)` location.
+pub const HANDLER_SESSION_CHECKPOINT: u32 = 31;
+
+/// `session_checkpoints` (RFC 0008) — list named checkpoints.
+pub const HANDLER_SESSION_CHECKPOINTS: u32 = 32;
+
+/// `session_checkpoint_delete` (RFC 0008) — remove a checkpoint by name.
+pub const HANDLER_SESSION_CHECKPOINT_DELETE: u32 = 33;
+
 /// Plugin ids this plugin invokes during planning + tool dispatch.
 /// `mcp.host` is intentionally omitted — it loads after agent in
 /// `register_all`, so its dynamic tool fan-out happens once both
@@ -196,6 +205,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("session_resume", HANDLER_SESSION_RESUME),
     ("session_branch", HANDLER_SESSION_BRANCH),
     ("session_rewind", HANDLER_SESSION_REWIND),
+    ("session_checkpoint", HANDLER_SESSION_CHECKPOINT),
+    ("session_checkpoints", HANDLER_SESSION_CHECKPOINTS),
+    ("session_checkpoint_delete", HANDLER_SESSION_CHECKPOINT_DELETE),
 ];
 
 /// Core plugin instance.
@@ -321,6 +333,15 @@ impl CorePlugin for AgentCorePlugin {
                 }
                 HANDLER_SESSION_REWIND => {
                     handlers::session::handle_session_rewind(ctx, pending_approvals, &args).await
+                }
+                HANDLER_SESSION_CHECKPOINT => {
+                    handlers::checkpoint::handle_session_checkpoint(ctx, &args).await
+                }
+                HANDLER_SESSION_CHECKPOINTS => {
+                    handlers::checkpoint::handle_session_checkpoints(ctx).await
+                }
+                HANDLER_SESSION_CHECKPOINT_DELETE => {
+                    handlers::checkpoint::handle_session_checkpoint_delete(ctx, &args).await
                 }
                 HANDLER_SESSION_LIST => handlers::session::handle_session_list(ctx).await,
                 HANDLER_SESSION_GET => handlers::session::handle_session_get(ctx, &args).await,

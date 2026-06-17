@@ -550,6 +550,23 @@ pub(crate) enum AgentCommand {
         #[arg(long, default_value_t = 30)]
         notify_after_secs: u64,
     },
+    /// Name a `(session, round)` location as a checkpoint — a stable handle
+    /// for later navigation. RFC 0008.
+    Checkpoint {
+        /// Session id to bookmark.
+        session_id: String,
+        /// Round within the session (1-based, inclusive).
+        round: u32,
+        /// Unique checkpoint name.
+        name: String,
+    },
+    /// List named checkpoints. RFC 0008.
+    Checkpoints,
+    /// Remove a named checkpoint. RFC 0008.
+    CheckpointRm {
+        /// Checkpoint name to remove.
+        name: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

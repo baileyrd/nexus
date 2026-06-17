@@ -396,6 +396,32 @@ pub struct AgentSession {
     pub branch_point: Option<u32>,
 }
 
+/// RFC 0008 (Phase 5.4) — a named pointer at a `(session_id, round)` location.
+/// Under the immutable-fork model that coordinate *is* a snapshot, so a
+/// checkpoint is just a stable, human-friendly handle for navigation /
+/// branching — no transcript copy. The set is persisted as a JSON array in
+/// `<forge>/.forge/agent/sessions/checkpoints.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCheckpoint {
+    /// Unique, human-friendly name (the stable handle).
+    pub name: String,
+    /// The session this checkpoint points into.
+    pub session_id: String,
+    /// The round within that session (1-based).
+    pub round: u32,
+    /// RFC 3339 UTC creation timestamp.
+    pub created_at: String,
+}
+
 /// Run a session against `driver` (the LLM) and `dispatcher` (the
 /// tool transport), driving rounds until the model is done, the
 /// policy aborts, every tool in a round is denied, or
