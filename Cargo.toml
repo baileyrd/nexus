@@ -4,6 +4,7 @@ exclude = ["shell"]
 members = [
     "crates/nexus-types",
     "crates/nexus-plugin-api",
+    "crates/nexus-hashline",
     "crates/nexus-kernel",
     "crates/nexus-kv",
     "crates/nexus-security",
@@ -52,6 +53,7 @@ publish = false
 [workspace.dependencies]
 # Internal crates
 nexus-plugin-api = { path = "crates/nexus-plugin-api" }
+nexus-hashline = { path = "crates/nexus-hashline" }
 
 # Async runtime
 tokio = { version = "1.51", default-features = false, features = [
@@ -133,6 +135,9 @@ rayon = "1.11"
 
 # Hashing
 sha2 = "0.11"
+
+# 3-way merge for hashline edits (RFC 0005 / the nexus-hashline leaf crate).
+diffy = "0.4"
 
 # Authenticated encryption (BL-101: granted_caps.json at-rest encryption)
 chacha20poly1305 = "0.10"
