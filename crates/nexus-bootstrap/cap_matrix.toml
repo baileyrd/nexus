@@ -186,6 +186,18 @@ note = "RFC 0008 — fork+continue a session; same tool-loop as session_run"
 
 [[handler]]
 plugin = "com.nexus.agent"
+command = "session_branch"
+caps = ["ai.chat"]
+note = "RFC 0008 — fork a parallel line from an earlier round"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_rewind"
+caps = ["ai.chat"]
+note = "RFC 0008 — non-destructively re-run from an earlier round"
+
+[[handler]]
+plugin = "com.nexus.agent"
 command = "round_decide"
 caps = ["ai.chat"]
 note = "reply to round_proposed — pinned to match session_run"

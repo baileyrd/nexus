@@ -72,6 +72,44 @@ struct SessionResumeArgs {
     session_config: Option<crate::session::SessionConfig>,
 }
 
+/// Args for `session_branch` (RFC 0008) — fork a parallel line from an earlier
+/// round `at_round` with a new user `message`.
+#[derive(Debug, Deserialize)]
+struct SessionBranchArgs {
+    session_id: String,
+    /// The parent round to fork from (1-based, inclusive). Inherits rounds
+    /// `1..=at_round`; new rounds continue from `at_round + 1`.
+    at_round: u32,
+    message: String,
+    #[serde(default)]
+    auto_approve: bool,
+    #[serde(default)]
+    approval_timeout_secs: Option<u64>,
+    #[serde(default)]
+    strict_approval: bool,
+    #[serde(default)]
+    session_config: Option<crate::session::SessionConfig>,
+}
+
+/// Args for `session_rewind` (RFC 0008) — non-destructively re-run from an
+/// earlier round `at_round`. The new message is optional (omit to simply redo
+/// from that point); the original line is preserved (immutable fork-node).
+#[derive(Debug, Deserialize)]
+struct SessionRewindArgs {
+    session_id: String,
+    at_round: u32,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    auto_approve: bool,
+    #[serde(default)]
+    approval_timeout_secs: Option<u64>,
+    #[serde(default)]
+    strict_approval: bool,
+    #[serde(default)]
+    session_config: Option<crate::session::SessionConfig>,
+}
+
 /// DG-33 follow-up — auto-record the completed session into the
 /// agent's `history.jsonl`.
 async fn record_session_memory(ctx: &KernelPluginContext, session: &crate::session::AgentSession) {
@@ -174,9 +212,57 @@ pub(crate) async fn handle_session_run(
     run_and_persist_session(ctx, pending_approvals, req).await
 }
 
-/// RFC 0008 (Phase 5.4) — resume a session: fork a child at the parent's tip,
-/// seeded with the parent's full (assembled) transcript plus a new user
+/// Approval + config knobs shared by every fork verb (resume/branch/rewind).
+struct ForkOptions {
+    auto_approve: bool,
+    approval_timeout_secs: Option<u64>,
+    strict_approval: bool,
+    session_config: crate::session::SessionConfig,
+}
+
+/// RFC 0008 (Phase 5.4) — the single fork primitive behind resume / branch /
+/// rewind. Assemble the parent, truncate its transcript to `up_to_round`
+/// (`None` = the tip, i.e. resume), seed a child at that point with an optional
 /// `message`, then run + persist it as a delta node linked to the parent.
+async fn fork_session(
+    ctx: Arc<KernelPluginContext>,
+    pending_approvals: Arc<PendingApprovals>,
+    verb: &str,
+    parent_id: String,
+    up_to_round: Option<u32>,
+    message: Option<String>,
+    opts: ForkOptions,
+) -> Result<serde_json::Value, PluginError> {
+    let parent = assemble_session(&ctx, parent_id.clone(), 0).await?;
+    let tip = parent.rounds.last().map_or(0, |r| r.round);
+    let branch_point =
+        resolve_fork_point(up_to_round, tip).map_err(|e| exec_err(format!("{verb}: {e}")))?;
+    // Seed = the parent's rounds up to (inclusive) the fork point.
+    let seed_rounds: Vec<crate::RoundRecord> = parent
+        .rounds
+        .into_iter()
+        .filter(|r| r.round <= branch_point)
+        .collect();
+    let req = SessionRunRequest {
+        goal: parent.goal,
+        archetype: parent.archetype,
+        // The system prompt isn't persisted; re-resolve it from the archetype.
+        system: None,
+        auto_approve: opts.auto_approve,
+        approval_timeout_secs: opts.approval_timeout_secs,
+        strict_approval: opts.strict_approval,
+        session_config: opts.session_config,
+        session_id: uuid::Uuid::new_v4().to_string(),
+        seed_rounds,
+        follow_up: message,
+        parent_id: Some(parent_id),
+        branch_point: Some(branch_point),
+    };
+    run_and_persist_session(ctx, pending_approvals, req).await
+}
+
+/// RFC 0008 — resume a session: fork a child at the parent's **tip**, seeded
+/// with the parent's full transcript plus a new user `message`.
 pub(crate) async fn handle_session_resume(
     ctx: Arc<KernelPluginContext>,
     pending_approvals: Arc<PendingApprovals>,
@@ -186,24 +272,78 @@ pub(crate) async fn handle_session_resume(
     if parsed.message.trim().is_empty() {
         return Err(exec_err("session_resume: `message` must be non-empty".into()));
     }
-    let parent = assemble_session(&ctx, parsed.session_id.clone(), 0).await?;
-    let branch_point = parent.rounds.last().map_or(0, |r| r.round);
-    let req = SessionRunRequest {
-        goal: parent.goal,
-        archetype: parent.archetype,
-        // The system prompt isn't persisted; re-resolve it from the archetype.
-        system: None,
-        auto_approve: parsed.auto_approve,
-        approval_timeout_secs: parsed.approval_timeout_secs,
-        strict_approval: parsed.strict_approval,
-        session_config: parsed.session_config.unwrap_or_default(),
-        session_id: uuid::Uuid::new_v4().to_string(),
-        seed_rounds: parent.rounds,
-        follow_up: Some(parsed.message),
-        parent_id: Some(parsed.session_id),
-        branch_point: Some(branch_point),
-    };
-    run_and_persist_session(ctx, pending_approvals, req).await
+    fork_session(
+        ctx,
+        pending_approvals,
+        "session_resume",
+        parsed.session_id,
+        None,
+        Some(parsed.message),
+        ForkOptions {
+            auto_approve: parsed.auto_approve,
+            approval_timeout_secs: parsed.approval_timeout_secs,
+            strict_approval: parsed.strict_approval,
+            session_config: parsed.session_config.unwrap_or_default(),
+        },
+    )
+    .await
+}
+
+/// RFC 0008 — branch a session: fork a parallel line from an earlier round
+/// `at_round` with a new user `message`.
+pub(crate) async fn handle_session_branch(
+    ctx: Arc<KernelPluginContext>,
+    pending_approvals: Arc<PendingApprovals>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: SessionBranchArgs = parse_args(args, "session_branch")?;
+    if parsed.message.trim().is_empty() {
+        return Err(exec_err("session_branch: `message` must be non-empty".into()));
+    }
+    fork_session(
+        ctx,
+        pending_approvals,
+        "session_branch",
+        parsed.session_id,
+        Some(parsed.at_round),
+        Some(parsed.message),
+        ForkOptions {
+            auto_approve: parsed.auto_approve,
+            approval_timeout_secs: parsed.approval_timeout_secs,
+            strict_approval: parsed.strict_approval,
+            session_config: parsed.session_config.unwrap_or_default(),
+        },
+    )
+    .await
+}
+
+/// RFC 0008 — rewind a session: non-destructively re-run from an earlier round
+/// `at_round`. The message is optional (omit to simply redo from that point);
+/// the original line is preserved (immutable fork-node).
+pub(crate) async fn handle_session_rewind(
+    ctx: Arc<KernelPluginContext>,
+    pending_approvals: Arc<PendingApprovals>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: SessionRewindArgs = parse_args(args, "session_rewind")?;
+    let message = parsed
+        .message
+        .filter(|m| !m.trim().is_empty());
+    fork_session(
+        ctx,
+        pending_approvals,
+        "session_rewind",
+        parsed.session_id,
+        Some(parsed.at_round),
+        message,
+        ForkOptions {
+            auto_approve: parsed.auto_approve,
+            approval_timeout_secs: parsed.approval_timeout_secs,
+            strict_approval: parsed.strict_approval,
+            session_config: parsed.session_config.unwrap_or_default(),
+        },
+    )
+    .await
 }
 
 /// Shared core: build the driver/dispatcher, resolve the system prompt + manifest
@@ -529,6 +669,19 @@ fn delta_rounds(
     }
 }
 
+/// Resolve a fork verb's target round: `None` forks at the parent's `tip`
+/// (resume); `Some(k)` forks at round `k`, which must be in `1..=tip`
+/// (branch / rewind). Pure.
+fn resolve_fork_point(up_to_round: Option<u32>, tip: u32) -> Result<u32, String> {
+    match up_to_round {
+        Some(k) if k == 0 || k > tip => {
+            Err(format!("at_round {k} out of range 1..={tip}"))
+        }
+        Some(k) => Ok(k),
+        None => Ok(tip),
+    }
+}
+
 pub(crate) async fn handle_session_delete(
     ctx: Arc<KernelPluginContext>,
     args: &serde_json::Value,
@@ -557,7 +710,7 @@ pub(crate) fn session_path(id: &str) -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{assemble_rounds, delta_rounds};
+    use super::{assemble_rounds, delta_rounds, resolve_fork_point};
     use crate::RoundRecord;
 
     fn round(n: u32) -> RoundRecord {
@@ -603,5 +756,26 @@ mod tests {
         let assembled = assemble_rounds(&parent_full, 2, node_delta);
         assert_eq!(rounds_of(&assembled), vec![1, 2, 3, 4]);
         assert_eq!(rounds_of(&delta_rounds(&assembled, Some(2))), vec![3, 4]);
+    }
+
+    #[test]
+    fn resolve_fork_point_none_is_tip_for_resume() {
+        assert_eq!(resolve_fork_point(None, 5), Ok(5));
+        // A parent with no rounds resumes at 0 (the loop then starts fresh).
+        assert_eq!(resolve_fork_point(None, 0), Ok(0));
+    }
+
+    #[test]
+    fn resolve_fork_point_accepts_in_range_for_branch_rewind() {
+        assert_eq!(resolve_fork_point(Some(1), 5), Ok(1));
+        assert_eq!(resolve_fork_point(Some(3), 5), Ok(3));
+        assert_eq!(resolve_fork_point(Some(5), 5), Ok(5)); // tip is inclusive
+    }
+
+    #[test]
+    fn resolve_fork_point_rejects_out_of_range() {
+        assert!(resolve_fork_point(Some(0), 5).is_err()); // rounds are 1-based
+        assert!(resolve_fork_point(Some(6), 5).is_err()); // past the tip
+        assert!(resolve_fork_point(Some(1), 0).is_err()); // empty parent
     }
 }

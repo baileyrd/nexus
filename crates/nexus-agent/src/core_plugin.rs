@@ -149,6 +149,12 @@ pub const HANDLER_ASK_RESPOND: u32 = 27;
 /// new user message, forking a child session at the parent's tip.
 pub const HANDLER_SESSION_RESUME: u32 = 28;
 
+/// `session_branch` (RFC 0008) — fork a parallel line from an earlier round.
+pub const HANDLER_SESSION_BRANCH: u32 = 29;
+
+/// `session_rewind` (RFC 0008) — non-destructively re-run from an earlier round.
+pub const HANDLER_SESSION_REWIND: u32 = 30;
+
 /// Plugin ids this plugin invokes during planning + tool dispatch.
 /// `mcp.host` is intentionally omitted — it loads after agent in
 /// `register_all`, so its dynamic tool fan-out happens once both
@@ -188,6 +194,8 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("ask", HANDLER_ASK),
     ("ask_respond", HANDLER_ASK_RESPOND),
     ("session_resume", HANDLER_SESSION_RESUME),
+    ("session_branch", HANDLER_SESSION_BRANCH),
+    ("session_rewind", HANDLER_SESSION_REWIND),
 ];
 
 /// Core plugin instance.
@@ -307,6 +315,12 @@ impl CorePlugin for AgentCorePlugin {
                 }
                 HANDLER_SESSION_RESUME => {
                     handlers::session::handle_session_resume(ctx, pending_approvals, &args).await
+                }
+                HANDLER_SESSION_BRANCH => {
+                    handlers::session::handle_session_branch(ctx, pending_approvals, &args).await
+                }
+                HANDLER_SESSION_REWIND => {
+                    handlers::session::handle_session_rewind(ctx, pending_approvals, &args).await
                 }
                 HANDLER_SESSION_LIST => handlers::session::handle_session_list(ctx).await,
                 HANDLER_SESSION_GET => handlers::session::handle_session_get(ctx, &args).await,
