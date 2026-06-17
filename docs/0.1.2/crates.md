@@ -2,7 +2,7 @@
 
 > **As of:** 2026-05-17. Sourced from each crate's `Cargo.toml` and `src/lib.rs`.
 
-All 38 workspace members in `crates/`. Excluded from this table: `shell/src-tauri/` (Tauri bridge — see [`shell.md`](shell.md)) and `packages/nexus-extension-api/` (TS package — see [`shell.md`](shell.md)).
+All 39 workspace members in `crates/`. Excluded from this table: `shell/src-tauri/` (Tauri bridge — see [`shell.md`](shell.md)) and `packages/nexus-extension-api/` (TS package — see [`shell.md`](shell.md)).
 
 | Crate | Kind | Purpose | IPC plugin id | Direct nexus-* deps | Notable external deps | Has CorePlugin impl? | Has settings? | Notes |
 |-------|------|---------|---------------|---------------------|----------------------|----------------------|---------------|-------|
@@ -41,7 +41,8 @@ All 38 workspace members in `crates/`. Excluded from this table: `shell/src-taur
 | nexus-fuzz | lib | Security fuzz targets (BL-103) | — | nexus-kernel, nexus-plugin-api, nexus-plugins, nexus-types | rand | No | No | Not published; stable-Rust smoke runner |
 | nexus-audio | lib | Audio subsystem: STT + TTS provider traits | com.nexus.audio | nexus-kernel, nexus-plugins | reqwest, base64, whisper-rs, hound | Yes | No | BL-117; optional local-audio feature |
 | nexus-collab | lib | Live-collaboration relay: WebSocket transport | com.nexus.collab | nexus-kernel, nexus-plugins | tokio-tungstenite, futures-util, uuid | Yes | No | BL-143 Phase 1; topic-agnostic relay |
-| nexus-memory | lib | Native memory engine: SQLite persistence + FTS5 search (remind_me-parity schema) | com.nexus.memory | nexus-plugin-api, nexus-plugins | rusqlite, r2d2, r2d2_sqlite | Yes | No | #188 — wired as a service plugin (CRUD/search live; vector/entity/wiki/sync to follow) |
+| nexus-memory | lib | Native memory engine at full remind_me parity: SQLite + FTS5, hybrid-vector recall (RRF), SPO facts + entity graph, tags, ACT-R vitality, capture+decompose, consolidate, LLM-wiki, import/export, hub sync, bus capture | com.nexus.memory | nexus-plugin-api, nexus-plugins | rusqlite, r2d2, r2d2_sqlite | Yes | No | #188 — wired service plugin (21 IPC handlers); see [`memory.md`](memory.md) |
+| nexus-memory-hub | bin | Standalone HTTP sync server for cross-instance memory replication (the hub `nexus-memory`'s `sync` handler pushes/pulls against) | — (deployable binary) | nexus-memory | axum/reqwest, rusqlite | No | No | Deployable sidecar; not a bootstrap plugin |
 | nexus-context | lib | Typed context-assembly pipeline (budget-bounded entries) | — | nexus-memory, nexus-plugin-api | serde, serde_json | No | No | Move 6; staging library — consumes nexus-memory; awaits nexus-ai-runtime consumer wiring (#188) |
 | nexus-protocol | lib | Speech-act protocol above rmcp transport | — | nexus-plugin-api | serde, serde_json | No | No | Move 7; staging library — zero in-tree consumers; awaits agent-loop adoption of typed messages (#188) |
 
@@ -49,7 +50,7 @@ All 38 workspace members in `crates/`. Excluded from this table: `shell/src-taur
 
 | Stat | Count |
 |------|-------|
-| Workspace members | 38 |
+| Workspace members | 39 |
 | Crates registering a CorePlugin | 24 |
 | Crates exposing a runtime-mutable Config struct | 11 |
 | Crates with no `nexus-*` deps (leaves) | 4 (`nexus-types`, `nexus-plugin-api`, `nexus-panic-log`, `nexus-fuzz` for deps the test cares about) |
@@ -60,5 +61,5 @@ All 38 workspace members in `crates/`. Excluded from this table: `shell/src-taur
 - **`?` in the "Has settings?" column** means the crate has runtime state but no externally-mutable Config struct was found in the lib.rs/Cargo.toml surface; review on a per-handler basis if you need to tune behaviour.
 - **The "Notable external deps" column** is curated, not exhaustive — only deps that hint at function are listed. See each crate's `Cargo.toml` for the full graph.
 - **`nexus-bootstrap` legitimately depends on every service crate** because it's the sole linker per invariant 2.
-- **`nexus-memory` is now a service plugin** (`com.nexus.memory`, #188) — promoted from a staging library to an IPC-reachable service (SQLite persistence + FTS5 search; `add`/`get`/`list`/`search`/`update`/`delete`/`stats` handlers live, with vector/entity/wiki/sync to follow). Registered by `nexus-bootstrap` right after storage; no longer exempt in `bootstrap_coverage`.
+- **`nexus-memory` is a service plugin at full remind_me parity** (`com.nexus.memory`, #188) — promoted from a staging library to an IPC-reachable service with 21 handlers: CRUD/list/stats, FTS5 + hybrid-vector recall (RRF), SPO facts + entity graph, tags, ACT-R vitality, import/export, cross-instance `sync` (against the standalone `nexus-memory-hub`), LLM `wiki_*` synthesis, `auto_capture`/`get_capture`/`consolidate`, and passive bus capture. Reachable from CLI, TUI, MCP, and the shell dashboard. Registered by `nexus-bootstrap` right after storage; no longer exempt in `bootstrap_coverage`. Full surface: [`memory.md`](memory.md).
 - **Staging libraries (`nexus-context`, `nexus-protocol`)** — two workspace members still ship ahead of their consumers (#188). They are not `CorePlugin`s; their integration path is through a downstream consumer crate (`nexus-ai-runtime` for `nexus-context`, the agent loop for `nexus-protocol`). The bootstrap-coverage test (`crates/nexus-bootstrap/tests/bootstrap_coverage.rs`) exempts them on this basis; removing a row requires either landing the consumer or a deliberate decision to promote the library into an IPC-reachable service (an IPC handler design + cap-matrix entry — as was just done for `nexus-memory`).

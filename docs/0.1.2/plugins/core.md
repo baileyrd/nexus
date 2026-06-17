@@ -29,33 +29,34 @@ pub trait CorePlugin: Send + Sync {
 - `dispatch_async` — futures-returning handler; override for handlers that need `await`. The dispatcher tries `dispatch_async` first and falls back to sync.
 - `wire_context` — kernel calls this exactly once with a per-plugin `KernelPluginContext` that the plugin uses for nested `ipc_call`, `emit_event`, `settings()`.
 
-## 23 in-tree core plugins
+## 24 in-tree core plugins
 
 Listed in registration order (the order matters for deterministic boot). Source of truth: `crates/nexus-bootstrap/src/plugins/mod.rs::register_all`.
 
-1. **com.nexus.security** (`crates/nexus-security/`) — keyring vault, audit log, TLS pinning
+1. **com.nexus.security** (`crates/nexus-security/`) — keyring vault, audit log, TLS pinning, OS-sandbox policy + download broker
 2. **com.nexus.storage** (`crates/nexus-storage/`) — file-as-truth, SQLite, Tantivy, watcher, graph, bases SQL
-3. **com.nexus.database** (`crates/nexus-database/`) — pure-compute formulas/views (no SQL)
-4. **com.nexus.editor** (`crates/nexus-editor/`) — block-tree + CM6 sessions
-5. **com.nexus.theme** (`crates/nexus-theme/`) — CSS variable cascade
-6. **com.nexus.ai.runtime** (`crates/nexus-ai-runtime/`) — task scheduler / observation. Registered before `ai` so the shared tokio pool handle is published in time for `ai`'s indexing daemon.
-7. **com.nexus.ai** (`crates/nexus-ai/`) — provider traits, RAG, tool loop
-8. **com.nexus.skills** (`crates/nexus-skills/`) — `.skill.md` registry
-9. **com.nexus.templates** (`crates/nexus-templates/`) — `.template.md` registry
-10. **com.nexus.formats** (`crates/nexus-formats/`) — pure markdown/canvas/notion parsing
-11. **com.nexus.workflow** (`crates/nexus-workflow/`) — `.workflow.toml` + triggers
-12. **com.nexus.linkpreview** (`crates/nexus-linkpreview/`) — OG/Twitter-card fetch
-13. **com.nexus.notifications** (`crates/nexus-notifications/`) — multi-channel + inbox
-14. **com.nexus.audio** (`crates/nexus-audio/`) — STT/TTS providers
-15. **com.nexus.comments** (`crates/nexus-comments/`) — block-anchored threads
-16. **com.nexus.agent** (`crates/nexus-agent/`) — archetypes, plan/run, transcripts
-17. **com.nexus.mcp.host** (`crates/nexus-mcp/`) — external MCP server connections
-18. **com.nexus.lsp** (`crates/nexus-lsp/`) — LSP server host
-19. **com.nexus.dap** (`crates/nexus-dap/`) — DAP adapter host
-20. **com.nexus.acp** (`crates/nexus-acp/`) — ACP agent host
-21. **com.nexus.git** (`crates/nexus-git/`) — libgit2 over forge root
-22. **com.nexus.terminal** (`crates/nexus-terminal/`) — PTY sessions, saved/ad-hoc commands, REPL
-23. **com.nexus.collab** (`crates/nexus-collab/`) — WebSocket relay. Registered last so every preceding plugin's events are available to the relay bridge.
+3. **com.nexus.memory** (`crates/nexus-memory/`) — native memory engine (full remind_me parity); owns its own `.forge` store, so it loads right after storage. See [`../memory.md`](../memory.md)
+4. **com.nexus.database** (`crates/nexus-database/`) — pure-compute formulas/views (no SQL)
+5. **com.nexus.editor** (`crates/nexus-editor/`) — block-tree + CM6 sessions
+6. **com.nexus.theme** (`crates/nexus-theme/`) — CSS variable cascade
+7. **com.nexus.ai.runtime** (`crates/nexus-ai-runtime/`) — task scheduler / observation. Registered before `ai` so the shared tokio pool handle is published in time for `ai`'s indexing daemon.
+8. **com.nexus.ai** (`crates/nexus-ai/`) — provider traits, RAG, tool loop
+9. **com.nexus.skills** (`crates/nexus-skills/`) — `.skill.md` registry
+10. **com.nexus.templates** (`crates/nexus-templates/`) — `.template.md` registry
+11. **com.nexus.formats** (`crates/nexus-formats/`) — pure markdown/canvas/notion parsing
+12. **com.nexus.workflow** (`crates/nexus-workflow/`) — `.workflow.toml` + triggers
+13. **com.nexus.linkpreview** (`crates/nexus-linkpreview/`) — OG/Twitter-card fetch
+14. **com.nexus.notifications** (`crates/nexus-notifications/`) — multi-channel + inbox
+15. **com.nexus.audio** (`crates/nexus-audio/`) — STT/TTS providers
+16. **com.nexus.comments** (`crates/nexus-comments/`) — block-anchored threads
+17. **com.nexus.agent** (`crates/nexus-agent/`) — archetypes, plan/run, transcripts
+18. **com.nexus.mcp.host** (`crates/nexus-mcp/`) — external MCP server connections
+19. **com.nexus.lsp** (`crates/nexus-lsp/`) — LSP server host
+20. **com.nexus.dap** (`crates/nexus-dap/`) — DAP adapter host
+21. **com.nexus.acp** (`crates/nexus-acp/`) — ACP agent host
+22. **com.nexus.git** (`crates/nexus-git/`) — libgit2 over forge root
+23. **com.nexus.terminal** (`crates/nexus-terminal/`) — PTY sessions, saved/ad-hoc commands, REPL
+24. **com.nexus.collab** (`crates/nexus-collab/`) — WebSocket relay. Registered last so every preceding plugin's events are available to the relay bridge.
 
 ## Authoring a new core plugin (in-tree)
 

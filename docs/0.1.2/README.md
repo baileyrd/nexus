@@ -17,12 +17,14 @@ The pre-0.1.2 doc set was a 9 MB curated mix of architecture, PRDs, ADRs, audits
 docs/0.1.2/
 ├── README.md                  ← you are here
 ├── architecture.md            ← workspace shape, invariants (from dep test), boot order
-├── crates.md                  ← table of all 35 Rust crates
+├── crates.md                  ← table of all 39 Rust crates
 ├── shell.md                   ← shell/ + shell/src-tauri/ + packages/nexus-extension-api/
 ├── architecture-adherence.md  ← audit of whether code lives up to microkernel + shell invariants
 ├── implementation-plan.md     ← phased remediation plan for every audit finding (39 items)
 ├── ipc-handlers.md            ← every IPC handler (~280), grouped by plugin
 ├── capabilities.md            ← every security capability (30), every use site
+├── memory.md                  ← the native memory engine (com.nexus.memory): full surface + remind_me parity
+├── os-sandbox.md              ← OS process sandbox: policy model + landlock/seccomp + download broker
 ├── amplifier-laundering.md    ← #189 threat model + accepted residual risk for amplifier plugins
 ├── application-capabilities.md ← what Nexus does, by feature domain
 ├── plugin-capabilities.md     ← per-plugin: what each of the 96 plugins provides
