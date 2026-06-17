@@ -361,6 +361,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description: 'Search, browse, and view the native memory store from the command palette.',
     load: () => import('./nexus/memoryDashboard').then(m => m.memoryDashboardPlugin),
   },
+  {
+    id: 'nexus.sandboxPanel', name: 'Sandbox Panel',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.security'],
+    description: 'Inspect the OS-sandbox policy and run brokered downloads from the command palette.',
+    load: () => import('./nexus/sandboxPanel').then(m => m.sandboxPanelPlugin),
+  },
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────
