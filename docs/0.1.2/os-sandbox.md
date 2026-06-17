@@ -58,6 +58,8 @@ A network-off policy denies raw sockets outright (seccomp). Rather than poke a h
 
 `DownloadPolicy { enabled, allowed_hosts, max_bytes }` is **off by default** (mirroring network-off-by-default); an operator opts in and names allowed hosts.
 
+The broker is reachable over IPC via `com.nexus.security::download` (`{ url, dest, cwd? }`), gated by the `net.http` capability *and* the `sandbox.toml` allowlist + writable-root checks. The active config is introspectable via `com.nexus.security::sandbox_policy`, loaded from [`SandboxConfig`](../../crates/nexus-security/src/sandbox_config.rs) (`.forge/sandbox.toml`, closed by default).
+
 ### What remains
 
-Route the real spawn paths (`nexus-terminal`, agent tool exec) through `sandbox_command`, surface `DownloadPolicy` + `SandboxPolicy` in config, and expose the broker over IPC. The enforcement primitives themselves are complete.
+Route the real spawn paths (`nexus-terminal`, agent tool exec) through `sandbox_command`, reading the configured `SandboxPolicy`. The enforcement primitives, config surface, and download IPC are complete.

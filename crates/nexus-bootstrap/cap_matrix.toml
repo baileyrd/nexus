@@ -970,6 +970,12 @@ plugin = "com.nexus.security"
 command = "sandbox_policy"
 unrestricted = "read-only introspection of the active OS-sandbox config from sandbox.toml"
 
+[[handler]]
+plugin = "com.nexus.security"
+command = "download"
+caps = ["net.http"]
+note = "brokered outbound HTTPS on a confined process's behalf; doubly gated — the cap here, plus the sandbox.toml allowlist + writable-root checks the handler enforces"
+
 # ─── com.nexus.skills ────────────────────────────────────────────────
 
 [[handler]]

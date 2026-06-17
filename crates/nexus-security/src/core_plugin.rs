@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use nexus_kernel::EventBus;
-use nexus_plugins::{CorePlugin, PluginError};
-use serde_json::json;
+use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
+use serde_json::{json, Value};
 
 use crate::{CredentialVault, SecurityError};
 
@@ -45,6 +45,9 @@ pub const HANDLER_METRICS_SNAPSHOT: u32 = 7;
 /// `sandbox_policy` handler id — return the active OS-sandbox config.
 pub const HANDLER_SANDBOX_POLICY: u32 = 8;
 
+/// `download` handler id (async) — brokered, allowlisted download.
+pub const HANDLER_DOWNLOAD: u32 = 9;
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::security::register`.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
@@ -56,6 +59,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("clear_audit_log", HANDLER_CLEAR_AUDIT_LOG),
     ("metrics_snapshot", HANDLER_METRICS_SNAPSHOT),
     ("sandbox_policy", HANDLER_SANDBOX_POLICY),
+    ("download", HANDLER_DOWNLOAD),
 ];
 
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
@@ -292,6 +296,62 @@ impl CorePlugin for SecurityCorePlugin {
             }),
         }
     }
+
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
+        // `download` performs outbound HTTP (async); everything else is sync.
+        if handler_id != HANDLER_DOWNLOAD {
+            return None;
+        }
+        let config = self.sandbox_config.clone();
+        let args = args.clone();
+        Some(Box::pin(async move {
+            download_handler(config, args).await.map_err(|reason| {
+                PluginError::ExecutionFailed { plugin_id: PLUGIN_ID.to_string(), reason }
+            })
+        }))
+    }
+}
+
+/// Parse + validate a `download` request against the active [`SandboxConfig`]
+/// (download allowlist + the policy's writable roots resolved against `cwd`,
+/// which defaults to the destination's parent). Sync — does no I/O — so the
+/// permission decision is unit-testable. Returns the validated URL, the
+/// destination, and the size cap, ready for [`crate::downloads::fetch_url`].
+fn prepare_download(
+    config: &crate::SandboxConfig,
+    args: &Value,
+) -> Result<(reqwest::Url, std::path::PathBuf, u64), String> {
+    let url = args
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "download: missing 'url'".to_string())?;
+    let dest = args
+        .get("dest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "download: missing 'dest'".to_string())?;
+    let dest = std::path::PathBuf::from(dest);
+    let cwd = args
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+        .or_else(|| dest.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_default();
+
+    let roots = config.policy.writable_roots_with_cwd(&cwd);
+    let req = crate::DownloadRequest { url, dest: &dest };
+    let validated =
+        crate::downloads::validate(&req, &config.downloads, &roots).map_err(|e| e.to_string())?;
+    Ok((validated, dest, config.downloads.max_bytes))
+}
+
+/// Async `download` handler: [`prepare_download`] (validate) then stream the
+/// fetch. Returns `{ "bytes_written": N }`.
+async fn download_handler(config: crate::SandboxConfig, args: Value) -> Result<Value, String> {
+    let (url, dest, max_bytes) = prepare_download(&config, &args)?;
+    let bytes = crate::downloads::fetch_url(url, &dest, max_bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "bytes_written": bytes }))
 }
 
 /// Strict-parse `args` into the typed envelope `T` (must be
@@ -406,6 +466,42 @@ mod tests {
         let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
         let result = plugin.dispatch(42, &serde_json::json!({}));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn prepare_download_enforces_policy() {
+        use nexus_types::SandboxPolicy;
+
+        // Default config: downloads disabled → refused before any I/O.
+        let closed = crate::SandboxConfig::default();
+        let args = json!({ "url": "https://h/x", "dest": "/work/x", "cwd": "/work" });
+        assert!(prepare_download(&closed, &args).unwrap_err().contains("disabled"));
+
+        // Enabled + allowlisted + workspace-write covering the dest → accepted.
+        let open = crate::SandboxConfig {
+            policy: SandboxPolicy::new_workspace_write(vec![std::path::PathBuf::from("/work")]),
+            downloads: crate::DownloadPolicy {
+                enabled: true,
+                allowed_hosts: vec!["host.example".to_string()],
+                max_bytes: 64,
+            },
+        };
+        let ok = json!({ "url": "https://host.example/a", "dest": "/work/a", "cwd": "/work" });
+        let (url, dest, cap) = prepare_download(&open, &ok).unwrap();
+        assert_eq!(url.host_str(), Some("host.example"));
+        assert_eq!(dest, std::path::Path::new("/work/a"));
+        assert_eq!(cap, 64);
+
+        // Same config, dest outside the writable root → refused.
+        let outside = json!({ "url": "https://host.example/a", "dest": "/etc/a", "cwd": "/work" });
+        assert!(prepare_download(&open, &outside)
+            .unwrap_err()
+            .contains("not inside a writable root"));
+
+        // Missing url → refused.
+        assert!(prepare_download(&open, &json!({ "dest": "/work/a" }))
+            .unwrap_err()
+            .contains("missing 'url'"));
     }
 
     #[test]
