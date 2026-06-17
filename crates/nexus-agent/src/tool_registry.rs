@@ -587,6 +587,70 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             command_id: "backlinks".to_string(),
         },
         AgentToolSpec {
+            name: "list_dir".to_string(),
+            description: "List the entries (files and subdirectories) of a forge-relative \
+                directory. Omit `relpath` or pass an empty string for the forge root. Use \
+                this to explore the forge before reading or editing."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "relpath": { "type": "string" } },
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 50,
+            required_capabilities: vec![Capability::FileSystemRead],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "list_dir".to_string(),
+        },
+        AgentToolSpec {
+            name: "grep".to_string(),
+            description: "Search file contents across the forge for a substring or regex \
+                (ripgrep-style), returning matching lines with their paths and line \
+                numbers. Set `is_regex` for a pattern. Distinct from `search_forge`, which \
+                is a ranked full-text search over indexed notes."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "is_regex": { "type": "boolean" },
+                    "case_sensitive": { "type": "boolean" },
+                    "whole_word": { "type": "boolean" },
+                    "max_files": { "type": "integer", "minimum": 1 },
+                    "max_results": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 300,
+            required_capabilities: vec![Capability::FileSystemRead],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "find_in_files".to_string(),
+        },
+        AgentToolSpec {
+            name: "find_symbol".to_string(),
+            description: "Look up code symbols (functions, types, …) by exact name in the \
+                forge's code index, optionally scoped to one file. Returns each symbol's \
+                path and line — useful for navigating code before editing."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "path": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1 }
+                },
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 100,
+            required_capabilities: vec![Capability::SearchForge],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "query_symbol".to_string(),
+        },
+        AgentToolSpec {
             name: "git_log".to_string(),
             description: "Most-recent N commits on the current branch.".to_string(),
             input_schema: serde_json::json!({
@@ -1027,5 +1091,32 @@ mod tests {
             .find(|s| s.name == "write_file")
             .expect("write_file in catalog");
         assert!(spec.requires_approval);
+    }
+
+    #[test]
+    fn read_only_navigation_tools_are_present() {
+        let catalog = default_tool_catalog();
+        for (name, command) in [
+            ("list_dir", "list_dir"),
+            ("grep", "find_in_files"),
+            ("find_symbol", "query_symbol"),
+            ("edit", "edit"),
+        ] {
+            let spec = catalog
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("{name} in catalog"));
+            assert_eq!(spec.target_plugin_id, "com.nexus.storage");
+            assert_eq!(spec.command_id, command);
+        }
+        // The three navigation tools are read-only (no approval gate); edit is not.
+        for name in ["list_dir", "grep", "find_symbol"] {
+            let spec = catalog.iter().find(|s| s.name == name).unwrap();
+            assert!(!spec.requires_approval, "{name} must be read-only");
+        }
+        assert!(
+            catalog.iter().find(|s| s.name == "edit").unwrap().requires_approval,
+            "edit must require approval",
+        );
     }
 }
