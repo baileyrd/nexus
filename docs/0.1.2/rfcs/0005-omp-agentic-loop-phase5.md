@@ -200,3 +200,11 @@ Backlog items spun out of the shipped work (not blockers):
   A genuinely interactive prompt wants longer; that needs a per-tool dispatch
   timeout (the `AgentToolSpec` already carries `estimated_duration_ms` as a
   starting point) rather than the single shared bridge timeout.
+- **Subagent isolation — orchestration (RFC 0006 Step 2).** Step 1 (git-worktree
+  primitives in `nexus-git`: `worktree_list` / `worktree_create` /
+  `worktree_remove`) shipped in #313. Step 2 is the chosen isolation model —
+  **Option A, process-level**: spin a child agent runtime on a worktree forge
+  root, run it OS-sandboxed, and merge its delta back into the parent forge. This
+  is the architecturally significant build (child-process orchestration, headless
+  run + result plumbing, worktree merge / conflict surfacing) and wants a design
+  proposal of its own before coding — deferred to backlog rather than started now.
