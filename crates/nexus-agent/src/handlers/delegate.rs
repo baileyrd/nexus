@@ -23,12 +23,13 @@
 //! 3. **Parent/child linkage** is recorded via `AgentTask.parent` so
 //!    a future task-DAG visualiser can render delegate fan-outs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
+use nexus_types::SandboxPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -37,7 +38,9 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use crate::subagent::{SubagentRunner, SubagentSpec};
+use crate::subagent::{
+    derive_subagent_policy, locate_sandbox_helper, SubagentRunner, SubagentSpec,
+};
 
 use super::shared::{exec_err, parse_args};
 
@@ -104,10 +107,10 @@ const fn default_delegate_auto_approve() -> bool {
     true
 }
 
-/// Per-call IPC timeout for the git worktree / merge round-trips in the
-/// isolated delegate path. These are local libgit2 operations — generous but
+/// Per-call IPC timeout for the local round-trips in the isolated delegate path
+/// (git worktree / merge, and the security sandbox-policy probe). Generous but
 /// finite, well under the subagent run's own ceiling.
-const GIT_TIMEOUT: Duration = Duration::from_secs(120);
+const ISOLATION_IPC_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Per-call IPC timeout for the `submit` round-trip to
 /// `com.nexus.ai.runtime`. Generous because the runtime's own dispatch
@@ -298,7 +301,7 @@ async fn delegate_isolated(
     // Isolation needs a git-backed forge. `status` returns JSON null when the
     // git plugin is passive (the forge root isn't a repo).
     let git_status = ctx
-        .ipc_call("com.nexus.git", "status", serde_json::json!({}), GIT_TIMEOUT)
+        .ipc_call("com.nexus.git", "status", serde_json::json!({}), ISOLATION_IPC_TIMEOUT)
         .await
         .map_err(|e| exec_err(format!("delegate: git status probe: {e}")))?;
     if !forge_is_git(&git_status) {
@@ -319,7 +322,7 @@ async fn delegate_isolated(
             "com.nexus.git",
             "worktree_create",
             serde_json::json!({ "name": name, "branch": branch }),
-            GIT_TIMEOUT,
+            ISOLATION_IPC_TIMEOUT,
         )
         .await
         .map_err(|e| exec_err(format!("delegate: worktree_create: {e}")))?;
@@ -329,9 +332,12 @@ async fn delegate_isolated(
         .ok_or_else(|| exec_err(format!("delegate: worktree_create reply missing path: {wt}")))?
         .to_string();
 
-    // Run the subagent headlessly against the worktree forge.
+    // Run the subagent headlessly against the worktree forge, OS-sandboxed
+    // (RFC 0007 PR 3) when the helper is available and the operator hasn't
+    // opted out via `danger-full-access`.
     let runner = SubagentRunner::resolve(None)
         .map_err(|e| exec_err(format!("delegate: locate nexus binary: {e}")))?;
+    let runner = apply_subagent_sandbox(&ctx, runner, Path::new(&wt_path)).await;
     let mut spec = SubagentSpec::new(PathBuf::from(&wt_path), a.goal.clone());
     spec.archetype = Some(a.archetype.clone());
     let outcome = runner
@@ -358,55 +364,8 @@ async fn delegate_isolated(
         .cloned()
         .unwrap_or(Value::Null);
 
-    // Commit the worktree's edits to the task branch.
-    let commit_reply = ctx
-        .ipc_call(
-            "com.nexus.git",
-            "worktree_commit",
-            serde_json::json!({ "name": name, "message": format!("subagent: {}", a.goal) }),
-            GIT_TIMEOUT,
-        )
-        .await
-        .map_err(|e| exec_err(format!("delegate: worktree_commit: {e}")))?;
-    let committed = commit_reply
-        .get("commit_hash")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-
-    let merge_status = if committed.is_none() {
-        MergeStatus::NoDelta
-    } else {
-        // Merge the branch into the parent's current HEAD.
-        let merge_reply = ctx
-            .ipc_call(
-                "com.nexus.git",
-                "merge",
-                serde_json::json!({ "branch": branch }),
-                GIT_TIMEOUT,
-            )
-            .await
-            .map_err(|e| exec_err(format!("delegate: merge {branch}: {e}")))?;
-        let conflicts = merge_reply
-            .get("conflicts")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if conflicts.is_empty() {
-            MergeStatus::Merged(merge_reply.get("commit_hash").cloned().unwrap_or(Value::Null))
-        } else {
-            // Restore the parent's working tree; keep the branch for manual
-            // resolution. Best-effort — a failed abort still leaves the branch.
-            let _ = ctx
-                .ipc_call(
-                    "com.nexus.git",
-                    "abort_merge",
-                    serde_json::json!({}),
-                    GIT_TIMEOUT,
-                )
-                .await;
-            MergeStatus::Conflicts(conflicts)
-        }
-    };
+    // Commit the worktree's edits to the task branch and merge it back.
+    let merge_status = commit_and_merge_back(&ctx, &name, &branch, &a.goal).await?;
 
     // The branch is always preserved; the worktree is disposable now that its
     // work is committed. Cleanup failure is non-fatal.
@@ -423,6 +382,67 @@ async fn delegate_isolated(
     ))
 }
 
+/// Commit the worktree's edits to its task branch and merge that branch back
+/// into the parent's HEAD. Returns the resulting [`MergeStatus`]: no-delta (the
+/// subagent changed nothing), a clean merge (carrying the merge commit), or
+/// conflicts (the parent's working tree is restored via `abort_merge` and the
+/// branch is kept for manual resolution).
+async fn commit_and_merge_back(
+    ctx: &KernelPluginContext,
+    name: &str,
+    branch: &str,
+    goal: &str,
+) -> Result<MergeStatus, PluginError> {
+    let commit_reply = ctx
+        .ipc_call(
+            "com.nexus.git",
+            "worktree_commit",
+            serde_json::json!({ "name": name, "message": format!("subagent: {goal}") }),
+            ISOLATION_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| exec_err(format!("delegate: worktree_commit: {e}")))?;
+    if commit_reply
+        .get("commit_hash")
+        .and_then(Value::as_str)
+        .is_none()
+    {
+        return Ok(MergeStatus::NoDelta);
+    }
+
+    let merge_reply = ctx
+        .ipc_call(
+            "com.nexus.git",
+            "merge",
+            serde_json::json!({ "branch": branch }),
+            ISOLATION_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| exec_err(format!("delegate: merge {branch}: {e}")))?;
+    let conflicts = merge_reply
+        .get("conflicts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if conflicts.is_empty() {
+        return Ok(MergeStatus::Merged(
+            merge_reply.get("commit_hash").cloned().unwrap_or(Value::Null),
+        ));
+    }
+
+    // Restore the parent's working tree; keep the branch for manual resolution.
+    // Best-effort — a failed abort still leaves the branch intact.
+    let _ = ctx
+        .ipc_call(
+            "com.nexus.git",
+            "abort_merge",
+            serde_json::json!({}),
+            ISOLATION_IPC_TIMEOUT,
+        )
+        .await;
+    Ok(MergeStatus::Conflicts(conflicts))
+}
+
 /// Remove an isolated subagent's worktree (force-pruning its working tree). The
 /// branch is left intact.
 async fn remove_worktree(ctx: &KernelPluginContext, name: &str) -> Result<(), PluginError> {
@@ -430,11 +450,63 @@ async fn remove_worktree(ctx: &KernelPluginContext, name: &str) -> Result<(), Pl
         "com.nexus.git",
         "worktree_remove",
         serde_json::json!({ "name": name, "force": true }),
-        GIT_TIMEOUT,
+        ISOLATION_IPC_TIMEOUT,
     )
     .await
     .map(|_| ())
     .map_err(|e| exec_err(format!("delegate: worktree_remove {name}: {e}")))
+}
+
+/// Wrap the subagent runner in the OS-sandbox (RFC 0007 PR 3). Best-effort:
+/// honours a `danger-full-access` operator opt-out (run unconfined), and falls
+/// back to an unconfined run when the `nexus-sandbox` helper isn't present next
+/// to the `nexus` binary (not built, or a host without it). Otherwise the
+/// subagent runs under a `workspace-write` policy scoped to its worktree.
+async fn apply_subagent_sandbox(
+    ctx: &KernelPluginContext,
+    runner: SubagentRunner,
+    worktree: &Path,
+) -> SubagentRunner {
+    let parent = resolve_parent_policy(ctx).await;
+    if parent.is_unrestricted() {
+        // Operator disabled OS containment globally — honour that for the
+        // subagent too rather than silently re-confining it.
+        return runner;
+    }
+    if let Some(helper) = locate_sandbox_helper(runner.binary()) {
+        runner.with_sandbox(helper, derive_subagent_policy(&parent, worktree))
+    } else {
+        tracing::warn!(
+            "delegate: nexus-sandbox helper not found next to the nexus binary; \
+             running the isolated subagent unconfined"
+        );
+        runner
+    }
+}
+
+/// Read the parent forge's configured OS-sandbox policy via
+/// `com.nexus.security::sandbox_policy` (the serialized `SandboxConfig`, whose
+/// `policy` field is what we want). Defaults to the safe `read-only` policy if
+/// the probe fails or the reply can't be parsed.
+async fn resolve_parent_policy(ctx: &KernelPluginContext) -> SandboxPolicy {
+    match ctx
+        .ipc_call(
+            "com.nexus.security",
+            "sandbox_policy",
+            serde_json::json!({}),
+            ISOLATION_IPC_TIMEOUT,
+        )
+        .await
+    {
+        Ok(reply) => reply
+            .get("policy")
+            .and_then(|p| serde_json::from_value::<SandboxPolicy>(p.clone()).ok())
+            .unwrap_or_default(),
+        Err(e) => {
+            tracing::warn!(error = %e, "delegate: sandbox_policy probe failed; defaulting to read-only");
+            SandboxPolicy::default()
+        }
+    }
 }
 
 /// `com.nexus.git::status` returns JSON null when the forge is not a git repo
