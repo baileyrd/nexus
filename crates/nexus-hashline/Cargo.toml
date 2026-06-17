@@ -1,0 +1,12 @@
+[package]
+name = "nexus-hashline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Hashline patch format for Nexus: content-hash-anchored edits with TAG hashing, an applier, and 3-way merge recovery (RFC 0005 Phase 5.1)"
+
+[dependencies]
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+diffy = { workspace = true }
