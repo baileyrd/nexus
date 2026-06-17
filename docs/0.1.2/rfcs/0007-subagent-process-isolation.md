@@ -1,6 +1,6 @@
 # RFC 0007 — Phase 5.3 Step 2: process-level subagent isolation (build design)
 
-- **Status:** Draft — design (PR 1 = spawn primitive; merge policy = merge-the-branch)
+- **Status:** Draft — design; build complete (PRs 1–4: spawn primitive → worktree harness → OS-sandbox → polish)
 - **Owner:** unassigned
 - **Created:** 2026-06-17
 - **Tracks:** [RFC 0006](0006-subagent-workspace-isolation.md) Step 2 (decision = Option A); [RFC 0005](0005-omp-agentic-loop-phase5.md) Phase 5.3; omp blueprint `docs/17-subagents-and-tasks.md`
@@ -83,9 +83,14 @@ no layering rule is touched.
 - **PR 3 — OS-sandbox the child.** Wrap the spawn in `sandbox_command` + derive
   the `WorkspaceWrite` policy from the parent's `sandbox.toml`. Linux-enforced
   (Landlock + seccomp); graceful no-op on macOS/Windows.
-- **PR 4 — polish.** Structured conflict surfacing to the parent agent loop,
-  `max_concurrent_sub_agents` admission enforcement, and the `nexus_bin` setting
-  (below) for shell/MCP frontends.
+- **PR 4 — polish.** An LLM-actionable `summary` field in the isolated-delegate
+  reply (conflict surfacing), a process-wide concurrency cap on isolated
+  subagents (`NEXUS_SUBAGENT_MAX_CONCURRENT`, default 4, enforced by a
+  `tokio::Semaphore` in `nexus-agent` since isolated subagents bypass the
+  ai-runtime), and a `NEXUS_SUBAGENT_BIN` env var so shell/MCP frontends (whose
+  `current_exe()` isn't the CLI) can locate the `nexus` binary.
+
+*All four PRs are built (#315 = PR 1+2, #316 = PR 3, PR 4 in this branch).*
 
 ## Resolved open questions (from RFC 0006)
 
@@ -104,10 +109,12 @@ no layering rule is touched.
 - **Locating the `nexus` binary.** `std::env::current_exe()` is the `nexus` CLI
   when delegation runs under the CLI/TUI, but **not** under the Tauri shell or
   the MCP server (their `current_exe()` is a different binary). PR 1 resolves an
-  explicit override first, then falls back to `current_exe()`; PR 4 promotes the
-  override to a documented `agent.subagent.nexus_bin` setting required for
-  shell/MCP. (New setting ⇒ `docs/0.1.2/settings/` entry + hardcoded-row delete,
-  per the repo guardrail, when PR 4 lands.)
+  explicit override first, then falls back to `current_exe()`; PR 4 inserts the
+  `NEXUS_SUBAGENT_BIN` **env var** between them (override → env → `current_exe()`).
+  It's an env var, not a forge `.forge` setting, because the binary path is
+  *install*-specific — the same forge opened from the CLI vs the shell needs a
+  different binary — so a per-forge TOML would be wrong. Documented in
+  `docs/0.1.2/settings/env-vars.md`.
 - **Committing the worktree delta (step 5).** The orchestrator stages + commits
   the worktree explicitly (deterministic) rather than relying on the agent
   loop's optional auto-commit. Finalised in PR 2.

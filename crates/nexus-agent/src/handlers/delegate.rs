@@ -39,7 +39,8 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 use crate::subagent::{
-    derive_subagent_policy, locate_sandbox_helper, SubagentRunner, SubagentSpec,
+    acquire_subagent_slot, derive_subagent_policy, locate_sandbox_helper, SubagentRunner,
+    SubagentSpec,
 };
 
 use super::shared::{exec_err, parse_args};
@@ -312,6 +313,11 @@ async fn delegate_isolated(
         ));
     }
 
+    // Bound how many isolated subagents run concurrently in this process
+    // (RFC 0007 PR 4) — each is a full child runtime. The permit is held until
+    // this call returns (released on every path, including errors).
+    let _slot = acquire_subagent_slot().await;
+
     let short = short_id(&uuid::Uuid::new_v4());
     let name = format!("subagent-{short}");
     let branch = format!("nexus/subagent/{short}");
@@ -376,7 +382,7 @@ async fn delegate_isolated(
     Ok(build_isolated_result(
         &branch,
         &merge_status,
-        subagent_outcome,
+        &subagent_outcome,
         outcome.exit_code,
         outcome.timed_out,
     ))
@@ -532,18 +538,35 @@ fn stderr_suffix(stderr: &str) -> String {
     format!("; stderr: {snippet}")
 }
 
-/// Shape the JSON reply for an isolated delegation from its pieces. Pure, so the
-/// reply contract is unit-testable without a runtime.
+/// Shape the JSON reply for an isolated delegation from its pieces, including a
+/// human-readable `summary` the parent agent loop can act on directly (RFC 0007
+/// PR 4 — conflict surfacing). Pure, so the reply contract is unit-testable
+/// without a runtime.
 fn build_isolated_result(
     branch: &str,
     status: &MergeStatus,
-    subagent_outcome: Value,
+    subagent_outcome: &Value,
     exit_code: Option<i32>,
     timed_out: bool,
 ) -> Value {
+    let summary = match status {
+        MergeStatus::NoDelta => {
+            format!("subagent made no changes; nothing to merge (branch '{branch}')")
+        }
+        MergeStatus::Merged(commit) => match commit.as_str() {
+            Some(c) => format!("merged subagent branch '{branch}' ({c}) into the forge"),
+            None => format!("merged subagent branch '{branch}' into the forge"),
+        },
+        MergeStatus::Conflicts(conflicts) => format!(
+            "subagent work is on branch '{branch}' but merging it hit conflicts in {} file(s); \
+             the merge was aborted — resolve the branch manually",
+            conflicts.len()
+        ),
+    };
     let mut obj = serde_json::json!({
         "isolation": "worktree",
         "branch": branch,
+        "summary": summary,
         "outcome": subagent_outcome,
         "subagent": { "exit_code": exit_code, "timed_out": timed_out },
     });
@@ -695,7 +718,7 @@ mod tests {
         let v = build_isolated_result(
             "nexus/subagent/abc",
             &MergeStatus::Merged(serde_json::json!("deadbee")),
-            serde_json::json!("complete"),
+            &serde_json::json!("complete"),
             Some(0),
             false,
         );
@@ -707,14 +730,16 @@ mod tests {
         assert_eq!(v["outcome"], "complete");
         assert_eq!(v["subagent"]["exit_code"], 0);
         assert_eq!(v["subagent"]["timed_out"], false);
+        let summary = v["summary"].as_str().expect("summary string");
+        assert!(summary.contains("merged") && summary.contains("deadbee"), "{summary}");
     }
 
     #[test]
     fn isolated_result_conflicts_shape() {
         let v = build_isolated_result(
             "nexus/subagent/abc",
-            &MergeStatus::Conflicts(vec![serde_json::json!("a.md")]),
-            Value::Null,
+            &MergeStatus::Conflicts(vec![serde_json::json!("a.md"), serde_json::json!("b.md")]),
+            &Value::Null,
             None,
             false,
         );
@@ -722,15 +747,18 @@ mod tests {
         assert_eq!(v["delta"], true);
         assert_eq!(v["conflicts"][0], "a.md");
         assert!(v.get("commit").is_none(), "no commit on a conflicted merge");
+        let summary = v["summary"].as_str().expect("summary string");
+        assert!(summary.contains("conflicts in 2 file(s)"), "{summary}");
     }
 
     #[test]
     fn isolated_result_no_delta_shape() {
-        let v = build_isolated_result("b", &MergeStatus::NoDelta, Value::Null, Some(0), false);
+        let v = build_isolated_result("b", &MergeStatus::NoDelta, &Value::Null, Some(0), false);
         assert_eq!(v["merged"], false);
         assert_eq!(v["delta"], false);
         assert!(v.get("commit").is_none());
         assert!(v.get("conflicts").is_none());
+        assert!(v["summary"].as_str().unwrap().contains("no changes"));
     }
 
     #[test]
