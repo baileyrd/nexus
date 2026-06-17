@@ -130,10 +130,17 @@ inherited prefix isn't re-indexed. Append-only invariants hold.
   `session_resume` handler (fork at tip). cap-matrix + ipc-handlers docs + IPC
   bindings.
 - **PR 3 — `session_branch` + `session_rewind` + tree view.** Fork at an
-  arbitrary `k`; `session_list`/`session_tree` surface `parent_id` so a UI can
-  render the forest.
-- **PR 4 — checkpoints + frontends.** `session_checkpoint` markers; CLI
-  `agent resume/branch/rewind`; shell tree UI.
+  arbitrary `k`; `session_list` surfaces `parent_id`/`branch_point` so a UI can
+  render the forest. *(Shipped — the dedicated nested `session_tree` convenience
+  was deferred to the shell-UI PR, where the actual rendering shapes it.)*
+- **PR 4 — CLI session surface.** `nexus agent sessions` (list, with fork
+  markers) / `show <id>` (assembled transcript) / `resume <id> <msg>` /
+  `branch <id> <round> <msg>` / `rewind <id> <round> [msg]` — the whole backend,
+  usable from the terminal. *(Shipped.)*
+- **PR 5 — checkpoints + shell tree UI (remaining).** `session_checkpoint`
+  markers (a per-forge `checkpoints.json` index); a shell plugin under
+  `shell/src/plugins/nexus/sessions/` that renders the forest from
+  `session_list` and drives resume/branch/rewind via `ipc_call`.
 
 ## Open questions
 

@@ -57,6 +57,7 @@ Unless noted, handlers route through `context.ipc_call(plugin_id, …)`. Plugin 
 
 **Agent** (`com.nexus.agent`)
 - `agent plan <goal> [--archetype]`, `agent run <goal> [--archetype] [--interactive] [--notify-after-secs 30]`, `agent list-custom`. `--interactive` subscribes to `com.nexus.agent.round_proposed`, prompts y/n on stderr, and replies via `round_decide` (BL-132). The notify threshold dispatches a notification through `com.nexus.notifications` when a run overruns (BL-133).
+- Session tree (RFC 0008): `agent sessions` (list stored sessions with `↳` fork markers), `agent show <id>` (assembled transcript), `agent resume <id> <message>` (fork at the tip), `agent branch <id> <round> <message>` (fork at a round), `agent rewind <id> <round> [message]` (non-destructive redo). All route through the `session_resume` / `session_branch` / `session_rewind` / `session_list` / `session_get` handlers.
 - `tool list [--capability ID]…` — list catalogued agent tools.
 
 **Database / bases**

@@ -549,6 +549,37 @@ fn main() {
                 notify_after_secs,
             ),
             AgentCommand::ListCustom => commands::agent::list_custom(&mut app),
+            AgentCommand::Sessions => commands::agent::sessions(&mut app),
+            AgentCommand::Show { session_id } => commands::agent::show(&mut app, &session_id),
+            AgentCommand::Resume {
+                session_id,
+                message,
+                notify_after_secs,
+            } => commands::agent::resume(&mut app, &session_id, &message, notify_after_secs),
+            AgentCommand::Branch {
+                session_id,
+                at_round,
+                message,
+                notify_after_secs,
+            } => commands::agent::branch(
+                &mut app,
+                &session_id,
+                at_round,
+                &message,
+                notify_after_secs,
+            ),
+            AgentCommand::Rewind {
+                session_id,
+                at_round,
+                message,
+                notify_after_secs,
+            } => commands::agent::rewind(
+                &mut app,
+                &session_id,
+                at_round,
+                message.as_deref(),
+                notify_after_secs,
+            ),
         },
 
         Commands::Tool(args) => match args.command {
