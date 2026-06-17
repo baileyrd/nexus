@@ -121,10 +121,12 @@ pub(crate) async fn handle_session_run(
         ctx: Arc::clone(&ctx),
         timeout: DEFAULT_CHAT_TIMEOUT,
     };
-    let dispatcher = KernelToolBridge {
+    // Wrap the kernel dispatcher so the session-local `todo` tool is handled
+    // inline (ephemeral, per-session) and every other call passes through.
+    let dispatcher = crate::todo::TodoDispatcher::new(KernelToolBridge {
         ctx: Arc::clone(&ctx),
         timeout: DEFAULT_TOOL_TIMEOUT,
-    };
+    });
 
     let resolved = match &parsed.archetype {
         Some(name) => Some(resolve_archetype_for_run(&ctx, Some(name)).await),
