@@ -179,3 +179,24 @@ changes, no ADR tension.
   to flip on terminal sandboxing and, eventually, a bundled `rush` (RFC 0002) +
   OSC 133 introspection (RFC 0003) for fully Nexus-owned, agent-observable tool
   sessions.
+
+## Progress & deferred follow-ups
+
+Phase 5.1 (hashline editing) shipped in #303–#306; Phase 5.2 (tool-catalog
+breadth) shipped in #307–#311. The agent tool catalog now covers
+`read_file` / `read_lines` / `grep` / `find_symbol` / `ast_query` / `edit`
+(hashline 3-way merge) / `todo` / `ask` / `delegate`, plus git and terminal.
+
+Backlog items spun out of the shipped work (not blockers):
+
+- **`ask` frontend wiring.** The `ask` backend (#311) publishes
+  `com.nexus.agent.ask_requested` and awaits `ask_respond`, but no frontend
+  renders the prompt yet — so `ask` currently always times out. The shell, CLI,
+  and TUI already consume `round_proposed` / `round_decide` for interactive
+  approval; wiring `ask_requested` / `ask_respond` the same way (a question
+  panel that posts the answers) makes `ask` usable. Frontend-scoped PR(s).
+- **Per-tool dispatch timeout.** `ask` can only wait `DEFAULT_ASK_TIMEOUT_SECS`
+  (50 s), kept under the 60 s `KernelToolBridge` `DEFAULT_TOOL_TIMEOUT` ceiling.
+  A genuinely interactive prompt wants longer; that needs a per-tool dispatch
+  timeout (the `AgentToolSpec` already carries `estimated_duration_ms` as a
+  starting point) rather than the single shared bridge timeout.
