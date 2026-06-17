@@ -380,6 +380,11 @@ pub const HANDLER_EDIT_FILE: u32 = 73;
 /// context-efficient alternative to `read_file` for large files.
 pub const HANDLER_READ_LINES: u32 = 74;
 
+/// Handler id for `ast_query` — tree-sitter structural code search. Args:
+/// [`crate::ipc::StorageAstQueryArgs`]; Returns
+/// [`crate::ipc::StorageAstQueryResult`]. Phase 5.2 / RFC 0005.
+pub const HANDLER_AST_QUERY: u32 = 75;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -405,6 +410,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("backlinks_to_block", HANDLER_BACKLINKS_TO_BLOCK),
     ("import_forge", HANDLER_IMPORT_FORGE),
     ("find_in_files", HANDLER_FIND_IN_FILES),
+    ("ast_query", HANDLER_AST_QUERY),
     ("replace_in_files", HANDLER_REPLACE_IN_FILES),
     ("read_frontmatter", HANDLER_READ_FRONTMATTER),
     ("write_frontmatter", HANDLER_WRITE_FRONTMATTER),
@@ -784,6 +790,7 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_IMPORT_FORGE => crate::handlers::index::import_forge(engine, args),
             HANDLER_FIND_IN_FILES => crate::handlers::search::find_in_files(&self.forge_root, args),
+            HANDLER_AST_QUERY => crate::handlers::search::ast_query(&self.forge_root, args),
             HANDLER_REPLACE_IN_FILES => {
                 crate::handlers::search::replace_in_files(engine, &self.forge_root, args)
             }
@@ -1228,6 +1235,7 @@ mod tests {
             ("HANDLER_WRITE_FRONTMATTER", HANDLER_WRITE_FRONTMATTER),
             ("HANDLER_EDIT_FILE", HANDLER_EDIT_FILE),
             ("HANDLER_READ_LINES", HANDLER_READ_LINES),
+            ("HANDLER_AST_QUERY", HANDLER_AST_QUERY),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {

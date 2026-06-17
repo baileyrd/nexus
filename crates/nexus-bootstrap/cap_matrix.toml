@@ -1156,6 +1156,11 @@ unrestricted = "read-only ripgrep-style content search"
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "ast_query"
+unrestricted = "read-only tree-sitter structural code search over forge files; same fs.read posture as find_in_files"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "search"
 unrestricted = "read-only Tantivy FTS query"
 

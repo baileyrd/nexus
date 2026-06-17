@@ -147,21 +147,43 @@ const DEFAULT_QUERY_LIMIT: u32 = 200;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// The tree-sitter grammar for a [`CodeLanguage`]. Shared by the symbol
+/// extractor and the `ast_query` structural search.
+#[must_use]
+pub fn ts_language(language: CodeLanguage) -> tree_sitter::Language {
+    match language {
+        CodeLanguage::Rust => tree_sitter_rust::LANGUAGE.into(),
+        CodeLanguage::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        CodeLanguage::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        CodeLanguage::JavaScript | CodeLanguage::Jsx => tree_sitter_javascript::LANGUAGE.into(),
+        CodeLanguage::Python => tree_sitter_python::LANGUAGE.into(),
+        CodeLanguage::Go => tree_sitter_go::LANGUAGE.into(),
+    }
+}
+
+/// Parse a language label (matching [`CodeLanguage::as_str`]) back into a
+/// [`CodeLanguage`]. `None` for an unknown label.
+#[must_use]
+pub fn language_from_label(label: &str) -> Option<CodeLanguage> {
+    Some(match label.to_ascii_lowercase().as_str() {
+        "rust" | "rs" => CodeLanguage::Rust,
+        "typescript" | "ts" => CodeLanguage::TypeScript,
+        "tsx" => CodeLanguage::Tsx,
+        "javascript" | "js" => CodeLanguage::JavaScript,
+        "jsx" => CodeLanguage::Jsx,
+        "python" | "py" => CodeLanguage::Python,
+        "go" => CodeLanguage::Go,
+        _ => return None,
+    })
+}
+
 /// Extract every supported symbol from `source` as the given
 /// `language`. Returns the symbols in walk order; methods follow the
 /// enclosing type / impl / class via `parent_idx`.
 #[must_use]
 pub fn extract_symbols(language: CodeLanguage, source: &str) -> Vec<ExtractedSymbol> {
     let mut parser = Parser::new();
-    let ts_language: tree_sitter::Language = match language {
-        CodeLanguage::Rust => tree_sitter_rust::LANGUAGE.into(),
-        CodeLanguage::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        CodeLanguage::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        CodeLanguage::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
-        CodeLanguage::Jsx => tree_sitter_javascript::LANGUAGE.into(),
-        CodeLanguage::Python => tree_sitter_python::LANGUAGE.into(),
-        CodeLanguage::Go => tree_sitter_go::LANGUAGE.into(),
-    };
+    let ts_language = ts_language(language);
     if parser.set_language(&ts_language).is_err() {
         return Vec::new();
     }

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageAstQueryResult",
+  "description": "Return type for `com.nexus.storage::ast_query`.",
+  "type": "object",
+  "properties": {
+    "matches": {
+      "description": "Matches in file/scan order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StorageAstQueryMatch"
+      }
+    },
+    "truncated": {
+      "description": "True when the result hit `max_results` and more matches exist.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "matches",
+    "truncated"
+  ],
+  "$defs": {
+    "StorageAstQueryMatch": {
+      "description": "One capture from an `ast_query` match.",
+      "type": "object",
+      "properties": {
+        "capture": {
+          "description": "The `@capture` name (empty for an unnamed capture).",
+          "type": "string"
+        },
+        "line": {
+          "description": "1-based line where the captured node begins.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "path": {
+          "description": "Forge-relative path of the matching file.",
+          "type": "string"
+        },
+        "text": {
+          "description": "The captured node's source text (truncated to 240 bytes).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "line",
+        "capture",
+        "text"
+      ]
+    }
+  }
+}
