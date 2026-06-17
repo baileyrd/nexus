@@ -15,6 +15,7 @@ is a snapshot of intent at its `Created` date, not a maintained spec.
 | [0003](0003-terminal-emulator-rusty-term.md) | `rusty_term` terminal emulator | Draft — assessment | **Selectively adopt.** Not the GUI (conflicts with ADR 0011); do adopt the headless VT grid core + OSC 133 / terminal-as-MCP-resource agent introspection. |
 | [0004](0004-lsp-framework-rusty-lsp.md) | `rusty_lsp` LSP framework | Draft — assessment | **Don't incorporate.** Nexus *hosts* language servers, it doesn't *build* them; its JSON-RPC core is already (deliberately) duplicated per protocol. Revisit only for a future forge-as-LSP-server. |
 | [0005](0005-omp-agentic-loop-phase5.md) | Phase 5 — omp agentic loop | Draft — plan | **Enrich, don't rebuild.** `nexus-agent` already has the autonomous loop; `rusty_omp` is a blueprint, not code. Phased small-PR plan to close the gap (hashline editing → tool catalog → subagent isolation → session tree), starting with hashline. |
+| [0006](0006-subagent-workspace-isolation.md) | Phase 5.3 — subagent workspace isolation | Draft — design | Isolate a delegated subagent's edits (git worktree) and merge the delta back. Deeper in Nexus than omp (storage is forge-root-bound); options A/B/C, recommends process-level isolation, with option-agnostic worktree primitives shipping first. |
 
 ## Assessment series (0002–0004)
 
