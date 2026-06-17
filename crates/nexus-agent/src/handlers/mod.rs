@@ -3,6 +3,7 @@
 //! `core_plugin.rs` keeps the `CorePlugin` trait impl and dispatches
 //! into these by handler id. Cross-cutting helpers live in `shared`.
 
+pub(crate) mod ask;
 pub(crate) mod custom;
 pub(crate) mod delegate;
 pub(crate) mod history;

@@ -47,7 +47,7 @@ use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 
 use crate::handlers;
-use crate::handlers::shared::{exec_err, PendingApprovals};
+use crate::handlers::shared::{exec_err, PendingApprovals, PendingAsks};
 
 // Re-export the public handler args / helpers historically exposed
 // from this module so downstream callers and integration tests keep
@@ -138,6 +138,13 @@ pub const HANDLER_DELEGATE: u32 = 24;
 /// BL-121 — `search_transcripts`.
 pub const HANDLER_SEARCH_TRANSCRIPTS: u32 = 25;
 
+/// `ask` (Phase 5.2) — publish an interactive prompt and await the user's
+/// answers via a `com.nexus.agent.ask_requested` event + `ask_respond` reply.
+pub const HANDLER_ASK: u32 = 26;
+
+/// `ask_respond` (Phase 5.2) — a frontend delivers answers for a pending `ask`.
+pub const HANDLER_ASK_RESPOND: u32 = 27;
+
 /// Plugin ids this plugin invokes during planning + tool dispatch.
 /// `mcp.host` is intentionally omitted — it loads after agent in
 /// `register_all`, so its dynamic tool fan-out happens once both
@@ -174,12 +181,17 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("memory_export", HANDLER_MEMORY_EXPORT),
     ("delegate", HANDLER_DELEGATE),
     ("search_transcripts", HANDLER_SEARCH_TRANSCRIPTS),
+    ("ask", HANDLER_ASK),
+    ("ask_respond", HANDLER_ASK_RESPOND),
 ];
 
 /// Core plugin instance.
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
     pending_approvals: Arc<PendingApprovals>,
+    /// Phase 5.2 — pending interactive `ask` awaits, keyed by ask id. Same
+    /// bounded/aged registry as `pending_approvals`.
+    pending_asks: Arc<PendingAsks>,
     /// BL-121 — absolute forge root used to open the FTS index at
     /// `<forge>/.forge/agent/transcripts.sqlite`. `None` for the
     /// legacy default constructor (which keeps every existing
@@ -196,6 +208,7 @@ impl AgentCorePlugin {
         Self {
             context: None,
             pending_approvals: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             forge_root: None,
         }
     }
@@ -208,6 +221,7 @@ impl AgentCorePlugin {
         Self {
             context: None,
             pending_approvals: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             forge_root: Some(forge_root),
         }
     }
@@ -270,6 +284,7 @@ impl CorePlugin for AgentCorePlugin {
 
         let ctx = self.context.clone();
         let pending_approvals = Arc::clone(&self.pending_approvals);
+        let pending_asks = Arc::clone(&self.pending_asks);
         let args = args.clone();
         Some(Box::pin(async move {
             let ctx = ctx.ok_or_else(|| {
@@ -309,6 +324,10 @@ impl CorePlugin for AgentCorePlugin {
                 }
                 HANDLER_SEARCH_TRANSCRIPTS => {
                     handlers::search_transcripts::handle_search_transcripts(&args)
+                }
+                HANDLER_ASK => handlers::ask::handle_ask(ctx, pending_asks, &args).await,
+                HANDLER_ASK_RESPOND => {
+                    handlers::ask::handle_ask_respond(pending_asks, &args).await
                 }
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
