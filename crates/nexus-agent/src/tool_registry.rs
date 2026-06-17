@@ -509,6 +509,29 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             command_id: "read_file".to_string(),
         },
         AgentToolSpec {
+            name: "read_lines".to_string(),
+            description: "Read a 1-based, inclusive line range of a forge file — use this \
+                instead of read_file for large files to keep context small. Returns the \
+                slice plus `total_lines` and the file's hashline `tag` (for `edit`). \
+                Defaults to the first 200 lines when `start`/`end` are omitted."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "start": { "type": "integer", "minimum": 1 },
+                    "end": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+            requires_approval: false,
+            estimated_duration_ms: 50,
+            required_capabilities: vec![Capability::FileSystemRead],
+            target_plugin_id: "com.nexus.storage".to_string(),
+            command_id: "read_lines".to_string(),
+        },
+        AgentToolSpec {
             name: "write_file".to_string(),
             description: "Write or overwrite a whole forge-relative file. To change part \
                 of an existing file, prefer `edit`."

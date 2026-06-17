@@ -49,6 +49,7 @@ use nexus_storage::ipc::{
     StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
     StorageNoteAppendResult, StorageOk, StoragePathArgs, StorageQuerySymbolArgs,
     StorageQuerySymbolResult, StorageQueryTagsArgs, StorageReadFileArgs, StorageReadFileResult,
+    StorageReadLinesArgs, StorageReadLinesResult,
     StorageReadFrontmatterArgs, StorageRelpathArgs, StorageRenameEntryArgs, StorageSearchArgs,
     StorageSearchHit, StorageSearchResult, StorageSettingsWriteArgs, StorageSymbolRow,
     StorageToggleTaskArgs, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
@@ -230,6 +231,10 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.storage::read_file ─────────────────────────────────────
     write_schema::<StorageReadFileArgs>("com_nexus_storage__read_file", "args");
     write_schema::<StorageReadFileResult>("com_nexus_storage__read_file", "result");
+
+    // ── com.nexus.storage::read_lines (Phase 5.2 / RFC 0005) ─────────────
+    write_schema::<StorageReadLinesArgs>("com_nexus_storage__read_lines", "args");
+    write_schema::<StorageReadLinesResult>("com_nexus_storage__read_lines", "result");
 
     // ── com.nexus.storage::write_file ────────────────────────────────────
     write_schema::<StorageWriteFileArgs>("com_nexus_storage__write_file", "args");

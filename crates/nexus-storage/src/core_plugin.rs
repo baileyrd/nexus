@@ -374,6 +374,12 @@ pub const HANDLER_WRITE_FRONTMATTER: u32 = 72;
 /// [`crate::StorageEngine::write_file`] so the index/FTS/graph stay in sync.
 pub const HANDLER_EDIT_FILE: u32 = 73;
 
+/// Handler id for `read_lines` — a 1-based, inclusive line-range read. Args:
+/// [`crate::ipc::StorageReadLinesArgs`]; Returns
+/// [`crate::ipc::StorageReadLinesResult`]. Phase 5.2 / RFC 0005 — a
+/// context-efficient alternative to `read_file` for large files.
+pub const HANDLER_READ_LINES: u32 = 74;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -394,6 +400,7 @@ pub const HANDLER_ENTITY_DECAY_RELATIONS: u32 = 69;
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("query_files", HANDLER_QUERY_FILES),
     ("read_file", HANDLER_READ_FILE),
+    ("read_lines", HANDLER_READ_LINES),
     ("backlinks", HANDLER_BACKLINKS),
     ("backlinks_to_block", HANDLER_BACKLINKS_TO_BLOCK),
     ("import_forge", HANDLER_IMPORT_FORGE),
@@ -694,6 +701,10 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_READ_FILE => {
                 let engine = self.engine_handle()?;
                 return crate::handlers::files::read_file(&engine, &mut self.snapshots, args);
+            }
+            HANDLER_READ_LINES => {
+                let engine = self.engine_handle()?;
+                return crate::handlers::files::read_lines(&engine, &mut self.snapshots, args);
             }
             HANDLER_EDIT_FILE => {
                 let engine = self.engine_handle()?;
@@ -1216,6 +1227,7 @@ mod tests {
             ),
             ("HANDLER_WRITE_FRONTMATTER", HANDLER_WRITE_FRONTMATTER),
             ("HANDLER_EDIT_FILE", HANDLER_EDIT_FILE),
+            ("HANDLER_READ_LINES", HANDLER_READ_LINES),
         ];
         handlers.sort_by_key(|(_, id)| *id);
         for window in handlers.windows(2) {

@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::ipc::{
     StorageEditArgs, StorageEditConflict, StorageEditFileResult, StorageEditResult,
     StorageFileExistsResult, StorageOk, StoragePathArgs, StorageReadFileArgs,
-    StorageReadFileResult, StorageWriteFileArgs,
+    StorageReadFileResult, StorageReadLinesArgs, StorageReadLinesResult, StorageWriteFileArgs,
 };
 use crate::{FileFilter, StorageEngine};
 
@@ -62,6 +62,74 @@ pub(crate) fn read_file(
         None => None,
     };
     to_value(&StorageReadFileResult { bytes, tag }, "read_file")
+}
+
+/// Default number of lines returned when `end` is omitted (a 200-line window).
+const DEFAULT_READ_LINES_SPAN: usize = 200;
+
+/// `com.nexus.storage::read_lines` (handler id `74`) — return a 1-based,
+/// inclusive line range of a text file, plus the total line count and the whole
+/// file's hashline TAG. A context-efficient alternative to `read_file` for large
+/// files. Records a snapshot of the whole file (same as `read_file`) so a later
+/// `edit` can recover via 3-way merge.
+pub(crate) fn read_lines(
+    engine: &StorageEngine,
+    snapshots: &mut nexus_hashline::SnapshotStore,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let StorageReadLinesArgs { path, start, end } = parse_args(args, "read_lines")?;
+
+    let bytes = match engine.read_file(&path) {
+        Ok(b) => b,
+        Err(crate::StorageError::FileNotFound(_)) => {
+            return to_value(&empty_read_lines(start), "read_lines");
+        }
+        Err(e) => return Err(exec_err(format!("read_lines '{path}': {e}"))),
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        // Non-UTF-8: no lines, no TAG (callers shouldn't line-read a binary).
+        return to_value(&empty_read_lines(start), "read_lines");
+    };
+
+    snapshots.record(&path, &text);
+    let tag = nexus_hashline::tag(&text);
+
+    let lines: Vec<&str> = text.lines().collect();
+    let total = lines.len();
+    let start_1 = start.map_or(1usize, |n| (n as usize).max(1));
+    let end_1 = end.map_or_else(
+        || start_1.saturating_add(DEFAULT_READ_LINES_SPAN - 1),
+        |n| n as usize,
+    );
+    let hi = end_1.min(total);
+
+    let (content, ret_end) = if total == 0 || start_1 > total || hi < start_1 {
+        (String::new(), 0usize)
+    } else {
+        (lines[start_1 - 1..hi].join("\n"), hi)
+    };
+
+    to_value(
+        &StorageReadLinesResult {
+            content: Some(content),
+            start: u32::try_from(start_1).unwrap_or(u32::MAX),
+            end: u32::try_from(ret_end).unwrap_or(u32::MAX),
+            total_lines: u32::try_from(total).unwrap_or(u32::MAX),
+            tag: Some(tag),
+        },
+        "read_lines",
+    )
+}
+
+/// A `read_lines` reply for a missing or non-UTF-8 file: no content, no TAG.
+fn empty_read_lines(start: Option<u32>) -> StorageReadLinesResult {
+    StorageReadLinesResult {
+        content: None,
+        start: start.unwrap_or(1).max(1),
+        end: 0,
+        total_lines: 0,
+        tag: None,
+    }
 }
 
 pub(crate) fn write_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {

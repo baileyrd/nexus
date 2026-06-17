@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageReadLinesArgs",
+  "description": "Args for `com.nexus.storage::read_lines` (handler id `74`).\n\nA context-efficient partial read: returns a 1-based, inclusive line range of\na text file rather than the whole thing. Phase 5.2 / RFC 0005.",
+  "type": "object",
+  "properties": {
+    "end": {
+      "description": "Last line to return (1-based, inclusive). Defaults to `start + 199`\n(a 200-line window), clamped to the end of the file.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "path": {
+      "description": "Forge-relative path of the file to read.",
+      "type": "string"
+    },
+    "start": {
+      "description": "First line to return (1-based). Defaults to 1.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}
