@@ -50,7 +50,9 @@ let mut cmd = sandbox_command(&helper, &policy, cwd, "rustc", ["--version"])?;
 let status = cmd.status()?; // runs `rustc --version` confined by `policy`
 ```
 
-`sandbox_command(helper, policy, cwd, program, args)` returns a `std::process::Command` that runs `nexus-sandbox <policy-json> <cwd> -- <program> [args…]`. `default_helper_path()` locates the helper next to the current executable. This also works where `pre_exec` is unavailable — notably `portable-pty` (the terminal backend).
+`sandbox_command(helper, policy, cwd, program, args)` returns a `std::process::Command` that runs `nexus-sandbox <policy-json> <cwd> -- <program> [args…]`. The frontend-agnostic argv builder `nexus_types::sandbox_argv` and the helper locator `nexus_types::default_helper_path` live in the **leaf** `nexus-types` (re-exported from `nexus-security`), so a spawn site can wrap a command *without* linking the enforcement engine — notably `portable-pty` (the terminal backend), which has no `pre_exec`.
+
+**Terminal adoption:** `nexus_terminal::SessionConfig` carries an opt-in `sandbox: Option<SandboxPolicy>`. When set to an enforcing policy, `Session::spawn` launches the shell *through* the helper (via `sandbox_argv`); `None` (the default) and `danger-full-access` run the shell directly, so interactive sessions are never surprise-confined. It **fails closed** — a requested policy with no locatable helper errors rather than running unconfined. The agent opts in when spawning sessions for autonomous tool execution.
 
 ### Permissioned downloads
 
@@ -62,4 +64,4 @@ The broker is reachable over IPC via `com.nexus.security::download` (`{ url, des
 
 ### What remains
 
-Route the real spawn paths (`nexus-terminal`, agent tool exec) through `sandbox_command`, reading the configured `SandboxPolicy`. The enforcement primitives, config surface, and download IPC are complete.
+The enforcement primitives, config surface, download IPC, and the opt-in terminal spawn path are complete. To fully *activate* confinement for autonomous work, the agent should pass its `SandboxPolicy` (from `sandbox.toml`) when spawning terminal sessions for tool execution — the mechanism is in place; flipping it on is a per-caller decision.

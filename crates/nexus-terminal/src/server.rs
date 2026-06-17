@@ -502,6 +502,9 @@ impl TerminalServer for InMemoryTerminalServer {
             working_dir: cfg.working_dir,
             initial_size: None,
             env: cfg.env,
+            // Interactive/server-spawned sessions are not confined; callers opt
+            // in to OS-sandboxing per session via `SessionConfig::sandbox`.
+            sandbox: None,
         };
         // BL-062 — at-cap path: evict the LRU stopped session before
         // spawning. If every session is still running, `spawn_or_evict`

@@ -20,7 +20,7 @@
 //! under the workspace roots" — is enforced.
 
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use nexus_types::SandboxPolicy;
@@ -159,20 +159,14 @@ pub fn confine_current_thread(
     Ok(filesystem)
 }
 
-/// Best-effort path to the `nexus-sandbox` helper: the binary named
-/// `nexus-sandbox` alongside the current executable. Callers that ship the
-/// helper elsewhere should pass an explicit path to [`sandbox_command`].
-#[must_use]
-pub fn default_helper_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    Some(exe.with_file_name("nexus-sandbox"))
-}
-
 /// Build a [`Command`] that runs `program` (with `args`) confined by `policy`,
 /// by way of the `nexus-sandbox` helper at `helper`. The helper applies the
 /// policy to *itself* — single-threaded — and `exec`s the target, avoiding the
 /// after-`fork()` allocation hazard a `pre_exec` hook would have in this
 /// (potentially multithreaded) process. See the module docs.
+///
+/// The argv layout comes from [`nexus_types::sandbox_argv`]; spawn backends that
+/// don't use [`Command`] (e.g. portable-pty) call that directly.
 ///
 /// # Errors
 /// Returns [`SandboxError::Encode`] if the policy cannot be serialized.
@@ -188,10 +182,10 @@ where
     A: IntoIterator,
     A::Item: AsRef<OsStr>,
 {
-    let policy_json =
-        serde_json::to_string(policy).map_err(|e| SandboxError::Encode(e.to_string()))?;
+    let argv = nexus_types::sandbox_argv(policy, cwd, program, args)
+        .map_err(|e| SandboxError::Encode(e.to_string()))?;
     let mut cmd = Command::new(helper);
-    cmd.arg(policy_json).arg(cwd).arg("--").arg(program).args(args);
+    cmd.args(argv);
     Ok(cmd)
 }
 
