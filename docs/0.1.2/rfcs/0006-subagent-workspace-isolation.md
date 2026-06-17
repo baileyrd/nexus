@@ -1,6 +1,6 @@
 # RFC 0006 — Phase 5.3: subagent workspace isolation
 
-- **Status:** Draft (design / decision)
+- **Status:** Step 1 shipped (#313); decision = Option A; Step 2 in backlog
 - **Owner:** unassigned
 - **Created:** 2026-06-17
 - **Tracks:** [RFC 0005](0005-omp-agentic-loop-phase5.md) Phase 5.3; omp blueprint `docs/17-subagents-and-tasks.md`
@@ -80,18 +80,20 @@ branch for the parent to review / merge.
 ## Recommended plan
 
 **Step 1 (option-agnostic, ship first): git-worktree primitives in `nexus-git`.**
-A small, testable, self-contained PR adding `worktree_create` / `worktree_list` /
-`worktree_remove` (+ a `worktree_merge` that does `patch` or `branch`) over
-`git2::Worktree`, passive when the forge isn't a repo. Every option above needs
-these, and they're independently useful (parallel work, review sandboxes). No
-agent-loop change, no storage change.
+✅ **Shipped in #313.** A small, self-contained PR added `worktree_create` /
+`worktree_list` / `worktree_remove` over `git2::Worktree` (handlers 39–41),
+creating worktrees under `<forge>/.forge/worktrees/<name>`, with a create/list/
+remove round-trip test. No agent-loop change, no storage change. (`worktree_merge`
+— `patch` / `branch` — folds into Step 2, where the merge policy is decided.)
 
-**Step 2: pick the isolation model (A / B / C) and build it.** Recommendation:
-**A (process-level)**, because it is the only option that gives *true* isolation,
-it avoids reshaping the storage model, and it is the natural home for the
-OS-sandbox + bundled-shell work already scoped in RFCs 0002/0003 — a subagent
-becomes "a confined runtime on a worktree whose delta we merge." It is the
-biggest build, so it would be its own phased sub-plan.
+**Step 2: pick the isolation model (A / B / C) and build it.** ✅ **Decided: A
+(process-level)** — the only option that gives *true* isolation, it avoids
+reshaping the storage model, and it is the natural home for the OS-sandbox +
+bundled-shell work already scoped in RFCs 0002/0003: a subagent becomes "a
+confined runtime on a worktree whose delta we merge." It is the biggest build
+(child-process orchestration, headless run + result plumbing, worktree
+merge / conflict surfacing), so it is **in the backlog** ([RFC 0005](0005-omp-agentic-loop-phase5.md))
+pending its own design proposal before coding.
 
 ## Open questions (for the decision)
 
