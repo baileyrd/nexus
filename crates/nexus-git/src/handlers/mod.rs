@@ -18,3 +18,4 @@ pub(crate) mod staging;
 pub(crate) mod stash;
 pub(crate) mod status;
 pub(crate) mod tags;
+pub(crate) mod worktree;

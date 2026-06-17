@@ -279,6 +279,86 @@ pub struct GitBranchArgs {
     pub name: String,
 }
 
+/// Args for `worktree_create` (handler id `40`). Phase 5.3 / RFC 0006 —
+/// the worktree lands at `<forge>/.forge/worktrees/<name>` (a managed,
+/// gitignored location); the caller chooses only the `name` and an optional
+/// branch to check out (created at HEAD when absent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitWorktreeCreateArgs {
+    /// Worktree name (a simple slug: letters, digits, `-`, `_`).
+    pub name: String,
+    /// Branch to check out in the worktree; created at HEAD if it does not
+    /// exist. Defaults to a branch named after the worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+/// Args for `worktree_remove` (handler id `41`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitWorktreeRemoveArgs {
+    /// Worktree name to remove.
+    pub name: String,
+    /// Remove even when the worktree is valid (deletes its working tree on
+    /// disk). When false, only stale/prunable worktrees are removed.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// One worktree in the `worktree_list` reply (handler id `39`) and the
+/// `worktree_create` reply.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitWorktreeInfo {
+    /// Worktree name.
+    pub name: String,
+    /// Absolute path of the worktree's working directory.
+    pub path: String,
+    /// Branch checked out in the worktree, if it could be resolved.
+    pub branch: Option<String>,
+}
+
+/// Reply for `worktree_list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitWorktreeListReply {
+    /// Worktrees attached to the forge repository.
+    pub worktrees: Vec<GitWorktreeInfo>,
+}
+
 /// One entry in the `stash_list` response (handler id `24`). Mirrors
 /// [`crate::types::StashEntry`].
 #[derive(Debug, Clone, Serialize, Deserialize)]

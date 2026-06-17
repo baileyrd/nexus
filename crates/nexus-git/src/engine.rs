@@ -540,6 +540,78 @@ impl GitEngine {
         Ok(())
     }
 
+    /// List the worktrees attached to this repository (Phase 5.3 / RFC 0006).
+    ///
+    /// # Errors
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn list_worktrees(&self) -> Result<Vec<crate::ipc::GitWorktreeInfo>, GitError> {
+        let names = self.repo.worktrees()?;
+        let mut out = Vec::new();
+        for name in names.iter().flatten() {
+            let Ok(wt) = self.repo.find_worktree(name) else {
+                continue;
+            };
+            // Resolving the checked-out branch needs opening the worktree's own
+            // repository; best-effort, `None` if that fails.
+            let branch = git2::Repository::open_from_worktree(&wt).ok().and_then(|r| {
+                r.head()
+                    .ok()
+                    .and_then(|h| h.shorthand().map(ToString::to_string))
+            });
+            out.push(crate::ipc::GitWorktreeInfo {
+                name: name.to_string(),
+                path: wt.path().display().to_string(),
+                branch,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Create a worktree named `name` at `path`, optionally checking out
+    /// `branch` (created at HEAD when it does not exist).
+    ///
+    /// # Errors
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn create_worktree(
+        &self,
+        name: &str,
+        path: &Path,
+        branch: Option<&str>,
+    ) -> Result<crate::ipc::GitWorktreeInfo, GitError> {
+        let mut opts = git2::WorktreeAddOptions::new();
+        let wt = if let Some(b) = branch {
+            let head = self.repo.head()?.peel_to_commit()?;
+            let branch_obj = match self.repo.find_branch(b, git2::BranchType::Local) {
+                Ok(existing) => existing,
+                Err(_) => self.repo.branch(b, &head, false)?,
+            };
+            let reference = branch_obj.into_reference();
+            opts.reference(Some(&reference));
+            self.repo.worktree(name, path, Some(&opts))?
+        } else {
+            self.repo.worktree(name, path, Some(&opts))?
+        };
+        Ok(crate::ipc::GitWorktreeInfo {
+            name: name.to_string(),
+            path: wt.path().display().to_string(),
+            branch: branch.map(ToString::to_string),
+        })
+    }
+
+    /// Remove the worktree named `name`. With `force`, prunes even a valid
+    /// worktree and deletes its working tree on disk; otherwise only
+    /// stale/prunable worktrees are removed.
+    ///
+    /// # Errors
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn remove_worktree(&self, name: &str, force: bool) -> Result<(), GitError> {
+        let wt = self.repo.find_worktree(name)?;
+        let mut opts = git2::WorktreePruneOptions::new();
+        opts.valid(force).working_tree(force);
+        wt.prune(Some(&mut opts))?;
+        Ok(())
+    }
+
     /// Switch to an existing branch.
     ///
     /// # Errors
@@ -1397,6 +1469,41 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = GitEngine::open(dir.path());
         assert!(matches!(result, Err(GitError::NotARepo(_))));
+    }
+
+    #[test]
+    fn worktree_create_list_remove_roundtrip() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("a.txt"), "hello").unwrap();
+        make_commit(&engine, "init");
+
+        let base = dir.path().join(".forge").join("worktrees");
+        fs::create_dir_all(&base).unwrap();
+        let wt_path = base.join("task1");
+
+        let info = engine
+            .create_worktree("task1", &wt_path, Some("task/1"))
+            .unwrap();
+        assert_eq!(info.name, "task1");
+        assert_eq!(info.branch.as_deref(), Some("task/1"));
+        assert!(
+            wt_path.join("a.txt").exists(),
+            "the worktree should have a checked-out working tree"
+        );
+
+        let list = engine.list_worktrees().unwrap();
+        let found = list.iter().find(|w| w.name == "task1").expect("listed");
+        assert_eq!(found.branch.as_deref(), Some("task/1"));
+
+        engine.remove_worktree("task1", true).unwrap();
+        assert!(
+            !engine
+                .list_worktrees()
+                .unwrap()
+                .iter()
+                .any(|w| w.name == "task1"),
+            "worktree should be gone after a forced remove"
+        );
     }
 
     #[test]
