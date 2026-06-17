@@ -37,6 +37,7 @@ const EXEMPT_CRATES: &[(&str, &str)] = &[
     ("nexus-panic-log", "stand-alone panic hook; not a plugin"),
     ("nexus-fuzz", "security fuzz harness; not a plugin"),
     ("nexus-crdt", "operation-based CRDT library used by editor"),
+    ("nexus-hashline", "stable line-id hashline editing library used by storage; not a plugin"),
     // Bootstrap itself.
     ("nexus-bootstrap", "the orchestrator that registers plugins"),
     // Frontend / IPC-proxy crates — consume Runtime, not registered as
