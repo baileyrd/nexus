@@ -79,10 +79,10 @@ pub use custom_agent::{
 };
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use session::{
-    run_session, run_session_with_config, run_session_with_id, AgentSession, AutoApproveAll,
-    ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionConfig, SessionOutcome,
-    SessionPolicy, ToolCallRecord, DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
-    LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
+    run_session, run_session_resumed, run_session_with_config, run_session_with_id, AgentSession,
+    AutoApproveAll, ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionConfig,
+    SessionOutcome, SessionPolicy, ToolCallRecord, DEFAULT_MAX_ITERATIONS,
+    DEFAULT_MAX_TOOL_CALLS_PER_ITERATION, LEGACY_MAX_AGENT_ROUNDS, MAX_AGENT_ROUNDS,
 };
 pub use tool_registry::{
     default_tool_catalog, measure_dispatch, seed_default_tools, AgentToolAccessRecord,

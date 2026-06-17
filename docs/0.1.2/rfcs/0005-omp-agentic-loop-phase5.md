@@ -187,6 +187,13 @@ breadth) shipped in #307–#311. The agent tool catalog now covers
 `read_file` / `read_lines` / `grep` / `find_symbol` / `ast_query` / `edit`
 (hashline 3-way merge) / `todo` / `ask` / `delegate`, plus git and terminal.
 
+Phase 5.3 (subagent workspace isolation) shipped in #313–#317 — process-level
+isolation per [RFC 0006](0006-subagent-workspace-isolation.md) /
+[RFC 0007](0007-subagent-process-isolation.md) (worktree → sandboxed child →
+merge-back). Phase 5.4 (session tree) is in design as
+[RFC 0008](0008-agent-session-tree.md) — resume / branch / rewind / checkpoint
+as one `fork(parent, k, message)` primitive; build under way.
+
 Backlog items spun out of the shipped work (not blockers):
 
 - **`ask` frontend wiring.** The `ask` backend (#311) publishes
