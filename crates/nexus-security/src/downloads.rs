@@ -124,7 +124,17 @@ pub async fn fetch(
     writable_roots: &[WritableRoot],
 ) -> Result<u64, DownloadError> {
     let url = validate(req, policy, writable_roots)?;
+    fetch_url(url, req.dest, policy.max_bytes).await
+}
 
+/// Fetch an already-validated `url` into `dest`, streaming with a `max_bytes`
+/// cap. Callers that have run [`validate`] themselves (e.g. the IPC handler)
+/// use this directly; [`fetch`] is the validate-then-fetch convenience.
+///
+/// # Errors
+/// Returns a [`DownloadError`] if the request errors, the response is
+/// unsuccessful, the cap is exceeded, or the write fails.
+pub async fn fetch_url(url: Url, dest: &Path, max_bytes: u64) -> Result<u64, DownloadError> {
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e| DownloadError::Http(e.to_string()))?;
@@ -138,13 +148,12 @@ pub async fn fetch(
     }
     // Reject early if the declared length already blows the cap.
     if let Some(len) = resp.content_length() {
-        if len > policy.max_bytes {
-            return Err(DownloadError::TooLarge { max: policy.max_bytes, got: len });
+        if len > max_bytes {
+            return Err(DownloadError::TooLarge { max: max_bytes, got: len });
         }
     }
 
-    let mut file =
-        std::fs::File::create(req.dest).map_err(|e| DownloadError::Io(e.to_string()))?;
+    let mut file = std::fs::File::create(dest).map_err(|e| DownloadError::Io(e.to_string()))?;
     let mut written: u64 = 0;
     while let Some(chunk) = resp
         .chunk()
@@ -152,10 +161,10 @@ pub async fn fetch(
         .map_err(|e| DownloadError::Http(e.to_string()))?
     {
         written += u64::try_from(chunk.len()).unwrap_or(u64::MAX);
-        if written > policy.max_bytes {
+        if written > max_bytes {
             drop(file);
-            let _ = std::fs::remove_file(req.dest);
-            return Err(DownloadError::TooLarge { max: policy.max_bytes, got: written });
+            let _ = std::fs::remove_file(dest);
+            return Err(DownloadError::TooLarge { max: max_bytes, got: written });
         }
         std::io::Write::write_all(&mut file, &chunk).map_err(|e| DownloadError::Io(e.to_string()))?;
     }

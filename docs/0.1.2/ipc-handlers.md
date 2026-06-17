@@ -26,7 +26,7 @@
 | `com.nexus.ai.runtime` | 12 |
 | `com.nexus.skills` | 8 |
 | `com.nexus.acp` | 8 |
-| `com.nexus.security` | 8 |
+| `com.nexus.security` | 9 |
 | `com.nexus.comments` | 7 |
 | `com.nexus.memory` | 21 |
 | `com.nexus.database` | 6 |
@@ -251,7 +251,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.security (8)
+## com.nexus.security (9)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -262,6 +262,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `metrics_snapshot` | — | read-only observability |
 | `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
 | `sandbox_policy` | — | read-only introspection of the active OS-sandbox config (`sandbox.toml`) |
+| `download` | `net.http` | **async** — brokered, allowlisted download into a writable root (`{ url, dest, cwd? }`) |
 
 ---
 
