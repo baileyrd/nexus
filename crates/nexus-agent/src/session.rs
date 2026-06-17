@@ -507,14 +507,19 @@ where
     .await
 }
 
-/// BL-120 — full entry point that also accepts an explicit
-/// [`crate::compression::Compressor`]. The compressor only fires
-/// when [`SessionConfig::max_context_tokens`] > 0; otherwise the
-/// loop runs identically to BL-119.
-// Session driver wiring plus the compressor; same rationale as
-// `run_session_with_config`.
+/// RFC 0008 (Phase 5.4) — the **seedable** session loop. Beyond
+/// [`run_session_with_compressor`] it accepts `seed_rounds` (an inherited
+/// transcript prefix from a parent session) and `follow_up` (a new user
+/// message). With an empty seed and no follow-up it behaves identically to a
+/// fresh run; otherwise it resumes / forks: `session.rounds` starts at
+/// `seed_rounds`, new rounds continue the numbering, and the first prompt is
+/// rebuilt from the inherited rounds plus the follow-up message.
+///
+/// The compressor only fires when [`SessionConfig::max_context_tokens`] > 0.
+// Session driver wiring plus the compressor + seed; folding these into a struct
+// would just move the arguments around.
 #[allow(clippy::too_many_arguments)]
-pub async fn run_session_with_compressor<D, P, T, C>(
+pub async fn run_session_resumed_with_compressor<D, P, T, C>(
     driver: &D,
     dispatcher: &T,
     policy: &P,
@@ -524,6 +529,8 @@ pub async fn run_session_with_compressor<D, P, T, C>(
     id: String,
     config: SessionConfig,
     compressor: &C,
+    seed_rounds: Vec<RoundRecord>,
+    follow_up: Option<String>,
 ) -> AgentSession
 where
     D: ChatDriver + ?Sized,
@@ -533,13 +540,17 @@ where
 {
     let config = config.sanitized();
     let started_at = chrono::Utc::now().to_rfc3339();
+    // RFC 0008 — a forked/resumed run starts with the inherited prefix; new
+    // rounds continue numbering past it. (Saturating: a transcript can't
+    // realistically exceed u32 rounds.)
+    let seed_len = u32::try_from(seed_rounds.len()).unwrap_or(u32::MAX);
     let mut session = AgentSession {
         id: id.clone(),
         goal: goal.to_string(),
         archetype,
         started_at,
         ended_at: String::new(),
-        rounds: Vec::new(),
+        rounds: seed_rounds,
         outcome: SessionOutcome::Complete,
         compactions: Vec::new(),
     };
@@ -556,7 +567,20 @@ where
     // round's results as bullet points. A future Phase 2c can
     // upgrade this to provider-native ChatTurn linkage once the
     // driver surface supports multi-turn directly.
-    let mut current_prompt = goal.to_string();
+    //
+    // RFC 0008 — a fresh run starts from the goal; a resumed/forked run rebuilds
+    // context from the inherited rounds and then appends the new user
+    // instruction (`follow_up`) as the next ask.
+    let mut current_prompt = if session.rounds.is_empty() && follow_up.is_none() {
+        goal.to_string()
+    } else {
+        let mut p = compose_followup_prompt_compressed(goal, &session.rounds, 0, "", false);
+        if let Some(msg) = follow_up.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+            p.push_str("\n\n## New instruction\n");
+            p.push_str(msg);
+        }
+        p
+    };
 
     // BL-120 — compression state. `live_rounds_start` is the index
     // into `session.rounds` of the first round NOT yet folded into
@@ -585,7 +609,10 @@ where
         recent_window_rounds: 2,
     };
 
-    for round_idx in 1..=config.max_iterations {
+    for iter in 1..=config.max_iterations {
+        // Absolute round number = inherited prefix length + this iteration, so a
+        // resumed run continues numbering past its seed (RFC 0008).
+        let round_idx = seed_len + iter;
         // BL-131 sanitisation pass before each driver invocation.
         let sanitized = crate::context_sanitize::sanitize_prompt(&current_prompt, &sanitize_opts);
         if sanitized.metrics.any_fired() {
@@ -757,13 +784,78 @@ where
             }
         }
 
-        if round_idx == config.max_iterations {
+        if iter == config.max_iterations {
             session.outcome = SessionOutcome::MaxRounds;
         }
     }
 
     session.ended_at = chrono::Utc::now().to_rfc3339();
     session
+}
+
+/// BL-120 — full entry point with an explicit
+/// [`crate::compression::Compressor`]; runs a **fresh** session (no inherited
+/// transcript). A thin wrapper over [`run_session_resumed_with_compressor`].
+#[allow(clippy::too_many_arguments)]
+pub async fn run_session_with_compressor<D, P, T, C>(
+    driver: &D,
+    dispatcher: &T,
+    policy: &P,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: SessionConfig,
+    compressor: &C,
+) -> AgentSession
+where
+    D: ChatDriver + ?Sized,
+    P: SessionPolicy + ?Sized,
+    T: ToolDispatcher + ?Sized,
+    C: crate::compression::Compressor + ?Sized,
+{
+    run_session_resumed_with_compressor(
+        driver, dispatcher, policy, goal, system, archetype, id, config, compressor,
+        Vec::new(), None,
+    )
+    .await
+}
+
+/// RFC 0008 (Phase 5.4) — resume / fork a session: run the loop seeded with
+/// `seed_rounds` (an inherited transcript prefix) and an optional `follow_up`
+/// user message. Mirrors [`run_session_with_config`]'s compressor selection
+/// (LLM compressor when a context budget is set, else the no-op).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_session_resumed<D, P, T>(
+    driver: &D,
+    dispatcher: &T,
+    policy: &P,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+    config: SessionConfig,
+    seed_rounds: Vec<RoundRecord>,
+    follow_up: Option<String>,
+) -> AgentSession
+where
+    D: ChatDriver + ?Sized,
+    P: SessionPolicy + ?Sized,
+    T: ToolDispatcher + ?Sized,
+{
+    if config.max_context_tokens > 0 {
+        let compressor = crate::compression::LlmCompressor::new(driver);
+        return run_session_resumed_with_compressor(
+            driver, dispatcher, policy, goal, system, archetype, id, config, &compressor,
+            seed_rounds, follow_up,
+        )
+        .await;
+    }
+    run_session_resumed_with_compressor::<D, P, T, crate::compression::NoopCompressor>(
+        driver, dispatcher, policy, goal, system, archetype, id, config,
+        &crate::compression::NoopCompressor, seed_rounds, follow_up,
+    )
+    .await
 }
 
 /// Marker indicating why a round caused the session to stop.
@@ -1036,6 +1128,116 @@ mod tests {
         assert_eq!(session.rounds[1].text, "summary: hello");
         assert!(session.rounds[1].tool_calls.is_empty());
         assert_eq!(dispatcher.calls.lock().unwrap().len(), 1);
+    }
+
+    // ── RFC 0008 (Phase 5.4) — resumable loop core ───────────────────────────
+
+    #[tokio::test]
+    async fn run_session_resumed_continues_round_numbering() {
+        // Two inherited rounds, as if forked from a parent at its tip.
+        let seed = vec![
+            RoundRecord { round: 1, text: "first".into(), tool_calls: Vec::new() },
+            RoundRecord { round: 2, text: "second".into(), tool_calls: Vec::new() },
+        ];
+        let driver = ScriptedDriver::new(vec![
+            Proposal { text: "resuming".into(), tool_calls: vec![read_tool("u1", "x.md")] },
+            Proposal { text: "done".into(), tool_calls: Vec::new() },
+        ]);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session_resumed(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "original goal",
+            "system",
+            None,
+            "child-id".into(),
+            SessionConfig::default(),
+            seed,
+            Some("now do the next thing".into()),
+        )
+        .await;
+
+        // Seed rounds (1, 2) are present; the two new rounds continue at 3, 4.
+        assert_eq!(session.rounds.len(), 4);
+        assert_eq!(session.rounds[0].round, 1);
+        assert_eq!(session.rounds[1].round, 2);
+        assert_eq!(session.rounds[2].round, 3);
+        assert_eq!(session.rounds[2].text, "resuming");
+        assert_eq!(session.rounds[3].round, 4);
+        assert_eq!(session.rounds[3].text, "done");
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert_eq!(session.id, "child-id");
+    }
+
+    #[tokio::test]
+    async fn run_session_resumed_weaves_followup_into_first_prompt() {
+        struct CapturingDriver {
+            replies: Mutex<std::collections::VecDeque<Proposal>>,
+            prompts: Mutex<Vec<String>>,
+        }
+        #[async_trait]
+        impl ChatDriver for CapturingDriver {
+            async fn propose(&self, _system: &str, user: &str) -> Result<Proposal, String> {
+                self.prompts.lock().unwrap().push(user.to_string());
+                Ok(self.replies.lock().unwrap().pop_front().expect("exhausted"))
+            }
+        }
+        let driver = CapturingDriver {
+            replies: Mutex::new(
+                vec![Proposal { text: "ok".into(), tool_calls: Vec::new() }].into(),
+            ),
+            prompts: Mutex::new(Vec::new()),
+        };
+        let dispatcher = CountingDispatcher::new();
+        let seed = vec![RoundRecord {
+            round: 1,
+            text: "earlier work".into(),
+            tool_calls: Vec::new(),
+        }];
+        let _session = run_session_resumed(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "root goal",
+            "system",
+            None,
+            "id".into(),
+            SessionConfig::default(),
+            seed,
+            Some("the new ask".into()),
+        )
+        .await;
+        let prompts = driver.prompts.lock().unwrap();
+        assert!(!prompts.is_empty());
+        // The first prompt carries the new instruction (and the inherited context).
+        assert!(prompts[0].contains("the new ask"), "first prompt: {}", prompts[0]);
+        assert!(prompts[0].contains("New instruction"), "first prompt: {}", prompts[0]);
+    }
+
+    #[tokio::test]
+    async fn run_session_resumed_empty_seed_behaves_like_fresh() {
+        let driver = ScriptedDriver::new(vec![Proposal {
+            text: "done".into(),
+            tool_calls: Vec::new(),
+        }]);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session_resumed(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "goal",
+            "sys",
+            None,
+            "id".into(),
+            SessionConfig::default(),
+            Vec::new(),
+            None,
+        )
+        .await;
+        assert_eq!(session.rounds.len(), 1);
+        assert_eq!(session.rounds[0].round, 1);
+        assert_eq!(session.outcome, SessionOutcome::Complete);
     }
 
     #[tokio::test]
