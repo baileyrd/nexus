@@ -729,6 +729,21 @@ unrestricted = "creates a branch ref — mutates .git inside forge root"
 
 [[handler]]
 plugin = "com.nexus.git"
+command = "worktree_list"
+unrestricted = "read-only enumeration of the forge repo's worktrees"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "worktree_create"
+unrestricted = "adds a git worktree under .forge/worktrees — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "worktree_remove"
+unrestricted = "removes a git worktree — mutates .git inside forge root"
+
+[[handler]]
+plugin = "com.nexus.git"
 command = "delete_branch"
 unrestricted = "deletes a branch ref — mutates .git inside forge root"
 

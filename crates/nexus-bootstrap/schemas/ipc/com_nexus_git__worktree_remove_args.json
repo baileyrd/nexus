@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitWorktreeRemoveArgs",
+  "description": "Args for `worktree_remove` (handler id `41`).",
+  "type": "object",
+  "properties": {
+    "force": {
+      "description": "Remove even when the worktree is valid (deletes its working tree on\ndisk). When false, only stale/prunable worktrees are removed.",
+      "type": "boolean",
+      "default": false
+    },
+    "name": {
+      "description": "Worktree name to remove.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

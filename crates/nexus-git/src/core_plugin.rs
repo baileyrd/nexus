@@ -217,6 +217,17 @@ pub const HANDLER_DISCARD_HUNKS: u32 = 37;
 /// existing `diff_file`/`blame` surfaces.
 pub const HANDLER_FILE_LOG: u32 = 38;
 
+/// `worktree_list` (Phase 5.3 / RFC 0006) — list worktrees attached to the
+/// forge repository. No args; returns [`crate::ipc::GitWorktreeListReply`].
+pub const HANDLER_WORKTREE_LIST: u32 = 39;
+/// `worktree_create` — add a worktree at `<forge>/.forge/worktrees/<name>`.
+/// Args: [`crate::ipc::GitWorktreeCreateArgs`]; returns
+/// [`crate::ipc::GitWorktreeInfo`].
+pub const HANDLER_WORKTREE_CREATE: u32 = 40;
+/// `worktree_remove` — remove a worktree. Args:
+/// [`crate::ipc::GitWorktreeRemoveArgs`].
+pub const HANDLER_WORKTREE_REMOVE: u32 = 41;
+
 /// Plugin ids this plugin requires already loaded — `nexus-security`
 /// provides the capability + credential types this crate uses.
 pub const MANIFEST_DEPS: &[&str] = &["com.nexus.security"];
@@ -264,6 +275,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("blame", HANDLER_BLAME),
     ("discard_hunks", HANDLER_DISCARD_HUNKS),
     ("file_log", HANDLER_FILE_LOG),
+    ("worktree_list", HANDLER_WORKTREE_LIST),
+    ("worktree_create", HANDLER_WORKTREE_CREATE),
+    ("worktree_remove", HANDLER_WORKTREE_REMOVE),
 ];
 
 /// P2-06 — interval the background git-state watcher sleeps between
@@ -396,7 +410,7 @@ impl CorePlugin for GitCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        use crate::handlers::{branches, log, merge, staging, stash, status, tags};
+        use crate::handlers::{branches, log, merge, staging, stash, status, tags, worktree};
 
         let Some(w) = &self.worker else {
             // Passive mode — forge root is not a git repository. HANDLER_STATUS
@@ -454,6 +468,9 @@ impl CorePlugin for GitCorePlugin {
             HANDLER_CONFLICT_VERSIONS => merge::conflict_versions(&h, args),
             HANDLER_MERGE => merge::merge(&h, args),
             HANDLER_BLAME => status::blame(&h, args, root),
+            HANDLER_WORKTREE_LIST => worktree::worktree_list(&h),
+            HANDLER_WORKTREE_CREATE => worktree::worktree_create(&h, args, root),
+            HANDLER_WORKTREE_REMOVE => worktree::worktree_remove(&h, args),
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),

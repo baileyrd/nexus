@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitWorktreeListReply",
+  "description": "Reply for `worktree_list`.",
+  "type": "object",
+  "properties": {
+    "worktrees": {
+      "description": "Worktrees attached to the forge repository.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitWorktreeInfo"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "worktrees"
+  ],
+  "$defs": {
+    "GitWorktreeInfo": {
+      "description": "One worktree in the `worktree_list` reply (handler id `39`) and the\n`worktree_create` reply.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "Branch checked out in the worktree, if it could be resolved.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Worktree name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Absolute path of the worktree's working directory.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ]
+    }
+  }
+}

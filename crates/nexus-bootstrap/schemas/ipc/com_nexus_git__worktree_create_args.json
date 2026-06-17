@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitWorktreeCreateArgs",
+  "description": "Args for `worktree_create` (handler id `40`). Phase 5.3 / RFC 0006 —\nthe worktree lands at `<forge>/.forge/worktrees/<name>` (a managed,\ngitignored location); the caller chooses only the `name` and an optional\nbranch to check out (created at HEAD when absent).",
+  "type": "object",
+  "properties": {
+    "branch": {
+      "description": "Branch to check out in the worktree; created at HEAD if it does not\nexist. Defaults to a branch named after the worktree.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Worktree name (a simple slug: letters, digits, `-`, `_`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

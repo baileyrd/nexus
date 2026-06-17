@@ -90,7 +90,8 @@ use nexus_ai_runtime::{
 // don't even derive `Serialize`.
 use nexus_git::ipc::{
     GitBranch, GitCommitArgs, GitCommitReply, GitDiffHunk, GitDiffLine, GitLogArgs, GitLogEntry,
-    GitOk, GitPathArgs, GitStatusReply,
+    GitOk, GitPathArgs, GitStatusReply, GitWorktreeCreateArgs, GitWorktreeInfo,
+    GitWorktreeListReply, GitWorktreeRemoveArgs,
 };
 // nexus-mcp uses a wire-mirror module (`nexus_mcp::ipc`) — the
 // existing handlers construct ad-hoc JSON via `serde_json::json!`.
@@ -513,6 +514,12 @@ fn emit_all_schemas_impl() {
     write_schema::<GitCommitArgs>("com_nexus_git__commit", "args");
     write_schema::<GitCommitReply>("com_nexus_git__commit", "reply");
     write_schema::<GitOk>("com_nexus_git", "ok");
+
+    // ── com.nexus.git::worktree_* (Phase 5.3 / RFC 0006) ─────────────────
+    write_schema::<GitWorktreeCreateArgs>("com_nexus_git__worktree_create", "args");
+    write_schema::<GitWorktreeRemoveArgs>("com_nexus_git__worktree_remove", "args");
+    write_schema::<GitWorktreeInfo>("com_nexus_git__worktree", "info");
+    write_schema::<GitWorktreeListReply>("com_nexus_git__worktree_list", "reply");
 
     // ── com.nexus.mcp.host (P1-3 #113) ───────────────────────────────────
     // Wire-mirror types — the impl emits ad-hoc `serde_json::json!`.

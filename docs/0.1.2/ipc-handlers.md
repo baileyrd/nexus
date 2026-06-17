@@ -13,7 +13,7 @@
 | Plugin | Handlers |
 |--------|---------:|
 | `com.nexus.storage` | 75 |
-| `com.nexus.git` | 38 |
+| `com.nexus.git` | 41 |
 | `com.nexus.terminal` | 29 |
 | `com.nexus.ai` | 28 |
 | `com.nexus.dap` | 21 |
@@ -91,7 +91,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.git (38)
+## com.nexus.git (41)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -101,6 +101,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `create_branch` / `delete_branch` / `switch_branch` / `create_tag` / `delete_tag` | — | ref mutation |
 | `push` / `push_tags` | — | **AUDIT** — outbound network, candidate for `net.http` |
 | `merge` / `abort_merge` / `rebase` / `abort_rebase` / `cherry_pick` / `abort_cherry_pick` | — | history mutation |
+| `worktree_list` / `worktree_create` / `worktree_remove` | — | git worktrees for subagent isolation (RFC 0006); worktrees live under `.forge/worktrees/` |
 | `stash_push` / `stash_pop` / `stash_drop` | — | stash mgmt |
 
 ---
