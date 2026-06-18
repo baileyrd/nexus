@@ -204,8 +204,17 @@ round (`compose_followup_prompt_compressed`). It now replays a real conversation
 to provider-native `ChatTurn`s; `ChatDriver` gained `propose_turns` (default
 flattens to the legacy single-string `propose`, so non-IPC drivers are
 unchanged). BL-120 compaction folds into the goal turn; BL-131 sanitisation
-moved to per-`ToolResult` content. **Part 2 — explicit tool error/retry
-policies** is the remaining 5.5 work.
+moved to per-`ToolResult` content.
+
+**Part 2 — explicit tool error/retry policies** is built: `dispatch_one`
+retries a tool call whose dispatch fails with a *transient* error
+(`is_retryable_tool_error` — timeouts, transport resets, rate limits,
+5xx/429) up to `SessionConfig::max_tool_retries` times with exponential
+backoff (`tool_retry_backoff_ms`). Permanent errors (not-found,
+validation, capability/policy denial) are never retried, and the whole
+mechanism is opt-in (`max_tool_retries` defaults to `0`, preserving the
+prior single-attempt behaviour). The exhausted-retry error is annotated
+with the attempt count. This completes Phase 5.5.
 
 Backlog items spun out of the shipped work (not blockers):
 

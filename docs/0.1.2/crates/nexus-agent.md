@@ -249,8 +249,11 @@ rounds: (1) BL-131 `sanitize_turns` over the tool-result turn contents; (2)
 empty tool calls → terminal text round, `Complete`; (5) build a `ProposedRound`,
 ask `policy.allow_round`; (6) `execute_round` applies the decision —
 `ApproveAll`/`Partial` dispatch the approved subset via `dispatch_one` (each timed
-with `Instant`, populating `ToolCallRecord.duration_ms`), `Abort`/`Timeout` stop
-with a synthetic narration round; (7) if no call approved → `Aborted`; (8) rebuild
+with `Instant`, populating `ToolCallRecord.duration_ms`; Phase 5.5 — a *transient*
+dispatch error, per `is_retryable_tool_error`, is retried up to
+`SessionConfig::max_tool_retries` times with exponential backoff
+`tool_retry_backoff_ms`, opt-in/off by default), `Abort`/`Timeout` stop with a
+synthetic narration round; (7) if no call approved → `Aborted`; (8) rebuild
 the conversation from the recorded rounds via `compose_turns` — Phase 5.5 (2c)
 provider-native multi-turn: a leading `User{goal}` turn then each round as an
 `Assistant{text, tool_calls}` turn followed by one `ToolResult` per call (failures
