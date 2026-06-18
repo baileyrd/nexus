@@ -1,4 +1,4 @@
-# Handoff — Phase 5.5 (loop hardening) complete; the RFC 0005 ladder is fully shipped
+# Handoff — agent retry + interaction follow-ups shipped; next up is subagent isolation
 
 You are continuing work on **Nexus** (microkernel Rust workspace + Tauri/React
 shell) at `/home/user/nexus`. Read [`CLAUDE.md`](../../../CLAUDE.md) and
@@ -6,140 +6,123 @@ shell) at `/home/user/nexus`. Read [`CLAUDE.md`](../../../CLAUDE.md) and
 
 ## Context: what was just finished
 
-**Phase 5.5 — loop hardening ([RFC 0005](0005-omp-agentic-loop-phase5.md)) is
-fully shipped**, completing the omp-parity ladder (5.1 hashline → 5.2 tool
-catalog → 5.3 subagent isolation → 5.4 session tree → **5.5 loop hardening**).
-Two PRs, both merged to `main` from branch `claude/exciting-maxwell-2x404u`:
+Phase 5.5 ([RFC 0005](0005-omp-agentic-loop-phase5.md)) shipped the omp-parity
+loop (multi-turn replay + opt-in retry). This session closed out **every
+follow-up that ladder spun off** — five PRs, all merged to `main` from branch
+`claude/find-handoff-md-t1bvnp`:
 
 | PR | Scope | Merged |
 |----|-------|--------|
-| #325 | provider-native multi-turn chat (Phase 2c) | ✅ |
-| #326 | tool error/retry policies | ✅ |
+| #328 | typed tool-dispatch errors (exact retry classification) | ✅ |
+| #329 | idempotency-aware tool retry | ✅ |
+| #330 | structured retry count on `ToolCallRecord` | ✅ |
+| #331 | shell(agent): render interactive `ask` prompts | ✅ |
+| #332 | per-tool dispatch timeout for slow/interactive tools | ✅ |
 
-**The unifying change:** the agent loop used to feed the model **one
-restated-goal user message per round** (`compose_followup_prompt_compressed`),
-digesting prior work into lossy `- round N: read_file ok` lines that discarded
-both the real tool output and the assistant `tool_use` ↔ `tool_result` linkage.
-It now **replays a real conversation** and **retries transient tool failures**.
+**Where it lives (new public surface to build on):**
 
-**Where it lives:**
+- **Typed dispatch errors (`#328`)** — `crates/nexus-agent/src/lib.rs`:
+  `ToolDispatcher::dispatch` returns `Result<Value, ToolDispatchError>`
+  (`message` + `ToolErrorKind::{Transient,Permanent,Unknown}`). The kernel
+  bridges (`KernelToolBridge` in `handlers/shared.rs`, `KernelToolDispatcher`
+  in `nexus-bootstrap/src/agent.rs`) fold `IpcError` into an exact kind via
+  `IpcErrorEnvelope::retryable`. `session.rs::dispatch_one` calls
+  `e.is_retryable()`; `Unknown` falls back to the `is_retryable_tool_error`
+  string heuristic (every `String`/`&str` → `Unknown`).
+- **Idempotency-aware retry (`#329`)** — `AgentToolSpec.idempotent`
+  (`tool_registry.rs`; mutating/side-effecting tools are `false`).
+  `SessionConfig::non_idempotent_tools` is a deny-list the **registry-free**
+  session loop consults; the agent service seeds it from
+  `AgentToolRegistry::non_idempotent_tool_names()` in
+  `run_session_optionally_gated_resumed` when `max_tool_retries > 0`. A
+  transient failure of a listed tool is reported without a retry.
+- **Retry count (`#330`)** — `ToolCallRecord.attempts` (`0` = never dispatched,
+  `1` = clean, `1 + N` = N retries). The `(after N attempts)` error suffix
+  stays for the model's transcript; `attempts` is the structured form.
+- **`ask` shell panel (`#331`)** — `shell/src/plugins/nexus/agent/`: the
+  `com.nexus.agent.` bus subscription routes `ask_requested` → `setPendingAsk`
+  (`agentRuntime.ts`); `AskCard` (`AgentSessionView.tsx`) renders radio /
+  checkbox / free-text per question; `submitAnswer` posts `ask_respond` with
+  `[{ id, selected, custom_input? }]`. Question/answer types are hand-written
+  in `sessionStore.ts` (the `ask` payload is **not** ts-exported).
+- **Per-tool timeout (`#332`)** — `AgentToolSpec.dispatch_timeout_ms` (default
+  `DEFAULT_TOOL_DISPATCH_TIMEOUT_MS` = 60 s). Both bridges resolve it via
+  `AgentToolRegistry::dispatch_timeout_for(target, command)`; `ask` is
+  `ASK_DISPATCH_TIMEOUT_MS` (330 s) and its handler wait
+  `DEFAULT_ASK_TIMEOUT_SECS` was raised 50 s → 300 s (an `handlers::ask` test
+  guards `ASK_DISPATCH_TIMEOUT_MS` > the handler wait). Unregistered routes use
+  the bridge default.
 
-- **Multi-turn loop:** `crates/nexus-agent/src/session.rs` — `compose_turns`
-  builds `User{goal}` (carrying any BL-120 compacted summary) → per round
-  `Assistant{text, tool_calls}` + one `ToolResult` per call (failures/denials via
-  `ToolResult.is_error`). `ChatDriver::propose_turns` (default flattens to the
-  legacy `propose`, so test/bootstrap drivers are untouched) is overridden by
-  `AiChatBridge` (`handlers/shared.rs`) to forward the turns. BL-120 compaction
-  folds into the goal turn; BL-131 `sanitize_turns` runs per-`ToolResult`.
-- **Wire types:** `crates/nexus-ai/src/ipc.rs` — `AiChatTurn` / `AiTurnToolCall`
-  + an optional `turns` field on `AiProposeArgs`; `handle_propose_tool_calls`
-  (`handlers/propose.rs`) prefers `turns` (→ provider-native `ChatTurn`s) and
-  falls back to the legacy text-only `messages`. `anthropic.rs` merges a user
-  turn that follows tool-results into one message (no consecutive user turns).
-  **No new IPC handler** — `propose_tool_calls` was reused; the only regenerated
-  bindings are `AiChatTurn.ts` / `AiTurnToolCall.ts` / `AiProposeArgs.ts` /
-  `SessionConfig.ts` + the propose turn schemas.
-- **Retry:** `session.rs` `dispatch_one` retries a *transient* dispatch error
-  (`is_retryable_tool_error` — timeouts, resets, `unavailable`, `429`/`5xx`) up
-  to `SessionConfig::max_tool_retries` (default **0 = off**) times with
-  exponential backoff (`tool_retry_backoff_ms`, default 250). Permanent errors
-  (not-found, validation, capability/policy denial) are never retried; the
-  exhausted error is annotated `(after N attempts)`.
+**Considered and declined (YAGNI):** promoting `ToolDispatchError` from its
+`{message, kind}` struct to a richer error *enum* — no consumer needs finer
+branching than `is_retryable()` today. Revisit only if a per-cause retry policy
+(e.g. retry timeouts but not cancellations) is ever wanted.
 
 ## Suggested next work
 
-The RFC 0005 phased ladder (5.1–5.5) is **done**. Remaining threads, ordered
+The RFC 0005 ladder and all its follow-ups are done. Remaining threads, ordered
 roughly by self-containment — **confirm priorities with the user before
-starting**:
+starting** (these are larger architectural efforts, not quick follow-ups):
 
-- **Typed tool-dispatch errors — ✅ shipped** (branch
-  `claude/find-handoff-md-t1bvnp`). `ToolDispatcher::dispatch` now returns
-  `Result<Value, ToolDispatchError>` (`message` + a `ToolErrorKind` of
-  `Transient`/`Permanent`/`Unknown`). The kernel bridges (`KernelToolBridge`,
-  `KernelToolDispatcher`) fold `IpcError` into an exact kind via
-  `IpcErrorEnvelope::retryable`, so the session loop retries transient IPC
-  failures without string-sniffing. `is_retryable_tool_error` remains the
-  `Unknown` fallback (every `String`/`&str` conversion lands there).
-  *Per-tool idempotency-aware retry* is now **✅ shipped** too: `AgentToolSpec`
-  carries an `idempotent` flag (mutating / side-effecting tools — writes,
-  deletes, pushes, terminal exec, delegation, `ask` — are `false`);
-  `SessionConfig::non_idempotent_tools` is a deny-list the registry-free loop
-  consults so a *transient* failure of a non-idempotent tool is reported
-  without a retry; the agent service seeds it from
-  `AgentToolRegistry::non_idempotent_tool_names` when `max_tool_retries > 0`.
-  (Spun out of #326.) Structured retry count is now **✅ shipped** too:
-  `ToolCallRecord.attempts` records total dispatch attempts (`0` = never
-  dispatched, `1` = clean, `1 + N` = `N` retries), so consumers read the retry
-  count structurally instead of parsing the `(after N attempts)` error suffix.
-  Considered and **declined (YAGNI)**: promoting `ToolDispatchError` from its
-  `{message, kind}` struct to a richer error *enum* — no consumer needs finer
-  branching than `is_retryable()` today; revisit if a per-cause retry policy
-  (e.g. retry timeouts but not cancellations) is ever wanted.
-- **`ask` frontend wiring + per-tool dispatch timeout — ✅ both shipped.**
-  *Frontend:* the `ask` backend (publishes `com.nexus.agent.ask_requested` /
-  awaits `ask_respond`) is now rendered by the shell — the `nexus.agent` plugin
-  subscribes to `ask_requested` (same `com.nexus.agent.` bus subscription as
-  `round_proposed`), shows an inline **AskCard** (radio / checkbox / free-text
-  per question, mirroring `ApprovalCard`), and posts `ask_respond` with
-  `[{ id, selected, custom_input? }]` answers (the question/answer types are
-  hand-written in `sessionStore.ts` — the `ask` payload isn't ts-exported).
-  *Per-tool timeout:* `AgentToolSpec` now carries `dispatch_timeout_ms` (default
-  `DEFAULT_TOOL_DISPATCH_TIMEOUT_MS` = 60 s); the kernel tool bridges
-  (`KernelToolBridge`, `KernelToolDispatcher`) resolve it via
-  `AgentToolRegistry::dispatch_timeout_for(target, command)` so `ask` waits up to
-  `ASK_DISPATCH_TIMEOUT_MS` (330 s) and its handler wait
-  (`DEFAULT_ASK_TIMEOUT_SECS`) was raised 50 s → 300 s (a test guards
-  `ASK_DISPATCH_TIMEOUT_MS` > the handler wait). Unregistered routes fall back to
-  the bridge default. (RFC 0005 backlog — done.)
 - **Subagent isolation — orchestration (RFC 0006 Step 2 / [RFC 0007](0007-subagent-process-isolation.md)).**
-  PR 1–2 (headless spawn, worktree harness + merge-back) are in; PR 3 (OS-sandbox
-  the child) and PR 4 (conflict surfacing, concurrency, `nexus_bin` setting) are
-  queued. PR 3 is the natural first consumer of the bundled-shell work below.
+  PR 1–2 (headless spawn via `subagent.rs`, worktree harness + merge-back) are
+  in; **PR 3 (OS-sandbox the child)** and **PR 4 (conflict surfacing,
+  concurrency, `nexus_bin` setting)** are queued. PR 3 is the natural next step
+  and the first consumer of the bundled-shell work below. `nexus-agent` already
+  links `nexus-types` for `SandboxPolicy` + `sandbox_argv` (RFC 0007 PR 3
+  groundwork — see `Cargo.toml`).
 - **Other open RFCs** (see [`rfcs/README.md`](README.md)):
   [RFC 0001](0001-workflow-cap-delegation.md) workflow cap delegation (security;
-  no code yet); [RFC 0002](0002-bundled-shell-rush.md) / [RFC 0003](0003-terminal-emulator-rusty-term.md)
-  bundled shell + headless VT core, both gated behind the OS-sandbox (follow
-  RFC 0007 PR 3).
+  no code yet); [RFC 0002](0002-bundled-shell-rush.md) /
+  [RFC 0003](0003-terminal-emulator-rusty-term.md) bundled shell + headless VT
+  core, both gated behind the OS-sandbox (follow RFC 0007 PR 3).
 
-**Known follow-ups / limitations from this effort (optional):**
+**Smaller optional threads left open this session:**
 
-- `compose_turns` assumes the loop invariant that text-only rounds are terminal,
-  so real transcripts never contain consecutive same-role turns; the Anthropic
-  adapter additionally coalesces a user turn after tool-results. A hand-crafted /
-  corrupted seed could still produce consecutive assistant turns (not coalesced).
-- The per-round "reconsider on error / finish when done" guidance moved from the
-  flat-prompt nudge into the **default planner system prompt**; custom archetypes
-  keep their own prompts and don't inherit it.
-- Retries are opt-in (default 0) and don't record a structured retry count on
-  `ToolCallRecord` (only a tracing log + the error-string annotation).
-- No live-AI-provider end-to-end run of either change (none configured here);
-  both are covered by scripted/capturing drivers + per-provider serialization and
-  classification unit tests.
+- `compose_turns` assumes text-only rounds are terminal, so real transcripts
+  never contain consecutive same-role turns (the Anthropic adapter also
+  coalesces a user turn after tool-results). A hand-crafted / corrupted seed
+  could still produce consecutive assistant turns (not coalesced).
+- Retries are opt-in (`max_tool_retries` default 0). No live-AI-provider
+  end-to-end run of the retry/idempotency paths (none configured here); covered
+  by scripted/capturing drivers + unit tests.
+- `ASK_DISPATCH_TIMEOUT_MS` / `DEFAULT_ASK_TIMEOUT_SECS` are hardcoded (330 s /
+  300 s). Promote to config if an operator ever needs to tune the interactive
+  wait — see [`settings/hardcoded-rust.md`](../settings/hardcoded-rust.md).
 
-## Workflow norms (this effort followed these)
+## Workflow norms (this session followed these)
 
-- Develop on branch `claude/exciting-maxwell-2x404u`; small, fully-verified
-  commits; open a PR per cohesive unit and merge before the next.
+- Develop on your assigned `claude/…` branch; small, fully-verified commits;
+  open a PR per cohesive unit and merge before the next. Keep the local branch
+  at your own commits — don't fast-forward it onto GitHub merge commits.
 - New IPC handler ⇒ add a `cap_matrix.toml` entry + bump the count in
   [`ipc-handlers.md`](../ipc-handlers.md) (the `bootstrap_coverage` test gates
-  handler ↔ matrix). (Phase 5.5 added **no** handler — it reused
-  `propose_tool_calls`.)
-- Any IPC-boundary type change ⇒ run `scripts/check_ipc_drift.sh`, then
-  `git add` the regenerated `*.ts` / `*.json`. (ts-rs emits a `.ts` per
-  `#[ts(export)]` type on `cargo test --features ts-export`; the schemars side is
-  explicit in `crates/nexus-bootstrap/tests/ipc_schema_emit.rs`.)
-- Commit trailers: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` and
-  `Claude-Session: …`. Don't put the model id in pushed artifacts.
+  handler ↔ matrix). None of this session's PRs added a handler.
+- Any IPC-boundary type change ⇒ regenerate bindings. Most IPC structs are
+  ts-rs-only (`AgentToolSpec`, `SessionConfig`, `ToolCallRecord` were
+  regenerated this session via `cargo test -p <crate> --features ts-export
+  --tests`); only the curated set in
+  `crates/nexus-bootstrap/tests/ipc_schema_emit.rs` also emits a JSON schema.
+  `scripts/check_ipc_drift.sh` regenerates everything but rebuilds ~25 crates
+  with `ts-export` (slow here) — prefer the single-crate ts-export run + a
+  targeted `git diff` of `packages/nexus-extension-api/src/generated/`.
+- Commit trailers: `Co-Authored-By: …` and `Claude-Session: …`. Don't put the
+  raw model id in pushed artifacts.
 
 ## Verification
 
-- **Rust:** `cargo test -p nexus-agent` / `-p nexus-ai` / `-p nexus-bootstrap` /
-  `-p nexus-cli`; `cargo clippy --workspace --all-targets` (the crates carry
-  pre-existing pedantic warnings — CI is not `-D warnings`; just don't add new
-  ones in touched files).
-- **Shell** (from `shell/`): `pnpm install`, then `pnpm typecheck` / `pnpm lint`
-  / `pnpm test`. Colocated `src/**/*.test.ts` are **not** CI-gated unless
-  re-exported by a `tests/plugins-nexus-*.test.ts` shim.
+- **Rust:** `cargo test -p nexus-agent` / `-p nexus-bootstrap` (etc.);
+  `cargo check --workspace --all-targets` to catch downstream breakage;
+  `cargo clippy -p <crate> --all-targets`. The crates carry pre-existing
+  pedantic warnings (e.g. `missing_panics_doc` on every registry method that
+  `.expect()`s the mutex) — CI is **not** `-D warnings`; just don't add a *new
+  kind* of warning in touched files. Match the surrounding convention.
+- **Shell** (from repo root): `pnpm install`, then
+  `pnpm --filter nexus-shell typecheck` / `lint` / `test`. The full suite is
+  ~1700 tests / ~80 s. Colocated `src/**/*.test.ts` only run when re-exported
+  by a `tests/<name>.test.ts` shim (e.g. `tests/agent.test.ts` imports the
+  agent plugin's colocated tests). Lint emits ~290 pre-existing a11y warnings
+  (0 errors) — check your new lines aren't among them.
 
 ## Environment gotchas
 
@@ -148,8 +131,9 @@ starting**:
 - Disk fills from `ts-export` rebuilds; `cargo clean` reclaims ~30 GiB. **Never**
   `rm -rf target/debug/build/*/out` (deletes build-script outputs and breaks the
   build). A full `--features ts-export` rebuild of a crate is ~5 min; redirect
-  cargo to a logfile and `tail`/`grep` it (the task-output tmpfs is tiny).
-- Keep the local branch at your own commits; don't fast-forward it onto GitHub
-  merge commits.
-- GitHub only via `mcp__github__*` tools; scope currently includes
-  `baileyrd/nexus`.
+  cargo to a logfile and `tail`/`grep` it (the task-output tmpfs is tiny). Run
+  long builds/tests in the background and poll the output file.
+- GitHub only via `mcp__github__*` tools (load via ToolSearch — the server
+  drops/reconnects between turns); scope currently includes `baileyrd/nexus`.
+  GitNexus MCP tools are **not** wired in this environment despite the CLAUDE.md
+  guidance — trace impact manually.
