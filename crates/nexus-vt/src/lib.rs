@@ -111,6 +111,20 @@ impl Vt {
         self.grid.last_output()
     }
 
+    /// If a command finished (OSC 133;D) since the last call, return its exit
+    /// code (`None` when the shell omitted it) and captured output, clearing the
+    /// pending flag. Returns `None` when no command finished since last drained.
+    ///
+    /// Call this after each [`advance`](Self::advance) to emit exactly one
+    /// command-finished signal per completion.
+    pub fn take_finished_command(&mut self) -> Option<(Option<i32>, Option<String>)> {
+        if self.grid.take_command_finished() {
+            Some((self.grid.last_exit_code(), self.grid.last_output().map(str::to_owned)))
+        } else {
+            None
+        }
+    }
+
     /// Direct access to the underlying grid (for callers needing cells, dirty
     /// rows, or other modelled state beyond the text accessors).
     #[must_use]
@@ -149,6 +163,23 @@ mod facade_tests {
         let mut vt = Vt::new(40, 10);
         vt.advance(b"\x1b]133;C\x07boom\n\x1b]133;D;7\x07");
         assert_eq!(vt.last_exit(), Some(7));
+    }
+
+    #[test]
+    fn take_finished_command_drains_once_per_completion() {
+        let mut vt = Vt::new(40, 10);
+        // No completion yet.
+        assert_eq!(vt.take_finished_command(), None);
+
+        vt.advance(b"\x1b]133;C\x07out\n\x1b]133;D;2\x07");
+        let finished = vt.take_finished_command();
+        assert!(matches!(finished, Some((Some(2), Some(ref o))) if o.contains("out")));
+        // Draining is one-shot: a second call sees nothing new.
+        assert_eq!(vt.take_finished_command(), None);
+
+        // A second command finishes and is drained independently.
+        vt.advance(b"\x1b]133;C\x07\x1b]133;D;0\x07");
+        assert!(matches!(vt.take_finished_command(), Some((Some(0), _))));
     }
 
     #[test]

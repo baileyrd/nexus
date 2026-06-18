@@ -61,10 +61,14 @@ pub(crate) fn build_activity_entry(
         // A rename is a UI-label tweak, not a session-boundary event, so
         // it's intentionally excluded here too — it still flows on the
         // per-session lifecycle topic via `publish_lifecycle_event`.
+        // CommandFinished (OSC 133) is a per-command agent signal carried on the
+        // lifecycle topic, not a session boundary, and it lacks the command line
+        // needed for a useful timeline row — so it's excluded here too.
         TerminalEvent::OutputReceived { .. }
         | TerminalEvent::PatternMatched { .. }
         | TerminalEvent::SessionRenamed { .. }
-        | TerminalEvent::SessionEvicted { .. } => return None,
+        | TerminalEvent::SessionEvicted { .. }
+        | TerminalEvent::CommandFinished { .. } => return None,
     }
     Some(entry)
 }

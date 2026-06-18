@@ -9,6 +9,15 @@
 //! machine parks in [`ManagedState::Stopped`] — matching the §4.3 rule
 //! that pre-command errors abort the whole chain.
 //!
+//! # Relationship to OSC 133 (RFC 0003)
+//!
+//! This printf-sentinel is the **fallback** exit-code path, for shells without
+//! the OSC 133 shell-integration script loaded. The **primary** path is OSC 133
+//! semantic-prompt marks, captured by the per-session VT grid and surfaced as a
+//! [`crate::TerminalEvent::CommandFinished`] event. The two never conflict: the
+//! sentinel is a synchronous line-buffer scan consumed by this FSM, while OSC
+//! 133 is an asynchronous kernel-bus event for agent observers.
+//!
 //! # Microkernel fit
 //!
 //! Plain library glue. No kernel bus, no plugin IPC: takes a

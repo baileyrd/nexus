@@ -274,6 +274,11 @@ pub struct Grid {
     /// surfaced as the `terminal://command` resource.
     #[cfg(feature = "l13")]
     last_command_output: Option<String>,
+    /// Set on each OSC 133;D (command finished). Drained by
+    /// [`Grid::take_command_finished`] so a host can emit exactly one
+    /// command-finished signal per completion (Nexus RFC 0003 PR-4).
+    #[cfg(feature = "l13")]
+    command_finished_flag: bool,
     /// Per-row line size attributes (DECDWL/DECDHL); `len() == rows`. The
     /// renderer relays each to the host so double-width/height lines display
     /// correctly, and they shift with the rows they label as the screen scrolls.
@@ -789,6 +794,8 @@ impl Grid {
             command_start: None,
             #[cfg(feature = "l13")]
             last_command_output: None,
+            #[cfg(feature = "l13")]
+            command_finished_flag: false,
         }
     }
 
@@ -1939,6 +1946,7 @@ impl Grid {
         if let Some(start) = self.command_start.take() {
             self.last_command_output = Some(self.capture_command_output(start));
         }
+        self.command_finished_flag = true;
     }
 
     /// Join the cell rows in the absolute line range `[start, cursor line)` into
@@ -2032,6 +2040,20 @@ impl Grid {
         #[cfg(not(feature = "l13"))]
         {
             None
+        }
+    }
+
+    /// Return and clear the "a command just finished" flag (set on OSC 133;D).
+    /// A host drains this after feeding a batch of bytes to emit exactly one
+    /// command-finished signal per completion. Always `false` without `l13`.
+    pub fn take_command_finished(&mut self) -> bool {
+        #[cfg(feature = "l13")]
+        {
+            std::mem::take(&mut self.command_finished_flag)
+        }
+        #[cfg(not(feature = "l13"))]
+        {
+            false
         }
     }
 

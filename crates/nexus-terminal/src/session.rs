@@ -697,6 +697,7 @@ impl Session {
         &mut self,
         bytes: Option<&mut crate::OutputBuffer>,
         lines: Option<&mut crate::LineBuffer>,
+        vt: Option<&mut nexus_vt::Vt>,
         timeout: Duration,
     ) -> Result<usize, TerminalError> {
         let mut scratch = [0u8; 8192];
@@ -707,6 +708,11 @@ impl Session {
             }
             if let Some(l) = lines {
                 l.push(&scratch[..n]);
+            }
+            // Tee the same bytes into the server-side VT grid (RFC 0003) so the
+            // agent/CLI/TUI screen view and OSC 133 command tracking stay current.
+            if let Some(v) = vt {
+                v.advance(&scratch[..n]);
             }
         }
         Ok(n)

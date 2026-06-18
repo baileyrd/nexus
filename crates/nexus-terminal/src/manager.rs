@@ -62,7 +62,17 @@ struct Entry {
     /// Unix-seconds creation timestamp. Stable across the session's
     /// lifetime — `last_accessed` moves independently.
     created_at: u64,
+    /// Server-side VT grid fed the same raw PTY bytes as the buffers above
+    /// (RFC 0003). Models the screen + scrollback + OSC 133 command/exit-code
+    /// boundaries for headless (agent/CLI/TUI) introspection, parallel to the
+    /// frontend's own emulator (xterm.js).
+    vt: nexus_vt::Vt,
 }
+
+/// A finished command's exit code (`None` when the shell omitted it) and its
+/// captured output (`None` when no OSC 133;C output region was marked). Returned
+/// by [`SessionManager::take_finished_command`].
+pub type FinishedCommand = (Option<i32>, Option<String>);
 
 /// In-memory registry of live PTY sessions. Not `Sync`; wrap in a mutex
 /// for concurrent access.
@@ -134,6 +144,12 @@ impl SessionManager {
                 ),
             });
         }
+        // Size the VT grid to the requested PTY size (default 80×24, matching
+        // `Session::spawn`). Read before `config` is moved into spawn.
+        let (cols, rows) = match &config.initial_size {
+            Some(s) => (s.cols as usize, s.rows as usize),
+            None => (80, 24),
+        };
         let session = Session::spawn(config)?;
         let id = session.id().clone();
         let now = SystemTime::now()
@@ -149,6 +165,7 @@ impl SessionManager {
                 last_accessed: Cell::new(Instant::now()),
                 name: None,
                 created_at: now,
+                vt: nexus_vt::Vt::new(cols, rows),
             },
         );
         Ok(id)
@@ -360,9 +377,24 @@ impl SessionManager {
             session,
             buffer,
             lines,
+            vt,
             ..
         } = entry;
-        session.read_into(Some(buffer), Some(lines), timeout)
+        session.read_into(Some(buffer), Some(lines), Some(vt), timeout)
+    }
+
+    /// Drain the session's "a command just finished" flag (OSC 133;D), returning
+    /// the exit code (`None` if the shell omitted it) and captured output for the
+    /// completion, or `None` if no command finished since the last call. Used by
+    /// the server to emit one `CommandFinished` event per completion.
+    ///
+    /// # Errors
+    /// - [`TerminalError::NotRunning`] if `id` is not tracked.
+    pub fn take_finished_command(
+        &mut self,
+        id: &SessionId,
+    ) -> Result<Option<FinishedCommand>, TerminalError> {
+        Ok(self.entry_mut(id)?.vt.take_finished_command())
     }
 
     /// Update the PTY's reported window size (PRD-09 §1.1).
@@ -373,6 +405,9 @@ impl SessionManager {
     pub fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed.set(Instant::now());
+        // Keep the server-side VT grid in step with the PTY so screen reads and
+        // OSC 133 output capture survive a mid-command resize.
+        entry.vt.resize(cols as usize, rows as usize);
         entry.session.resize(cols, rows)
     }
 
