@@ -193,6 +193,122 @@ pub struct ToolCall {
     pub args: serde_json::Value,
 }
 
+/// How a [`ToolDispatcher`] failure should be treated by the session
+/// retry policy ([`session::SessionConfig::max_tool_retries`]).
+///
+/// Before typed dispatch errors the trait returned a bare `String`, and
+/// the loop recovered an *approximate* retry decision by string-sniffing
+/// it ([`is_retryable_tool_error`]). A dispatcher that knows the exact
+/// nature of a failure — the kernel IPC bridge, whose `IpcError` carries
+/// an authoritative `retryable` flag — classifies it precisely instead,
+/// so a `Timeout` is always retried and a `CapabilityDenied` never is,
+/// regardless of how their messages happen to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolErrorKind {
+    /// The failure looks transient — a retry may succeed (timeout,
+    /// transport reset, rate limit, 5xx, a cancelled call).
+    Transient,
+    /// The failure is permanent — a retry cannot change the outcome
+    /// (not-found, validation, capability / policy denial).
+    Permanent,
+    /// The dispatcher could not classify the failure. The retry policy
+    /// falls back to the [`is_retryable_tool_error`] heuristic over
+    /// [`ToolDispatchError::message`]. This is what every `String` /
+    /// `&str` conversion produces, so dispatchers that only have a
+    /// message string keep their pre-typed behaviour exactly.
+    Unknown,
+}
+
+/// Structured error returned by [`ToolDispatcher::dispatch`].
+///
+/// Carries the human-readable `message` (what the dispatcher used to
+/// return as a bare `String`, surfaced verbatim in the transcript) plus a
+/// [`ToolErrorKind`] the session loop consults to decide whether to retry.
+/// `From<String>` / `From<&str>` produce an [`ToolErrorKind::Unknown`]
+/// error so existing `map_err(|e| e.to_string())`-style call sites migrate
+/// with a single `.into()`.
+#[derive(Debug, Clone, Error)]
+#[error("{message}")]
+pub struct ToolDispatchError {
+    /// Human-readable failure message. Surfaced in the transcript and,
+    /// for [`ToolErrorKind::Unknown`] errors, sniffed by the retry
+    /// heuristic.
+    pub message: String,
+    /// Retry classification — see [`ToolErrorKind`].
+    pub kind: ToolErrorKind,
+}
+
+impl ToolDispatchError {
+    /// A failure classified as transient (retryable).
+    #[must_use]
+    pub fn transient(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: ToolErrorKind::Transient,
+        }
+    }
+
+    /// A failure classified as permanent (never retried).
+    #[must_use]
+    pub fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: ToolErrorKind::Permanent,
+        }
+    }
+
+    /// An unclassified failure — the retry policy sniffs the message via
+    /// [`is_retryable_tool_error`].
+    #[must_use]
+    pub fn unknown(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: ToolErrorKind::Unknown,
+        }
+    }
+
+    /// Build from an explicit `retryable` flag — e.g. an
+    /// `IpcErrorEnvelope`'s `retryable`, the authoritative source of
+    /// truth for IPC failures. Maps `true` to [`ToolErrorKind::Transient`]
+    /// and `false` to [`ToolErrorKind::Permanent`].
+    #[must_use]
+    pub fn classified(message: impl Into<String>, retryable: bool) -> Self {
+        Self {
+            message: message.into(),
+            kind: if retryable {
+                ToolErrorKind::Transient
+            } else {
+                ToolErrorKind::Permanent
+            },
+        }
+    }
+
+    /// Whether the session loop should retry this failure. Exact for
+    /// [`ToolErrorKind::Transient`] / [`ToolErrorKind::Permanent`]; for
+    /// [`ToolErrorKind::Unknown`] it falls back to the
+    /// [`is_retryable_tool_error`] message heuristic.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match self.kind {
+            ToolErrorKind::Transient => true,
+            ToolErrorKind::Permanent => false,
+            ToolErrorKind::Unknown => is_retryable_tool_error(&self.message),
+        }
+    }
+}
+
+impl From<String> for ToolDispatchError {
+    fn from(message: String) -> Self {
+        Self::unknown(message)
+    }
+}
+
+impl From<&str> for ToolDispatchError {
+    fn from(message: &str) -> Self {
+        Self::unknown(message)
+    }
+}
+
 /// Adapter for the transport layer the session loop (and agents
 /// generally) use when dispatching a [`ToolCall`]. Implemented by
 /// callers; in tree the production implementation is a thin
@@ -201,8 +317,12 @@ pub struct ToolCall {
 /// kernel-free and tests can supply a mock dispatcher.
 #[async_trait]
 pub trait ToolDispatcher: Send + Sync {
-    /// Dispatch a tool call and return its raw JSON response.
-    async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, String>;
+    /// Dispatch a tool call and return its raw JSON response, or a
+    /// [`ToolDispatchError`] whose [`ToolErrorKind`] drives the retry
+    /// policy. Dispatchers that can classify the failure exactly should;
+    /// those that only have a message can return it via `.into()`
+    /// (classified as [`ToolErrorKind::Unknown`]).
+    async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError>;
 }
 
 /// An agent: produces a tool-call plan for a goal. After ADR 0025
