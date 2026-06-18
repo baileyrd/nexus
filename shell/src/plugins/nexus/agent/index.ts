@@ -58,6 +58,7 @@ export const agentPlugin: Plugin = {
         createElement(AgentSessionView, {
           onRun: () => void runtime.startSession(),
           onApprove: (decision, reason) => void runtime.submitDecision(decision, reason),
+          onRespondAsk: () => void runtime.submitAnswer(),
           onSelectSession: (id) => void runtime.selectSession(id),
           onDeleteSession: (id) => void runtime.deleteSession(id),
           onRefreshSessions: () => void runtime.refreshSessions(),

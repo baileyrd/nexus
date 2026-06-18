@@ -62,6 +62,42 @@ export interface PendingRound {
   approvals: Record<string, boolean>
 }
 
+/** One interactive question from a `com.nexus.agent.ask_requested` event. */
+export interface AskQuestion {
+  /** Caller-chosen id echoed back in the answer. */
+  id: string
+  /** Question text shown to the user. */
+  prompt: string
+  /** Selectable options. Empty means free-form text input. */
+  options: string[]
+  /** Whether more than one option may be selected. */
+  multi: boolean
+}
+
+/** The user's in-progress answer to one [`AskQuestion`]. */
+export interface AskAnswerDraft {
+  /** Chosen option labels (radio → one entry, checkbox → many). */
+  selected: string[]
+  /** Free-form text (for option-less questions). */
+  customInput: string
+}
+
+/**
+ * An interactive prompt awaiting the user's answer. Mirrors
+ * [`PendingRound`] but for the `ask` tool: the agent core plugin emits
+ * `com.nexus.agent.ask_requested` mid-session, the user fills in answers,
+ * and the runtime posts `ask_respond` to unblock the waiting tool call.
+ * Addressed by `askId`, not a session id — the event carries no session.
+ */
+export interface PendingAsk {
+  /** Correlates the answer back to the waiting `ask` call. */
+  askId: string
+  /** Questions to render, in order. */
+  questions: AskQuestion[]
+  /** Draft answers keyed by [`AskQuestion.id`]. */
+  answers: Record<string, AskAnswerDraft>
+}
+
 export type SessionOutcome =
   | 'complete'
   | 'aborted'
@@ -154,6 +190,10 @@ export interface AgentSessionState {
   /** The last round_proposed event awaiting user decision. `null`
    *  whenever the session isn't paused for approval. */
   pendingRound: PendingRound | null
+  /** The last ask_requested event awaiting the user's answers. `null`
+   *  whenever no interactive prompt is open. Independent of
+   *  `pendingRound` — an `ask` fires mid-round during tool dispatch. */
+  pendingAsk: PendingAsk | null
   /** Where the live session is right now. Drives the composer's
    *  enabled/disabled state. */
   phase: SessionPhase
@@ -183,6 +223,8 @@ export interface AgentSessionState {
   appendRound(record: RoundRecord): void
   setPendingRound(round: PendingRound | null): void
   toggleApproval(toolUseId: string, approve: boolean): void
+  setPendingAsk(ask: PendingAsk | null): void
+  updateAskAnswer(questionId: string, patch: Partial<AskAnswerDraft>): void
   finishSession(outcome: SessionOutcome): void
   clearLive(): void
   setSessions(rows: SessionSummary[]): void
@@ -201,6 +243,7 @@ const INITIAL: Omit<AgentSessionState, keyof Mutators> = {
   currentSessionId: null,
   liveTranscript: [],
   pendingRound: null,
+  pendingAsk: null,
   phase: 'idle',
   liveError: null,
   sessions: [],
@@ -232,6 +275,7 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
       currentSessionId: sessionId,
       liveTranscript: [],
       pendingRound: null,
+      pendingAsk: null,
       phase: 'starting',
       liveError: null,
     }),
@@ -251,16 +295,30 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
         },
       }
     }),
+  setPendingAsk: (pendingAsk) => set({ pendingAsk }),
+  updateAskAnswer: (questionId, patch) =>
+    set((s) => {
+      if (!s.pendingAsk) return s
+      const prev = s.pendingAsk.answers[questionId] ?? { selected: [], customInput: '' }
+      return {
+        pendingAsk: {
+          ...s.pendingAsk,
+          answers: { ...s.pendingAsk.answers, [questionId]: { ...prev, ...patch } },
+        },
+      }
+    }),
   finishSession: (outcome) =>
     set({
       phase: outcome === 'errored' ? 'errored' : 'completed',
       pendingRound: null,
+      pendingAsk: null,
     }),
   clearLive: () =>
     set({
       currentSessionId: null,
       liveTranscript: [],
       pendingRound: null,
+      pendingAsk: null,
       phase: 'idle',
       liveError: null,
     }),
@@ -337,6 +395,36 @@ export function decodeProposedRound(
   const approvals: Record<string, boolean> = {}
   for (const tc of toolCalls) approvals[tc.id] = true
   return { sessionId, round, text, toolCalls, approvals }
+}
+
+/**
+ * Decode a `com.nexus.agent.ask_requested` payload
+ * (`{ ask_id, questions: [{ id, prompt, options, multi }] }`) into a
+ * [`PendingAsk`]. Returns `null` when the payload lacks an ask id or any
+ * usable question. Each question seeds an empty answer draft.
+ */
+export function decodeAskRequested(raw: unknown): PendingAsk | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const askId = typeof r.ask_id === 'string' ? r.ask_id : null
+  if (!askId) return null
+  const qRaw = Array.isArray(r.questions) ? r.questions : []
+  const questions: AskQuestion[] = []
+  for (const item of qRaw) {
+    if (!item || typeof item !== 'object') continue
+    const q = item as Record<string, unknown>
+    const id = typeof q.id === 'string' ? q.id : null
+    const prompt = typeof q.prompt === 'string' ? q.prompt : null
+    if (!id || !prompt) continue
+    const options = Array.isArray(q.options)
+      ? q.options.filter((o): o is string => typeof o === 'string')
+      : []
+    questions.push({ id, prompt, options, multi: q.multi === true })
+  }
+  if (questions.length === 0) return null
+  const answers: Record<string, AskAnswerDraft> = {}
+  for (const q of questions) answers[q.id] = { selected: [], customInput: '' }
+  return { askId, questions, answers }
 }
 
 const KNOWN_OUTCOMES: SessionOutcome[] = [

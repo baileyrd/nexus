@@ -75,12 +75,19 @@ starting**:
   `{message, kind}` struct to a richer error *enum* — no consumer needs finer
   branching than `is_retryable()` today; revisit if a per-cause retry policy
   (e.g. retry timeouts but not cancellations) is ever wanted.
-- **`ask` frontend wiring + per-tool dispatch timeout.** The `ask` backend
-  publishes `com.nexus.agent.ask_requested` / awaits `ask_respond` but no
-  frontend renders the prompt, so `ask` always times out; and it can only wait
-  `DEFAULT_ASK_TIMEOUT_SECS` (50 s) under the shared 60 s bridge ceiling. Wire a
-  question panel (mirror `round_proposed`/`round_decide`) + a per-tool dispatch
-  timeout. (RFC 0005 backlog.)
+- **`ask` frontend wiring — ✅ shipped; per-tool dispatch timeout still open.**
+  The `ask` backend (publishes `com.nexus.agent.ask_requested` / awaits
+  `ask_respond`) is now rendered by the shell: the `nexus.agent` plugin
+  subscribes to `ask_requested` (same `com.nexus.agent.` bus subscription as
+  `round_proposed`), shows an inline **AskCard** (radio / checkbox / free-text
+  per question, mirroring `ApprovalCard`), and posts `ask_respond` with
+  `[{ id, selected, custom_input? }]` answers. Frontend-only (the `ask` payload
+  isn't ts-exported, so the question/answer types are hand-written in
+  `sessionStore.ts`; no binding regen). **Still open:** the *per-tool dispatch
+  timeout* — `ask` can only wait `DEFAULT_ASK_TIMEOUT_SECS` (50 s) under the
+  shared 60 s `DEFAULT_TOOL_TIMEOUT` ceiling, so a human has <50 s to answer.
+  Give `ask` (and other slow tools) a per-tool dispatch timeout so the wait can
+  exceed the default tool ceiling. (RFC 0005 backlog.)
 - **Subagent isolation — orchestration (RFC 0006 Step 2 / [RFC 0007](0007-subagent-process-isolation.md)).**
   PR 1–2 (headless spawn, worktree harness + merge-back) are in; PR 3 (OS-sandbox
   the child) and PR 4 (conflict surfacing, concurrency, `nexus_bin` setting) are

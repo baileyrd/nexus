@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 
 import { createAgentRuntime } from './agentRuntime.ts'
 import {
+  decodeAskRequested,
   decodeProposedRound,
   decodeSessionList,
   decodeTranscript,
@@ -149,6 +150,26 @@ test('decodeTranscript: decodes a round-trip transcript', () => {
   assert.ok(transcript)
   assert.equal(transcript?.rounds.length, 1)
   assert.equal(transcript?.outcome, 'complete')
+})
+
+test('decodeAskRequested: accepts a well-formed payload and seeds empty drafts', () => {
+  const decoded = decodeAskRequested({
+    ask_id: 'ask-1',
+    questions: [
+      { id: 'q1', prompt: 'Pick one', options: ['a', 'b'], multi: false },
+      { id: 'q2', prompt: 'Free text', options: [], multi: false },
+    ],
+  })
+  assert.ok(decoded, 'decoder must accept the prompt')
+  assert.equal(decoded?.askId, 'ask-1')
+  assert.equal(decoded?.questions.length, 2)
+  assert.equal(decoded?.questions[0].options[1], 'b')
+  assert.deepEqual(decoded?.answers['q1'], { selected: [], customInput: '' })
+})
+
+test('decodeAskRequested: rejects payloads with no ask_id or no usable question', () => {
+  assert.equal(decodeAskRequested({ questions: [{ id: 'q', prompt: 'p' }] }), null)
+  assert.equal(decodeAskRequested({ ask_id: 'a', questions: [{ id: 'q' }] }), null)
 })
 
 test('decodeSessionList: drops malformed rows', () => {
@@ -321,6 +342,61 @@ test('submitDecision abort sends kind=abort with reason', async () => {
   const args = ipc?.args as Record<string, unknown>
   assert.equal(args.kind, 'abort')
   assert.equal(args.reason, 'changed my mind')
+})
+
+// ── Interactive ask prompts ───────────────────────────────────────────
+
+test('subscribeTopics: ask_requested populates pendingAsk', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.subscribeTopics()
+  kernel.topicSubscribers[0]('com.nexus.agent.ask_requested', {
+    ask_id: 'ask-7',
+    questions: [{ id: 'q1', prompt: 'Which file?', options: ['a.md', 'b.md'], multi: false }],
+  })
+  const s = useAgentSessionStore.getState()
+  assert.equal(s.pendingAsk?.askId, 'ask-7')
+  assert.equal(s.pendingAsk?.questions.length, 1)
+})
+
+test('submitAnswer posts ask_respond with selected + custom_input answers', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.subscribeTopics()
+  kernel.topicSubscribers[0]('com.nexus.agent.ask_requested', {
+    ask_id: 'ask-9',
+    questions: [
+      { id: 'q1', prompt: 'Pick', options: ['x', 'y'], multi: true },
+      { id: 'q2', prompt: 'Note', options: [], multi: false },
+    ],
+  })
+  const store = useAgentSessionStore.getState()
+  store.updateAskAnswer('q1', { selected: ['x', 'y'] })
+  store.updateAskAnswer('q2', { customInput: '  ship it  ' })
+
+  await runtime.submitAnswer()
+
+  const ipc = kernel.calls.find((c) => c.commandId === 'ask_respond')
+  assert.ok(ipc, 'ask_respond must be invoked')
+  const args = ipc?.args as { ask_id: string; answers: Array<Record<string, unknown>> }
+  assert.equal(args.ask_id, 'ask-9')
+  const q1 = args.answers.find((a) => a.id === 'q1')
+  const q2 = args.answers.find((a) => a.id === 'q2')
+  assert.deepEqual(q1?.selected, ['x', 'y'])
+  assert.equal('custom_input' in (q1 as object), false, 'option answer carries no custom_input')
+  assert.equal(q2?.custom_input, 'ship it', 'free-text answer is trimmed into custom_input')
+  // Card clears optimistically.
+  assert.equal(useAgentSessionStore.getState().pendingAsk, null)
+})
+
+test('submitAnswer with no pending ask is a no-op', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.submitAnswer()
+  assert.equal(kernel.calls.length, 0)
 })
 
 // ── Sessions sidebar ──────────────────────────────────────────────────

@@ -33,6 +33,9 @@ import {
 import {
   useAgentSessionStore,
   type ArchetypeInfo,
+  type AskAnswerDraft,
+  type AskQuestion,
+  type PendingAsk,
   type PendingRound,
   type RoundRecord,
   type SessionSummary,
@@ -44,6 +47,8 @@ import {
 export interface AgentSessionViewProps {
   onRun(): void
   onApprove(decision: 'approve_all' | 'partial' | 'abort', reason?: string): void
+  /** Submit the drafted answers for the open interactive `ask` prompt. */
+  onRespondAsk(): void
   onSelectSession(id: string): void
   onDeleteSession(id: string): void
   onRefreshSessions(): void
@@ -61,6 +66,7 @@ export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
   const phase = useAgentSessionStore((s) => s.phase)
   const liveTranscript = useAgentSessionStore((s) => s.liveTranscript)
   const pendingRound = useAgentSessionStore((s) => s.pendingRound)
+  const pendingAsk = useAgentSessionStore((s) => s.pendingAsk)
   const liveError = useAgentSessionStore((s) => s.liveError)
   const sessions = useAgentSessionStore((s) => s.sessions)
   const sessionsLoading = useAgentSessionStore((s) => s.sessionsLoading)
@@ -125,7 +131,7 @@ export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
       </header>
 
       <section className="agent-session__transcript" aria-label="Session transcript">
-        {liveTranscript.length === 0 && !pendingRound && phase === 'idle' ? (
+        {liveTranscript.length === 0 && !pendingRound && !pendingAsk && phase === 'idle' ? (
           <Empty />
         ) : (
           <>
@@ -146,6 +152,7 @@ export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
                 readFile={props.readFile}
               />
             ) : null}
+            {pendingAsk ? <AskCard ask={pendingAsk} onSubmit={props.onRespondAsk} /> : null}
             {phase === 'completed' || phase === 'errored' ? (
               <button
                 type="button"
@@ -413,6 +420,93 @@ function ApprovalCard({
         </form>
       )}
     </article>
+  )
+}
+
+interface AskCardProps {
+  ask: PendingAsk
+  onSubmit(): void
+}
+
+/**
+ * Inline panel for an interactive `ask` prompt. Mirrors
+ * [`ApprovalCard`] — renders one row per question (radio / checkbox /
+ * free-text by shape) and submits the drafted answers. Answers are held
+ * in the store so the runtime can read them when posting `ask_respond`.
+ */
+function AskCard({ ask, onSubmit }: AskCardProps): JSX.Element {
+  const updateAskAnswer = useAgentSessionStore((s) => s.updateAskAnswer)
+  return (
+    <article className="agent-ask" data-testid="agent-ask-card">
+      <header>
+        <span className="agent-ask__badge">Question</span>
+      </header>
+      <ul className="agent-ask__questions">
+        {ask.questions.map((q) => (
+          <AskQuestionRow
+            key={q.id}
+            question={q}
+            draft={ask.answers[q.id]}
+            onChange={(patch) => updateAskAnswer(q.id, patch)}
+          />
+        ))}
+      </ul>
+      <footer className="agent-ask__actions">
+        <button type="button" onClick={onSubmit} data-testid="agent-ask-submit">
+          Submit answers
+        </button>
+      </footer>
+    </article>
+  )
+}
+
+interface AskQuestionRowProps {
+  question: AskQuestion
+  draft: AskAnswerDraft | undefined
+  onChange(patch: Partial<AskAnswerDraft>): void
+}
+
+function AskQuestionRow({ question, draft, onChange }: AskQuestionRowProps): JSX.Element {
+  const selected = draft?.selected ?? []
+  const customInput = draft?.customInput ?? ''
+  return (
+    <li className="agent-ask__question">
+      <p className="agent-ask__prompt">{question.prompt}</p>
+      {question.options.length === 0 ? (
+        <input
+          type="text"
+          className="agent-ask__text"
+          value={customInput}
+          placeholder="Type your answer…"
+          onChange={(e) => onChange({ customInput: e.target.value })}
+          data-testid={`agent-ask-input-${question.id}`}
+        />
+      ) : (
+        <div className="agent-ask__options">
+          {question.options.map((opt) => (
+            <label key={opt} className="agent-ask__option">
+              <input
+                type={question.multi ? 'checkbox' : 'radio'}
+                name={`agent-ask-${question.id}`}
+                checked={selected.includes(opt)}
+                onChange={(e) => {
+                  if (question.multi) {
+                    const next = e.target.checked
+                      ? [...selected, opt]
+                      : selected.filter((o) => o !== opt)
+                    onChange({ selected: next })
+                  } else {
+                    onChange({ selected: [opt] })
+                  }
+                }}
+                data-testid={`agent-ask-option-${question.id}-${opt}`}
+              />
+              <span>{opt}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </li>
   )
 }
 

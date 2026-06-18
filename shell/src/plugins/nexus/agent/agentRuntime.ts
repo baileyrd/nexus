@@ -13,6 +13,7 @@ import { LONG_RUNNING_OP_TIMEOUT_MS } from '../constants'
 import { isRoundEntirelySafe } from './riskClassifier'
 import {
   decodeArchetypes,
+  decodeAskRequested,
   decodeProposedRound,
   decodeSessionList,
   decodeTranscript,
@@ -31,10 +32,13 @@ const SESSION_LIST = 'session_list'
 const SESSION_GET = 'session_get'
 const SESSION_DELETE = 'session_delete'
 const ROUND_DECIDE = 'round_decide'
+const ASK_RESPOND = 'ask_respond'
 const LIST_ARCHETYPES = 'list_archetypes'
 
 /** Bus event the agent emits when a round needs approval. */
 const TOPIC_ROUND_PROPOSED = 'com.nexus.agent.round_proposed'
+/** Bus event the agent emits when the `ask` tool needs the user's answers. */
+const TOPIC_ASK_REQUESTED = 'com.nexus.agent.ask_requested'
 
 /** session_run is long-running by design — it returns only when the
  *  whole session ends. Use the same generous ceiling the legacy
@@ -116,6 +120,10 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
 
   // ── Topic subscription ──────────────────────────────────────────────
   const handleTopic = (topic: string, payload: unknown) => {
+    if (topic === TOPIC_ASK_REQUESTED) {
+      handleAskRequested(payload)
+      return
+    }
     if (topic !== TOPIC_ROUND_PROPOSED) return
     if (!payload || typeof payload !== 'object') return
     const p = payload as Record<string, unknown>
@@ -212,6 +220,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     useAgentSessionStore.setState((s) => ({
       liveTranscript: transcript.rounds,
       pendingRound: null,
+      pendingAsk: null,
       phase: transcript.outcome === 'errored' ? 'errored' : 'completed',
       liveError: s.liveError,
     }))
@@ -280,6 +289,47 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       api.notifications.show({ type: 'error', message: `Approval failed: ${message}` })
+    }
+  }
+
+  // ── Interactive `ask` prompts ───────────────────────────────────────
+  const handleAskRequested = (payload: unknown): void => {
+    const decoded = decodeAskRequested(payload)
+    if (!decoded) return
+    useAgentSessionStore.getState().setPendingAsk(decoded)
+  }
+
+  /**
+   * Deliver the user's drafted answers to the waiting `ask` call via
+   * `ask_respond`. Answers map each question to `{ id, selected,
+   * custom_input? }` — the wire shape `ask` returns to the model. The
+   * card clears optimistically; a transport failure surfaces a
+   * notification (the backend `ask` will fall back to a timeout).
+   */
+  const submitAnswer = async (): Promise<void> => {
+    const pending = useAgentSessionStore.getState().pendingAsk
+    if (!pending) return
+    const answers = pending.questions.map((q) => {
+      const draft = pending.answers[q.id] ?? { selected: [], customInput: '' }
+      const custom = draft.customInput.trim()
+      const answer: { id: string; selected: string[]; custom_input?: string } = {
+        id: q.id,
+        selected: draft.selected,
+      }
+      if (custom) answer.custom_input = custom
+      return answer
+    })
+    useAgentSessionStore.getState().setPendingAsk(null)
+    try {
+      await api.kernel.invoke<unknown>(
+        AGENT_PLUGIN_ID,
+        ASK_RESPOND,
+        { ask_id: pending.askId, answers },
+        QUICK_IPC_TIMEOUT_MS,
+      )
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      api.notifications.show({ type: 'error', message: `Answer failed: ${message}` })
     }
   }
 
@@ -393,6 +443,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     handleTopic,
     startSession,
     submitDecision,
+    submitAnswer,
     clearLive,
     refreshSessions,
     selectSession,
