@@ -25,6 +25,7 @@ members = [
     "crates/nexus-theme",
     "crates/nexus-bootstrap",
     "crates/nexus-editor",
+    "crates/nexus-rush",
     "crates/nexus-terminal",
     "crates/nexus-agent",
     "crates/nexus-skills",

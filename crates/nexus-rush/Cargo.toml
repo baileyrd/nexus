@@ -1,0 +1,28 @@
+[package]
+name = "nexus-rush"
+version.workspace = true
+# rush is edition 2024; the workspace root is 2021. Per-crate editions are
+# allowed (toolchain 1.94.1 supports edition 2024), so this is set explicitly
+# rather than inherited from the workspace.
+edition = "2024"
+license.workspace = true
+publish.workspace = true
+description = "Bundled POSIX-ish shell for Nexus sandboxed terminal sessions: an in-tree vendoring of baileyrd/rush refactored to lib + thin bin (RFC 0002). No l13/gui."
+
+# The library is the embeddable/testable shell core — it never calls
+# `std::process::exit`. The thin binary owns the single exit and the REPL.
+[lib]
+name = "nexus_rush"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nexus-rush"
+path = "src/main.rs"
+
+[dependencies]
+rustyline = { workspace = true }
+
+# Job control (process groups, terminal hand-off, signals) is Unix-only; the
+# raw libc bindings are the most stable surface for it.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
