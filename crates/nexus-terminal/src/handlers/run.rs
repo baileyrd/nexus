@@ -68,6 +68,7 @@ impl TerminalCorePlugin {
             }),
             working_dir,
             env,
+            ..Default::default()
         };
 
         let id = self

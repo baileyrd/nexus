@@ -161,6 +161,32 @@ pub struct SessionConfig {
     /// caller opts in. When set to an enforcing policy, the shell is launched
     /// through the `nexus-sandbox` helper (filesystem + network confinement).
     pub sandbox: Option<SandboxPolicy>,
+    /// Opt in to the bundled `nexus-rush` shell for this session (RFC 0002).
+    /// Only takes effect when no explicit [`shell`](Self::shell) is pinned and a
+    /// confining [`sandbox`](Self::sandbox) policy is set — see
+    /// [`use_bundled_shell`]. The caller (which reads `sandbox.toml`'s
+    /// `bundled_shell_for_sandbox`) sets this so `nexus-terminal` need not depend
+    /// on `nexus-security`. Default `false`: the system shell stays the default.
+    pub bundled_shell: bool,
+    /// Opt in to loading the OSC 133 shell-integration script (RFC 0003 PR-6)
+    /// into the spawned shell so it emits reliable command/exit-code marks the
+    /// server-side VT grid captures. Only effective for shells with an emitter
+    /// (bash/zsh/fish/pwsh — see [`crate::integration`]); a no-op otherwise.
+    /// Default `false`.
+    pub shell_integration: bool,
+}
+
+/// Whether a session should launch the bundled `nexus-rush` shell rather than
+/// the system shell: only when the caller pinned no explicit shell, opted in via
+/// `bundled_shell`, and a *confining* sandbox policy is set. Keeping this a pure
+/// function makes the decision unit-testable without touching the filesystem
+/// (path resolution is a separate, best-effort step in [`Session::spawn`]).
+fn use_bundled_shell(
+    shell: Option<&ShellSpec>,
+    sandbox: Option<&SandboxPolicy>,
+    bundled_opt_in: bool,
+) -> bool {
+    shell.is_none() && bundled_opt_in && sandbox.is_some_and(|p| !p.is_unrestricted())
 }
 
 /// Decide the actual `(program, args)` to spawn: the shell directly, or the
@@ -242,7 +268,21 @@ impl Session {
     /// a pty, or [`TerminalError::Spawn`] if the shell binary cannot be
     /// launched (not on PATH, permission denied, …).
     pub fn spawn(config: SessionConfig) -> Result<Self, TerminalError> {
-        let shell = config.shell.unwrap_or_else(detect_default_shell);
+        // Bundled-shell opt-in (RFC 0002): a sandboxed session with no pinned
+        // shell prefers the bundled nexus-rush. Resolution is best-effort — if
+        // the bundled binary can't be found we fall back to the system shell, so
+        // a misconfigured install never blocks the session.
+        let bundled = use_bundled_shell(
+            config.shell.as_ref(),
+            config.sandbox.as_ref(),
+            config.bundled_shell,
+        )
+        .then(crate::shell::resolve_bundled_shell)
+        .flatten();
+        let is_bundled = bundled.is_some();
+        let shell = bundled
+            .or(config.shell)
+            .unwrap_or_else(detect_default_shell);
         let shell_display = shell.program.display().to_string();
 
         let size = config.initial_size.unwrap_or(PtySize {
@@ -277,6 +317,11 @@ impl Session {
         // `xterm-256color` matches what xterm.js on the frontend emulates.
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // Tell the bundled rush it's embedded in a Nexus-owned PTY so it skips
+        // claiming the controlling terminal (job-control hand-off).
+        if is_bundled {
+            cmd.env("NEXUS_EMBEDDED_SHELL", "1");
+        }
         for (k, v) in &config.env {
             cmd.env(k, v);
         }
@@ -332,7 +377,7 @@ impl Session {
             })
             .map_err(|e| TerminalError::PtyAlloc(format!("reader thread: {e}")))?;
 
-        Ok(Self {
+        let mut session = Self {
             id: SessionId::new_random(),
             master: pair.master,
             child: Some(child),
@@ -343,7 +388,17 @@ impl Session {
             shell_display,
             state: ProcessState::Running,
             last_signal: None,
-        })
+        };
+        // RFC 0003 PR-6: optionally load the OSC 133 shell-integration script so
+        // the shell emits reliable command/exit-code marks the server-side VT
+        // grid captures. Best-effort — a write failure (e.g. the child exited
+        // immediately) is non-fatal, and shells without an emitter are a no-op.
+        if config.shell_integration {
+            if let Some(payload) = crate::integration::integration_payload(&shell.program) {
+                let _ = session.write(&payload);
+            }
+        }
+        Ok(session)
     }
 
     /// Current lifecycle state (PRD-09 §4). Cheap — reads the latched
@@ -658,6 +713,7 @@ impl Session {
         &mut self,
         bytes: Option<&mut crate::OutputBuffer>,
         lines: Option<&mut crate::LineBuffer>,
+        vt: Option<&mut nexus_vt::Vt>,
         timeout: Duration,
     ) -> Result<usize, TerminalError> {
         let mut scratch = [0u8; 8192];
@@ -668,6 +724,11 @@ impl Session {
             }
             if let Some(l) = lines {
                 l.push(&scratch[..n]);
+            }
+            // Tee the same bytes into the server-side VT grid (RFC 0003) so the
+            // agent/CLI/TUI screen view and OSC 133 command tracking stay current.
+            if let Some(v) = vt {
+                v.advance(&scratch[..n]);
             }
         }
         Ok(n)
@@ -760,6 +821,25 @@ mod tests {
             assert_eq!(args[3], OsString::from("/bin/sh"));
             assert_eq!(args[4], OsString::from("-l"));
         }
+    }
+
+    #[test]
+    fn use_bundled_shell_only_for_confined_unpinned_opt_in() {
+        let ws = SandboxPolicy::new_workspace_write(vec![]);
+        let pinned = Some(ShellSpec { program: "/bin/sh".into(), args: vec![] });
+
+        // The one case that selects the bundled shell: opt-in + a confining
+        // policy + no caller-pinned shell.
+        assert!(use_bundled_shell(None, Some(&ws), true));
+
+        // A pinned shell always wins.
+        assert!(!use_bundled_shell(pinned.as_ref(), Some(&ws), true));
+        // Opt-in off → system shell stays the default.
+        assert!(!use_bundled_shell(None, Some(&ws), false));
+        // No sandbox policy → bundled shell is sandbox-only.
+        assert!(!use_bundled_shell(None, None, true));
+        // An unrestricted policy isn't "confining" → system shell.
+        assert!(!use_bundled_shell(None, Some(&SandboxPolicy::DangerFullAccess), true));
     }
 
     fn unix_only(test_name: &str) -> bool {

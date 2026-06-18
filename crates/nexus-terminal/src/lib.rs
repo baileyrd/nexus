@@ -63,6 +63,7 @@ mod error;
 // R8 / #191 — wire-mirror IPC types lifted out of `core_plugin.rs`.
 mod external_terminal;
 mod handlers;
+mod integration;
 pub mod ipc;
 mod job_object;
 mod lines;

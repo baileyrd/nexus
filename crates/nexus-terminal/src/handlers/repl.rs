@@ -37,6 +37,7 @@ impl TerminalCorePlugin {
             }),
             working_dir: a.working_dir.map(PathBuf::from),
             env: a.env,
+            ..Default::default()
         };
         let id = self
             .server

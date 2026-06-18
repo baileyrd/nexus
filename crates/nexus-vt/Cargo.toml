@@ -1,0 +1,30 @@
+[package]
+name = "nexus-vt"
+version.workspace = true
+# rusty_term's core is edition 2024; per-crate editions are allowed (toolchain
+# 1.94.1), so this is set explicitly rather than inherited from the 2021 root.
+edition = "2024"
+license.workspace = true
+publish.workspace = true
+description = "Headless VT engine for Nexus: a GUI-free, l13-free in-tree port of baileyrd/rusty_term's core/ (VT parser + grid + scrollback + OSC 133 command tracking), for server-side terminal screen introspection (RFC 0003 Track B). No GUI, no in-band channel."
+
+[features]
+# Command-tracking (OSC 133 prompt/command/exit-code marks) and the
+# terminal-introspection surface. In upstream rusty_term this feature also
+# enabled an in-band OSC-5379 JSON-RPC transport (pulling `rusty_lsp` +
+# `serde_json`); here `core/channel.rs` is a dependency-free no-op stub, so the
+# feature pulls NO extra crates. On by default — it is the point of this crate.
+default = ["l13"]
+l13 = []
+# Declared (never enabled) so the vendored `#[cfg(feature = "gui")]` code in the
+# ported core does not trip the unexpected-cfg lint. The GUI is deliberately not
+# adopted (ADR 0011); this pulls no deps.
+gui = []
+# Gates the upstream in-band-channel test module (`core/tests.rs`), kept in-tree
+# for provenance but never compiled — Nexus replaces that transport with the
+# no-op stub, so its MCP round-trip assertions don't apply here.
+channel_tests = []
+
+[dependencies]
+unicode-width = { workspace = true }
+unicode-segmentation = { workspace = true }

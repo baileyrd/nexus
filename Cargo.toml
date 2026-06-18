@@ -25,6 +25,8 @@ members = [
     "crates/nexus-theme",
     "crates/nexus-bootstrap",
     "crates/nexus-editor",
+    "crates/nexus-rush",
+    "crates/nexus-vt",
     "crates/nexus-terminal",
     "crates/nexus-agent",
     "crates/nexus-skills",
@@ -132,6 +134,11 @@ semver = "1"
 
 # Regex (lightweight)
 regex-lite = "0.1"
+
+# Unicode width + grapheme segmentation — the only deps of the headless VT
+# engine (`nexus-vt`, the ported rusty_term core).
+unicode-width = "0.2"
+unicode-segmentation = "1"
 
 # Parallelism
 rayon = "1.11"

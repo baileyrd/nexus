@@ -1,6 +1,6 @@
 # RFC 0003 — `rusty_term`: selectively adopt the VT core + agent-introspection design
 
-- **Status:** Draft (assessment / recommendation)
+- **Status:** Accepted — Tracks A + B landed (`nexus-vt` grid; OSC 133 capture + shell-integration emitters; terminal-as-MCP-resource with change notifications). Open: bundled rush emitting OSC 133 itself; making the server grid authoritative for xterm.js.
 - **Owner:** unassigned
 - **Created:** 2026-06-17
 - **Tracks:** OS-sandbox / AgenticSandbox vision, omp agentic loop, `nexus-terminal`

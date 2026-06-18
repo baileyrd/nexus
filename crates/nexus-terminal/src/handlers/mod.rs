@@ -8,6 +8,7 @@
 
 pub(crate) mod adhoc;
 pub(crate) mod ai;
+pub(crate) mod grid;
 pub(crate) mod info;
 pub(crate) mod io;
 pub(crate) mod repl;

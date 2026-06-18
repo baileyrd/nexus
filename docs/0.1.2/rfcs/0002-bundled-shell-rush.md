@@ -1,6 +1,6 @@
 # RFC 0002 — Bundled shell (vendor `rush`) for sandboxed terminal sessions
 
-- **Status:** Draft (assessment / recommendation)
+- **Status:** Accepted — Stage 1 landed (`nexus-rush` vendored; bundled shell wired for sandboxed sessions). Stage 2 (hardening) / Stage 3 (AgenticSandbox `/bin/sh`) remain.
 - **Owner:** unassigned
 - **Created:** 2026-06-17
 - **Tracks:** OS-sandbox adoption (Phase 4), AgenticSandbox vision

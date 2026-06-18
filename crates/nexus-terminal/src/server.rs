@@ -40,6 +40,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use nexus_types::SandboxPolicy;
 use serde::{Deserialize, Serialize};
 
 use crate::error::TerminalError;
@@ -72,6 +73,20 @@ pub struct ServerSpawnConfig {
     /// Secret-masking happens at the UI layer; this field carries the
     /// resolved values.
     pub env: Vec<(String, String)>,
+    /// OS-sandbox policy to confine the session under (RFC 0002/0007). `None`
+    /// (the default) runs the shell directly. A caller opts a session into
+    /// confinement here — e.g. an agent spawning a tool session, or a future
+    /// bridge that reads `sandbox.toml`. Server-spawned interactive sessions
+    /// leave this `None`.
+    pub sandbox: Option<SandboxPolicy>,
+    /// Opt in to the bundled `nexus-rush` shell (RFC 0002). Only effective with
+    /// a confining [`sandbox`](Self::sandbox) policy and no explicit
+    /// [`shell`](Self::shell); threaded from `sandbox.toml`'s
+    /// `bundled_shell_for_sandbox` by the caller. Default `false`.
+    pub bundled_shell: bool,
+    /// Opt in to loading the OSC 133 shell-integration script (RFC 0003) so the
+    /// shell emits reliable command/exit-code marks. Default `false`.
+    pub shell_integration: bool,
 }
 
 impl ServerSpawnConfig {
@@ -221,6 +236,35 @@ pub enum TerminalEvent {
         /// pass.
         reason: String,
     },
+    /// RFC 0003 Track A — a foreground command finished, detected via an
+    /// OSC 133;D semantic-prompt mark. Carries the exit code (`None` when the
+    /// shell omitted it) and, when an output region was marked (OSC 133;C), the
+    /// captured output text. This is the primary, reliable agent signal that a
+    /// command ended and its result; the `precmd.rs` printf-sentinel remains the
+    /// fallback for shells without the OSC 133 integration script loaded.
+    CommandFinished {
+        /// Session id.
+        id: String,
+        /// Exit code reported by the shell, or `None` if absent/unparseable.
+        exit_code: Option<i32>,
+        /// Captured command output (between OSC 133;C and ;D), if any.
+        command_output: Option<String>,
+        /// How the completion was detected.
+        source: CmdSource,
+    },
+}
+
+/// How a [`TerminalEvent::CommandFinished`] was detected.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CmdSource {
+    /// An OSC 133;D semantic-prompt mark — the primary path (requires the
+    /// shell-integration script, RFC 0003 PR-6).
+    Osc133,
+    /// The `precmd.rs` printf-sentinel pre-command fallback, for shells without
+    /// the OSC 133 integration loaded. Reserved — the sentinel path is consumed
+    /// synchronously by `run_pre_commands` today and does not emit this event.
+    Sentinel,
 }
 
 impl TerminalEvent {
@@ -236,7 +280,8 @@ impl TerminalEvent {
             | TerminalEvent::PatternMatched { id, .. }
             | TerminalEvent::SessionClosed { id, .. }
             | TerminalEvent::MemoryLimitExceeded { id, .. }
-            | TerminalEvent::SessionEvicted { id, .. } => id,
+            | TerminalEvent::SessionEvicted { id, .. }
+            | TerminalEvent::CommandFinished { id, .. } => id,
         }
     }
 }
@@ -502,9 +547,13 @@ impl TerminalServer for InMemoryTerminalServer {
             working_dir: cfg.working_dir,
             initial_size: None,
             env: cfg.env,
-            // Interactive/server-spawned sessions are not confined; callers opt
-            // in to OS-sandboxing per session via `SessionConfig::sandbox`.
-            sandbox: None,
+            // Sandboxing is opt-in per session: callers (e.g. an agent tool
+            // session, or a bridge reading `sandbox.toml`) set `cfg.sandbox`.
+            // IPC handlers leave it `None`, so interactive sessions are never
+            // surprise-confined.
+            sandbox: cfg.sandbox,
+            bundled_shell: cfg.bundled_shell,
+            shell_integration: cfg.shell_integration,
         };
         // BL-062 — at-cap path: evict the LRU stopped session before
         // spawning. If every session is still running, `spawn_or_evict`
@@ -582,6 +631,21 @@ impl TerminalServer for InMemoryTerminalServer {
 
     fn pump(&mut self, id: &SessionId, timeout: Duration) -> Result<usize, TerminalError> {
         let bytes = self.manager.drain(id, timeout)?;
+        // RFC 0003 Track A: surface a completed command (OSC 133;D) as a typed
+        // event on the lifecycle topic. Drained after every pump so it fires even
+        // when the completion produced no new buffered line. OSC 133 is the
+        // primary signal; the `precmd.rs` printf-sentinel remains the fallback for
+        // shells without the integration script loaded (different channel — no
+        // conflict). The autonomous drainer pumps every session, so a completion
+        // observed during a `read_raw_since` drain is emitted by the next pump.
+        if let Some((exit_code, command_output)) = self.manager.take_finished_command(id)? {
+            self.emit(&TerminalEvent::CommandFinished {
+                id: id.as_str().to_string(),
+                exit_code,
+                command_output,
+                source: CmdSource::Osc133,
+            });
+        }
         let after = self.manager.line_count(id).unwrap_or(0);
         let already = self.emitted_lines.get(id).copied().unwrap_or(0);
         // If the LineBuffer wrapped between pumps, `after` can be
@@ -740,6 +804,7 @@ mod tests {
             }),
             working_dir: None,
             env: vec![],
+            ..Default::default()
         }
     }
 
@@ -757,6 +822,7 @@ mod tests {
             }),
             working_dir: None,
             env: vec![],
+            ..Default::default()
         }
     }
 
@@ -858,6 +924,108 @@ mod tests {
     }
 
     #[test]
+    fn pump_emits_command_finished_on_osc_133() {
+        if !unix_only("pump_emits_command_finished_on_osc_133") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let rx = s.subscribe_events();
+        // A shell that emits an OSC 133 command-output region then a finished
+        // mark with exit code 7. `printf` interprets the \NNN octal escapes into
+        // the real ESC/BEL bytes the VT parser consumes.
+        let id = s
+            .create_session(ServerSpawnConfig {
+                name: Some("osc133".into()),
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        "printf '\\033]133;C\\007done\\n\\033]133;D;7\\007'".into(),
+                    ],
+                }),
+                ..Default::default()
+            })
+            .expect("create");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut finished: Option<(Option<i32>, Option<String>, CmdSource)> = None;
+        while Instant::now() < deadline && finished.is_none() {
+            let _ = s.pump(&id, Duration::from_millis(100));
+            while let Ok(evt) = rx.try_recv() {
+                if let TerminalEvent::CommandFinished {
+                    exit_code,
+                    command_output,
+                    source,
+                    ..
+                } = evt
+                {
+                    finished = Some((exit_code, command_output, source));
+                }
+            }
+        }
+
+        let (exit_code, output, source) = finished.expect("expected a CommandFinished event");
+        assert_eq!(exit_code, Some(7));
+        assert_eq!(source, CmdSource::Osc133);
+        assert!(
+            output.unwrap_or_default().contains("done"),
+            "captured output should contain the command text",
+        );
+    }
+
+    #[test]
+    fn shell_integration_makes_bash_emit_osc_133() {
+        if !unix_only("shell_integration_makes_bash_emit_osc_133") {
+            return;
+        }
+        if !std::path::Path::new("/bin/bash").exists() {
+            return; // no bash on this host — skip
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let rx = s.subscribe_events();
+        // Interactive bash with no user rc; the OSC 133 integration is sourced
+        // into the PTY at spawn via shell_integration, not from a dotfile.
+        let id = s
+            .create_session(ServerSpawnConfig {
+                name: Some("si".into()),
+                shell: Some(ShellSpec {
+                    program: "/bin/bash".into(),
+                    args: vec!["--norc".into(), "--noprofile".into(), "-i".into()],
+                }),
+                shell_integration: true,
+                ..Default::default()
+            })
+            .expect("create");
+
+        // Pump while bash sources the integration + draws prompts; run a command
+        // so a prompt (and thus an OSC 133;D) is produced, then look for the
+        // typed CommandFinished event — the end-to-end proof emitters fire.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut sent = false;
+        let mut seen_osc133 = false;
+        while Instant::now() < deadline && !seen_osc133 {
+            let _ = s.pump(&id, Duration::from_millis(100));
+            while let Ok(evt) = rx.try_recv() {
+                if let TerminalEvent::CommandFinished {
+                    source: CmdSource::Osc133,
+                    ..
+                } = evt
+                {
+                    seen_osc133 = true;
+                }
+            }
+            if !sent {
+                let _ = s.send_raw_input(&id, b"false\n");
+                sent = true;
+            }
+        }
+        assert!(
+            seen_osc133,
+            "expected an OSC 133 CommandFinished after loading the bash integration",
+        );
+    }
+
+    #[test]
     fn wait_for_pattern_returns_false_on_timeout_for_silent_session() {
         if !unix_only("wait_for_pattern_returns_false_on_timeout_for_silent_session") {
             return;
@@ -873,6 +1041,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                ..Default::default()
             })
             .expect("create");
         let hit = s
@@ -1043,6 +1212,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                ..Default::default()
             })
             .expect("create");
 

@@ -11,6 +11,9 @@ nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 # BL-057 — universal activity timeline emitter types (BL-052).
 nexus-types = { path = "../nexus-types" }
+# Headless VT engine: a per-session server-side grid + OSC 133 command tracking
+# (RFC 0003). Default features keep OSC 133 on.
+nexus-vt = { path = "../nexus-vt" }
 portable-pty = { workspace = true }
 regex-lite = { workspace = true }
 thiserror = { workspace = true }

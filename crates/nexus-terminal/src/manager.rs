@@ -62,7 +62,17 @@ struct Entry {
     /// Unix-seconds creation timestamp. Stable across the session's
     /// lifetime — `last_accessed` moves independently.
     created_at: u64,
+    /// Server-side VT grid fed the same raw PTY bytes as the buffers above
+    /// (RFC 0003). Models the screen + scrollback + OSC 133 command/exit-code
+    /// boundaries for headless (agent/CLI/TUI) introspection, parallel to the
+    /// frontend's own emulator (xterm.js).
+    vt: nexus_vt::Vt,
 }
+
+/// A finished command's exit code (`None` when the shell omitted it) and its
+/// captured output (`None` when no OSC 133;C output region was marked). Returned
+/// by [`SessionManager::take_finished_command`].
+pub type FinishedCommand = (Option<i32>, Option<String>);
 
 /// In-memory registry of live PTY sessions. Not `Sync`; wrap in a mutex
 /// for concurrent access.
@@ -134,6 +144,12 @@ impl SessionManager {
                 ),
             });
         }
+        // Size the VT grid to the requested PTY size (default 80×24, matching
+        // `Session::spawn`). Read before `config` is moved into spawn.
+        let (cols, rows) = match &config.initial_size {
+            Some(s) => (s.cols as usize, s.rows as usize),
+            None => (80, 24),
+        };
         let session = Session::spawn(config)?;
         let id = session.id().clone();
         let now = SystemTime::now()
@@ -149,6 +165,7 @@ impl SessionManager {
                 last_accessed: Cell::new(Instant::now()),
                 name: None,
                 created_at: now,
+                vt: nexus_vt::Vt::new(cols, rows),
             },
         );
         Ok(id)
@@ -236,6 +253,54 @@ impl SessionManager {
                 .cloned()
                 .collect(),
         )
+    }
+
+    /// The session's current visible screen as text, modelled by the VT grid
+    /// (RFC 0003). `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_screen(&self, id: &SessionId) -> Option<String> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.screen_text())
+    }
+
+    /// The most recent `max` scrollback lines of the VT grid as text (oldest
+    /// first). `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_scrollback(&self, id: &SessionId, max: usize) -> Option<String> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.scrollback_text(max))
+    }
+
+    /// The VT grid cursor as `(col, row)` (both zero-based). `None` if unknown.
+    #[must_use]
+    pub fn vt_cursor(&self, id: &SessionId) -> Option<(usize, usize)> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.cursor())
+    }
+
+    /// The working directory last reported by the child via OSC 7 (empty until
+    /// set). `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_cwd(&self, id: &SessionId) -> Option<String> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.cwd().to_string())
+    }
+
+    /// The last finished command's exit code and captured output (OSC 133;C..D).
+    /// Read-only — unlike [`Self::take_finished_command`] this does not clear the
+    /// pending flag. `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_last_exit(&self, id: &SessionId) -> Option<FinishedCommand> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some((
+            entry.vt.last_exit(),
+            entry.vt.last_command_output().map(str::to_owned),
+        ))
     }
 
     /// Search the session's line buffer for `query`. Returns the indices
@@ -360,9 +425,24 @@ impl SessionManager {
             session,
             buffer,
             lines,
+            vt,
             ..
         } = entry;
-        session.read_into(Some(buffer), Some(lines), timeout)
+        session.read_into(Some(buffer), Some(lines), Some(vt), timeout)
+    }
+
+    /// Drain the session's "a command just finished" flag (OSC 133;D), returning
+    /// the exit code (`None` if the shell omitted it) and captured output for the
+    /// completion, or `None` if no command finished since the last call. Used by
+    /// the server to emit one `CommandFinished` event per completion.
+    ///
+    /// # Errors
+    /// - [`TerminalError::NotRunning`] if `id` is not tracked.
+    pub fn take_finished_command(
+        &mut self,
+        id: &SessionId,
+    ) -> Result<Option<FinishedCommand>, TerminalError> {
+        Ok(self.entry_mut(id)?.vt.take_finished_command())
     }
 
     /// Update the PTY's reported window size (PRD-09 §1.1).
@@ -373,6 +453,9 @@ impl SessionManager {
     pub fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed.set(Instant::now());
+        // Keep the server-side VT grid in step with the PTY so screen reads and
+        // OSC 133 output capture survive a mid-command resize.
+        entry.vt.resize(cols as usize, rows as usize);
         entry.session.resize(cols, rows)
     }
 
@@ -627,6 +710,46 @@ mod tests {
         assert!(matches!(err, TerminalError::NotRunning(_)), "got {err:?}");
         let err = m.drain(&ghost, Duration::from_millis(10)).unwrap_err();
         assert!(matches!(err, TerminalError::NotRunning(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn vt_grid_tracks_screen_and_osc_133_exit() {
+        if !unix_only("vt_grid_tracks_screen_and_osc_133_exit") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(4, 4096);
+        // A shell that emits an OSC 133 command-output region with text then a
+        // finished mark with exit 5.
+        let cfg = SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '\\033]133;C\\007grid-line\\n\\033]133;D;5\\007'".into(),
+                ],
+            }),
+            ..SessionConfig::default()
+        };
+        let id = m.spawn(cfg).expect("spawn");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let _ = m.drain(&id, Duration::from_millis(200)).expect("drain");
+            if m.vt_last_exit(&id).and_then(|(e, _)| e) == Some(5) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "OSC 133 exit not captured; screen={:?}",
+                m.vt_screen(&id),
+            );
+        }
+        // The screen models the command output; last-exit carries the code + text.
+        assert!(m.vt_screen(&id).unwrap_or_default().contains("grid-line"));
+        let (exit, output) = m.vt_last_exit(&id).expect("last exit");
+        assert_eq!(exit, Some(5));
+        assert!(output.unwrap_or_default().contains("grid-line"));
+        // Unknown id reads as None — the handler maps this to NotRunning.
+        assert!(m.vt_screen(&SessionId::from_string("nope")).is_none());
     }
 
     #[test]

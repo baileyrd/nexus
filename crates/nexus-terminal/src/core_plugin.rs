@@ -283,6 +283,24 @@ pub const HANDLER_REPL_LIST: u32 = 29;
 /// renames a terminal tab; the auto-naming path stays shell-local.
 pub const HANDLER_RENAME_SESSION: u32 = 30;
 
+// ── RFC 0003 Track A — server-side VT grid introspection (read-only) ────────
+
+/// `get_screen` handler id. Args: [`SessionIdArgs`]. Returns the session's
+/// current visible screen text + cursor, modelled by the `nexus-vt` grid.
+pub const HANDLER_GET_SCREEN: u32 = 31;
+/// `get_scrollback` handler id. Args: [`crate::ipc::GetScrollbackArgs`]. Returns
+/// the most recent scrollback lines as text (oldest first).
+pub const HANDLER_GET_SCROLLBACK: u32 = 32;
+/// `get_cwd` handler id. Args: [`SessionIdArgs`]. Returns the child's working
+/// directory as reported via OSC 7.
+pub const HANDLER_GET_CWD: u32 = 33;
+/// `get_cursor` handler id. Args: [`SessionIdArgs`]. Returns the grid cursor
+/// position `(col, row)`.
+pub const HANDLER_GET_CURSOR: u32 = 34;
+/// `get_last_exit` handler id. Args: [`SessionIdArgs`]. Returns the last
+/// finished command's exit code (OSC 133;D) and captured output.
+pub const HANDLER_GET_LAST_EXIT: u32 = 35;
+
 /// Plugin ids this plugin calls at handler-dispatch time. Soft —
 /// `stream_chat` is only used by the inline-suggest path, which
 /// gracefully degrades when `com.nexus.ai` is absent — but
@@ -323,6 +341,11 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("repl_stop", HANDLER_REPL_STOP),
     ("repl_list", HANDLER_REPL_LIST),
     ("rename_session", HANDLER_RENAME_SESSION),
+    ("get_screen", HANDLER_GET_SCREEN),
+    ("get_scrollback", HANDLER_GET_SCROLLBACK),
+    ("get_cwd", HANDLER_GET_CWD),
+    ("get_cursor", HANDLER_GET_CURSOR),
+    ("get_last_exit", HANDLER_GET_LAST_EXIT),
 ];
 
 // ── DTOs ───────────────────────────────────────────────────────────────────
@@ -1224,6 +1247,11 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_REPL_STOP => self.dispatch_repl_stop(args),
             HANDLER_REPL_LIST => self.dispatch_repl_list(),
             HANDLER_RENAME_SESSION => self.dispatch_rename_session(args),
+            HANDLER_GET_SCREEN => self.dispatch_get_screen(args),
+            HANDLER_GET_SCROLLBACK => self.dispatch_get_scrollback(args),
+            HANDLER_GET_CWD => self.dispatch_get_cwd(args),
+            HANDLER_GET_CURSOR => self.dispatch_get_cursor(args),
+            HANDLER_GET_LAST_EXIT => self.dispatch_get_last_exit(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }

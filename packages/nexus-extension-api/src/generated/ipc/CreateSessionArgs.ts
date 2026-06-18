@@ -24,4 +24,10 @@ working_dir: string | null,
 /**
  * Env vars to merge on top of the inherited environment.
  */
-env: Array<[string, string]>, };
+env: Array<[string, string]>, 
+/**
+ * Opt in to loading the OSC 133 shell-integration script (RFC 0003) so the
+ * shell emits reliable command/exit-code marks the server-side VT grid
+ * captures. No-op for shells without an emitter. Default `false`.
+ */
+shell_integration: boolean, };

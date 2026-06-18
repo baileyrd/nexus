@@ -75,7 +75,7 @@ pub fn run(cmd: &str, max_secs: u64) -> Result<i32> {
 
     while Instant::now() < deadline {
         let _ = session
-            .read_into(None, Some(&mut lines), Duration::from_millis(200))
+            .read_into(None, Some(&mut lines), None, Duration::from_millis(200))
             .context("drain session")?;
 
         // Emit newly-appended complete lines. Dedup collapses adjacent
@@ -94,7 +94,7 @@ pub fn run(cmd: &str, max_secs: u64) -> Result<i32> {
             exit_code = Some(code);
             // Final drain + flush of any partial-last-line bytes.
             let _ = session
-                .read_into(None, Some(&mut lines), Duration::from_millis(100))
+                .read_into(None, Some(&mut lines), None, Duration::from_millis(100))
                 .ok();
             lines.flush_pending();
             while next_line_to_emit < lines.len() {
@@ -125,7 +125,7 @@ pub fn run(cmd: &str, max_secs: u64) -> Result<i32> {
         // Even after shutdown, flush anything queued so the user sees
         // the final output before the 124 exit.
         let _ = session
-            .read_into(None, Some(&mut lines), Duration::from_millis(100))
+            .read_into(None, Some(&mut lines), None, Duration::from_millis(100))
             .ok();
         lines.flush_pending();
         while next_line_to_emit < lines.len() {
@@ -190,7 +190,7 @@ pub fn shell() -> Result<i32> {
         }
 
         let _ = session
-            .read_into(None, Some(&mut lines), Duration::from_millis(200))
+            .read_into(None, Some(&mut lines), None, Duration::from_millis(200))
             .context("drain shell")?;
 
         while next_line_to_emit < lines.len() {

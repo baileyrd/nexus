@@ -1,0 +1,38 @@
+//! nexus-rush — thin binary wrapper around the `nexus_rush` shell library.
+//!
+//! All shell logic lives in the library so it can be embedded and unit-tested
+//! without a PTY. This binary is the only place that calls `process::exit`: it
+//! dispatches argv (`-c`/script/interactive) into the library and exits with the
+//! resulting status. When launched by `nexus-terminal` as the bundled sandbox
+//! shell, `NEXUS_EMBEDDED_SHELL=1` disables rush's job-control terminal hand-off.
+
+fn main() -> ! {
+    let args: Vec<String> = std::env::args().collect();
+
+    // The bundled-shell launch path sets NEXUS_EMBEDDED_SHELL=1 so rush doesn't
+    // fight portable-pty's session leader for the controlling terminal.
+    nexus_rush::set_embedded(std::env::var_os("NEXUS_EMBEDDED_SHELL").is_some());
+
+    // Non-interactive modes: `rush -c "cmd" [name args…]` and `rush FILE [args…]`.
+    let code = match args.get(1).map(String::as_str) {
+        Some("-c") => {
+            let cmd = args.get(2).cloned().unwrap_or_default();
+            let name = args.get(3).cloned().unwrap_or_else(|| "rush".to_string());
+            nexus_rush::set_args(name, args.get(4..).unwrap_or(&[]).to_vec());
+            nexus_rush::eval(&cmd)
+        }
+        Some(file) => {
+            nexus_rush::set_args(file.to_string(), args.get(2..).unwrap_or(&[]).to_vec());
+            match std::fs::read_to_string(file) {
+                Ok(src) => nexus_rush::eval(&src),
+                Err(e) => {
+                    eprintln!("rush: {file}: {e}");
+                    1
+                }
+            }
+        }
+        None => nexus_rush::run_repl(),
+    };
+
+    std::process::exit(code);
+}

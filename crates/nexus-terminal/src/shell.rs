@@ -52,6 +52,32 @@ impl ShellSpec {
     }
 }
 
+/// Locate the bundled `nexus-rush` shell binary, expected to sit beside the
+/// running executable — the same discovery shape as
+/// [`nexus_types::default_helper_path`] for `nexus-sandbox`. Returns `None`
+/// (so callers fall back to the system shell) when the binary can't be found,
+/// mirroring `subagent::locate_sandbox_helper`'s existence check.
+#[must_use]
+pub fn bundled_shell_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let name = if cfg!(windows) { "nexus-rush.exe" } else { "nexus-rush" };
+    let path = exe.with_file_name(name);
+    path.exists().then_some(path)
+}
+
+/// Build a [`ShellSpec`] for the bundled `nexus-rush` shell, run interactively.
+/// `None` when the bundled binary isn't present (caller falls back to the
+/// detected system shell). The session layer sets `NEXUS_EMBEDDED_SHELL=1` so
+/// rush disables its job-control terminal hand-off inside the Nexus PTY.
+#[must_use]
+pub fn resolve_bundled_shell() -> Option<ShellSpec> {
+    let program = bundled_shell_path()?;
+    Some(ShellSpec {
+        program,
+        args: vec!["-i".to_string()],
+    })
+}
+
 /// Detect a usable default shell for this platform.
 ///
 /// Never returns an error: callers receive the best candidate that satisfies

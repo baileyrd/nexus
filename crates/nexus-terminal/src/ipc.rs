@@ -50,6 +50,11 @@ pub struct CreateSessionArgs {
     /// Env vars to merge on top of the inherited environment.
     #[serde(default)]
     pub env: Vec<(String, String)>,
+    /// Opt in to loading the OSC 133 shell-integration script (RFC 0003) so the
+    /// shell emits reliable command/exit-code marks the server-side VT grid
+    /// captures. No-op for shells without an emitter. Default `false`.
+    #[serde(default)]
+    pub shell_integration: bool,
 }
 
 /// Response from `create_session`.
@@ -646,4 +651,116 @@ pub struct ReplInfo {
     pub args: Vec<String>,
     /// Unix epoch milliseconds at `repl_start` time.
     pub started_at_ms: i64,
+}
+
+// ── RFC 0003 Track A — server-side VT grid introspection ────────────────────
+// Read-only snapshots of the per-session VT grid (screen / scrollback / cwd /
+// cursor / last-command exit) maintained by `nexus-vt`. Surfaced to agents over
+// IPC and (PR-7) as MCP terminal resources. Args reuse `SessionIdArgs` except
+// `get_scrollback`, which takes an optional line cap.
+
+/// Cursor position in the VT grid, `(col, row)` both zero-based. Shared by the
+/// `get_screen` and `get_cursor` responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GridCursor {
+    /// Zero-based column.
+    pub col: usize,
+    /// Zero-based row.
+    pub row: usize,
+}
+
+/// Response from `get_screen`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetScreenResponse {
+    /// The visible screen as text (one line per row, trailing blanks dropped).
+    pub text: String,
+    /// Cursor position.
+    pub cursor: GridCursor,
+}
+
+/// Arguments for `get_scrollback`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetScrollbackArgs {
+    /// Session id the handler targets.
+    pub id: String,
+    /// Max lines to return (most recent, oldest first). Defaults to 1000.
+    #[serde(default)]
+    pub lines: Option<usize>,
+}
+
+/// Response from `get_scrollback`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetScrollbackResponse {
+    /// The requested scrollback lines as text (oldest first).
+    pub text: String,
+}
+
+/// Response from `get_cwd`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetCwdResponse {
+    /// Working directory reported by the child via OSC 7 (empty until set).
+    pub cwd: String,
+}
+
+/// Response from `get_last_exit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetLastExitResponse {
+    /// Exit code of the last finished command (OSC 133;D), or `None`.
+    pub exit_code: Option<i32>,
+    /// Captured output of the last finished command (OSC 133;C..D), if any.
+    pub output: Option<String>,
 }
