@@ -8,19 +8,20 @@
 //! surface authored prompt templates from `.forge/skills/` so external clients
 //! can invoke them as named, parameterised prompts.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use nexus_kernel::{Ipc as _, KernelPluginContext};
+use nexus_kernel::{EventFilter, Events as _, Ipc as _, KernelPluginContext, NexusEvent};
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{
     Annotated, CallToolRequestParams, CallToolResult, ListResourcesResult, ListToolsResult,
     PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult, Resource,
-    ResourceContents, ServerCapabilities, ServerInfo,
+    ResourceContents, ResourceUpdatedNotificationParam, ServerCapabilities, ServerInfo,
 };
 use rmcp::schemars;
-use rmcp::service::RequestContext;
+use rmcp::service::{Peer, RequestContext};
 use rmcp::RoleServer;
 use rmcp::ServiceExt as _;
 use rmcp::{tool, tool_router};
@@ -135,6 +136,78 @@ pub(crate) fn build_terminal_resource(id: &str, kind: &str, description: &str) -
         .with_mime_type("text/plain"),
         None,
     )
+}
+
+/// RFC 0003 Track A — bridge terminal lifecycle events on the kernel bus into MCP
+/// `notifications/resources/updated`, so a subscribed client learns when a
+/// session's screen / exit / command resources change without polling.
+///
+/// On `CommandFinished` (OSC 133;D) the screen + exit + command resources are
+/// pushed; the chatty `OutputReceived` stream is debounced to at most one screen
+/// push per session per `OUTPUT_DEBOUNCE`. Best-effort: a no-op when no tokio
+/// runtime is in scope (e.g. a sync test harness), and it exits quietly when the
+/// bus or the client peer closes.
+fn spawn_terminal_resource_notifier(context: &KernelPluginContext, peer: Peer<RoleServer>) {
+    /// Debounce window for screen pushes driven by the output byte stream.
+    const OUTPUT_DEBOUNCE: Duration = Duration::from_millis(750);
+
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let mut sub = context.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.terminal.events.".to_string(),
+    ));
+    handle.spawn(async move {
+        let mut last_screen_push: HashMap<String, Instant> = HashMap::new();
+        loop {
+            let evt = match sub.recv().await {
+                Ok(evt) => evt,
+                Err(_) => break, // bus dropped
+            };
+            let NexusEvent::Custom { payload, .. } = &evt.event else {
+                continue;
+            };
+            let kind = payload
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let Some(id) = payload.get("id").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            match kind {
+                // A command finished: screen, exit, and command resources changed.
+                "command_finished" => {
+                    for k in ["screen", "exit", "command"] {
+                        notify_terminal_resource(&peer, id, k).await;
+                    }
+                    last_screen_push.insert(id.to_string(), Instant::now());
+                }
+                // New output: push a screen update, debounced (the stream is chatty).
+                "output_received" => {
+                    let now = Instant::now();
+                    let due = last_screen_push
+                        .get(id)
+                        .is_none_or(|t| now.duration_since(*t) >= OUTPUT_DEBOUNCE);
+                    if due {
+                        notify_terminal_resource(&peer, id, "screen").await;
+                        last_screen_push.insert(id.to_string(), now);
+                    }
+                }
+                "session_closed" => {
+                    last_screen_push.remove(id);
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
+/// Push one `notifications/resources/updated` for a terminal VT-grid resource.
+async fn notify_terminal_resource(peer: &Peer<RoleServer>, id: &str, kind: &str) {
+    let uri = format!("{TERMINAL_URI_PREFIX}{id}/{kind}");
+    let _ = peer
+        .notify_resource_updated(ResourceUpdatedNotificationParam::new(uri))
+        .await;
 }
 
 // ── Input types ──────────────────────────────────────────────────────────────
@@ -711,7 +784,11 @@ impl NexusMcpServer {
     /// Returns an error if the transport or server fails to start.
     pub async fn serve_stdio(self) -> Result<(), Box<dyn std::error::Error>> {
         let transport = rmcp::transport::io::stdio();
+        // Clone the context before `serve` consumes `self`, so the terminal
+        // resource-change notifier can subscribe to the kernel bus.
+        let context = Arc::clone(&self.context);
         let server: rmcp::service::RunningService<RoleServer, Self> = self.serve(transport).await?;
+        spawn_terminal_resource_notifier(&context, server.peer().clone());
         server.waiting().await?;
         Ok(())
     }
@@ -2348,6 +2425,9 @@ impl rmcp::ServerHandler for NexusMcpServer {
         info.capabilities = ServerCapabilities::builder()
             .enable_tools()
             .enable_resources()
+            // RFC 0003 — clients may subscribe to terminal resources and receive
+            // notifications/resources/updated as the VT grid changes.
+            .enable_resources_subscribe()
             .build();
         info.with_instructions(
             "Nexus MCP server: manage a personal knowledge base of markdown notes. \
