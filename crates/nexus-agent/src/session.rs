@@ -1041,7 +1041,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     let outcome = loop {
         match dispatcher.dispatch(&proposed.tool_call).await {
             Ok(value) => break Ok(value),
-            Err(e) if retries < max_retries && is_retryable_tool_error(&e) => {
+            Err(e) if retries < max_retries && e.is_retryable() => {
                 let factor = 1u64.checked_shl(retries).unwrap_or(u64::MAX);
                 let delay = backoff_ms.saturating_mul(factor);
                 tracing::warn!(
@@ -1083,7 +1083,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             error: if retries > 0 {
                 format!("{e} (after {} attempts)", retries + 1)
             } else {
-                e
+                e.message
             },
             response: None,
             duration_ms,
@@ -1092,11 +1092,17 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
 }
 
 /// Phase 5.5 — heuristic: does a tool dispatch error look *transient*
-/// (worth retrying) rather than permanent? The [`ToolDispatcher`]
-/// surface only carries a `String`, so we match well-known transient
+/// (worth retrying) rather than permanent? We match well-known transient
 /// signatures — timeouts, transport resets, rate limits, 5xx / 429,
 /// "unavailable". Everything else (not-found, validation, capability
 /// denial, policy denial) is treated as permanent and not retried.
+///
+/// This is the fallback path for [`crate::ToolErrorKind::Unknown`]:
+/// dispatchers that classify their failures exactly (e.g. the kernel IPC
+/// bridge, which folds `IpcError`'s authoritative `retryable` flag into a
+/// [`crate::ToolErrorKind`]) bypass it entirely via
+/// [`crate::ToolDispatchError::is_retryable`]. It still runs for
+/// dispatchers that only carry a message string.
 ///
 /// Deliberately conservative: a missed transient only forgoes a retry,
 /// whereas a false positive risks re-running a non-idempotent tool. For
@@ -1277,7 +1283,7 @@ fn sanitize_turns(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Proposal;
+    use crate::{Proposal, ToolDispatchError, ToolErrorKind};
     use std::sync::Mutex;
 
     /// Driver that returns a different proposal per call, in order.
@@ -1313,7 +1319,7 @@ mod tests {
     }
     #[async_trait]
     impl ToolDispatcher for CountingDispatcher {
-        async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, String> {
+        async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError> {
             self.calls.lock().unwrap().push(call.clone());
             Ok(serde_json::json!({"ok": true}))
         }
@@ -1336,14 +1342,21 @@ mod tests {
     /// Dispatcher that fails its first `fail_n` calls with `err`, then
     /// succeeds; records how many times it was dispatched.
     struct FlakyDispatcher {
-        err: String,
+        err: ToolDispatchError,
         fail_n: usize,
         calls: Mutex<usize>,
     }
     impl FlakyDispatcher {
+        /// Fail with a message-only (`Unknown`) error — exercises the
+        /// `is_retryable_tool_error` heuristic fallback path.
         fn new(err: &str, fail_n: usize) -> Self {
+            Self::with_error(ToolDispatchError::from(err), fail_n)
+        }
+        /// Fail with a fully-typed error — exercises the exact
+        /// classification path.
+        fn with_error(err: ToolDispatchError, fail_n: usize) -> Self {
             Self {
-                err: err.into(),
+                err,
                 fail_n,
                 calls: Mutex::new(0),
             }
@@ -1354,7 +1367,7 @@ mod tests {
     }
     #[async_trait]
     impl ToolDispatcher for FlakyDispatcher {
-        async fn dispatch(&self, _call: &ToolCall) -> Result<serde_json::Value, String> {
+        async fn dispatch(&self, _call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError> {
             let mut n = self.calls.lock().unwrap();
             *n += 1;
             if *n <= self.fail_n {
@@ -1487,6 +1500,88 @@ mod tests {
         assert_eq!(dispatcher.call_count(), 3);
         let err = &session.rounds[0].tool_calls[0].error;
         assert!(err.contains("after 3 attempts"), "error: {err}");
+    }
+
+    // ── Typed tool-dispatch errors (Phase 5.5 follow-up) ─────────────────────
+    // A dispatcher's explicit `ToolErrorKind` is authoritative and overrides
+    // what the `is_retryable_tool_error` message heuristic would have guessed.
+
+    #[test]
+    fn typed_error_kind_overrides_message_heuristic() {
+        // "timeout" reads transient, but a Permanent classification wins.
+        let permanent = ToolDispatchError::permanent("dispatch timeout after 60s");
+        assert!(!permanent.is_retryable());
+        // "file not found" reads permanent, but a Transient classification wins.
+        let transient = ToolDispatchError::transient("file not found: notes.md");
+        assert!(transient.is_retryable());
+        // Unknown defers to the heuristic over the message.
+        assert!(ToolDispatchError::unknown("connection reset by peer").is_retryable());
+        assert!(!ToolDispatchError::unknown("invalid arguments").is_retryable());
+        // `classified` maps the IPC envelope's `retryable` flag.
+        assert_eq!(
+            ToolDispatchError::classified("x", true).kind,
+            ToolErrorKind::Transient
+        );
+        assert_eq!(
+            ToolDispatchError::classified("x", false).kind,
+            ToolErrorKind::Permanent
+        );
+        // String conversions default to Unknown.
+        assert_eq!(
+            ToolDispatchError::from("boom".to_string()).kind,
+            ToolErrorKind::Unknown
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_permanent_error_skips_retry_despite_transient_message() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        // Message would be retried by the heuristic, but the kind is Permanent.
+        let dispatcher = FlakyDispatcher::with_error(
+            ToolDispatchError::permanent("dispatch timeout"),
+            5,
+        );
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            config_with_retries(3),
+        )
+        .await;
+        // Permanent → dispatched exactly once, no retries.
+        assert_eq!(dispatcher.call_count(), 1);
+        let err = &session.rounds[0].tool_calls[0].error;
+        assert!(err.contains("dispatch timeout"));
+        assert!(!err.contains("attempts"));
+    }
+
+    #[tokio::test]
+    async fn typed_transient_error_retries_despite_permanent_message() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        // Message would NOT be retried by the heuristic, but the kind is Transient.
+        let dispatcher =
+            FlakyDispatcher::with_error(ToolDispatchError::transient("file not found"), 2);
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            config_with_retries(3),
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        // 2 transient failures + 1 success.
+        assert_eq!(dispatcher.call_count(), 3);
+        let rec = &session.rounds[0].tool_calls[0];
+        assert!(rec.error.is_empty(), "succeeded after retries: {}", rec.error);
+        assert!(rec.response.is_some());
     }
 
     #[tokio::test]

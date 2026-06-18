@@ -17,8 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nexus_agent::{ChatDriver, Proposal, ProposedToolCall, ToolCall, ToolDispatcher};
-use nexus_kernel::{Ipc as _, KernelPluginContext};
+use nexus_agent::{
+    ChatDriver, Proposal, ProposedToolCall, ToolCall, ToolDispatchError, ToolDispatcher,
+};
+use nexus_kernel::{Ipc as _, IpcErrorEnvelope, KernelPluginContext};
 use serde::Deserialize;
 
 /// Default per-tool timeout. Matches [`crate::terminal::IPC_TIMEOUT`]
@@ -34,7 +36,10 @@ const DEFAULT_CHAT_TIMEOUT: Duration = Duration::from_secs(300);
 /// [`ToolDispatcher`] backed by a [`KernelPluginContext`]. Every
 /// dispatched call becomes `ipc_call(target_plugin_id, command_id,
 /// args)`. Failures (plugin not found, handler panic, timeout) are
-/// flattened into strings for the agent library's error surface.
+/// surfaced as a typed [`ToolDispatchError`] whose retry classification
+/// comes from the kernel's authoritative [`IpcErrorEnvelope::retryable`]
+/// flag, so the session loop retries transient IPC failures (timeout,
+/// cancellation) without re-deriving them from the message.
 pub struct KernelToolDispatcher {
     ctx: Arc<KernelPluginContext>,
     timeout: Duration,
@@ -60,7 +65,7 @@ impl KernelToolDispatcher {
 
 #[async_trait]
 impl ToolDispatcher for KernelToolDispatcher {
-    async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, String> {
+    async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError> {
         self.ctx
             .ipc_call(
                 &call.target_plugin_id,
@@ -69,7 +74,10 @@ impl ToolDispatcher for KernelToolDispatcher {
                 self.timeout,
             )
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| {
+                let retryable = IpcErrorEnvelope::from_ipc_error(&e).retryable;
+                ToolDispatchError::classified(e.to_string(), retryable)
+            })
     }
 }
 

@@ -65,7 +65,10 @@ BL-121 FTS5 transcript search; and a BL-133 auto-notify subscriber.
 Module-by-module (one line each):
 
 - **`lib.rs`** — core types: `Step`, `Plan` (+ `Plan::new`), `ToolCall`,
-  `ToolDispatcher` trait, `Agent` trait, `AgentError`. Re-exports everything below.
+  `ToolDispatcher` trait (returns `Result<Value, ToolDispatchError>`),
+  `ToolDispatchError` + `ToolErrorKind` (typed retry classification —
+  `Transient`/`Permanent`/`Unknown`, with `From<String>`/`From<&str>` →
+  `Unknown`), `Agent` trait, `AgentError`. Re-exports everything below.
 - **`agents.rs`** (`EchoAgent`) — trivial one-step `Agent` for smoke tests/scaffolding.
 - **`llm.rs`** — `LlmAgent` (the only in-tree real planner), `ChatDriver` trait,
   `Proposal`, `ProposedToolCall`, `DEFAULT_SYSTEM_PROMPT`. Maps a `Proposal` to a
@@ -250,9 +253,12 @@ empty tool calls → terminal text round, `Complete`; (5) build a `ProposedRound
 ask `policy.allow_round`; (6) `execute_round` applies the decision —
 `ApproveAll`/`Partial` dispatch the approved subset via `dispatch_one` (each timed
 with `Instant`, populating `ToolCallRecord.duration_ms`; Phase 5.5 — a *transient*
-dispatch error, per `is_retryable_tool_error`, is retried up to
-`SessionConfig::max_tool_retries` times with exponential backoff
-`tool_retry_backoff_ms`, opt-in/off by default), `Abort`/`Timeout` stop with a
+dispatch error is retried up to `SessionConfig::max_tool_retries` times with
+exponential backoff `tool_retry_backoff_ms`, opt-in/off by default. Retryability
+comes from the typed `ToolDispatchError.kind` (`ToolDispatchError::is_retryable`):
+`Transient`/`Permanent` are exact, and the kernel bridges set them from
+`IpcErrorEnvelope::retryable`; `Unknown` (every `String`/`&str` conversion) falls
+back to the `is_retryable_tool_error` message heuristic), `Abort`/`Timeout` stop with a
 synthetic narration round; (7) if no call approved → `Aborted`; (8) rebuild
 the conversation from the recorded rounds via `compose_turns` — Phase 5.5 (2c)
 provider-native multi-turn: a leading `User{goal}` turn then each round as an
@@ -279,7 +285,9 @@ unregistered tool names as high-risk (conservative).
 bridges: `AiChatBridge` (`ChatDriver`) calls `com.nexus.ai::propose_tool_calls`
 (targets already resolved by the AI plugin's `dispatch_target` mapping);
 `KernelToolBridge` (`ToolDispatcher`) forwards each `ToolCall` to
-`ctx.ipc_call(target_plugin_id, command_id, args)`. The agent-side
+`ctx.ipc_call(target_plugin_id, command_id, args)`, folding any `IpcError` into a
+typed `ToolDispatchError` whose `kind` comes from `IpcErrorEnvelope::retryable`
+(via `ipc_error_to_dispatch_error`) so the retry policy classifies it exactly. The agent-side
 `AgentToolRegistry` is a process-global catalogue (`seed_default_tools` at boot)
 holding 13 tools — read/write/search/backlinks/git/terminal/delegate plus three
 BL-132 destructive ops (`delete_file`, `replace_in_files`, `git_push`, all

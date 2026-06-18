@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::{ToolCall, ToolDispatcher};
+use crate::{ToolCall, ToolDispatchError, ToolDispatcher};
 
 /// Plugin id the `todo` tool is advertised under (intercepted, never dispatched).
 pub const TODO_TARGET: &str = "com.nexus.agent";
@@ -210,10 +210,16 @@ impl<D> TodoDispatcher<D> {
 
 #[async_trait]
 impl<D: ToolDispatcher> ToolDispatcher for TodoDispatcher<D> {
-    async fn dispatch(&self, call: &ToolCall) -> Result<Value, String> {
+    async fn dispatch(&self, call: &ToolCall) -> Result<Value, ToolDispatchError> {
         if call.target_plugin_id == TODO_TARGET && call.command_id == TODO_COMMAND {
-            let mut list = self.list.lock().map_err(|_| "todo list poisoned".to_string())?;
-            return handle(&mut list, &call.args);
+            // The todo tool runs in-process; its failures (poisoned lock,
+            // validation errors from `handle`) are all permanent — retrying
+            // can't change the outcome.
+            let mut list = self
+                .list
+                .lock()
+                .map_err(|_| ToolDispatchError::permanent("todo list poisoned"))?;
+            return handle(&mut list, &call.args).map_err(ToolDispatchError::permanent);
         }
         self.inner.dispatch(call).await
     }
@@ -275,8 +281,8 @@ mod tests {
     struct DenyDispatcher;
     #[async_trait]
     impl ToolDispatcher for DenyDispatcher {
-        async fn dispatch(&self, _call: &ToolCall) -> Result<Value, String> {
-            Err("delegated".to_string())
+        async fn dispatch(&self, _call: &ToolCall) -> Result<Value, ToolDispatchError> {
+            Err(ToolDispatchError::permanent("delegated"))
         }
     }
 
@@ -297,6 +303,6 @@ mod tests {
             command_id: "read_file".to_string(),
             args: json!({}),
         };
-        assert_eq!(d.dispatch(&other).await.unwrap_err(), "delegated");
+        assert_eq!(d.dispatch(&other).await.unwrap_err().message, "delegated");
     }
 }

@@ -52,10 +52,19 @@ The RFC 0005 phased ladder (5.1–5.5) is **done**. Remaining threads, ordered
 roughly by self-containment — **confirm priorities with the user before
 starting**:
 
-- **Typed tool-dispatch errors.** Retry classification is currently a heuristic
-  on the dispatcher's `String` error (`is_retryable_tool_error`). Promoting
-  `ToolDispatcher` to a structured error would make classification exact and
-  enable per-tool idempotency-aware retry. (Spun out of #326.)
+- **Typed tool-dispatch errors — ✅ shipped** (branch
+  `claude/find-handoff-md-t1bvnp`). `ToolDispatcher::dispatch` now returns
+  `Result<Value, ToolDispatchError>` (`message` + a `ToolErrorKind` of
+  `Transient`/`Permanent`/`Unknown`). The kernel bridges (`KernelToolBridge`,
+  `KernelToolDispatcher`) fold `IpcError` into an exact kind via
+  `IpcErrorEnvelope::retryable`, so the session loop retries transient IPC
+  failures without string-sniffing. `is_retryable_tool_error` remains the
+  `Unknown` fallback (every `String`/`&str` conversion lands there). **Remaining
+  follow-up:** *per-tool idempotency-aware retry* — `ToolDispatchError` makes
+  classification exact, but the retry policy still doesn't consult a per-tool
+  idempotency flag (no such field on `AgentToolSpec` yet), so a transient
+  failure of a non-idempotent tool can still be re-dispatched. Add an
+  `idempotent` flag to `AgentToolSpec` + gate retries on it. (Spun out of #326.)
 - **`ask` frontend wiring + per-tool dispatch timeout.** The `ask` backend
   publishes `com.nexus.agent.ask_requested` / awaits `ask_respond` but no
   frontend renders the prompt, so `ask` always times out; and it can only wait

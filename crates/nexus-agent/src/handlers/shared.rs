@@ -15,7 +15,9 @@ use nexus_kernel::{Events as _, FileSystem as _, Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::Deserialize;
 
-use crate::{AgentError, ChatDriver, ToolCall, ToolDispatcher, DEFAULT_SYSTEM_PROMPT};
+use crate::{
+    AgentError, ChatDriver, ToolCall, ToolDispatchError, ToolDispatcher, DEFAULT_SYSTEM_PROMPT,
+};
 
 /// Reverse-DNS identifier of the agent core plugin. Re-exported by
 /// `core_plugin.rs` as the public `PLUGIN_ID`.
@@ -731,7 +733,7 @@ pub(crate) struct KernelToolBridge {
 
 #[async_trait]
 impl ToolDispatcher for KernelToolBridge {
-    async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, String> {
+    async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError> {
         self.ctx
             .ipc_call(
                 &call.target_plugin_id,
@@ -740,8 +742,19 @@ impl ToolDispatcher for KernelToolBridge {
                 self.timeout,
             )
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| ipc_error_to_dispatch_error(&e))
     }
+}
+
+/// Fold an [`nexus_kernel::IpcError`] into a typed [`ToolDispatchError`],
+/// taking the retry classification from the kernel's authoritative
+/// [`nexus_kernel::IpcErrorEnvelope::retryable`] flag (Timeout / Cancelled
+/// are retryable; not-found, capability denial, crashes, serialization are
+/// not). This replaces the previous `e.to_string()` flattening that forced
+/// the session loop to re-derive retryability by sniffing the message.
+pub(crate) fn ipc_error_to_dispatch_error(err: &nexus_kernel::IpcError) -> ToolDispatchError {
+    let retryable = nexus_kernel::IpcErrorEnvelope::from_ipc_error(err).retryable;
+    ToolDispatchError::classified(err.to_string(), retryable)
 }
 
 // ── BusBridgePolicy (Phase 2b approval callback) ───────────────────────────
