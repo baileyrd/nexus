@@ -1,4 +1,4 @@
-# Handoff — agent retry + interaction follow-ups shipped; next up is subagent isolation
+# Handoff — agent retry + interaction follow-ups shipped; RFC 0007 subagent isolation fully landed
 
 You are continuing work on **Nexus** (microkernel Rust workspace + Tauri/React
 shell) at `/home/user/nexus`. Read [`CLAUDE.md`](../../../CLAUDE.md) and
@@ -60,22 +60,36 @@ branching than `is_retryable()` today. Revisit only if a per-cause retry policy
 
 ## Suggested next work
 
-The RFC 0005 ladder and all its follow-ups are done. Remaining threads, ordered
-roughly by self-containment — **confirm priorities with the user before
+The RFC 0005 ladder and all its follow-ups are done — **and so is the entire
+RFC 0007 subagent-isolation ladder.** (A prior draft of this handoff listed its
+PR 3/PR 4 as "queued, PR 3 is the natural next step"; that was wrong — all four
+PRs were merged before the Phase 5.5 retry work even started.) Verified in the
+tree, `cargo test -p nexus-agent` green (`subagent::*` 17 passed / 2 ignored):
+
+| Commit | PR | What landed |
+|--------|----|-------------|
+| `843e8eb` | PR 1 | headless child-spawn primitive (`crates/nexus-agent/src/subagent.rs`) |
+| `8f86043` | PR 2 | worktree isolation harness (`delegate isolation="worktree"` → `delegate_isolated`) |
+| `a1b10ae` | PR 3 | OS-sandbox the child (`apply_subagent_sandbox`, `resolve_parent_policy`, `derive_subagent_policy`, `nexus-sandbox` helper wrap) |
+| `76c50be` | PR 4 | polish: concurrency cap (`NEXUS_SUBAGENT_MAX_CONCURRENT`), `NEXUS_SUBAGENT_BIN`, conflict `summary` in `build_isolated_result` |
+
+So the **OS-sandbox confinement that RFC 0002/0003 were gated behind now
+exists**, with a working consumer to copy (`subagent.rs::spawn_invocation` →
+`nexus_types::sandbox_argv` → `nexus-sandbox` sidecar). Remaining threads,
+ordered roughly by self-containment — **confirm priorities with the user before
 starting** (these are larger architectural efforts, not quick follow-ups):
 
-- **Subagent isolation — orchestration (RFC 0006 Step 2 / [RFC 0007](0007-subagent-process-isolation.md)).**
-  PR 1–2 (headless spawn via `subagent.rs`, worktree harness + merge-back) are
-  in; **PR 3 (OS-sandbox the child)** and **PR 4 (conflict surfacing,
-  concurrency, `nexus_bin` setting)** are queued. PR 3 is the natural next step
-  and the first consumer of the bundled-shell work below. `nexus-agent` already
-  links `nexus-types` for `SandboxPolicy` + `sandbox_argv` (RFC 0007 PR 3
-  groundwork — see `Cargo.toml`).
-- **Other open RFCs** (see [`rfcs/README.md`](README.md)):
-  [RFC 0001](0001-workflow-cap-delegation.md) workflow cap delegation (security;
-  no code yet); [RFC 0002](0002-bundled-shell-rush.md) /
-  [RFC 0003](0003-terminal-emulator-rusty-term.md) bundled shell + headless VT
-  core, both gated behind the OS-sandbox (follow RFC 0007 PR 3).
+- **RFC 0002 / RFC 0003 — bundled shell + headless VT** (see
+  [`rfcs/README.md`](README.md)): [RFC 0002](0002-bundled-shell-rush.md) vendors
+  `baileyrd/rush` as a workspace lib and runs it as the bundled shell for
+  *sandboxed* terminal sessions (system shell stays default);
+  [RFC 0003](0003-terminal-emulator-rusty-term.md) adopts the headless VT grid
+  core + OSC 133 command/exit-code capture for agent-observable terminals. Both
+  were gated behind the OS-sandbox — **now unblocked** (RFC 0007 PR 3 landed).
+- **RFC 0001 — workflow cap delegation**
+  ([RFC 0001](0001-workflow-cap-delegation.md)): close the capability-laundering
+  surface where workflow steps dispatch through the workflow plugin's own caps
+  rather than the triggering principal's (security; no code yet). Self-contained.
 
 **Smaller optional threads left open this session:**
 
