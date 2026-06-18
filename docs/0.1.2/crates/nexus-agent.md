@@ -243,20 +243,24 @@ separately. The standalone `plan` IPC handler produces a `Plan`; actual executio
 goes through the session loop.
 
 **Session run loop (`run_session_with_compressor`).** For up to `max_iterations`
-rounds: (1) BL-131 `sanitize_prompt` over the assembled prompt; (2)
-`driver.propose(system, current_prompt)` — driver error ends the session
+rounds: (1) BL-131 `sanitize_turns` over the tool-result turn contents; (2)
+`driver.propose_turns(system, current_turns)` — driver error ends the session
 `Errored`; (3) truncate excess tool calls to `max_tool_calls_per_iteration`; (4)
 empty tool calls → terminal text round, `Complete`; (5) build a `ProposedRound`,
 ask `policy.allow_round`; (6) `execute_round` applies the decision —
 `ApproveAll`/`Partial` dispatch the approved subset via `dispatch_one` (each timed
 with `Instant`, populating `ToolCallRecord.duration_ms`), `Abort`/`Timeout` stop
-with a synthetic narration round; (7) if no call approved → `Aborted`; (8) compose
-the next prompt from approved results (flat re-statement of goal + per-round bullet
-results — Phase 2a does not use provider-native multi-turn yet); (9) if
-`max_context_tokens > 0`, run BL-120 compaction while over budget and >
-`WORKING_SET_ROUNDS` (4) rounds remain unfolded; (10) on the last iteration set
-`MaxRounds`. The full transcript (every round, even compacted ones) is always
-persisted — compaction only affects the live prompt.
+with a synthetic narration round; (7) if no call approved → `Aborted`; (8) rebuild
+the conversation from the recorded rounds via `compose_turns` — Phase 5.5 (2c)
+provider-native multi-turn: a leading `User{goal}` turn then each round as an
+`Assistant{text, tool_calls}` turn followed by one `ToolResult` per call (failures
+flagged `is_error`), so the model replays its own calls and their real results
+rather than a flat goal re-statement; (9) if `max_context_tokens > 0`, run BL-120
+compaction (folding oldest live rounds into a summary carried on the goal turn)
+while over budget and > `WORKING_SET_ROUNDS` (4) rounds remain unfolded; (10) on
+the last iteration set `MaxRounds`. The full transcript (every round, even
+compacted ones) is always persisted — compaction only affects the live
+conversation.
 
 **Approval & cancellation.** `AutoApproveAll` for `auto_approve: true`;
 otherwise `BusBridgePolicy` auto-approves rounds whose every tool call is

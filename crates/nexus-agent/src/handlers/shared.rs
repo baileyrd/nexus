@@ -648,16 +648,40 @@ pub(crate) struct AiChatBridge {
 #[async_trait]
 impl ChatDriver for AiChatBridge {
     async fn propose(&self, system: &str, user_message: &str) -> Result<crate::Proposal, String> {
-        propose_via_ai(&self.ctx, self.timeout, system, user_message).await
+        let args = serde_json::json!({
+            "messages": [{ "role": "user", "content": user_message }],
+            "system": system,
+        });
+        propose_call(&self.ctx, self.timeout, args).await
+    }
+
+    async fn propose_turns(
+        &self,
+        system: &str,
+        turns: &[crate::AgentChatTurn],
+    ) -> Result<crate::Proposal, String> {
+        // Phase 5.5 (2c) — forward the structured conversation so the
+        // provider replays real `tool_use` / `tool_result` turns instead
+        // of a restated-goal blob. `messages` stays present (empty) so
+        // the wire decode keeps a valid (back-compat) shape; the AI
+        // handler prefers `turns` when non-empty.
+        let args = serde_json::json!({
+            "messages": [],
+            "turns": turns,
+            "system": system,
+        });
+        propose_call(&self.ctx, self.timeout, args).await
     }
 }
 
-/// Shared `propose_tool_calls` IPC dance.
-async fn propose_via_ai(
+/// Shared `propose_tool_calls` IPC dance: dispatch `args` at
+/// `com.nexus.ai` and decode the reply into a [`crate::Proposal`].
+/// Callers build `args` (legacy `messages` or rich `turns`); the decode
+/// is identical either way.
+async fn propose_call(
     ctx: &KernelPluginContext,
     timeout: Duration,
-    system: &str,
-    user_message: &str,
+    args: serde_json::Value,
 ) -> Result<crate::Proposal, String> {
     #[derive(Deserialize)]
     struct ProposeWire {
@@ -675,10 +699,6 @@ async fn propose_via_ai(
         args: serde_json::Value,
     }
 
-    let args = serde_json::json!({
-        "messages": [{ "role": "user", "content": user_message }],
-        "system": system,
-    });
     let raw = ctx
         .ipc_call("com.nexus.ai", "propose_tool_calls", args, timeout)
         .await

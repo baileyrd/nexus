@@ -190,9 +190,22 @@ breadth) shipped in #307–#311. The agent tool catalog now covers
 Phase 5.3 (subagent workspace isolation) shipped in #313–#317 — process-level
 isolation per [RFC 0006](0006-subagent-workspace-isolation.md) /
 [RFC 0007](0007-subagent-process-isolation.md) (worktree → sandboxed child →
-merge-back). Phase 5.4 (session tree) is in design as
+merge-back). Phase 5.4 (session tree) shipped in #318–#323 per
 [RFC 0008](0008-agent-session-tree.md) — resume / branch / rewind / checkpoint
-as one `fork(parent, k, message)` primitive; build under way.
+as one `fork(parent, k, message)` primitive.
+
+Phase 5.5 (loop hardening) is under way. **Part 1 — provider-native multi-turn
+chat (Phase 2c)** is built: the session loop no longer restates the goal each
+round (`compose_followup_prompt_compressed`). It now replays a real conversation
+(`compose_turns`): a leading `User{goal}` turn, then each round as an
+`Assistant{text, tool_calls}` turn followed by one `ToolResult` per call
+(failures flagged `is_error`). The `propose_tool_calls` wire gained an optional
+`turns` array (`AiChatTurn` / `AiTurnToolCall`) the AI handler converts straight
+to provider-native `ChatTurn`s; `ChatDriver` gained `propose_turns` (default
+flattens to the legacy single-string `propose`, so non-IPC drivers are
+unchanged). BL-120 compaction folds into the goal turn; BL-131 sanitisation
+moved to per-`ToolResult` content. **Part 2 — explicit tool error/retry
+policies** is the remaining 5.5 work.
 
 Backlog items spun out of the shipped work (not blockers):
 
