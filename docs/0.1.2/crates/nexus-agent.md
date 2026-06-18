@@ -264,7 +264,10 @@ idempotency-gated: a transient failure of a tool named in
 can't double-apply — the agent service seeds that list from
 `AgentToolRegistry::non_idempotent_tool_names` (every catalog tool with
 `idempotent = false`: writes, deletes, pushes, terminal exec, delegation, `ask`)
-when retries are enabled), `Abort`/`Timeout` stop with a
+when retries are enabled. Each record carries `ToolCallRecord.attempts` — total
+dispatch attempts (`0` = never dispatched, `1` = clean, `1 + N` = `N` retries) —
+so consumers read the retry count structurally rather than parsing the
+`(after N attempts)` error suffix), `Abort`/`Timeout` stop with a
 synthetic narration round; (7) if no call approved → `Aborted`; (8) rebuild
 the conversation from the recorded rounds via `compose_turns` — Phase 5.5 (2c)
 provider-native multi-turn: a leading `User{goal}` turn then each round as an

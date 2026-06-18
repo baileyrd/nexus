@@ -1036,6 +1036,7 @@ mod tests {
             response: None,
             error: error.to_string(),
             duration_ms: 0,
+            attempts: u32::from(approved),
         }
     }
 

@@ -364,6 +364,24 @@ pub struct ToolCallRecord {
     /// recall preamble can show "tool X took 12ms last time".
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub duration_ms: u64,
+    /// Phase 5.5 follow-up — total dispatch attempts this call took:
+    /// `0` when the call was never dispatched (denied / aborted /
+    /// approval-timeout), `1` for a clean single dispatch, and `1 + N`
+    /// when `N` transient retries fired before success or giving up (the
+    /// retry count is therefore `attempts.saturating_sub(1)`). Lets
+    /// consumers read the retry count structurally instead of parsing the
+    /// `(after N attempts)` suffix on `error`. `#[serde(default)]` rides
+    /// over transcripts written before this field existed.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub attempts: u32,
+}
+
+/// `serde(skip_serializing_if)` helper for `ToolCallRecord::attempts` —
+/// omits the field for records that never dispatched (denied) or were
+/// deserialised from a transcript predating the field.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 /// `serde(skip_serializing_if)` helper used by `ToolCallRecord`'s
@@ -979,6 +997,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     response: None,
                     error: format!("session aborted: {reason}"),
                     duration_ms: 0,
+                    attempts: 0,
                 })
                 .collect(),
             Some(RoundStopReason::Aborted(reason)),
@@ -995,6 +1014,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     response: None,
                     error: format!("approval timeout: {reason}"),
                     duration_ms: 0,
+                    attempts: 0,
                 })
                 .collect(),
             Some(RoundStopReason::Timeout(reason)),
@@ -1072,6 +1092,8 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
                 reason
             },
             duration_ms: 0,
+            // Never dispatched — no attempts.
+            attempts: 0,
         };
     }
     // DG-33 follow-up — measure wall-clock dispatch latency so
@@ -1132,6 +1154,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             response: Some(value),
             error: String::new(),
             duration_ms,
+            attempts: retries + 1,
         },
         Err(e) => ToolCallRecord {
             id: proposed.id,
@@ -1148,6 +1171,7 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             },
             response: None,
             duration_ms,
+            attempts: retries + 1,
         },
     }
 }
@@ -1507,6 +1531,8 @@ mod tests {
         let rec = &session.rounds[0].tool_calls[0];
         assert!(rec.error.is_empty(), "succeeded after retries: {}", rec.error);
         assert!(rec.response.is_some());
+        // 2 retries + the successful attempt = 3 total.
+        assert_eq!(rec.attempts, 3);
     }
 
     #[tokio::test]
@@ -1526,7 +1552,9 @@ mod tests {
         .await;
         // Permanent error → dispatched exactly once.
         assert_eq!(dispatcher.call_count(), 1);
-        assert!(session.rounds[0].tool_calls[0].error.contains("file not found"));
+        let rec = &session.rounds[0].tool_calls[0];
+        assert!(rec.error.contains("file not found"));
+        assert_eq!(rec.attempts, 1, "single dispatch, no retry");
     }
 
     #[tokio::test]
@@ -1537,9 +1565,10 @@ mod tests {
         let session =
             run_session(&driver, &dispatcher, &AutoApproveAll, "go", "sys", None).await;
         assert_eq!(dispatcher.call_count(), 1, "no retry without opt-in");
-        let err = &session.rounds[0].tool_calls[0].error;
-        assert!(err.contains("dispatch timeout"));
-        assert!(!err.contains("attempts"));
+        let rec = &session.rounds[0].tool_calls[0];
+        assert!(rec.error.contains("dispatch timeout"));
+        assert!(!rec.error.contains("attempts"));
+        assert_eq!(rec.attempts, 1);
     }
 
     #[tokio::test]
@@ -1559,8 +1588,10 @@ mod tests {
         .await;
         // 1 initial + 2 retries = 3 attempts, then gives up.
         assert_eq!(dispatcher.call_count(), 3);
-        let err = &session.rounds[0].tool_calls[0].error;
-        assert!(err.contains("after 3 attempts"), "error: {err}");
+        let rec = &session.rounds[0].tool_calls[0];
+        assert!(rec.error.contains("after 3 attempts"), "error: {}", rec.error);
+        // The structured count matches the string annotation.
+        assert_eq!(rec.attempts, 3);
     }
 
     // ── Typed tool-dispatch errors (Phase 5.5 follow-up) ─────────────────────
@@ -1670,9 +1701,10 @@ mod tests {
         .await;
         // Non-idempotent → dispatched exactly once, no retry.
         assert_eq!(dispatcher.call_count(), 1);
-        let err = &session.rounds[0].tool_calls[0].error;
-        assert!(err.contains("dispatch timeout"));
-        assert!(!err.contains("attempts"));
+        let rec = &session.rounds[0].tool_calls[0];
+        assert!(rec.error.contains("dispatch timeout"));
+        assert!(!rec.error.contains("attempts"));
+        assert_eq!(rec.attempts, 1);
     }
 
     #[tokio::test]
@@ -2030,6 +2062,9 @@ mod tests {
         assert!(!r0.tool_calls[1].approved);
         assert_eq!(r0.tool_calls[1].reason, "skip the second");
         assert_eq!(dispatcher.calls.lock().unwrap().len(), 1);
+        // Approved call dispatched once; the denied call never ran.
+        assert_eq!(r0.tool_calls[0].attempts, 1);
+        assert_eq!(r0.tool_calls[1].attempts, 0);
     }
 
     #[tokio::test]

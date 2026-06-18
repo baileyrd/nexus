@@ -67,9 +67,14 @@ starting**:
   consults so a *transient* failure of a non-idempotent tool is reported
   without a retry; the agent service seeds it from
   `AgentToolRegistry::non_idempotent_tool_names` when `max_tool_retries > 0`.
-  (Spun out of #326.) Possible further work: record a structured retry count on
-  `ToolCallRecord`, and promote `ToolDispatcher` to a structured error *enum*
-  (vs. the current message+kind struct) for typed per-tool idempotency keys.
+  (Spun out of #326.) Structured retry count is now **✅ shipped** too:
+  `ToolCallRecord.attempts` records total dispatch attempts (`0` = never
+  dispatched, `1` = clean, `1 + N` = `N` retries), so consumers read the retry
+  count structurally instead of parsing the `(after N attempts)` error suffix.
+  Considered and **declined (YAGNI)**: promoting `ToolDispatchError` from its
+  `{message, kind}` struct to a richer error *enum* — no consumer needs finer
+  branching than `is_retryable()` today; revisit if a per-cause retry policy
+  (e.g. retry timeouts but not cancellations) is ever wanted.
 - **`ask` frontend wiring + per-tool dispatch timeout.** The `ask` backend
   publishes `com.nexus.agent.ask_requested` / awaits `ask_respond` but no
   frontend renders the prompt, so `ask` always times out; and it can only wait

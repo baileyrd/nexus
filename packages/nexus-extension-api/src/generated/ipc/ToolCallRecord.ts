@@ -49,4 +49,15 @@ error?: string,
  * `crate::memory::events_from_session` so the prompt-time
  * recall preamble can show "tool X took 12ms last time".
  */
-duration_ms?: bigint, };
+duration_ms?: bigint, 
+/**
+ * Phase 5.5 follow-up — total dispatch attempts this call took:
+ * `0` when the call was never dispatched (denied / aborted /
+ * approval-timeout), `1` for a clean single dispatch, and `1 + N`
+ * when `N` transient retries fired before success or giving up (the
+ * retry count is therefore `attempts.saturating_sub(1)`). Lets
+ * consumers read the retry count structurally instead of parsing the
+ * `(after N attempts)` suffix on `error`. `#[serde(default)]` rides
+ * over transcripts written before this field existed.
+ */
+attempts?: number, };

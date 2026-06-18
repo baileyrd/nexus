@@ -232,6 +232,7 @@ mod tests {
                 response: ok.then(|| serde_json::json!({"ok": true})),
                 error: if ok { String::new() } else { "boom".into() },
                 duration_ms: 0,
+                attempts: 1,
             }],
         }
     }
