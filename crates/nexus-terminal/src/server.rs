@@ -84,6 +84,9 @@ pub struct ServerSpawnConfig {
     /// [`shell`](Self::shell); threaded from `sandbox.toml`'s
     /// `bundled_shell_for_sandbox` by the caller. Default `false`.
     pub bundled_shell: bool,
+    /// Opt in to loading the OSC 133 shell-integration script (RFC 0003) so the
+    /// shell emits reliable command/exit-code marks. Default `false`.
+    pub shell_integration: bool,
 }
 
 impl ServerSpawnConfig {
@@ -550,6 +553,7 @@ impl TerminalServer for InMemoryTerminalServer {
             // surprise-confined.
             sandbox: cfg.sandbox,
             bundled_shell: cfg.bundled_shell,
+            shell_integration: cfg.shell_integration,
         };
         // BL-062 — at-cap path: evict the LRU stopped session before
         // spawning. If every session is still running, `spawn_or_evict`
@@ -966,6 +970,58 @@ mod tests {
         assert!(
             output.unwrap_or_default().contains("done"),
             "captured output should contain the command text",
+        );
+    }
+
+    #[test]
+    fn shell_integration_makes_bash_emit_osc_133() {
+        if !unix_only("shell_integration_makes_bash_emit_osc_133") {
+            return;
+        }
+        if !std::path::Path::new("/bin/bash").exists() {
+            return; // no bash on this host — skip
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let rx = s.subscribe_events();
+        // Interactive bash with no user rc; the OSC 133 integration is sourced
+        // into the PTY at spawn via shell_integration, not from a dotfile.
+        let id = s
+            .create_session(ServerSpawnConfig {
+                name: Some("si".into()),
+                shell: Some(ShellSpec {
+                    program: "/bin/bash".into(),
+                    args: vec!["--norc".into(), "--noprofile".into(), "-i".into()],
+                }),
+                shell_integration: true,
+                ..Default::default()
+            })
+            .expect("create");
+
+        // Pump while bash sources the integration + draws prompts; run a command
+        // so a prompt (and thus an OSC 133;D) is produced, then look for the
+        // typed CommandFinished event — the end-to-end proof emitters fire.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut sent = false;
+        let mut seen_osc133 = false;
+        while Instant::now() < deadline && !seen_osc133 {
+            let _ = s.pump(&id, Duration::from_millis(100));
+            while let Ok(evt) = rx.try_recv() {
+                if let TerminalEvent::CommandFinished {
+                    source: CmdSource::Osc133,
+                    ..
+                } = evt
+                {
+                    seen_osc133 = true;
+                }
+            }
+            if !sent {
+                let _ = s.send_raw_input(&id, b"false\n");
+                sent = true;
+            }
+        }
+        assert!(
+            seen_osc133,
+            "expected an OSC 133 CommandFinished after loading the bash integration",
         );
     }
 

@@ -30,6 +30,8 @@ impl TerminalCorePlugin {
             shell,
             working_dir: a.working_dir.map(PathBuf::from),
             env: a.env,
+            // OSC 133 shell-integration opt-in (RFC 0003) flows from the wire.
+            shell_integration: a.shell_integration,
             // IPC-spawned sessions are not sandboxed (sandbox + bundled shell
             // are opt-in by programmatic callers; see ServerSpawnConfig).
             ..Default::default()

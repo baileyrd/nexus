@@ -50,6 +50,11 @@ pub struct CreateSessionArgs {
     /// Env vars to merge on top of the inherited environment.
     #[serde(default)]
     pub env: Vec<(String, String)>,
+    /// Opt in to loading the OSC 133 shell-integration script (RFC 0003) so the
+    /// shell emits reliable command/exit-code marks the server-side VT grid
+    /// captures. No-op for shells without an emitter. Default `false`.
+    #[serde(default)]
+    pub shell_integration: bool,
 }
 
 /// Response from `create_session`.

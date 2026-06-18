@@ -168,6 +168,12 @@ pub struct SessionConfig {
     /// `bundled_shell_for_sandbox`) sets this so `nexus-terminal` need not depend
     /// on `nexus-security`. Default `false`: the system shell stays the default.
     pub bundled_shell: bool,
+    /// Opt in to loading the OSC 133 shell-integration script (RFC 0003 PR-6)
+    /// into the spawned shell so it emits reliable command/exit-code marks the
+    /// server-side VT grid captures. Only effective for shells with an emitter
+    /// (bash/zsh/fish/pwsh — see [`crate::integration`]); a no-op otherwise.
+    /// Default `false`.
+    pub shell_integration: bool,
 }
 
 /// Whether a session should launch the bundled `nexus-rush` shell rather than
@@ -371,7 +377,7 @@ impl Session {
             })
             .map_err(|e| TerminalError::PtyAlloc(format!("reader thread: {e}")))?;
 
-        Ok(Self {
+        let mut session = Self {
             id: SessionId::new_random(),
             master: pair.master,
             child: Some(child),
@@ -382,7 +388,17 @@ impl Session {
             shell_display,
             state: ProcessState::Running,
             last_signal: None,
-        })
+        };
+        // RFC 0003 PR-6: optionally load the OSC 133 shell-integration script so
+        // the shell emits reliable command/exit-code marks the server-side VT
+        // grid captures. Best-effort — a write failure (e.g. the child exited
+        // immediately) is non-fatal, and shells without an emitter are a no-op.
+        if config.shell_integration {
+            if let Some(payload) = crate::integration::integration_payload(&shell.program) {
+                let _ = session.write(&payload);
+            }
+        }
+        Ok(session)
     }
 
     /// Current lifecycle state (PRD-09 §4). Cheap — reads the latched
