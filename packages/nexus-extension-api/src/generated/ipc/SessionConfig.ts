@@ -43,4 +43,20 @@ max_context_tokens: number,
  * (Hermes Features 2–3) will let an agent pick a different
  * provider per session.
  */
-provider_hint?: string | null, };
+provider_hint?: string | null, 
+/**
+ * Phase 5.5 — maximum automatic retries for a tool call whose
+ * dispatch fails with a *transient* error (see
+ * [`is_retryable_tool_error`]). `0` (the default) disables retries,
+ * preserving the prior behaviour. Permanent errors (not-found,
+ * validation, capability denial) and policy denials are never
+ * retried.
+ */
+max_tool_retries: number, 
+/**
+ * Phase 5.5 — base backoff between tool-call retries, in
+ * milliseconds, doubled each attempt (exponential). `0` retries
+ * immediately. Defaults to [`DEFAULT_TOOL_RETRY_BACKOFF_MS`]; only
+ * consulted when `max_tool_retries > 0`.
+ */
+tool_retry_backoff_ms: bigint, };

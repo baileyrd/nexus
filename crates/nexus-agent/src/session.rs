@@ -56,6 +56,12 @@ pub const DEFAULT_MAX_ITERATIONS: u32 = 32;
 /// work and the per-call result fan-out stay bounded.
 pub const DEFAULT_MAX_TOOL_CALLS_PER_ITERATION: u32 = 16;
 
+/// Phase 5.5 — default base backoff between transient tool-call
+/// retries, in milliseconds (doubled each attempt). Only consulted when
+/// [`SessionConfig::max_tool_retries`] > 0. 250 ms keeps a single retry
+/// snappy while still letting a momentary blip clear.
+pub const DEFAULT_TOOL_RETRY_BACKOFF_MS: u64 = 250;
+
 /// BL-119 — provider-routing + budget knobs for a single agent
 /// session.
 ///
@@ -107,6 +113,22 @@ pub struct SessionConfig {
     /// provider per session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_hint: Option<String>,
+
+    /// Phase 5.5 — maximum automatic retries for a tool call whose
+    /// dispatch fails with a *transient* error (see
+    /// [`is_retryable_tool_error`]). `0` (the default) disables retries,
+    /// preserving the prior behaviour. Permanent errors (not-found,
+    /// validation, capability denial) and policy denials are never
+    /// retried.
+    #[serde(default)]
+    pub max_tool_retries: u32,
+
+    /// Phase 5.5 — base backoff between tool-call retries, in
+    /// milliseconds, doubled each attempt (exponential). `0` retries
+    /// immediately. Defaults to [`DEFAULT_TOOL_RETRY_BACKOFF_MS`]; only
+    /// consulted when `max_tool_retries > 0`.
+    #[serde(default = "default_tool_retry_backoff_ms")]
+    pub tool_retry_backoff_ms: u64,
 }
 
 fn default_max_iterations() -> u32 {
@@ -117,6 +139,10 @@ fn default_max_tool_calls_per_iteration() -> u32 {
     DEFAULT_MAX_TOOL_CALLS_PER_ITERATION
 }
 
+fn default_tool_retry_backoff_ms() -> u64 {
+    DEFAULT_TOOL_RETRY_BACKOFF_MS
+}
+
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
@@ -124,6 +150,8 @@ impl Default for SessionConfig {
             max_tool_calls_per_iteration: DEFAULT_MAX_TOOL_CALLS_PER_ITERATION,
             max_context_tokens: 0,
             provider_hint: None,
+            max_tool_retries: 0,
+            tool_retry_backoff_ms: DEFAULT_TOOL_RETRY_BACKOFF_MS,
         }
     }
 }
@@ -151,6 +179,8 @@ impl SessionConfig {
             max_tool_calls_per_iteration: self.max_tool_calls_per_iteration.max(1),
             max_context_tokens: self.max_context_tokens,
             provider_hint: self.provider_hint.clone(),
+            max_tool_retries: self.max_tool_retries,
+            tool_retry_backoff_ms: self.tool_retry_backoff_ms,
         }
     }
 }
@@ -717,6 +747,8 @@ where
             &proposal.text,
             proposal.tool_calls,
             decision,
+            config.max_tool_retries,
+            config.tool_retry_backoff_ms,
         )
         .await;
 
@@ -904,6 +936,8 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
     _text: &str,
     proposed: Vec<ProposedToolCall>,
     decision: RoundDecision,
+    max_retries: u32,
+    backoff_ms: u64,
 ) -> (Vec<ToolCallRecord>, Option<RoundStopReason>) {
     match decision {
         RoundDecision::Abort(reason) => (
@@ -941,7 +975,8 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
         RoundDecision::ApproveAll => {
             let mut out = Vec::with_capacity(proposed.len());
             for p in proposed {
-                let record = dispatch_one(dispatcher, p, true, String::new()).await;
+                let record =
+                    dispatch_one(dispatcher, p, true, String::new(), max_retries, backoff_ms).await;
                 out.push(record);
             }
             (out, None)
@@ -956,7 +991,8 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                 let (approve, reason) = entry
                     .map(|e| (e.approve, e.reason.clone()))
                     .unwrap_or((false, "no decision provided".to_string()));
-                let record = dispatch_one(dispatcher, p, approve, reason).await;
+                let record =
+                    dispatch_one(dispatcher, p, approve, reason, max_retries, backoff_ms).await;
                 out.push(record);
             }
             (out, None)
@@ -969,6 +1005,8 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     proposed: ProposedToolCall,
     approved: bool,
     reason: String,
+    max_retries: u32,
+    backoff_ms: u64,
 ) -> ToolCallRecord {
     if !approved {
         return ToolCallRecord {
@@ -992,9 +1030,36 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     // start happens *after* the approval gate so denials don't
     // pollute the metric; the saturating cast caps at u64::MAX in
     // the pathological case where a dispatch hangs longer than ~584
-    // million years.
+    // million years. Phase 5.5 — the timer spans every retry attempt
+    // (incl. backoff) so a flaky tool's real cost is recorded.
     let started = std::time::Instant::now();
-    let outcome = dispatcher.dispatch(&proposed.tool_call).await;
+    // Phase 5.5 — retry transient dispatch failures with exponential
+    // backoff. `retries` counts attempts beyond the first; the loop is a
+    // single pass when `max_retries == 0` (the default), identical to the
+    // pre-5.5 behaviour.
+    let mut retries: u32 = 0;
+    let outcome = loop {
+        match dispatcher.dispatch(&proposed.tool_call).await {
+            Ok(value) => break Ok(value),
+            Err(e) if retries < max_retries && is_retryable_tool_error(&e) => {
+                let factor = 1u64.checked_shl(retries).unwrap_or(u64::MAX);
+                let delay = backoff_ms.saturating_mul(factor);
+                tracing::warn!(
+                    tool = %proposed.name,
+                    attempt = retries + 1,
+                    max_retries,
+                    backoff_ms = delay,
+                    error = %e,
+                    "Phase 5.5: retrying transient tool failure",
+                );
+                if delay > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                }
+                retries += 1;
+            }
+            Err(e) => break Err(e),
+        }
+    };
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match outcome {
         Ok(value) => ToolCallRecord {
@@ -1013,11 +1078,53 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
             tool_call: proposed.tool_call,
             approved: true,
             reason,
+            // Annotate the final error with the attempt count so the
+            // transcript shows the call was retried before giving up.
+            error: if retries > 0 {
+                format!("{e} (after {} attempts)", retries + 1)
+            } else {
+                e
+            },
             response: None,
-            error: e,
             duration_ms,
         },
     }
+}
+
+/// Phase 5.5 — heuristic: does a tool dispatch error look *transient*
+/// (worth retrying) rather than permanent? The [`ToolDispatcher`]
+/// surface only carries a `String`, so we match well-known transient
+/// signatures — timeouts, transport resets, rate limits, 5xx / 429,
+/// "unavailable". Everything else (not-found, validation, capability
+/// denial, policy denial) is treated as permanent and not retried.
+///
+/// Deliberately conservative: a missed transient only forgoes a retry,
+/// whereas a false positive risks re-running a non-idempotent tool. For
+/// that reason retries are opt-in ([`SessionConfig::max_tool_retries`]
+/// defaults to `0`).
+#[must_use]
+pub fn is_retryable_tool_error(error: &str) -> bool {
+    const TRANSIENT: &[&str] = &[
+        "timeout",
+        "timed out",
+        "deadline",
+        "temporarily",
+        "temporary failure",
+        "connection reset",
+        "connection refused",
+        "connection closed",
+        "broken pipe",
+        "unavailable",
+        "try again",
+        "too many requests",
+        "rate limit",
+        " 429",
+        " 502",
+        " 503",
+        " 504",
+    ];
+    let e = error.to_ascii_lowercase();
+    TRANSIENT.iter().any(|sig| e.contains(sig))
 }
 
 /// Phase 5.5 (2c) — build the provider-native conversation replayed to
@@ -1222,6 +1329,164 @@ mod tests {
                 args: serde_json::json!({ "path": path }),
             },
         }
+    }
+
+    // ── Phase 5.5 — tool error/retry policy ──────────────────────────────────
+
+    /// Dispatcher that fails its first `fail_n` calls with `err`, then
+    /// succeeds; records how many times it was dispatched.
+    struct FlakyDispatcher {
+        err: String,
+        fail_n: usize,
+        calls: Mutex<usize>,
+    }
+    impl FlakyDispatcher {
+        fn new(err: &str, fail_n: usize) -> Self {
+            Self {
+                err: err.into(),
+                fail_n,
+                calls: Mutex::new(0),
+            }
+        }
+        fn call_count(&self) -> usize {
+            *self.calls.lock().unwrap()
+        }
+    }
+    #[async_trait]
+    impl ToolDispatcher for FlakyDispatcher {
+        async fn dispatch(&self, _call: &ToolCall) -> Result<serde_json::Value, String> {
+            let mut n = self.calls.lock().unwrap();
+            *n += 1;
+            if *n <= self.fail_n {
+                Err(self.err.clone())
+            } else {
+                Ok(serde_json::json!({ "ok": true }))
+            }
+        }
+    }
+
+    /// Retries on, zero backoff (so tests don't sleep).
+    fn config_with_retries(max: u32) -> SessionConfig {
+        SessionConfig {
+            max_tool_retries: max,
+            tool_retry_backoff_ms: 0,
+            ..SessionConfig::default()
+        }
+    }
+
+    /// One tool round (failing/succeeding) then a terminal text round.
+    fn tool_then_done() -> Vec<Proposal> {
+        vec![
+            Proposal {
+                text: "fetch".into(),
+                tool_calls: vec![read_tool("u1", "a.md")],
+            },
+            Proposal {
+                text: "done".into(),
+                tool_calls: Vec::new(),
+            },
+        ]
+    }
+
+    #[test]
+    fn is_retryable_classifies_transient_vs_permanent() {
+        for transient in [
+            "dispatch timeout after 60s",
+            "connection reset by peer",
+            "HTTP 503 Service Unavailable",
+            "provider returned 429 Too Many Requests",
+            "service temporarily unavailable",
+        ] {
+            assert!(is_retryable_tool_error(transient), "should retry: {transient}");
+        }
+        for permanent in [
+            "file not found: notes.md",
+            "denied by policy",
+            "invalid arguments: missing field 'path'",
+            "unknown tool: frobnicate",
+        ] {
+            assert!(
+                !is_retryable_tool_error(permanent),
+                "should NOT retry: {permanent}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_tool_failure_retries_then_succeeds() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        let dispatcher = FlakyDispatcher::new("dispatch timeout", 2);
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            config_with_retries(3),
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        // 2 failures + 1 success.
+        assert_eq!(dispatcher.call_count(), 3);
+        let rec = &session.rounds[0].tool_calls[0];
+        assert!(rec.error.is_empty(), "succeeded after retries: {}", rec.error);
+        assert!(rec.response.is_some());
+    }
+
+    #[tokio::test]
+    async fn permanent_tool_failure_is_not_retried() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        let dispatcher = FlakyDispatcher::new("file not found", 5);
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            config_with_retries(3),
+        )
+        .await;
+        // Permanent error → dispatched exactly once.
+        assert_eq!(dispatcher.call_count(), 1);
+        assert!(session.rounds[0].tool_calls[0].error.contains("file not found"));
+    }
+
+    #[tokio::test]
+    async fn retries_disabled_by_default() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        let dispatcher = FlakyDispatcher::new("dispatch timeout", 5);
+        // Plain run_session → default config, max_tool_retries = 0.
+        let session =
+            run_session(&driver, &dispatcher, &AutoApproveAll, "go", "sys", None).await;
+        assert_eq!(dispatcher.call_count(), 1, "no retry without opt-in");
+        let err = &session.rounds[0].tool_calls[0].error;
+        assert!(err.contains("dispatch timeout"));
+        assert!(!err.contains("attempts"));
+    }
+
+    #[tokio::test]
+    async fn exhausted_retries_annotate_attempt_count() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        let dispatcher = FlakyDispatcher::new("dispatch timeout", 99); // always fails
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            config_with_retries(2),
+        )
+        .await;
+        // 1 initial + 2 retries = 3 attempts, then gives up.
+        assert_eq!(dispatcher.call_count(), 3);
+        let err = &session.rounds[0].tool_calls[0].error;
+        assert!(err.contains("after 3 attempts"), "error: {err}");
     }
 
     #[tokio::test]
@@ -1828,6 +2093,7 @@ mod tests {
             max_tool_calls_per_iteration: 0,
             max_context_tokens: 0,
             provider_hint: None,
+            ..SessionConfig::default()
         };
         let s = cfg.sanitized();
         assert_eq!(s.max_iterations, 1);
