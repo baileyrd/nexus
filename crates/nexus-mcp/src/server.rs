@@ -95,6 +95,48 @@ pub(crate) fn build_note_resource(path: &str, size_bytes: u64) -> Resource {
     )
 }
 
+/// `com.nexus.terminal` — RFC 0003 Track A. The `nexus_terminal_get_*` tools and
+/// the `mcp://nexus/terminal/...` resources read the server-side VT grid.
+const TERMINAL_PLUGIN: &str = plugin_ids::TERMINAL;
+
+/// URI prefix for MCP resources representing a terminal session's VT grid state.
+/// Each session exposes `mcp://nexus/terminal/<id>/<kind>` for the kinds below.
+const TERMINAL_URI_PREFIX: &str = "mcp://nexus/terminal/";
+
+/// The readable VT-grid resource kinds, with descriptions, per terminal session.
+const TERMINAL_RESOURCE_KINDS: &[(&str, &str)] = &[
+    ("screen", "Current visible screen, as text."),
+    ("scrollback", "Lines that scrolled off the top, oldest first."),
+    ("cwd", "Working directory reported by the child (OSC 7)."),
+    ("cursor", "Cursor position as \"col,row\" (zero-based)."),
+    ("exit", "Exit code of the last finished command (OSC 133)."),
+    ("command", "Output of the last finished command (OSC 133)."),
+];
+
+/// Parse `(session_id, kind)` out of a `mcp://nexus/terminal/<id>/<kind>` URI.
+/// Returns `None` for non-terminal URIs or a missing id/kind component.
+pub(crate) fn parse_terminal_uri(uri: &str) -> Option<(&str, &str)> {
+    let rest = uri.strip_prefix(TERMINAL_URI_PREFIX)?;
+    let (id, kind) = rest.split_once('/')?;
+    if id.is_empty() || kind.is_empty() {
+        return None;
+    }
+    Some((id, kind))
+}
+
+/// Build an MCP [`Resource`] descriptor for one VT-grid `kind` of a session.
+pub(crate) fn build_terminal_resource(id: &str, kind: &str, description: &str) -> Resource {
+    Annotated::new(
+        RawResource::new(
+            format!("{TERMINAL_URI_PREFIX}{id}/{kind}"),
+            format!("terminal {id} · {kind}"),
+        )
+        .with_description(description)
+        .with_mime_type("text/plain"),
+        None,
+    )
+}
+
 // ── Input types ──────────────────────────────────────────────────────────────
 
 /// Input for the `nexus_read_note` tool.
@@ -134,6 +176,22 @@ struct DeleteNoteInput {
 struct ListNotesInput {
     /// Optional path prefix to filter notes (e.g. "notes/projects/").
     prefix: Option<String>,
+}
+
+/// Input for the single-session `nexus_terminal_get_*` tools (RFC 0003).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TerminalSessionInput {
+    /// Terminal session id (from `list_sessions` / the terminal sidebar).
+    session_id: String,
+}
+
+/// Input for the `nexus_terminal_get_scrollback` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TerminalScrollbackInput {
+    /// Terminal session id.
+    session_id: String,
+    /// Max scrollback lines to return (most recent, oldest first). Default 1000.
+    lines: Option<usize>,
 }
 
 /// Input for the `nexus_search` tool.
@@ -684,6 +742,91 @@ impl NexusMcpServer {
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
     }
 
+    /// RFC 0003 Track A — `com.nexus.terminal` IPC client for the VT-grid
+    /// introspection handlers (`get_screen` / `get_scrollback` / `get_cwd` /
+    /// `get_cursor` / `get_last_exit`).
+    async fn terminal_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(TERMINAL_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// Run a terminal introspection handler and return its JSON result, folding
+    /// any error into `{ "error": ... }` so a tool always returns a body.
+    async fn terminal_tool(&self, command: &str, args: serde_json::Value) -> serde_json::Value {
+        match self.terminal_call::<serde_json::Value>(command, args).await {
+            Ok(v) => v,
+            Err(e) => serde_json::json!({ "error": e }),
+        }
+    }
+
+    /// Read one VT-grid resource `kind` for session `id` as text, mapping the
+    /// kind to its introspection handler (RFC 0003 Track A `read_resource`).
+    async fn read_terminal_resource(&self, id: &str, kind: &str) -> Result<String, String> {
+        let args = serde_json::json!({ "id": id });
+        Ok(match kind {
+            "screen" => {
+                #[derive(Deserialize)]
+                struct R {
+                    text: String,
+                }
+                self.terminal_call::<R>("get_screen", args).await?.text
+            }
+            "scrollback" => {
+                #[derive(Deserialize)]
+                struct R {
+                    text: String,
+                }
+                self.terminal_call::<R>("get_scrollback", args).await?.text
+            }
+            "cwd" => {
+                #[derive(Deserialize)]
+                struct R {
+                    cwd: String,
+                }
+                self.terminal_call::<R>("get_cwd", args).await?.cwd
+            }
+            "cursor" => {
+                #[derive(Deserialize)]
+                struct R {
+                    col: usize,
+                    row: usize,
+                }
+                let r = self.terminal_call::<R>("get_cursor", args).await?;
+                format!("{},{}", r.col, r.row)
+            }
+            "exit" => {
+                #[derive(Deserialize)]
+                struct R {
+                    exit_code: Option<i32>,
+                }
+                self.terminal_call::<R>("get_last_exit", args)
+                    .await?
+                    .exit_code
+                    .map(|c| c.to_string())
+                    .unwrap_or_default()
+            }
+            "command" => {
+                #[derive(Deserialize)]
+                struct R {
+                    output: Option<String>,
+                }
+                self.terminal_call::<R>("get_last_exit", args)
+                    .await?
+                    .output
+                    .unwrap_or_default()
+            }
+            other => return Err(format!("unknown terminal resource kind: {other}")),
+        })
+    }
+
     /// BL-115 — `com.nexus.git` IPC client used by `nexus_detect_changes`.
     async fn git_call<T: serde::de::DeserializeOwned>(
         &self,
@@ -1012,6 +1155,79 @@ impl NexusMcpServer {
                 size_bytes: 0,
             }),
         }
+    }
+
+    #[tool(
+        name = "nexus_terminal_get_screen",
+        description = "Read a terminal session's current visible screen (server-side VT grid) as text, plus the cursor position."
+    )]
+    async fn terminal_get_screen(
+        &self,
+        Parameters(input): Parameters<TerminalSessionInput>,
+    ) -> Json<serde_json::Value> {
+        Json(
+            self.terminal_tool("get_screen", serde_json::json!({ "id": input.session_id }))
+                .await,
+        )
+    }
+
+    #[tool(
+        name = "nexus_terminal_get_scrollback",
+        description = "Read a terminal session's scrollback (lines that scrolled off the top), oldest first."
+    )]
+    async fn terminal_get_scrollback(
+        &self,
+        Parameters(input): Parameters<TerminalScrollbackInput>,
+    ) -> Json<serde_json::Value> {
+        Json(
+            self.terminal_tool(
+                "get_scrollback",
+                serde_json::json!({ "id": input.session_id, "lines": input.lines }),
+            )
+            .await,
+        )
+    }
+
+    #[tool(
+        name = "nexus_terminal_get_cwd",
+        description = "Read a terminal session's working directory as reported by the child via OSC 7."
+    )]
+    async fn terminal_get_cwd(
+        &self,
+        Parameters(input): Parameters<TerminalSessionInput>,
+    ) -> Json<serde_json::Value> {
+        Json(
+            self.terminal_tool("get_cwd", serde_json::json!({ "id": input.session_id }))
+                .await,
+        )
+    }
+
+    #[tool(
+        name = "nexus_terminal_get_cursor",
+        description = "Read a terminal session's cursor position (col, row; zero-based)."
+    )]
+    async fn terminal_get_cursor(
+        &self,
+        Parameters(input): Parameters<TerminalSessionInput>,
+    ) -> Json<serde_json::Value> {
+        Json(
+            self.terminal_tool("get_cursor", serde_json::json!({ "id": input.session_id }))
+                .await,
+        )
+    }
+
+    #[tool(
+        name = "nexus_terminal_get_last_exit",
+        description = "Read a terminal session's last finished command exit code and captured output (OSC 133)."
+    )]
+    async fn terminal_get_last_exit(
+        &self,
+        Parameters(input): Parameters<TerminalSessionInput>,
+    ) -> Json<serde_json::Value> {
+        Json(
+            self.terminal_tool("get_last_exit", serde_json::json!({ "id": input.session_id }))
+                .await,
+        )
     }
 
     #[tool(
@@ -2138,7 +2354,9 @@ impl rmcp::ServerHandler for NexusMcpServer {
              Use nexus_* tools to create, read, update, delete, search, and query notes; \
              list and render authored skill templates from .forge/skills via \
              nexus_list_skills / nexus_render_skill. Forge notes are also enumerated \
-             as MCP resources under mcp://nexus/notes/.",
+             as MCP resources under mcp://nexus/notes/. Observe live terminal sessions \
+             with nexus_terminal_get_screen / _scrollback / _cwd / _cursor / _last_exit \
+             (OSC 133), also exposed as resources under mcp://nexus/terminal/<id>/.",
         )
     }
 
@@ -2242,10 +2460,28 @@ impl rmcp::ServerHandler for NexusMcpServer {
             .storage_call("query_files", serde_json::json!({}))
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(format!("query_files: {e}"), None))?;
-        let resources: Vec<Resource> = records
+        let mut resources: Vec<Resource> = records
             .into_iter()
             .map(|r| build_note_resource(&r.path, r.size_bytes))
             .collect();
+
+        // RFC 0003 Track A — expose each live terminal session's VT-grid state as
+        // resources. Best-effort: if the terminal plugin is absent or has no
+        // sessions, just contribute none rather than failing the whole listing.
+        #[derive(Deserialize)]
+        struct TermSession {
+            id: String,
+        }
+        let sessions: Vec<TermSession> = self
+            .terminal_call("list_sessions", serde_json::json!({}))
+            .await
+            .unwrap_or_default();
+        for s in sessions {
+            for (kind, desc) in TERMINAL_RESOURCE_KINDS {
+                resources.push(build_terminal_resource(&s.id, kind, desc));
+            }
+        }
+
         Ok(ListResourcesResult {
             resources,
             ..Default::default()
@@ -2266,6 +2502,14 @@ impl rmcp::ServerHandler for NexusMcpServer {
         let started = std::time::Instant::now();
         let uri = request.uri.clone();
         let outcome: Result<ReadResourceResult, rmcp::ErrorData> = async {
+            // RFC 0003 Track A — terminal VT-grid resources.
+            if let Some((id, kind)) = parse_terminal_uri(&uri) {
+                let text = self.read_terminal_resource(id, kind).await.map_err(|e| {
+                    rmcp::ErrorData::resource_not_found(format!("resource not found: {uri} ({e})"), None)
+                })?;
+                let contents = ResourceContents::text(text, &uri).with_mime_type("text/plain");
+                return Ok(ReadResourceResult::new(vec![contents]));
+            }
             let Some(path) = parse_note_uri(&uri) else {
                 return Err(rmcp::ErrorData::resource_not_found(
                     format!("unknown resource uri: {uri}"),
@@ -2315,6 +2559,30 @@ mod tests {
         assert_eq!(parse_note_uri("file:///x"), None);
         // Notes root with no trailing path component.
         assert_eq!(parse_note_uri("mcp://nexus/notes"), None);
+    }
+
+    #[test]
+    fn parse_terminal_uri_extracts_id_and_kind() {
+        assert_eq!(
+            parse_terminal_uri("mcp://nexus/terminal/abc-123/screen"),
+            Some(("abc-123", "screen"))
+        );
+        assert_eq!(
+            parse_terminal_uri("mcp://nexus/terminal/s1/last"),
+            Some(("s1", "last"))
+        );
+        // Non-terminal URIs and missing components are rejected.
+        assert_eq!(parse_terminal_uri("mcp://nexus/notes/foo.md"), None);
+        assert_eq!(parse_terminal_uri("mcp://nexus/terminal/abc"), None);
+        assert_eq!(parse_terminal_uri("mcp://nexus/terminal//screen"), None);
+    }
+
+    #[test]
+    fn build_terminal_resource_sets_uri_mime_and_name() {
+        let r = build_terminal_resource("sess-1", "screen", "Current visible screen");
+        assert_eq!(r.raw.uri, "mcp://nexus/terminal/sess-1/screen");
+        assert_eq!(r.raw.mime_type.as_deref(), Some("text/plain"));
+        assert!(r.raw.name.contains("sess-1"));
     }
 
     #[test]
