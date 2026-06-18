@@ -170,6 +170,15 @@ pub struct AgentToolSpec {
     /// Defaults to `true` (safe to retry) when omitted.
     #[serde(default = "default_true")]
     pub idempotent: bool,
+    /// Per-tool dispatch timeout in milliseconds — how long the kernel
+    /// tool bridge waits on `ipc_call` for this tool before giving up.
+    /// Most tools complete well within the default
+    /// ([`DEFAULT_TOOL_DISPATCH_TIMEOUT_MS`], 60 s); *interactive* tools
+    /// like `ask` set a longer budget so the dispatch can outlast a human
+    /// (the bridge falls back to its own default for tools not in this
+    /// registry). Defaults to [`DEFAULT_TOOL_DISPATCH_TIMEOUT_MS`].
+    #[serde(default = "default_dispatch_timeout_ms")]
+    pub dispatch_timeout_ms: u64,
     /// Best-guess duration. Surfaced in `nexus tool list` so users
     /// can plan around long-running tools without diving into source.
     /// Not enforced.
@@ -336,6 +345,25 @@ impl AgentToolRegistry {
             .filter(|spec| !spec.idempotent)
             .map(|spec| spec.name.clone())
             .collect()
+    }
+
+    /// Resolve the per-tool dispatch timeout for the tool routed to
+    /// `(target_plugin_id, command_id)`, if one is registered. The kernel
+    /// tool bridge consults this so an interactive tool (`ask`) can wait
+    /// longer than the default tool ceiling; tools not in the registry
+    /// (e.g. ad-hoc MCP routes) return `None` and use the bridge default.
+    #[must_use]
+    pub fn dispatch_timeout_for(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+    ) -> Option<Duration> {
+        self.tools
+            .lock()
+            .expect("agent tool registry mutex")
+            .values()
+            .find(|spec| spec.target_plugin_id == target_plugin_id && spec.command_id == command_id)
+            .map(|spec| Duration::from_millis(spec.dispatch_timeout_ms))
     }
 
     /// Look up a tool by name. `None` if not registered.
@@ -516,6 +544,22 @@ fn default_true() -> bool {
     true
 }
 
+/// Default per-tool dispatch timeout — matches the kernel tool bridge's
+/// own `DEFAULT_TOOL_TIMEOUT` (60 s), so a tool that doesn't opt into a
+/// longer budget behaves exactly as before.
+pub const DEFAULT_TOOL_DISPATCH_TIMEOUT_MS: u64 = 60_000;
+
+/// Dispatch budget for the interactive `ask` tool. Must exceed the
+/// handler's own wait (`handlers::shared::DEFAULT_ASK_TIMEOUT_SECS`) so
+/// the handler returns `timed_out` gracefully before the bridge's
+/// `ipc_call` deadline fires — guarded by a test in `handlers::ask`.
+pub const ASK_DISPATCH_TIMEOUT_MS: u64 = 330_000;
+
+/// serde default for [`AgentToolSpec::dispatch_timeout_ms`].
+fn default_dispatch_timeout_ms() -> u64 {
+    DEFAULT_TOOL_DISPATCH_TIMEOUT_MS
+}
+
 /// Static catalogue of agent tools. Each entry's
 /// `(target_plugin_id, command_id)` mirrors the IPC route the AI
 /// executor uses for the same tool. Kept here rather than wired
@@ -538,6 +582,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -562,6 +607,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -583,6 +629,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -609,6 +656,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -628,6 +676,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 150,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -644,6 +693,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -662,6 +712,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -689,6 +740,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 300,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -711,6 +763,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -737,6 +790,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 400,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -764,6 +818,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 5,
             required_capabilities: vec![],
             target_plugin_id: "com.nexus.agent".to_string(),
@@ -803,6 +858,9 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             // Re-prompting the user is an observable side effect — never
             // auto-retry an `ask` on a transient failure.
             idempotent: false,
+            // Interactive — wait minutes for a human, well past the
+            // default 60 s tool ceiling (see `ASK_DISPATCH_TIMEOUT_MS`).
+            dispatch_timeout_ms: ASK_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 30_000,
             required_capabilities: vec![],
             target_plugin_id: "com.nexus.agent".to_string(),
@@ -818,6 +876,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 200,
             required_capabilities: vec![Capability::GitRead],
             target_plugin_id: "com.nexus.git".to_string(),
@@ -837,6 +896,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 2_000,
             required_capabilities: vec![Capability::TerminalExecute],
             target_plugin_id: "com.nexus.terminal".to_string(),
@@ -853,6 +913,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::TerminalExecute],
             target_plugin_id: "com.nexus.terminal".to_string(),
@@ -872,6 +933,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::TerminalExecute],
             target_plugin_id: "com.nexus.terminal".to_string(),
@@ -909,6 +971,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             // sub-run to proceed.
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 5_000,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.agent".to_string(),
@@ -942,6 +1005,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -968,6 +1032,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 500,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -990,6 +1055,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             }),
             requires_approval: true,
             idempotent: false,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 3_000,
             required_capabilities: vec![Capability::GitWrite],
             target_plugin_id: "com.nexus.git".to_string(),
@@ -1014,6 +1080,7 @@ mod tests {
             }),
             requires_approval: false,
             idempotent: true,
+            dispatch_timeout_ms: DEFAULT_TOOL_DISPATCH_TIMEOUT_MS,
             estimated_duration_ms: 1,
             required_capabilities: caps,
             target_plugin_id: "com.test".to_string(),
@@ -1077,6 +1144,29 @@ mod tests {
                 "{name} is read-only and must stay retry-safe"
             );
         }
+    }
+
+    /// Phase 5.5 follow-up: the interactive `ask` tool carries a longer
+    /// per-tool dispatch timeout; ordinary tools keep the default; and an
+    /// unregistered route resolves to `None` (bridge default applies).
+    #[test]
+    fn dispatch_timeout_for_overrides_ask_only() {
+        let registry = AgentToolRegistry::new();
+        for spec in default_tool_catalog() {
+            registry.register(spec);
+        }
+        assert_eq!(
+            registry.dispatch_timeout_for("com.nexus.agent", "ask"),
+            Some(Duration::from_millis(ASK_DISPATCH_TIMEOUT_MS)),
+        );
+        assert_eq!(
+            registry.dispatch_timeout_for("com.nexus.storage", "read_file"),
+            Some(Duration::from_millis(DEFAULT_TOOL_DISPATCH_TIMEOUT_MS)),
+        );
+        assert_eq!(
+            registry.dispatch_timeout_for("com.nexus.unknown", "nope"),
+            None,
+        );
     }
 
     /// Cross-check that the new tools point at handler ids that

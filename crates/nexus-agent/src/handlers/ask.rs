@@ -166,6 +166,20 @@ mod tests {
         .is_err());
     }
 
+    /// The `ask` tool's per-tool dispatch budget must outlast the
+    /// handler's own wait, so the handler returns `timed_out` gracefully
+    /// before the bridge's `ipc_call` deadline turns the call into a
+    /// transport error.
+    #[test]
+    fn ask_dispatch_timeout_exceeds_handler_wait() {
+        assert!(
+            crate::tool_registry::ASK_DISPATCH_TIMEOUT_MS > DEFAULT_ASK_TIMEOUT_SECS * 1000,
+            "ask dispatch timeout ({}ms) must exceed the handler wait ({}s)",
+            crate::tool_registry::ASK_DISPATCH_TIMEOUT_MS,
+            DEFAULT_ASK_TIMEOUT_SECS,
+        );
+    }
+
     #[test]
     fn ask_args_parse_questions() {
         let parsed: AskArgs = serde_json::from_value(serde_json::json!({

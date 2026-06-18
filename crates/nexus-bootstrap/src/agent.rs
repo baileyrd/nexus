@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nexus_agent::{
-    ChatDriver, Proposal, ProposedToolCall, ToolCall, ToolDispatchError, ToolDispatcher,
+    AgentToolRegistry, ChatDriver, Proposal, ProposedToolCall, ToolCall, ToolDispatchError,
+    ToolDispatcher,
 };
 use nexus_kernel::{Ipc as _, IpcErrorEnvelope, KernelPluginContext};
 use serde::Deserialize;
@@ -66,12 +67,17 @@ impl KernelToolDispatcher {
 #[async_trait]
 impl ToolDispatcher for KernelToolDispatcher {
     async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError> {
+        // Honour a registered tool's per-tool dispatch timeout (e.g.
+        // `ask`), falling back to this dispatcher's default.
+        let timeout = AgentToolRegistry::global()
+            .dispatch_timeout_for(&call.target_plugin_id, &call.command_id)
+            .unwrap_or(self.timeout);
         self.ctx
             .ipc_call(
                 &call.target_plugin_id,
                 &call.command_id,
                 call.args.clone(),
-                self.timeout,
+                timeout,
             )
             .await
             .map_err(|e| {
