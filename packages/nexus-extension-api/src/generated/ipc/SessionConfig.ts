@@ -59,4 +59,17 @@ max_tool_retries: number,
  * immediately. Defaults to [`DEFAULT_TOOL_RETRY_BACKOFF_MS`]; only
  * consulted when `max_tool_retries > 0`.
  */
-tool_retry_backoff_ms: bigint, };
+tool_retry_backoff_ms: bigint, 
+/**
+ * Phase 5.5 follow-up — tool names that must **not** be retried
+ * even on a *transient* failure, because re-dispatching them could
+ * double-apply an effect or re-trigger an observable side effect
+ * (writes, deletes, pushes, terminal execution, delegation, user
+ * prompts). A transient failure of a tool listed here is reported
+ * without a retry. Empty by default (every transient failure is
+ * retry-eligible, preserving the Phase 5.5 behaviour); the agent
+ * service populates it from
+ * [`crate::AgentToolRegistry::non_idempotent_tool_names`]. Only
+ * consulted when `max_tool_retries > 0`.
+ */
+non_idempotent_tools: Array<string>, };

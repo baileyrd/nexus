@@ -878,7 +878,7 @@ pub(crate) async fn run_session_optionally_gated_resumed<D, P, T>(
     system: &str,
     archetype: Option<String>,
     id: String,
-    config: crate::SessionConfig,
+    mut config: crate::SessionConfig,
     seed_rounds: Vec<crate::RoundRecord>,
     follow_up: Option<String>,
 ) -> crate::session::AgentSession
@@ -887,6 +887,16 @@ where
     P: crate::SessionPolicy,
     T: crate::ToolDispatcher + ?Sized,
 {
+    // Phase 5.5 follow-up — make opt-in retries idempotency-aware. When a
+    // caller turns retries on but doesn't name the non-idempotent tools,
+    // seed the deny-list from the registry so a transient failure of a
+    // mutating / side-effecting tool isn't blindly re-dispatched. A caller
+    // that supplied its own list (even an empty one is treated as "use the
+    // registry default" here) keeps non-empty overrides intact.
+    if config.max_tool_retries > 0 && config.non_idempotent_tools.is_empty() {
+        config.non_idempotent_tools =
+            crate::AgentToolRegistry::global().non_idempotent_tool_names();
+    }
     match manifest_policy {
         Some(mp) => {
             let wrapped = crate::ManifestPolicyGate::new(base_policy, mp);

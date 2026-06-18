@@ -30,6 +30,18 @@ input_schema: unknown,
  */
 requires_approval: boolean, 
 /**
+ * Whether re-dispatching this tool with identical args is safe —
+ * i.e. a second run has no compounding or externally-observable
+ * side effect. The session retry policy skips automatic retries for
+ * non-idempotent tools (`false`) even on a transient failure, so a
+ * tool whose first attempt may have landed before the transport
+ * failed isn't silently run twice. Read-only / query tools are
+ * idempotent; mutating and side-effecting tools (writes, deletes,
+ * pushes, terminal execution, delegation, user prompts) are not.
+ * Defaults to `true` (safe to retry) when omitted.
+ */
+idempotent: boolean, 
+/**
  * Best-guess duration. Surfaced in `nexus tool list` so users
  * can plan around long-running tools without diving into source.
  * Not enforced.

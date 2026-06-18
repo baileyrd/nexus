@@ -129,6 +129,19 @@ pub struct SessionConfig {
     /// consulted when `max_tool_retries > 0`.
     #[serde(default = "default_tool_retry_backoff_ms")]
     pub tool_retry_backoff_ms: u64,
+
+    /// Phase 5.5 follow-up — tool names that must **not** be retried
+    /// even on a *transient* failure, because re-dispatching them could
+    /// double-apply an effect or re-trigger an observable side effect
+    /// (writes, deletes, pushes, terminal execution, delegation, user
+    /// prompts). A transient failure of a tool listed here is reported
+    /// without a retry. Empty by default (every transient failure is
+    /// retry-eligible, preserving the Phase 5.5 behaviour); the agent
+    /// service populates it from
+    /// [`crate::AgentToolRegistry::non_idempotent_tool_names`]. Only
+    /// consulted when `max_tool_retries > 0`.
+    #[serde(default)]
+    pub non_idempotent_tools: Vec<String>,
 }
 
 fn default_max_iterations() -> u32 {
@@ -152,6 +165,7 @@ impl Default for SessionConfig {
             provider_hint: None,
             max_tool_retries: 0,
             tool_retry_backoff_ms: DEFAULT_TOOL_RETRY_BACKOFF_MS,
+            non_idempotent_tools: Vec::new(),
         }
     }
 }
@@ -181,6 +195,7 @@ impl SessionConfig {
             provider_hint: self.provider_hint.clone(),
             max_tool_retries: self.max_tool_retries,
             tool_retry_backoff_ms: self.tool_retry_backoff_ms,
+            non_idempotent_tools: self.non_idempotent_tools.clone(),
         }
     }
 }
@@ -608,6 +623,16 @@ where
     C: crate::compression::Compressor + ?Sized,
 {
     let config = config.sanitized();
+    // Phase 5.5 follow-up — the set of tool names the retry policy must
+    // not auto-retry on a transient failure (non-idempotent tools).
+    // Borrows `config`, which outlives the loop. Empty unless the caller
+    // populated `non_idempotent_tools` (the agent service fills it from
+    // the tool registry).
+    let non_idempotent: std::collections::HashSet<&str> = config
+        .non_idempotent_tools
+        .iter()
+        .map(String::as_str)
+        .collect();
     let started_at = chrono::Utc::now().to_rfc3339();
     // RFC 0008 — a forked/resumed run starts with the inherited prefix; new
     // rounds continue numbering past it. (Saturating: a transcript can't
@@ -749,6 +774,7 @@ where
             decision,
             config.max_tool_retries,
             config.tool_retry_backoff_ms,
+            &non_idempotent,
         )
         .await;
 
@@ -938,6 +964,7 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
     decision: RoundDecision,
     max_retries: u32,
     backoff_ms: u64,
+    non_idempotent: &std::collections::HashSet<&str>,
 ) -> (Vec<ToolCallRecord>, Option<RoundStopReason>) {
     match decision {
         RoundDecision::Abort(reason) => (
@@ -975,8 +1002,17 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
         RoundDecision::ApproveAll => {
             let mut out = Vec::with_capacity(proposed.len());
             for p in proposed {
-                let record =
-                    dispatch_one(dispatcher, p, true, String::new(), max_retries, backoff_ms).await;
+                let retry_safe = !non_idempotent.contains(p.name.as_str());
+                let record = dispatch_one(
+                    dispatcher,
+                    p,
+                    true,
+                    String::new(),
+                    max_retries,
+                    backoff_ms,
+                    retry_safe,
+                )
+                .await;
                 out.push(record);
             }
             (out, None)
@@ -991,8 +1027,17 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                 let (approve, reason) = entry
                     .map(|e| (e.approve, e.reason.clone()))
                     .unwrap_or((false, "no decision provided".to_string()));
-                let record =
-                    dispatch_one(dispatcher, p, approve, reason, max_retries, backoff_ms).await;
+                let retry_safe = !non_idempotent.contains(p.name.as_str());
+                let record = dispatch_one(
+                    dispatcher,
+                    p,
+                    approve,
+                    reason,
+                    max_retries,
+                    backoff_ms,
+                    retry_safe,
+                )
+                .await;
                 out.push(record);
             }
             (out, None)
@@ -1007,6 +1052,11 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     reason: String,
     max_retries: u32,
     backoff_ms: u64,
+    // Phase 5.5 follow-up — whether this tool is safe to auto-retry on a
+    // transient failure. `false` for non-idempotent tools (see
+    // `SessionConfig::non_idempotent_tools`): a transient failure is
+    // reported without re-dispatching so the effect can't double-apply.
+    retry_safe: bool,
 ) -> ToolCallRecord {
     if !approved {
         return ToolCallRecord {
@@ -1041,6 +1091,17 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     let outcome = loop {
         match dispatcher.dispatch(&proposed.tool_call).await {
             Ok(value) => break Ok(value),
+            // A transient failure of a non-idempotent tool (`!retry_safe`)
+            // is surfaced as-is — re-dispatching could double-apply the
+            // effect, so the model decides whether to retry itself.
+            Err(e) if !retry_safe && e.is_retryable() => {
+                tracing::debug!(
+                    tool = %proposed.name,
+                    error = %e,
+                    "Phase 5.5: skipping retry of transient failure for non-idempotent tool",
+                );
+                break Err(e);
+            }
             Err(e) if retries < max_retries && e.is_retryable() => {
                 let factor = 1u64.checked_shl(retries).unwrap_or(u64::MAX);
                 let delay = backoff_ms.saturating_mul(factor);
@@ -1582,6 +1643,59 @@ mod tests {
         let rec = &session.rounds[0].tool_calls[0];
         assert!(rec.error.is_empty(), "succeeded after retries: {}", rec.error);
         assert!(rec.response.is_some());
+    }
+
+    // ── Idempotency-aware retry (Phase 5.5 follow-up) ────────────────────────
+    // A transient failure of a tool named in `non_idempotent_tools` is NOT
+    // retried, even with retries enabled — re-dispatching could double-apply.
+
+    #[tokio::test]
+    async fn non_idempotent_tool_skips_retry_on_transient_failure() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        // Transient message that WOULD be retried for an idempotent tool.
+        let dispatcher = FlakyDispatcher::new("dispatch timeout", 2);
+        let mut cfg = config_with_retries(3);
+        // `read_tool` dispatches a call named "read_file"; mark it non-idempotent.
+        cfg.non_idempotent_tools = vec!["read_file".to_string()];
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            cfg,
+        )
+        .await;
+        // Non-idempotent → dispatched exactly once, no retry.
+        assert_eq!(dispatcher.call_count(), 1);
+        let err = &session.rounds[0].tool_calls[0].error;
+        assert!(err.contains("dispatch timeout"));
+        assert!(!err.contains("attempts"));
+    }
+
+    #[tokio::test]
+    async fn idempotent_tool_still_retries_when_others_are_listed() {
+        let driver = ScriptedDriver::new(tool_then_done());
+        let dispatcher = FlakyDispatcher::new("dispatch timeout", 2);
+        let mut cfg = config_with_retries(3);
+        // A different tool is non-idempotent; "read_file" is not, so it retries.
+        cfg.non_idempotent_tools = vec!["write_file".to_string()];
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "go",
+            "sys",
+            None,
+            "id".into(),
+            cfg,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert_eq!(dispatcher.call_count(), 3);
+        assert!(session.rounds[0].tool_calls[0].error.is_empty());
     }
 
     #[tokio::test]
