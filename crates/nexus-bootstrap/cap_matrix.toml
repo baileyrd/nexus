@@ -1740,6 +1740,33 @@ plugin = "com.nexus.terminal"
 command = "open_in_terminal"
 unrestricted = "opens the host's terminal app on a path — host-level invocation, not a kernel spawn"
 
+# RFC 0003 Track A — read-only VT grid introspection (screen/scrollback/cwd/
+# cursor/last-exit). Pure reads of in-memory session state; no spawn, no mutation.
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "get_screen"
+unrestricted = "read-only VT grid screen text + cursor"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "get_scrollback"
+unrestricted = "read-only VT grid scrollback text"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "get_cwd"
+unrestricted = "read-only child cwd (OSC 7)"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "get_cursor"
+unrestricted = "read-only VT grid cursor position"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "get_last_exit"
+unrestricted = "read-only last-command exit code + output (OSC 133)"
+
 # ─── com.nexus.theme — forge-local theme config ──────────────────────
 
 [[handler]]

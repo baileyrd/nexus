@@ -14,7 +14,7 @@
 |--------|---------:|
 | `com.nexus.storage` | 75 |
 | `com.nexus.git` | 42 |
-| `com.nexus.terminal` | 29 |
+| `com.nexus.terminal` | 34 |
 | `com.nexus.ai` | 28 |
 | `com.nexus.dap` | 21 |
 | `com.nexus.agent` | 26 |
@@ -36,7 +36,7 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 2 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **342** |
+| **Total** | **347** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -131,7 +131,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.terminal (29)
+## com.nexus.terminal (34)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -143,6 +143,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `saved_list` / `saved_create` / `saved_update` / `saved_delete` / `saved_reorder` | — | saved-command CRUD (KV) |
 | `adhoc_list` / `adhoc_get` / `adhoc_delete` | — | ad-hoc history (KV) |
 | `open_in_terminal` | — | host-level invocation |
+| `get_screen` / `get_scrollback` / `get_cwd` / `get_cursor` / `get_last_exit` | — | RFC 0003 Track A — read-only VT grid introspection (screen / scrollback / cwd / cursor / OSC 133 last-exit) |
 
 ---
 

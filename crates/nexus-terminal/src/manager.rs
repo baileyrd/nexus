@@ -255,6 +255,54 @@ impl SessionManager {
         )
     }
 
+    /// The session's current visible screen as text, modelled by the VT grid
+    /// (RFC 0003). `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_screen(&self, id: &SessionId) -> Option<String> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.screen_text())
+    }
+
+    /// The most recent `max` scrollback lines of the VT grid as text (oldest
+    /// first). `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_scrollback(&self, id: &SessionId, max: usize) -> Option<String> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.scrollback_text(max))
+    }
+
+    /// The VT grid cursor as `(col, row)` (both zero-based). `None` if unknown.
+    #[must_use]
+    pub fn vt_cursor(&self, id: &SessionId) -> Option<(usize, usize)> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.cursor())
+    }
+
+    /// The working directory last reported by the child via OSC 7 (empty until
+    /// set). `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_cwd(&self, id: &SessionId) -> Option<String> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some(entry.vt.cwd().to_string())
+    }
+
+    /// The last finished command's exit code and captured output (OSC 133;C..D).
+    /// Read-only — unlike [`Self::take_finished_command`] this does not clear the
+    /// pending flag. `None` if the id is unknown.
+    #[must_use]
+    pub fn vt_last_exit(&self, id: &SessionId) -> Option<FinishedCommand> {
+        let entry = self.sessions.get(id)?;
+        entry.last_accessed.set(Instant::now());
+        Some((
+            entry.vt.last_exit(),
+            entry.vt.last_command_output().map(str::to_owned),
+        ))
+    }
+
     /// Search the session's line buffer for `query`. Returns the indices
     /// of matching lines (into the line buffer as it is *now* — indices
     /// are not stable across eviction). `is_regex = true` interprets the
@@ -662,6 +710,46 @@ mod tests {
         assert!(matches!(err, TerminalError::NotRunning(_)), "got {err:?}");
         let err = m.drain(&ghost, Duration::from_millis(10)).unwrap_err();
         assert!(matches!(err, TerminalError::NotRunning(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn vt_grid_tracks_screen_and_osc_133_exit() {
+        if !unix_only("vt_grid_tracks_screen_and_osc_133_exit") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(4, 4096);
+        // A shell that emits an OSC 133 command-output region with text then a
+        // finished mark with exit 5.
+        let cfg = SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '\\033]133;C\\007grid-line\\n\\033]133;D;5\\007'".into(),
+                ],
+            }),
+            ..SessionConfig::default()
+        };
+        let id = m.spawn(cfg).expect("spawn");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let _ = m.drain(&id, Duration::from_millis(200)).expect("drain");
+            if m.vt_last_exit(&id).and_then(|(e, _)| e) == Some(5) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "OSC 133 exit not captured; screen={:?}",
+                m.vt_screen(&id),
+            );
+        }
+        // The screen models the command output; last-exit carries the code + text.
+        assert!(m.vt_screen(&id).unwrap_or_default().contains("grid-line"));
+        let (exit, output) = m.vt_last_exit(&id).expect("last exit");
+        assert_eq!(exit, Some(5));
+        assert!(output.unwrap_or_default().contains("grid-line"));
+        // Unknown id reads as None — the handler maps this to NotRunning.
+        assert!(m.vt_screen(&SessionId::from_string("nope")).is_none());
     }
 
     #[test]
