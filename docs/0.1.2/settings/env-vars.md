@@ -15,6 +15,7 @@
 | `NEXUS_TUI_LOG` | `nexus-tui/src/lib.rs:107` | `$TEMP/nexus-tui.log` | TUI log file path. |
 | `NEXUS_SUBAGENT_BIN` | `nexus-agent/src/subagent.rs` (`SubagentRunner::resolve`) | _(current_exe)_ | Path to the `nexus` CLI used to spawn isolated subagents (RFC 0007, `delegate isolation="worktree"`). The binary location is install-specific, so it's an env var, not a forge setting. Frontends whose own `current_exe()` isn't the CLI (Tauri shell, MCP) set this. |
 | `NEXUS_SUBAGENT_MAX_CONCURRENT` | `nexus-agent/src/subagent.rs` (`subagent_semaphore`) | `4` | Cap on isolated subagents (each a full child `nexus` process) running concurrently in one process. Non-positive / unparseable values fall back to the default. |
+| `NEXUS_EMBEDDED_SHELL` | `nexus-rush/src/main.rs` (`set_embedded`) | _(unset)_ | Set by `nexus-terminal` (any value) when launching the bundled `nexus-rush` shell inside a Nexus-owned PTY (RFC 0002). Tells rush to disable its job-control terminal hand-off (`tcsetpgrp`/`setpgid`) so it doesn't fight portable-pty's session leader for the controlling terminal. Not meant to be set by operators. |
 
 ## AI provider detection (read directly by `nexus-ai`)
 

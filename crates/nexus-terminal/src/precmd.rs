@@ -359,6 +359,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                ..Default::default()
             })
             .expect("spawn")
     }

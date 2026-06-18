@@ -40,6 +40,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use nexus_types::SandboxPolicy;
 use serde::{Deserialize, Serialize};
 
 use crate::error::TerminalError;
@@ -72,6 +73,17 @@ pub struct ServerSpawnConfig {
     /// Secret-masking happens at the UI layer; this field carries the
     /// resolved values.
     pub env: Vec<(String, String)>,
+    /// OS-sandbox policy to confine the session under (RFC 0002/0007). `None`
+    /// (the default) runs the shell directly. A caller opts a session into
+    /// confinement here — e.g. an agent spawning a tool session, or a future
+    /// bridge that reads `sandbox.toml`. Server-spawned interactive sessions
+    /// leave this `None`.
+    pub sandbox: Option<SandboxPolicy>,
+    /// Opt in to the bundled `nexus-rush` shell (RFC 0002). Only effective with
+    /// a confining [`sandbox`](Self::sandbox) policy and no explicit
+    /// [`shell`](Self::shell); threaded from `sandbox.toml`'s
+    /// `bundled_shell_for_sandbox` by the caller. Default `false`.
+    pub bundled_shell: bool,
 }
 
 impl ServerSpawnConfig {
@@ -502,9 +514,12 @@ impl TerminalServer for InMemoryTerminalServer {
             working_dir: cfg.working_dir,
             initial_size: None,
             env: cfg.env,
-            // Interactive/server-spawned sessions are not confined; callers opt
-            // in to OS-sandboxing per session via `SessionConfig::sandbox`.
-            sandbox: None,
+            // Sandboxing is opt-in per session: callers (e.g. an agent tool
+            // session, or a bridge reading `sandbox.toml`) set `cfg.sandbox`.
+            // IPC handlers leave it `None`, so interactive sessions are never
+            // surprise-confined.
+            sandbox: cfg.sandbox,
+            bundled_shell: cfg.bundled_shell,
         };
         // BL-062 — at-cap path: evict the LRU stopped session before
         // spawning. If every session is still running, `spawn_or_evict`
@@ -740,6 +755,7 @@ mod tests {
             }),
             working_dir: None,
             env: vec![],
+            ..Default::default()
         }
     }
 
@@ -757,6 +773,7 @@ mod tests {
             }),
             working_dir: None,
             env: vec![],
+            ..Default::default()
         }
     }
 
@@ -873,6 +890,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                ..Default::default()
             })
             .expect("create");
         let hit = s
@@ -1043,6 +1061,7 @@ mod tests {
                 }),
                 working_dir: None,
                 env: vec![],
+                ..Default::default()
             })
             .expect("create");
 

@@ -30,6 +30,9 @@ impl TerminalCorePlugin {
             shell,
             working_dir: a.working_dir.map(PathBuf::from),
             env: a.env,
+            // IPC-spawned sessions are not sandboxed (sandbox + bundled shell
+            // are opt-in by programmatic callers; see ServerSpawnConfig).
+            ..Default::default()
         };
         let id = self
             .server

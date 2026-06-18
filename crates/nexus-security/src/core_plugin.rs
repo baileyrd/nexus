@@ -485,6 +485,7 @@ mod tests {
                 allowed_hosts: vec!["host.example".to_string()],
                 max_bytes: 64,
             },
+            ..Default::default()
         };
         let ok = json!({ "url": "https://host.example/a", "dest": "/work/a", "cwd": "/work" });
         let (url, dest, cap) = prepare_download(&open, &ok).unwrap();
@@ -516,6 +517,7 @@ mod tests {
         let cfg = crate::SandboxConfig {
             policy: nexus_types::SandboxPolicy::new_workspace_write(vec![]),
             downloads: crate::DownloadPolicy { enabled: true, ..Default::default() },
+            ..Default::default()
         };
         let mut plugin =
             SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);

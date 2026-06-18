@@ -24,6 +24,14 @@ pub struct SandboxConfig {
     pub policy: SandboxPolicy,
     /// Permissioned-download broker policy.
     pub downloads: DownloadPolicy,
+    /// When true, *sandboxed* terminal sessions launch the bundled `nexus-rush`
+    /// shell instead of the detected system shell (RFC 0002). Off by default —
+    /// the system shell stays the default everywhere until rush hardens (RFC
+    /// 0002 Stage 1). Non-sandboxed sessions are unaffected regardless. The
+    /// terminal layer consumes this via `SessionConfig::bundled_shell`, threaded
+    /// by the caller that builds the session config (kept out of `nexus-terminal`
+    /// itself so it need not depend on `nexus-security`).
+    pub bundled_shell_for_sandbox: bool,
 }
 
 impl SandboxConfig {
@@ -59,6 +67,20 @@ mod tests {
         let cfg = SandboxConfig::default();
         assert_eq!(cfg.policy, SandboxPolicy::ReadOnly);
         assert!(!cfg.downloads.enabled);
+        // Bundled shell is opt-in: off by default (system shell is the default).
+        assert!(!cfg.bundled_shell_for_sandbox);
+    }
+
+    #[test]
+    fn parses_bundled_shell_opt_in() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        std::fs::write(
+            dir.path().join(SANDBOX_CONFIG_RELPATH),
+            "bundled_shell_for_sandbox = true\n",
+        )
+        .unwrap();
+        assert!(SandboxConfig::load(dir.path()).bundled_shell_for_sandbox);
     }
 
     #[test]
