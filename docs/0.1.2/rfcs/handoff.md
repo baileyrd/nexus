@@ -1,4 +1,4 @@
-# Handoff — Phase 5.4 (agent session tree) complete; next: Phase 5.5
+# Handoff — Phase 5.5 (loop hardening) complete; the RFC 0005 ladder is fully shipped
 
 You are continuing work on **Nexus** (microkernel Rust workspace + Tauri/React
 shell) at `/home/user/nexus`. Read [`CLAUDE.md`](../../../CLAUDE.md) and
@@ -6,80 +6,108 @@ shell) at `/home/user/nexus`. Read [`CLAUDE.md`](../../../CLAUDE.md) and
 
 ## Context: what was just finished
 
-**Phase 5.4 — the agent session tree ([RFC 0008](0008-agent-session-tree.md)) is
-fully shipped** across 6 small PRs (all merged to `main` from branch
-`claude/lucid-turing-8w72qg`):
+**Phase 5.5 — loop hardening ([RFC 0005](0005-omp-agentic-loop-phase5.md)) is
+fully shipped**, completing the omp-parity ladder (5.1 hashline → 5.2 tool
+catalog → 5.3 subagent isolation → 5.4 session tree → **5.5 loop hardening**).
+Two PRs, both merged to `main` from branch `claude/exciting-maxwell-2x404u`:
 
 | PR | Scope | Merged |
 |----|-------|--------|
-| #318 | resumable loop core | ✅ |
-| #319 | tree persistence + `session_resume` | ✅ |
-| #320 | `session_branch` + `session_rewind` | ✅ |
-| #321 | CLI session surface | ✅ |
-| #322 | checkpoints | ✅ |
-| #323 | `nexus.sessions` shell tree UI | ✅ |
+| #325 | provider-native multi-turn chat (Phase 2c) | ✅ |
+| #326 | tool error/retry policies | ✅ |
 
-**The unifying insight:** resume / branch / rewind are one primitive —
-`fork(parent, k, message)` (assemble the parent transcript, truncate to round
-`k`, seed the loop with that prefix + an optional follow-up message, continue).
-Decisions: **immutable fork-nodes** (delta-stored) + **non-destructive rewind**.
-Design doc: [`0008-agent-session-tree.md`](0008-agent-session-tree.md) (status:
-Implemented).
+**The unifying change:** the agent loop used to feed the model **one
+restated-goal user message per round** (`compose_followup_prompt_compressed`),
+digesting prior work into lossy `- round N: read_file ok` lines that discarded
+both the real tool output and the assistant `tool_use` ↔ `tool_result` linkage.
+It now **replays a real conversation** and **retries transient tool failures**.
 
 **Where it lives:**
 
-- **Loop:** `crates/nexus-agent/src/session.rs` —
-  `run_session_resumed[_with_compressor]` (seedable; empty seed = old
-  behaviour). `AgentSession` gained `parent_id`/`branch_point`; new
-  `SessionCheckpoint` type (both ts-exported).
-- **Handlers** (`com.nexus.agent`, ids 28–33): `session_resume`/`branch`/`rewind`
-  in `handlers/session.rs` (shared `fork_session` + `run_and_persist_session`
-  core); `session_checkpoint[s]`/`_delete` in `handlers/checkpoint.rs`. Forked
-  nodes persist only delta rounds; `session_get` assembles by walking parents.
-  `checkpoints.json` per forge.
-- **CLI:** `crates/nexus-cli/src/commands/agent.rs` —
-  `nexus agent sessions|show|resume|branch|rewind|checkpoint|checkpoints|checkpoint-rm`.
-- **Shell:** `shell/src/plugins/nexus/sessions/` (`sessionTree.ts` pure forest
-  logic, `sessionsRuntime.ts`, `sessionsStore.ts`, `SessionTreeView.tsx`);
-  registered in `shell/src/plugins/catalog.ts`.
+- **Multi-turn loop:** `crates/nexus-agent/src/session.rs` — `compose_turns`
+  builds `User{goal}` (carrying any BL-120 compacted summary) → per round
+  `Assistant{text, tool_calls}` + one `ToolResult` per call (failures/denials via
+  `ToolResult.is_error`). `ChatDriver::propose_turns` (default flattens to the
+  legacy `propose`, so test/bootstrap drivers are untouched) is overridden by
+  `AiChatBridge` (`handlers/shared.rs`) to forward the turns. BL-120 compaction
+  folds into the goal turn; BL-131 `sanitize_turns` runs per-`ToolResult`.
+- **Wire types:** `crates/nexus-ai/src/ipc.rs` — `AiChatTurn` / `AiTurnToolCall`
+  + an optional `turns` field on `AiProposeArgs`; `handle_propose_tool_calls`
+  (`handlers/propose.rs`) prefers `turns` (→ provider-native `ChatTurn`s) and
+  falls back to the legacy text-only `messages`. `anthropic.rs` merges a user
+  turn that follows tool-results into one message (no consecutive user turns).
+  **No new IPC handler** — `propose_tool_calls` was reused; the only regenerated
+  bindings are `AiChatTurn.ts` / `AiTurnToolCall.ts` / `AiProposeArgs.ts` /
+  `SessionConfig.ts` + the propose turn schemas.
+- **Retry:** `session.rs` `dispatch_one` retries a *transient* dispatch error
+  (`is_retryable_tool_error` — timeouts, resets, `unavailable`, `429`/`5xx`) up
+  to `SessionConfig::max_tool_retries` (default **0 = off**) times with
+  exponential backoff (`tool_retry_backoff_ms`, default 250). Permanent errors
+  (not-found, validation, capability/policy denial) are never retried; the
+  exhausted error is annotated `(after N attempts)`.
 
 ## Suggested next work
 
-**Phase 5.5 — loop hardening** (from the RFC 0005 ladder,
-[`0005-omp-agentic-loop-phase5.md`](0005-omp-agentic-loop-phase5.md)):
-provider-native multi-turn chat (Phase 2c — replace the restate-the-goal prompt
-formulation with real `ChatTurn` linkage) and tool error/retry policies. Touches
-`nexus-ai`, `nexus-agent`. Confirm priorities with the user before starting.
+The RFC 0005 phased ladder (5.1–5.5) is **done**. Remaining threads, ordered
+roughly by self-containment — **confirm priorities with the user before
+starting**:
 
-**Known follow-ups / limitations (optional):**
+- **Typed tool-dispatch errors.** Retry classification is currently a heuristic
+  on the dispatcher's `String` error (`is_retryable_tool_error`). Promoting
+  `ToolDispatcher` to a structured error would make classification exact and
+  enable per-tool idempotency-aware retry. (Spun out of #326.)
+- **`ask` frontend wiring + per-tool dispatch timeout.** The `ask` backend
+  publishes `com.nexus.agent.ask_requested` / awaits `ask_respond` but no
+  frontend renders the prompt, so `ask` always times out; and it can only wait
+  `DEFAULT_ASK_TIMEOUT_SECS` (50 s) under the shared 60 s bridge ceiling. Wire a
+  question panel (mirror `round_proposed`/`round_decide`) + a per-tool dispatch
+  timeout. (RFC 0005 backlog.)
+- **Subagent isolation — orchestration (RFC 0006 Step 2 / [RFC 0007](0007-subagent-process-isolation.md)).**
+  PR 1–2 (headless spawn, worktree harness + merge-back) are in; PR 3 (OS-sandbox
+  the child) and PR 4 (conflict surfacing, concurrency, `nexus_bin` setting) are
+  queued. PR 3 is the natural first consumer of the bundled-shell work below.
+- **Other open RFCs** (see [`rfcs/README.md`](README.md)):
+  [RFC 0001](0001-workflow-cap-delegation.md) workflow cap delegation (security;
+  no code yet); [RFC 0002](0002-bundled-shell-rush.md) / [RFC 0003](0003-terminal-emulator-rusty-term.md)
+  bundled shell + headless VT core, both gated behind the OS-sandbox (follow
+  RFC 0007 PR 3).
 
-- Resume re-resolves the system prompt from `archetype` — a custom `system`
-  override isn't persisted on `AgentSession`.
-- Branch-from-checkpoint-by-name isn't wired (checkpoints are bookmarks; the user
-  reads coords and runs `branch`). Possible UX enhancement.
-- No dedicated nested `session_tree` IPC handler — `session_list` carries
-  `parent_id`/`branch_point` and clients build the forest.
-- The shell React view was verified by typecheck/lint/unit-test only, not
-  visually.
-- End-to-end resume/branch/rewind with a live AI provider wasn't exercised (none
-  configured in the dev environment).
+**Known follow-ups / limitations from this effort (optional):**
 
-## Workflow norms (this effort established these)
+- `compose_turns` assumes the loop invariant that text-only rounds are terminal,
+  so real transcripts never contain consecutive same-role turns; the Anthropic
+  adapter additionally coalesces a user turn after tool-results. A hand-crafted /
+  corrupted seed could still produce consecutive assistant turns (not coalesced).
+- The per-round "reconsider on error / finish when done" guidance moved from the
+  flat-prompt nudge into the **default planner system prompt**; custom archetypes
+  keep their own prompts and don't inherit it.
+- Retries are opt-in (default 0) and don't record a structured retry count on
+  `ToolCallRecord` (only a tracing log + the error-string annotation).
+- No live-AI-provider end-to-end run of either change (none configured here);
+  both are covered by scripted/capturing drivers + per-provider serialization and
+  classification unit tests.
 
-- Develop on branch `claude/lucid-turing-8w72qg`; small, fully-verified PRs; open
-  **and** merge each before starting the next.
+## Workflow norms (this effort followed these)
+
+- Develop on branch `claude/exciting-maxwell-2x404u`; small, fully-verified
+  commits; open a PR per cohesive unit and merge before the next.
 - New IPC handler ⇒ add a `cap_matrix.toml` entry + bump the count in
   [`ipc-handlers.md`](../ipc-handlers.md) (the `bootstrap_coverage` test gates
-  handler ↔ matrix).
+  handler ↔ matrix). (Phase 5.5 added **no** handler — it reused
+  `propose_tool_calls`.)
 - Any IPC-boundary type change ⇒ run `scripts/check_ipc_drift.sh`, then
-  `git add` the regenerated `*.ts` / `*.json`.
+  `git add` the regenerated `*.ts` / `*.json`. (ts-rs emits a `.ts` per
+  `#[ts(export)]` type on `cargo test --features ts-export`; the schemars side is
+  explicit in `crates/nexus-bootstrap/tests/ipc_schema_emit.rs`.)
 - Commit trailers: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` and
   `Claude-Session: …`. Don't put the model id in pushed artifacts.
 
 ## Verification
 
-- **Rust:** `cargo test -p nexus-agent` / `-p nexus-bootstrap` / `-p nexus-cli`;
-  `cargo clippy --workspace --all-targets`.
+- **Rust:** `cargo test -p nexus-agent` / `-p nexus-ai` / `-p nexus-bootstrap` /
+  `-p nexus-cli`; `cargo clippy --workspace --all-targets` (the crates carry
+  pre-existing pedantic warnings — CI is not `-D warnings`; just don't add new
+  ones in touched files).
 - **Shell** (from `shell/`): `pnpm install`, then `pnpm typecheck` / `pnpm lint`
   / `pnpm test`. Colocated `src/**/*.test.ts` are **not** CI-gated unless
   re-exported by a `tests/plugins-nexus-*.test.ts` shim.
@@ -90,8 +118,8 @@ formulation with real `ChatTurn` linkage) and tool error/retry policies. Touches
   `cd /home/user/nexus &&`**.
 - Disk fills from `ts-export` rebuilds; `cargo clean` reclaims ~30 GiB. **Never**
   `rm -rf target/debug/build/*/out` (deletes build-script outputs and breaks the
-  build). The task-output tmpfs is tiny — pipe cargo through `grep` or redirect
-  to a logfile and `tail`.
+  build). A full `--features ts-export` rebuild of a crate is ~5 min; redirect
+  cargo to a logfile and `tail`/`grep` it (the task-output tmpfs is tiny).
 - Keep the local branch at your own commits; don't fast-forward it onto GitHub
   merge commits.
 - GitHub only via `mcp__github__*` tools; scope currently includes
