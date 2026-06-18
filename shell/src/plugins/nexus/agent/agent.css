@@ -528,6 +528,87 @@
   border-color: var(--interactive-accent);
 }
 
+/* ── Ask (interactive question) card ──────────────────────────────── */
+
+.agent-ask {
+  padding: 12px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: 6px;
+  background: var(--interactive-accent-soft, var(--background-secondary));
+  box-shadow: 0 0 0 1px var(--interactive-accent) inset;
+}
+
+.agent-ask > header {
+  margin-bottom: 8px;
+}
+
+.agent-ask__badge {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: white;
+  background: var(--interactive-accent);
+  border-radius: 999px;
+}
+
+.agent-ask__questions {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.agent-ask__question {
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+}
+
+.agent-ask__prompt {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+
+.agent-ask__options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-ask__option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.agent-ask__text {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.agent-ask__text:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.agent-ask__actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* ── History sidebar ──────────────────────────────────────────────── */
 
 .agent-session__history {
