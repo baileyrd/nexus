@@ -103,10 +103,14 @@ pub(crate) fn insert_pending_bounded(
     evicted
 }
 
-/// Default interactive `ask` wait. Kept under [`DEFAULT_TOOL_TIMEOUT`] (60 s) so
-/// the tool-dispatch ceiling never cuts a wait off mid-flight; a longer
-/// interactive window needs a per-tool dispatch timeout (follow-up).
-pub(crate) const DEFAULT_ASK_TIMEOUT_SECS: u64 = 50;
+/// Default interactive `ask` wait — how long the handler blocks for the
+/// user's answers before returning `timed_out`. The `ask` tool carries a
+/// longer per-tool dispatch timeout
+/// ([`crate::tool_registry::ASK_DISPATCH_TIMEOUT_MS`]) so the bridge's
+/// `ipc_call` deadline never cuts this wait off mid-flight; the invariant
+/// (`ASK_DISPATCH_TIMEOUT_MS` > this) is guarded by a test in
+/// [`super::ask`].
+pub(crate) const DEFAULT_ASK_TIMEOUT_SECS: u64 = 300;
 
 /// One pending `ask`, paired with its insert time for aging — mirrors
 /// [`PendingEntry`]. The oneshot carries the frontend's answers as raw JSON.
@@ -734,12 +738,18 @@ pub(crate) struct KernelToolBridge {
 #[async_trait]
 impl ToolDispatcher for KernelToolBridge {
     async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, ToolDispatchError> {
+        // A registered tool may override the default dispatch ceiling
+        // (e.g. `ask` waits minutes for a human); unknown routes use the
+        // bridge default.
+        let timeout = crate::AgentToolRegistry::global()
+            .dispatch_timeout_for(&call.target_plugin_id, &call.command_id)
+            .unwrap_or(self.timeout);
         self.ctx
             .ipc_call(
                 &call.target_plugin_id,
                 &call.command_id,
                 call.args.clone(),
-                self.timeout,
+                timeout,
             )
             .await
             .map_err(|e| ipc_error_to_dispatch_error(&e))

@@ -42,6 +42,16 @@ requires_approval: boolean,
  */
 idempotent: boolean, 
 /**
+ * Per-tool dispatch timeout in milliseconds — how long the kernel
+ * tool bridge waits on `ipc_call` for this tool before giving up.
+ * Most tools complete well within the default
+ * ([`DEFAULT_TOOL_DISPATCH_TIMEOUT_MS`], 60 s); *interactive* tools
+ * like `ask` set a longer budget so the dispatch can outlast a human
+ * (the bridge falls back to its own default for tools not in this
+ * registry). Defaults to [`DEFAULT_TOOL_DISPATCH_TIMEOUT_MS`].
+ */
+dispatch_timeout_ms: bigint, 
+/**
  * Best-guess duration. Surfaced in `nexus tool list` so users
  * can plan around long-running tools without diving into source.
  * Not enforced.

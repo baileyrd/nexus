@@ -296,7 +296,12 @@ bridges: `AiChatBridge` (`ChatDriver`) calls `com.nexus.ai::propose_tool_calls`
 `KernelToolBridge` (`ToolDispatcher`) forwards each `ToolCall` to
 `ctx.ipc_call(target_plugin_id, command_id, args)`, folding any `IpcError` into a
 typed `ToolDispatchError` whose `kind` comes from `IpcErrorEnvelope::retryable`
-(via `ipc_error_to_dispatch_error`) so the retry policy classifies it exactly. The agent-side
+(via `ipc_error_to_dispatch_error`) so the retry policy classifies it exactly. The
+`ipc_call` deadline is per-tool: the bridge consults
+`AgentToolRegistry::dispatch_timeout_for(target, command)` (each spec's
+`dispatch_timeout_ms`, default 60 s) so the interactive `ask` tool can wait
+minutes for a human (`ASK_DISPATCH_TIMEOUT_MS`, 330 s) while ordinary tools keep
+the 60 s ceiling; unregistered routes fall back to the bridge default. The agent-side
 `AgentToolRegistry` is a process-global catalogue (`seed_default_tools` at boot)
 holding 13 tools — read/write/search/backlinks/git/terminal/delegate plus three
 BL-132 destructive ops (`delete_file`, `replace_in_files`, `git_push`, all
