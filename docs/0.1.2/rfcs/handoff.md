@@ -59,12 +59,17 @@ starting**:
   `KernelToolDispatcher`) fold `IpcError` into an exact kind via
   `IpcErrorEnvelope::retryable`, so the session loop retries transient IPC
   failures without string-sniffing. `is_retryable_tool_error` remains the
-  `Unknown` fallback (every `String`/`&str` conversion lands there). **Remaining
-  follow-up:** *per-tool idempotency-aware retry* — `ToolDispatchError` makes
-  classification exact, but the retry policy still doesn't consult a per-tool
-  idempotency flag (no such field on `AgentToolSpec` yet), so a transient
-  failure of a non-idempotent tool can still be re-dispatched. Add an
-  `idempotent` flag to `AgentToolSpec` + gate retries on it. (Spun out of #326.)
+  `Unknown` fallback (every `String`/`&str` conversion lands there).
+  *Per-tool idempotency-aware retry* is now **✅ shipped** too: `AgentToolSpec`
+  carries an `idempotent` flag (mutating / side-effecting tools — writes,
+  deletes, pushes, terminal exec, delegation, `ask` — are `false`);
+  `SessionConfig::non_idempotent_tools` is a deny-list the registry-free loop
+  consults so a *transient* failure of a non-idempotent tool is reported
+  without a retry; the agent service seeds it from
+  `AgentToolRegistry::non_idempotent_tool_names` when `max_tool_retries > 0`.
+  (Spun out of #326.) Possible further work: record a structured retry count on
+  `ToolCallRecord`, and promote `ToolDispatcher` to a structured error *enum*
+  (vs. the current message+kind struct) for typed per-tool idempotency keys.
 - **`ask` frontend wiring + per-tool dispatch timeout.** The `ask` backend
   publishes `com.nexus.agent.ask_requested` / awaits `ask_respond` but no
   frontend renders the prompt, so `ask` always times out; and it can only wait

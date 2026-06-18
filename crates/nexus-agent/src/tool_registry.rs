@@ -159,6 +159,17 @@ pub struct AgentToolSpec {
     /// Read by the session policy (ADR 0024 / DG-34); the registry
     /// itself does not gate dispatch.
     pub requires_approval: bool,
+    /// Whether re-dispatching this tool with identical args is safe —
+    /// i.e. a second run has no compounding or externally-observable
+    /// side effect. The session retry policy skips automatic retries for
+    /// non-idempotent tools (`false`) even on a transient failure, so a
+    /// tool whose first attempt may have landed before the transport
+    /// failed isn't silently run twice. Read-only / query tools are
+    /// idempotent; mutating and side-effecting tools (writes, deletes,
+    /// pushes, terminal execution, delegation, user prompts) are not.
+    /// Defaults to `true` (safe to retry) when omitted.
+    #[serde(default = "default_true")]
+    pub idempotent: bool,
     /// Best-guess duration. Surfaced in `nexus tool list` so users
     /// can plan around long-running tools without diving into source.
     /// Not enforced.
@@ -308,6 +319,22 @@ impl AgentToolRegistry {
                     .iter()
                     .all(|cap| owned.contains(cap))
             })
+            .collect()
+    }
+
+    /// Names of every registered tool flagged non-idempotent
+    /// (`!idempotent`). The agent session retry policy feeds this into
+    /// [`crate::SessionConfig::non_idempotent_tools`] so a transient
+    /// failure of a mutating / side-effecting tool isn't blindly
+    /// re-dispatched. Order is unspecified (registry is a map).
+    #[must_use]
+    pub fn non_idempotent_tool_names(&self) -> Vec<String> {
+        self.tools
+            .lock()
+            .expect("agent tool registry mutex")
+            .values()
+            .filter(|spec| !spec.idempotent)
+            .map(|spec| spec.name.clone())
             .collect()
     }
 
@@ -482,6 +509,13 @@ pub fn seed_default_tools() {
     }
 }
 
+/// serde default for [`AgentToolSpec::idempotent`] — an omitted flag means
+/// "safe to retry", matching the pre-idempotency behaviour where every
+/// transient failure was eligible for retry.
+fn default_true() -> bool {
+    true
+}
+
 /// Static catalogue of agent tools. Each entry's
 /// `(target_plugin_id, command_id)` mirrors the IPC route the AI
 /// executor uses for the same tool. Kept here rather than wired
@@ -503,6 +537,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -526,6 +561,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -546,6 +582,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -571,6 +608,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -589,6 +627,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 150,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -604,6 +643,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -621,6 +661,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -647,6 +688,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 300,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -668,6 +710,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 100,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -693,6 +736,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 400,
             required_capabilities: vec![Capability::SearchForge],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -719,6 +763,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 5,
             required_capabilities: vec![],
             target_plugin_id: "com.nexus.agent".to_string(),
@@ -755,6 +800,9 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            // Re-prompting the user is an observable side effect — never
+            // auto-retry an `ask` on a transient failure.
+            idempotent: false,
             estimated_duration_ms: 30_000,
             required_capabilities: vec![],
             target_plugin_id: "com.nexus.agent".to_string(),
@@ -769,6 +817,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 200,
             required_capabilities: vec![Capability::GitRead],
             target_plugin_id: "com.nexus.git".to_string(),
@@ -787,6 +836,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 2_000,
             required_capabilities: vec![Capability::TerminalExecute],
             target_plugin_id: "com.nexus.terminal".to_string(),
@@ -802,6 +852,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::TerminalExecute],
             target_plugin_id: "com.nexus.terminal".to_string(),
@@ -820,6 +871,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::TerminalExecute],
             target_plugin_id: "com.nexus.terminal".to_string(),
@@ -856,6 +908,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
             // session policy can decide whether the user wants the
             // sub-run to proceed.
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 5_000,
             required_capabilities: vec![Capability::FileSystemRead],
             target_plugin_id: "com.nexus.agent".to_string(),
@@ -888,6 +941,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 50,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -913,6 +967,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 500,
             required_capabilities: vec![Capability::FileSystemWrite],
             target_plugin_id: "com.nexus.storage".to_string(),
@@ -934,6 +989,7 @@ pub fn default_tool_catalog() -> Vec<AgentToolSpec> {
                 "additionalProperties": false
             }),
             requires_approval: true,
+            idempotent: false,
             estimated_duration_ms: 3_000,
             required_capabilities: vec![Capability::GitWrite],
             target_plugin_id: "com.nexus.git".to_string(),
@@ -957,6 +1013,7 @@ mod tests {
                 "additionalProperties": false
             }),
             requires_approval: false,
+            idempotent: true,
             estimated_duration_ms: 1,
             required_capabilities: caps,
             target_plugin_id: "com.test".to_string(),
@@ -984,6 +1041,40 @@ mod tests {
             assert!(
                 !spec.required_capabilities.is_empty(),
                 "tool {name} must declare a write capability",
+            );
+        }
+    }
+
+    /// Phase 5.5 follow-up: the default catalog flags mutating /
+    /// side-effecting tools non-idempotent so the retry policy won't
+    /// blindly re-dispatch them, while read-only / query tools stay
+    /// retry-safe.
+    #[test]
+    fn default_catalog_marks_mutating_tools_non_idempotent() {
+        let registry = AgentToolRegistry::new();
+        for spec in default_tool_catalog() {
+            registry.register(spec);
+        }
+        let non_idem: std::collections::HashSet<String> =
+            registry.non_idempotent_tool_names().into_iter().collect();
+
+        for name in [
+            "write_file",
+            "edit",
+            "delete_file",
+            "replace_in_files",
+            "git_push",
+            "terminal_run_saved",
+            "terminal_send_signal",
+            "delegate_to_agent",
+            "ask",
+        ] {
+            assert!(non_idem.contains(name), "{name} must be non-idempotent");
+        }
+        for name in ["read_file", "read_lines", "search_forge", "list_dir", "git_log"] {
+            assert!(
+                !non_idem.contains(name),
+                "{name} is read-only and must stay retry-safe"
             );
         }
     }

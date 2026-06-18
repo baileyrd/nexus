@@ -258,7 +258,13 @@ exponential backoff `tool_retry_backoff_ms`, opt-in/off by default. Retryability
 comes from the typed `ToolDispatchError.kind` (`ToolDispatchError::is_retryable`):
 `Transient`/`Permanent` are exact, and the kernel bridges set them from
 `IpcErrorEnvelope::retryable`; `Unknown` (every `String`/`&str` conversion) falls
-back to the `is_retryable_tool_error` message heuristic), `Abort`/`Timeout` stop with a
+back to the `is_retryable_tool_error` message heuristic. Retries are also
+idempotency-gated: a transient failure of a tool named in
+`SessionConfig::non_idempotent_tools` is reported without a retry so its effect
+can't double-apply — the agent service seeds that list from
+`AgentToolRegistry::non_idempotent_tool_names` (every catalog tool with
+`idempotent = false`: writes, deletes, pushes, terminal exec, delegation, `ask`)
+when retries are enabled), `Abort`/`Timeout` stop with a
 synthetic narration round; (7) if no call approved → `Aborted`; (8) rebuild
 the conversation from the recorded rounds via `compose_turns` — Phase 5.5 (2c)
 provider-native multi-turn: a leading `User{goal}` turn then each round as an
