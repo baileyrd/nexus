@@ -40,6 +40,12 @@ rather than describing what you would do. Prefer fewer, broader tool \
 calls over many tiny ones. If the goal is purely informational, \
 respond with text and no tool calls.\n\
 \n\
+You see the running conversation, including your own earlier tool \
+calls and their results. A tool result flagged as an error means that \
+call failed — adjust your approach, and stop (responding with a short \
+text summary, no tool calls) once the goal is complete or clearly \
+unreachable.\n\
+\n\
 To change part of an existing file, prefer `edit` over `write_file`: \
 read the file first (its reply carries a hashline `tag`), then send an \
 `edit` patch whose `[path#TAG]` header uses that tag. Reserve \
@@ -92,6 +98,103 @@ pub struct Proposal {
     pub tool_calls: Vec<ProposedToolCall>,
 }
 
+/// Phase 5.5 (2c) — one tool call inside an [`AgentChatTurn::Assistant`]
+/// turn. Serializes to the `com.nexus.ai::propose_tool_calls` `turns`
+/// wire shape (`nexus_ai::ipc::AiTurnToolCall`) so the IPC-backed driver
+/// can forward a full conversation with linkage intact.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AgentTurnToolCall {
+    /// Provider-issued tool-use id; the matching `tool_result` turn
+    /// echoes it back.
+    pub id: String,
+    /// Tool name as advertised in the registry.
+    pub name: String,
+    /// Decoded tool arguments the model emitted.
+    pub input: serde_json::Value,
+}
+
+/// Phase 5.5 (2c) — one conversation turn the agent loop replays to the
+/// provider, preserving the assistant `tool_use` ↔ `tool_result`
+/// linkage that the legacy single-string `propose` formulation dropped.
+/// Serializes to the `nexus_ai::ipc::AiChatTurn` wire shape
+/// (`tag = "kind"`); the agent crate stays kernel-/AI-free, so it owns
+/// its own mirror rather than depending on `nexus-ai`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentChatTurn {
+    /// A user message — the goal, a compacted-history preamble, or a
+    /// resume follow-up.
+    User {
+        /// The user's text.
+        content: String,
+    },
+    /// An assistant message: this round's narration plus the tool
+    /// calls it proposed.
+    Assistant {
+        /// Assistant narration; empty when the round was tool-only.
+        content: String,
+        /// Tool calls proposed this round, in order.
+        tool_calls: Vec<AgentTurnToolCall>,
+    },
+    /// One executed (or denied) tool call's result, keyed back to the
+    /// originating [`AgentTurnToolCall::id`].
+    ToolResult {
+        /// The assistant tool-call id this answers.
+        tool_use_id: String,
+        /// Stringified result, or the error / denial reason when
+        /// `is_error`.
+        content: String,
+        /// `true` for a failed or denied call.
+        is_error: bool,
+    },
+}
+
+/// Default projection of an [`AgentChatTurn`] conversation into a single
+/// user prompt. Used by the [`ChatDriver::propose_turns`] fallback for
+/// drivers that don't natively forward structured turns (the test
+/// drivers and the single-shot planner driver); IPC-backed drivers
+/// override `propose_turns` and never call this.
+#[must_use]
+pub fn flatten_turns_to_prompt(turns: &[AgentChatTurn]) -> String {
+    let mut out = String::new();
+    for turn in turns {
+        match turn {
+            AgentChatTurn::User { content } => {
+                out.push_str(content);
+                out.push('\n');
+            }
+            AgentChatTurn::Assistant {
+                content,
+                tool_calls,
+            } => {
+                if !content.is_empty() {
+                    out.push_str(content);
+                    out.push('\n');
+                }
+                for tc in tool_calls {
+                    out.push_str("[tool_call ");
+                    out.push_str(&tc.name);
+                    out.push(' ');
+                    out.push_str(&tc.input.to_string());
+                    out.push_str("]\n");
+                }
+            }
+            AgentChatTurn::ToolResult {
+                content, is_error, ..
+            } => {
+                out.push_str(if *is_error {
+                    "[tool error] "
+                } else {
+                    "[tool result] "
+                });
+                out.push_str(content);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
 /// Planner-side chat abstraction. Concrete impls drive an AI
 /// provider via IPC; tests supply canned drivers. Phase 1b of
 /// ADR 0023 replaced the previous `chat(system, user) -> String`
@@ -108,6 +211,30 @@ pub trait ChatDriver: Send + Sync {
     /// Any transport / provider / mapping failure is surfaced as a
     /// string.
     async fn propose(&self, system: &str, user_message: &str) -> Result<Proposal, String>;
+
+    /// Phase 5.5 (2c) — run one planning turn against a full
+    /// conversation rather than a single restated-goal string. The
+    /// `turns` carry the assistant `tool_use` ↔ `tool_result` linkage,
+    /// so a provider that understands function-calling sees a real
+    /// multi-turn exchange (the model's own prior tool calls and their
+    /// results) instead of a lossy bullet-point digest.
+    ///
+    /// The default flattens `turns` into one user message via
+    /// [`flatten_turns_to_prompt`] and defers to [`propose`], so the
+    /// many canned test drivers and the single-shot planner driver keep
+    /// working unchanged. The IPC-backed driver overrides this to
+    /// forward the structured turns to `com.nexus.ai::propose_tool_calls`.
+    ///
+    /// # Errors
+    /// Any transport / provider / mapping failure is surfaced as a
+    /// string.
+    async fn propose_turns(
+        &self,
+        system: &str,
+        turns: &[AgentChatTurn],
+    ) -> Result<Proposal, String> {
+        self.propose(system, &flatten_turns_to_prompt(turns)).await
+    }
 }
 
 /// LLM-driven agent. Wraps a [`ChatDriver`] and a system prompt.

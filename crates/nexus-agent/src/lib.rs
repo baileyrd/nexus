@@ -77,7 +77,10 @@ pub use custom_agent::{
     ManifestToolPolicy, MemorySection, SystemPromptSection, ToolsSection, AGENTS_DIR,
     MANIFEST_FILE_NAME,
 };
-pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
+pub use llm::{
+    flatten_turns_to_prompt, AgentChatTurn, AgentTurnToolCall, ChatDriver, LlmAgent, Proposal,
+    ProposedToolCall, DEFAULT_SYSTEM_PROMPT,
+};
 pub use session::{
     run_session, run_session_resumed, run_session_with_config, run_session_with_id, AgentSession,
     AutoApproveAll, ProposedRound, RoundDecision, RoundDecisionEntry, RoundRecord, SessionCheckpoint,

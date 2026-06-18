@@ -308,13 +308,25 @@ fn turns_to_anthropic(turns: &[ChatTurn]) -> Vec<AnthropicBlockMessage> {
     for turn in turns {
         match turn {
             ChatTurn::User { content } => {
-                flush_tool_results(&mut out, &mut pending_tool_results);
-                out.push(AnthropicBlockMessage {
-                    role: "user",
-                    content: vec![AnthropicBlock::Text {
+                // Anthropic forbids two consecutive user messages and
+                // requires tool_result blocks to lead the user turn that
+                // answers an assistant's tool_use. When results are
+                // pending (e.g. a resume that injects a new instruction
+                // right after a tool round), fold this user text into the
+                // SAME user message rather than emitting a second one.
+                if pending_tool_results.is_empty() {
+                    out.push(AnthropicBlockMessage {
+                        role: "user",
+                        content: vec![AnthropicBlock::Text {
+                            text: content.clone(),
+                        }],
+                    });
+                } else {
+                    pending_tool_results.push(AnthropicBlock::Text {
                         text: content.clone(),
-                    }],
-                });
+                    });
+                    flush_tool_results(&mut out, &mut pending_tool_results);
+                }
             }
             ChatTurn::Assistant {
                 content,
@@ -471,6 +483,33 @@ mod tests {
         assert!(arr[0].get("is_error").is_none()); // success → omitted
         assert_eq!(arr[1]["tool_use_id"], "t2");
         assert_eq!(arr[1]["is_error"], true);
+    }
+
+    /// Phase 5.5 (2c) — a user turn directly after tool results (e.g. a
+    /// resume that injects a new instruction mid-tool-round) must fold
+    /// into the SAME user message, not emit a second consecutive user
+    /// message (which Anthropic rejects).
+    #[test]
+    fn user_turn_after_tool_results_merges_into_one_message() {
+        let turns = [
+            ChatTurn::ToolResult {
+                tool_use_id: "t1".to_string(),
+                content: "alpha".to_string(),
+                is_error: false,
+            },
+            ChatTurn::User {
+                content: "now do the next thing".to_string(),
+            },
+        ];
+        let messages = turns_to_anthropic(&turns);
+        assert_eq!(messages.len(), 1, "must not produce two user messages");
+        assert_eq!(messages[0].role, "user");
+        let json = serde_json::to_value(&messages[0].content).expect("ser");
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], "tool_result");
+        assert_eq!(arr[1]["type"], "text");
+        assert_eq!(arr[1]["text"], "now do the next thing");
     }
 
     #[test]

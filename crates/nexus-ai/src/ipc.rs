@@ -287,6 +287,80 @@ pub struct AiStreamChatArgs {
 
 // ─── G7 — propose_tool_calls (no-execute single-turn) ─────────────────────
 
+/// One tool call inside an [`AiChatTurn::Assistant`] turn — the rich,
+/// linkage-preserving form used by the Phase 5.5 (2c) multi-turn
+/// `propose_tool_calls` path. Mirrors the model's native `tool_use`
+/// block: `id` is the provider-issued handle the matching
+/// [`AiChatTurn::ToolResult`] echoes back so the model can correlate a
+/// result with the call that produced it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiTurnToolCall {
+    /// Provider-issued tool-use id (e.g. `toolu_…`). The matching
+    /// `tool_result` turn echoes this back.
+    pub id: String,
+    /// Tool name as advertised in the registry.
+    pub name: String,
+    /// Decoded tool arguments the model emitted.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub input: serde_json::Value,
+}
+
+/// One conversation turn on the `propose_tool_calls` wire that
+/// preserves the assistant `tool_use` ↔ `tool_result` linkage a plain
+/// text-only [`AiStreamAskMessage`] cannot. Phase 5.5 (2c): the agent
+/// loop sends the whole conversation as `turns` so the provider sees a
+/// real multi-turn exchange instead of a restated-goal blob. Mirrors
+/// [`crate::provider::ChatTurn`] across the IPC boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AiChatTurn {
+    /// A user message — plain text.
+    User {
+        /// The user's text.
+        content: String,
+    },
+    /// An assistant message that may carry text and/or tool calls.
+    Assistant {
+        /// Assistant narration; empty when the model emitted only
+        /// tool-use blocks.
+        #[serde(default)]
+        content: String,
+        /// Tool calls the model issued, in order. Empty for a
+        /// text-only assistant turn.
+        #[serde(default)]
+        tool_calls: Vec<AiTurnToolCall>,
+    },
+    /// The dispatcher's reply to one assistant tool call.
+    ToolResult {
+        /// The [`AiTurnToolCall::id`] this answers.
+        tool_use_id: String,
+        /// Stringified tool result (or the error message when
+        /// `is_error`).
+        content: String,
+        /// `true` when the tool returned an error; providers surface
+        /// this distinctly from a successful result.
+        #[serde(default)]
+        is_error: bool,
+    },
+}
+
 /// Args for `com.nexus.ai::propose_tool_calls`.
 ///
 /// Single-turn entry point that runs the provider once with the
@@ -312,8 +386,17 @@ pub struct AiStreamChatArgs {
 #[serde(deny_unknown_fields)]
 pub struct AiProposeArgs {
     /// Conversation messages — same shape as `stream_chat`. Most
-    /// callers pass a single user turn carrying the goal.
+    /// callers pass a single user turn carrying the goal. Legacy,
+    /// text-only path: superseded by `turns` when that is non-empty.
     pub messages: Vec<AiStreamAskMessage>,
+    /// Phase 5.5 (2c) — rich, linkage-preserving conversation turns.
+    /// When present and non-empty this **supersedes** `messages`: the
+    /// handler builds provider-native [`crate::provider::ChatTurn`]s
+    /// directly from it, so assistant `tool_use` blocks and their
+    /// `tool_result` replies reach the model intact. Absent / empty
+    /// keeps the legacy text-only `messages` path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<AiChatTurn>,
     /// Optional system prompt forwarded to the provider verbatim.
     /// Unlike `stream_chat`, this handler does NOT prepend the host
     /// system-prompt floor — agent planning prompts are caller-owned.

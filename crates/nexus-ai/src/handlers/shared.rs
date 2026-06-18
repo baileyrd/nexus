@@ -410,6 +410,47 @@ pub(crate) fn messages_to_turns(messages: Vec<crate::provider::ChatMessage>) -> 
         .collect()
 }
 
+/// Phase 5.5 (2c) — convert the rich [`AiChatTurn`] wire form into
+/// provider-native [`ChatTurn`]s with the assistant `tool_use` ↔
+/// `tool_result` linkage intact. Unlike [`messages_to_turns`] (which
+/// can only carry text, dropping the tool calls an assistant issued)
+/// this replays a real multi-turn conversation to the provider.
+pub(crate) fn ai_turns_to_chat_turns(turns: &[crate::ipc::AiChatTurn]) -> Vec<ChatTurn> {
+    use crate::ipc::AiChatTurn;
+    use crate::provider::ToolCall;
+    turns
+        .iter()
+        .map(|t| match t {
+            AiChatTurn::User { content } => ChatTurn::User {
+                content: content.clone(),
+            },
+            AiChatTurn::Assistant {
+                content,
+                tool_calls,
+            } => ChatTurn::Assistant {
+                content: content.clone(),
+                tool_calls: tool_calls
+                    .iter()
+                    .map(|c| ToolCall {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        input: c.input.clone(),
+                    })
+                    .collect(),
+            },
+            AiChatTurn::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => ChatTurn::ToolResult {
+                tool_use_id: tool_use_id.clone(),
+                content: content.clone(),
+                is_error: *is_error,
+            },
+        })
+        .collect()
+}
+
 // ─── Streaming envelope ─────────────────────────────────────────────────────
 
 /// Shared bus contract for the `stream_chat` family. Owns the

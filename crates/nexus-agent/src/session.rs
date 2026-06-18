@@ -24,7 +24,9 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use crate::{ChatDriver, ProposedToolCall, ToolCall, ToolDispatcher};
+use crate::{
+    AgentChatTurn, AgentTurnToolCall, ChatDriver, ProposedToolCall, ToolCall, ToolDispatcher,
+};
 
 /// Legacy hard cap on round count (the BL-119-pre default). Kept
 /// `pub` so external tests that pin against the ADR 0024 Phase 2a
@@ -602,26 +604,16 @@ where
         return session;
     }
 
-    // Conversation transcript fed back to the driver each round.
-    // Phase 2a uses a simple "current-user-prompt" formulation:
-    // each round, we restate the goal and append the prior
-    // round's results as bullet points. A future Phase 2c can
-    // upgrade this to provider-native ChatTurn linkage once the
-    // driver surface supports multi-turn directly.
+    // Phase 5.5 (2c) — the conversation replayed to the driver each
+    // round. Provider-native turns preserve the assistant tool_use ↔
+    // tool_result linkage the old restated-goal formulation dropped, so
+    // the model sees its own prior calls and their real results rather
+    // than a "- round N: tool ok" digest.
     //
-    // RFC 0008 — a fresh run starts from the goal; a resumed/forked run rebuilds
-    // context from the inherited rounds and then appends the new user
-    // instruction (`follow_up`) as the next ask.
-    let mut current_prompt = if session.rounds.is_empty() && follow_up.is_none() {
-        goal.to_string()
-    } else {
-        let mut p = compose_followup_prompt_compressed(goal, &session.rounds, 0, "", false);
-        if let Some(msg) = follow_up.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
-            p.push_str("\n\n## New instruction\n");
-            p.push_str(msg);
-        }
-        p
-    };
+    // RFC 0008 — a fresh run is just the goal; a resumed/forked run
+    // replays the inherited rounds and weaves in the new user
+    // instruction (`follow_up`).
+    let mut current_turns = compose_turns(goal, &session.rounds, 0, "", follow_up.as_deref());
 
     // BL-120 — compression state. `live_rounds_start` is the index
     // into `session.rounds` of the first round NOT yet folded into
@@ -634,13 +626,13 @@ where
     // even after older rounds have been rolled up.
     const WORKING_SET_ROUNDS: usize = 4;
 
-    // BL-131 — per-iteration mechanical-waste passes on the
-    // assembled prompt. Today's `compose_followup_prompt_compressed`
-    // emits minimal `- round N: tool ok` lines so the passes are
-    // mostly no-ops, but the wiring is in place for when richer
-    // tool results land. Each pass is bounded by the configured
-    // budget; metrics emit through `tracing::info` (bus-event
-    // wiring deferred — see BL-131 closure note).
+    // BL-131 — per-iteration mechanical-waste passes applied to the
+    // tool-result turn contents (see `sanitize_turns`). With ordinary
+    // results the passes are mostly no-ops, but the wiring is in place
+    // for when verbose payloads (base64 image data, browser snapshots)
+    // land. Each pass is bounded by the configured budget; metrics emit
+    // through `tracing::info` (bus-event wiring deferred — see BL-131
+    // closure note).
     let sanitize_opts = crate::context_sanitize::SanitizeOptions {
         // Reuse the BL-119 / BL-120 context-token budget. Multiply
         // by 4 to approximate chars-per-token; the trim is a coarse
@@ -654,23 +646,25 @@ where
         // Absolute round number = inherited prefix length + this iteration, so a
         // resumed run continues numbering past its seed (RFC 0008).
         let round_idx = seed_len + iter;
-        // BL-131 sanitisation pass before each driver invocation.
-        let sanitized = crate::context_sanitize::sanitize_prompt(&current_prompt, &sanitize_opts);
-        if sanitized.metrics.any_fired() {
+        // BL-131 sanitisation pass before each driver invocation,
+        // applied to the tool-result turn contents where verbose
+        // payloads (base64 image data, stale snapshots, over-budget
+        // length) actually land.
+        let metrics = sanitize_turns(&mut current_turns, &sanitize_opts);
+        if metrics.any_fired() {
             tracing::info!(
                 target: "nexus_agent::context_sanitize",
                 round = round_idx,
-                dedup_count = sanitized.metrics.dedup_count,
-                base64_bytes_stripped = sanitized.metrics.base64_bytes_stripped,
-                snapshot_compressed = sanitized.metrics.snapshot_compressed_count,
-                trimmed_bytes = sanitized.metrics.trimmed_bytes,
+                dedup_count = metrics.dedup_count,
+                base64_bytes_stripped = metrics.base64_bytes_stripped,
+                snapshot_compressed = metrics.snapshot_compressed_count,
+                trimmed_bytes = metrics.trimmed_bytes,
                 "BL-131: context sanitisation passes fired",
             );
-            current_prompt = sanitized.text;
         }
 
         // Ask the model for this round's tool calls.
-        let mut proposal = match driver.propose(system, &current_prompt).await {
+        let mut proposal = match driver.propose_turns(system, &current_turns).await {
             Ok(p) => p,
             Err(e) => {
                 session.rounds.push(RoundRecord {
@@ -727,7 +721,6 @@ where
         .await;
 
         let any_approved = records.iter().any(|r| r.approved);
-        let all_errored = !records.is_empty() && records.iter().all(|r| !r.error.is_empty());
         session.rounds.push(RoundRecord {
             round: round_idx,
             text: proposal.text,
@@ -759,27 +752,23 @@ where
             break;
         }
 
-        // Build the next round's prompt from the approved results.
-        // Stay deliberately minimal — the goal is to give the model
-        // enough context to pick a sensible next step without
-        // bloating the prompt.
-        current_prompt = compose_followup_prompt_compressed(
-            goal,
-            &session.rounds,
-            live_rounds_start,
-            &live_summary,
-            all_errored,
-        );
+        // Rebuild the conversation from the recorded rounds so the next
+        // turn carries this round's assistant calls and their real
+        // results (failures flagged via ToolResult.is_error). The
+        // resume follow-up only seeds the very first turn, so it is not
+        // re-applied here.
+        current_turns =
+            compose_turns(goal, &session.rounds, live_rounds_start, &live_summary, None);
 
-        // BL-120 — trigger compression while the prompt exceeds the
-        // configured token budget AND there are at least
+        // BL-120 — trigger compression while the conversation exceeds
+        // the configured token budget AND there are at least
         // `WORKING_SET_ROUNDS` rounds left untouched. Multiple
         // compactions per round are allowed; each one rolls another
         // chunk of history forward but stops short of the working
         // set so the most recent rounds stay verbatim.
         if config.max_context_tokens > 0 {
             let budget_chars = (config.max_context_tokens as usize).saturating_mul(4);
-            while current_prompt.len() > budget_chars
+            while turns_char_len(&current_turns) > budget_chars
                 && session.rounds.len().saturating_sub(live_rounds_start) > WORKING_SET_ROUNDS
             {
                 let new_start = session.rounds.len() - WORKING_SET_ROUNDS;
@@ -815,12 +804,12 @@ where
                 }
                 live_summary.push_str(&summary);
                 live_rounds_start = new_start;
-                current_prompt = compose_followup_prompt_compressed(
+                current_turns = compose_turns(
                     goal,
                     &session.rounds,
                     live_rounds_start,
                     &live_summary,
-                    all_errored,
+                    None,
                 );
             }
         }
@@ -1031,54 +1020,151 @@ async fn dispatch_one<T: ToolDispatcher + ?Sized>(
     }
 }
 
-/// BL-120 — follow-up prompt builder that honours a
-/// rolling-summary preamble + a working-set window. `live_start`
-/// is the index into `rounds` of the first round still considered
-/// "live"; rounds before it have already been folded into
-/// `live_summary` by the configured compressor.
-fn compose_followup_prompt_compressed(
+/// Phase 5.5 (2c) — build the provider-native conversation replayed to
+/// the driver each round. Where the old `compose_followup_prompt_compressed`
+/// flattened history into a lossy "- round N: tool ok" digest, this
+/// preserves the assistant `tool_use` ↔ `tool_result` linkage:
+///
+///   - one leading `User` turn carrying the goal (+ any BL-120 compacted
+///     summary, + the resume follow-up *when there are no live rounds*);
+///   - each live round as an `Assistant` turn (its narration + the tool
+///     calls it proposed) followed by one `ToolResult` turn per call —
+///     successes carry the response, failures/denials carry the error
+///     text with `is_error = true`;
+///   - a trailing `User` turn for the resume follow-up when live rounds
+///     exist.
+///
+/// Folding the follow-up into the goal turn when there are no live rounds
+/// (and only then appending it as its own turn) keeps the sequence free
+/// of two consecutive same-role turns, which Anthropic rejects.
+///
+/// `live_start` is the index into `rounds` of the first round not yet
+/// folded into `live_summary` (BL-120); earlier rounds live in the
+/// summary instead.
+fn compose_turns(
     goal: &str,
     rounds: &[RoundRecord],
     live_start: usize,
     live_summary: &str,
-    all_errored: bool,
-) -> String {
-    let mut out = String::new();
-    out.push_str("Original goal: ");
-    out.push_str(goal);
-    if !live_summary.is_empty() {
-        out.push_str("\n\nEarlier work (compacted):\n");
-        out.push_str(live_summary);
-    }
-    out.push_str("\n\nResults so far:\n");
+    follow_up: Option<&str>,
+) -> Vec<AgentChatTurn> {
     let live = rounds.get(live_start..).unwrap_or(&[]);
+    let follow_up = follow_up.map(str::trim).filter(|m| !m.is_empty());
+
+    let mut goal_turn = String::with_capacity(goal.len() + live_summary.len() + 32);
+    goal_turn.push_str("Original goal: ");
+    goal_turn.push_str(goal);
+    if !live_summary.is_empty() {
+        goal_turn.push_str("\n\nEarlier work (compacted):\n");
+        goal_turn.push_str(live_summary);
+    }
+    if live.is_empty() {
+        if let Some(msg) = follow_up {
+            goal_turn.push_str("\n\n## New instruction\n");
+            goal_turn.push_str(msg);
+        }
+    }
+
+    let mut turns = Vec::with_capacity(1 + live.len() * 2 + 1);
+    turns.push(AgentChatTurn::User { content: goal_turn });
+
     for r in live {
-        if r.tool_calls.is_empty() {
-            continue;
-        }
+        turns.push(AgentChatTurn::Assistant {
+            content: r.text.clone(),
+            tool_calls: r
+                .tool_calls
+                .iter()
+                .map(|tc| AgentTurnToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    input: tc.tool_call.args.clone(),
+                })
+                .collect(),
+        });
         for tc in &r.tool_calls {
-            if tc.approved && tc.error.is_empty() {
-                out.push_str(&format!("- round {}: {} ok\n", r.round, tc.name));
-            } else if !tc.error.is_empty() {
-                out.push_str(&format!(
-                    "- round {}: {} failed: {}\n",
-                    r.round, tc.name, tc.error
-                ));
-            }
+            let (content, is_error) = tool_result_payload(tc);
+            turns.push(AgentChatTurn::ToolResult {
+                tool_use_id: tc.id.clone(),
+                content,
+                is_error,
+            });
         }
     }
-    if all_errored {
-        out.push_str(
-            "\nThe last round's tool calls all failed. Consider trying \
-             a different approach or stopping if the goal is unreachable.",
-        );
-    } else {
-        out.push_str(
-            "\nDecide the next tool call(s), or respond with text and no \
-             tool calls if the goal is complete.",
-        );
+
+    if !live.is_empty() {
+        if let Some(msg) = follow_up {
+            turns.push(AgentChatTurn::User {
+                content: format!("## New instruction\n{msg}"),
+            });
+        }
     }
-    out
+    turns
+}
+
+/// Project a recorded tool call into a `ToolResult` body + error flag.
+/// A non-empty `error` (a failed dispatch *or* a policy denial — see
+/// [`dispatch_one`]) becomes the error content with `is_error = true`;
+/// otherwise the dispatcher's JSON response is stringified (unwrapping a
+/// bare JSON string so the model sees clean text). Every record yields
+/// exactly one result, so each assistant `tool_use` keeps its matching
+/// `tool_result` — an invariant providers enforce.
+fn tool_result_payload(tc: &ToolCallRecord) -> (String, bool) {
+    if tc.error.is_empty() {
+        let body = tc.response.as_ref().map_or(String::new(), |v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        });
+        (body, false)
+    } else {
+        (tc.error.clone(), true)
+    }
+}
+
+/// Approximate character size of a conversation, used as the BL-120
+/// compression trigger (chars ≈ tokens × 4). Sums turn text plus, for
+/// assistant turns, the tool name + serialized input of each call.
+fn turns_char_len(turns: &[AgentChatTurn]) -> usize {
+    turns
+        .iter()
+        .map(|t| match t {
+            AgentChatTurn::User { content } | AgentChatTurn::ToolResult { content, .. } => {
+                content.len()
+            }
+            AgentChatTurn::Assistant {
+                content,
+                tool_calls,
+            } => {
+                content.len()
+                    + tool_calls
+                        .iter()
+                        .map(|c| c.name.len() + c.input.to_string().len())
+                        .sum::<usize>()
+            }
+        })
+        .sum()
+}
+
+/// BL-131 — mechanical context sanitisation applied to the tool-result
+/// turn contents (where verbose payloads land), reusing the pure-string
+/// [`crate::context_sanitize::sanitize_prompt`] passes per result and
+/// aggregating their metrics. The model's own narration and the goal
+/// turn are left untouched.
+fn sanitize_turns(
+    turns: &mut [AgentChatTurn],
+    opts: &crate::context_sanitize::SanitizeOptions,
+) -> crate::context_sanitize::SanitizeMetrics {
+    let mut agg = crate::context_sanitize::SanitizeMetrics::default();
+    for turn in turns.iter_mut() {
+        if let AgentChatTurn::ToolResult { content, .. } = turn {
+            let res = crate::context_sanitize::sanitize_prompt(content, opts);
+            agg.dedup_count += res.metrics.dedup_count;
+            agg.base64_bytes_stripped += res.metrics.base64_bytes_stripped;
+            agg.snapshot_compressed_count += res.metrics.snapshot_compressed_count;
+            agg.trimmed_bytes += res.metrics.trimmed_bytes;
+            *content = res.text;
+        }
+    }
+    agg
 }
 
 #[cfg(test)]
@@ -1254,6 +1340,96 @@ mod tests {
         // The first prompt carries the new instruction (and the inherited context).
         assert!(prompts[0].contains("the new ask"), "first prompt: {}", prompts[0]);
         assert!(prompts[0].contains("New instruction"), "first prompt: {}", prompts[0]);
+    }
+
+    /// Phase 5.5 (2c) — the loop drives the provider through
+    /// `propose_turns`, and the conversation it replays carries the
+    /// assistant `tool_use` ↔ `tool_result` linkage (the model's own
+    /// prior call plus its real result), not a restated-goal digest.
+    #[tokio::test]
+    async fn loop_replays_provider_native_tool_turns() {
+        struct CapturingTurnsDriver {
+            replies: Mutex<std::collections::VecDeque<Proposal>>,
+            captured: Mutex<Vec<Vec<AgentChatTurn>>>,
+        }
+        #[async_trait]
+        impl ChatDriver for CapturingTurnsDriver {
+            async fn propose(&self, _system: &str, _user: &str) -> Result<Proposal, String> {
+                panic!("loop must call propose_turns, not the single-string propose");
+            }
+            async fn propose_turns(
+                &self,
+                _system: &str,
+                turns: &[AgentChatTurn],
+            ) -> Result<Proposal, String> {
+                self.captured.lock().unwrap().push(turns.to_vec());
+                Ok(self.replies.lock().unwrap().pop_front().expect("exhausted"))
+            }
+        }
+
+        let driver = CapturingTurnsDriver {
+            replies: Mutex::new(
+                vec![
+                    Proposal {
+                        text: "fetching".into(),
+                        tool_calls: vec![read_tool("u1", "a.md")],
+                    },
+                    Proposal {
+                        text: "done".into(),
+                        tool_calls: Vec::new(),
+                    },
+                ]
+                .into(),
+            ),
+            captured: Mutex::new(Vec::new()),
+        };
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "summarise notes",
+            "system",
+            None,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+
+        let captured = driver.captured.lock().unwrap();
+        // First turn: fresh goal only. Second turn: goal + the executed
+        // round replayed with linkage.
+        assert_eq!(captured.len(), 2, "two planning turns");
+        assert!(matches!(&captured[0][..], [AgentChatTurn::User { .. }]));
+
+        let second = &captured[1];
+        assert!(
+            matches!(&second[0], AgentChatTurn::User { content } if content.contains("summarise notes")),
+            "first turn carries the goal: {second:?}"
+        );
+        match &second[1] {
+            AgentChatTurn::Assistant {
+                content,
+                tool_calls,
+            } => {
+                assert_eq!(content, "fetching");
+                assert_eq!(tool_calls.len(), 1);
+                assert_eq!(tool_calls[0].id, "u1");
+                assert_eq!(tool_calls[0].name, "read_file");
+            }
+            other => panic!("expected Assistant with a tool call, got {other:?}"),
+        }
+        match &second[2] {
+            AgentChatTurn::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "u1", "result keyed back to the call");
+                assert!(content.contains("ok"), "carries the real result: {content}");
+                assert!(!is_error);
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
     }
 
     #[tokio::test]

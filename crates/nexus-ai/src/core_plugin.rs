@@ -1202,6 +1202,94 @@ mod tool_dispatch_tests {
         }
     }
 
+    /// Phase 5.5 (2c) — the rich `turns` wire form round-trips into
+    /// provider-native [`ChatTurn`]s with assistant `tool_use` ↔
+    /// `tool_result` linkage preserved, unlike the lossy text-only
+    /// `messages_to_turns` path.
+    #[test]
+    fn ai_turns_preserve_tool_use_linkage() {
+        use crate::ipc::{AiChatTurn, AiTurnToolCall};
+        use crate::handlers::shared::ai_turns_to_chat_turns;
+
+        let wire = vec![
+            AiChatTurn::User {
+                content: "read notes.md".to_string(),
+            },
+            AiChatTurn::Assistant {
+                content: "on it".to_string(),
+                tool_calls: vec![AiTurnToolCall {
+                    id: "toolu_1".to_string(),
+                    name: "read_file".to_string(),
+                    input: serde_json::json!({ "path": "notes.md" }),
+                }],
+            },
+            AiChatTurn::ToolResult {
+                tool_use_id: "toolu_1".to_string(),
+                content: "file contents".to_string(),
+                is_error: false,
+            },
+        ];
+        let turns = ai_turns_to_chat_turns(&wire);
+        assert_eq!(turns.len(), 3);
+        match &turns[1] {
+            ChatTurn::Assistant {
+                content,
+                tool_calls,
+            } => {
+                assert_eq!(content, "on it");
+                assert_eq!(tool_calls.len(), 1, "tool call must survive the boundary");
+                assert_eq!(tool_calls[0].id, "toolu_1");
+                assert_eq!(tool_calls[0].name, "read_file");
+            }
+            other => panic!("expected Assistant with a tool call, got {other:?}"),
+        }
+        match &turns[2] {
+            ChatTurn::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(content, "file contents");
+                assert!(!is_error);
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    /// The internally-tagged `AiChatTurn` wire form survives a JSON
+    /// round-trip (the agent serializes it, the AI handler decodes it).
+    #[test]
+    fn ai_chat_turn_json_round_trip() {
+        use crate::ipc::{AiChatTurn, AiTurnToolCall};
+
+        let turns = vec![
+            AiChatTurn::User {
+                content: "hi".to_string(),
+            },
+            AiChatTurn::Assistant {
+                content: String::new(),
+                tool_calls: vec![AiTurnToolCall {
+                    id: "t1".to_string(),
+                    name: "grep".to_string(),
+                    input: serde_json::json!({ "q": "x" }),
+                }],
+            },
+            AiChatTurn::ToolResult {
+                tool_use_id: "t1".to_string(),
+                content: "boom".to_string(),
+                is_error: true,
+            },
+        ];
+        let json = serde_json::to_string(&turns).expect("serialize");
+        // Internally tagged on `kind`.
+        assert!(json.contains("\"kind\":\"user\""));
+        assert!(json.contains("\"kind\":\"assistant\""));
+        assert!(json.contains("\"kind\":\"tool_result\""));
+        let back: Vec<AiChatTurn> = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, turns);
+    }
+
     // ─── BL-010 / BL-011 / BL-034 — `mode=complete` engine path ─────────
 
     fn chat_args_complete() -> AiStreamChatArgs {

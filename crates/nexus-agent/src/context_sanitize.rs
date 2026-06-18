@@ -2,23 +2,22 @@
 //!
 //! Complementary to BL-120's LLM-driven turn summarisation: that pass
 //! folds semantic redundancy across rounds; this pass targets
-//! *mechanical* waste in the assembled prompt (duplicate tool-result
-//! lines, inline base64 data URIs, stale browser snapshots, raw
-//! over-budget length) without an LLM call. The four passes are
-//! pure-string transformations applied to the assembled
-//! `current_prompt` string just before [`crate::session`] hands it
-//! to the chat driver.
+//! *mechanical* waste (duplicate result lines, inline base64 data URIs,
+//! stale browser snapshots, raw over-budget length) without an LLM
+//! call. The four passes are pure-string transformations.
 //!
 //! ## Wire point
 //!
-//! Called from [`crate::session::run_session_with_compressor`] each
-//! iteration after `compose_followup_prompt_compressed` returns and
-//! before `driver.propose`. Today the composer emits minimal
-//! `- round N: tool ok` lines, so most passes are effectively no-ops
-//! against current outputs; the module is forward-looking
-//! infrastructure ready to fire when richer tool results land in
-//! the prompt (e.g. when a browser-snapshot tool, vision tool, or
-//! verbose stdout dispatcher starts shipping its raw payload back).
+//! Since Phase 5.5 (2c) the agent loop replays a provider-native
+//! conversation rather than one flattened prompt string, so
+//! [`crate::session`] applies [`sanitize_prompt`] per **tool-result
+//! turn content** — exactly where verbose payloads land — each
+//! iteration before `driver.propose_turns`. (The pure functions below
+//! are unchanged; only the call site moved from the old flat
+//! `current_prompt` to individual turn bodies.) With ordinary tool
+//! results most passes are no-ops; the module is forward-looking
+//! infrastructure ready to fire when a browser-snapshot tool, vision
+//! tool, or verbose stdout dispatcher ships a raw payload back.
 //!
 //! ## Passes
 //!
