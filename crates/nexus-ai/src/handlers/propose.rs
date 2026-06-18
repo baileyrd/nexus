@@ -10,7 +10,8 @@ use nexus_plugins::PluginError;
 
 use crate::config::AiConfig;
 use crate::handlers::shared::{
-    build_ai_provider, exec_err, filter_to_read_only, ipc_messages_to_chat, messages_to_turns,
+    ai_turns_to_chat_turns, build_ai_provider, exec_err, filter_to_read_only, ipc_messages_to_chat,
+    messages_to_turns,
 };
 use crate::ipc::{
     AiProposeArgs, AiProposeReply, AiProposedToolCall, AiToolPolicy, AiUnmappedToolCall,
@@ -54,8 +55,16 @@ pub(crate) async fn handle_propose_tool_calls(
         }
     };
 
-    let messages = ipc_messages_to_chat(&parsed.messages);
-    let turns = messages_to_turns(messages);
+    // Phase 5.5 (2c) — prefer the rich `turns` payload (assistant
+    // `tool_use` ↔ `tool_result` linkage preserved) when the caller
+    // sends it; fall back to the legacy text-only `messages` form
+    // otherwise so existing single-turn callers keep working.
+    let turns = if parsed.turns.is_empty() {
+        let messages = ipc_messages_to_chat(&parsed.messages);
+        messages_to_turns(messages)
+    } else {
+        ai_turns_to_chat_turns(&parsed.turns)
+    };
     let schemas = registry.schemas();
     let on_chunk = |_: String| {};
     let output = ai

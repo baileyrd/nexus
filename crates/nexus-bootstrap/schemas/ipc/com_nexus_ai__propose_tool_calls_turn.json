@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiChatTurn",
+  "description": "One conversation turn on the `propose_tool_calls` wire that\npreserves the assistant `tool_use` ↔ `tool_result` linkage a plain\ntext-only [`AiStreamAskMessage`] cannot. Phase 5.5 (2c): the agent\nloop sends the whole conversation as `turns` so the provider sees a\nreal multi-turn exchange instead of a restated-goal blob. Mirrors\n[`crate::provider::ChatTurn`] across the IPC boundary.",
+  "oneOf": [
+    {
+      "description": "A user message — plain text.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "The user's text.",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "const": "user"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "content"
+      ]
+    },
+    {
+      "description": "An assistant message that may carry text and/or tool calls.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Assistant narration; empty when the model emitted only\ntool-use blocks.",
+          "type": "string",
+          "default": ""
+        },
+        "kind": {
+          "type": "string",
+          "const": "assistant"
+        },
+        "tool_calls": {
+          "description": "Tool calls the model issued, in order. Empty for a\ntext-only assistant turn.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AiTurnToolCall"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    {
+      "description": "The dispatcher's reply to one assistant tool call.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Stringified tool result (or the error message when\n`is_error`).",
+          "type": "string"
+        },
+        "is_error": {
+          "description": "`true` when the tool returned an error; providers surface\nthis distinctly from a successful result.",
+          "type": "boolean",
+          "default": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "tool_result"
+        },
+        "tool_use_id": {
+          "description": "The [`AiTurnToolCall::id`] this answers.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "tool_use_id",
+        "content"
+      ]
+    }
+  ],
+  "$defs": {
+    "AiTurnToolCall": {
+      "description": "One tool call inside an [`AiChatTurn::Assistant`] turn — the rich,\nlinkage-preserving form used by the Phase 5.5 (2c) multi-turn\n`propose_tool_calls` path. Mirrors the model's native `tool_use`\nblock: `id` is the provider-issued handle the matching\n[`AiChatTurn::ToolResult`] echoes back so the model can correlate a\nresult with the call that produced it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Provider-issued tool-use id (e.g. `toolu_…`). The matching\n`tool_result` turn echoes this back.",
+          "type": "string"
+        },
+        "input": {
+          "description": "Decoded tool arguments the model emitted."
+        },
+        "name": {
+          "description": "Tool name as advertised in the registry.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "input"
+      ]
+    }
+  }
+}

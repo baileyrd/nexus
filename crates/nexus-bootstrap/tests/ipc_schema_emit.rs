@@ -19,9 +19,10 @@ use std::path::PathBuf;
 use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
-    AiActivityListArgs, AiActivityListResult, AiGenerateDocsArgs, AiGenerateDocsReply,
+    AiActivityListArgs, AiActivityListResult, AiChatTurn, AiGenerateDocsArgs, AiGenerateDocsReply,
     AiPredictArgs, AiPredictReply, AiProposeArgs, AiProposeReply, AiProposedToolCall,
     AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
+    AiTurnToolCall,
     AiStreamChatArgs, AiStreamChatMode, AiToolPolicy, AiUnmappedToolCall, EnrichEntityArgs,
     EnrichEntityResult, EntityRecallArgs, EntityRecallHitRow, EntityRecallResult,
     InferEntityRelationsArgs, InferEntityRelationsResult, InferredRelationRow,
@@ -398,6 +399,10 @@ fn emit_all_schemas_impl() {
     write_schema::<AiProposeReply>("com_nexus_ai__propose_tool_calls", "reply");
     write_schema::<AiProposedToolCall>("com_nexus_ai__propose_tool_calls", "tool_call");
     write_schema::<AiUnmappedToolCall>("com_nexus_ai__propose_tool_calls", "unmapped");
+    // Phase 5.5 (2c) — rich multi-turn request form (assistant
+    // `tool_use` ↔ `tool_result` linkage preserved).
+    write_schema::<AiChatTurn>("com_nexus_ai__propose_tool_calls", "turn");
+    write_schema::<AiTurnToolCall>("com_nexus_ai__propose_tool_calls", "turn_tool_call");
 
     // ── com.nexus.ai::ask (BL-038 RAG response) ──────────────────────────
     // The MCP surface re-uses this shape to expose RAG answers + their

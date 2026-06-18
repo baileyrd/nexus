@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiTurnToolCall",
+  "description": "One tool call inside an [`AiChatTurn::Assistant`] turn — the rich,\nlinkage-preserving form used by the Phase 5.5 (2c) multi-turn\n`propose_tool_calls` path. Mirrors the model's native `tool_use`\nblock: `id` is the provider-issued handle the matching\n[`AiChatTurn::ToolResult`] echoes back so the model can correlate a\nresult with the call that produced it.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Provider-issued tool-use id (e.g. `toolu_…`). The matching\n`tool_result` turn echoes this back.",
+      "type": "string"
+    },
+    "input": {
+      "description": "Decoded tool arguments the model emitted."
+    },
+    "name": {
+      "description": "Tool name as advertised in the registry.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "input"
+  ]
+}
