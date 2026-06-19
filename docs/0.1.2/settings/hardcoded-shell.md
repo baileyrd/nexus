@@ -13,7 +13,7 @@ These items from the original 2026-04-25 audit still apply; many have been promo
 | Original entry | Current file:line | Status |
 |----------------|-------------------|--------|
 | `core/zoom/index.ts:15-18` — zoom step/min/max/default | unchanged; schema wired | ✓ verified |
-| `core/terminal/index.ts:33,40` — `fontSize` 13, `fontFamily` 'monospace' | unchanged; schema present | ✓ verified |
+| `nexus/terminal/TerminalInstance.tsx:246,250` — `fontSize` 13, `scrollback` 5000 | promoted to schema keys `terminal.fontSize` / `terminal.scrollback` in `nexus/terminal/index.ts` (2026-06-19); font family is theme-driven via `--font-monospace`. (Prior `core/terminal/index.ts` cite was stale — that plugin no longer exists.) | ✓ promoted |
 | `nexus/terminal/savedCommandsStore.ts:85` — `2_000` ms auto-restart | unchanged | ✓ verified |
 | `nexus/canvas/renderer.ts:32` — `250×60` default text-node size | now `DEFAULT_TEXT_NODE_SIZE` at line 33 | ✓ named |
 | `nexus/canvas/renderer.ts:36,40,292,294` — handle geometry | now named constants at lines 37-41 | ✓ named |

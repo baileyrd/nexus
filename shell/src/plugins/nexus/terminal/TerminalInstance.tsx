@@ -8,6 +8,8 @@ import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
 import { useTerminalStore } from './terminalStore'
 import { useThemeStore } from '../../../stores/themeStore'
+import { configStore } from '../../../stores/configStore'
+import { eventBus } from '../../../host/EventBus'
 import { createUrlExtractor } from './urlExtractor'
 import type { UrlMatch } from './urls'
 import { UrlChips } from './UrlChips'
@@ -240,14 +242,26 @@ export function TerminalInstance({
     const fontFamily =
       readCssVar('--font-monospace', 'ui-monospace, SFMono-Regular, Menlo, monospace')
 
+    // Display settings come from the unified Settings panel (the
+    // `nexus.terminal` plugin's `configuration` schema, persisted to the
+    // forge's `[settings]` bag). Read here for the initial value; the
+    // `config:changed` subscription below applies later edits live to this
+    // open terminal. Guard against a non-numeric / out-of-range value in
+    // the settings bag so a bad entry can't break the xterm canvas.
+    const fontSizeRaw = configStore.get<number>('terminal.fontSize', 13)
+    const fontSize = Number.isFinite(fontSizeRaw) && fontSizeRaw > 0 ? fontSizeRaw : 13
+    const scrollbackRaw = configStore.get<number>('terminal.scrollback', 5000)
+    const scrollback =
+      Number.isFinite(scrollbackRaw) && scrollbackRaw >= 0 ? Math.floor(scrollbackRaw) : 5000
+
     const term = new Terminal({
       theme,
       fontFamily,
-      fontSize: 13,
+      fontSize,
       cursorBlink: true,
       allowProposedApi: false,
       convertEol: false,
-      scrollback: 5000,
+      scrollback,
     })
 
     // OI-20 — copy/paste keyboard chords. Convention every emulator
@@ -584,6 +598,25 @@ export function TerminalInstance({
       }
     }
     focusRef.current = focusTerm
+
+    // Live-apply display settings when the user edits them in the Settings
+    // panel. `configStore.set` emits `config:changed:<key>`, so we mutate
+    // the live xterm options in place rather than forcing a remount
+    // (mirrors the theme subscription above). A font-size change alters
+    // cell metrics, so it refits and propagates the new cols/rows to the
+    // PTY via `refitRef`; scrollback only resizes the buffer.
+    const applyFontSize = () => {
+      const raw = configStore.get<number>('terminal.fontSize', 13)
+      term.options.fontSize = Number.isFinite(raw) && raw > 0 ? raw : 13
+      refitRef.current?.()
+    }
+    const applyScrollback = () => {
+      const raw = configStore.get<number>('terminal.scrollback', 5000)
+      term.options.scrollback = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 5000
+    }
+    const offFontSize = eventBus.on('config:changed:terminal.fontSize', applyFontSize)
+    const offScrollback = eventBus.on('config:changed:terminal.scrollback', applyScrollback)
+
     const resizeObs = new ResizeObserver((entries) => {
       let outerChanged = false
       for (const entry of entries) {
@@ -645,6 +678,12 @@ export function TerminalInstance({
       } catch {}
       try {
         unsubTheme()
+      } catch {}
+      try {
+        offFontSize()
+      } catch {}
+      try {
+        offScrollback()
       } catch {}
       try {
         webgl?.dispose()

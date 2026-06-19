@@ -98,6 +98,21 @@ export const terminalPlugin: Plugin = {
         category: 'system',
         schema: [
           {
+            key: 'terminal.fontSize',
+            title: 'Font size',
+            description: 'Terminal font size in pixels. Applies immediately to open terminals.',
+            type: 'number' as const,
+            default: 13,
+          },
+          {
+            key: 'terminal.scrollback',
+            title: 'Scrollback lines',
+            description:
+              'Lines of output history kept per terminal. Applies immediately to open terminals.',
+            type: 'number' as const,
+            default: 5000,
+          },
+          {
             key: 'ui.commandSaveNotificationMs',
             title: 'Command save notification duration',
             description: 'Auto-dismiss duration for "opening terminal" notifications in milliseconds',
