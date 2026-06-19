@@ -1,5 +1,5 @@
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
-import type { Extension } from '@codemirror/state'
+import { EditorState, type Extension } from '@codemirror/state'
 // Phase 5 ripped out `@codemirror/commands` `history()` + `historyKeymap`.
 // The kernel's UndoTree owns history now — see
 // docs/editor-transaction-wiring-plan.md §Phase 5 / resolved decision #3.
@@ -25,6 +25,17 @@ export interface BaselineExtensionsOptions {
    * the factory defaults to `false` to avoid inventing one.
    */
   lineNumbers?: boolean
+  /**
+   * Soft-wrap long lines. Defaults to `true` (the prior always-wrapped
+   * behaviour). Set `false` to let lines run off the right edge with a
+   * horizontal scrollbar.
+   */
+  wordWrap?: boolean
+  /**
+   * Number of columns a tab character renders as (CM6 `tabSize` facet).
+   * Defaults to `4` to match the CodeMirror default.
+   */
+  tabSize?: number
   /**
    * Optional kernel-undo binding. When present, Ctrl/Cmd-Z routes to
    * `kernelClient.undo(relpath)` and Ctrl-Y / Cmd-Shift-Z to
@@ -123,9 +134,12 @@ export function baselineExtensions(
     syntaxHighlighting(defaultHighlightStyle),
     search({ top: true }),
     keymap.of([...searchKeymap, ...keys]),
-    EditorView.lineWrapping,
+    EditorState.tabSize.of(opts.tabSize ?? 4),
     nexusSyntaxHighlighting,
   ]
+  // Soft-wrap unless the user turned it off — default `true` preserves
+  // the prior always-wrapped behaviour.
+  if (opts.wordWrap !== false) exts.push(EditorView.lineWrapping)
   if (opts.lineNumbers) exts.push(lineNumbers())
   // Vim layers in front of the search/default keymaps so its modal
   // dispatch takes precedence — Normal-mode `/` reaches the vim

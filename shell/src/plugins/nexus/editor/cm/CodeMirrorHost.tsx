@@ -15,6 +15,10 @@ export interface CodeMirrorHostProps {
   readOnly?: boolean
   /** Show gutter line numbers. Defaults to `false`. */
   lineNumbers?: boolean
+  /** Soft-wrap long lines. Defaults to `true`. */
+  wordWrap?: boolean
+  /** Tab width in columns (CM6 `tabSize` facet). Defaults to `4`. */
+  tabSize?: number
   /**
    * Extra CM extensions appended after the baseline. The Phase 5
    * transaction bridge threads through here — the host stays generic
@@ -82,6 +86,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
       onChange,
       readOnly = false,
       lineNumbers = false,
+      wordWrap = true,
+      tabSize = 4,
       buildExtensions,
       kernelUndo,
       keybindings,
@@ -121,7 +127,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
     )
 
     // Mount the view exactly once. Any prop that influences construction
-    // (readOnly, lineNumbers) is synchronised via the effects below.
+    // (readOnly, lineNumbers, wordWrap, tabSize) is synchronised via the
+    // effects below.
     useEffect(() => {
       const parent = hostRef.current
       if (!parent) return
@@ -132,6 +139,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
           baselineCompartment.current.of(
             baselineExtensions({
               lineNumbers,
+              wordWrap,
+              tabSize,
               kernelUndo: kernelUndoRef.current,
               keybindings,
               vim,
@@ -181,6 +190,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
         effects: baselineCompartment.current.reconfigure(
           baselineExtensions({
               lineNumbers,
+              wordWrap,
+              tabSize,
               kernelUndo: kernelUndoRef.current,
               keybindings,
               vim,
@@ -189,7 +200,7 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
         ),
       })
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [lineNumbers])
+    }, [lineNumbers, wordWrap, tabSize])
 
     useEffect(() => {
       const view = viewRef.current
