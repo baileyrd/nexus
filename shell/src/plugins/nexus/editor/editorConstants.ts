@@ -151,6 +151,8 @@ import { ReplKernelsTab } from './ReplKernelsTab'
 export const CONFIG_FONT_SIZE = 'nexus.editor.fontSize'
 export const CONFIG_LINE_HEIGHT = 'nexus.editor.lineHeight'
 export const CONFIG_LINE_NUMBERS = 'nexus.editor.lineNumbers'
+export const CONFIG_WORD_WRAP = 'nexus.editor.wordWrap'
+export const CONFIG_TAB_SIZE = 'nexus.editor.tabSize'
 
 export function applyEditorCssVars(api: PluginAPI): void {
   const root = document.documentElement

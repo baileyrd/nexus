@@ -866,6 +866,10 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
   // the host's baseline compartment reconfigures live on prop change,
   // so flipping this setting takes effect without a remount.
   const showLineNumbers = useConfigValue('nexus.editor.lineNumbers', false) as boolean
+  // `wordWrap` / `tabSize` thread to CodeMirrorHost the same way as
+  // lineNumbers — the host's baseline compartment reconfigures live.
+  const wordWrap = useConfigValue('nexus.editor.wordWrap', true) as boolean
+  const tabSize = useConfigValue('nexus.editor.tabSize', 4) as number
   const centredStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -963,6 +967,8 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           }}
           keybindings={keybindings}
           lineNumbers={showLineNumbers}
+          wordWrap={wordWrap}
+          tabSize={tabSize}
           vim={
             keybindings === 'vim'
               ? {
@@ -1271,6 +1277,8 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
         value={tab.content}
         onChange={(v) => useEditorStore.getState().setContent(tab.relpath, v)}
         keybindings={keybindings}
+        wordWrap={wordWrap}
+        tabSize={tabSize}
         vim={
           keybindings === 'vim' && runtime
             ? {
