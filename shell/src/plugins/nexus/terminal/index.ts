@@ -100,7 +100,7 @@ export const terminalPlugin: Plugin = {
           {
             key: 'terminal.fontSize',
             title: 'Font size',
-            description: 'Terminal font size in pixels. Applies to newly opened terminals.',
+            description: 'Terminal font size in pixels. Applies immediately to open terminals.',
             type: 'number' as const,
             default: 13,
           },
@@ -108,7 +108,7 @@ export const terminalPlugin: Plugin = {
             key: 'terminal.scrollback',
             title: 'Scrollback lines',
             description:
-              'Lines of output history kept per terminal. Applies to newly opened terminals.',
+              'Lines of output history kept per terminal. Applies immediately to open terminals.',
             type: 'number' as const,
             default: 5000,
           },

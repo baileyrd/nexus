@@ -83,9 +83,10 @@ and wrongly claimed font had a schema.
   to the plugin's `configuration.schema` — they now render in the Settings panel
   and persist to the forge `[settings]` bag like every other World-A setting.
 - `TerminalInstance.tsx` reads them at mount via `configStore.get<number>(…)`
-  (the same non-reactive accessor `savedCommandsStore.ts:153` uses), with a
-  numeric guard so a bad value can't break the xterm canvas. Applies to newly
-  opened terminals; font *family* remains theme-driven (`--font-monospace`).
+  (numeric-guarded so a bad value can't break the xterm canvas) and subscribes to
+  `config:changed:terminal.{fontSize,scrollback}` to apply later edits **live** to
+  open terminals — a font-size change refits and propagates the new cols/rows to
+  the PTY. Font *family* remains theme-driven (`--font-monospace`).
 - Corrected the stale `hardcoded-shell.md` row.
 
 Still `Hard` (out of scope here, tracked in `hardcoded-rust.md`): backend
