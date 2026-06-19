@@ -71,6 +71,46 @@ pub fn eval_fresh(src: &str) -> i32 {
     eval(src)
 }
 
+/// How the binary was invoked, decoded from argv. Extracted so the dispatch is
+/// testable without a tty (the REPL otherwise blocks on stdin).
+#[derive(Debug, PartialEq, Eq)]
+pub enum LaunchMode {
+    /// Interactive REPL — `rush`, or an interactive flag (`-i`, `-l`, …).
+    Repl,
+    /// `rush -c "cmds" [name args…]`.
+    Command {
+        src: String,
+        name: String,
+        args: Vec<String>,
+    },
+    /// `rush FILE [args…]`.
+    Script { path: String, args: Vec<String> },
+}
+
+/// Classify process arguments (`args[0]` is the program name). A first arg of
+/// `-c` is a command string; **no arg or any leading-dash flag** (`-i`, `-l`, …)
+/// selects the interactive REPL; anything else is a script file.
+///
+/// The leading-dash → REPL rule is what makes `nexus-rush -i` (how
+/// `nexus-terminal` launches the bundled interactive shell) actually start the
+/// REPL instead of trying to open a file named `-i`.
+#[must_use]
+pub fn classify_args(args: &[String]) -> LaunchMode {
+    match args.get(1).map(String::as_str) {
+        Some("-c") => LaunchMode::Command {
+            src: args.get(2).cloned().unwrap_or_default(),
+            name: args.get(3).cloned().unwrap_or_else(|| "rush".to_string()),
+            args: args.get(4..).unwrap_or(&[]).to_vec(),
+        },
+        None => LaunchMode::Repl,
+        Some(flag) if flag.starts_with('-') => LaunchMode::Repl,
+        Some(file) => LaunchMode::Script {
+            path: file.to_string(),
+            args: args.get(2..).unwrap_or(&[]).to_vec(),
+        },
+    }
+}
+
 /// Set `$0` (shell/script name) and the positional parameters (`$1`…).
 pub fn set_args(name: String, args: Vec<String>) {
     vars::set_args(name, args);
@@ -228,6 +268,27 @@ fn repl_inner() -> rustyline::Result<i32> {
 #[cfg(test)]
 mod lib_tests {
     use super::*;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn classify_args_routes_interactive_flags_to_repl() {
+        // Regression for the bundled-shell launch: `nexus-rush -i` must start the
+        // REPL, not try to open a file named "-i". (RFC 0002 audit C1.)
+        assert_eq!(classify_args(&argv(&["nexus-rush"])), LaunchMode::Repl);
+        assert_eq!(classify_args(&argv(&["nexus-rush", "-i"])), LaunchMode::Repl);
+        assert_eq!(classify_args(&argv(&["nexus-rush", "-l"])), LaunchMode::Repl);
+        assert!(matches!(
+            classify_args(&argv(&["nexus-rush", "-c", "echo hi"])),
+            LaunchMode::Command { .. }
+        ));
+        assert!(matches!(
+            classify_args(&argv(&["nexus-rush", "script.sh", "a"])),
+            LaunchMode::Script { .. }
+        ));
+    }
 
     #[test]
     fn exit_builtin_returns_code_without_killing_process() {

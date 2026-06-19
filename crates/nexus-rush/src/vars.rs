@@ -76,6 +76,11 @@ pub fn reset_state() {
     ARGS.with(|a| a.borrow_mut().clear());
     EXIT_REQUESTED.with(|e| *e.borrow_mut() = None);
     crate::func::clear();
+    // The job table is per-run state too: a fresh eval must not see a prior
+    // run's background jobs. (Terminal/job-control setup is preserved — see
+    // `job::reset`.)
+    #[cfg(unix)]
+    crate::job::reset();
 }
 
 /// Set `$0` and the positional parameters (`$1`…).

@@ -204,11 +204,14 @@ fn wait_pgid(pgid: pid_t, pids: &[pid_t]) -> Wait {
 
 /// Reap finished/stopped/continued background jobs without blocking, reporting
 /// state changes. Called once before each prompt.
+///
+/// This runs **regardless of `job_control`**: a shell embedded in a Nexus-owned
+/// PTY (RFC 0002) keeps job control off, but `&` still spawns real children via
+/// [`run_background`]. Without reaping them here those children would linger as
+/// zombies for the life of the embedded shell. Foreground commands in embedded
+/// mode are already waited synchronously (see `exec::run_foreground`), so the
+/// non-blocking `waitpid(-1)` below only collects background-job members.
 pub fn reap_background() {
-    if !job_control_enabled() {
-        return;
-    }
-
     loop {
         let mut status: c_int = 0;
         let flags = libc::WNOHANG | libc::WUNTRACED | libc::WCONTINUED;
@@ -459,6 +462,18 @@ pub(crate) fn job_control_enabled() -> bool {
     STATE.with(|s| s.borrow().job_control)
 }
 
+/// Clear the in-memory job table for a fresh evaluation (see
+/// [`crate::reset_state`]). The terminal / job-control configuration
+/// (`shell_pgid`, `job_control`) established by [`init`] is host setup, not
+/// per-run shell state, so it is left intact.
+pub(crate) fn reset() {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.jobs.clear();
+        s.next_id = 0;
+    });
+}
+
 fn state_label(state: JobState) -> &'static str {
     match state {
         JobState::Running => "Running",
@@ -490,4 +505,62 @@ fn wifstopped(status: c_int) -> bool {
 }
 fn wifcontinued(status: c_int) -> bool {
     libc::WIFCONTINUED(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    /// H2 regression: a background child must be reaped even when job control is
+    /// **off** (the embedded-PTY mode, RFC 0002). Before the fix
+    /// `reap_background` early-returned whenever `job_control` was false, so `&`
+    /// jobs spawned by an embedded shell leaked as zombies.
+    ///
+    /// Safe under the parallel test harness because no other test in this crate
+    /// spawns an external process (the common commands are builtins), so this is
+    /// the only reapable child in the process.
+    #[test]
+    fn reap_background_collects_children_when_job_control_off() {
+        reset();
+        // Not embedded/interactive here, so job control is off — the exact
+        // configuration the bug mishandled.
+        assert!(!job_control_enabled());
+
+        // Spawn a real, fast-exiting child and register it as a background job
+        // the way `run_background` does (track the raw pid; the std handle's
+        // Drop neither waits nor kills on Unix, so reaping is the table's job).
+        let child = Command::new("true").spawn().expect("spawn `true`");
+        let pid = child.id() as pid_t;
+        drop(child);
+        add_job(pid, &[pid], "true", JobState::Running);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            reap_background();
+            if STATE.with(|s| s.borrow().jobs.is_empty()) {
+                break; // reaped, reported Done, and pruned
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background job was never reaped with job control off"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        reset();
+    }
+
+    /// L3 regression: a fresh evaluation must not inherit a prior run's job
+    /// table. `reset` clears the in-memory jobs and the id counter.
+    #[test]
+    fn reset_clears_job_table() {
+        reset();
+        add_job(4242, &[4242], "sleep 99", JobState::Running);
+        assert_eq!(STATE.with(|s| s.borrow().jobs.len()), 1);
+
+        reset();
+        assert!(STATE.with(|s| s.borrow().jobs.is_empty()));
+        assert_eq!(STATE.with(|s| s.borrow().next_id), 0);
+    }
 }

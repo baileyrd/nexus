@@ -10,6 +10,21 @@
 //! The bundled `nexus-rush` shell does **not** emit OSC 133 yet — it has no
 //! precmd/preexec hook — so rush sessions fall back to the sentinel. Teaching
 //! rush to emit OSC 133 is an RFC 0002 Stage 2 follow-up.
+//!
+//! ## Echo artifact (known limitation)
+//!
+//! The payload is *typed into* the freshly-spawned PTY, which is still in
+//! cooked/echo mode, so the line discipline echoes the script text once into the
+//! grid — it appears at the very top of a `get_scrollback` dump for an
+//! integration-enabled session. This is a **one-time, session-start artifact**:
+//! it lands *before* the first OSC 133;C output-start mark, so it never pollutes
+//! the structured per-command capture (`terminal://command`) the agent actually
+//! reads. A termios echo-off at spawn can't fix it reliably — the shell resets
+//! its own termios when it initialises line editing — so the clean fix is
+//! rc-file / env injection (e.g. `bash --rcfile`) or having the bundled shell
+//! emit OSC 133 natively, both tracked as follow-ups (RFC 0003 grid-ownership /
+//! RFC 0002 Stage 2). The collision-proofing below keeps the *injection itself*
+//! robust in the meantime.
 
 use std::path::Path;
 
@@ -52,13 +67,30 @@ impl IntegrationShell {
 }
 
 /// Heredoc delimiter for the POSIX `source /dev/stdin` wrapper. Distinctive so
-/// it can't collide with script content.
+/// it can't collide with script content (enforced — see [`posix_source_wrapper`]
+/// and the `shipped_scripts_do_not_contain_the_heredoc_delim` test).
 const POSIX_HEREDOC_DELIM: &[u8] = b"__NEXUS_OSC133_EOF__";
+
+/// Whether `haystack` contains `needle` as a contiguous byte run. Tiny so the
+/// collision guard doesn't pull in a substring-search dependency.
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    needle.is_empty() || haystack.windows(needle.len()).any(|w| w == needle)
+}
 
 /// Wrap a script so a POSIX shell sources it from a quoted heredoc: the script
 /// runs in the shell's own context (so `return` / hook setup behave) as a single
 /// command, rather than line-by-line interactive input.
 fn posix_source_wrapper(script: &[u8]) -> Vec<u8> {
+    // The heredoc ends at the first line equal to the delimiter, so the script
+    // body must never contain it — otherwise sourcing would terminate early and
+    // the shell would try to execute the remainder as commands. The shipped
+    // scripts are checked by `shipped_scripts_do_not_contain_the_heredoc_delim`;
+    // assert here too so any future emitter (or caller-supplied script) that
+    // smuggles the delimiter in trips a debug build rather than misbehaving live.
+    debug_assert!(
+        !contains_subslice(script, POSIX_HEREDOC_DELIM),
+        "integration script must not contain the heredoc delimiter",
+    );
     let mut out = Vec::with_capacity(script.len() + 64);
     out.extend_from_slice(b"source /dev/stdin <<'");
     out.extend_from_slice(POSIX_HEREDOC_DELIM);
@@ -148,5 +180,27 @@ mod tests {
     #[test]
     fn no_payload_for_shells_without_an_emitter() {
         assert!(integration_payload(&PathBuf::from("/bin/sh")).is_none());
+    }
+
+    #[test]
+    fn shipped_scripts_do_not_contain_the_heredoc_delim() {
+        // M3 collision guard: the POSIX heredoc terminates at the first line
+        // equal to the delimiter, so no shipped script may contain it — else
+        // sourcing would end early and the shell would run the remainder as
+        // commands. Enforces the "can't collide" claim instead of asserting it.
+        for sh in [IntegrationShell::Bash, IntegrationShell::Zsh] {
+            assert!(
+                !contains_subslice(sh.script(), POSIX_HEREDOC_DELIM),
+                "{sh:?} script contains the heredoc delimiter — sourcing would break",
+            );
+        }
+    }
+
+    #[test]
+    fn contains_subslice_matches_runs() {
+        assert!(contains_subslice(b"abcdef", b"cde"));
+        assert!(!contains_subslice(b"abcdef", b"xyz"));
+        assert!(contains_subslice(b"abc", b"")); // empty needle is trivially present
+        assert!(!contains_subslice(b"ab", b"abc")); // needle longer than haystack
     }
 }

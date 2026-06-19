@@ -274,11 +274,14 @@ pub struct Grid {
     /// surfaced as the `terminal://command` resource.
     #[cfg(feature = "l13")]
     last_command_output: Option<String>,
-    /// Set on each OSC 133;D (command finished). Drained by
-    /// [`Grid::take_command_finished`] so a host can emit exactly one
-    /// command-finished signal per completion (Nexus RFC 0003 PR-4).
+    /// One entry per OSC 133;D (command finished), each carrying that command's
+    /// exit code and captured output. Drained FIFO by
+    /// [`Grid::pop_finished_command`] so a host emits exactly one
+    /// command-finished signal per completion — even when several commands
+    /// finish inside a single byte batch (a bool flag would coalesce them and
+    /// lose all but the last). Nexus RFC 0003 PR-4.
     #[cfg(feature = "l13")]
-    command_finished_flag: bool,
+    finished_commands: VecDeque<(Option<i32>, Option<String>)>,
     /// Per-row line size attributes (DECDWL/DECDHL); `len() == rows`. The
     /// renderer relays each to the host so double-width/height lines display
     /// correctly, and they shift with the rows they label as the screen scrolls.
@@ -795,7 +798,7 @@ impl Grid {
             #[cfg(feature = "l13")]
             last_command_output: None,
             #[cfg(feature = "l13")]
-            command_finished_flag: false,
+            finished_commands: VecDeque::new(),
         }
     }
 
@@ -1837,6 +1840,16 @@ impl Grid {
         self.scroll_bottom = self.rows.saturating_sub(1);
         self.scrollback.clear();
         self.prompt_marks.clear();
+        // A hard reset wipes the screen and scrollback the captures point into,
+        // so drop the in-flight command mark and any pending completions too —
+        // otherwise `command_start` dangles into freed lines (L1).
+        #[cfg(feature = "l13")]
+        {
+            self.command_start = None;
+            self.last_command_output = None;
+            self.last_exit = None;
+            self.finished_commands.clear();
+        }
         self.view_offset = 0;
         self.tab_stops = default_tab_stops(self.cols);
         self.cursor_visible = true;
@@ -1943,10 +1956,17 @@ impl Grid {
     #[cfg(feature = "l13")]
     pub(crate) fn command_finished(&mut self, exit: Option<i32>) {
         self.last_exit = exit;
-        if let Some(start) = self.command_start.take() {
-            self.last_command_output = Some(self.capture_command_output(start));
-        }
-        self.command_finished_flag = true;
+        // Assign unconditionally: a `D` with no preceding `C` (no output-start
+        // mark) must clear any earlier command's capture rather than leave it
+        // stale on the `terminal://command` resource (M1).
+        self.last_command_output = self
+            .command_start
+            .take()
+            .map(|start| self.capture_command_output(start));
+        // Queue this completion so every `D` is reported, even when several land
+        // in one byte batch (M2) — the captured output is snapshotted per entry.
+        self.finished_commands
+            .push_back((exit, self.last_command_output.clone()));
     }
 
     /// Join the cell rows in the absolute line range `[start, cursor line)` into
@@ -2043,17 +2063,20 @@ impl Grid {
         }
     }
 
-    /// Return and clear the "a command just finished" flag (set on OSC 133;D).
-    /// A host drains this after feeding a batch of bytes to emit exactly one
-    /// command-finished signal per completion. Always `false` without `l13`.
-    pub fn take_command_finished(&mut self) -> bool {
+    /// Pop the oldest pending command completion (OSC 133;D) as its exit code
+    /// (`None` when the shell omitted it) and captured output. A host drains
+    /// this in a loop after feeding a batch of bytes, emitting one
+    /// command-finished signal per completion — so back-to-back completions in
+    /// a single batch are each reported rather than coalesced. Always `None`
+    /// without `l13`.
+    pub fn pop_finished_command(&mut self) -> Option<(Option<i32>, Option<String>)> {
         #[cfg(feature = "l13")]
         {
-            std::mem::take(&mut self.command_finished_flag)
+            self.finished_commands.pop_front()
         }
         #[cfg(not(feature = "l13"))]
         {
-            false
+            None
         }
     }
 

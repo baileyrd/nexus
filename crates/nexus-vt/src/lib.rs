@@ -111,18 +111,15 @@ impl Vt {
         self.grid.last_output()
     }
 
-    /// If a command finished (OSC 133;D) since the last call, return its exit
-    /// code (`None` when the shell omitted it) and captured output, clearing the
-    /// pending flag. Returns `None` when no command finished since last drained.
+    /// Pop the oldest command completion (OSC 133;D) seen since it was last
+    /// drained, as its exit code (`None` when the shell omitted it) and captured
+    /// output. Returns `None` once the queue is empty.
     ///
-    /// Call this after each [`advance`](Self::advance) to emit exactly one
-    /// command-finished signal per completion.
+    /// Call this in a loop after each [`advance`](Self::advance) — draining
+    /// until `None` — so every completion is emitted, even when several commands
+    /// finish inside one byte batch.
     pub fn take_finished_command(&mut self) -> Option<(Option<i32>, Option<String>)> {
-        if self.grid.take_command_finished() {
-            Some((self.grid.last_exit_code(), self.grid.last_output().map(str::to_owned)))
-        } else {
-            None
-        }
+        self.grid.pop_finished_command()
     }
 
     /// Direct access to the underlying grid (for callers needing cells, dirty
@@ -180,6 +177,46 @@ mod facade_tests {
         // A second command finishes and is drained independently.
         vt.advance(b"\x1b]133;C\x07\x1b]133;D;0\x07");
         assert!(matches!(vt.take_finished_command(), Some((Some(0), _))));
+    }
+
+    #[test]
+    fn take_finished_command_reports_every_completion_in_one_batch() {
+        // M2 regression: two commands completing inside a single advance must
+        // both be reported with their own exit codes — a bool flag would
+        // coalesce them and drop the first. Drain in a loop until empty.
+        let mut vt = Vt::new(40, 10);
+        vt.advance(
+            b"\x1b]133;C\x07first\n\x1b]133;D;1\x07\x1b]133;C\x07second\n\x1b]133;D;0\x07",
+        );
+
+        let mut drained = Vec::new();
+        while let Some(done) = vt.take_finished_command() {
+            drained.push(done);
+        }
+        assert_eq!(drained.len(), 2, "both completions must surface: {drained:?}");
+        assert_eq!(drained[0].0, Some(1));
+        assert!(drained[0].1.as_deref().unwrap_or_default().contains("first"));
+        assert_eq!(drained[1].0, Some(0));
+        assert!(drained[1].1.as_deref().unwrap_or_default().contains("second"));
+    }
+
+    #[test]
+    fn command_finished_without_output_begin_clears_stale_capture() {
+        // M1 regression: a `D` with no preceding `C` must not report the prior
+        // command's captured output — the per-completion output is `None`.
+        let mut vt = Vt::new(40, 10);
+        vt.advance(b"\x1b]133;C\x07kept\n\x1b]133;D;0\x07");
+        assert!(vt.last_command_output().unwrap_or_default().contains("kept"));
+
+        // Second command finishes with no output-start mark.
+        vt.advance(b"\x1b]133;D;3\x07");
+        let second = vt.take_finished_command(); // pops the first (kept)
+        assert!(second.is_some());
+        let third = vt.take_finished_command(); // pops the second (no C)
+        assert_eq!(third, Some((Some(3), None)), "D-without-C must carry no output");
+        // And the resource-facing accessor reflects the cleared capture.
+        assert_eq!(vt.last_command_output(), None);
+        assert_eq!(vt.last_exit(), Some(3));
     }
 
     #[test]
