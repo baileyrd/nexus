@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { UNDO_HISTORY_CAP } from '../constants'
+import { configStore } from '../../../stores/configStore'
 import type { CanvasDoc, CanvasEdge, CanvasNode, CanvasPatchOp } from './kernelClient'
 
 export interface Camera {
@@ -7,17 +8,26 @@ export interface Camera {
   x: number
   /** Top-left world-space y that maps to viewport (0, 0). */
   y: number
-  /** 1.0 = 1:1. Clamped to [MIN_ZOOM, MAX_ZOOM] at write time. */
+  /** 1.0 = 1:1. Clamped to the configured [canvas.zoomMin, canvas.zoomMax]
+   *  at write time. */
   zoom: number
 }
 
+/** Built-in zoom-bound defaults. The live limits come from the
+ *  `canvas.zoomMin` / `canvas.zoomMax` settings (read in `clampZoom`);
+ *  these are the fallbacks when those keys are unset. */
 export const MIN_ZOOM = 0.1
 export const MAX_ZOOM = 4.0
 const DEFAULT_CAMERA: Camera = { x: 0, y: 0, zoom: 1 }
 
-function clampZoom(z: number): number {
-  if (z < MIN_ZOOM) return MIN_ZOOM
-  if (z > MAX_ZOOM) return MAX_ZOOM
+/** Clamp a zoom factor to the configured bounds. Reads the settings at
+ *  call time (non-reactive) so a Settings change applies to the next
+ *  pan/zoom or zoom-to-fit without a remount. */
+export function clampZoom(z: number): number {
+  const min = configStore.get('canvas.zoomMin', MIN_ZOOM)
+  const max = configStore.get('canvas.zoomMax', MAX_ZOOM)
+  if (z < min) return min
+  if (z > max) return max
   return z
 }
 

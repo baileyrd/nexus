@@ -105,6 +105,20 @@ export const canvasPlugin: Plugin = {
             default: 8192,
           },
           {
+            key: 'canvas.zoomMin',
+            title: 'Minimum zoom',
+            description: 'Lower bound on canvas zoom (1.0 = 100%). Applied live to pan/zoom and zoom-to-fit.',
+            type: 'number',
+            default: 0.1,
+          },
+          {
+            key: 'canvas.zoomMax',
+            title: 'Maximum zoom',
+            description: 'Upper bound on canvas zoom (1.0 = 100%). Applied live to pan/zoom and zoom-to-fit.',
+            type: 'number',
+            default: 4.0,
+          },
+          {
             key: 'canvas.colorSwatches',
             title: 'Color swatches',
             description: 'Hex color strings shown in the node/edge color picker.',
