@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useGraphStore } from './graphStore'
 import { radialLayout, type LaidOutNode } from './layout'
 import { eventBus } from '../../../host/EventBus'
+import { useConfigValue } from '../../../stores/configStore'
 
 const EVENT_FILE_OPEN = 'files:open'
 
@@ -9,13 +10,14 @@ const EVENT_FILE_OPEN = 'files:open'
 const DEFAULT_WIDTH = 240
 const DEFAULT_HEIGHT = 300
 
-/** Label truncation width in characters — SVG text has no reliable
- *  CSS text-overflow, so we clip in JS. 14 chars ≈ fits "shell-kernel". */
+/** Default label truncation width in characters (the `nexus.graph.labelWidth`
+ *  setting overrides it) — SVG text has no reliable CSS text-overflow, so we
+ *  clip in JS. 14 chars ≈ fits "shell-kernel". */
 const LABEL_MAX_CHARS = 14
 
-function truncate(label: string): string {
-  if (label.length <= LABEL_MAX_CHARS) return label
-  return label.slice(0, LABEL_MAX_CHARS - 1) + '…'
+function truncate(label: string, max: number): string {
+  if (label.length <= max) return label
+  return label.slice(0, max - 1) + '…'
 }
 
 /**
@@ -265,6 +267,7 @@ function GraphNode({
   onHoverOut,
   onPick,
 }: GraphNodeProps) {
+  const labelWidth = useConfigValue('nexus.graph.labelWidth', LABEL_MAX_CHARS)
   const isCentre = node.direction === 'centre'
   const baseRadius = isCentre ? 8 : 6
   const radius = isCentre ? baseRadius : hovered ? baseRadius + 1 : baseRadius
@@ -309,7 +312,7 @@ function GraphNode({
         fontWeight={labelWeight}
         style={{ userSelect: 'none' }}
       >
-        {truncate(node.name)}
+        {truncate(node.name, labelWidth)}
       </text>
     </g>
   )

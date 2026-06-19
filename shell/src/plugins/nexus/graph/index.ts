@@ -101,7 +101,23 @@ export const graphPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.rightPanel'],
-    contributes: {},
+    contributes: {
+      configuration: {
+        pluginId: 'nexus.graph',
+        title: 'Graph',
+        order: 35,
+        category: 'navigation',
+        schema: [
+          {
+            key: 'nexus.graph.labelWidth',
+            title: 'Node label width (characters)',
+            description: 'Maximum characters shown on right-panel graph node labels before truncating with an ellipsis. Applied live.',
+            type: 'number',
+            default: 14,
+          },
+        ],
+      },
+    },
   },
 
   activate(api: PluginAPI) {
