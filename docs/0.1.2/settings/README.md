@@ -13,6 +13,7 @@ This directory documents **every** configuration surface in Nexus. The promise: 
 | [`env-vars.md`](env-vars.md) | Every env var the code reads at runtime |
 | [`hardcoded-rust.md`](hardcoded-rust.md) | Rust-side hardcoded values flagged for promotion to settings or named constants |
 | [`hardcoded-shell.md`](hardcoded-shell.md) | Shell-side hardcoded values flagged for promotion to settings or named constants |
+| [`hardcoded-audit-2026-06-19.md`](hardcoded-audit-2026-06-19.md) | Point-in-time audit (2026-06-19): verified NEW untracked findings + corrected false positives + systemic hygiene issues |
 | [`plugin-manifest-defaults.md`](plugin-manifest-defaults.md) | Defaults baked into plugin manifests — backend `MANIFEST_TOML`, scaffolds, shell `definePlugin` keybindings/priorities/schema defaults |
 
 ## Categories at a glance

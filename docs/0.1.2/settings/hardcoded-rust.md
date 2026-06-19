@@ -4,6 +4,8 @@
 
 Workflow: pick an item from this list, promote it to a config field or named constant, then delete the row.
 
+> **See also:** [`hardcoded-audit-2026-06-19.md`](hardcoded-audit-2026-06-19.md) — the latest point-in-time audit (verified NEW findings, corrected false positives, and systemic hygiene issues including the ~72 struck rows / ~5 drifted cites flagged below).
+
 ---
 
 ## User Config

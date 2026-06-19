@@ -3,6 +3,8 @@
 > **As of:** 2026-05-17. Companion to [`hardcoded-rust.md`](hardcoded-rust.md) and [`plugin-manifest-defaults.md`](plugin-manifest-defaults.md) (manifest-baked defaults). This refreshes the prior `shell/HARDCODED_SETTINGS_AUDIT.md` (dated 2026-04-25). For values already named/consolidated since then, see [`#verified-and-unchanged`](#verified-and-unchanged).
 >
 > Carry-over status from prior audit is preserved under [`shell/HARDCODED_SETTINGS_AUDIT.md`](../../../shell/HARDCODED_SETTINGS_AUDIT.md) — that file is the source-of-truth catalogue; this 0.1.2 page is the delta + nexus-extension-api extension.
+>
+> **See also:** [`hardcoded-audit-2026-06-19.md`](hardcoded-audit-2026-06-19.md) — the latest point-in-time audit (verified NEW shell findings: sandbox orchestrator timeouts, dev port, deactivation cap).
 
 ## Verified-and-unchanged
 
