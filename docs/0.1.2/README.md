@@ -20,6 +20,8 @@ docs/0.1.2/
 ├── crates.md                  ← table of all 39 Rust crates
 ├── shell.md                   ← shell/ + shell/src-tauri/ + packages/nexus-extension-api/
 ├── architecture-adherence.md  ← audit of whether code lives up to microkernel + shell invariants
+├── audits/
+│   └── architecture-review-2026-06-19.md  ← focused review: kernel / AI-first-class / everything-a-plugin
 ├── implementation-plan.md     ← phased remediation plan for every audit finding (39 items)
 ├── ipc-handlers.md            ← every IPC handler (~280), grouped by plugin
 ├── capabilities.md            ← every security capability (30), every use site
@@ -52,6 +54,7 @@ docs/0.1.2/
 - **Building a plugin:** [`plugins/community.md`](plugins/community.md) → [`capabilities.md`](capabilities.md) → [`ipc-handlers.md`](ipc-handlers.md).
 - **Adding a setting (the right way):** [`settings/README.md`](settings/README.md) → [`settings/hardcoded-rust.md`](settings/hardcoded-rust.md) / [`settings/hardcoded-shell.md`](settings/hardcoded-shell.md) for already-flagged candidates.
 - **Security review:** [`capabilities.md`](capabilities.md) → [`amplifier-laundering.md`](amplifier-laundering.md) → [`reference/audit-flags.md`](reference/audit-flags.md).
+- **Adherence / point-in-time reviews:** [`architecture-adherence.md`](architecture-adherence.md) (living) → [`audits/architecture-review-2026-06-19.md`](audits/architecture-review-2026-06-19.md) (focused: kernel / AI-first-class / everything-a-plugin).
 
 ## What's not here yet
 

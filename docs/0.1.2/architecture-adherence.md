@@ -1,6 +1,8 @@
 # Architecture Adherence Audit
 
 > **As of:** 2026-05-17. Audit of whether the code lives up to the architectural invariants documented in [`architecture.md`](architecture.md) (microkernel) and [`shell.md`](shell.md) (Tauri desktop shell). Verdicts grounded in `Cargo.toml` reads, the enforcement tests, and direct greps — not in archived docs.
+>
+> **See also:** [`audits/architecture-review-2026-06-19.md`](audits/architecture-review-2026-06-19.md) — a focused 2026-06-19 review of three axes (kernel architecture, AI as a first-class citizen, everything-as-a-plugin) that defers to this doc for the full invariant matrix.
 
 ## TL;DR
 
