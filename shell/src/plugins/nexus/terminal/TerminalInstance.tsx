@@ -8,6 +8,7 @@ import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
 import { useTerminalStore } from './terminalStore'
 import { useThemeStore } from '../../../stores/themeStore'
+import { configStore } from '../../../stores/configStore'
 import { createUrlExtractor } from './urlExtractor'
 import type { UrlMatch } from './urls'
 import { UrlChips } from './UrlChips'
@@ -240,14 +241,26 @@ export function TerminalInstance({
     const fontFamily =
       readCssVar('--font-monospace', 'ui-monospace, SFMono-Regular, Menlo, monospace')
 
+    // Display settings come from the unified Settings panel (the
+    // `nexus.terminal` plugin's `configuration` schema, persisted to the
+    // forge's `[settings]` bag). Read non-reactively at mount, so a change
+    // applies to newly opened terminals. Guard against a non-numeric /
+    // out-of-range value in the settings bag so a bad entry can't break
+    // the xterm canvas.
+    const fontSizeRaw = configStore.get<number>('terminal.fontSize', 13)
+    const fontSize = Number.isFinite(fontSizeRaw) && fontSizeRaw > 0 ? fontSizeRaw : 13
+    const scrollbackRaw = configStore.get<number>('terminal.scrollback', 5000)
+    const scrollback =
+      Number.isFinite(scrollbackRaw) && scrollbackRaw >= 0 ? Math.floor(scrollbackRaw) : 5000
+
     const term = new Terminal({
       theme,
       fontFamily,
-      fontSize: 13,
+      fontSize,
       cursorBlink: true,
       allowProposedApi: false,
       convertEol: false,
-      scrollback: 5000,
+      scrollback,
     })
 
     // OI-20 — copy/paste keyboard chords. Convention every emulator

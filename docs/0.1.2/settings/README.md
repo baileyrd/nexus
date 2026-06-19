@@ -14,6 +14,7 @@ This directory documents **every** configuration surface in Nexus. The promise: 
 | [`hardcoded-rust.md`](hardcoded-rust.md) | Rust-side hardcoded values flagged for promotion to settings or named constants |
 | [`hardcoded-shell.md`](hardcoded-shell.md) | Shell-side hardcoded values flagged for promotion to settings or named constants |
 | [`hardcoded-audit-2026-06-19.md`](hardcoded-audit-2026-06-19.md) | Point-in-time audit (2026-06-19): verified NEW untracked findings + corrected false positives + systemic hygiene issues |
+| [`settings-integration-2026-06-19.md`](settings-integration-2026-06-19.md) | Are subsystem settings integrated into the unified Settings panel? The three settings worlds + per-subsystem coverage matrix (terminal worked example) |
 | [`plugin-manifest-defaults.md`](plugin-manifest-defaults.md) | Defaults baked into plugin manifests — backend `MANIFEST_TOML`, scaffolds, shell `definePlugin` keybindings/priorities/schema defaults |
 
 ## Categories at a glance
