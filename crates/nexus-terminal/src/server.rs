@@ -638,7 +638,10 @@ impl TerminalServer for InMemoryTerminalServer {
         // shells without the integration script loaded (different channel — no
         // conflict). The autonomous drainer pumps every session, so a completion
         // observed during a `read_raw_since` drain is emitted by the next pump.
-        if let Some((exit_code, command_output)) = self.manager.take_finished_command(id)? {
+        // Drain the completion queue: several commands can finish within one
+        // pump's worth of bytes, and each must surface as its own event (a bool
+        // flag coalesced them and lost all but the last — RFC 0003 PR-4 / M2).
+        while let Some((exit_code, command_output)) = self.manager.take_finished_command(id)? {
             self.emit(&TerminalEvent::CommandFinished {
                 id: id.as_str().to_string(),
                 exit_code,
@@ -970,6 +973,50 @@ mod tests {
         assert!(
             output.unwrap_or_default().contains("done"),
             "captured output should contain the command text",
+        );
+    }
+
+    #[test]
+    fn pump_emits_a_command_finished_per_completion_in_one_burst() {
+        // M2 regression: when two commands finish within a single burst of
+        // bytes, the pump must emit a CommandFinished for *each* (with its own
+        // exit code), not coalesce them. Before the queue fix the bool flag kept
+        // only the last completion.
+        if !unix_only("pump_emits_a_command_finished_per_completion_in_one_burst") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let rx = s.subscribe_events();
+        let id = s
+            .create_session(ServerSpawnConfig {
+                name: Some("burst".into()),
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        // Two back-to-back C..D regions in one write: exit 1 then 0.
+                        "printf '\\033]133;C\\007one\\n\\033]133;D;1\\007\\033]133;C\\007two\\n\\033]133;D;0\\007'".into(),
+                    ],
+                }),
+                ..Default::default()
+            })
+            .expect("create");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut exits: Vec<Option<i32>> = Vec::new();
+        while Instant::now() < deadline && exits.len() < 2 {
+            let _ = s.pump(&id, Duration::from_millis(100));
+            while let Ok(evt) = rx.try_recv() {
+                if let TerminalEvent::CommandFinished { exit_code, .. } = evt {
+                    exits.push(exit_code);
+                }
+            }
+        }
+
+        assert_eq!(
+            exits,
+            vec![Some(1), Some(0)],
+            "each completion in the burst must surface its own event in order",
         );
     }
 

@@ -38,6 +38,16 @@ const EXEMPT_CRATES: &[(&str, &str)] = &[
     ("nexus-fuzz", "security fuzz harness; not a plugin"),
     ("nexus-crdt", "operation-based CRDT library used by editor"),
     ("nexus-hashline", "stable line-id hashline editing library used by storage; not a plugin"),
+    (
+        "nexus-rush",
+        "vendored bundled shell (RFC 0002); a leaf lib+bin consumed by \
+         nexus-terminal for sandboxed sessions, not a CorePlugin",
+    ),
+    (
+        "nexus-vt",
+        "vendored headless VT grid (RFC 0003 Track B); a leaf lib consumed by \
+         nexus-terminal for server-side screen introspection, not a CorePlugin",
+    ),
     // Bootstrap itself.
     ("nexus-bootstrap", "the orchestrator that registers plugins"),
     // Frontend / IPC-proxy crates — consume Runtime, not registered as

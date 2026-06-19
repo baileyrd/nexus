@@ -527,6 +527,27 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_sandbox_policy_exposes_bundled_shell_flag() {
+        // M4: `bundled_shell_for_sandbox` is the config surface a confined-session
+        // spawner (the agent) reads back over this introspection handler to set
+        // `SessionConfig.bundled_shell`. Lock that it round-trips through the IPC
+        // response so the knob is reachable, not silently dropped — off by
+        // default, and reflected when enabled.
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let out = plugin.dispatch(HANDLER_SANDBOX_POLICY, &json!({})).unwrap();
+        assert_eq!(out["bundled_shell_for_sandbox"], false);
+
+        let cfg = crate::SandboxConfig {
+            bundled_shell_for_sandbox: true,
+            ..Default::default()
+        };
+        let mut plugin =
+            SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);
+        let out = plugin.dispatch(HANDLER_SANDBOX_POLICY, &json!({})).unwrap();
+        assert_eq!(out["bundled_shell_for_sandbox"], true);
+    }
+
+    #[test]
     fn dispatch_get_secret_returns_null_when_disabled() {
         // with_probe initialises a disabled vault — retrieve returns
         // KeyringDisabled which we map to {"value": null} so callers

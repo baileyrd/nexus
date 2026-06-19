@@ -13,25 +13,23 @@ fn main() -> ! {
     // fight portable-pty's session leader for the controlling terminal.
     nexus_rush::set_embedded(std::env::var_os("NEXUS_EMBEDDED_SHELL").is_some());
 
-    // Non-interactive modes: `rush -c "cmd" [name args…]` and `rush FILE [args…]`.
-    let code = match args.get(1).map(String::as_str) {
-        Some("-c") => {
-            let cmd = args.get(2).cloned().unwrap_or_default();
-            let name = args.get(3).cloned().unwrap_or_else(|| "rush".to_string());
-            nexus_rush::set_args(name, args.get(4..).unwrap_or(&[]).to_vec());
-            nexus_rush::eval(&cmd)
+    let code = match nexus_rush::classify_args(&args) {
+        nexus_rush::LaunchMode::Command { src, name, args: pos } => {
+            nexus_rush::set_args(name, pos);
+            nexus_rush::eval(&src)
         }
-        Some(file) => {
-            nexus_rush::set_args(file.to_string(), args.get(2..).unwrap_or(&[]).to_vec());
-            match std::fs::read_to_string(file) {
+        nexus_rush::LaunchMode::Script { path, args: pos } => {
+            nexus_rush::set_args(path.clone(), pos);
+            match std::fs::read_to_string(&path) {
                 Ok(src) => nexus_rush::eval(&src),
                 Err(e) => {
-                    eprintln!("rush: {file}: {e}");
+                    eprintln!("rush: {path}: {e}");
                     1
                 }
             }
         }
-        None => nexus_rush::run_repl(),
+        // `rush`, `rush -i`, `rush -l`, … → interactive REPL.
+        nexus_rush::LaunchMode::Repl => nexus_rush::run_repl(),
     };
 
     std::process::exit(code);

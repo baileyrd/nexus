@@ -138,6 +138,39 @@ pub(crate) fn build_terminal_resource(id: &str, kind: &str, description: &str) -
     )
 }
 
+/// What a terminal lifecycle event means for the resource notifier — split out
+/// of the async loop so the routing is unit-testable without a live peer/bus.
+enum NotifyAction {
+    /// Push these resource kinds and (re)stamp the session's debounce slot.
+    PushResources(&'static [&'static str]),
+    /// Push the screen resource, subject to the output debounce window.
+    ScreenDebounced,
+    /// Session ended — drop its debounce slot.
+    Release,
+    /// Nothing the notifier reacts to.
+    Ignore,
+}
+
+/// Map a terminal event `kind` (the serde tag of `TerminalEvent`) to the
+/// notifier's reaction. `session_evicted` releases the slot alongside
+/// `session_closed` so the debounce map can't leak across LRU evictions (L4).
+fn classify_terminal_event(kind: &str) -> NotifyAction {
+    match kind {
+        "command_finished" => NotifyAction::PushResources(&["screen", "exit", "command"]),
+        "output_received" => NotifyAction::ScreenDebounced,
+        "session_closed" | "session_evicted" => NotifyAction::Release,
+        _ => NotifyAction::Ignore,
+    }
+}
+
+/// Whether a kernel-bus `recv` error should end the notifier loop. A `Lagged`
+/// gap is recoverable — the slow consumer skips the dropped span and keeps
+/// going; only a `Closed` bus is terminal. Collapsing both to "stop" killed
+/// notifications permanently after a single lag (H1).
+fn recv_error_is_terminal(err: &nexus_kernel::RecvError) -> bool {
+    matches!(err, nexus_kernel::RecvError::Closed)
+}
+
 /// RFC 0003 Track A — bridge terminal lifecycle events on the kernel bus into MCP
 /// `notifications/resources/updated`, so a subscribed client learns when a
 /// session's screen / exit / command resources change without polling.
@@ -162,7 +195,17 @@ fn spawn_terminal_resource_notifier(context: &KernelPluginContext, peer: Peer<Ro
         loop {
             let evt = match sub.recv().await {
                 Ok(evt) => evt,
-                Err(_) => break, // bus dropped
+                // A slow consumer that falls behind the bus capacity gets a
+                // Lagged error for the dropped span; that is recoverable — skip
+                // the gap and keep notifying. Only a Closed bus ends the loop.
+                // (Collapsing both to `break` killed notifications permanently
+                // after a single lag — H1.)
+                Err(e) => {
+                    if recv_error_is_terminal(&e) {
+                        break;
+                    }
+                    continue;
+                }
             };
             let NexusEvent::Custom { payload, .. } = &evt.event else {
                 continue;
@@ -174,16 +217,16 @@ fn spawn_terminal_resource_notifier(context: &KernelPluginContext, peer: Peer<Ro
             let Some(id) = payload.get("id").and_then(serde_json::Value::as_str) else {
                 continue;
             };
-            match kind {
+            match classify_terminal_event(kind) {
                 // A command finished: screen, exit, and command resources changed.
-                "command_finished" => {
-                    for k in ["screen", "exit", "command"] {
+                NotifyAction::PushResources(kinds) => {
+                    for k in kinds {
                         notify_terminal_resource(&peer, id, k).await;
                     }
                     last_screen_push.insert(id.to_string(), Instant::now());
                 }
                 // New output: push a screen update, debounced (the stream is chatty).
-                "output_received" => {
+                NotifyAction::ScreenDebounced => {
                     let now = Instant::now();
                     let due = last_screen_push
                         .get(id)
@@ -193,10 +236,14 @@ fn spawn_terminal_resource_notifier(context: &KernelPluginContext, peer: Peer<Ro
                         last_screen_push.insert(id.to_string(), now);
                     }
                 }
-                "session_closed" => {
+                // Session ended (closed or LRU-evicted): release its debounce
+                // slot so the map can't grow unbounded across many short-lived
+                // sessions. Eviction was previously missed, leaking one entry per
+                // evicted session — L4.
+                NotifyAction::Release => {
                     last_screen_push.remove(id);
                 }
-                _ => {}
+                NotifyAction::Ignore => {}
             }
         }
     });
@@ -2629,6 +2676,44 @@ impl rmcp::ServerHandler for NexusMcpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_terminal_event_routes_each_kind() {
+        // command_finished pushes all three resources.
+        assert!(matches!(
+            classify_terminal_event("command_finished"),
+            NotifyAction::PushResources(ks) if ks == ["screen", "exit", "command"]
+        ));
+        // output_received is debounced screen-only.
+        assert!(matches!(
+            classify_terminal_event("output_received"),
+            NotifyAction::ScreenDebounced
+        ));
+        // L4 regression: both session ends release the debounce slot — eviction
+        // must not leak an entry like it did before this arm existed.
+        assert!(matches!(
+            classify_terminal_event("session_closed"),
+            NotifyAction::Release
+        ));
+        assert!(matches!(
+            classify_terminal_event("session_evicted"),
+            NotifyAction::Release
+        ));
+        // Anything else is ignored.
+        assert!(matches!(
+            classify_terminal_event("session_created"),
+            NotifyAction::Ignore
+        ));
+    }
+
+    #[test]
+    fn recv_error_lagged_is_recoverable_only_closed_is_terminal() {
+        // H1 regression: a lag must NOT end the notifier loop (recoverable);
+        // only a closed bus is terminal. Collapsing both killed notifications
+        // permanently after one lag.
+        assert!(!recv_error_is_terminal(&nexus_kernel::RecvError::Lagged(7)));
+        assert!(recv_error_is_terminal(&nexus_kernel::RecvError::Closed));
+    }
 
     #[test]
     fn parse_note_uri_extracts_path() {
