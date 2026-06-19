@@ -9,8 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { clientLogger } from '../../../clientLogger'
 import {
   useCanvasStore,
-  MIN_ZOOM,
-  MAX_ZOOM,
+  clampZoom,
   newNodeId,
   applyNodeAdd,
   applyNodeRemove,
@@ -334,7 +333,7 @@ export function CanvasView({ relpath, client }: Props) {
         const worldX = cam.x + cx / cam.zoom
         const worldY = cam.y + cy / cam.zoom
         const factor = Math.exp(-e.deltaY * 0.002)
-        const nextZoom = clamp(cam.zoom * factor, MIN_ZOOM, MAX_ZOOM)
+        const nextZoom = clampZoom(cam.zoom * factor)
         cameraRef.current = {
           x: worldX - cx / nextZoom,
           y: worldY - cy / nextZoom,
@@ -1645,10 +1644,6 @@ function CornerLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v
-}
-
 function setEquals(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false
   for (const v of a) if (!b.has(v)) return false
@@ -1681,11 +1676,7 @@ function fitCameraToNodes(
   const padding = 80
   const contentW = maxX - minX + padding * 2
   const contentH = maxY - minY + padding * 2
-  const zoom = clamp(
-    Math.min(viewW / contentW, viewH / contentH, 1),
-    MIN_ZOOM,
-    MAX_ZOOM,
-  )
+  const zoom = clampZoom(Math.min(viewW / contentW, viewH / contentH, 1))
   const cx = (minX + maxX) / 2
   const cy = (minY + maxY) / 2
   return {
