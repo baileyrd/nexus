@@ -97,7 +97,8 @@ Still `Hard` (out of scope here, tracked in `hardcoded-rust.md`): backend
 1. **Make backend configs discoverable.** Give the panel a way to surface
    World-B `Config` structs (e.g. each service exposes a `config_schema` IPC
    handler the panel renders), so MCP/LSP/DAP/sandbox/kernel settings aren't
-   TOML-only. *Largest structural win.*
+   TOML-only. *Largest structural win.* → **Design spec:**
+   [`backend-config-discovery.md`](backend-config-discovery.md).
 2. **Add a schema↔consumer lint.** A schema field whose key is never read by its
    plugin (or a hardcoded literal that shadows a declared key) should fail review —
    this is exactly the terminal font drift.
