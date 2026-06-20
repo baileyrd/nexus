@@ -1,62 +1,20 @@
 // src/plugins/core/notificationService/index.ts
-// Service plugin — bootstraps the notification queue.
-// After this activates, api.notifications.show() is available.
+// Service plugin — bootstraps the notification queue and renders the
+// in-app toast stack. After this activates, api.notifications.show() is
+// available and its notifications are painted by NotificationToaster in
+// the overlay slot.
 
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { configStore } from '../../../stores/configStore'
 import { clientLogger } from '../../../clientLogger'
+import {
+  notificationQueue,
+  DEFAULT_NOTIFICATION_DURATION_MS,
+  CONFIG_KEY_DURATION,
+} from './notificationQueue'
+import { NotificationToaster } from './NotificationToaster'
 
-const DEFAULT_NOTIFICATION_DURATION_MS = 4000
-const CONFIG_KEY_DURATION = 'ui.notificationDurationMs'
-
-export interface Notification {
-  id: string
-  message: string
-  type: 'info' | 'warning' | 'error' | 'success'
-  duration: number
-  actions?: Array<{ label: string; command: string }>
-  timestamp: number
-}
-
-type NotificationListener = (notifications: Notification[]) => void
-
-export class NotificationQueue {
-  private items: Notification[] = []
-  private listeners: NotificationListener[] = []
-  private counter = 0
-
-  push(n: Partial<Omit<Notification, 'id' | 'timestamp'>> & { message: string }) {
-    const item: Notification = {
-      type: 'info',
-      duration: configStore.get<number>(CONFIG_KEY_DURATION, DEFAULT_NOTIFICATION_DURATION_MS) ?? DEFAULT_NOTIFICATION_DURATION_MS,
-      ...n,
-      id: `notif-${++this.counter}`,
-      timestamp: Date.now(),
-    }
-    this.items = [...this.items, item]
-    this.notify()
-
-    if (item.duration > 0) {
-      setTimeout(() => this.dismiss(item.id), item.duration)
-    }
-  }
-
-  dismiss(id: string) {
-    this.items = this.items.filter(i => i.id !== id)
-    this.notify()
-  }
-
-  getAll() { return this.items }
-
-  subscribe(fn: NotificationListener): () => void {
-    this.listeners.push(fn)
-    return () => { this.listeners = this.listeners.filter(l => l !== fn) }
-  }
-
-  private notify() {
-    this.listeners.forEach(fn => fn(this.items))
-  }
-}
+const TOASTER_VIEW_ID = 'core.notification-service.toaster'
 
 export const notificationServicePlugin: Plugin = {
   manifest: {
@@ -89,8 +47,28 @@ export const notificationServicePlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    api.internal!.registerInternalService('notificationQueue', new NotificationQueue())
+    api.internal!.registerInternalService('notificationQueue', notificationQueue)
     api.configuration.register(notificationServicePlugin.manifest.contributes!.configuration!)
+    // Paint the toast stack in the overlay slot. Low priority so toasts
+    // never stack above blocking modals/banners sharing the slot; the
+    // overlayFloating z-index keeps them above content, below modals.
+    api.views.register(TOASTER_VIEW_ID, {
+      slot: 'overlay',
+      component: () =>
+        createElement(NotificationToaster, {
+          onAction: (command: string) => {
+            void api.commands.execute(command)
+          },
+        }),
+      priority: 5,
+    })
     clientLogger.info('[core.notification-service] ready')
   },
 }
+
+// Re-exported for importers of the plugin module + tests.
+export {
+  NotificationQueue,
+  notificationQueue,
+  type Notification,
+} from './notificationQueue'
