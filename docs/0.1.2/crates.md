@@ -1,8 +1,8 @@
 # Crate Inventory
 
-> **As of:** 2026-05-17. Sourced from each crate's `Cargo.toml` and `src/lib.rs`.
+> **As of:** 2026-06-28. Sourced from each crate's `Cargo.toml` and `src/lib.rs`.
 
-All 39 workspace members in `crates/`. Excluded from this table: `shell/src-tauri/` (Tauri bridge — see [`shell.md`](shell.md)) and `packages/nexus-extension-api/` (TS package — see [`shell.md`](shell.md)).
+All 42 workspace members in `crates/`. Excluded from this table: `shell/src-tauri/` (Tauri bridge — see [`shell.md`](shell.md)) and `packages/nexus-extension-api/` (TS package — see [`shell.md`](shell.md)).
 
 | Crate | Kind | Purpose | IPC plugin id | Direct nexus-* deps | Notable external deps | Has CorePlugin impl? | Has settings? | Notes |
 |-------|------|---------|---------------|---------------------|----------------------|----------------------|---------------|-------|
@@ -25,6 +25,7 @@ All 39 workspace members in `crates/`. Excluded from this table: `shell/src-taur
 | nexus-git | lib | Git integration: status, diff, blame, log | com.nexus.git | nexus-kernel, nexus-plugins, nexus-security, nexus-types | git2, chrono, toml | Yes | No | libgit2-backed |
 | nexus-formats | lib | File-format library: markdown, canvas, config | com.nexus.formats | nexus-plugins | comrak, regex-lite, csv, zip, sha2 | Yes | AppConfig + WorkspaceState + AiConfig | Pure-logic; no SQL |
 | nexus-database | lib | Database support: property types, formulas, CSV | com.nexus.database | nexus-types, nexus-plugins | regex-lite, csv | Yes | No | Pure-logic; SQL queries delegated to storage |
+| nexus-hashline | lib | Content-hash-anchored patch format (hashline/omp edits) | — | (leaf) | thiserror, sha2, diffy | No | No | RFC 0005 Phase 5.1; consumed by nexus-storage to apply hash-bound edits |
 | nexus-theme | lib | Theming engine: CSS variables, cascade, snippets | com.nexus.theme | nexus-kernel, nexus-plugins | notify, notify-debouncer-mini, schemars | Yes | Theme config | ~100 CSS variable defaults |
 | nexus-bootstrap | lib | Runtime bootstrap: kernel + plugin loader assembly | — | every service crate | tokio, anyhow, tracing, rusqlite, zip | No | cap_matrix.toml | Central assembly point; sole linker of every service |
 | nexus-editor | lib | Editor engine: block tree, annotations, transactions | com.nexus.editor | nexus-formats, nexus-kernel, nexus-plugins, nexus-types | comrak, sha2, chrono, uuid | Yes | No | PRD-08 §1-5 in-memory domain model |

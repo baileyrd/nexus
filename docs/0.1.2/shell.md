@@ -34,48 +34,41 @@ Plugin tiers visible to the host:
 2. **Nexus first-party** (`shell/src/plugins/nexus/`) — also ships in the binary; plugin id begins with `nexus.*`.
 3. **Community** — discovered at runtime from `~/.nexus-shell/plugins/<name>/`. Loaded into an iframe sandbox (ADR 0015).
 
-## Core chrome plugins (17)
+## Core plugins (7)
+
+Provided by the host from `shell/src/plugins/core/`; plugin id begins with `core.*`. The authoritative list is curated in `shell/src/plugins/catalog.ts`.
 
 | Plugin id | Folder | Provides |
 |-----------|--------|----------|
-| `core.activityBar` | `core/activityBar/` | left-edge ribbon, slot for icons |
-| `core.capabilityPrompt` | `core/capabilityPrompt/` | per-call cap consent banner |
-| `core.commandPalette` | `core/commandPalette/` | `Ctrl+P` / `Ctrl+Shift+P` palette |
-| `core.configurationService` | `core/configurationService/` | settings registry + persistence |
-| `core.editorArea` | `core/editorArea/` | the editor pane host |
-| `core.fileExplorer` | `core/fileExplorer/` | left-dock file tree |
-| `core.fileSystemService` | `core/fileSystemService/` | high-level fs ops over `com.nexus.storage` |
-| `core.notificationService` | `core/notificationService/` | toast container, dismiss queue |
-| `core.panelArea` | `core/panelArea/` | bottom-dock leaf host |
-| `core.rightPanel` | `core/rightPanel/` | right-dock leaf host |
-| `core.settings` | `core/settings/` | settings modal |
-| `core.sidebar` | `core/sidebar/` | left-dock leaf host |
-| `core.statusBar` | `core/statusBar/` | bottom-strip status bar |
-| `core.terminal` | `core/terminal/` | bottom-dock terminal pane |
-| `core.themeService` | `core/themeService/` | CSS variable resolver, theme switch |
-| `core.titleBar` | `core/titleBar/` | window-chrome title bar |
-| `core.zoom` | `core/zoom/` | `Ctrl+=` / `Ctrl+-` zoom level |
+| `core.capabilityPrompt` | `core/capabilityPrompt/` | modal that grants/denies high-risk plugin capabilities |
+| `core.configuration-service` | `core/configurationService/` | shell config store; backs `api.configuration` for every plugin |
+| `core.filesystem-service` | `core/fileSystemService/` | forge-relative file IO with capability checks |
+| `core.notification-service` | `core/notificationService/` | toast + status notifications via `api.notifications` |
+| `core.settings` | `core/settings/` | settings panel — config sections, themes, keybindings, plugin management |
+| `core.theme-service` | `core/themeService/` | loads/switches/persists themes; exposes CSS variables to the shell |
+| `core.zoom` | `core/zoom/` | app-wide UI zoom with persisted level (`Ctrl+=`, `Ctrl+-`, `Ctrl+0`) |
 
-## Nexus first-party plugins (65)
+> Earlier drafts listed 17 `core.*` chrome plugins (`core.activityBar`, `core.editorArea`, `core.fileExplorer`, `core.panelArea`, `core.sidebar`, `core.statusBar`, `core.rightPanel`, `core.terminal`, `core.titleBar`, `core.commandPalette`). Those were refactored into `nexus.*` first-party plugins (e.g. `nexus.activityBar`, `nexus.rightPanel`, `nexus.statusBar`, `nexus.terminal`, `nexus.commandPalette`) or folded into built-in chrome; they are no longer core plugins.
 
-Domain groupings (folder names under `shell/src/plugins/nexus/`):
+## Nexus first-party plugins (58)
 
-- **Editing & content:** `editor`, `outline`, `tags`, `templates`, `comments`, `crdtConflict`, `multibufferSync`, `linkSuggest`, `enrich`
-- **AI surfaces:** `ai`, `agent`, `sessions` (session-tree navigator — resume/branch/rewind/checkpoint, RFC 0008), `recall`, `semanticSearch`, `viewBuilder`, `dreamCycle`, `memory`
-- **Navigation:** `backlinks`, `outgoingLinks`, `files`, `search`, `searchPanel`, `bookmarks`, `launcher`, `paneMode`, `workspace`, `pick`
-- **Visualisation:** `canvas`, `graph`, `bases`, `osArchitecture`, `activityTimeline`
-- **Tools / processes:** `processes`, `terminal`, `git`/`gitPanel`/`gitStatus`, `mcp`, `skills`, `workflow`, `debugger`
-- **System / chrome supplements:** `activityBar`, `sidebar`, `rightPanel`, `statusBar`, `status`, `commandPalette`
+Folder names under `shell/src/plugins/nexus/` (each is one `nexus.*` plugin id; a few folders register more than one catalog entry — e.g. `graph` → `nexus.graph` + `nexus.graph.global`). The enable/disable split is curated in `shell/src/plugins/catalog.ts`: a default-on set loaded at boot plus a default-off set the user opts into from **Settings → Plugins** (backend-gated features such as `collab`, `crdtConflict`, and `dreamCycle` ship default-off). Domain groupings:
+
+- **Editing & content:** `editor`, `outline`, `paneMode`, `comments`, `crdtConflict`, `templates`, `linkSuggest`
+- **AI surfaces:** `ai`, `aiSettings`, `agent`, `sessions` (session-tree navigator — resume/branch/rewind/checkpoint, RFC 0008), `recall`, `semanticSearch`, `enrich`, `dreamCycle`, `skills`, `memory`, `memoryDashboard`
+- **Navigation & context:** `files`, `search`, `searchPanel`, `bookmarks`, `launcher`, `workspace`, `noteContext` (backlinks / outgoing links / tags / per-file graph)
+- **Visualisation:** `canvas`, `graph`, `bases`, `osArchitecture`, `activityTimeline`, `viewBuilder`
+- **Tools / processes:** `processes`, `terminal`, `gitPanel`, `gitStatus`, `mcp`, `workflow`, `debugger`, `sandboxPanel`
+- **System / chrome supplements:** `activityBar`, `rightPanel`, `statusBar`, `commandPalette`
 - **Notifications & observability:** `notifications`, `notificationsInbox`, `notificationsSettings`, `healthPanel`, `observability`, `diagnostics`
-- **Files & metadata:** `fileProperties`, `allProperties`
+- **Files & metadata:** `fileProperties`
 - **Extension / catalog:** `pluginsMgmt`, `themePicker`
 - **Collaboration:** `collab`
 - **Audio:** `audio`
 - **Notion import/export:** `notion`
-- **UX primitives:** `confirm`, `prompt`
-- **Constants:** `constants.ts` (shared cap/threshold table)
+- **UX primitives:** `confirm`, `prompt`, `pick`
 
-Each is a folder with an `index.ts` exporting a `definePlugin({...})` call. Contributions ride through `ExtensionHost` and end up registered in the relevant `SlotRegistry`.
+Each is a folder with an `index.ts` exporting a `Plugin` object — `export const <name>Plugin: Plugin = { manifest, activate, deactivate? }`. Contributions ride through `ExtensionHost` and end up registered in the relevant `SlotRegistry`. (`_lib/` is a shared-utility namespace, not a plugin; `constants.ts` holds the shared cap/threshold table.)
 
 ## Tauri bridge (`shell/src-tauri/`)
 
@@ -132,7 +125,7 @@ Adding a Tauri command that *isn't* a host-platform primitive is a smell — ext
 
 The `@nexus/extension-api` TypeScript package. Two surfaces:
 
-1. **Hand-authored** — `src/index.ts` re-exports types (`PluginManifest`, `PluginContext`, `Capability`, `Slot`, etc.) and the `definePlugin` helper.
+1. **Hand-authored** — `src/index.ts` re-exports the plugin-contract types (`NexusPluginContext`, `ScriptPlugin`, `Capability`, etc.) plus shared SDK enums and helpers. There is no `definePlugin` factory — first-party shell plugins export a `Plugin` object directly, and community/script plugins default-export a `ScriptPlugin`.
 2. **Generated** — `src/generated/ipc/*.ts` emitted by `ts-rs` from every pilot IPC type. Regenerated by `scripts/check_ipc_drift.sh`; the drift check fails CI if Rust source changes without committing the regenerated TS.
 
 Sandbox surface for community/script plugins:
@@ -154,7 +147,7 @@ Capability strings used by the SDK match the kernel's `Capability` enum strings 
 
 ## How a shell plugin adds a new pane
 
-1. Author `shell/src/plugins/nexus/<feature>/index.ts` with a `definePlugin({...})` call.
+1. Author `shell/src/plugins/nexus/<feature>/index.ts` exporting a `Plugin` object — `export const <feature>Plugin: Plugin = { manifest, activate }` — and register it in `shell/src/plugins/catalog.ts`.
 2. Contribute a `UiPanel` registration pointing at a React component.
 3. Component receives a `PluginContext` exposing `ctx.ipc(plugin_id, command, args)` and `ctx.events.subscribe(topic, handler)`.
 4. Capabilities required by the plugin go in `manifest.capabilities.required`; the user grants at install.
