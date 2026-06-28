@@ -32,7 +32,7 @@ Single entry point: `shell/src/host/ExtensionHost.ts`. Loads every plugin contri
 Plugin tiers visible to the host:
 1. **Core** (`shell/src/plugins/core/`) — provided by the host, ships in the binary. Plugin id begins with `core.*`.
 2. **Nexus first-party** (`shell/src/plugins/nexus/`) — also ships in the binary; plugin id begins with `nexus.*`.
-3. **Community** — discovered at runtime from `~/.nexus-shell/plugins/<name>/`. Loaded into an iframe sandbox (ADR 0015).
+3. **Community** — discovered at runtime from `~/.nexus-shell/plugins/<name>/` (user-installed, all modes), plus the in-repo `shell/src/plugins/community/` in dev mode. Loaded into an iframe sandbox (ADR 0015). See `shell/src/host/communityPluginLoader.ts`.
 
 ## Core plugins (7)
 
@@ -148,7 +148,7 @@ Capability strings used by the SDK match the kernel's `Capability` enum strings 
 ## How a shell plugin adds a new pane
 
 1. Author `shell/src/plugins/nexus/<feature>/index.ts` exporting a `Plugin` object — `export const <feature>Plugin: Plugin = { manifest, activate }` — and register it in `shell/src/plugins/catalog.ts`.
-2. Contribute a `UiPanel` registration pointing at a React component.
-3. Component receives a `PluginContext` exposing `ctx.ipc(plugin_id, command, args)` and `ctx.events.subscribe(topic, handler)`.
-4. Capabilities required by the plugin go in `manifest.capabilities.required`; the user grants at install.
+2. In `activate(api)`, register the pane through the Leaf/View pipeline: `api.viewRegistry.register('<view-type>', creator)` (where `creator` returns the React view), then give it an entry point — an activity-bar icon via `api.activityBar.addItem({...})` and/or a focus command (`api.commands.register`) that calls `api.workspace.ensureLeafOfType('<view-type>', 'left' | 'right')` + `api.workspace.revealLeaf(leaf)`. (Fixed chrome widgets — status bar, overlay — use `api.views.register(viewId, { slot, component, priority })` instead.)
+3. The component reads and writes through the same `api` captured in `activate` (or a shared store it updates): `api.kernel.invoke(pluginId, command, args)` for IPC and `api.events.on(topic, handler)` for bus events. There is no per-component `PluginContext`/`ctx.ipc`.
+4. First-party plugins run trusted (granted `Capability::ALL`), so no capability declaration is needed. Capability-gating is the **community** tier: those ship a manifest declaring `capabilities` (PascalCase strings matching the kernel `Capability` enum) that the user grants at install (WI-31).
 5. If state needs persistence, write through `com.nexus.storage::settings_write` or a plugin-side `kv.write` — **never** a new Tauri command.
