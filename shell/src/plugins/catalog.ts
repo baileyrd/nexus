@@ -154,15 +154,6 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description: 'Source control sidebar — staged/unstaged files, commit UI, branch picker, and commit log.',
     load: () => import('./nexus/gitPanel').then(m => m.gitPanelPlugin),
   },
-  {
-    id: 'nexus.collab', name: 'Collaboration',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    popoutCompatible: false,
-    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
-    description:
-      'BL-143 — peers panel showing live collaborators, their current file and cursor block, and the relay connection state. Wired to com.nexus.collab.* bus events; only meaningful when [collab] is enabled in .forge/config.toml.',
-    load: () => import('./nexus/collab').then(m => m.collabPlugin),
-  },
   // ── Chrome ─────────────────────────────────────────────────────────────────
   {
     id: 'nexus.activityBar', name: 'Activity Bar',
@@ -226,14 +217,6 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/outline').then(m => m.outlinePlugin),
   },
   {
-    id: 'nexus.crdtConflict', name: 'CRDT Conflict',
-    version: '0.2.0', core: false, activationEvents: ['onStartup'],
-    dependsOn: ['nexus.collab'],
-    description:
-      'BL-007 / BL-074 — surfaces CRDT pull-landing conflicts (concurrent block edits, delete-vs-edit) as a toast so the user knows a merge needs review. Resolver modal is a deferred follow-up.',
-    load: () => import('./nexus/crdtConflict').then(m => m.crdtConflictPlugin),
-  },
-  {
     id: 'nexus.notifications', name: 'Notifications',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description:
@@ -246,13 +229,6 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description:
       'BL-136 — persistent inbox panel for notifications. Reads from com.nexus.notifications::inbox_list and lets the user mark read / dismiss / jump-to-source. Without this plugin notifications are still toasted live by nexus.notifications, but the history is not surfaced.',
     load: () => import('./nexus/notificationsInbox').then(m => m.notificationsInboxPlugin),
-  },
-  {
-    id: 'nexus.dreamCycle', name: 'Dream Cycle',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description:
-      'BL-129 follow-up — subscribes to com.nexus.dream_cycle.proposals and toasts "N new relation proposals from Dream Cycle" after a nightly run. The per-row approve/skip inbox is gated on a future list_draft_relations IPC.',
-    load: () => import('./nexus/dreamCycle').then(m => m.dreamCyclePlugin),
   },
   {
     id: 'nexus.diagnostics', name: 'Diagnostics',
@@ -563,6 +539,38 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     popoutCompatible: false,
     description: 'Save / switch / delete named workspace layouts under .forge/layouts/. Read-only inventory of registered view types. Drag-drop canvas + export-as-plugin are deferred follow-ups (BL-067 Phase 1).',
     load: () => import('./nexus/viewBuilder').then(m => m.viewBuilderPlugin),
+  },
+  // ── Backend-gated features ───────────────────────────────────────────────────
+  // Default-off because their backend master switch ships disabled: collab
+  // (`[collab] enabled = false` in .forge/config.toml) and dream cycle
+  // (`[dream_cycle] enabled = false` in app.toml). When default-on these
+  // contributed an activity-bar icon on every cold start for a feature that
+  // does nothing until the user opts in — so the icon is now opt-in too.
+  // Enabling collab also pulls in crdtConflict via dependsOn when the user
+  // wants conflict toasts.
+  {
+    id: 'nexus.collab', name: 'Collaboration',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.workspace', 'nexus.activityBar'],
+    description:
+      'BL-143 — peers panel showing live collaborators, their current file and cursor block, and the relay connection state. Wired to com.nexus.collab.* bus events; only meaningful when [collab] is enabled in .forge/config.toml.',
+    load: () => import('./nexus/collab').then(m => m.collabPlugin),
+  },
+  {
+    id: 'nexus.crdtConflict', name: 'CRDT Conflict',
+    version: '0.2.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.collab'],
+    description:
+      'BL-007 / BL-074 — surfaces CRDT pull-landing conflicts (concurrent block edits, delete-vs-edit) as a toast so the user knows a merge needs review. Resolver modal is a deferred follow-up. Rides with collaboration — enabling it pulls in nexus.collab.',
+    load: () => import('./nexus/crdtConflict').then(m => m.crdtConflictPlugin),
+  },
+  {
+    id: 'nexus.dreamCycle', name: 'Dream Cycle',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description:
+      'BL-129 follow-up — subscribes to com.nexus.dream_cycle.proposals and toasts "N new relation proposals from Dream Cycle" after a nightly run. The per-row approve/skip inbox is gated on a future list_draft_relations IPC.',
+    load: () => import('./nexus/dreamCycle').then(m => m.dreamCyclePlugin),
   },
 ]
 
