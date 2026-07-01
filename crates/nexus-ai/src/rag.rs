@@ -421,6 +421,28 @@ pub async fn semantic_search(
     retrieve(ctx, embedder, query, limit).await
 }
 
+/// Hybrid retrieval (gap-analysis 2026-07-01 §2): embed `query`, then
+/// fuse the keyword (Tantivy BM25) and vector (cosine) rankings via
+/// storage's `hybrid_search` handler (reciprocal-rank fusion, `k=60`).
+/// Compared to [`semantic_search`], keyword-exact hits that embed
+/// poorly and semantic hits that share no keywords both surface.
+///
+/// # Errors
+/// Returns [`AiError`] if embedding or the fused storage query fails.
+pub async fn hybrid_search(
+    ctx: &KernelPluginContext,
+    embedder: &dyn EmbeddingProvider,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, AiError> {
+    let q_embeddings = embedder.embed(&[query.to_string()]).await?;
+    let q_embedding = q_embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| AiError::Provider("embedding returned no vectors".into()))?;
+    vectorstore::hybrid_search(ctx, query, &q_embedding, limit).await
+}
+
 /// Default fallback system prompt used when no RAG sources are available.
 const RAG_FALLBACK_PROMPT: &str =
     "You are a helpful assistant. Answer the user's question to the best of your ability.";

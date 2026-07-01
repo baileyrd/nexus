@@ -12,6 +12,14 @@ use crate::rag;
 /// vector store (no chat). Mirrors the embedder build path of `ask`
 /// but skips the chat provider entirely so callers (palette, TUI,
 /// MCP) get a fast, score-bearing list of hits.
+///
+/// Pass `"hybrid": true` to fuse the vector ranking with Tantivy BM25
+/// via storage's `hybrid_search` (RRF) instead of vector-only
+/// retrieval. In hybrid mode each entry in `matches` carries the
+/// `StorageHybridMatch` wire shape (`file_path`, `block_id`,
+/// `block_type`, `excerpt`, `score`, `fts_rank`, `vector_rank`) and
+/// the reply is tagged `"hybrid": true`; the default (vector-only)
+/// reply shape is unchanged.
 pub(crate) async fn handle_semantic_search(
     ctx: &KernelPluginContext,
     embed_cfg: Option<AiConfig>,
@@ -26,11 +34,27 @@ pub(crate) async fn handle_semantic_search(
         .and_then(serde_json::Value::as_u64)
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(10);
+    let hybrid = args
+        .get("hybrid")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
 
     let embed_cfg = embed_cfg.ok_or_else(|| {
         exec_err("semantic_search: no AI embedding provider configured".to_string())
     })?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    if hybrid {
+        let matches = rag::hybrid_search(ctx, embedder.as_ref(), query, limit)
+            .await
+            .map_err(|e| {
+                exec_err(format!(
+                    "semantic_search[hybrid] (query_len={}, limit={limit}): {e}",
+                    query.len()
+                ))
+            })?;
+        return Ok(serde_json::json!({ "matches": matches, "hybrid": true }));
+    }
 
     let matches = rag::semantic_search(ctx, embedder.as_ref(), query, limit)
         .await

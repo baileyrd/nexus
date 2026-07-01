@@ -9,6 +9,14 @@ lives in the git log and in `docs/0.1.2/audits/`.
 ## [Unreleased]
 
 ### Added
+- **Hybrid forge search** (`com.nexus.storage::hybrid_search`, handler id
+  76) — reciprocal-rank fusion (`k=60`, matching `nexus-memory`'s recall)
+  of the Tantivy BM25 arm and the vector-store cosine arm, with 4×
+  per-arm oversampling so blocks outside one arm's window can still win
+  on fused rank. The caller supplies query text + embedding (storage
+  does not embed — D-1). Reachable end-to-end via
+  `com.nexus.ai::semantic_search` with `"hybrid": true`; either arm
+  degrades gracefully when empty.
 - **Cognitive-store persistence (memory Phase 5)** — `MemoryStore` (the
   episodic / semantic / procedural facade in `nexus-memory`) gains optional
   SQLite write-through: `MemoryStore::open(forge_root)` loads prior state

@@ -1326,6 +1326,11 @@ unrestricted = "read-only nearest-neighbour vector query"
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "hybrid_search"
+unrestricted = "read-only RRF fusion of the Tantivy FTS and vector-query arms"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "vectorstore_count"
 unrestricted = "read-only vector count"
 
