@@ -86,6 +86,44 @@ CREATE TABLE IF NOT EXISTS sync_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Phase 5 — durable backing for the three cognitive stores
+-- (EpisodicStore / SemanticStore / ProceduralStore). Same database file
+-- as the remind_me-parity `memories` table so `.forge/memory/` stays a
+-- single-file store; the tables are disjoint and the in-memory facades
+-- remain the read path.
+
+CREATE TABLE IF NOT EXISTS episodic_log (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          TEXT NOT NULL UNIQUE,
+    session_id  TEXT,
+    kind        TEXT NOT NULL,
+    content     TEXT NOT NULL DEFAULT '{}',
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_episodic_session ON episodic_log(session_id);
+
+CREATE TABLE IF NOT EXISTS semantic_facts (
+    id             TEXT PRIMARY KEY,
+    key            TEXT NOT NULL,
+    content        TEXT NOT NULL,
+    tags           TEXT NOT NULL DEFAULT '[]',
+    source_session TEXT,
+    stored_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_key ON semantic_facts(key);
+
+CREATE TABLE IF NOT EXISTS procedural_skills (
+    id               TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    description      TEXT NOT NULL DEFAULT '',
+    trigger_patterns TEXT NOT NULL DEFAULT '[]',
+    template         TEXT NOT NULL DEFAULT '',
+    source_session   TEXT,
+    learned_at       TEXT NOT NULL,
+    use_count        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_procedural_name ON procedural_skills(name);
 ";
 
 /// Column list (table-qualified, in [`row_to_memory`] order) shared by all
@@ -687,6 +725,204 @@ impl MemoryDb {
             by_source: grouped_count(&conn, "source")?,
         })
     }
+
+    // ─── Cognitive stores (Phase 5) ────────────────────────────────────────
+    //
+    // Durable backing for `EpisodicStore` / `SemanticStore` /
+    // `ProceduralStore`. The in-memory facades stay the read path; these
+    // methods are their write-through + load-on-open counterparts.
+
+    /// Append an episodic entry, pruning rows beyond `capacity` so the
+    /// durable log mirrors the in-memory ring's bound. `capacity == 0`
+    /// disables pruning (unbounded log).
+    ///
+    /// # Errors
+    /// Returns an error if the row cannot be written.
+    pub fn episodic_append(&self, entry: &crate::EpisodicEntry, capacity: usize) -> Result<()> {
+        let conn = self.pool.get()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO episodic_log (id, session_id, kind, content, occurred_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                entry.id.as_uuid().to_string(),
+                entry.session_id.map(|s| s.to_string()),
+                kind_to_str(entry.kind)?,
+                entry.content.to_string(),
+                entry.occurred_at.to_rfc3339(),
+            ],
+        )?;
+        if capacity > 0 {
+            conn.execute(
+                "DELETE FROM episodic_log WHERE seq <= \
+                     (SELECT MAX(seq) FROM episodic_log) - ?1",
+                params![i64::try_from(capacity).unwrap_or(i64::MAX)],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Most recent `limit` episodic entries in chronological order
+    /// (oldest first) — the shape `EpisodicStore` loads its ring from.
+    ///
+    /// # Errors
+    /// Returns an error on a query failure or an undecodable row.
+    pub fn episodic_recent(&self, limit: usize) -> Result<Vec<crate::EpisodicEntry>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, kind, content, occurred_at FROM episodic_log \
+             ORDER BY seq DESC LIMIT ?1",
+        )?;
+        let mut rows: Vec<crate::EpisodicEntry> = stmt
+            .query_map(params![clamp_limit(limit)], |row| {
+                row_to_episodic(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// Upsert a semantic fact, de-duplicating by `key` (last writer
+    /// wins) — the same invariant `SemanticStore::store` maintains
+    /// in memory.
+    ///
+    /// # Errors
+    /// Returns an error if the rows cannot be written.
+    pub fn semantic_upsert(&self, entry: &crate::SemanticEntry) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM semantic_facts WHERE key = ?1",
+            params![entry.key],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO semantic_facts \
+                 (id, key, content, tags, source_session, stored_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                entry.id.as_uuid().to_string(),
+                entry.key,
+                entry.content,
+                serde_json::to_string(&entry.tags).unwrap_or_else(|_| "[]".to_string()),
+                entry.source_session.map(|s| s.to_string()),
+                entry.stored_at.to_rfc3339(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Delete a semantic fact by id. Returns `true` when a row was removed.
+    ///
+    /// # Errors
+    /// Returns an error if the delete cannot be executed.
+    pub fn semantic_delete(&self, id: crate::SemanticId) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let n = conn.execute(
+            "DELETE FROM semantic_facts WHERE id = ?1",
+            params![id.as_uuid().to_string()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Every stored semantic fact — the load-on-open path for
+    /// `SemanticStore`.
+    ///
+    /// # Errors
+    /// Returns an error on a query failure or an undecodable row.
+    pub fn semantic_all(&self) -> Result<Vec<crate::SemanticEntry>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, key, content, tags, source_session, stored_at FROM semantic_facts",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                row_to_semantic(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Upsert a procedural skill, de-duplicating by `name` (last writer
+    /// wins) — the same invariant `ProceduralStore::register` maintains
+    /// in memory.
+    ///
+    /// # Errors
+    /// Returns an error if the rows cannot be written.
+    pub fn procedural_upsert(&self, entry: &crate::ProceduralEntry) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM procedural_skills WHERE name = ?1",
+            params![entry.name],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO procedural_skills \
+                 (id, name, description, trigger_patterns, template, \
+                  source_session, learned_at, use_count) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                entry.id.as_uuid().to_string(),
+                entry.name,
+                entry.description,
+                serde_json::to_string(&entry.trigger_patterns)
+                    .unwrap_or_else(|_| "[]".to_string()),
+                entry.template,
+                entry.source_session.map(|s| s.to_string()),
+                entry.learned_at.to_rfc3339(),
+                i64::try_from(entry.use_count).unwrap_or(i64::MAX),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Delete a procedural skill by id. Returns `true` when a row was
+    /// removed.
+    ///
+    /// # Errors
+    /// Returns an error if the delete cannot be executed.
+    pub fn procedural_delete(&self, id: crate::ProceduralId) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let n = conn.execute(
+            "DELETE FROM procedural_skills WHERE id = ?1",
+            params![id.as_uuid().to_string()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Increment a skill's durable `use_count`. Returns `true` when the
+    /// skill exists.
+    ///
+    /// # Errors
+    /// Returns an error if the update cannot be executed.
+    pub fn procedural_record_use(&self, id: crate::ProceduralId) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let n = conn.execute(
+            "UPDATE procedural_skills SET use_count = use_count + 1 WHERE id = ?1",
+            params![id.as_uuid().to_string()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Every stored procedural skill — the load-on-open path for
+    /// `ProceduralStore`.
+    ///
+    /// # Errors
+    /// Returns an error on a query failure or an undecodable row.
+    pub fn procedural_all(&self) -> Result<Vec<crate::ProceduralEntry>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, trigger_patterns, template, \
+                    source_session, learned_at, use_count \
+             FROM procedural_skills",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                row_to_procedural(row).map_err(|e| into_rusqlite(&e))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
 }
 
 /// Count rows grouped by a fixed column (`category` / `memory_type` /
@@ -744,6 +980,77 @@ pub(crate) fn parse_dt(s: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| MemoryDbError::Decode(format!("timestamp {s:?}: {e}")))
+}
+
+/// Serialize an [`crate::EpisodicKind`] to its serde `snake_case` string
+/// (`user_message`, `tool_call`, …) for the `episodic_log.kind` column.
+fn kind_to_str(kind: crate::EpisodicKind) -> Result<String> {
+    match serde_json::to_value(kind) {
+        Ok(serde_json::Value::String(s)) => Ok(s),
+        other => Err(MemoryDbError::Decode(format!(
+            "episodic kind serialized to non-string: {other:?}"
+        ))),
+    }
+}
+
+fn str_to_kind(s: &str) -> Result<crate::EpisodicKind> {
+    serde_json::from_value(serde_json::Value::String(s.to_string()))
+        .map_err(|e| MemoryDbError::Decode(format!("episodic kind {s:?}: {e}")))
+}
+
+fn parse_opt_uuid(s: Option<String>) -> Result<Option<Uuid>> {
+    s.map(|v| parse_uuid(&v)).transpose()
+}
+
+fn row_to_episodic(row: &Row<'_>) -> Result<crate::EpisodicEntry> {
+    let id: String = row.get("id")?;
+    let session_id: Option<String> = row.get("session_id")?;
+    let kind: String = row.get("kind")?;
+    let content: String = row.get("content")?;
+    let occurred_at: String = row.get("occurred_at")?;
+    Ok(crate::EpisodicEntry {
+        id: crate::EpisodicId::from_uuid(parse_uuid(&id)?),
+        session_id: parse_opt_uuid(session_id)?,
+        kind: str_to_kind(&kind)?,
+        content: serde_json::from_str(&content)
+            .map_err(|e| MemoryDbError::Decode(format!("episodic content: {e}")))?,
+        occurred_at: parse_dt(&occurred_at)?,
+    })
+}
+
+fn row_to_semantic(row: &Row<'_>) -> Result<crate::SemanticEntry> {
+    let id: String = row.get("id")?;
+    let tags: String = row.get("tags")?;
+    let source_session: Option<String> = row.get("source_session")?;
+    let stored_at: String = row.get("stored_at")?;
+    Ok(crate::SemanticEntry {
+        id: crate::SemanticId::from_uuid(parse_uuid(&id)?),
+        key: row.get("key")?,
+        content: row.get("content")?,
+        tags: serde_json::from_str(&tags)
+            .map_err(|e| MemoryDbError::Decode(format!("semantic tags: {e}")))?,
+        source_session: parse_opt_uuid(source_session)?,
+        stored_at: parse_dt(&stored_at)?,
+    })
+}
+
+fn row_to_procedural(row: &Row<'_>) -> Result<crate::ProceduralEntry> {
+    let id: String = row.get("id")?;
+    let triggers: String = row.get("trigger_patterns")?;
+    let source_session: Option<String> = row.get("source_session")?;
+    let learned_at: String = row.get("learned_at")?;
+    let use_count: i64 = row.get("use_count")?;
+    Ok(crate::ProceduralEntry {
+        id: crate::ProceduralId::from_uuid(parse_uuid(&id)?),
+        name: row.get("name")?,
+        description: row.get("description")?,
+        trigger_patterns: serde_json::from_str(&triggers)
+            .map_err(|e| MemoryDbError::Decode(format!("procedural triggers: {e}")))?,
+        template: row.get("template")?,
+        source_session: parse_opt_uuid(source_session)?,
+        learned_at: parse_dt(&learned_at)?,
+        use_count: u64::try_from(use_count).unwrap_or(0),
+    })
 }
 
 fn row_to_memory(row: &Row<'_>) -> Result<Memory> {

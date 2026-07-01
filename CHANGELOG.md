@@ -9,6 +9,21 @@ lives in the git log and in `docs/0.1.2/audits/`.
 ## [Unreleased]
 
 ### Added
+- **Cognitive-store persistence (memory Phase 5)** — `MemoryStore` (the
+  episodic / semantic / procedural facade in `nexus-memory`) gains optional
+  SQLite write-through: `MemoryStore::open(forge_root)` loads prior state
+  from `.forge/memory/memory.db` (new `episodic_log` / `semantic_facts` /
+  `procedural_skills` tables alongside the plugin's `memories` table) and
+  persists every subsequent mutation, so agent memory survives process
+  restarts. `MemoryStore::new()` keeps the original in-memory semantics; the
+  API surface is unchanged, exactly as the Phase-1 docs promised.
+- **Common plugin contract + conformance gates** (#187 / V9) —
+  `@nexus/extension-api`'s `NexusPluginContext` is re-derived as the subset
+  both live runtimes satisfy (with `MaybePromise` bridging sync/async);
+  compile-only conformance tests lock the in-process `PluginAPI` (which now
+  carries a host-asserted `pluginId`) and the sandbox
+  `SandboxedPluginContext` to it. `ScriptPlugin` is deprecated (removal
+  0.2.0) and the package re-cut `1.0.0` → `0.1.0`.
 - **Native memory engine at full `remind_me` parity** (`com.nexus.memory`,
   #188) — promoted from a staging library to a wired service plugin with 21
   IPC handlers: CRUD/list/stats, FTS5 + hybrid-vector recall (RRF), SPO facts
