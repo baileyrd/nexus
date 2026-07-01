@@ -85,7 +85,10 @@ pub(crate) async fn sync(db: MemoryDb, args: &Value) -> Result<Value, String> {
 /// (its `node_id` stays foreign); whole-store authorship-agnostic sync would
 /// need an explicit change outbox.
 async fn push(db: &MemoryDb, client: &reqwest::Client, cfg: &HubConfig) -> Result<u64, String> {
-    let mut ts = db.sync_state_get(PUSH_TS).map_err(de)?.unwrap_or_else(|| EPOCH.to_string());
+    let mut ts = db
+        .sync_state_get(PUSH_TS)
+        .map_err(de)?
+        .unwrap_or_else(|| EPOCH.to_string());
     let mut id = db.sync_state_get(PUSH_ID).map_err(de)?.unwrap_or_default();
     let mut total = 0_u64;
     loop {
@@ -135,7 +138,10 @@ async fn push(db: &MemoryDb, client: &reqwest::Client, cfg: &HubConfig) -> Resul
 /// Pull remote memories newer than the stored pull cursor, applying each with
 /// last-write-wins and advancing the cursor.
 async fn pull(db: &MemoryDb, client: &reqwest::Client, cfg: &HubConfig) -> Result<u64, String> {
-    let mut ts = db.sync_state_get(PULL_TS).map_err(de)?.unwrap_or_else(|| EPOCH.to_string());
+    let mut ts = db
+        .sync_state_get(PULL_TS)
+        .map_err(de)?
+        .unwrap_or_else(|| EPOCH.to_string());
     let mut id = db.sync_state_get(PULL_ID).map_err(de)?;
     let mut total = 0_u64;
     loop {
@@ -154,8 +160,15 @@ async fn pull(db: &MemoryDb, client: &reqwest::Client, cfg: &HubConfig) -> Resul
         if !resp.status().is_success() {
             return Err(format!("sync pull: HTTP {}", resp.status()));
         }
-        let body: Value = resp.json().await.map_err(|e| format!("sync pull: decode: {e}"))?;
-        let records = body.get("records").and_then(Value::as_array).cloned().unwrap_or_default();
+        let body: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("sync pull: decode: {e}"))?;
+        let records = body
+            .get("records")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         if records.is_empty() {
             break;
         }
@@ -173,7 +186,8 @@ async fn pull(db: &MemoryDb, client: &reqwest::Client, cfg: &HubConfig) -> Resul
             }
         }
         db.sync_state_set(PULL_TS, &ts).map_err(de)?;
-        db.sync_state_set(PULL_ID, id.as_deref().unwrap_or("")).map_err(de)?;
+        db.sync_state_set(PULL_ID, id.as_deref().unwrap_or(""))
+            .map_err(de)?;
         total += records.len() as u64;
         if records.len() < BATCH {
             break;
@@ -202,7 +216,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("sync push") || err.contains("sync pull"), "got: {err}");
+        assert!(
+            err.contains("sync push") || err.contains("sync pull"),
+            "got: {err}"
+        );
     }
 
     #[test]

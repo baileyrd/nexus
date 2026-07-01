@@ -39,8 +39,8 @@ mod vars;
 
 use std::path::PathBuf;
 
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 
 pub use parser::ParseError;
 
@@ -208,7 +208,11 @@ fn repl_inner() -> rustyline::Result<i32> {
         #[cfg(unix)]
         job::reap_background();
 
-        let prompt = if buffer.is_empty() { prompt() } else { "> ".to_string() };
+        let prompt = if buffer.is_empty() {
+            prompt()
+        } else {
+            "> ".to_string()
+        };
         match rl.readline(&prompt) {
             Ok(line) => {
                 if buffer.is_empty() && line.trim().is_empty() {
@@ -278,8 +282,14 @@ mod lib_tests {
         // Regression for the bundled-shell launch: `nexus-rush -i` must start the
         // REPL, not try to open a file named "-i". (RFC 0002 audit C1.)
         assert_eq!(classify_args(&argv(&["nexus-rush"])), LaunchMode::Repl);
-        assert_eq!(classify_args(&argv(&["nexus-rush", "-i"])), LaunchMode::Repl);
-        assert_eq!(classify_args(&argv(&["nexus-rush", "-l"])), LaunchMode::Repl);
+        assert_eq!(
+            classify_args(&argv(&["nexus-rush", "-i"])),
+            LaunchMode::Repl
+        );
+        assert_eq!(
+            classify_args(&argv(&["nexus-rush", "-l"])),
+            LaunchMode::Repl
+        );
         assert!(matches!(
             classify_args(&argv(&["nexus-rush", "-c", "echo hi"])),
             LaunchMode::Command { .. }

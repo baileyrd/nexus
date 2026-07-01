@@ -302,7 +302,12 @@ async fn delegate_isolated(
     // Isolation needs a git-backed forge. `status` returns JSON null when the
     // git plugin is passive (the forge root isn't a repo).
     let git_status = ctx
-        .ipc_call("com.nexus.git", "status", serde_json::json!({}), ISOLATION_IPC_TIMEOUT)
+        .ipc_call(
+            "com.nexus.git",
+            "status",
+            serde_json::json!({}),
+            ISOLATION_IPC_TIMEOUT,
+        )
         .await
         .map_err(|e| exec_err(format!("delegate: git status probe: {e}")))?;
     if !forge_is_git(&git_status) {
@@ -335,7 +340,11 @@ async fn delegate_isolated(
     let wt_path = wt
         .get("path")
         .and_then(Value::as_str)
-        .ok_or_else(|| exec_err(format!("delegate: worktree_create reply missing path: {wt}")))?
+        .ok_or_else(|| {
+            exec_err(format!(
+                "delegate: worktree_create reply missing path: {wt}"
+            ))
+        })?
         .to_string();
 
     // Run the subagent headlessly against the worktree forge, OS-sandboxed
@@ -432,7 +441,10 @@ async fn commit_and_merge_back(
         .unwrap_or_default();
     if conflicts.is_empty() {
         return Ok(MergeStatus::Merged(
-            merge_reply.get("commit_hash").cloned().unwrap_or(Value::Null),
+            merge_reply
+                .get("commit_hash")
+                .cloned()
+                .unwrap_or(Value::Null),
         ));
     }
 
@@ -731,7 +743,10 @@ mod tests {
         assert_eq!(v["subagent"]["exit_code"], 0);
         assert_eq!(v["subagent"]["timed_out"], false);
         let summary = v["summary"].as_str().expect("summary string");
-        assert!(summary.contains("merged") && summary.contains("deadbee"), "{summary}");
+        assert!(
+            summary.contains("merged") && summary.contains("deadbee"),
+            "{summary}"
+        );
     }
 
     #[test]

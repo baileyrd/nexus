@@ -775,7 +775,10 @@ impl AnsiParser {
                 // an unclamped value (parsed up to `usize`) would spin under the
                 // held grid lock and hang the terminal on hostile input.
                 if let Some(ch) = self.last_char {
-                    let cap = g.rows.saturating_add(g.scrollback_max).saturating_mul(g.cols);
+                    let cap = g
+                        .rows
+                        .saturating_add(g.scrollback_max)
+                        .saturating_mul(g.cols);
                     for _ in 0..count.min(cap) {
                         g.put_char(ch, self.pen);
                     }

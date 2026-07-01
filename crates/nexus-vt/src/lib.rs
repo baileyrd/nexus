@@ -23,9 +23,9 @@
 mod core;
 
 pub use core::{
-    AnsiParser, CursorShape, DirtyFrame, Grid, LineAttr, Theme, SCROLLBACK_MAX, ATTR_BLINK,
-    ATTR_BOLD, ATTR_DIM, ATTR_HIDDEN, ATTR_ITALIC, ATTR_MASK, ATTR_REVERSE, ATTR_STRIKE,
-    ATTR_UNDERLINE, WIDE_TRAILER,
+    ATTR_BLINK, ATTR_BOLD, ATTR_DIM, ATTR_HIDDEN, ATTR_ITALIC, ATTR_MASK, ATTR_REVERSE,
+    ATTR_STRIKE, ATTR_UNDERLINE, AnsiParser, CursorShape, DirtyFrame, Grid, LineAttr,
+    SCROLLBACK_MAX, Theme, WIDE_TRAILER,
 };
 
 /// A headless terminal: a [`Grid`] plus the [`AnsiParser`] that drives it.
@@ -149,7 +149,9 @@ mod facade_tests {
         vt.advance(b"\x1b]133;A\x07ls\x1b]133;C\x07hello\n\x1b]133;D;0\x07");
         assert_eq!(vt.last_exit(), Some(0));
         assert!(
-            vt.last_command_output().unwrap_or_default().contains("hello"),
+            vt.last_command_output()
+                .unwrap_or_default()
+                .contains("hello"),
             "captured output was {:?}",
             vt.last_command_output()
         );
@@ -185,19 +187,33 @@ mod facade_tests {
         // both be reported with their own exit codes — a bool flag would
         // coalesce them and drop the first. Drain in a loop until empty.
         let mut vt = Vt::new(40, 10);
-        vt.advance(
-            b"\x1b]133;C\x07first\n\x1b]133;D;1\x07\x1b]133;C\x07second\n\x1b]133;D;0\x07",
-        );
+        vt.advance(b"\x1b]133;C\x07first\n\x1b]133;D;1\x07\x1b]133;C\x07second\n\x1b]133;D;0\x07");
 
         let mut drained = Vec::new();
         while let Some(done) = vt.take_finished_command() {
             drained.push(done);
         }
-        assert_eq!(drained.len(), 2, "both completions must surface: {drained:?}");
+        assert_eq!(
+            drained.len(),
+            2,
+            "both completions must surface: {drained:?}"
+        );
         assert_eq!(drained[0].0, Some(1));
-        assert!(drained[0].1.as_deref().unwrap_or_default().contains("first"));
+        assert!(
+            drained[0]
+                .1
+                .as_deref()
+                .unwrap_or_default()
+                .contains("first")
+        );
         assert_eq!(drained[1].0, Some(0));
-        assert!(drained[1].1.as_deref().unwrap_or_default().contains("second"));
+        assert!(
+            drained[1]
+                .1
+                .as_deref()
+                .unwrap_or_default()
+                .contains("second")
+        );
     }
 
     #[test]
@@ -206,14 +222,22 @@ mod facade_tests {
         // command's captured output — the per-completion output is `None`.
         let mut vt = Vt::new(40, 10);
         vt.advance(b"\x1b]133;C\x07kept\n\x1b]133;D;0\x07");
-        assert!(vt.last_command_output().unwrap_or_default().contains("kept"));
+        assert!(
+            vt.last_command_output()
+                .unwrap_or_default()
+                .contains("kept")
+        );
 
         // Second command finishes with no output-start mark.
         vt.advance(b"\x1b]133;D;3\x07");
         let second = vt.take_finished_command(); // pops the first (kept)
         assert!(second.is_some());
         let third = vt.take_finished_command(); // pops the second (no C)
-        assert_eq!(third, Some((Some(3), None)), "D-without-C must carry no output");
+        assert_eq!(
+            third,
+            Some((Some(3), None)),
+            "D-without-C must carry no output"
+        );
         // And the resource-facing accessor reflects the cleared capture.
         assert_eq!(vt.last_command_output(), None);
         assert_eq!(vt.last_exit(), Some(3));

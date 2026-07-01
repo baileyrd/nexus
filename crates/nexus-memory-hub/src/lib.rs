@@ -186,9 +186,7 @@ impl HubStore {
             ));
             args.push(Box::new(node.to_string()));
         }
-        sql.push_str(&format!(
-            " ORDER BY updated_at ASC, id ASC LIMIT {limit}"
-        ));
+        sql.push_str(&format!(" ORDER BY updated_at ASC, id ASC LIMIT {limit}"));
 
         let mut stmt = conn.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(AsRef::as_ref).collect();
@@ -380,7 +378,10 @@ mod tests {
     fn push_then_pull_round_trips() {
         let store = HubStore::open_in_memory().unwrap();
         let processed = store
-            .push("node-a", &[rec("m1", "2026-01-01T00:00:00+00:00", "node-a")])
+            .push(
+                "node-a",
+                &[rec("m1", "2026-01-01T00:00:00+00:00", "node-a")],
+            )
             .unwrap();
         assert_eq!(processed, vec!["m1"]);
         let out = store.pull(EPOCH, None, None, 100).unwrap();
@@ -407,7 +408,9 @@ mod tests {
     #[test]
     fn last_write_wins_on_updated_at() {
         let store = HubStore::open_in_memory().unwrap();
-        store.push("a", &[rec("m1", "2026-01-01T00:00:00+00:00", "a")]).unwrap();
+        store
+            .push("a", &[rec("m1", "2026-01-01T00:00:00+00:00", "a")])
+            .unwrap();
         // Older update is ignored.
         store
             .push(
@@ -435,7 +438,10 @@ mod tests {
         // Three rows share a timestamp — the keyset must page by id, not skip.
         let ts = "2026-01-01T00:00:00+00:00";
         store
-            .push("a", &[rec("m1", ts, "a"), rec("m2", ts, "a"), rec("m3", ts, "a")])
+            .push(
+                "a",
+                &[rec("m1", ts, "a"), rec("m2", ts, "a"), rec("m3", ts, "a")],
+            )
             .unwrap();
         let page1 = store.pull(EPOCH, None, None, 2).unwrap();
         assert_eq!(page1.len(), 2);
@@ -450,8 +456,12 @@ mod tests {
     #[test]
     fn pull_excludes_origin_node() {
         let store = HubStore::open_in_memory().unwrap();
-        store.push("a", &[rec("m1", "2026-01-01T00:00:00+00:00", "a")]).unwrap();
-        store.push("b", &[rec("m2", "2026-01-02T00:00:00+00:00", "b")]).unwrap();
+        store
+            .push("a", &[rec("m1", "2026-01-01T00:00:00+00:00", "a")])
+            .unwrap();
+        store
+            .push("b", &[rec("m2", "2026-01-02T00:00:00+00:00", "b")])
+            .unwrap();
         // Node "a" pulls everything except what it pushed.
         let out = store.pull(EPOCH, None, Some("a"), 100).unwrap();
         assert_eq!(out.len(), 1);

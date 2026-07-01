@@ -553,11 +553,13 @@ impl GitEngine {
             };
             // Resolving the checked-out branch needs opening the worktree's own
             // repository; best-effort, `None` if that fails.
-            let branch = git2::Repository::open_from_worktree(&wt).ok().and_then(|r| {
-                r.head()
-                    .ok()
-                    .and_then(|h| h.shorthand().map(ToString::to_string))
-            });
+            let branch = git2::Repository::open_from_worktree(&wt)
+                .ok()
+                .and_then(|r| {
+                    r.head()
+                        .ok()
+                        .and_then(|h| h.shorthand().map(ToString::to_string))
+                });
             out.push(crate::ipc::GitWorktreeInfo {
                 name: name.to_string(),
                 path: wt.path().display().to_string(),
@@ -635,10 +637,7 @@ impl GitEngine {
         let tree_id = index.write_tree()?;
 
         // Skip the commit when nothing changed — the staged tree matches HEAD.
-        let head_commit = wt_repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_commit().ok());
+        let head_commit = wt_repo.head().ok().and_then(|h| h.peel_to_commit().ok());
         if let Some(parent) = &head_commit {
             if parent.tree_id() == tree_id {
                 return Ok(None);

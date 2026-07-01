@@ -14,7 +14,9 @@ use nexus_kernel::{Events as _, KernelPluginContext};
 use nexus_plugins::PluginError;
 use serde::{Deserialize, Serialize};
 
-use super::shared::{exec_err, insert_ask_bounded, parse_args, PendingAsks, DEFAULT_ASK_TIMEOUT_SECS};
+use super::shared::{
+    exec_err, insert_ask_bounded, parse_args, PendingAsks, DEFAULT_ASK_TIMEOUT_SECS,
+};
 
 /// Bus topic carrying an interactive prompt to frontends.
 pub(crate) const EVENT_ASK_REQUESTED: &str = "com.nexus.agent.ask_requested";
@@ -171,6 +173,9 @@ mod tests {
     /// before the bridge's `ipc_call` deadline turns the call into a
     /// transport error.
     #[test]
+    // The assertion is constant by design — locking the compile-time
+    // relationship between the two const tunables IS the test.
+    #[allow(clippy::assertions_on_constants)]
     fn ask_dispatch_timeout_exceeds_handler_wait() {
         assert!(
             crate::tool_registry::ASK_DISPATCH_TIMEOUT_MS > DEFAULT_ASK_TIMEOUT_SECS * 1000,

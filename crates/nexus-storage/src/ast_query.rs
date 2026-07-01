@@ -56,10 +56,11 @@ pub fn ast_query(
     forge_root: &Path,
     args: &StorageAstQueryArgs,
 ) -> Result<StorageAstQueryResult, AstQueryError> {
-    let language =
-        language_from_label(&args.language).ok_or_else(|| AstQueryError::UnknownLanguage(args.language.clone()))?;
+    let language = language_from_label(&args.language)
+        .ok_or_else(|| AstQueryError::UnknownLanguage(args.language.clone()))?;
     let lang = ts_language(language);
-    let query = Query::new(&lang, &args.query).map_err(|e| AstQueryError::BadQuery(e.to_string()))?;
+    let query =
+        Query::new(&lang, &args.query).map_err(|e| AstQueryError::BadQuery(e.to_string()))?;
     let capture_names = query.capture_names();
 
     let max = args
@@ -104,10 +105,7 @@ pub fn ast_query(
         while let Some(m) = it.next() {
             for cap in m.captures {
                 let node = cap.node;
-                let name = capture_names
-                    .get(cap.index as usize)
-                    .copied()
-                    .unwrap_or("");
+                let name = capture_names.get(cap.index as usize).copied().unwrap_or("");
                 let text = node.utf8_text(src).unwrap_or("");
                 matches.push(StorageAstQueryMatch {
                     path: rel_str.to_string(),
@@ -128,7 +126,10 @@ pub fn ast_query(
 
 /// Files to consider: a single file when `path` names one, otherwise every
 /// text file in the forge (language/scope filtering happens in the loop).
-fn candidate_files(forge_root: &Path, args: &StorageAstQueryArgs) -> Result<Vec<PathBuf>, StorageError> {
+fn candidate_files(
+    forge_root: &Path,
+    args: &StorageAstQueryArgs,
+) -> Result<Vec<PathBuf>, StorageError> {
     if let Some(scope) = &args.path {
         let candidate = PathBuf::from(scope);
         if forge_root.join(&candidate).is_file() {

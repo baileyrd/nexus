@@ -356,7 +356,10 @@ mod tests {
 
     #[test]
     fn tag_is_uppercased_and_validated() {
-        assert_eq!(parse("[a#abcd]\nDEL 1.=1\n").unwrap().sections[0].tag, "ABCD");
+        assert_eq!(
+            parse("[a#abcd]\nDEL 1.=1\n").unwrap().sections[0].tag,
+            "ABCD"
+        );
         assert!(matches!(
             parse("[a#XYZ]\nDEL 1.=1\n"),
             Err(HashlineError::BadSectionHeader { line: 1 })

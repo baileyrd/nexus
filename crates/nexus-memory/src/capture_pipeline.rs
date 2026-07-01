@@ -89,14 +89,22 @@ pub(crate) async fn auto_capture(
         parent.category = c.to_string();
     }
     if let Some(tags) = args.get("tags").and_then(Value::as_array) {
-        parent.tags = tags.iter().filter_map(|t| t.as_str().map(String::from)).collect();
+        parent.tags = tags
+            .iter()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect();
     }
     let parent_id = parent.id.to_string();
-    db.insert(&parent).map_err(|e| format!("auto_capture: insert parent: {e}"))?;
+    db.insert(&parent)
+        .map_err(|e| format!("auto_capture: insert parent: {e}"))?;
 
     let mut children: Vec<String> = Vec::new();
     let mut decomposed = false;
-    if args.get("decompose").and_then(Value::as_bool).unwrap_or(false) {
+    if args
+        .get("decompose")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         let ctx = ctx.ok_or_else(|| "auto_capture: decompose needs a wired context".to_string())?;
         let gen = ctx
             .ipc_call(
@@ -145,7 +153,10 @@ mod tests {
     #[test]
     fn parse_facts_falls_back_to_lines() {
         let out = "- first fact\n- second fact\n3. third fact";
-        assert_eq!(parse_facts(out), vec!["first fact", "second fact", "third fact"]);
+        assert_eq!(
+            parse_facts(out),
+            vec!["first fact", "second fact", "third fact"]
+        );
         assert!(parse_facts("   ").is_empty());
     }
 

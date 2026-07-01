@@ -10,8 +10,8 @@
 //! does for `git2`. Keeping the library runtime-agnostic means the core
 //! plugin that wraps it can choose its own concurrency shape.
 
-use std::io::{Read, Write};
 use std::ffi::OsString;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
@@ -298,12 +298,15 @@ impl Session {
             .map_err(|e| TerminalError::PtyAlloc(e.to_string()))?;
 
         // Either the shell directly, or the nexus-sandbox helper wrapping it.
-        let (program, args) =
-            resolve_spawn_target(&shell, config.sandbox.as_ref(), config.working_dir.as_deref())
-                .map_err(|reason| TerminalError::Spawn {
-                    shell: shell_display.clone(),
-                    reason,
-                })?;
+        let (program, args) = resolve_spawn_target(
+            &shell,
+            config.sandbox.as_ref(),
+            config.working_dir.as_deref(),
+        )
+        .map_err(|reason| TerminalError::Spawn {
+            shell: shell_display.clone(),
+            reason,
+        })?;
         let mut cmd = CommandBuilder::new(&program);
         for a in &args {
             cmd.arg(a);
@@ -795,7 +798,10 @@ mod tests {
 
     #[test]
     fn resolve_spawn_target_runs_shell_directly_when_unsandboxed() {
-        let shell = ShellSpec { program: "/bin/sh".into(), args: vec!["-l".into()] };
+        let shell = ShellSpec {
+            program: "/bin/sh".into(),
+            args: vec!["-l".into()],
+        };
         // No policy → run the shell directly.
         let (prog, args) = resolve_spawn_target(&shell, None, None).unwrap();
         assert_eq!(prog, PathBuf::from("/bin/sh"));
@@ -808,7 +814,10 @@ mod tests {
 
     #[test]
     fn resolve_spawn_target_wraps_with_helper_when_confined() {
-        let shell = ShellSpec { program: "/bin/sh".into(), args: vec!["-l".into()] };
+        let shell = ShellSpec {
+            program: "/bin/sh".into(),
+            args: vec!["-l".into()],
+        };
         let policy = SandboxPolicy::new_workspace_write(vec![]);
         // Helper discovery is best-effort; only assert wrapping when located.
         if nexus_types::default_helper_path().is_some() {
@@ -826,7 +835,10 @@ mod tests {
     #[test]
     fn use_bundled_shell_only_for_confined_unpinned_opt_in() {
         let ws = SandboxPolicy::new_workspace_write(vec![]);
-        let pinned = Some(ShellSpec { program: "/bin/sh".into(), args: vec![] });
+        let pinned = Some(ShellSpec {
+            program: "/bin/sh".into(),
+            args: vec![],
+        });
 
         // The one case that selects the bundled shell: opt-in + a confining
         // policy + no caller-pinned shell.
@@ -839,7 +851,11 @@ mod tests {
         // No sandbox policy → bundled shell is sandbox-only.
         assert!(!use_bundled_shell(None, None, true));
         // An unrestricted policy isn't "confining" → system shell.
-        assert!(!use_bundled_shell(None, Some(&SandboxPolicy::DangerFullAccess), true));
+        assert!(!use_bundled_shell(
+            None,
+            Some(&SandboxPolicy::DangerFullAccess),
+            true
+        ));
     }
 
     fn unix_only(test_name: &str) -> bool {

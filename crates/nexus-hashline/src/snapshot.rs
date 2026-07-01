@@ -123,7 +123,10 @@ mod tests {
             store.record("a", &format!("v{i}\n"));
         }
         // Oldest two versions evicted; latest is the final write.
-        assert_eq!(store.latest("a").unwrap().content, format!("v{}\n", MAX_VERSIONS_PER_PATH + 1));
+        assert_eq!(
+            store.latest("a").unwrap().content,
+            format!("v{}\n", MAX_VERSIONS_PER_PATH + 1)
+        );
         assert!(store.get_by_tag("a", &tag("v0\n")).is_none());
         assert!(store.get_by_tag("a", &tag("v1\n")).is_none());
         assert!(store.get_by_tag("a", &tag("v2\n")).is_some());
@@ -136,7 +139,10 @@ mod tests {
             store.record(&format!("p{i}"), "x\n");
         }
         assert_eq!(store.path_count(), MAX_SNAPSHOT_PATHS);
-        assert!(store.latest("p0").is_none(), "oldest path should be evicted");
+        assert!(
+            store.latest("p0").is_none(),
+            "oldest path should be evicted"
+        );
         assert!(store.latest(&format!("p{MAX_SNAPSHOT_PATHS}")).is_some());
     }
 

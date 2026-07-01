@@ -49,18 +49,18 @@ mod parser;
 mod png;
 mod sixel;
 
+#[cfg(feature = "gui")]
+pub(crate) use base64::encode as base64_encode;
 pub use cell::{
     ATTR_BLINK, ATTR_BOLD, ATTR_DIM, ATTR_HIDDEN, ATTR_ITALIC, ATTR_MASK, ATTR_REVERSE,
     ATTR_STRIKE, ATTR_UNDERLINE, WIDE_TRAILER,
 };
+#[cfg(feature = "gui")]
+pub use cell::{Cell, char_width};
 pub use color::Theme;
 pub use grid::{CursorShape, DirtyFrame, Grid, LineAttr, SCROLLBACK_MAX};
 #[cfg(feature = "gui")]
-pub use cell::{Cell, char_width};
-#[cfg(feature = "gui")]
 pub use grid::{MouseModes, Selection};
-#[cfg(feature = "gui")]
-pub(crate) use base64::encode as base64_encode;
 pub use parser::AnsiParser;
 
 #[cfg(test)]

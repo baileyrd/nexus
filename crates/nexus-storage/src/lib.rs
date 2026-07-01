@@ -87,6 +87,7 @@ pub use find_replace::{
 pub use graph::{
     BacklinkResult, EdgeData, GraphStats, KnowledgeGraph, OutgoingLink, UnresolvedLink,
 };
+pub use hybrid::HybridMatch;
 pub use index::{
     delete_file, file_by_path, insert_file, query_backlinks, query_blocks, query_files,
     query_links, query_tags, soft_delete_file,
@@ -98,7 +99,6 @@ pub use index::{
 pub use mdx::{parse_mdx, MdxParseResult, ParsedJsxComponent};
 pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
 pub use reconcile::{reconcile, ReconcileDelta};
-pub use hybrid::HybridMatch;
 pub use search::{SearchIndex, SearchResult};
 
 /// Oversampling multiplier for each hybrid-search arm: both the FTS and

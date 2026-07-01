@@ -60,7 +60,10 @@ pub fn start_capture(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHandle
                     }
                 }
                 Err(RecvError::Lagged(n)) => {
-                    tracing::warn!(dropped = n, "memory capture: subscriber lagged; events dropped");
+                    tracing::warn!(
+                        dropped = n,
+                        "memory capture: subscriber lagged; events dropped"
+                    );
                 }
                 Err(RecvError::Closed) => break,
             }
@@ -106,8 +109,7 @@ mod tests {
         .expect("publish");
 
         // Poll a separate store handle until the captured row lands.
-        let store =
-            MemoryDb::open(&forge.join(".forge").join("memory").join("memory.db")).unwrap();
+        let store = MemoryDb::open(&forge.join(".forge").join("memory").join("memory.db")).unwrap();
         let mut count = 0u64;
         for _ in 0..200 {
             count = store.count().unwrap();

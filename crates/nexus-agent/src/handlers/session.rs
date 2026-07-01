@@ -270,7 +270,9 @@ pub(crate) async fn handle_session_resume(
 ) -> Result<serde_json::Value, PluginError> {
     let parsed: SessionResumeArgs = parse_args(args, "session_resume")?;
     if parsed.message.trim().is_empty() {
-        return Err(exec_err("session_resume: `message` must be non-empty".into()));
+        return Err(exec_err(
+            "session_resume: `message` must be non-empty".into(),
+        ));
     }
     fork_session(
         ctx,
@@ -298,7 +300,9 @@ pub(crate) async fn handle_session_branch(
 ) -> Result<serde_json::Value, PluginError> {
     let parsed: SessionBranchArgs = parse_args(args, "session_branch")?;
     if parsed.message.trim().is_empty() {
-        return Err(exec_err("session_branch: `message` must be non-empty".into()));
+        return Err(exec_err(
+            "session_branch: `message` must be non-empty".into(),
+        ));
     }
     fork_session(
         ctx,
@@ -326,9 +330,7 @@ pub(crate) async fn handle_session_rewind(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let parsed: SessionRewindArgs = parse_args(args, "session_rewind")?;
-    let message = parsed
-        .message
-        .filter(|m| !m.trim().is_empty());
+    let message = parsed.message.filter(|m| !m.trim().is_empty());
     fork_session(
         ctx,
         pending_approvals,
@@ -659,10 +661,7 @@ fn assemble_rounds(
 
 /// The rounds a node persists: a fork stores only rounds after its
 /// `branch_point`; a root (`None`) stores all. Pure.
-fn delta_rounds(
-    full: &[crate::RoundRecord],
-    branch_point: Option<u32>,
-) -> Vec<crate::RoundRecord> {
+fn delta_rounds(full: &[crate::RoundRecord], branch_point: Option<u32>) -> Vec<crate::RoundRecord> {
     match branch_point {
         Some(bp) => full.iter().filter(|r| r.round > bp).cloned().collect(),
         None => full.to_vec(),
@@ -674,9 +673,7 @@ fn delta_rounds(
 /// (branch / rewind). Pure.
 pub(crate) fn resolve_fork_point(up_to_round: Option<u32>, tip: u32) -> Result<u32, String> {
     match up_to_round {
-        Some(k) if k == 0 || k > tip => {
-            Err(format!("at_round {k} out of range 1..={tip}"))
-        }
+        Some(k) if k == 0 || k > tip => Err(format!("at_round {k} out of range 1..={tip}")),
         Some(k) => Ok(k),
         None => Ok(tip),
     }
@@ -743,7 +740,10 @@ mod tests {
         // round 3 is past the fork point), then appends the node's own rounds.
         let parent = vec![round(1), round(2), round(3)];
         let node = vec![round(3), round(4)];
-        assert_eq!(rounds_of(&assemble_rounds(&parent, 2, node)), vec![1, 2, 3, 4]);
+        assert_eq!(
+            rounds_of(&assemble_rounds(&parent, 2, node)),
+            vec![1, 2, 3, 4]
+        );
     }
 
     #[test]

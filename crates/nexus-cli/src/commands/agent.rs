@@ -198,7 +198,11 @@ pub fn checkpoint(app: &mut App, session_id: &str, round: u32, name: &str) -> Re
 /// RFC 0008 — `nexus agent checkpoints`: list named checkpoints.
 pub fn checkpoints(app: &mut App) -> Result<()> {
     let format = app.format();
-    let response = call(app, "session_checkpoints", Value::Object(serde_json::Map::new()))?;
+    let response = call(
+        app,
+        "session_checkpoints",
+        Value::Object(serde_json::Map::new()),
+    )?;
     match format {
         OutputFormat::Json => {
             println!(
@@ -216,7 +220,11 @@ pub fn checkpoints(app: &mut App) -> Result<()> {
 
 /// RFC 0008 — `nexus agent checkpoint-rm <name>`: remove a named checkpoint.
 pub fn checkpoint_rm(app: &mut App, name: &str) -> Result<()> {
-    let response = call(app, "session_checkpoint_delete", serde_json::json!({ "name": name }))?;
+    let response = call(
+        app,
+        "session_checkpoint_delete",
+        serde_json::json!({ "name": name }),
+    )?;
     let deleted = response
         .get("deleted")
         .and_then(Value::as_bool)

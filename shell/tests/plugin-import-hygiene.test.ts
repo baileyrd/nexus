@@ -99,6 +99,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/outline/OutlineView.tsx',               // host/EventBus
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // host/communityPluginLoader
   'shell/src/plugins/nexus/processes/index.ts',                    // host/communityPluginLoader
+  'shell/src/plugins/nexus/terminal/TerminalInstance.tsx',         // host/EventBus — config:changed:terminal.* subscriptions; same React-component pattern as BacklinksView/GraphGlobalView (no `api` in scope); WI-25 drain
   'shell/src/plugins/nexus/viewBuilder/ViewBuilderView.tsx',       // BL-067: introspection tool — host/layoutSnapshot is exactly the surface this panel exists to surface; no @nexus/extension-api equivalent, by design (the builder reads the shell, it doesn't run inside its sandbox)
   'shell/src/plugins/nexus/workspace/index.ts',                    // V16 inversion seam — registerWorkspaceHostSurface (host/WorkspaceHostSurface) lets the workspace plugin REGISTER its root-path surface with the host (plugin→host direction, same shape as the editor seam above). By design; cannot move to @nexus/extension-api without re-coupling the host to the plugin.
 ])

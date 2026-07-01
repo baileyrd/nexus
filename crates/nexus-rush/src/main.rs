@@ -14,7 +14,11 @@ fn main() -> ! {
     nexus_rush::set_embedded(std::env::var_os("NEXUS_EMBEDDED_SHELL").is_some());
 
     let code = match nexus_rush::classify_args(&args) {
-        nexus_rush::LaunchMode::Command { src, name, args: pos } => {
+        nexus_rush::LaunchMode::Command {
+            src,
+            name,
+            args: pos,
+        } => {
             nexus_rush::set_args(name, pos);
             nexus_rush::eval(&src)
         }

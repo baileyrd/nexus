@@ -49,7 +49,8 @@ pub(crate) fn worktree_create(
 
 pub(crate) fn worktree_remove(h: &GitWorkerHandle, args: &Value) -> Result<Value, PluginError> {
     let GitWorktreeRemoveArgs { name, force } = parse_args(args, "worktree_remove")?;
-    h.with(move |e| e.remove_worktree(&name, force)).map_err(map_err)?;
+    h.with(move |e| e.remove_worktree(&name, force))
+        .map_err(map_err)?;
     to_value(&GitOk { ok: true }, "worktree_remove")
 }
 

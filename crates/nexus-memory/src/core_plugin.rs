@@ -138,7 +138,10 @@ const DEFAULT_SEARCH_LIMIT: usize = 20;
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct AddArgs {
@@ -175,7 +178,10 @@ pub struct AddArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct IdArgs {
@@ -188,7 +194,10 @@ pub struct IdArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct ListArgs {
@@ -214,7 +223,10 @@ pub struct ListArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct SearchArgs {
@@ -231,7 +243,10 @@ pub struct SearchArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct UpdateArgs {
@@ -266,7 +281,10 @@ pub struct UpdateArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct FactsArgs {
@@ -289,7 +307,10 @@ pub struct FactsArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct EntitiesArgs {
@@ -303,7 +324,10 @@ pub struct EntitiesArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct TagsArgs {
@@ -317,7 +341,10 @@ pub struct TagsArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct VitalityReportArgs {
@@ -393,7 +420,11 @@ impl MemoryCorePlugin {
         let a: IdArgs = parse_args(args, "get")?;
         // A `get` by id is a deliberate recall, so it records the access
         // (bumps access_count / accessed_at) — the ACT-R vitality input.
-        match self.db.get_recording_access(parse_id(&a.id)?).map_err(db_err)? {
+        match self
+            .db
+            .get_recording_access(parse_id(&a.id)?)
+            .map_err(db_err)?
+        {
             Some(m) => to_value(&m, "get"),
             None => Err(exec_err(format!("no memory with id '{}'", a.id))),
         }
@@ -522,7 +553,10 @@ impl MemoryCorePlugin {
 
     fn consolidate(&self, args: &Value) -> Result<Value, PluginError> {
         let category = args.get("category").and_then(Value::as_str);
-        let dry_run = args.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let limit = args
             .get("limit")
             .and_then(Value::as_u64)
@@ -540,7 +574,9 @@ impl MemoryCorePlugin {
                 let changed = if dry_run {
                     true
                 } else {
-                    self.db.mark_superseded(loser.id, canonical).map_err(db_err)?
+                    self.db
+                        .mark_superseded(loser.id, canonical)
+                        .map_err(db_err)?
                 };
                 if changed {
                     superseded += 1;
@@ -651,7 +687,9 @@ mod tests {
         let got = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
         assert_eq!(got["content"], "deploy runs on Kubernetes");
 
-        let hits = p.dispatch(HANDLER_SEARCH, &json!({ "query": "kubernetes" })).unwrap();
+        let hits = p
+            .dispatch(HANDLER_SEARCH, &json!({ "query": "kubernetes" }))
+            .unwrap();
         assert_eq!(hits.as_array().unwrap().len(), 1);
 
         let stats = p.dispatch(HANDLER_STATS, &json!({})).unwrap();
@@ -671,7 +709,10 @@ mod tests {
             .unwrap()
             .to_string();
         let upd = p
-            .dispatch(HANDLER_UPDATE, &json!({ "id": id, "content": "new", "status": "archived" }))
+            .dispatch(
+                HANDLER_UPDATE,
+                &json!({ "id": id, "content": "new", "status": "archived" }),
+            )
             .unwrap();
         assert_eq!(upd["updated"], true);
         let got = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
@@ -725,9 +766,13 @@ mod tests {
     #[test]
     fn invalid_id_errors() {
         let mut p = plugin();
-        let err = p.dispatch(HANDLER_GET, &json!({ "id": "not-a-uuid" })).unwrap_err();
+        let err = p
+            .dispatch(HANDLER_GET, &json!({ "id": "not-a-uuid" }))
+            .unwrap_err();
         match err {
-            PluginError::ExecutionFailed { reason, .. } => assert!(reason.contains("invalid memory id")),
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("invalid memory id"))
+            }
             other => panic!("unexpected error: {other:?}"),
         }
     }
@@ -736,7 +781,8 @@ mod tests {
     fn add_stores_spo_fact_and_facts_recalls_it() {
         let mut p = plugin();
         // A plain memory and two SPO facts.
-        p.dispatch(HANDLER_ADD, &json!({ "content": "loose note" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "loose note" }))
+            .unwrap();
         let fact = p
             .dispatch(
                 HANDLER_ADD,
@@ -759,7 +805,10 @@ mod tests {
         assert_eq!(all.as_array().unwrap().len(), 2);
         // Narrow by subject + object.
         let one = p
-            .dispatch(HANDLER_FACTS, &json!({ "subject": "ada", "object": "rust" }))
+            .dispatch(
+                HANDLER_FACTS,
+                &json!({ "subject": "ada", "object": "rust" }),
+            )
             .unwrap();
         assert_eq!(one.as_array().unwrap().len(), 1);
         assert_eq!(one[0]["content"], "Ada writes Rust");
@@ -775,13 +824,22 @@ mod tests {
             .unwrap()
             .to_string();
         // Not a fact yet.
-        assert_eq!(p.dispatch(HANDLER_FACTS, &json!({})).unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(
+            p.dispatch(HANDLER_FACTS, &json!({}))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         p.dispatch(
             HANDLER_UPDATE,
             &json!({ "id": id, "subject": "ada", "predicate": "knows", "object": "lovelace" }),
         )
         .unwrap();
-        let facts = p.dispatch(HANDLER_FACTS, &json!({ "predicate": "knows" })).unwrap();
+        let facts = p
+            .dispatch(HANDLER_FACTS, &json!({ "predicate": "knows" }))
+            .unwrap();
         assert_eq!(facts.as_array().unwrap().len(), 1);
         assert_eq!(facts[0]["subject"], "ada");
     }
@@ -789,7 +847,8 @@ mod tests {
     #[test]
     fn entities_lists_distinct_entities_with_counts() {
         let mut p = plugin();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "no entity here" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "no entity here" }))
+            .unwrap();
         p.dispatch(
             HANDLER_ADD,
             &json!({ "content": "Ada writes Rust", "subject": "ada", "predicate": "writes", "object": "rust" }),
@@ -812,24 +871,35 @@ mod tests {
     #[test]
     fn export_returns_all_memories() {
         let mut p = plugin();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "one" })).unwrap();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "two" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "one" }))
+            .unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "two" }))
+            .unwrap();
         let dump = p.dispatch(HANDLER_EXPORT, &json!({})).unwrap();
         let arr = dump.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         // Full records: ids and content present, ready for re-import.
-        assert!(arr.iter().all(|m| m["id"].is_string() && m["content"].is_string()));
+        assert!(arr
+            .iter()
+            .all(|m| m["id"].is_string() && m["content"].is_string()));
     }
 
     #[test]
     fn list_filters_by_tag_and_tags_lists_facets() {
         let mut p = plugin();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "a", "tags": ["infra", "k8s"] })).unwrap();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "b", "tags": ["infra"] })).unwrap();
+        p.dispatch(
+            HANDLER_ADD,
+            &json!({ "content": "a", "tags": ["infra", "k8s"] }),
+        )
+        .unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "b", "tags": ["infra"] }))
+            .unwrap();
         p.dispatch(HANDLER_ADD, &json!({ "content": "c" })).unwrap();
 
         // list with a tag filter.
-        let infra = p.dispatch(HANDLER_LIST, &json!({ "tag": "infra" })).unwrap();
+        let infra = p
+            .dispatch(HANDLER_LIST, &json!({ "tag": "infra" }))
+            .unwrap();
         assert_eq!(infra.as_array().unwrap().len(), 2);
         let k8s = p.dispatch(HANDLER_LIST, &json!({ "tag": "k8s" })).unwrap();
         assert_eq!(k8s.as_array().unwrap().len(), 1);
@@ -846,11 +916,14 @@ mod tests {
     fn vitality_report_ranks_accessed_memories_first() {
         let mut p = plugin();
         // Two memories; recall one of them several times so it outranks.
-        let hot = p.dispatch(HANDLER_ADD, &json!({ "content": "hot" })).unwrap()["id"]
+        let hot = p
+            .dispatch(HANDLER_ADD, &json!({ "content": "hot" }))
+            .unwrap()["id"]
             .as_str()
             .unwrap()
             .to_string();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "cold" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "cold" }))
+            .unwrap();
         for _ in 0..5 {
             p.dispatch(HANDLER_GET, &json!({ "id": hot })).unwrap();
         }
@@ -864,13 +937,19 @@ mod tests {
     fn consolidate_supersedes_duplicates() {
         let mut p = plugin();
         // Three exact (normalized) duplicates + one unique.
-        p.dispatch(HANDLER_ADD, &json!({ "content": "likes Rust" })).unwrap();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "LIKES   rust" })).unwrap();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "likes rust" })).unwrap();
-        p.dispatch(HANDLER_ADD, &json!({ "content": "uses Go" })).unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "likes Rust" }))
+            .unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "LIKES   rust" }))
+            .unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "likes rust" }))
+            .unwrap();
+        p.dispatch(HANDLER_ADD, &json!({ "content": "uses Go" }))
+            .unwrap();
 
         // Dry run reports without changing anything.
-        let dry = p.dispatch(HANDLER_CONSOLIDATE, &json!({ "dry_run": true })).unwrap();
+        let dry = p
+            .dispatch(HANDLER_CONSOLIDATE, &json!({ "dry_run": true }))
+            .unwrap();
         assert_eq!(dry["clusters"], 1);
         assert_eq!(dry["superseded"], 2);
         // All four still active after a dry run.
@@ -886,10 +965,15 @@ mod tests {
         // Real run supersedes the two non-canonical duplicates.
         let res = p.dispatch(HANDLER_CONSOLIDATE, &json!({})).unwrap();
         assert_eq!(res["superseded"], 2);
-        let active = p.dispatch(HANDLER_LIST, &json!({ "status": "active", "limit": 50 })).unwrap();
+        let active = p
+            .dispatch(HANDLER_LIST, &json!({ "status": "active", "limit": 50 }))
+            .unwrap();
         assert_eq!(active.as_array().unwrap().len(), 2); // one canonical + "uses Go"
-        // Re-running is a no-op (the duplicates are already superseded).
-        assert_eq!(p.dispatch(HANDLER_CONSOLIDATE, &json!({})).unwrap()["superseded"], 0);
+                                                         // Re-running is a no-op (the duplicates are already superseded).
+        assert_eq!(
+            p.dispatch(HANDLER_CONSOLIDATE, &json!({})).unwrap()["superseded"],
+            0
+        );
     }
 
     #[test]

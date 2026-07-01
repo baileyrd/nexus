@@ -164,16 +164,14 @@ pub(crate) fn edit_file(
         .map_err(|e| exec_err(format!("edit: malformed hashline patch: {e}")))?;
 
     // Resolve every section first; only touch disk once all succeed cleanly.
-    let mut staged: Vec<(String, String, &'static str)> =
-        Vec::with_capacity(parsed.sections.len());
+    let mut staged: Vec<(String, String, &'static str)> = Vec::with_capacity(parsed.sections.len());
     let mut conflicts: Vec<StorageEditConflict> = Vec::new();
     for section in &parsed.sections {
-        let bytes = engine.read_file(&section.path).map_err(|e| {
-            exec_err(format!("edit: cannot read '{}': {e}", section.path))
-        })?;
-        let current = String::from_utf8(bytes).map_err(|_| {
-            exec_err(format!("edit: '{}' is not valid UTF-8", section.path))
-        })?;
+        let bytes = engine
+            .read_file(&section.path)
+            .map_err(|e| exec_err(format!("edit: cannot read '{}': {e}", section.path)))?;
+        let current = String::from_utf8(bytes)
+            .map_err(|_| exec_err(format!("edit: '{}' is not valid UTF-8", section.path)))?;
         match nexus_hashline::apply_section(section, &current, snapshots)
             .map_err(|e| exec_err(format!("edit '{}': {e}", section.path)))?
         {

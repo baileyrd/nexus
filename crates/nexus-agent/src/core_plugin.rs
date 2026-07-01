@@ -207,7 +207,10 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("session_rewind", HANDLER_SESSION_REWIND),
     ("session_checkpoint", HANDLER_SESSION_CHECKPOINT),
     ("session_checkpoints", HANDLER_SESSION_CHECKPOINTS),
-    ("session_checkpoint_delete", HANDLER_SESSION_CHECKPOINT_DELETE),
+    (
+        "session_checkpoint_delete",
+        HANDLER_SESSION_CHECKPOINT_DELETE,
+    ),
 ];
 
 /// Core plugin instance.
@@ -369,9 +372,7 @@ impl CorePlugin for AgentCorePlugin {
                     handlers::search_transcripts::handle_search_transcripts(&args)
                 }
                 HANDLER_ASK => handlers::ask::handle_ask(ctx, pending_asks, &args).await,
-                HANDLER_ASK_RESPOND => {
-                    handlers::ask::handle_ask_respond(pending_asks, &args).await
-                }
+                HANDLER_ASK_RESPOND => handlers::ask::handle_ask_respond(pending_asks, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))

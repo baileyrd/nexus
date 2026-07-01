@@ -1014,14 +1014,18 @@ fn edit_is_atomic_across_sections() {
 
     // Section for a.md is valid; section for b.md carries a stale TAG.
     let tag_a = nexus_hashline::tag("one\n");
-    let patch = format!("[notes/a.md#{tag_a}]\nSWAP 1.=1:\n+ONE\n\n[notes/b.md#0000]\nSWAP 1.=1:\n+TWO\n");
+    let patch =
+        format!("[notes/a.md#{tag_a}]\nSWAP 1.=1:\n+ONE\n\n[notes/b.md#0000]\nSWAP 1.=1:\n+TWO\n");
     let err = crate::handlers::files::edit_file(
         &engine,
         &nexus_hashline::SnapshotStore::new(),
         &serde_json::json!({ "patch": patch }),
     )
     .unwrap_err();
-    assert!(format!("{err:?}").contains("notes/b.md"), "error names the stale file");
+    assert!(
+        format!("{err:?}").contains("notes/b.md"),
+        "error names the stale file"
+    );
 
     // Neither file was written (all-or-nothing): a.md is untouched.
     assert_eq!(engine.read_file("notes/a.md").unwrap(), b"one\n");
@@ -1031,7 +1035,9 @@ fn edit_is_atomic_across_sections() {
 fn edit_stale_tag_errors_without_writing() {
     let dir = tmp();
     let engine = StorageEngine::init(dir.path()).expect("init");
-    engine.write_file("notes/s.md", b"current\n").expect("write");
+    engine
+        .write_file("notes/s.md", b"current\n")
+        .expect("write");
 
     let patch = "[notes/s.md#0000]\nSWAP 1.=1:\n+x\n";
     let err = crate::handlers::files::edit_file(
@@ -1040,7 +1046,10 @@ fn edit_stale_tag_errors_without_writing() {
         &serde_json::json!({ "patch": patch }),
     )
     .unwrap_err();
-    assert!(format!("{err:?}").to_lowercase().contains("tag"), "stale-tag error: {err:?}");
+    assert!(
+        format!("{err:?}").to_lowercase().contains("tag"),
+        "stale-tag error: {err:?}"
+    );
     assert_eq!(engine.read_file("notes/s.md").unwrap(), b"current\n");
 }
 
@@ -1078,14 +1087,19 @@ fn read_file_handler_records_snapshot_for_later_merge() {
     let tag = nexus_hashline::tag("hello\n");
     assert_eq!(reply["tag"].as_str().unwrap(), tag);
     // … and a snapshot is now available, keyed by that TAG.
-    assert_eq!(snaps.get_by_tag("notes/r.md", &tag).unwrap().content, "hello\n");
+    assert_eq!(
+        snaps.get_by_tag("notes/r.md", &tag).unwrap().content,
+        "hello\n"
+    );
 }
 
 #[test]
 fn edit_recovers_via_three_way_merge_after_external_change() {
     let dir = tmp();
     let engine = StorageEngine::init(dir.path()).expect("init");
-    engine.write_file("notes/m.md", b"a\nb\nc\nd\ne\n").expect("write");
+    engine
+        .write_file("notes/m.md", b"a\nb\nc\nd\ne\n")
+        .expect("write");
 
     // Agent reads the file — records the base snapshot.
     let mut snaps = nexus_hashline::SnapshotStore::new();
@@ -1104,12 +1118,9 @@ fn edit_recovers_via_three_way_merge_after_external_change() {
 
     // The agent edits line 2 against the now-stale base TAG.
     let patch = format!("[notes/m.md#{base_tag}]\nSWAP 2.=2:\n+b-edited\n");
-    let reply = crate::handlers::files::edit_file(
-        &engine,
-        &snaps,
-        &serde_json::json!({ "patch": patch }),
-    )
-    .expect("edit");
+    let reply =
+        crate::handlers::files::edit_file(&engine, &snaps, &serde_json::json!({ "patch": patch }))
+            .expect("edit");
 
     assert_eq!(reply["files"][0]["status"], "merged");
     assert_eq!(reply["conflicts"].as_array().unwrap().len(), 0);
@@ -1135,14 +1146,13 @@ fn edit_surfaces_conflict_without_writing() {
     let base_tag = snaps.latest("notes/c.md").expect("snapshot").tag.clone();
 
     // Both sides change the same single line — unresolvable.
-    engine.write_file("notes/c.md", b"theirs\n").expect("external");
+    engine
+        .write_file("notes/c.md", b"theirs\n")
+        .expect("external");
     let patch = format!("[notes/c.md#{base_tag}]\nSWAP 1.=1:\n+ours\n");
-    let reply = crate::handlers::files::edit_file(
-        &engine,
-        &snaps,
-        &serde_json::json!({ "patch": patch }),
-    )
-    .expect("edit");
+    let reply =
+        crate::handlers::files::edit_file(&engine, &snaps, &serde_json::json!({ "patch": patch }))
+            .expect("edit");
 
     assert_eq!(reply["files"].as_array().unwrap().len(), 0);
     assert_eq!(reply["conflicts"].as_array().unwrap().len(), 1);
@@ -1166,20 +1176,28 @@ fn read_lines_returns_requested_inclusive_range() {
         .write_file("notes/big.md", b"l1\nl2\nl3\nl4\nl5\n")
         .expect("write");
 
-    let r = read_lines(&engine, serde_json::json!({ "path": "notes/big.md", "start": 2, "end": 4 }));
+    let r = read_lines(
+        &engine,
+        serde_json::json!({ "path": "notes/big.md", "start": 2, "end": 4 }),
+    );
     assert_eq!(r["content"], "l2\nl3\nl4");
     assert_eq!(r["start"], 2);
     assert_eq!(r["end"], 4);
     assert_eq!(r["total_lines"], 5);
     // The whole-file tag is surfaced for editing.
-    assert_eq!(r["tag"].as_str().unwrap(), nexus_hashline::tag("l1\nl2\nl3\nl4\nl5\n"));
+    assert_eq!(
+        r["tag"].as_str().unwrap(),
+        nexus_hashline::tag("l1\nl2\nl3\nl4\nl5\n")
+    );
 }
 
 #[test]
 fn read_lines_defaults_to_first_window_and_clamps_end() {
     let dir = tmp();
     let engine = StorageEngine::init(dir.path()).expect("init");
-    engine.write_file("notes/s.md", b"a\nb\nc\n").expect("write");
+    engine
+        .write_file("notes/s.md", b"a\nb\nc\n")
+        .expect("write");
 
     // No start/end → from line 1; end clamps to the 3-line total.
     let r = read_lines(&engine, serde_json::json!({ "path": "notes/s.md" }));
@@ -1195,7 +1213,10 @@ fn read_lines_past_eof_is_empty_not_an_error() {
     let engine = StorageEngine::init(dir.path()).expect("init");
     engine.write_file("notes/s.md", b"a\nb\n").expect("write");
 
-    let r = read_lines(&engine, serde_json::json!({ "path": "notes/s.md", "start": 9 }));
+    let r = read_lines(
+        &engine,
+        serde_json::json!({ "path": "notes/s.md", "start": 9 }),
+    );
     assert_eq!(r["content"], ""); // empty slice, not null
     assert_eq!(r["end"], 0);
     assert_eq!(r["total_lines"], 2);

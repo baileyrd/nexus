@@ -100,18 +100,28 @@ fn expand_simple(rc: &RawSimple) -> Result<Command, String> {
                 file: expand_word(file)?,
                 append: *append,
             }),
-            RawRedirect::Dup { fd, target } => {
-                redirects.push(Redirect::Dup { fd: *fd, target: *target })
-            }
+            RawRedirect::Dup { fd, target } => redirects.push(Redirect::Dup {
+                fd: *fd,
+                target: *target,
+            }),
             // A here-doc body feeds stdin; it's a Command field, not a Redirect.
             // Its `$`-expansions run unless the delimiter was quoted.
             RawRedirect::Heredoc { body, expand } => {
-                heredoc = Some(if *expand { expand_dollars(body)? } else { body.clone() });
+                heredoc = Some(if *expand {
+                    expand_dollars(body)?
+                } else {
+                    body.clone()
+                });
             }
         }
     }
 
-    Ok(Command { argv, redirects, assignments, heredoc })
+    Ok(Command {
+        argv,
+        redirects,
+        assignments,
+        heredoc,
+    })
 }
 
 /// If `word` has the form `NAME=...` with `NAME` a valid identifier whose `=`
@@ -152,9 +162,10 @@ fn expand_argv_word(word: &Word) -> Result<Vec<String>, String> {
     // A standalone `"$@"` expands to one argument per positional parameter,
     // preserving any spaces within each — the common arg-forwarding idiom.
     if let [WordPart::Quoted(s)] = word.as_slice()
-        && s == "$@" {
-            return Ok(crate::vars::args());
-        }
+        && s == "$@"
+    {
+        return Ok(crate::vars::args());
+    }
 
     let mut sp = Splitter::default();
 
@@ -214,7 +225,9 @@ impl Splitter {
             self.fields.push(Field::default());
             self.delim = false;
         }
-        self.fields.last_mut().unwrap()
+        self.fields
+            .last_mut()
+            .expect("fields non-empty: a field is pushed above when none exists")
     }
 
     /// Add quoted/literal text: never split, metacharacters escaped.
@@ -237,8 +250,8 @@ impl Splitter {
                 self.delim = true;
             } else {
                 let mut chunk = String::new();
-                while matches!(chars.peek(), Some(c) if !c.is_whitespace()) {
-                    chunk.push(chars.next().unwrap());
+                while let Some(c) = chars.next_if(|c| !c.is_whitespace()) {
+                    chunk.push(c);
                 }
                 let f = self.current();
                 f.plain.push_str(&chunk);
@@ -476,7 +489,9 @@ fn expand_braced(inner: &str) -> Result<String, String> {
         "#" => return Ok(crate::vars::arg_count().to_string()),
         "@" | "*" => return Ok(crate::vars::args().join(" ")),
         _ if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) => {
-            let n: usize = inner.parse().map_err(|_| format!("${{{inner}}}: bad substitution"))?;
+            let n: usize = inner
+                .parse()
+                .map_err(|_| format!("${{{inner}}}: bad substitution"))?;
             return Ok(crate::vars::arg(n).unwrap_or_default());
         }
         _ => {}
@@ -515,14 +530,18 @@ fn expand_braced(inner: &str) -> Result<String, String> {
 
     match op {
         // `:-` / `-`: substitute the word when unset (or empty).
-        Some('-') => Ok(if use_word { word } else { value.unwrap() }),
+        Some('-') => Ok(if use_word {
+            word
+        } else {
+            value.unwrap_or_default()
+        }),
         // `:=` / `=`: also assign the word back to the variable.
         Some('=') => {
             if use_word {
                 crate::vars::set(name, &word);
                 Ok(word)
             } else {
-                Ok(value.unwrap())
+                Ok(value.unwrap_or_default())
             }
         }
         // `:+` / `+`: substitute the word only when set (and non-empty).
@@ -537,7 +556,7 @@ fn expand_braced(inner: &str) -> Result<String, String> {
                 };
                 Err(msg)
             } else {
-                Ok(value.unwrap())
+                Ok(value.unwrap_or_default())
             }
         }
         _ => Err(format!("${{{inner}}}: bad substitution")),
@@ -636,7 +655,10 @@ mod tests {
 
         let c = expand_cmd("A=1 B=2 echo hi");
         assert_eq!(c.argv, vec!["echo", "hi"]);
-        assert_eq!(c.assignments, vec![("A".into(), "1".into()), ("B".into(), "2".into())]);
+        assert_eq!(
+            c.assignments,
+            vec![("A".into(), "1".into()), ("B".into(), "2".into())]
+        );
     }
 
     #[test]

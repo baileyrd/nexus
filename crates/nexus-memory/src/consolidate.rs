@@ -13,7 +13,11 @@ use crate::model::Memory;
 /// every run of whitespace to a single space.
 #[must_use]
 pub(crate) fn normalize_content(content: &str) -> String {
-    content.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    content
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Group `memories` by normalized content, returning only the clusters with a
@@ -42,7 +46,9 @@ pub(crate) fn cluster_duplicates(memories: Vec<Memory>) -> Vec<Vec<Memory>> {
             continue;
         }
         group.sort_by(|a, b| {
-            b.updated_at.cmp(&a.updated_at).then_with(|| b.id.cmp(&a.id))
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| b.id.cmp(&a.id))
         });
         clusters.push(group);
     }

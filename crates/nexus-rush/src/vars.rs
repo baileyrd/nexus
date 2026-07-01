@@ -160,7 +160,13 @@ pub fn set(name: &str, value: &str) {
     VARS.with(|v| {
         let mut m = v.borrow_mut();
         let exported = m.get(name).is_some_and(|x| x.exported);
-        m.insert(name.to_string(), Var { value: value.to_string(), exported });
+        m.insert(
+            name.to_string(),
+            Var {
+                value: value.to_string(),
+                exported,
+            },
+        );
     });
 }
 
@@ -169,7 +175,10 @@ pub fn set_exported(name: &str, value: &str) {
     VARS.with(|v| {
         v.borrow_mut().insert(
             name.to_string(),
-            Var { value: value.to_string(), exported: true },
+            Var {
+                value: value.to_string(),
+                exported: true,
+            },
         );
     });
 }
@@ -179,7 +188,10 @@ pub fn export(name: &str) {
     VARS.with(|v| {
         v.borrow_mut()
             .entry(name.to_string())
-            .or_insert_with(|| Var { value: String::new(), exported: false })
+            .or_insert_with(|| Var {
+                value: String::new(),
+                exported: false,
+            })
             .exported = true;
     });
 }

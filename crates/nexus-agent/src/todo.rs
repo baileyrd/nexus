@@ -92,11 +92,7 @@ impl TodoList {
     /// # Errors
     /// Errors if `id` is unknown or another task is already in progress.
     pub fn start(&mut self, id: usize) -> Result<(), String> {
-        if let Some(active) = self
-            .items
-            .iter()
-            .find(|i| i.state == TodoState::InProgress)
-        {
+        if let Some(active) = self.items.iter().find(|i| i.state == TodoState::InProgress) {
             if active.id != id {
                 return Err(format!(
                     "task {} is already in progress; finish or drop it first",
@@ -234,7 +230,13 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|i| format!("{}:{}", i["text"].as_str().unwrap(), i["state"].as_str().unwrap()))
+            .map(|i| {
+                format!(
+                    "{}:{}",
+                    i["text"].as_str().unwrap(),
+                    i["state"].as_str().unwrap()
+                )
+            })
             .collect()
     }
 

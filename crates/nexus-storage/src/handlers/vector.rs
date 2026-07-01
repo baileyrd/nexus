@@ -52,8 +52,7 @@ pub(crate) fn query(engine: &StorageEngine, args: &Value) -> Result<Value, Plugi
 }
 
 pub(crate) fn delete_by_file(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
-    let StorageVectorDeleteArgs { namespace, path } =
-        parse_args(args, "vector_delete_by_file")?;
+    let StorageVectorDeleteArgs { namespace, path } = parse_args(args, "vector_delete_by_file")?;
     engine
         .vector_delete_by_file(&namespace, &path)
         .map_err(|e| exec_err(format!("vector_delete_by_file: {e}")))?;

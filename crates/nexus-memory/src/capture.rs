@@ -81,9 +81,9 @@ fn emitted_in_self_namespace(event: &NexusEvent) -> bool {
 /// Derive `(topic, optional payload, human summary)` for an event.
 fn describe(event: &NexusEvent, source: &str) -> (String, Option<Value>, String) {
     match event {
-        NexusEvent::Custom { type_id, payload, .. } => {
-            (type_id.clone(), Some(payload.clone()), type_id.clone())
-        }
+        NexusEvent::Custom {
+            type_id, payload, ..
+        } => (type_id.clone(), Some(payload.clone()), type_id.clone()),
         NexusEvent::PluginLoaded { plugin_id, version } => (
             "PluginLoaded".to_string(),
             None,
@@ -197,7 +197,10 @@ mod tests {
             "com.nexus.memory.added",
             serde_json::json!({ "id": "x" }),
         );
-        assert!(event_to_memory(&ev).is_none(), "must not capture own events (loop guard)");
+        assert!(
+            event_to_memory(&ev).is_none(),
+            "must not capture own events (loop guard)"
+        );
     }
 
     #[test]
@@ -224,7 +227,10 @@ mod tests {
         );
         let m = event_to_memory(&ev).unwrap();
         assert_eq!(m.metadata["payload"]["api_key"], "[redacted]");
-        assert_eq!(m.metadata["payload"]["nested"]["Authorization"], "[redacted]");
+        assert_eq!(
+            m.metadata["payload"]["nested"]["Authorization"],
+            "[redacted]"
+        );
         assert_eq!(m.metadata["payload"]["provider"], "openai");
         assert_eq!(m.metadata["payload"]["nested"]["model"], "gpt");
     }

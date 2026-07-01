@@ -45,7 +45,10 @@ pub(crate) fn download(app: &mut App, url: &str, dest: &str, cwd: Option<&str>) 
     let res: Value = rt
         .block_on(invoker.ipc_call(SECURITY_PLUGIN, "download", args, IPC_TIMEOUT))
         .context("security ipc call 'download' failed")?;
-    let bytes = res.get("bytes_written").and_then(Value::as_u64).unwrap_or(0);
+    let bytes = res
+        .get("bytes_written")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     println!("downloaded {bytes} bytes to {dest}");
     Ok(())
 }

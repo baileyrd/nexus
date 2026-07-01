@@ -54,7 +54,14 @@ pub fn import_remind_me_db(target: &MemoryDb, source: &Path) -> Result<ImportRep
     let cols = table_columns(&conn, "memories")?;
 
     let mut select = vec![
-        "id", "content", "category", "tags", "source", "metadata", "created_at", "updated_at",
+        "id",
+        "content",
+        "category",
+        "tags",
+        "source",
+        "metadata",
+        "created_at",
+        "updated_at",
     ];
     select.extend(OPTIONAL_COLS.iter().copied().filter(|c| cols.contains(*c)));
     let sql = format!("SELECT {} FROM memories", select.join(", "));

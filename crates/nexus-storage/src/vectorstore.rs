@@ -72,7 +72,13 @@ pub fn upsert(
             let blob = embedding_to_blob(&chunk.embedding);
             #[allow(clippy::cast_possible_wrap)]
             let block_id = chunk.block_id as i64;
-            stmt.execute(params![namespace, chunk.file_path, block_id, chunk.chunk_text, blob,])?;
+            stmt.execute(params![
+                namespace,
+                chunk.file_path,
+                block_id,
+                chunk.chunk_text,
+                blob,
+            ])?;
         }
     }
     tx.commit()?;
@@ -111,8 +117,9 @@ pub fn search(
     query_embedding: &[f32],
     limit: usize,
 ) -> Result<Vec<ChunkMatch>, StorageError> {
-    let mut stmt = conn
-        .prepare("SELECT file_path, block_id, chunk_text, embedding FROM embeddings WHERE namespace = ?1;")?;
+    let mut stmt = conn.prepare(
+        "SELECT file_path, block_id, chunk_text, embedding FROM embeddings WHERE namespace = ?1;",
+    )?;
 
     let mut matches: Vec<ChunkMatch> = stmt
         .query_map(params![namespace], |row| {
