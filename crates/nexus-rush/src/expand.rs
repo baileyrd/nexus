@@ -214,7 +214,9 @@ impl Splitter {
             self.fields.push(Field::default());
             self.delim = false;
         }
-        self.fields.last_mut().unwrap()
+        self.fields
+            .last_mut()
+            .expect("fields non-empty: a field is pushed above when none exists")
     }
 
     /// Add quoted/literal text: never split, metacharacters escaped.
@@ -237,8 +239,8 @@ impl Splitter {
                 self.delim = true;
             } else {
                 let mut chunk = String::new();
-                while matches!(chars.peek(), Some(c) if !c.is_whitespace()) {
-                    chunk.push(chars.next().unwrap());
+                while let Some(c) = chars.next_if(|c| !c.is_whitespace()) {
+                    chunk.push(c);
                 }
                 let f = self.current();
                 f.plain.push_str(&chunk);
@@ -515,14 +517,14 @@ fn expand_braced(inner: &str) -> Result<String, String> {
 
     match op {
         // `:-` / `-`: substitute the word when unset (or empty).
-        Some('-') => Ok(if use_word { word } else { value.unwrap() }),
+        Some('-') => Ok(if use_word { word } else { value.unwrap_or_default() }),
         // `:=` / `=`: also assign the word back to the variable.
         Some('=') => {
             if use_word {
                 crate::vars::set(name, &word);
                 Ok(word)
             } else {
-                Ok(value.unwrap())
+                Ok(value.unwrap_or_default())
             }
         }
         // `:+` / `+`: substitute the word only when set (and non-empty).
@@ -537,7 +539,7 @@ fn expand_braced(inner: &str) -> Result<String, String> {
                 };
                 Err(msg)
             } else {
-                Ok(value.unwrap())
+                Ok(value.unwrap_or_default())
             }
         }
         _ => Err(format!("${{{inner}}}: bad substitution")),

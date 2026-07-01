@@ -309,8 +309,8 @@ fn lex_redirect(chars: &mut Peekable<Chars>, explicit_fd: Option<u32>) -> Result
                 Some('&') => {
                     chars.next();
                     let mut target = String::new();
-                    while matches!(chars.peek(), Some(d) if d.is_ascii_digit()) {
-                        target.push(chars.next().unwrap());
+                    while let Some(d) = chars.next_if(char::is_ascii_digit) {
+                        target.push(d);
                     }
                     let t = target
                         .parse()
@@ -371,7 +371,8 @@ fn lex_word(chars: &mut Peekable<Chars>, seed: Option<String>) -> Result<Word, L
                     if qc == '\\'
                         && let Some(&next) = chars.peek()
                             && matches!(next, '"' | '\\' | '$') {
-                                s.push(chars.next().unwrap());
+                                chars.next();
+                                s.push(next);
                                 continue;
                             }
                     // Keep `$(...)`/`${...}` whole so an inner `"` or space
