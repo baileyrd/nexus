@@ -52,6 +52,7 @@ use nexus_storage::ipc::{
     StorageQuerySymbolResult, StorageQueryTagsArgs, StorageReadFileArgs, StorageReadFileResult,
     StorageAstQueryArgs, StorageAstQueryMatch, StorageAstQueryResult, StorageReadLinesArgs,
     StorageReadLinesResult,
+    StorageHybridMatch, StorageHybridSearchArgs, StorageHybridSearchResult,
     StorageReadFrontmatterArgs, StorageRelpathArgs, StorageRenameEntryArgs, StorageSearchArgs,
     StorageSearchHit, StorageSearchResult, StorageSettingsWriteArgs, StorageSymbolRow,
     StorageToggleTaskArgs, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
@@ -283,6 +284,11 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageVectorQueryArgs>("com_nexus_storage__vector_query", "args");
     write_schema::<StorageVectorMatch>("com_nexus_storage__vector_query", "match");
     write_schema::<StorageVectorstoreCountResult>("com_nexus_storage__vectorstore_count", "result");
+
+    // ── com.nexus.storage::hybrid_search (RRF fusion of FTS + vector) ────
+    write_schema::<StorageHybridSearchArgs>("com_nexus_storage__hybrid_search", "args");
+    write_schema::<StorageHybridMatch>("com_nexus_storage__hybrid_search", "match");
+    write_schema::<StorageHybridSearchResult>("com_nexus_storage__hybrid_search", "result");
 
     // ── com.nexus.storage::base_record_* delete/restore + base_*_delete + rename (#190) ──
     write_schema::<StorageBaseRecordIdArgs>("com_nexus_storage__base_record_id", "args");

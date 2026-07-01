@@ -385,6 +385,14 @@ pub const HANDLER_READ_LINES: u32 = 74;
 /// [`crate::ipc::StorageAstQueryResult`]. Phase 5.2 / RFC 0005.
 pub const HANDLER_AST_QUERY: u32 = 75;
 
+/// Handler id for `hybrid_search` — reciprocal-rank fusion of the
+/// Tantivy FTS arm and the vector arm. Args:
+/// [`crate::ipc::StorageHybridSearchArgs`]; Returns
+/// [`crate::ipc::StorageHybridSearchResult`]. The caller supplies both
+/// the query text and its embedding (storage does not embed — design
+/// decision D-1).
+pub const HANDLER_HYBRID_SEARCH: u32 = 76;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -478,6 +486,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("base_record_soft_delete", HANDLER_BASE_RECORD_SOFT_DELETE),
     ("base_record_restore", HANDLER_BASE_RECORD_RESTORE),
     ("obsidian_base_query", HANDLER_OBSIDIAN_BASE_QUERY),
+    ("hybrid_search", HANDLER_HYBRID_SEARCH),
 ];
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
@@ -738,6 +747,7 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_GRAPH_STATS => crate::handlers::graph::graph_stats(engine),
             HANDLER_REBUILD_INDEX => crate::handlers::index::rebuild_index(engine),
             HANDLER_SEARCH => crate::handlers::search::search(engine, args),
+            HANDLER_HYBRID_SEARCH => crate::handlers::search::hybrid_search(engine, args),
             HANDLER_QUERY_SYMBOL => crate::handlers::search::query_symbol(engine, args),
             HANDLER_WRITE_FILE => crate::handlers::files::write_file(engine, args),
             HANDLER_NOTE_APPEND => crate::handlers::notes::note_append(engine, args),

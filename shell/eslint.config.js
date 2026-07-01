@@ -106,7 +106,10 @@ export default tseslint.config(
         paths: [
           {
             name: '@nexus/extension-api',
-            importNames: [],
+            // ScriptPlugin: deprecated 0.1.0 (#187) — no runtime ever
+            // implemented it. Use SandboxedPlugin (sandbox tier) or the
+            // shell-side Plugin interface (first-party tier).
+            importNames: ['ScriptPlugin'],
             message:
               'This export is deprecated — see packages/nexus-extension-api/DEPRECATED.md for the replacement.',
           },

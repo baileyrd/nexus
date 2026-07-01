@@ -3,8 +3,11 @@
 //! Semantic memory holds declarative facts the agent has learned or
 //! been given: user preferences, domain knowledge, entity summaries,
 //! and extracted insights. Phase 1 provides keyword/prefix matching.
-//! Phase 5 layers in embedding-based vector search using the forge's
-//! existing Tantivy index as the persistence substrate.
+//! Phase 5 (here) adds optional `SQLite` persistence to the shared
+//! `<forge>/.forge/memory/memory.db` (`semantic_facts` table) —
+//! construct via [`SemanticStore::open`] to load stored facts and
+//! write every subsequent mutation through. Embedding-based retrieval
+//! remains a follow-up; the interface is stable across both.
 //!
 //! Entries are tagged and source-linked so the context builder (Move 5)
 //! can filter by relevance to the current session's domain.
@@ -16,6 +19,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::db::{MemoryDb, MemoryDbError};
+
 /// Opaque identifier for a [`SemanticEntry`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SemanticId(Uuid);
@@ -25,6 +30,12 @@ impl SemanticId {
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    /// Wrap an existing UUID (durable-store load path).
+    #[must_use]
+    pub fn from_uuid(id: Uuid) -> Self {
+        Self(id)
     }
 
     /// Inner UUID value.
@@ -95,28 +106,56 @@ impl SemanticEntry {
     }
 }
 
-/// In-memory semantic knowledge store with keyword search.
+/// Semantic knowledge store with keyword search — in-memory map with
+/// optional durable backing.
 ///
 /// Thread-safe and `Clone`-able (both clones share the same `Arc`).
-/// Phase 5 adds a persistence layer and replaces `search` with an
-/// embedding-based retrieval path while keeping the same interface.
+/// Reads always come from the in-memory map; the `SQLite` layer exists
+/// so facts survive process restarts. Embedding-based retrieval can
+/// replace `search` later without changing the interface.
 #[derive(Clone, Debug)]
 pub struct SemanticStore {
     inner: Arc<Mutex<HashMap<SemanticId, SemanticEntry>>>,
+    persist: Option<MemoryDb>,
 }
 
 impl SemanticStore {
-    /// Create an empty store.
+    /// Create a purely in-memory store (Phase-1 semantics — nothing
+    /// survives a restart).
     #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
+            persist: None,
         }
+    }
+
+    /// Open a store backed by `db` (Phase 5): stored facts are loaded
+    /// into memory and every subsequent mutation writes through.
+    ///
+    /// # Errors
+    /// Returns an error if the durable store cannot be read.
+    pub fn open(db: MemoryDb) -> Result<Self, MemoryDbError> {
+        let entries = db.semantic_all()?;
+        let map = entries.into_iter().map(|e| (e.id, e)).collect();
+        Ok(Self {
+            inner: Arc::new(Mutex::new(map)),
+            persist: Some(db),
+        })
     }
 
     /// Store a fact. Replaces any existing entry with the same `key`
     /// (last writer wins; keyed de-duplication avoids stale facts).
+    ///
+    /// When a durable store is attached the fact is written through
+    /// best-effort: a write failure is logged and the in-memory map
+    /// still updates, preserving the infallible Phase-1 contract.
     pub fn store(&self, entry: SemanticEntry) {
+        if let Some(db) = &self.persist {
+            if let Err(e) = db.semantic_upsert(&entry) {
+                tracing::warn!(error = %e, "semantic write-through failed; fact kept in-memory only");
+            }
+        }
         let mut g = self.inner.lock().expect("semantic store poisoned");
         // Remove any entry with the same key before inserting the new one
         // so the store stays de-duplicated by key (not by id).
@@ -164,7 +203,15 @@ impl SemanticStore {
     }
 
     /// Remove an entry. Returns `true` if it was present.
+    ///
+    /// Write-through mirrors [`store`](Self::store): best-effort, with
+    /// failures logged.
     pub fn remove(&self, id: SemanticId) -> bool {
+        if let Some(db) = &self.persist {
+            if let Err(e) = db.semantic_delete(id) {
+                tracing::warn!(error = %e, "semantic delete write-through failed");
+            }
+        }
         self.inner
             .lock()
             .expect("semantic store poisoned")

@@ -91,6 +91,10 @@ export function buildPluginAPI(
   assertValidPluginId(pluginId)
 
   const api: PluginAPI = {
+    // ─── Identity ──────────────────────────────────────────────────────────
+    // Host-asserted (validated above) — the common-contract twin of the
+    // sandbox tier's handshake-bound `pluginId` (#187).
+    pluginId,
     // ─── Commands ──────────────────────────────────────────────────────────
     commands: {
       register(id, handler) {

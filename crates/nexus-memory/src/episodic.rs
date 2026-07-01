@@ -6,10 +6,13 @@
 //! the in-process store does not grow unbounded across a long-lived
 //! process.
 //!
-//! Phase 1 ships an in-memory bounded ring. Phase 5 wires persistence
-//! to `<forge>/.forge/memory/episodic.db` so events survive across
-//! process restarts and can be queried by sessions that predate the
-//! current run.
+//! Phase 1 shipped an in-memory bounded ring. Phase 5 (here) adds an
+//! optional `SQLite` write-through to the shared
+//! `<forge>/.forge/memory/memory.db` (`episodic_log` table) so events
+//! survive across process restarts: construct via [`EpisodicStore::open`]
+//! to load the most recent `capacity` events and persist every
+//! subsequent [`EpisodicStore::record`]. [`EpisodicStore::new`] remains
+//! purely in-memory (unchanged Phase-1 semantics).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -17,6 +20,8 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::db::{MemoryDb, MemoryDbError};
 
 /// Default maximum entries retained in the in-memory ring.
 pub const DEFAULT_EPISODIC_CAPACITY: usize = 4096;
@@ -30,6 +35,12 @@ impl EpisodicId {
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    /// Wrap an existing UUID (durable-store load path).
+    #[must_use]
+    pub fn from_uuid(id: Uuid) -> Self {
+        Self(id)
     }
 
     /// Inner UUID value.
@@ -119,30 +130,61 @@ impl EpisodicEntry {
     }
 }
 
-/// Bounded in-memory episodic event log.
+/// Bounded episodic event log — in-memory ring with optional durable
+/// backing.
 ///
 /// Thread-safe and `Clone`-able (both clone the same backing `Arc`).
-/// When `capacity` is reached, the oldest entry is dropped. Phase 5
-/// wires a SQLite persistence layer beneath this so overflow entries
-/// are archived rather than discarded.
+/// When `capacity` is reached, the oldest entry is dropped (and pruned
+/// from the durable log when one is attached). Reads always come from
+/// the ring; the `SQLite` layer exists so the ring can be rebuilt across
+/// process restarts.
 #[derive(Clone, Debug)]
 pub struct EpisodicStore {
     inner: Arc<Mutex<VecDeque<EpisodicEntry>>>,
     capacity: usize,
+    persist: Option<MemoryDb>,
 }
 
 impl EpisodicStore {
-    /// Create a store with the given capacity.
+    /// Create a purely in-memory store with the given capacity
+    /// (Phase-1 semantics — nothing survives a restart).
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(VecDeque::with_capacity(capacity.min(256)))),
             capacity,
+            persist: None,
         }
     }
 
+    /// Open a store backed by `db` (Phase 5): the most recent
+    /// `capacity` events are loaded into the ring and every subsequent
+    /// [`record`](Self::record) writes through.
+    ///
+    /// # Errors
+    /// Returns an error if the durable log cannot be read.
+    pub fn open(db: MemoryDb, capacity: usize) -> Result<Self, MemoryDbError> {
+        let entries = db.episodic_recent(capacity)?;
+        let mut ring = VecDeque::with_capacity(capacity.min(256));
+        ring.extend(entries);
+        Ok(Self {
+            inner: Arc::new(Mutex::new(ring)),
+            capacity,
+            persist: Some(db),
+        })
+    }
+
     /// Record a new entry. Drops the oldest entry if at capacity.
+    ///
+    /// When a durable log is attached the entry is written through
+    /// best-effort: a write failure is logged and the in-memory ring
+    /// still advances, preserving the infallible Phase-1 contract.
     pub fn record(&self, entry: EpisodicEntry) {
+        if let Some(db) = &self.persist {
+            if let Err(e) = db.episodic_append(&entry, self.capacity) {
+                tracing::warn!(error = %e, "episodic write-through failed; entry kept in-memory only");
+            }
+        }
         let mut g = self.inner.lock().expect("episodic store poisoned");
         if g.len() == self.capacity {
             g.pop_front();

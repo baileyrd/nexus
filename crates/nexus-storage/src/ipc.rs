@@ -1294,6 +1294,84 @@ pub struct StorageVectorstoreCountResult {
     pub count: u64,
 }
 
+// ── com.nexus.storage::hybrid_search ─────────────────────────────────────────
+
+/// Args for `com.nexus.storage::hybrid_search` (handler id `76`) — RRF
+/// fusion of the Tantivy FTS arm and the vector arm. The caller
+/// supplies both the raw query text (for BM25) and its embedding (for
+/// cosine similarity); storage does not embed (design decision D-1 —
+/// one embedding path, owned by `com.nexus.ai`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageHybridSearchArgs {
+    /// Full-text query string (Tantivy syntax) for the FTS arm.
+    pub query: String,
+    /// Query embedding for the vector arm (same dimensionality as the
+    /// stored vectors).
+    pub embedding: Vec<f32>,
+    /// Vector-store collection to search. Defaults to `notes`.
+    #[serde(default = "default_vector_namespace")]
+    pub namespace: String,
+    /// Maximum number of fused matches to return. Defaults to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One hit in [`StorageHybridSearchResult::results`]. Mirror of
+/// [`crate::HybridMatch`] — kept in sync manually; compared via
+/// `cargo test -p nexus-bootstrap --test ipc_schema_emit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageHybridMatch {
+    /// Path of the source file (forge-relative).
+    pub file_path: String,
+    /// Identifier of the matched block.
+    pub block_id: u64,
+    /// Block type from the FTS arm; `None` for vector-only hits.
+    pub block_type: Option<String>,
+    /// FTS excerpt when available, otherwise the matched chunk text.
+    pub excerpt: String,
+    /// Fused RRF score. Higher is more relevant; only comparable
+    /// within one reply.
+    pub score: f32,
+    /// 0-based rank in the FTS arm, when it hit there.
+    pub fts_rank: Option<u32>,
+    /// 0-based rank in the vector arm, when it hit there.
+    pub vector_rank: Option<u32>,
+}
+
+/// Reply for `com.nexus.storage::hybrid_search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageHybridSearchResult {
+    /// Fused matches, best first (descending RRF score).
+    pub results: Vec<StorageHybridMatch>,
+}
+
 // ── #190 / R7 — write_frontmatter ────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::write_frontmatter`. Mirrors the

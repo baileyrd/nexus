@@ -139,6 +139,41 @@ pub async fn search(
         .map_err(|e| AiError::Provider(format!("vector_query: decode: {e}")))
 }
 
+/// Fused keyword + vector query via storage's `hybrid_search` (handler
+/// id `76`) — reciprocal-rank fusion of the Tantivy FTS arm and the
+/// vector arm. Returns the fused match objects exactly as storage
+/// serialises them (`StorageHybridMatch` wire shape: `file_path`,
+/// `block_id`, `block_type`, `excerpt`, `score`, `fts_rank`,
+/// `vector_rank`) so the handler can pass them through without a
+/// mirror struct on this side.
+///
+/// # Errors
+/// Returns [`AiError::Provider`] on dispatcher failure or a malformed
+/// reply.
+pub async fn hybrid_search(
+    ctx: &KernelPluginContext,
+    query: &str,
+    query_embedding: &[f32],
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, AiError> {
+    let args = serde_json::json!({
+        "query": query,
+        "embedding": query_embedding,
+        "limit": limit,
+    });
+    let response = ctx
+        .ipc_call(STORAGE_PLUGIN, "hybrid_search", args, STORAGE_IPC_TIMEOUT)
+        .await
+        .map_err(|e| AiError::Provider(format!("storage hybrid_search: {e}")))?;
+    response
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .ok_or_else(|| {
+            AiError::Provider("hybrid_search: reply missing 'results' array".to_string())
+        })
+}
+
 /// Delete all embeddings for `file_path` via storage IPC.
 ///
 /// # Errors

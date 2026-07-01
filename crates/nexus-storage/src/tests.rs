@@ -1210,3 +1210,125 @@ fn read_lines_missing_file_yields_nulls() {
     assert!(r["tag"].is_null());
     assert_eq!(r["total_lines"], 0);
 }
+
+// ── hybrid_search (RRF fusion of FTS + vector arms) ───────────────────────
+
+/// Look up the single indexed block id for a file via a token unique
+/// to that file. Panics if the token doesn't resolve to exactly one hit.
+fn block_id_for_token(engine: &StorageEngine, token: &str) -> u64 {
+    let hits = engine.search(token, 10).expect("token lookup");
+    assert_eq!(hits.len(), 1, "token {token:?} should identify one block");
+    hits[0].block_id
+}
+
+#[test]
+fn hybrid_search_fuses_both_arms_and_ranks_dual_hits_first() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+
+    engine
+        .write_file("notes/keyword.md", b"xylophone-token appears here")
+        .expect("write keyword note");
+    engine
+        .write_file("notes/semantic.md", b"unrelated-prose-marker entirely")
+        .expect("write semantic note");
+    engine.rebuild_search_index().expect("warm FTS");
+
+    let keyword_block = block_id_for_token(&engine, "xylophone-token");
+    let semantic_block = block_id_for_token(&engine, "unrelated-prose-marker");
+
+    // Synthetic embeddings: the query vector below matches semantic.md
+    // exactly and keyword.md not at all.
+    engine
+        .vector_insert(
+            "notes",
+            "notes/keyword.md",
+            &[vectorstore::ChunkEmbedding {
+                file_path: "notes/keyword.md".to_string(),
+                block_id: keyword_block,
+                chunk_text: "xylophone-token appears here".to_string(),
+                embedding: vec![0.0, 1.0, 0.0],
+            }],
+        )
+        .expect("insert keyword embedding");
+    engine
+        .vector_insert(
+            "notes",
+            "notes/semantic.md",
+            &[vectorstore::ChunkEmbedding {
+                file_path: "notes/semantic.md".to_string(),
+                block_id: semantic_block,
+                chunk_text: "unrelated-prose-marker entirely".to_string(),
+                embedding: vec![1.0, 0.0, 0.0],
+            }],
+        )
+        .expect("insert semantic embedding");
+
+    let fused = engine
+        .hybrid_search("xylophone-token", "notes", &[1.0, 0.0, 0.0], 5)
+        .expect("hybrid search");
+
+    // keyword.md hits the FTS arm at rank 0 AND the vector arm at rank
+    // 1 (cosine 0 still ranks); semantic.md hits only the vector arm
+    // at rank 0. Dual-arm membership must win on fused score.
+    assert_eq!(fused.len(), 2, "both notes should surface");
+    assert_eq!(fused[0].file_path, "notes/keyword.md");
+    assert_eq!(fused[0].fts_rank, Some(0));
+    assert_eq!(fused[0].vector_rank, Some(1));
+    assert_eq!(fused[0].block_type.as_deref(), Some("paragraph"));
+
+    assert_eq!(fused[1].file_path, "notes/semantic.md");
+    assert_eq!(fused[1].fts_rank, None);
+    assert_eq!(fused[1].vector_rank, Some(0));
+    // Vector-only hits fall back to the chunk text for display.
+    assert_eq!(fused[1].excerpt, "unrelated-prose-marker entirely");
+}
+
+#[test]
+fn hybrid_search_degrades_to_fts_when_no_vectors_indexed() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine
+        .write_file("notes/only.md", b"quicksilver-token paragraph")
+        .expect("write");
+    engine.rebuild_search_index().expect("warm FTS");
+
+    let fused = engine
+        .hybrid_search("quicksilver-token", "notes", &[1.0, 0.0], 5)
+        .expect("hybrid search");
+
+    assert_eq!(fused.len(), 1);
+    assert_eq!(fused[0].file_path, "notes/only.md");
+    assert_eq!(fused[0].fts_rank, Some(0));
+    assert_eq!(fused[0].vector_rank, None);
+}
+
+#[test]
+fn hybrid_search_handler_wire_shape() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+    engine
+        .write_file("notes/wire.md", b"wire-shape-token body")
+        .expect("write");
+    engine.rebuild_search_index().expect("warm FTS");
+
+    let reply = crate::handlers::search::hybrid_search(
+        &engine,
+        &serde_json::json!({
+            "query": "wire-shape-token",
+            "embedding": [0.5, 0.5],
+            "limit": 3
+        }),
+    )
+    .expect("handler reply");
+
+    let results = reply["results"].as_array().expect("results array");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["file_path"], "notes/wire.md");
+    assert_eq!(results[0]["fts_rank"], 0);
+    assert!(results[0]["vector_rank"].is_null());
+    // Typed round-trip: the wire object parses as the ipc mirror type.
+    let typed: crate::ipc::StorageHybridSearchResult =
+        serde_json::from_value(reply).expect("mirror decode");
+    assert_eq!(typed.results.len(), 1);
+}

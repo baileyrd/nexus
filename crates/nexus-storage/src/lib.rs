@@ -28,6 +28,7 @@ mod find_replace;
 mod forge;
 mod graph;
 mod handlers;
+pub mod hybrid;
 /// BL-083: forge-to-forge import / migration planning + apply.
 pub mod import;
 mod index;
@@ -97,7 +98,14 @@ pub use index::{
 pub use mdx::{parse_mdx, MdxParseResult, ParsedJsxComponent};
 pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
 pub use reconcile::{reconcile, ReconcileDelta};
+pub use hybrid::HybridMatch;
 pub use search::{SearchIndex, SearchResult};
+
+/// Oversampling multiplier for each hybrid-search arm: both the FTS and
+/// vector arms fetch `limit × this` candidates before fusion so a block
+/// ranked outside the final window in one arm can still win on combined
+/// rank (mirrors `nexus-memory`'s recall oversampling rationale).
+pub const HYBRID_ARM_OVERSAMPLE: usize = 4;
 pub use search_scope::{parse_scoped_query, CmpOp, PropertyOp, ScopeFilter};
 pub use tasks::{
     insert_tasks, query_tasks, toggle_task, toggle_task_in_file, ParsedTask, TaskFilter, TaskRecord,
@@ -1824,6 +1832,32 @@ impl StorageEngine {
     ) -> Result<Vec<vectorstore::ChunkMatch>, StorageError> {
         let conn = self.pool_connection()?;
         vectorstore::search(&conn, namespace, query_embedding, limit)
+    }
+
+    /// Hybrid search: reciprocal-rank fusion of the Tantivy FTS arm
+    /// ([`Self::search`]) and the vector arm ([`Self::vector_query`]).
+    ///
+    /// Each arm is oversampled ([`HYBRID_ARM_OVERSAMPLE`]× `limit`) so
+    /// a block ranked outside the final `limit` in one arm can still
+    /// win on fusion; the fused list is truncated to `limit`. Either
+    /// arm may legitimately come back empty (no embeddings indexed yet,
+    /// or a query with no keyword hits) — fusion then degrades to the
+    /// other arm's ranking.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if either underlying query fails.
+    pub fn hybrid_search(
+        &self,
+        query: &str,
+        namespace: &str,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<HybridMatch>, StorageError> {
+        let depth = limit.saturating_mul(HYBRID_ARM_OVERSAMPLE).max(limit);
+        let fts = self.search(query, depth)?;
+        let vector = self.vector_query(namespace, query_embedding, depth)?;
+        Ok(hybrid::fuse(&fts, &vector, limit))
     }
 
     /// Delete every embedding row for `file_path`.

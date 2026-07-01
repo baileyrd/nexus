@@ -45,9 +45,7 @@ do all three of the following in the **same PR**:
 
 | Symbol | Announced | Removal target | Replacement |
 |--------|-----------|----------------|-------------|
-
-_No active deprecations._ When the first one lands, replace this paragraph
-with rows in the table above.
+| `ScriptPlugin` (`src/index.ts`) | 0.1.0 — 2026-07-01 | 0.2.0 | `SandboxedPlugin` (`src/sandbox/plugin.ts`) for sandboxed community plugins, or the shell-side `Plugin` interface (`shell/src/types/plugin.ts`) for first-party plugins. No runtime ever implemented the four-hook `ScriptPlugin` lifecycle; #187 resolved the entry-point contract to the two-hook `activate`/`deactivate` shape both runtimes already use. |
 
 ## Why three signals?
 

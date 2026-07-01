@@ -1,35 +1,37 @@
 /**
  * Public TypeScript surface for Nexus script-plugin authors (UI F-2.1.1).
  *
- * ## Status — pre-1.0, two runtime contracts diverge (#187)
+ * ## Status — reconciled common contract (#187)
  *
- * The `NexusPluginContext` / `ScriptPlugin` shapes below are the
- * *target* contract this package will eventually freeze at `1.x`. They
- * are **not** what any current runtime supplies:
+ * `NexusPluginContext` is the **common plugin contract**: the subset of
+ * verbs BOTH in-tree runtimes hand plugins today, expressed with
+ * {@link MaybePromise} returns wherever the tiers disagree on
+ * sync-versus-async. Each live context type is a structural superset:
  *
- * | Runtime | Actual context type | Source |
+ * | Runtime | Context type | Beyond the common contract |
  * |---|---|---|
- * | In-process shell host | `PluginAPI` | `shell/src/types/plugin.ts` |
- * | Sandboxed community plugins | `SandboxedPluginContext` | `./sandbox/context.ts` |
+ * | In-process shell host | `PluginAPI` (`shell/src/types/plugin.ts`) | `workspace`, `viewRegistry`, `views`, `configuration`, `settings`, `keybindings`, `fs`, `editor`, `internal` |
+ * | Sandboxed community plugins | `SandboxedPluginContext` (`./sandbox/context.ts`) | declarative `views.registerPanel` |
  *
- * `PluginAPI` and `SandboxedPluginContext` overlap with
- * `NexusPluginContext` on the verbs that matter (commands, events,
- * notifications, settings, ipc / kernel.invoke) but neither satisfies
- * it structurally — the field names and async-versus-sync split differ.
- * See [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md) for the per-field
- * inventory.
+ * Conformance is locked by compile-only tests — a contract edit either
+ * runtime cannot satisfy fails `tsc` in CI:
  *
- * Until the contracts are reconciled, treat `NexusPluginContext` and
- * `ScriptPlugin` as forward-looking documentation, not as a substitute
- * for the runtime-specific contracts.
+ *   - `src/contractConformance.test-d.ts` (sandbox tier, this package)
+ *   - `shell/src/types/contractConformance.test-d.ts` (in-process tier)
+ *
+ * Portable plugin logic can be typed against `NexusPluginContext` and
+ * handed either runtime's context object; `await` every
+ * `MaybePromise`-returning call (awaiting a plain value is a no-op).
+ * Tier-specific surfaces stay on the runtime contracts — see
+ * [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md) for the inventory.
  *
  * ## Versioning
  *
- * The current `1.0.0` package tag predates the runtime audit that
- * surfaced the divergence above; it does not yet imply structural
- * freeze. A future `2.0.0` (or a clean re-cut to `0.x` for the next
- * major) will hold the line once one runtime shape is canonical and
- * the others adopt it.
+ * Re-cut to `0.x` (repo-review V9 / #187): the original `1.0.0` tag
+ * predated the runtime audit and implied a structural freeze that did
+ * not exist. The package re-versions at `0.1.0` alongside the rest of
+ * the workspace; `1.0.0` will be re-cut once the common contract and
+ * its conformance gates have soaked for a release.
  *
  * ## Runtime
  *
@@ -43,7 +45,9 @@
  *   (`EditorBlockType`, `EditorDecorationProvider`, `EditorKeybinding`,
  *   `Snippet`, `MenuItem`, `ContextMenuItem`, `UriHandler`,
  *   `WebviewPanelConfig`, `TreeDataProvider`, `TreeNode`, `PanelNode`).
- * - `ScriptPlugin` — the shape a plugin's default export must satisfy.
+ * - `ScriptPlugin` — deprecated (#187, see `DEPRECATED.md`); use
+ *   `SandboxedPlugin` (sandboxed tier) or the shell-side `Plugin`
+ *   interface (first-party tier) instead.
  *
  * ## What's out of scope
  *
@@ -72,6 +76,16 @@
 // nexus-plugin-api --features ts-export`; do not hand-edit the
 // `./generated/*.ts` files.
 export * from './generated';
+
+// Contribution DTOs shared verbatim by both tiers. Declared in
+// sandbox/context.ts (their original home) and referenced here by the
+// common contract; the cycle is type-only and already existed via the
+// `export * from './sandbox/context'` re-export at the bottom of this
+// file.
+import type {
+  ActivityBarItemConfig,
+  StatusBarItemConfig,
+} from './sandbox/context';
 
 /**
  * Versioned plugin ABI marker. Mirrors `PLUGIN_API_VERSION` const in
@@ -222,77 +236,166 @@ export interface MdxComponent {
 // ─── Host-provided context ───────────────────────────────────────────────────
 
 /**
- * **Status (#187): aspirational, not yet runtime-backed.** No in-tree
- * runtime exposes a context that satisfies this interface today. The
- * in-process shell host hands plugins a `PluginAPI`
- * (`shell/src/types/plugin.ts`) and the sandbox runtime hands them a
- * `SandboxedPluginContext` (`./sandbox/context.ts`). Both overlap with
- * the verbs declared below but diverge on field names and on the
- * sync-versus-async boundary — see [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md).
+ * A value that may or may not be wrapped in a promise. The common
+ * contract uses this wherever the in-process tier answers synchronously
+ * but the sandbox tier must cross `postMessage`. Portable code should
+ * `await` unconditionally — awaiting a plain value is a no-op.
+ */
+export type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * Tier-portable view of a status-bar item handle. The in-process tier
+ * hands back a live handle with mutable `text` / `content` properties;
+ * the sandbox tier hands back an RPC proxy with an async `update`
+ * method. `dispose` is the only verb both tiers agree on, so it is the
+ * only verb the common contract promises.
+ */
+export interface NexusStatusBarItemHandle {
+  dispose(): MaybePromise<void>;
+}
+
+/**
+ * The common plugin contract (#187) — the surface a plugin can rely on
+ * in **every** runtime tier.
  *
- * Treat this shape as the target contract once one runtime is chosen
- * canonical. Plugin authors targeting today's host should import
- * `PluginAPI` (in-process) or `SandboxedPluginContext` (sandboxed)
- * directly until the divergence is closed.
+ * Both live context shapes structurally satisfy this interface:
+ *
+ *   - `PluginAPI` (in-process shell host, `shell/src/types/plugin.ts`)
+ *     — sync-leaning; extends this with `workspace`, `viewRegistry`,
+ *     `views`, `configuration`, `settings`, `keybindings`, `fs`,
+ *     `editor`, and (core-only) `internal`.
+ *   - `SandboxedPluginContext` (`./sandbox/context.ts`) — async;
+ *     extends this with declarative `views.registerPanel`.
+ *
+ * Return types use {@link MaybePromise} wherever the tiers disagree on
+ * sync-versus-async; portable code must `await` those results.
+ * Conformance is locked by the compile-only tests named in the module
+ * header — a change here that either runtime cannot satisfy fails
+ * `tsc` in CI.
  */
 export interface NexusPluginContext {
-  pluginId: string;
+  /**
+   * Stable plugin identifier (manifest id). Baked in host-side —
+   * `buildPluginAPI` (in-process) and the sandbox handshake both bind
+   * it before the plugin sees the context, so it is not self-asserted.
+   */
+  readonly pluginId: string;
 
-  settings: {
-    get(): Promise<Record<string, unknown>>;
+  /** Command registry — register handlers, invoke commands by id. */
+  commands: {
+    /**
+     * Register a command handler. The sandbox tier returns a
+     * {@link Disposable}; the in-process tier returns `void` (cleanup
+     * is swept by `PluginRegistry.unregisterAll` on deactivate).
+     * Portable code should not rely on the return value.
+     */
+    register(
+      id: string,
+      handler: (...args: unknown[]) => unknown,
+    ): Disposable | void;
+    /** Execute a command by id. Async in every tier. */
+    execute(id: string, ...args: unknown[]): Promise<unknown>;
   };
 
-  events: {
-    emit(typeId: string, payload: unknown): Promise<void>;
-  };
-
-  ipc: {
-    call(
-      targetPluginId: string,
+  /** Kernel IPC bridge — `context.ipc_call` + kernel event subscription. */
+  kernel: {
+    /**
+     * Invoke a kernel-plugin command. Rejects with an
+     * `IpcErrorEnvelope`-derived string on timeout, capability denial,
+     * or plugin crash. `timeoutMs` defaults to 30 seconds.
+     */
+    invoke<T = unknown>(
+      pluginId: string,
       commandId: string,
       args?: unknown,
-    ): Promise<unknown>;
-  };
-
-  editor: EditorAPI & {
-    registerBlockType(type: EditorBlockType): Disposable;
-    registerDecorationProvider(provider: EditorDecorationProvider): Disposable;
-    registerKeybinding(binding: EditorKeybinding): Disposable;
-    registerSnippet(snippet: Snippet): Disposable;
+      timeoutMs?: number,
+    ): Promise<T>;
     /**
-     * Register an MDX component — the editor scans for matching
-     * self-closing JSX tags and renders each as a widget. PRD-08 §7.
+     * Subscribe to kernel custom events whose `type_id` starts with
+     * `topicPrefix`. Resolves to an idempotent {@link Disposable}.
      */
-    registerMdxComponent(component: MdxComponent): Disposable;
+    on<T = unknown>(
+      topicPrefix: string,
+      handler: (topic: string, payload: T) => void,
+    ): Promise<Disposable>;
   };
-
-  ui: {
-    notify(level: ToastLevel, message: string): void;
-    registerTreeDataProvider(
-      viewId: string,
-      provider: TreeDataProvider,
-    ): Disposable;
-    registerFileHandler(ext: string, contentTypeId: string): Disposable;
-    registerContextMenuItem(item: ContextMenuItem): Disposable;
-    registerMenuItem(item: MenuItem): Disposable;
-    registerUriHandler(handler: UriHandler): Disposable;
-    registerWebviewPanel(viewId: string, config: WebviewPanelConfig): Disposable;
-    registerPanelView(viewId: string, render: PanelRenderFn): Disposable;
-  };
-
-  workspace: WorkspaceAPI;
 
   /**
-   * AI action registry (BL-035). Plugins contribute named actions
-   * (summarize, rewrite, translate, …) bound to one or more surfaces;
-   * the shell surfaces matching actions in the editor's right-click
-   * selection menu, the block-handle menu, and (once BL-038 lands) the
-   * canvas node menu. The runtime impl is supplied by the host —
-   * extension-api ships only the contract.
+   * OS-level capabilities (filesystem, dialogs, window controls,
+   * open-in-default-app). Identical shape in both tiers — every method
+   * was async from day one, so no {@link MaybePromise} bridging is
+   * needed. Capability-gated host-side in both tiers.
    */
-  ai: AiAPI;
+  platform: PlatformAPI;
 
-  disposables: DisposableStore;
+  /** In-app plugin-to-plugin events. */
+  events: {
+    on<T = unknown>(event: string, handler: (payload: T) => void): Disposable;
+    emit<T = unknown>(event: string, payload: T): void;
+  };
+
+  /**
+   * Per-plugin namespaced key/value storage. Synchronous in the
+   * in-process tier, async in the sandbox — always `await`.
+   */
+  storage: {
+    get(key: string): MaybePromise<string | null>;
+    set(key: string, value: string): MaybePromise<void>;
+    delete(key: string): MaybePromise<void>;
+  };
+
+  /** Toast notifications. */
+  notifications: {
+    show(notification: {
+      message: string;
+      type?: 'info' | 'warning' | 'error' | 'success';
+      duration?: number;
+    }): MaybePromise<void>;
+  };
+
+  /**
+   * Context keys for menu / keybinding `when` clauses. `get` is typed
+   * `unknown` because the sandbox tier resolves through a promise —
+   * `await` the result before narrowing.
+   */
+  context: {
+    set(key: string, value: unknown): MaybePromise<void>;
+    get(key: string): unknown;
+    evaluate(expression: string): MaybePromise<boolean>;
+  };
+
+  /** Host-rendered modal prompts. Async in every tier. */
+  input: {
+    prompt(message: string, placeholder?: string): Promise<string | null>;
+    confirm(message: string): Promise<boolean>;
+  };
+
+  /** Custom URI scheme registry (WI-13). Identical shape in both tiers. */
+  uri: UriAPI;
+
+  /** Activity-bar items. */
+  activityBar: {
+    /**
+     * Add an item. The sandbox tier returns a {@link Disposable}; the
+     * in-process tier returns `void` (registry-swept). Portable code
+     * should not rely on the return value.
+     */
+    addItem(config: ActivityBarItemConfig): Disposable | void;
+    removeItem(id: string): void;
+  };
+
+  /** Status-bar items. */
+  statusBar: {
+    /**
+     * Create a status-bar item. Sync handle in the in-process tier,
+     * promise in the sandbox — always `await`. Beyond `dispose` the
+     * resolved handle is tier-specific; portable code should treat it
+     * as {@link NexusStatusBarItemHandle}.
+     */
+    createItem(
+      config: StatusBarItemConfig,
+    ): MaybePromise<NexusStatusBarItemHandle>;
+  };
 }
 
 // ─── AI action surface (BL-035) ──────────────────────────────────────────────
@@ -460,23 +563,21 @@ export interface WorkspaceAPI {
 // ─── Plugin entry point ──────────────────────────────────────────────────────
 
 /**
- * Shape a script plugin's default export must satisfy. The host calls
- * the lifecycle hooks in this order:
+ * @deprecated Since 0.1.0 (2026-07-01) — no runtime ever implemented
+ * this four-hook lifecycle, and #187 resolved the entry-point contract
+ * in favour of the two-hook `activate` / `deactivate` shape. Use
+ * {@link SandboxedPlugin} (`./sandbox/plugin.ts`, sandboxed community
+ * tier) or the shell-side `Plugin` interface
+ * (`shell/src/types/plugin.ts`, first-party tier). Removal target:
+ * 0.2.0. See `DEPRECATED.md` for the migration table.
  *
- *   loadScriptPlugin → onInit → onStart → (dispatch…) → onStop
- *
- * Failures in any hook are logged to the Running Extensions settings
- * tab but do not propagate to other plugins — the contribution bridge
- * keeps going with the next plugin in the snapshot.
- *
- * **Status (#187): aspirational, not yet runtime-backed.** No
- * `loadScriptPlugin` entry point exists in the current shell or
- * sandbox runtime. The in-process shell loads first-party plugins via
- * a different protocol (see `shell/src/host/extensionHost.ts`); the
- * sandbox runtime calls `SandboxedPlugin.activate` /
- * `SandboxedPlugin.deactivate` (see `./sandbox/plugin.ts`). Plugin
- * authors targeting today's host should implement the runtime-specific
- * shape, not this one. See [`CONTRACT_STATUS.md`](../CONTRACT_STATUS.md).
+ * Original intent, retained for the deprecation window: the host would
+ * call `loadScriptPlugin → onInit → onStart → (dispatch…) → onStop`.
+ * No `loadScriptPlugin` entry point exists in the current shell or
+ * sandbox runtime; the in-process shell loads first-party plugins via
+ * `activate(api)` (see `shell/src/host/extensionHost.ts`) and the
+ * sandbox runtime calls `SandboxedPlugin.activate(ctx)` /
+ * `SandboxedPlugin.deactivate()`.
  */
 export interface ScriptPlugin {
   dispatch(

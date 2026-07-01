@@ -12,7 +12,7 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 75 |
+| `com.nexus.storage` | 76 |
 | `com.nexus.git` | 42 |
 | `com.nexus.terminal` | 34 |
 | `com.nexus.ai` | 28 |
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (75)
+## com.nexus.storage (76)
 
 ### Read
 
@@ -57,6 +57,7 @@
 | `find_in_files` | — | ripgrep-style content search |
 | `ast_query` | — | tree-sitter structural code search (S-expression query with `@capture`s) over one language |
 | `search` | — | Tantivy FTS query |
+| `hybrid_search` | — | RRF fusion of the Tantivy FTS and vector-query arms (caller supplies query text + embedding) |
 | `file_exists` | — | existence check |
 | `list_dir` | — | directory enumeration |
 | `backlinks` / `backlinks_to_block` | — | wiki backlink query |

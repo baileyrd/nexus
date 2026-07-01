@@ -1,12 +1,12 @@
-//! Search-domain handlers: `search`, `query_symbol`, `query_tags`,
-//! `find_in_files`, `replace_in_files`.
+//! Search-domain handlers: `search`, `hybrid_search`, `query_symbol`,
+//! `query_tags`, `find_in_files`, `replace_in_files`.
 
 use std::path::Path;
 
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{StorageQueryTagsArgs, StorageSearchArgs};
+use crate::ipc::{StorageHybridSearchArgs, StorageQueryTagsArgs, StorageSearchArgs};
 use crate::StorageEngine;
 
 use super::shared::{exec_err, parse_args, to_value};
@@ -14,6 +14,10 @@ use super::shared::{exec_err, parse_args, to_value};
 /// Default match count when the caller omits `limit`. Kept identical
 /// to the pre-#190 hand-rolled default for wire-compat.
 const DEFAULT_SEARCH_LIMIT: usize = 50;
+
+/// Default fused-match count for `hybrid_search` when the caller omits
+/// `limit`.
+const DEFAULT_HYBRID_LIMIT: usize = 10;
 
 pub(crate) fn search(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     // #190 / R7 — strict-parse via existing `StorageSearchArgs`.
@@ -25,6 +29,28 @@ pub(crate) fn search(engine: &StorageEngine, args: &Value) -> Result<Value, Plug
         .search(&query, limit)
         .map_err(|e| exec_err(format!("search: {e}")))?;
     to_value(&results, "search")
+}
+
+/// `com.nexus.storage::hybrid_search` (handler id `76`) — RRF fusion of
+/// the Tantivy FTS arm and the vector arm. The reply wire shape
+/// `{"results": [...]}` matches the typed
+/// `crate::ipc::StorageHybridSearchResult`; `HybridMatch` serialises
+/// field-for-field as `StorageHybridMatch` (pinned by the
+/// `ipc_schema_emit` invariant).
+pub(crate) fn hybrid_search(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let StorageHybridSearchArgs {
+        query,
+        embedding,
+        namespace,
+        limit,
+    } = parse_args(args, "hybrid_search")?;
+    let limit = limit
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(DEFAULT_HYBRID_LIMIT);
+    let results = engine
+        .hybrid_search(&query, &namespace, &embedding, limit)
+        .map_err(|e| exec_err(format!("hybrid_search: {e}")))?;
+    Ok(serde_json::json!({ "results": results }))
 }
 
 pub(crate) fn query_symbol(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {

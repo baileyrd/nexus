@@ -7,9 +7,13 @@
 //! context so the model can apply the learned approach without
 //! re-discovering it from scratch.
 //!
-//! Phase 1 ships an in-memory registry with substring trigger matching.
-//! Phase 5 can layer in embedding-based semantic matching (similar to
-//! how `SemanticStore::search` evolves) while keeping the same API.
+//! Phase 1 shipped an in-memory registry with substring trigger
+//! matching. Phase 5 (here) adds optional `SQLite` persistence to the
+//! shared `<forge>/.forge/memory/memory.db` (`procedural_skills`
+//! table) — construct via [`ProceduralStore::open`] to load learned
+//! skills and write every subsequent mutation through.
+//! Embedding-based trigger matching remains a follow-up; the interface
+//! is stable across both.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -17,6 +21,8 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::db::{MemoryDb, MemoryDbError};
 
 /// Opaque identifier for a [`ProceduralEntry`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -27,6 +33,12 @@ impl ProceduralId {
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    /// Wrap an existing UUID (durable-store load path).
+    #[must_use]
+    pub fn from_uuid(id: Uuid) -> Self {
+        Self(id)
     }
 
     /// Inner UUID value.
@@ -97,29 +109,58 @@ impl ProceduralEntry {
     }
 }
 
-/// In-memory procedural skill registry.
+/// Procedural skill registry — in-memory map with optional durable
+/// backing.
 ///
 /// Thread-safe and `Clone`-able (both clones share the same `Arc`).
-/// Skills are matched by substring against caller-supplied trigger text;
-/// Phase 5 can upgrade to embedding similarity without changing the
+/// Skills are matched by substring against caller-supplied trigger
+/// text; reads always come from the in-memory map, and the `SQLite`
+/// layer exists so learned skills survive process restarts. Embedding
+/// similarity can replace the matcher later without changing the
 /// public interface.
 #[derive(Clone, Debug)]
 pub struct ProceduralStore {
     inner: Arc<Mutex<HashMap<ProceduralId, ProceduralEntry>>>,
+    persist: Option<MemoryDb>,
 }
 
 impl ProceduralStore {
-    /// Create an empty store.
+    /// Create a purely in-memory store (Phase-1 semantics — nothing
+    /// survives a restart).
     #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
+            persist: None,
         }
+    }
+
+    /// Open a store backed by `db` (Phase 5): learned skills are loaded
+    /// into memory and every subsequent mutation writes through.
+    ///
+    /// # Errors
+    /// Returns an error if the durable store cannot be read.
+    pub fn open(db: MemoryDb) -> Result<Self, MemoryDbError> {
+        let entries = db.procedural_all()?;
+        let map = entries.into_iter().map(|e| (e.id, e)).collect();
+        Ok(Self {
+            inner: Arc::new(Mutex::new(map)),
+            persist: Some(db),
+        })
     }
 
     /// Register a skill. Silently replaces any skill with the same `name`
     /// (re-registration updates the template; last writer wins).
+    ///
+    /// When a durable store is attached the skill is written through
+    /// best-effort: a write failure is logged and the in-memory map
+    /// still updates, preserving the infallible Phase-1 contract.
     pub fn register(&self, entry: ProceduralEntry) {
+        if let Some(db) = &self.persist {
+            if let Err(e) = db.procedural_upsert(&entry) {
+                tracing::warn!(error = %e, "procedural write-through failed; skill kept in-memory only");
+            }
+        }
         let mut g = self.inner.lock().expect("procedural store poisoned");
         g.retain(|_, e| e.name != entry.name);
         g.insert(entry.id, entry);
@@ -169,7 +210,15 @@ impl ProceduralStore {
     /// Increment the `use_count` for a skill. Called by the context
     /// builder each time a skill is injected into a context window so
     /// frequently-applied skills rank higher in future lookups.
+    ///
+    /// Write-through mirrors [`register`](Self::register): best-effort,
+    /// with failures logged.
     pub fn record_use(&self, id: ProceduralId) {
+        if let Some(db) = &self.persist {
+            if let Err(e) = db.procedural_record_use(id) {
+                tracing::warn!(error = %e, "procedural use-count write-through failed");
+            }
+        }
         let mut g = self.inner.lock().expect("procedural store poisoned");
         if let Some(entry) = g.get_mut(&id) {
             entry.use_count = entry.use_count.saturating_add(1);
@@ -177,7 +226,15 @@ impl ProceduralStore {
     }
 
     /// Remove a skill. Returns `true` if it was present.
+    ///
+    /// Write-through mirrors [`register`](Self::register): best-effort,
+    /// with failures logged.
     pub fn unregister(&self, id: ProceduralId) -> bool {
+        if let Some(db) = &self.persist {
+            if let Err(e) = db.procedural_delete(id) {
+                tracing::warn!(error = %e, "procedural delete write-through failed");
+            }
+        }
         self.inner
             .lock()
             .expect("procedural store poisoned")

@@ -1,7 +1,7 @@
 {
   "name": "@nexus/extension-api",
-  "version": "1.0.0",
-  "description": "Stable TypeScript types for Nexus script-plugin authors (UI F-2.1.1)",
+  "version": "0.1.0",
+  "description": "TypeScript plugin contract for Nexus — common NexusPluginContext + sandbox runtime types (UI F-2.1.1, #187). Re-cut to 0.x per repo-review V9; 1.0.0 returns once the conformance gates have soaked.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

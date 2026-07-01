@@ -46,6 +46,11 @@
         "type": "string"
       }
     },
+    "shell_integration": {
+      "description": "Opt in to loading the OSC 133 shell-integration script (RFC 0003) so the\nshell emits reliable command/exit-code marks the server-side VT grid\ncaptures. No-op for shells without an emitter. Default `false`.",
+      "type": "boolean",
+      "default": false
+    },
     "working_dir": {
       "description": "Working directory.",
       "type": [

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageHybridSearchArgs",
+  "description": "Args for `com.nexus.storage::hybrid_search` (handler id `76`) — RRF\nfusion of the Tantivy FTS arm and the vector arm. The caller\nsupplies both the raw query text (for BM25) and its embedding (for\ncosine similarity); storage does not embed (design decision D-1 —\none embedding path, owned by `com.nexus.ai`).",
+  "type": "object",
+  "properties": {
+    "embedding": {
+      "description": "Query embedding for the vector arm (same dimensionality as the\nstored vectors).",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      }
+    },
+    "limit": {
+      "description": "Maximum number of fused matches to return. Defaults to 10.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "namespace": {
+      "description": "Vector-store collection to search. Defaults to `notes`.",
+      "type": "string",
+      "default": "notes"
+    },
+    "query": {
+      "description": "Full-text query string (Tantivy syntax) for the FTS arm.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "query",
+    "embedding"
+  ]
+}
