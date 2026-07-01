@@ -833,8 +833,13 @@ where
         // results (failures flagged via ToolResult.is_error). The
         // resume follow-up only seeds the very first turn, so it is not
         // re-applied here.
-        current_turns =
-            compose_turns(goal, &session.rounds, live_rounds_start, &live_summary, None);
+        current_turns = compose_turns(
+            goal,
+            &session.rounds,
+            live_rounds_start,
+            &live_summary,
+            None,
+        );
 
         // BL-120 — trigger compression while the conversation exceeds
         // the configured token budget AND there are at least
@@ -921,8 +926,17 @@ where
     C: crate::compression::Compressor + ?Sized,
 {
     run_session_resumed_with_compressor(
-        driver, dispatcher, policy, goal, system, archetype, id, config, compressor,
-        Vec::new(), None,
+        driver,
+        dispatcher,
+        policy,
+        goal,
+        system,
+        archetype,
+        id,
+        config,
+        compressor,
+        Vec::new(),
+        None,
     )
     .await
 }
@@ -952,14 +966,32 @@ where
     if config.max_context_tokens > 0 {
         let compressor = crate::compression::LlmCompressor::new(driver);
         return run_session_resumed_with_compressor(
-            driver, dispatcher, policy, goal, system, archetype, id, config, &compressor,
-            seed_rounds, follow_up,
+            driver,
+            dispatcher,
+            policy,
+            goal,
+            system,
+            archetype,
+            id,
+            config,
+            &compressor,
+            seed_rounds,
+            follow_up,
         )
         .await;
     }
     run_session_resumed_with_compressor::<D, P, T, crate::compression::NoopCompressor>(
-        driver, dispatcher, policy, goal, system, archetype, id, config,
-        &crate::compression::NoopCompressor, seed_rounds, follow_up,
+        driver,
+        dispatcher,
+        policy,
+        goal,
+        system,
+        archetype,
+        id,
+        config,
+        &crate::compression::NoopCompressor,
+        seed_rounds,
+        follow_up,
     )
     .await
 }
@@ -974,6 +1006,7 @@ enum RoundStopReason {
 /// Apply a [`RoundDecision`] to a list of proposed tool calls,
 /// returning the per-call records produced this round and an
 /// optional reason for the session to stop.
+#[allow(clippy::too_many_arguments)]
 async fn execute_round<T: ToolDispatcher + ?Sized>(
     dispatcher: &T,
     _round_idx: u32,
@@ -1495,7 +1528,10 @@ mod tests {
             "provider returned 429 Too Many Requests",
             "service temporarily unavailable",
         ] {
-            assert!(is_retryable_tool_error(transient), "should retry: {transient}");
+            assert!(
+                is_retryable_tool_error(transient),
+                "should retry: {transient}"
+            );
         }
         for permanent in [
             "file not found: notes.md",
@@ -1529,7 +1565,11 @@ mod tests {
         // 2 failures + 1 success.
         assert_eq!(dispatcher.call_count(), 3);
         let rec = &session.rounds[0].tool_calls[0];
-        assert!(rec.error.is_empty(), "succeeded after retries: {}", rec.error);
+        assert!(
+            rec.error.is_empty(),
+            "succeeded after retries: {}",
+            rec.error
+        );
         assert!(rec.response.is_some());
         // 2 retries + the successful attempt = 3 total.
         assert_eq!(rec.attempts, 3);
@@ -1562,8 +1602,7 @@ mod tests {
         let driver = ScriptedDriver::new(tool_then_done());
         let dispatcher = FlakyDispatcher::new("dispatch timeout", 5);
         // Plain run_session → default config, max_tool_retries = 0.
-        let session =
-            run_session(&driver, &dispatcher, &AutoApproveAll, "go", "sys", None).await;
+        let session = run_session(&driver, &dispatcher, &AutoApproveAll, "go", "sys", None).await;
         assert_eq!(dispatcher.call_count(), 1, "no retry without opt-in");
         let rec = &session.rounds[0].tool_calls[0];
         assert!(rec.error.contains("dispatch timeout"));
@@ -1589,7 +1628,11 @@ mod tests {
         // 1 initial + 2 retries = 3 attempts, then gives up.
         assert_eq!(dispatcher.call_count(), 3);
         let rec = &session.rounds[0].tool_calls[0];
-        assert!(rec.error.contains("after 3 attempts"), "error: {}", rec.error);
+        assert!(
+            rec.error.contains("after 3 attempts"),
+            "error: {}",
+            rec.error
+        );
         // The structured count matches the string annotation.
         assert_eq!(rec.attempts, 3);
     }
@@ -1629,10 +1672,8 @@ mod tests {
     async fn typed_permanent_error_skips_retry_despite_transient_message() {
         let driver = ScriptedDriver::new(tool_then_done());
         // Message would be retried by the heuristic, but the kind is Permanent.
-        let dispatcher = FlakyDispatcher::with_error(
-            ToolDispatchError::permanent("dispatch timeout"),
-            5,
-        );
+        let dispatcher =
+            FlakyDispatcher::with_error(ToolDispatchError::permanent("dispatch timeout"), 5);
         let session = run_session_with_config(
             &driver,
             &dispatcher,
@@ -1672,7 +1713,11 @@ mod tests {
         // 2 transient failures + 1 success.
         assert_eq!(dispatcher.call_count(), 3);
         let rec = &session.rounds[0].tool_calls[0];
-        assert!(rec.error.is_empty(), "succeeded after retries: {}", rec.error);
+        assert!(
+            rec.error.is_empty(),
+            "succeeded after retries: {}",
+            rec.error
+        );
         assert!(rec.response.is_some());
     }
 
@@ -1769,12 +1814,26 @@ mod tests {
     async fn run_session_resumed_continues_round_numbering() {
         // Two inherited rounds, as if forked from a parent at its tip.
         let seed = vec![
-            RoundRecord { round: 1, text: "first".into(), tool_calls: Vec::new() },
-            RoundRecord { round: 2, text: "second".into(), tool_calls: Vec::new() },
+            RoundRecord {
+                round: 1,
+                text: "first".into(),
+                tool_calls: Vec::new(),
+            },
+            RoundRecord {
+                round: 2,
+                text: "second".into(),
+                tool_calls: Vec::new(),
+            },
         ];
         let driver = ScriptedDriver::new(vec![
-            Proposal { text: "resuming".into(), tool_calls: vec![read_tool("u1", "x.md")] },
-            Proposal { text: "done".into(), tool_calls: Vec::new() },
+            Proposal {
+                text: "resuming".into(),
+                tool_calls: vec![read_tool("u1", "x.md")],
+            },
+            Proposal {
+                text: "done".into(),
+                tool_calls: Vec::new(),
+            },
         ]);
         let dispatcher = CountingDispatcher::new();
         let session = run_session_resumed(
@@ -1818,7 +1877,11 @@ mod tests {
         }
         let driver = CapturingDriver {
             replies: Mutex::new(
-                vec![Proposal { text: "ok".into(), tool_calls: Vec::new() }].into(),
+                vec![Proposal {
+                    text: "ok".into(),
+                    tool_calls: Vec::new(),
+                }]
+                .into(),
             ),
             prompts: Mutex::new(Vec::new()),
         };
@@ -1844,8 +1907,16 @@ mod tests {
         let prompts = driver.prompts.lock().unwrap();
         assert!(!prompts.is_empty());
         // The first prompt carries the new instruction (and the inherited context).
-        assert!(prompts[0].contains("the new ask"), "first prompt: {}", prompts[0]);
-        assert!(prompts[0].contains("New instruction"), "first prompt: {}", prompts[0]);
+        assert!(
+            prompts[0].contains("the new ask"),
+            "first prompt: {}",
+            prompts[0]
+        );
+        assert!(
+            prompts[0].contains("New instruction"),
+            "first prompt: {}",
+            prompts[0]
+        );
     }
 
     /// Phase 5.5 (2c) — the loop drives the provider through
