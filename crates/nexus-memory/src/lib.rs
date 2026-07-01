@@ -62,8 +62,8 @@ pub use procedural::{ProceduralEntry, ProceduralId, ProceduralStore};
 pub use semantic::{SemanticEntry, SemanticId, SemanticStore};
 
 pub use capture::event_to_memory;
-pub use db::{MemoryDb, MemoryDbError};
 pub use core_plugin::MemoryCorePlugin;
+pub use db::{MemoryDb, MemoryDbError};
 pub use import::{import_chat_log, import_remind_me_db, ImportReport};
 pub use model::{Memory, MemoryStatus, MemoryType};
 
@@ -258,16 +258,21 @@ mod tests {
 
         {
             let mem = MemoryStore::open(dir.path()).unwrap();
-            mem.semantic.store(SemanticEntry::new("user.language", "Python"));
+            mem.semantic
+                .store(SemanticEntry::new("user.language", "Python"));
             // Same key — replaces, not duplicates (in memory AND on disk).
-            mem.semantic.store(SemanticEntry::new("user.language", "Rust"));
+            mem.semantic
+                .store(SemanticEntry::new("user.language", "Rust"));
             mem.semantic.store(doomed.clone());
             assert!(mem.semantic.remove(doomed.id));
         }
 
         let mem = MemoryStore::open(dir.path()).unwrap();
         assert_eq!(mem.semantic.len(), 1);
-        assert_eq!(mem.semantic.get_by_key("user.language").unwrap().content, "Rust");
+        assert_eq!(
+            mem.semantic.get_by_key("user.language").unwrap().content,
+            "Rust"
+        );
         assert!(mem.semantic.get_by_key("scratch.note").is_none());
     }
 

@@ -885,7 +885,10 @@ fn xtgettcap_answers_known_caps_and_truecolor() {
     // `Co` (436f) and `Tc` (5463) in one query.
     p.advance(&mut g, b"\x1bP+q436f;5463\x1b\\");
     // Co=256 -> value "256" hex-encoded (323536); Tc is a boolean (no value).
-    assert_eq!(p.take_responses(), b"\x1bP1+r436f=323536\x1b\\\x1bP1+r5463\x1b\\");
+    assert_eq!(
+        p.take_responses(),
+        b"\x1bP1+r436f=323536\x1b\\\x1bP1+r5463\x1b\\"
+    );
     assert_eq!(g.cells[0].ch, ' '); // nothing leaked to the screen
 }
 
@@ -895,7 +898,10 @@ fn xtgettcap_reports_terminal_name() {
     let mut p = AnsiParser::new();
     p.advance(&mut g, b"\x1bP+q544e\x1b\\"); // TN -> terminfo name
     // "rusty_term" hex-encoded.
-    assert_eq!(p.take_responses(), b"\x1bP1+r544e=72757374795f7465726d\x1b\\");
+    assert_eq!(
+        p.take_responses(),
+        b"\x1bP1+r544e=72757374795f7465726d\x1b\\"
+    );
 }
 
 #[test]
@@ -1171,7 +1177,10 @@ fn osc_9_records_notification_and_relays() {
     let mut g = Grid::new(80, 24);
     let mut p = AnsiParser::new();
     p.advance(&mut g, b"\x1b]9;Build complete\x07");
-    assert_eq!(g.notifications, vec![(String::new(), "Build complete".to_string())]);
+    assert_eq!(
+        g.notifications,
+        vec![(String::new(), "Build complete".to_string())]
+    );
     assert_eq!(g.take_host_out(), b"\x1b]9;Build complete\x07"); // relayed for TUI
     assert_eq!(g.cells[0].ch, ' '); // not printed
 }
@@ -1191,7 +1200,10 @@ fn osc_777_parses_title_and_body() {
     let mut p = AnsiParser::new();
     // The body keeps any further `;` (only the first two are structural).
     p.advance(&mut g, b"\x1b]777;notify;Deploy;done; ok\x07");
-    assert_eq!(g.notifications, vec![("Deploy".to_string(), "done; ok".to_string())]);
+    assert_eq!(
+        g.notifications,
+        vec![("Deploy".to_string(), "done; ok".to_string())]
+    );
 }
 
 #[test]
@@ -2500,7 +2512,10 @@ fn base64_encodes_with_padding_and_round_trips() {
     assert_eq!(base64::encode(b""), "");
     // Round-trips with decode across every byte value.
     let data: Vec<u8> = (0u8..=255).collect();
-    assert_eq!(base64::decode(base64::encode(&data).as_bytes()).unwrap(), data);
+    assert_eq!(
+        base64::decode(base64::encode(&data).as_bytes()).unwrap(),
+        data
+    );
 }
 
 #[test]
@@ -2604,7 +2619,11 @@ const NOISE34_444_B64: &str = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEA
 /// A decoded JPEG pixel `(r, g, b)` as signed ints (for tolerance comparisons).
 fn jpx(img: &jpeg::Image, x: usize, y: usize) -> (i32, i32, i32) {
     let o = (y * img.width + x) * 4;
-    (img.rgba[o] as i32, img.rgba[o + 1] as i32, img.rgba[o + 2] as i32)
+    (
+        img.rgba[o] as i32,
+        img.rgba[o + 1] as i32,
+        img.rgba[o + 2] as i32,
+    )
 }
 
 #[test]
@@ -2638,9 +2657,17 @@ fn jpeg_decodes_two_colors_444() {
     let img = jpeg::decode(&data).unwrap();
     assert_eq!((img.width, img.height), (16, 16));
     let (lr, lg, lb) = jpx(&img, 2, 8);
-    assert!(lr > 180 && lg < 80 && lb < 80, "left red, got {:?}", (lr, lg, lb));
+    assert!(
+        lr > 180 && lg < 80 && lb < 80,
+        "left red, got {:?}",
+        (lr, lg, lb)
+    );
     let (rr, rg, rb) = jpx(&img, 13, 8);
-    assert!(rb > 180 && rr < 80 && rg < 90, "right blue, got {:?}", (rr, rg, rb));
+    assert!(
+        rb > 180 && rr < 80 && rg < 90,
+        "right blue, got {:?}",
+        (rr, rg, rb)
+    );
 }
 
 #[test]
@@ -2811,7 +2838,13 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
         );
-        for tool in ["get_screen", "get_scrollback", "get_cwd", "get_title", "get_dimensions"] {
+        for tool in [
+            "get_screen",
+            "get_scrollback",
+            "get_cwd",
+            "get_title",
+            "get_dimensions",
+        ] {
             assert!(resp.contains(tool), "tools/list missing {tool}");
         }
     }
@@ -2827,7 +2860,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_screen"}}"#,
         );
-        assert!(resp.contains("hello channel"), "screen text not returned: {resp}");
+        assert!(
+            resp.contains("hello channel"),
+            "screen text not returned: {resp}"
+        );
         assert!(resp.contains("\"content\""));
     }
 
@@ -2938,7 +2974,10 @@ mod l13 {
             "channel",
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"version":0}}"#,
         );
-        assert!(resp.contains("\"error\""), "version 0 must be rejected: {resp}");
+        assert!(
+            resp.contains("\"error\""),
+            "version 0 must be rejected: {resp}"
+        );
         assert!(resp.contains("\"supported\""));
     }
 
@@ -2962,8 +3001,14 @@ mod l13 {
             "channel",
             r#"{"jsonrpc":"2.0","id":2,"method":"describe"}"#,
         );
-        assert!(resp.contains("\"min\":1") && resp.contains("\"max\":1"), "{resp}");
-        assert!(resp.contains("resources/read"), "schema lists MCP resource methods: {resp}");
+        assert!(
+            resp.contains("\"min\":1") && resp.contains("\"max\":1"),
+            "{resp}"
+        );
+        assert!(
+            resp.contains("resources/read"),
+            "schema lists MCP resource methods: {resp}"
+        );
         assert!(resp.contains("\"acp\""));
     }
 
@@ -2978,15 +3023,25 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":3,"method":"resources/list"}"#,
         );
-        for uri in ["terminal://screen", "terminal://cursor", "terminal://dimensions"] {
-            assert!(list.contains(uri), "resource {uri} missing from list: {list}");
+        for uri in [
+            "terminal://screen",
+            "terminal://cursor",
+            "terminal://dimensions",
+        ] {
+            assert!(
+                list.contains(uri),
+                "resource {uri} missing from list: {list}"
+            );
         }
         let read = channel_roundtrip(
             &mut g,
             "mcp",
             r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"terminal://screen"}}"#,
         );
-        assert!(read.contains("resource body"), "screen resource text missing: {read}");
+        assert!(
+            read.contains("resource body"),
+            "screen resource text missing: {read}"
+        );
         assert!(read.contains("\"contents\""));
     }
 
@@ -2998,7 +3053,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"terminal://nope"}}"#,
         );
-        assert!(resp.contains("\"error\""), "unknown resource must error: {resp}");
+        assert!(
+            resp.contains("\"error\""),
+            "unknown resource must error: {resp}"
+        );
     }
 
     #[test]
@@ -3012,7 +3070,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_cursor"}}"#,
         );
-        assert!(resp.contains("5,3"), "cursor position not reported as COL,ROW: {resp}");
+        assert!(
+            resp.contains("5,3"),
+            "cursor position not reported as COL,ROW: {resp}"
+        );
     }
 
     #[test]
@@ -3023,14 +3084,23 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"terminal://cwd"}}"#,
         );
-        assert!(sub.contains("\"result\""), "subscribe should succeed: {sub}");
+        assert!(
+            sub.contains("\"result\""),
+            "subscribe should succeed: {sub}"
+        );
         // A cwd change (OSC 7) now pushes a notification on the child channel.
         let mut p = AnsiParser::new();
         p.advance(&mut g, b"\x1b]7;file:///tmp/x\x07");
         let push = String::from_utf8(p.take_responses()).unwrap();
-        assert!(push.contains("notifications/resources/updated"), "no push: {push}");
+        assert!(
+            push.contains("notifications/resources/updated"),
+            "no push: {push}"
+        );
         assert!(push.contains("terminal://cwd"), "{push}");
-        assert!(!push.contains("\"id\""), "a notification carries no id: {push}");
+        assert!(
+            !push.contains("\"id\""),
+            "a notification carries no id: {push}"
+        );
     }
 
     #[test]
@@ -3038,7 +3108,10 @@ mod l13 {
         let mut g = Grid::new(80, 24);
         let mut p = AnsiParser::new();
         p.advance(&mut g, b"\x1b]7;file:///tmp/x\x07");
-        assert!(p.take_responses().is_empty(), "no notification without subscribe");
+        assert!(
+            p.take_responses().is_empty(),
+            "no notification without subscribe"
+        );
     }
 
     #[test]
@@ -3056,7 +3129,10 @@ mod l13 {
         );
         let mut p = AnsiParser::new();
         p.advance(&mut g, b"\x1b]2;new title\x07");
-        assert!(p.take_responses().is_empty(), "unsubscribed: must not notify");
+        assert!(
+            p.take_responses().is_empty(),
+            "unsubscribed: must not notify"
+        );
     }
 
     #[test]
@@ -3068,7 +3144,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"terminal://screen"}}"#,
         );
-        assert!(resp.contains("\"error\""), "screen is not subscribable: {resp}");
+        assert!(
+            resp.contains("\"error\""),
+            "screen is not subscribable: {resp}"
+        );
     }
 
     #[test]
@@ -3082,12 +3161,17 @@ mod l13 {
         let mut p = AnsiParser::new();
         p.advance(&mut g, b"\x1b]2;same\x07"); // "" -> "same": a real change
         assert!(
-            String::from_utf8(p.take_responses()).unwrap().contains("terminal://title"),
+            String::from_utf8(p.take_responses())
+                .unwrap()
+                .contains("terminal://title"),
             "first title set must notify"
         );
         let mut p2 = AnsiParser::new();
         p2.advance(&mut g, b"\x1b]2;same\x07"); // "same" -> "same": no change
-        assert!(p2.take_responses().is_empty(), "a no-op title set must not notify");
+        assert!(
+            p2.take_responses().is_empty(),
+            "a no-op title set must not notify"
+        );
     }
 
     #[test]
@@ -3101,7 +3185,11 @@ mod l13 {
         assert!(ok.contains("\"result\""), "set_status should succeed: {ok}");
         // The bottom row of a snapshot now shows the overlay text, not grid content.
         let frame = g.snapshot_dirty();
-        let (_, bottom) = frame.rows.iter().find(|(y, _)| *y == 2).expect("bottom row dirty");
+        let (_, bottom) = frame
+            .rows
+            .iter()
+            .find(|(y, _)| *y == 2)
+            .expect("bottom row dirty");
         let text: String = bottom.iter().map(|c| c.ch).collect();
         assert!(text.starts_with("READY"), "overlay text missing: {text:?}");
         // Clearing restores the underlying (blank) row.
@@ -3111,7 +3199,11 @@ mod l13 {
             r#"{"jsonrpc":"2.0","id":2,"method":"clear_status"}"#,
         );
         let frame = g.snapshot_dirty();
-        let (_, bottom) = frame.rows.iter().find(|(y, _)| *y == 2).expect("bottom row dirty");
+        let (_, bottom) = frame
+            .rows
+            .iter()
+            .find(|(y, _)| *y == 2)
+            .expect("bottom row dirty");
         let text: String = bottom.iter().map(|c| c.ch).collect();
         assert!(!text.contains("READY"), "overlay not cleared: {text:?}");
     }
@@ -3126,10 +3218,17 @@ mod l13 {
         );
         g.resize(4, 4); // overlay re-lays out to the new width
         let frame = g.snapshot_dirty();
-        let (_, bottom) = frame.rows.iter().find(|(y, _)| *y == 3).expect("new bottom row");
+        let (_, bottom) = frame
+            .rows
+            .iter()
+            .find(|(y, _)| *y == 3)
+            .expect("new bottom row");
         assert_eq!(bottom.len(), 4, "overlay re-laid to new width");
         let text: String = bottom.iter().map(|c| c.ch).collect();
-        assert!(text.starts_with("hi"), "overlay lost across resize: {text:?}");
+        assert!(
+            text.starts_with("hi"),
+            "overlay lost across resize: {text:?}"
+        );
     }
 
     #[test]
@@ -3140,7 +3239,10 @@ mod l13 {
             "render",
             r#"{"jsonrpc":"2.0","id":1,"method":"set_status","params":{}}"#,
         );
-        assert!(resp.contains("\"error\""), "missing text must error: {resp}");
+        assert!(
+            resp.contains("\"error\""),
+            "missing text must error: {resp}"
+        );
     }
 
     #[test]
@@ -3155,15 +3257,24 @@ mod l13 {
         let mut p = AnsiParser::new();
         p.advance(&mut g, b"\x1b]133;D;0\x07");
         let push = String::from_utf8(p.take_responses()).unwrap();
-        assert!(push.contains("notifications/command_finished"), "no typed push: {push}");
-        assert!(push.contains("\"exit\":0"), "exit code not carried in the push: {push}");
+        assert!(
+            push.contains("notifications/command_finished"),
+            "no typed push: {push}"
+        );
+        assert!(
+            push.contains("\"exit\":0"),
+            "exit code not carried in the push: {push}"
+        );
         // The resource now reads the exit code.
         let read = channel_roundtrip(
             &mut g,
             "mcp",
             r#"{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"terminal://exit"}}"#,
         );
-        assert!(read.contains("\"text\":\"0\""), "exit code not reported: {read}");
+        assert!(
+            read.contains("\"text\":\"0\""),
+            "exit code not reported: {read}"
+        );
     }
 
     #[test]
@@ -3176,7 +3287,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"terminal://exit"}}"#,
         );
-        assert!(read.contains("\"text\":\"130\""), "nonzero exit not parsed: {read}");
+        assert!(
+            read.contains("\"text\":\"130\""),
+            "nonzero exit not parsed: {read}"
+        );
     }
 
     #[test]
@@ -3191,14 +3305,23 @@ mod l13 {
         let mut p = AnsiParser::new();
         p.advance(&mut g, b"\x1b]133;D\x07");
         let push = String::from_utf8(p.take_responses()).unwrap();
-        assert!(push.contains("notifications/command_finished"), "must push on finish: {push}");
-        assert!(push.contains("\"exit\":null"), "a missing code should push null: {push}");
+        assert!(
+            push.contains("notifications/command_finished"),
+            "must push on finish: {push}"
+        );
+        assert!(
+            push.contains("\"exit\":null"),
+            "a missing code should push null: {push}"
+        );
         let read = channel_roundtrip(
             &mut g,
             "mcp",
             r#"{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"terminal://exit"}}"#,
         );
-        assert!(read.contains("\"text\":\"\""), "missing code should read empty: {read}");
+        assert!(
+            read.contains("\"text\":\"\""),
+            "missing code should read empty: {read}"
+        );
     }
 
     #[test]
@@ -3211,15 +3334,24 @@ mod l13 {
         );
         // Prompt, command line, output-start, output, command-end.
         let mut p = AnsiParser::new();
-        p.advance(&mut g, b"\x1b]133;A\x07$ echo hi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07");
+        p.advance(
+            &mut g,
+            b"\x1b]133;A\x07$ echo hi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07",
+        );
         let push = String::from_utf8(p.take_responses()).unwrap();
-        assert!(push.contains("terminal://command"), "command finish must push: {push}");
+        assert!(
+            push.contains("terminal://command"),
+            "command finish must push: {push}"
+        );
         let read = channel_roundtrip(
             &mut g,
             "mcp",
             r#"{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"terminal://command"}}"#,
         );
-        assert!(read.contains("\"text\":\"hi\""), "captured output wrong: {read}");
+        assert!(
+            read.contains("\"text\":\"hi\""),
+            "captured output wrong: {read}"
+        );
     }
 
     #[test]
@@ -3236,7 +3368,10 @@ mod l13 {
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"terminal://command"}}"#,
         );
         // Output rows joined by a newline (escaped in JSON).
-        assert!(read.contains("a.txt\\nb.txt"), "multi-line capture wrong: {read}");
+        assert!(
+            read.contains("a.txt\\nb.txt"),
+            "multi-line capture wrong: {read}"
+        );
     }
 
     #[test]
@@ -3250,7 +3385,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"terminal://command"}}"#,
         );
-        assert!(read.contains("\"text\":\"\""), "no C means no captured output: {read}");
+        assert!(
+            read.contains("\"text\":\"\""),
+            "no C means no captured output: {read}"
+        );
     }
 
     #[test]
@@ -3265,7 +3403,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"terminal://command"}}"#,
         );
-        assert!(read.contains("\"text\":\"partial\""), "resize must keep the capture: {read}");
+        assert!(
+            read.contains("\"text\":\"partial\""),
+            "resize must keep the capture: {read}"
+        );
     }
 
     #[test]
@@ -3282,7 +3423,10 @@ mod l13 {
             "mcp",
             r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"terminal://command"}}"#,
         );
-        assert!(read.contains("ABCD\\nEFGH"), "capture must reflect the rewrap: {read}");
+        assert!(
+            read.contains("ABCD\\nEFGH"),
+            "capture must reflect the rewrap: {read}"
+        );
     }
 
     #[test]
@@ -3308,38 +3452,56 @@ mod l13 {
 #[test]
 fn selection_extracts_single_line() {
     let mut g = parse(b"hello world", 20, 2);
-    g.selection = Some(Selection { anchor: (0, 0), head: (4, 0) });
+    g.selection = Some(Selection {
+        anchor: (0, 0),
+        head: (4, 0),
+    });
     assert_eq!(g.selected_text().as_deref(), Some("hello"));
 }
 
 #[test]
 fn selection_spans_rows_and_joins_with_newline() {
     let mut g = parse(b"abc\r\ndef", 10, 3);
-    g.selection = Some(Selection { anchor: (0, 0), head: (2, 1) });
+    g.selection = Some(Selection {
+        anchor: (0, 0),
+        head: (2, 1),
+    });
     assert_eq!(g.selected_text().as_deref(), Some("abc\ndef"));
 }
 
 #[test]
 fn selection_backward_drag_normalizes() {
     let mut g = parse(b"hello world", 20, 2);
-    g.selection = Some(Selection { anchor: (4, 0), head: (0, 0) });
+    g.selection = Some(Selection {
+        anchor: (4, 0),
+        head: (0, 0),
+    });
     assert_eq!(g.selected_text().as_deref(), Some("hello"));
 }
 
 #[test]
 fn selection_trims_trailing_blanks_per_line() {
     let mut g = parse(b"hi", 10, 1);
-    g.selection = Some(Selection { anchor: (0, 0), head: (9, 0) });
+    g.selection = Some(Selection {
+        anchor: (0, 0),
+        head: (9, 0),
+    });
     assert_eq!(g.selected_text().as_deref(), Some("hi"));
 }
 
 #[test]
 fn is_selected_includes_full_intermediate_rows() {
     let mut g = parse(b"", 10, 3);
-    g.selection = Some(Selection { anchor: (5, 0), head: (1, 2) });
+    g.selection = Some(Selection {
+        anchor: (5, 0),
+        head: (1, 2),
+    });
     assert!(g.is_selected(0, 1), "whole intermediate row is selected");
     assert!(g.is_selected(9, 1));
-    assert!(!g.is_selected(4, 0), "before the start col on the start row");
+    assert!(
+        !g.is_selected(4, 0),
+        "before the start col on the start row"
+    );
     assert!(!g.is_selected(2, 2), "after the end col on the end row");
     assert!(g.is_selected(1, 2), "the end cell is inclusive");
 }
@@ -3367,7 +3529,10 @@ fn ris_clears_bracketed_paste_and_selection() {
     let mut g = Grid::new(10, 2);
     let mut p = AnsiParser::new();
     p.advance(&mut g, b"\x1b[?2004h");
-    g.selection = Some(Selection { anchor: (0, 0), head: (3, 0) });
+    g.selection = Some(Selection {
+        anchor: (0, 0),
+        head: (3, 0),
+    });
     p.advance(&mut g, b"\x1bc"); // RIS
     assert!(!g.bracketed_paste);
     assert_eq!(g.selection, None);
@@ -3383,7 +3548,11 @@ fn sixel_huge_repeat_count_is_bounded() {
     // inner paint loop ~usize::MAX times. A ~25-byte payload must decode promptly.
     let img = decode(b"#0;2;100;0;0!999999999999999999~");
     assert!(img.width > 0, "the band still paints");
-    assert!(img.width <= 2000, "repeat clamped to the column cap, got {}", img.width);
+    assert!(
+        img.width <= 2000,
+        "repeat clamped to the column cap, got {}",
+        img.width
+    );
 }
 
 #[test]
@@ -3392,7 +3561,11 @@ fn rep_huge_count_is_bounded_to_capacity() {
     // scrollback); without the clamp this would loop ~1e8+ times under the lock.
     // The fill still completes; the top row is a fully repeated, scrolled-up line.
     let g = parse(b"A\x1b[99999999b", 4, 2);
-    assert_eq!(row_text(&g, 0), "AAAA", "the clamped REP still fills the screen");
+    assert_eq!(
+        row_text(&g, 0),
+        "AAAA",
+        "the clamped REP still fills the screen"
+    );
 }
 
 #[test]
@@ -3405,7 +3578,11 @@ fn su_huge_count_clears_region_without_flooding_scrollback() {
     // exactly the two displaced lines — not 9_999_999_999 blank entries.
     assert_eq!(row_text(&g, 0).trim_end(), "");
     assert_eq!(row_text(&g, 1).trim_end(), "");
-    assert_eq!(g.scrollback.len(), 2, "only the region's rows reach scrollback");
+    assert_eq!(
+        g.scrollback.len(),
+        2,
+        "only the region's rows reach scrollback"
+    );
 }
 
 // --- Configured theme (startup config) ---
@@ -3454,8 +3631,14 @@ fn ris_restores_theme_not_builtin() {
     // The child sets its own colors (OSC 10/11), then fully resets.
     p.advance(&mut g, b"\x1b]10;#ffffff\x07\x1b]11;#000000\x07\x1b\x63x");
     let c = g.cells[0];
-    assert_eq!(c.fg, 0xd8d8d8, "RIS returns to the configured fg, not white");
-    assert_eq!(c.bg, 0x1d1f21, "RIS returns to the configured bg, not black");
+    assert_eq!(
+        c.fg, 0xd8d8d8,
+        "RIS returns to the configured fg, not white"
+    );
+    assert_eq!(
+        c.bg, 0x1d1f21,
+        "RIS returns to the configured bg, not black"
+    );
 }
 
 #[test]
@@ -3476,7 +3659,10 @@ fn osc_104_resets_palette_to_theme() {
     // Remap index 1 via OSC 4, then reset it via OSC 104;1 — it must return to
     // the *themed* red, not the stock xterm 0x800000.
     p.advance(&mut g, b"\x1b]4;1;#0000ff\x07\x1b]104;1\x07\x1b[31mx");
-    assert_eq!(g.cells[0].fg, 0xcc6666, "OSC 104 restores the themed index 1");
+    assert_eq!(
+        g.cells[0].fg, 0xcc6666,
+        "OSC 104 restores the themed index 1"
+    );
 }
 
 #[test]

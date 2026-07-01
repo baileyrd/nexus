@@ -146,7 +146,13 @@ pub(crate) fn insert_ask_bounded(
             break;
         }
     }
-    map.insert(ask_id, AskEntry { tx, inserted_at: now });
+    map.insert(
+        ask_id,
+        AskEntry {
+            tx,
+            inserted_at: now,
+        },
+    );
     evicted
 }
 
@@ -911,7 +917,15 @@ where
         Some(mp) => {
             let wrapped = crate::ManifestPolicyGate::new(base_policy, mp);
             crate::session::run_session_resumed(
-                driver, dispatcher, &wrapped, goal, system, archetype, id, config, seed_rounds,
+                driver,
+                dispatcher,
+                &wrapped,
+                goal,
+                system,
+                archetype,
+                id,
+                config,
+                seed_rounds,
                 follow_up,
             )
             .await

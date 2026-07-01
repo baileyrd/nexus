@@ -305,9 +305,12 @@ impl CorePlugin for SecurityCorePlugin {
         let config = self.sandbox_config.clone();
         let args = args.clone();
         Some(Box::pin(async move {
-            download_handler(config, args).await.map_err(|reason| {
-                PluginError::ExecutionFailed { plugin_id: PLUGIN_ID.to_string(), reason }
-            })
+            download_handler(config, args)
+                .await
+                .map_err(|reason| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason,
+                })
         }))
     }
 }
@@ -475,7 +478,9 @@ mod tests {
         // Default config: downloads disabled → refused before any I/O.
         let closed = crate::SandboxConfig::default();
         let args = json!({ "url": "https://h/x", "dest": "/work/x", "cwd": "/work" });
-        assert!(prepare_download(&closed, &args).unwrap_err().contains("disabled"));
+        assert!(prepare_download(&closed, &args)
+            .unwrap_err()
+            .contains("disabled"));
 
         // Enabled + allowlisted + workspace-write covering the dest → accepted.
         let open = crate::SandboxConfig {
@@ -516,11 +521,13 @@ mod tests {
         // Reflects an injected workspace-write config.
         let cfg = crate::SandboxConfig {
             policy: nexus_types::SandboxPolicy::new_workspace_write(vec![]),
-            downloads: crate::DownloadPolicy { enabled: true, ..Default::default() },
+            downloads: crate::DownloadPolicy {
+                enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
-        let mut plugin =
-            SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);
         let out = plugin.dispatch(HANDLER_SANDBOX_POLICY, &json!({})).unwrap();
         assert_eq!(out["policy"]["mode"], "workspace-write");
         assert_eq!(out["downloads"]["enabled"], true);
@@ -541,8 +548,7 @@ mod tests {
             bundled_shell_for_sandbox: true,
             ..Default::default()
         };
-        let mut plugin =
-            SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe()).with_sandbox_config(cfg);
         let out = plugin.dispatch(HANDLER_SANDBOX_POLICY, &json!({})).unwrap();
         assert_eq!(out["bundled_shell_for_sandbox"], true);
     }

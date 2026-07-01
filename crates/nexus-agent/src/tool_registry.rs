@@ -1138,7 +1138,13 @@ mod tests {
         ] {
             assert!(non_idem.contains(name), "{name} must be non-idempotent");
         }
-        for name in ["read_file", "read_lines", "search_forge", "list_dir", "git_log"] {
+        for name in [
+            "read_file",
+            "read_lines",
+            "search_forge",
+            "list_dir",
+            "git_log",
+        ] {
             assert!(
                 !non_idem.contains(name),
                 "{name} is read-only and must stay retry-safe"
@@ -1422,7 +1428,11 @@ mod tests {
             assert!(!spec.requires_approval, "{name} must be read-only");
         }
         assert!(
-            catalog.iter().find(|s| s.name == "edit").unwrap().requires_approval,
+            catalog
+                .iter()
+                .find(|s| s.name == "edit")
+                .unwrap()
+                .requires_approval,
             "edit must require approval",
         );
     }

@@ -5,9 +5,9 @@
 //! …) that the [`AnsiParser`](super::parser::AnsiParser) drives, and produces a
 //! [`DirtyFrame`] snapshot for the renderer.
 
-use std::collections::VecDeque;
 #[cfg(any(test, feature = "gui"))]
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 use super::cell::{Cell, DEFAULT_BG, DEFAULT_FG, Pen, WIDE_TRAILER, char_width};
 use unicode_segmentation::UnicodeSegmentation;
@@ -400,7 +400,13 @@ pub(crate) struct Line {
 /// buffer, preserving the top-left overlap and blank-filling any new area. Used
 /// for the *alternate* screen, whose full-screen apps repaint on resize — there
 /// is no logical-line history there to rejoin, so a plain clip is correct.
-fn reflow_clip(old: &[Cell], old_cols: usize, old_rows: usize, cols: usize, rows: usize) -> Vec<Cell> {
+fn reflow_clip(
+    old: &[Cell],
+    old_cols: usize,
+    old_rows: usize,
+    cols: usize,
+    rows: usize,
+) -> Vec<Cell> {
     let mut new = vec![Cell::blank(); cols * rows];
     let copy_rows = rows.min(old_rows);
     let copy_cols = cols.min(old_cols);
@@ -486,7 +492,11 @@ fn reflow_history(
     // off) and may be narrower than `old_cols`; both are handled by the joiner.
     let phys = |i: usize| -> (&[Cell], bool, LineAttr) {
         if i < hist {
-            (&scrollback[i].cells, scrollback[i].wrapped, LineAttr::Single)
+            (
+                &scrollback[i].cells,
+                scrollback[i].wrapped,
+                LineAttr::Single,
+            )
         } else {
             let y = i - hist;
             (
@@ -550,7 +560,11 @@ fn reflow_history(
     if cur_started {
         // A trailing wrapped run with no closing hard break (shouldn't normally
         // happen, since a wrap always creates the next row): keep it anyway.
-        let min_keep = if logical.len() == cursor_logical { cursor_off } else { 0 };
+        let min_keep = if logical.len() == cursor_logical {
+            cursor_off
+        } else {
+            0
+        };
         let mut end = cur.len();
         while end > min_keep && is_padding(&cur[end - 1]) {
             end -= 1;
@@ -705,7 +719,14 @@ impl StatusLine {
     /// by two columns with a flagged trailer, drop zero-width scalars, stop at the
     /// margin, and pad the tail with blanks in `bg`.
     fn lay_out(text: &str, fg: u32, bg: u32, cols: usize) -> Vec<Cell> {
-        let blank = Cell { ch: ' ', cluster: 0, fg, bg, flags: 0, link: 0 };
+        let blank = Cell {
+            ch: ' ',
+            cluster: 0,
+            fg,
+            bg,
+            flags: 0,
+            link: 0,
+        };
         let mut cells = vec![blank; cols];
         let mut x = 0;
         for ch in text.chars() {
@@ -716,9 +737,23 @@ impl StatusLine {
             if x + w > cols {
                 break;
             }
-            cells[x] = Cell { ch, cluster: 0, fg, bg, flags: 0, link: 0 };
+            cells[x] = Cell {
+                ch,
+                cluster: 0,
+                fg,
+                bg,
+                flags: 0,
+                link: 0,
+            };
             if w == 2 {
-                cells[x + 1] = Cell { ch: ' ', cluster: 0, fg, bg, flags: WIDE_TRAILER, link: 0 };
+                cells[x + 1] = Cell {
+                    ch: ' ',
+                    cluster: 0,
+                    fg,
+                    bg,
+                    flags: WIDE_TRAILER,
+                    link: 0,
+                };
             }
             x += w;
         }
@@ -728,7 +763,12 @@ impl StatusLine {
     #[cfg(feature = "l13")]
     fn new(text: String, fg: u32, bg: u32, cols: usize) -> Self {
         let cells = Self::lay_out(&text, fg, bg, cols);
-        StatusLine { text, fg, bg, cells }
+        StatusLine {
+            text,
+            fg,
+            bg,
+            cells,
+        }
     }
 
     /// Re-lay the existing text/colors at a new width (after a resize).
@@ -972,10 +1012,26 @@ impl Grid {
     /// reserved half-block cells, anchored by serial (top cell row) so it
     /// scrolls with text. Bounded — the oldest image is dropped past the cap.
     #[cfg(any(test, feature = "gui"))]
-    fn store_image(&mut self, pw: usize, ph: usize, pixels: &[Option<u32>], col: usize, cols: usize, rows: usize) {
+    fn store_image(
+        &mut self,
+        pw: usize,
+        ph: usize,
+        pixels: &[Option<u32>],
+        col: usize,
+        cols: usize,
+        rows: usize,
+    ) {
         const MAX_IMAGES: usize = 8;
         let serial = self.total_scrolled + self.cursor.1;
-        self.images.push(GridImage { serial, col, cols, rows, pw, ph, pixels: pixels[..pw * ph].to_vec() });
+        self.images.push(GridImage {
+            serial,
+            col,
+            cols,
+            rows,
+            pw,
+            ph,
+            pixels: pixels[..pw * ph].to_vec(),
+        });
         if self.images.len() > MAX_IMAGES {
             self.images.remove(0);
         }
@@ -1188,12 +1244,19 @@ impl Grid {
     fn selection_bounds(&self) -> Option<((usize, usize), (usize, usize))> {
         let sel = self.selection?;
         let clamp = |(c, r): (usize, usize)| {
-            (c.min(self.cols.saturating_sub(1)), r.min(self.rows.saturating_sub(1)))
+            (
+                c.min(self.cols.saturating_sub(1)),
+                r.min(self.rows.saturating_sub(1)),
+            )
         };
         let a = clamp(sel.anchor);
         let b = clamp(sel.head);
         // Row-major linear order, so a backward drag still yields start <= end.
-        if (a.1, a.0) <= (b.1, b.0) { Some((a, b)) } else { Some((b, a)) }
+        if (a.1, a.0) <= (b.1, b.0) {
+            Some((a, b))
+        } else {
+            Some((b, a))
+        }
     }
 
     /// Whether the cell at `(col, row)` lies within the active selection
@@ -1668,10 +1731,12 @@ impl Grid {
         for c in &mut self.cells[first_blank..region_end] {
             *c = blank;
         }
-        self.shift_line_meta(cy + n,
-        cy,
-        count / cols,
-        (self.scroll_bottom + 1 - n)..(self.scroll_bottom + 1),);
+        self.shift_line_meta(
+            cy + n,
+            cy,
+            count / cols,
+            (self.scroll_bottom + 1 - n)..(self.scroll_bottom + 1),
+        );
         for d in &mut self.dirty[cy..=self.scroll_bottom] {
             *d = true;
         }
@@ -2148,7 +2213,10 @@ impl Grid {
             (&self.scrollback[abs].cells, self.scrollback[abs].wrapped)
         } else {
             let y = abs - h;
-            (&self.cells[y * self.cols..(y + 1) * self.cols], self.wrapped[y])
+            (
+                &self.cells[y * self.cols..(y + 1) * self.cols],
+                self.wrapped[y],
+            )
         }
     }
 
@@ -2211,12 +2279,18 @@ impl Grid {
     #[cfg(any(test, feature = "gui"))]
     pub fn search_jump(&mut self, forward: bool) -> bool {
         let abs = {
-            let Some(s) = &mut self.search else { return false };
+            let Some(s) = &mut self.search else {
+                return false;
+            };
             if s.anchors.is_empty() {
                 return false;
             }
             let n = s.anchors.len();
-            s.current = if forward { (s.current + 1) % n } else { (s.current + n - 1) % n };
+            s.current = if forward {
+                (s.current + 1) % n
+            } else {
+                (s.current + n - 1) % n
+            };
             s.anchors[s.current].0
         };
         self.scroll_to_abs(abs);

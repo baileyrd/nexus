@@ -586,9 +586,7 @@ fn main() {
                 name,
             } => commands::agent::checkpoint(&mut app, &session_id, round, &name),
             AgentCommand::Checkpoints => commands::agent::checkpoints(&mut app),
-            AgentCommand::CheckpointRm { name } => {
-                commands::agent::checkpoint_rm(&mut app, &name)
-            }
+            AgentCommand::CheckpointRm { name } => commands::agent::checkpoint_rm(&mut app, &name),
         },
 
         Commands::Tool(args) => match args.command {

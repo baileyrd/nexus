@@ -149,7 +149,10 @@ fn test_unary(op: &str, s: &str) -> Result<bool, String> {
         "-e" => Path::new(s).exists(),
         "-f" => Path::new(s).is_file(),
         "-d" => Path::new(s).is_dir(),
-        "-s" => Path::new(s).metadata().map(|m| m.len() > 0).unwrap_or(false),
+        "-s" => Path::new(s)
+            .metadata()
+            .map(|m| m.len() > 0)
+            .unwrap_or(false),
         // Permission bits aren't portable; approximate with existence.
         "-r" | "-w" | "-x" => Path::new(s).exists(),
         _ => return Err(format!("unknown unary operator `{op}`")),
@@ -157,7 +160,10 @@ fn test_unary(op: &str, s: &str) -> Result<bool, String> {
 }
 
 fn test_binary(a: &str, op: &str, b: &str) -> Result<bool, String> {
-    let int = |s: &str| s.parse::<i64>().map_err(|_| format!("integer expected: `{s}`"));
+    let int = |s: &str| {
+        s.parse::<i64>()
+            .map_err(|_| format!("integer expected: `{s}`"))
+    };
     Ok(match op {
         "=" | "==" => a == b,
         "!=" => a != b,
@@ -214,10 +220,7 @@ fn unset(argv: &[String]) -> i32 {
 /// early-out stops further commands, and `lib::eval` / `lib::run_repl` resolve
 /// the latch into the process exit code.
 fn exit(argv: &[String]) -> i32 {
-    let code = argv
-        .get(1)
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(0);
+    let code = argv.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
     crate::vars::set_exit_requested(Some(code));
     code
 }

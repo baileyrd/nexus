@@ -274,10 +274,7 @@ mod linux {
     };
     use nexus_types::SandboxPolicy;
 
-    pub(super) fn apply(
-        policy: &SandboxPolicy,
-        cwd: &Path,
-    ) -> Result<SandboxStatus, SandboxError> {
+    pub(super) fn apply(policy: &SandboxPolicy, cwd: &Path) -> Result<SandboxStatus, SandboxError> {
         let err = |e: landlock::RulesetError| SandboxError::Ruleset(e.to_string());
         // ABI::V1 governs read/write/exec on files and dirs — broad kernel
         // compatibility (5.13+). Newer rights (truncate, refer) are not
@@ -390,7 +387,10 @@ mod tests {
 
         match outcome {
             Some((inet_denied, unix_ok)) => {
-                assert!(inet_denied, "inet socket creation must be denied after the block");
+                assert!(
+                    inet_denied,
+                    "inet socket creation must be denied after the block"
+                );
                 assert!(unix_ok, "AF_UNIX sockets must remain available");
             }
             None => eprintln!("seccomp network block not enforced/available in this env"),
@@ -417,8 +417,11 @@ mod tests {
         // A non-network policy composes the seccomp block (verified where the
         // kernel enforces seccomp — it does in this container).
         let denied = std::thread::spawn(|| {
-            confine_current_thread(&SandboxPolicy::new_workspace_write(vec![]), Path::new("/tmp"))
-                .unwrap();
+            confine_current_thread(
+                &SandboxPolicy::new_workspace_write(vec![]),
+                Path::new("/tmp"),
+            )
+            .unwrap();
             let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
             let d = fd < 0;
             if fd >= 0 {
@@ -444,8 +447,7 @@ mod tests {
         let outside = std::env::temp_dir().join("nexus_ro_sandbox_probe");
         let probe = outside.clone();
         let (status, write_failed) = std::thread::spawn(move || {
-            let status =
-                apply_to_current_thread(&SandboxPolicy::ReadOnly, Path::new("/")).unwrap();
+            let status = apply_to_current_thread(&SandboxPolicy::ReadOnly, Path::new("/")).unwrap();
             let failed = std::fs::File::create(&probe)
                 .and_then(|mut f| f.write_all(b"x"))
                 .is_err();
@@ -491,8 +493,14 @@ mod tests {
         .unwrap();
 
         if status == SandboxStatus::FullyEnforced {
-            assert!(inside_ok, "writes inside the workspace root must be allowed");
-            assert!(outside_blocked, "writes outside the workspace root must be blocked");
+            assert!(
+                inside_ok,
+                "writes inside the workspace root must be allowed"
+            );
+            assert!(
+                outside_blocked,
+                "writes outside the workspace root must be blocked"
+            );
         } else {
             eprintln!("landlock status {status:?}: enforcement not verifiable in this env");
         }

@@ -36,7 +36,11 @@ pub struct DownloadPolicy {
 
 impl Default for DownloadPolicy {
     fn default() -> Self {
-        Self { enabled: false, allowed_hosts: Vec::new(), max_bytes: 100 * 1024 * 1024 }
+        Self {
+            enabled: false,
+            allowed_hosts: Vec::new(),
+            max_bytes: 100 * 1024 * 1024,
+        }
     }
 }
 
@@ -149,7 +153,10 @@ pub async fn fetch_url(url: Url, dest: &Path, max_bytes: u64) -> Result<u64, Dow
     // Reject early if the declared length already blows the cap.
     if let Some(len) = resp.content_length() {
         if len > max_bytes {
-            return Err(DownloadError::TooLarge { max: max_bytes, got: len });
+            return Err(DownloadError::TooLarge {
+                max: max_bytes,
+                got: len,
+            });
         }
     }
 
@@ -164,9 +171,13 @@ pub async fn fetch_url(url: Url, dest: &Path, max_bytes: u64) -> Result<u64, Dow
         if written > max_bytes {
             drop(file);
             let _ = std::fs::remove_file(dest);
-            return Err(DownloadError::TooLarge { max: max_bytes, got: written });
+            return Err(DownloadError::TooLarge {
+                max: max_bytes,
+                got: written,
+            });
         }
-        std::io::Write::write_all(&mut file, &chunk).map_err(|e| DownloadError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut file, &chunk)
+            .map_err(|e| DownloadError::Io(e.to_string()))?;
     }
     Ok(written)
 }
@@ -213,7 +224,10 @@ mod tests {
             url: "https://static.crates.io/x",
             dest: Path::new("/work/x"),
         };
-        assert!(matches!(validate(&req, &p, &roots()), Err(DownloadError::Disabled)));
+        assert!(matches!(
+            validate(&req, &p, &roots()),
+            Err(DownloadError::Disabled)
+        ));
     }
 
     #[test]
@@ -222,7 +236,10 @@ mod tests {
             url: "http://static.crates.io/x",
             dest: Path::new("/work/x"),
         };
-        assert!(matches!(validate(&req, &policy(), &roots()), Err(DownloadError::Scheme(_))));
+        assert!(matches!(
+            validate(&req, &policy(), &roots()),
+            Err(DownloadError::Scheme(_))
+        ));
     }
 
     #[test]
@@ -252,7 +269,10 @@ mod tests {
     #[test]
     fn policy_serde_round_trips() {
         let json = serde_json::to_string(&policy()).unwrap();
-        assert_eq!(serde_json::from_str::<DownloadPolicy>(&json).unwrap(), policy());
+        assert_eq!(
+            serde_json::from_str::<DownloadPolicy>(&json).unwrap(),
+            policy()
+        );
         // Missing fields fall back to defaults.
         let partial: DownloadPolicy = serde_json::from_str("{\"enabled\":true}").unwrap();
         assert!(partial.enabled);

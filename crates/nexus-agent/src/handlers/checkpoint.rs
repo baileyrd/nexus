@@ -45,7 +45,9 @@ pub(crate) async fn handle_session_checkpoint(
     let a: CheckpointArgs = parse_args(args, "session_checkpoint")?;
     let name = a.name.trim().to_string();
     if name.is_empty() {
-        return Err(exec_err("session_checkpoint: `name` must be non-empty".into()));
+        return Err(exec_err(
+            "session_checkpoint: `name` must be non-empty".into(),
+        ));
     }
     // Validate the (session, round) coordinate before bookmarking it.
     let parent = assemble_session(&ctx, a.session_id.clone(), 0).await?;

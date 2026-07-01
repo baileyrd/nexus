@@ -73,7 +73,11 @@ pub struct RawSimple {
 #[derive(Debug, Clone)]
 pub enum RawRedirect {
     /// `[fd]< file` / `[fd]> file` / `[fd]>> file`.
-    File { fd: u32, file: Word, mode: RedirMode },
+    File {
+        fd: u32,
+        file: Word,
+        mode: RedirMode,
+    },
     /// `&> file` / `&>> file` — stdout and stderr to one file.
     Both { file: Word, append: bool },
     /// `fd>&target` — `fd` duplicates `target` (e.g. `2>&1`).
@@ -150,12 +154,18 @@ pub fn parse(input: &str) -> Result<CommandList, ParseError> {
         lexer::LexError::Incomplete => ParseError::Incomplete,
         lexer::LexError::Syntax(msg) => ParseError::Syntax(msg),
     })?;
-    let mut p = Parser { toks: tokens, pos: 0 };
+    let mut p = Parser {
+        toks: tokens,
+        pos: 0,
+    };
 
     let list = p.parse_list()?;
     p.skip_separators();
     if let Some(tok) = p.peek() {
-        return Err(ParseError::Syntax(format!("unexpected `{}`", describe(tok))));
+        return Err(ParseError::Syntax(format!(
+            "unexpected `{}`",
+            describe(tok)
+        )));
     }
     Ok(list)
 }
@@ -293,7 +303,10 @@ impl Parser {
         self.pos += 2; // `(` `)` — guaranteed by is_funcdef_ahead
         self.skip_newlines();
         let body = self.parse_brace_body()?;
-        Ok(RawCommand::Compound(Box::new(Compound::FuncDef { name, body })))
+        Ok(RawCommand::Compound(Box::new(Compound::FuncDef {
+            name,
+            body,
+        })))
     }
 
     fn parse_group(&mut self) -> Result<RawCommand, ParseError> {
@@ -391,7 +404,10 @@ impl Parser {
             None
         };
         self.expect_keyword("fi")?;
-        Ok(RawCommand::Compound(Box::new(Compound::If { branches, else_body })))
+        Ok(RawCommand::Compound(Box::new(Compound::If {
+            branches,
+            else_body,
+        })))
     }
 
     fn parse_cond_then(&mut self) -> Result<(CommandList, CommandList), ParseError> {
@@ -407,7 +423,11 @@ impl Parser {
         self.expect_keyword("do")?;
         let body = self.parse_list()?;
         self.expect_keyword("done")?;
-        Ok(RawCommand::Compound(Box::new(Compound::Loop { until, cond, body })))
+        Ok(RawCommand::Compound(Box::new(Compound::Loop {
+            until,
+            cond,
+            body,
+        })))
     }
 
     fn parse_for(&mut self) -> Result<RawCommand, ParseError> {
@@ -430,7 +450,11 @@ impl Parser {
         self.expect_keyword("do")?;
         let body = self.parse_list()?;
         self.expect_keyword("done")?;
-        Ok(RawCommand::Compound(Box::new(Compound::For { var, words, body })))
+        Ok(RawCommand::Compound(Box::new(Compound::For {
+            var,
+            words,
+            body,
+        })))
     }
 
     fn parse_case(&mut self) -> Result<RawCommand, ParseError> {
@@ -471,7 +495,10 @@ impl Parser {
         }
 
         self.expect_keyword("esac")?;
-        Ok(RawCommand::Compound(Box::new(Compound::Case { word, items })))
+        Ok(RawCommand::Compound(Box::new(Compound::Case {
+            word,
+            items,
+        })))
     }
 
     /// Consume the current token, requiring it to be a `Word`.
@@ -503,7 +530,9 @@ impl Parser {
         match self.advance() {
             Some(Token::Word(w)) => Ok(w),
             None => Err(ParseError::Incomplete),
-            _ => Err(ParseError::Syntax(format!("expected filename after `{after}`"))),
+            _ => Err(ParseError::Syntax(format!(
+                "expected filename after `{after}`"
+            ))),
         }
     }
 
@@ -512,11 +541,12 @@ impl Parser {
         match self.peek() {
             Some(Token::Word(parts)) => {
                 if let [WordPart::Unquoted(s)] = parts.as_slice()
-                    && is_name(s) {
-                        let name = s.clone();
-                        self.pos += 1;
-                        return Ok(name);
-                    }
+                    && is_name(s)
+                {
+                    let name = s.clone();
+                    self.pos += 1;
+                    return Ok(name);
+                }
                 Err(ParseError::Syntax("expected a variable name".into()))
             }
             None => Err(ParseError::Incomplete),
@@ -537,9 +567,10 @@ impl Parser {
 /// The reserved word a token represents, if it's a single unquoted keyword.
 fn as_keyword(tok: &Token) -> Option<&'static str> {
     if let Token::Word(parts) = tok
-        && let [WordPart::Unquoted(s)] = parts.as_slice() {
-            return RESERVED.iter().copied().find(|&kw| kw == s);
-        }
+        && let [WordPart::Unquoted(s)] = parts.as_slice()
+    {
+        return RESERVED.iter().copied().find(|&kw| kw == s);
+    }
     None
 }
 
@@ -638,7 +669,10 @@ mod tests {
         }
         match first_cmd(&parse_ok("cmd > f 2>&1")) {
             RawCommand::Simple(s) => {
-                assert!(matches!(s.redirects[1], RawRedirect::Dup { fd: 2, target: 1 }));
+                assert!(matches!(
+                    s.redirects[1],
+                    RawRedirect::Dup { fd: 2, target: 1 }
+                ));
             }
             _ => panic!(),
         }
@@ -688,7 +722,10 @@ mod tests {
         let p = parse_ok("if true; then echo yes; else echo no; fi");
         match first_cmd(&p) {
             RawCommand::Compound(c) => match c.as_ref() {
-                Compound::If { branches, else_body } => {
+                Compound::If {
+                    branches,
+                    else_body,
+                } => {
                     assert_eq!(branches.len(), 1);
                     assert!(else_body.is_some());
                 }
@@ -703,7 +740,10 @@ mod tests {
         let p = parse_ok("if a; then b; elif c; then d; elif e; then f; fi");
         match first_cmd(&p) {
             RawCommand::Compound(c) => match c.as_ref() {
-                Compound::If { branches, else_body } => {
+                Compound::If {
+                    branches,
+                    else_body,
+                } => {
                     assert_eq!(branches.len(), 3);
                     assert!(else_body.is_none());
                 }
@@ -775,7 +815,10 @@ mod tests {
             RawCommand::Compound(_)
         ));
         // `name` is a plain word when not followed by `()`.
-        assert_eq!(argv_text(first_cmd(&parse_ok("greet hi"))), vec!["greet", "hi"]);
+        assert_eq!(
+            argv_text(first_cmd(&parse_ok("greet hi"))),
+            vec!["greet", "hi"]
+        );
     }
 
     #[test]
@@ -786,8 +829,14 @@ mod tests {
 
     #[test]
     fn incomplete_compound_reports_incomplete() {
-        assert!(matches!(parse("if true; then echo hi"), Err(ParseError::Incomplete)));
-        assert!(matches!(parse("while true; do"), Err(ParseError::Incomplete)));
+        assert!(matches!(
+            parse("if true; then echo hi"),
+            Err(ParseError::Incomplete)
+        ));
+        assert!(matches!(
+            parse("while true; do"),
+            Err(ParseError::Incomplete)
+        ));
         assert!(matches!(parse("for x in a b"), Err(ParseError::Incomplete)));
     }
 

@@ -74,7 +74,10 @@ impl WritableRoot {
     /// A writable root with no read-only carve-outs.
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
-        Self { root, read_only_subpaths: Vec::new() }
+        Self {
+            root,
+            read_only_subpaths: Vec::new(),
+        }
     }
 
     /// True if `path` is within this root and not within a read-only subpath.
@@ -82,7 +85,10 @@ impl WritableRoot {
     #[must_use]
     pub fn is_path_writable(&self, path: &Path) -> bool {
         path.starts_with(&self.root)
-            && !self.read_only_subpaths.iter().any(|ro| path.starts_with(ro))
+            && !self
+                .read_only_subpaths
+                .iter()
+                .any(|ro| path.starts_with(ro))
     }
 }
 
@@ -179,7 +185,10 @@ impl SandboxPolicy {
         // Workspace roots (cwd + extras) keep a read-only `.git` carve-out.
         for root in std::iter::once(cwd.to_path_buf()).chain(writable_roots.iter().cloned()) {
             let git = root.join(".git");
-            out.push(WritableRoot { root, read_only_subpaths: vec![git] });
+            out.push(WritableRoot {
+                root,
+                read_only_subpaths: vec![git],
+            });
         }
         // System temp dirs are fully writable (no `.git` guard).
         if !exclude_slash_tmp && cfg!(unix) {
@@ -201,9 +210,10 @@ impl SandboxPolicy {
         match self {
             Self::DangerFullAccess => true,
             Self::ReadOnly => false,
-            Self::WorkspaceWrite { .. } => {
-                self.writable_roots_with_cwd(cwd).iter().any(|r| r.is_path_writable(path))
-            }
+            Self::WorkspaceWrite { .. } => self
+                .writable_roots_with_cwd(cwd)
+                .iter()
+                .any(|r| r.is_path_writable(path)),
         }
     }
 }
@@ -380,7 +390,10 @@ mod tests {
         };
         let json = serde_json::to_string(&ws).unwrap();
         assert!(json.contains("\"mode\":\"workspace-write\""), "got: {json}");
-        assert!(json.contains("network_access"), "fields stay snake_case: {json}");
+        assert!(
+            json.contains("network_access"),
+            "fields stay snake_case: {json}"
+        );
         assert_eq!(serde_json::from_str::<SandboxPolicy>(&json).unwrap(), ws);
 
         // Tags for the unit variants.

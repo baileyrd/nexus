@@ -35,7 +35,11 @@ pub struct Command {
 #[derive(Debug, Clone)]
 pub enum Redirect {
     /// `[fd]< file` / `[fd]> file` / `[fd]>> file`.
-    File { fd: u32, file: String, mode: RedirMode },
+    File {
+        fd: u32,
+        file: String,
+        mode: RedirMode,
+    },
     /// `&> file` / `&>> file`.
     Both { file: String, append: bool },
     /// `fd>&target` (e.g. `2>&1`).
@@ -119,7 +123,10 @@ fn run_pipeline_node(raw: &RawPipeline) -> Result<i32, String> {
 
 fn run_compound(compound: &Compound) -> Result<i32, String> {
     match compound {
-        Compound::If { branches, else_body } => {
+        Compound::If {
+            branches,
+            else_body,
+        } => {
             for (cond, body) in branches {
                 if exec_list(cond)? == 0 {
                     return exec_list(body);
@@ -159,7 +166,8 @@ fn run_compound(compound: &Compound) -> Result<i32, String> {
             let subject = crate::expand::expand_to_string(word)?;
             for (patterns, body) in items {
                 for pat in patterns {
-                    if crate::glob::match_component(&crate::expand::expand_pattern(pat)?, &subject) {
+                    if crate::glob::match_component(&crate::expand::expand_pattern(pat)?, &subject)
+                    {
                         return exec_list(body);
                     }
                 }
@@ -368,10 +376,10 @@ fn run(pipeline: &Pipeline, capture: bool) -> Result<(i32, String), String> {
 
         if !is_last {
             prev_stdout = child.stdout.take().map(Stdio::from);
-        } else if capture
-            && let Some(mut out) = child.stdout.take() {
-                out.read_to_string(&mut captured).map_err(|e| e.to_string())?;
-            }
+        } else if capture && let Some(mut out) = child.stdout.take() {
+            out.read_to_string(&mut captured)
+                .map_err(|e| e.to_string())?;
+        }
         children.push(child);
     }
 
@@ -412,7 +420,11 @@ pub(crate) fn build_stage(
     // stage feeds another (or is being captured); the redirects below override
     // in source order, so `> f 2>&1` sends both to `f`.
     let mut stdin_sink: Option<Stdio> = stdin_src;
-    let mut stdout_sink = if !is_last || capture { Sink::Pipe } else { Sink::Inherit };
+    let mut stdout_sink = if !is_last || capture {
+        Sink::Pipe
+    } else {
+        Sink::Inherit
+    };
     let mut stderr_sink = Sink::Inherit;
 
     for r in &cmd.redirects {
@@ -510,13 +522,14 @@ fn open_write(file: &str, append: bool) -> Result<File, String> {
 /// a large body can't deadlock against a child that hasn't started reading.
 pub(crate) fn feed_heredoc(child: &mut Child, cmd: &Command) {
     if let Some(body) = &cmd.heredoc
-        && let Some(mut stdin) = child.stdin.take() {
-            let body = body.clone();
-            std::thread::spawn(move || {
-                use std::io::Write;
-                let _ = stdin.write_all(body.as_bytes());
-            });
-        }
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        let body = body.clone();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(body.as_bytes());
+        });
+    }
 }
 
 /// A human-readable rendering of a pipeline, for the `jobs` listing. Only the

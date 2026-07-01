@@ -188,7 +188,13 @@ mod tests {
     use crate::snapshot::SnapshotStore;
 
     fn ops(patch: &str) -> Vec<Op> {
-        parse(patch).unwrap().sections.into_iter().next().unwrap().ops
+        parse(patch)
+            .unwrap()
+            .sections
+            .into_iter()
+            .next()
+            .unwrap()
+            .ops
     }
 
     #[test]
@@ -257,9 +263,17 @@ mod tests {
     fn apply_section_applies_on_matching_tag() {
         let current = "a\nb\n";
         let t = tag(current);
-        let section = parse(&format!("[f#{t}]\nSWAP 1.=1:\n+A\n")).unwrap().sections.remove(0);
+        let section = parse(&format!("[f#{t}]\nSWAP 1.=1:\n+A\n"))
+            .unwrap()
+            .sections
+            .remove(0);
         let outcome = apply_section(&section, current, &SnapshotStore::new()).unwrap();
-        assert_eq!(outcome, EditOutcome::Applied { content: "A\nb\n".to_string() });
+        assert_eq!(
+            outcome,
+            EditOutcome::Applied {
+                content: "A\nb\n".to_string()
+            }
+        );
     }
 
     #[test]
@@ -302,7 +316,10 @@ mod tests {
 
     #[test]
     fn apply_section_stale_without_snapshot_errors() {
-        let section = parse("[f#0000]\nSWAP 1.=1:\n+x\n").unwrap().sections.remove(0);
+        let section = parse("[f#0000]\nSWAP 1.=1:\n+x\n")
+            .unwrap()
+            .sections
+            .remove(0);
         let err = apply_section(&section, "different\n", &SnapshotStore::new()).unwrap_err();
         assert!(matches!(err, HashlineError::StaleTag { .. }));
     }
@@ -311,7 +328,10 @@ mod tests {
     fn apply_section_rejects_block_ops() {
         let current = "a\n";
         let t = tag(current);
-        let section = parse(&format!("[f#{t}]\nSWAP.BLK 1:\n+x\n")).unwrap().sections.remove(0);
+        let section = parse(&format!("[f#{t}]\nSWAP.BLK 1:\n+x\n"))
+            .unwrap()
+            .sections
+            .remove(0);
         assert_eq!(
             apply_section(&section, current, &SnapshotStore::new()).unwrap_err(),
             HashlineError::BlockOpsUnsupported

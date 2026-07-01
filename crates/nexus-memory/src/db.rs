@@ -383,8 +383,9 @@ impl MemoryDb {
     /// Returns an error on a query or decode failure.
     pub fn list(&self, limit: usize) -> Result<Vec<Memory>> {
         let conn = self.pool.get()?;
-        let mut stmt =
-            conn.prepare(&format!("SELECT {COLS} FROM memories m ORDER BY m.created_at DESC LIMIT ?1"))?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m ORDER BY m.created_at DESC LIMIT ?1"
+        ))?;
         let out = stmt
             .query_map(params![clamp_limit(limit)], |row| {
                 row_to_memory(row).map_err(|e| into_rusqlite(&e))
@@ -541,8 +542,9 @@ impl MemoryDb {
     /// Returns an error on a query or decode failure.
     pub fn export_all(&self) -> Result<Vec<Memory>> {
         let conn = self.pool.get()?;
-        let mut stmt =
-            conn.prepare(&format!("SELECT {COLS} FROM memories m ORDER BY m.created_at ASC, m.id ASC"))?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m ORDER BY m.created_at ASC, m.id ASC"
+        ))?;
         let out = stmt
             .query_map([], |row| row_to_memory(row).map_err(|e| into_rusqlite(&e)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -629,8 +631,9 @@ impl MemoryDb {
     /// Returns an error on a query or decode failure.
     pub fn vitality_report(&self, limit: usize) -> Result<Vec<Memory>> {
         let conn = self.pool.get()?;
-        let mut stmt =
-            conn.prepare(&format!("SELECT {COLS} FROM memories m WHERE m.status = 'active'"))?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m WHERE m.status = 'active'"
+        ))?;
         let mut mems: Vec<Memory> = stmt
             .query_map([], |row| row_to_memory(row).map_err(|e| into_rusqlite(&e)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -696,7 +699,10 @@ impl MemoryDb {
     /// Returns an error on a write failure.
     pub fn delete(&self, id: Uuid) -> Result<bool> {
         let conn = self.pool.get()?;
-        let n = conn.execute("DELETE FROM memories WHERE id = ?1", params![id.to_string()])?;
+        let n = conn.execute(
+            "DELETE FROM memories WHERE id = ?1",
+            params![id.to_string()],
+        )?;
         Ok(n > 0)
     }
 
@@ -864,8 +870,7 @@ impl MemoryDb {
                 entry.id.as_uuid().to_string(),
                 entry.name,
                 entry.description,
-                serde_json::to_string(&entry.trigger_patterns)
-                    .unwrap_or_else(|_| "[]".to_string()),
+                serde_json::to_string(&entry.trigger_patterns).unwrap_or_else(|_| "[]".to_string()),
                 entry.template,
                 entry.source_session.map(|s| s.to_string()),
                 entry.learned_at.to_rfc3339(),
@@ -1120,7 +1125,8 @@ mod tests {
     #[test]
     fn fts_search_finds_by_content() {
         let db = MemoryDb::open_in_memory().unwrap();
-        db.insert(&Memory::new("the deployment runs on Kubernetes")).unwrap();
+        db.insert(&Memory::new("the deployment runs on Kubernetes"))
+            .unwrap();
         db.insert(&Memory::new("the cat sat on the mat")).unwrap();
         let hits = db.search("kubernetes", 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -1171,8 +1177,12 @@ mod tests {
                 .with_tags(["infra", "k8s"]),
         )
         .unwrap();
-        db.insert(&Memory::new("ops episodic").with_category("ops").with_type(MemoryType::Episodic))
-            .unwrap();
+        db.insert(
+            &Memory::new("ops episodic")
+                .with_category("ops")
+                .with_type(MemoryType::Episodic),
+        )
+        .unwrap();
         db.insert(
             &Memory::new("prefs semantic")
                 .with_category("prefs")
@@ -1181,26 +1191,72 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(db.list_filtered(None, None, None, None, 10).unwrap().len(), 3);
-        assert_eq!(db.list_filtered(Some("ops"), None, None, None, 10).unwrap().len(), 2);
-        assert_eq!(db.list_filtered(None, Some("semantic"), None, None, 10).unwrap().len(), 2);
-        let combined = db.list_filtered(Some("ops"), Some("semantic"), None, None, 10).unwrap();
+        assert_eq!(
+            db.list_filtered(None, None, None, None, 10).unwrap().len(),
+            3
+        );
+        assert_eq!(
+            db.list_filtered(Some("ops"), None, None, None, 10)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            db.list_filtered(None, Some("semantic"), None, None, 10)
+                .unwrap()
+                .len(),
+            2
+        );
+        let combined = db
+            .list_filtered(Some("ops"), Some("semantic"), None, None, 10)
+            .unwrap();
         assert_eq!(combined.len(), 1);
         assert_eq!(combined[0].content, "ops semantic");
-        assert_eq!(db.list_filtered(None, None, Some("active"), None, 10).unwrap().len(), 3);
-        assert_eq!(db.list_filtered(None, None, Some("archived"), None, 10).unwrap().len(), 0);
+        assert_eq!(
+            db.list_filtered(None, None, Some("active"), None, 10)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            db.list_filtered(None, None, Some("archived"), None, 10)
+                .unwrap()
+                .len(),
+            0
+        );
         // Tag filter: "infra" tags two rows, "k8s" tags one; combined with a
         // category filter it narrows further.
-        assert_eq!(db.list_filtered(None, None, None, Some("infra"), 10).unwrap().len(), 2);
-        assert_eq!(db.list_filtered(None, None, None, Some("k8s"), 10).unwrap().len(), 1);
-        assert_eq!(db.list_filtered(Some("prefs"), None, None, Some("infra"), 10).unwrap().len(), 1);
-        assert_eq!(db.list_filtered(None, None, None, Some("absent"), 10).unwrap().len(), 0);
+        assert_eq!(
+            db.list_filtered(None, None, None, Some("infra"), 10)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            db.list_filtered(None, None, None, Some("k8s"), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_filtered(Some("prefs"), None, None, Some("infra"), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_filtered(None, None, None, Some("absent"), 10)
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn list_tags_counts_distinct_tags() {
         let db = MemoryDb::open_in_memory().unwrap();
-        db.insert(&Memory::new("a").with_tags(["infra", "k8s"])).unwrap();
+        db.insert(&Memory::new("a").with_tags(["infra", "k8s"]))
+            .unwrap();
         db.insert(&Memory::new("b").with_tags(["infra"])).unwrap();
         db.insert(&Memory::new("c")).unwrap(); // untagged
         let tags = db.list_tags(10).unwrap();
@@ -1232,13 +1288,19 @@ mod tests {
         // Subject filter -> both Ada facts.
         assert_eq!(db.list_facts(Some("ada"), None, None, 10).unwrap().len(), 2);
         // Predicate filter -> one.
-        assert_eq!(db.list_facts(None, Some("writes"), None, 10).unwrap().len(), 1);
+        assert_eq!(
+            db.list_facts(None, Some("writes"), None, 10).unwrap().len(),
+            1
+        );
         // Combined subject + object -> one exact fact.
         let hit = db.list_facts(Some("ada"), None, Some("rust"), 10).unwrap();
         assert_eq!(hit.len(), 1);
         assert_eq!(hit[0].content, "Ada writes Rust");
         // No match.
-        assert_eq!(db.list_facts(Some("grace"), None, None, 10).unwrap().len(), 0);
+        assert_eq!(
+            db.list_facts(Some("grace"), None, None, 10).unwrap().len(),
+            0
+        );
     }
 
     #[test]
@@ -1296,7 +1358,10 @@ mod tests {
         let first = db.get_recording_access(m.id).unwrap().unwrap();
         assert_eq!(first.access_count, 1);
         assert!(first.accessed_at.is_some());
-        assert_eq!(db.get_recording_access(m.id).unwrap().unwrap().access_count, 2);
+        assert_eq!(
+            db.get_recording_access(m.id).unwrap().unwrap().access_count,
+            2
+        );
         // The bump is durable, not just reflected in the returned struct.
         assert_eq!(db.get(m.id).unwrap().unwrap().access_count, 2);
 
@@ -1386,14 +1451,18 @@ mod tests {
     fn sync_state_round_trips() {
         let db = MemoryDb::open_in_memory().unwrap();
         assert!(db.sync_state_get("cursor").unwrap().is_none());
-        db.sync_state_set("cursor", "2026-01-01T00:00:00+00:00|m1").unwrap();
+        db.sync_state_set("cursor", "2026-01-01T00:00:00+00:00|m1")
+            .unwrap();
         assert_eq!(
             db.sync_state_get("cursor").unwrap().as_deref(),
             Some("2026-01-01T00:00:00+00:00|m1")
         );
         // Upsert overwrites.
         db.sync_state_set("cursor", "later").unwrap();
-        assert_eq!(db.sync_state_get("cursor").unwrap().as_deref(), Some("later"));
+        assert_eq!(
+            db.sync_state_get("cursor").unwrap().as_deref(),
+            Some("later")
+        );
     }
 
     #[test]
@@ -1410,7 +1479,11 @@ mod tests {
         // Idempotent: a second supersede is a no-op (already superseded).
         assert!(!db.mark_superseded(loser.id, canonical.id).unwrap());
         // Excluded from the active-only vitality report.
-        assert!(db.vitality_report(10).unwrap().iter().all(|m| m.id != loser.id));
+        assert!(db
+            .vitality_report(10)
+            .unwrap()
+            .iter()
+            .all(|m| m.id != loser.id));
     }
 
     #[test]

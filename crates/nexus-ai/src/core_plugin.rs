@@ -1208,8 +1208,8 @@ mod tool_dispatch_tests {
     /// `messages_to_turns` path.
     #[test]
     fn ai_turns_preserve_tool_use_linkage() {
-        use crate::ipc::{AiChatTurn, AiTurnToolCall};
         use crate::handlers::shared::ai_turns_to_chat_turns;
+        use crate::ipc::{AiChatTurn, AiTurnToolCall};
 
         let wire = vec![
             AiChatTurn::User {

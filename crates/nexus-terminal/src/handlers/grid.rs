@@ -63,7 +63,10 @@ impl TerminalCorePlugin {
         let a: SessionIdArgs = parse_args(args, "get_cwd")?;
         let id = SessionId::from_string(a.id);
         let server = self.server.lock().map_err(poisoned)?;
-        let cwd = server.manager().vt_cwd(&id).ok_or_else(|| not_running(&id))?;
+        let cwd = server
+            .manager()
+            .vt_cwd(&id)
+            .ok_or_else(|| not_running(&id))?;
         to_value(&GetCwdResponse { cwd }, "get_cwd")
     }
 

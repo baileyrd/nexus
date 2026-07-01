@@ -107,7 +107,10 @@ const TERMINAL_URI_PREFIX: &str = "mcp://nexus/terminal/";
 /// The readable VT-grid resource kinds, with descriptions, per terminal session.
 const TERMINAL_RESOURCE_KINDS: &[(&str, &str)] = &[
     ("screen", "Current visible screen, as text."),
-    ("scrollback", "Lines that scrolled off the top, oldest first."),
+    (
+        "scrollback",
+        "Lines that scrolled off the top, oldest first.",
+    ),
     ("cwd", "Working directory reported by the child (OSC 7)."),
     ("cursor", "Cursor position as \"col,row\" (zero-based)."),
     ("exit", "Exit code of the last finished command (OSC 133)."),
@@ -1349,8 +1352,11 @@ impl NexusMcpServer {
         Parameters(input): Parameters<TerminalSessionInput>,
     ) -> Json<serde_json::Value> {
         Json(
-            self.terminal_tool("get_last_exit", serde_json::json!({ "id": input.session_id }))
-                .await,
+            self.terminal_tool(
+                "get_last_exit",
+                serde_json::json!({ "id": input.session_id }),
+            )
+            .await,
         )
     }
 
@@ -1489,7 +1495,10 @@ impl NexusMcpServer {
         Parameters(input): Parameters<MemoryEntitiesInput>,
     ) -> Json<MemoryEntitiesOutput> {
         let args = serde_json::json!({ "limit": input.limit });
-        match self.memory_call::<serde_json::Value>("entities", args).await {
+        match self
+            .memory_call::<serde_json::Value>("entities", args)
+            .await
+        {
             Ok(entities) => Json(MemoryEntitiesOutput { entities }),
             Err(e) => Json(MemoryEntitiesOutput {
                 entities: serde_json::json!({ "error": e }),
@@ -1523,7 +1532,10 @@ impl NexusMcpServer {
         Parameters(input): Parameters<MemoryVitalityInput>,
     ) -> Json<MemoryListOutput> {
         let args = serde_json::json!({ "limit": input.limit });
-        match self.memory_call::<serde_json::Value>("vitality_report", args).await {
+        match self
+            .memory_call::<serde_json::Value>("vitality_report", args)
+            .await
+        {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
                 memories: serde_json::json!({ "error": e }),
@@ -1557,7 +1569,10 @@ impl NexusMcpServer {
         Parameters(input): Parameters<MemoryVectorSyncInput>,
     ) -> Json<MemoryVectorSyncOutput> {
         let args = serde_json::json!({ "limit": input.limit });
-        match self.memory_call::<serde_json::Value>("vector_sync", args).await {
+        match self
+            .memory_call::<serde_json::Value>("vector_sync", args)
+            .await
+        {
             Ok(result) => Json(MemoryVectorSyncOutput { result }),
             Err(e) => Json(MemoryVectorSyncOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1599,7 +1614,10 @@ impl NexusMcpServer {
             "query": input.query,
             "limit": input.limit,
         });
-        match self.memory_call::<serde_json::Value>("wiki_compile", args).await {
+        match self
+            .memory_call::<serde_json::Value>("wiki_compile", args)
+            .await
+        {
             Ok(result) => Json(MemoryWikiOutput { result }),
             Err(e) => Json(MemoryWikiOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1616,7 +1634,10 @@ impl NexusMcpServer {
         Parameters(input): Parameters<MemoryWikiReadInput>,
     ) -> Json<MemoryWikiOutput> {
         let args = serde_json::json!({ "topic": input.topic });
-        match self.memory_call::<serde_json::Value>("wiki_read", args).await {
+        match self
+            .memory_call::<serde_json::Value>("wiki_read", args)
+            .await
+        {
             Ok(result) => Json(MemoryWikiOutput { result }),
             Err(e) => Json(MemoryWikiOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1629,7 +1650,10 @@ impl NexusMcpServer {
         description = "List the synthesized wiki pages (slugs + paths)"
     )]
     async fn memory_wiki_list(&self) -> Json<MemoryWikiOutput> {
-        match self.memory_call::<serde_json::Value>("wiki_list", serde_json::json!({})).await {
+        match self
+            .memory_call::<serde_json::Value>("wiki_list", serde_json::json!({}))
+            .await
+        {
             Ok(result) => Json(MemoryWikiOutput { result }),
             Err(e) => Json(MemoryWikiOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1665,7 +1689,10 @@ impl NexusMcpServer {
         Parameters(input): Parameters<SandboxDownloadInput>,
     ) -> Json<SandboxResultOutput> {
         let args = serde_json::json!({ "url": input.url, "dest": input.dest, "cwd": input.cwd });
-        match self.security_call::<serde_json::Value>("download", args).await {
+        match self
+            .security_call::<serde_json::Value>("download", args)
+            .await
+        {
             Ok(result) => Json(SandboxResultOutput { result }),
             Err(e) => Json(SandboxResultOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1687,7 +1714,10 @@ impl NexusMcpServer {
             "client": input.client,
             "category": input.category,
         });
-        match self.memory_call::<serde_json::Value>("auto_capture", args).await {
+        match self
+            .memory_call::<serde_json::Value>("auto_capture", args)
+            .await
+        {
             Ok(result) => Json(MemoryResultOutput { result }),
             Err(e) => Json(MemoryResultOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1704,7 +1734,10 @@ impl NexusMcpServer {
         Parameters(input): Parameters<MemoryConsolidateInput>,
     ) -> Json<MemoryResultOutput> {
         let args = serde_json::json!({ "category": input.category, "dry_run": input.dry_run });
-        match self.memory_call::<serde_json::Value>("consolidate", args).await {
+        match self
+            .memory_call::<serde_json::Value>("consolidate", args)
+            .await
+        {
             Ok(result) => Json(MemoryResultOutput { result }),
             Err(e) => Json(MemoryResultOutput {
                 result: serde_json::json!({ "error": e }),
@@ -1717,7 +1750,10 @@ impl NexusMcpServer {
         description = "Export every stored memory as full records (oldest first), suitable for backup or re-import into another store"
     )]
     async fn memory_export(&self) -> Json<MemoryListOutput> {
-        match self.memory_call::<serde_json::Value>("export", serde_json::json!({})).await {
+        match self
+            .memory_call::<serde_json::Value>("export", serde_json::json!({}))
+            .await
+        {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
                 memories: serde_json::json!({ "error": e }),
@@ -2632,7 +2668,10 @@ impl rmcp::ServerHandler for NexusMcpServer {
             // RFC 0003 Track A — terminal VT-grid resources.
             if let Some((id, kind)) = parse_terminal_uri(&uri) {
                 let text = self.read_terminal_resource(id, kind).await.map_err(|e| {
-                    rmcp::ErrorData::resource_not_found(format!("resource not found: {uri} ({e})"), None)
+                    rmcp::ErrorData::resource_not_found(
+                        format!("resource not found: {uri} ({e})"),
+                        None,
+                    )
                 })?;
                 let contents = ResourceContents::text(text, &uri).with_mime_type("text/plain");
                 return Ok(ReadResourceResult::new(vec![contents]));

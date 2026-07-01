@@ -164,7 +164,8 @@ impl SubagentRunner {
     /// [`ResolveError::CurrentExe`] if neither an override nor the env var is
     /// set and `current_exe()` cannot be determined.
     pub fn resolve(override_bin: Option<PathBuf>) -> Result<Self, ResolveError> {
-        resolve_binary(override_bin, std::env::var_os(NEXUS_SUBAGENT_BIN_ENV)).map(Self::with_binary)
+        resolve_binary(override_bin, std::env::var_os(NEXUS_SUBAGENT_BIN_ENV))
+            .map(Self::with_binary)
     }
 
     /// The resolved `nexus` binary path.
@@ -236,9 +237,13 @@ impl SubagentRunner {
         match &self.sandbox {
             None => Ok((self.nexus_bin.clone(), target)),
             Some(sb) => {
-                let argv =
-                    nexus_types::sandbox_argv(&sb.policy, &spec.forge_root, &self.nexus_bin, target)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+                let argv = nexus_types::sandbox_argv(
+                    &sb.policy,
+                    &spec.forge_root,
+                    &self.nexus_bin,
+                    target,
+                )
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
                 Ok((sb.helper.clone(), argv))
             }
         }
@@ -336,10 +341,7 @@ pub(crate) async fn acquire_subagent_slot() -> tokio::sync::SemaphorePermit<'sta
 /// `nexus` binary. `kill_on_drop(true)` means a timeout — which drops the
 /// in-flight `wait_with_output` future — sends `SIGKILL` to the child; its
 /// partial output is discarded with it.
-async fn run_capture(
-    mut cmd: Command,
-    timeout: Duration,
-) -> std::io::Result<SubagentOutcome> {
+async fn run_capture(mut cmd: Command, timeout: Duration) -> std::io::Result<SubagentOutcome> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -429,7 +431,10 @@ mod tests {
             .iter()
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
-        let pos = as_str.iter().position(|a| a == "--archetype").expect("flag");
+        let pos = as_str
+            .iter()
+            .position(|a| a == "--archetype")
+            .expect("flag");
         assert_eq!(as_str[pos + 1], "coder");
         // archetype must precede the `--` goal separator.
         let sep = as_str.iter().position(|a| a == "--").expect("separator");
@@ -478,9 +483,15 @@ mod tests {
             "policy json comes first: {}",
             as_str[0]
         );
-        assert_eq!(as_str[1], "/tmp/wt", "cwd is the worktree (spec.forge_root)");
+        assert_eq!(
+            as_str[1], "/tmp/wt",
+            "cwd is the worktree (spec.forge_root)"
+        );
         assert_eq!(as_str[2], "--");
-        assert_eq!(as_str[3], "/opt/nexus", "wrapped program is the nexus binary");
+        assert_eq!(
+            as_str[3], "/opt/nexus",
+            "wrapped program is the nexus binary"
+        );
         assert_eq!(as_str[4], "agent");
         assert_eq!(as_str[5], "run");
     }
@@ -511,7 +522,9 @@ mod tests {
             exclude_slash_tmp: false,
         };
         assert!(derive_subagent_policy(&net_parent, wt).has_full_network_access());
-        assert!(derive_subagent_policy(&SandboxPolicy::DangerFullAccess, wt).has_full_network_access());
+        assert!(
+            derive_subagent_policy(&SandboxPolicy::DangerFullAccess, wt).has_full_network_access()
+        );
     }
 
     #[test]
@@ -562,9 +575,18 @@ mod tests {
     #[test]
     fn parse_max_concurrent_defaults_and_overrides() {
         assert_eq!(parse_max_concurrent(None), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
-        assert_eq!(parse_max_concurrent(Some("")), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
-        assert_eq!(parse_max_concurrent(Some("0")), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
-        assert_eq!(parse_max_concurrent(Some("nope")), DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+        assert_eq!(
+            parse_max_concurrent(Some("")),
+            DEFAULT_MAX_CONCURRENT_SUBAGENTS
+        );
+        assert_eq!(
+            parse_max_concurrent(Some("0")),
+            DEFAULT_MAX_CONCURRENT_SUBAGENTS
+        );
+        assert_eq!(
+            parse_max_concurrent(Some("nope")),
+            DEFAULT_MAX_CONCURRENT_SUBAGENTS
+        );
         assert_eq!(parse_max_concurrent(Some("  8 ")), 8);
         assert_eq!(parse_max_concurrent(Some("1")), 1);
     }

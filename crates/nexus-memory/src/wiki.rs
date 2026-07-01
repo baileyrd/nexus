@@ -58,7 +58,9 @@ fn page_path(topic: &str) -> String {
     format!("{WIKI_DIR}/{}.md", slugify(topic))
 }
 
-fn require_ctx(ctx: &Option<Arc<KernelPluginContext>>) -> Result<&Arc<KernelPluginContext>, String> {
+fn require_ctx(
+    ctx: &Option<Arc<KernelPluginContext>>,
+) -> Result<&Arc<KernelPluginContext>, String> {
     ctx.as_ref()
         .ok_or_else(|| "wiki: plugin context not wired".to_string())
 }
@@ -87,7 +89,9 @@ pub(crate) async fn wiki_compile(
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(DEFAULT_SOURCE_LIMIT);
 
-    let memories = db.search(query, limit).map_err(|e| format!("wiki_compile: search: {e}"))?;
+    let memories = db
+        .search(query, limit)
+        .map_err(|e| format!("wiki_compile: search: {e}"))?;
     if memories.is_empty() {
         return Err(format!("wiki_compile: no memories match '{query}'"));
     }
@@ -140,13 +144,21 @@ pub(crate) async fn wiki_read(
     let topic = str_arg(args, "topic")?;
     let path = page_path(topic);
     let resp = ctx
-        .ipc_call(STORAGE_PLUGIN, "read_file", json!({ "path": path }), IPC_TIMEOUT)
+        .ipc_call(
+            STORAGE_PLUGIN,
+            "read_file",
+            json!({ "path": path }),
+            IPC_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("wiki_read: {e}"))?;
     // read_file returns { bytes: [u8] | null }.
     match resp.get("bytes").and_then(Value::as_array) {
         Some(arr) => {
-            let bytes: Vec<u8> = arr.iter().filter_map(|n| n.as_u64().map(|v| v as u8)).collect();
+            let bytes: Vec<u8> = arr
+                .iter()
+                .filter_map(|n| n.as_u64().map(|v| v as u8))
+                .collect();
             Ok(json!({ "path": path, "content": String::from_utf8_lossy(&bytes) }))
         }
         None => Err(format!("wiki_read: no page for '{topic}' ({path})")),
@@ -160,7 +172,12 @@ pub(crate) async fn wiki_list(
 ) -> Result<Value, String> {
     let ctx = require_ctx(&ctx)?;
     let resp = ctx
-        .ipc_call(STORAGE_PLUGIN, "list_dir", json!({ "relpath": WIKI_DIR }), IPC_TIMEOUT)
+        .ipc_call(
+            STORAGE_PLUGIN,
+            "list_dir",
+            json!({ "relpath": WIKI_DIR }),
+            IPC_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("wiki_list: {e}"))?;
     let pages: Vec<Value> = resp
@@ -211,7 +228,10 @@ mod tests {
             .await
             .unwrap_err()
             .contains("context not wired"));
-        assert!(wiki_list(None, &json!({})).await.unwrap_err().contains("context not wired"));
+        assert!(wiki_list(None, &json!({}))
+            .await
+            .unwrap_err()
+            .contains("context not wired"));
     }
 
     #[tokio::test]
@@ -221,6 +241,9 @@ mod tests {
         let db = MemoryDb::open_in_memory().unwrap();
         // With a (None) context, require_ctx errors first — assert that path.
         let err = wiki_compile(db, None, &json!({})).await.unwrap_err();
-        assert!(err.contains("context not wired") || err.contains("missing 'topic'"), "got: {err}");
+        assert!(
+            err.contains("context not wired") || err.contains("missing 'topic'"),
+            "got: {err}"
+        );
     }
 }

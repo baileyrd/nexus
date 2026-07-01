@@ -17,10 +17,14 @@ async fn spawn_hub() -> String {
         store: HubStore::open_in_memory().expect("hub store"),
         secret: Arc::new(SECRET.to_string()),
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
-        nexus_memory_hub::serve(listener, state).await.expect("serve");
+        nexus_memory_hub::serve(listener, state)
+            .await
+            .expect("serve");
     });
     format!("http://{addr}")
 }
@@ -45,8 +49,16 @@ async fn two_nodes_converge_through_the_hub() {
     let mut b = MemoryCorePlugin::with_db(MemoryDb::open_in_memory().unwrap());
 
     // A stores a memory; B stores a different one.
-    a.dispatch(HANDLER_ADD, &json!({ "content": "from node A", "category": "ops" })).unwrap();
-    b.dispatch(HANDLER_ADD, &json!({ "content": "from node B", "category": "prefs" })).unwrap();
+    a.dispatch(
+        HANDLER_ADD,
+        &json!({ "content": "from node A", "category": "ops" }),
+    )
+    .unwrap();
+    b.dispatch(
+        HANDLER_ADD,
+        &json!({ "content": "from node B", "category": "prefs" }),
+    )
+    .unwrap();
 
     // A pushes its memory (pulls nothing yet).
     let a1 = run_sync(&mut a, &hub, "node-a").await;
@@ -66,7 +78,10 @@ async fn two_nodes_converge_through_the_hub() {
         .iter()
         .filter_map(|m| m["content"].as_str())
         .collect();
-    assert!(b_contents.contains(&"from node A"), "B should have A's memory: {b_contents:?}");
+    assert!(
+        b_contents.contains(&"from node A"),
+        "B should have A's memory: {b_contents:?}"
+    );
     assert!(b_contents.contains(&"from node B"));
 
     // A syncs again and pulls B's memory → both nodes converged.
@@ -80,7 +95,10 @@ async fn two_nodes_converge_through_the_hub() {
         .filter_map(|m| m["content"].as_str())
         .collect();
     assert!(a_contents.contains(&"from node A"));
-    assert!(a_contents.contains(&"from node B"), "A should have B's memory: {a_contents:?}");
+    assert!(
+        a_contents.contains(&"from node B"),
+        "A should have B's memory: {a_contents:?}"
+    );
 
     // Idempotent: a third sync with no local changes pushes/pulls nothing new.
     let a3 = run_sync(&mut a, &hub, "node-a").await;

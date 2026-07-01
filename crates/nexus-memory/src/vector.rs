@@ -77,12 +77,14 @@ pub(crate) fn reciprocal_rank_fusion(rankings: &[Vec<Uuid>], k: f64, limit: usiz
 }
 
 /// Embed `texts` via `com.nexus.ai::embed_text`, returning one vector each.
-async fn embed(
-    ctx: &KernelPluginContext,
-    texts: Vec<String>,
-) -> Result<Vec<Vec<f32>>, String> {
+async fn embed(ctx: &KernelPluginContext, texts: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
     let resp = ctx
-        .ipc_call(AI_PLUGIN, "embed_text", json!({ "texts": texts }), IPC_TIMEOUT)
+        .ipc_call(
+            AI_PLUGIN,
+            "embed_text",
+            json!({ "texts": texts }),
+            IPC_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("embed_text: {e}"))?;
     let embeddings = resp
@@ -157,7 +159,9 @@ pub(crate) async fn recall(
     // Semantic arm — best-effort. Any failure (no ctx, no embedder, IPC error)
     // degrades to FTS-only rather than failing the recall.
     let vec_ids: Vec<Uuid> = match ctx {
-        Some(ref ctx) => vector_recall(ctx, query, arm_limit).await.unwrap_or_default(),
+        Some(ref ctx) => vector_recall(ctx, query, arm_limit)
+            .await
+            .unwrap_or_default(),
         None => Vec::new(),
     };
 
@@ -281,10 +285,13 @@ mod tests {
     #[tokio::test]
     async fn recall_without_context_returns_fts_results() {
         let db = MemoryDb::open_in_memory().unwrap();
-        db.insert(&Memory::new("the deployment runs on kubernetes")).unwrap();
+        db.insert(&Memory::new("the deployment runs on kubernetes"))
+            .unwrap();
         db.insert(&Memory::new("a note about cats")).unwrap();
         // No wired context → vector arm is skipped, FTS arm still works.
-        let out = recall(db, None, &json!({ "query": "kubernetes" })).await.unwrap();
+        let out = recall(db, None, &json!({ "query": "kubernetes" }))
+            .await
+            .unwrap();
         let arr = out.as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert!(arr[0]["content"].as_str().unwrap().contains("kubernetes"));

@@ -60,7 +60,11 @@ impl ShellSpec {
 #[must_use]
 pub fn bundled_shell_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let name = if cfg!(windows) { "nexus-rush.exe" } else { "nexus-rush" };
+    let name = if cfg!(windows) {
+        "nexus-rush.exe"
+    } else {
+        "nexus-rush"
+    };
     let path = exe.with_file_name(name);
     path.exists().then_some(path)
 }

@@ -120,8 +120,11 @@ max_bytes = 2048
     fn malformed_file_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
-        std::fs::write(dir.path().join(SANDBOX_CONFIG_RELPATH), "this is not = valid toml [[[")
-            .unwrap();
+        std::fs::write(
+            dir.path().join(SANDBOX_CONFIG_RELPATH),
+            "this is not = valid toml [[[",
+        )
+        .unwrap();
         // Fails closed: defaults, not a panic or a widened sandbox.
         assert_eq!(SandboxConfig::load(dir.path()), SandboxConfig::default());
     }

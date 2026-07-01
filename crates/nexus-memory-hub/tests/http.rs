@@ -14,7 +14,9 @@ async fn spawn_hub() -> (String, &'static str) {
         store: HubStore::open_in_memory().expect("store"),
         secret: Arc::new(secret.to_string()),
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, router(state)).await.expect("serve");
@@ -28,7 +30,11 @@ async fn health_push_pull_and_auth_over_http() {
     let client = reqwest::Client::new();
 
     // /health is unauthenticated.
-    let health = client.get(format!("{base}/health")).send().await.expect("health");
+    let health = client
+        .get(format!("{base}/health"))
+        .send()
+        .await
+        .expect("health");
     assert_eq!(health.status(), 200);
     let body: Value = health.json().await.expect("health json");
     assert_eq!(body["status"], "ok");

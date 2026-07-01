@@ -109,10 +109,11 @@ impl Parser {
     /// Consume the current token if it is one of `ops`.
     fn eat(&mut self, ops: &[&str]) -> Option<&'static str> {
         if let Some(op) = self.peek_op()
-            && ops.contains(&op) {
-                self.pos += 1;
-                return Some(op);
-            }
+            && ops.contains(&op)
+        {
+            self.pos += 1;
+            return Some(op);
+        }
         None
     }
 
@@ -138,7 +139,11 @@ impl Parser {
         let mut value = self.parse_relational()?;
         while let Some(op) = self.eat(&["==", "!="]) {
             let rhs = self.parse_relational()?;
-            value = bool_int(if op == "==" { value == rhs } else { value != rhs });
+            value = bool_int(if op == "==" {
+                value == rhs
+            } else {
+                value != rhs
+            });
         }
         Ok(value)
     }

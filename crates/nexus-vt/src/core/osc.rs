@@ -180,7 +180,11 @@ pub(crate) fn dispatch(
                         let exit = parts.next().and_then(|s| s.parse::<i32>().ok());
                         g.command_finished(exit);
                         super::channel::notify_command_finished(g, exit, responses);
-                        super::channel::notify_resource_changed(g, super::channel::RES_COMMAND, responses);
+                        super::channel::notify_resource_changed(
+                            g,
+                            super::channel::RES_COMMAND,
+                            responses,
+                        );
                     }
                     _ => {}
                 }
