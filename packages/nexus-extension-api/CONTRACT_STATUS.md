@@ -1,64 +1,85 @@
 # Plugin context contract status (#187)
 
-This document tracks the divergence between the **target** plugin
-context shape exported by this package (`NexusPluginContext` /
-`ScriptPlugin`) and the **actual** runtime context shapes the in-tree
-runtimes hand to plugins today. Until reconciliation lands, plugin
-authors should code against the runtime-specific contract that matches
-their plugin's tier, not the target contract.
+**Status: reconciled (2026-07-01).** `NexusPluginContext` is no longer
+aspirational — it is the **common plugin contract**: the subset of verbs
+both in-tree runtimes hand plugins today, expressed with
+`MaybePromise<T>` returns wherever the tiers disagree on
+sync-versus-async. Both live context shapes structurally satisfy it,
+and that fact is locked by compile-only conformance tests (the gating
+signal the original audit asked for):
 
-Source: `docs/0.1.2/audits/expert-review-2026-05-31.md` (R4).
-
-## The three shapes
-
-| Shape | Source | Status |
+| Tier | Runtime shape | Conformance test |
 |---|---|---|
-| `NexusPluginContext` / `ScriptPlugin` | `packages/nexus-extension-api/src/index.ts` | **Aspirational** — no in-tree runtime implements this. |
-| `PluginAPI` | `shell/src/types/plugin.ts` | **Live** — what the in-process shell host hands first-party plugins. |
-| `SandboxedPluginContext` | `packages/nexus-extension-api/src/sandbox/context.ts` | **Live** — what the iframe sandbox runtime hands community plugins. |
+| In-process shell host | `PluginAPI` (`shell/src/types/plugin.ts`) | `shell/src/types/contractConformance.test-d.ts` + runtime key-walk in `shell/src/host/PluginAPI.test.ts` |
+| Sandboxed community plugins | `SandboxedPluginContext` (`./src/sandbox/context.ts`) | `src/contractConformance.test-d.ts` |
 
-`SandboxedPlugin` (`./src/sandbox/plugin.ts`) is the live runtime
-counterpart of the aspirational `ScriptPlugin`; the in-process shell
-loads first-party plugins via a different protocol entirely (see
-`shell/src/host/extensionHost.ts`).
+Both tests participate in CI (`pnpm --filter @nexus/extension-api
+check`, `pnpm --filter nexus-shell typecheck` / `test`). A contract
+edit either runtime cannot satisfy fails `tsc`.
 
-## Field-level divergence — `NexusPluginContext` vs. runtime shapes
+Source: `docs/0.1.2/audits/expert-review-2026-05-31.md` (R4) and
+`docs/0.1.2/audits/repo-review-2026-06-10.md` (V9). Tracking issue:
+[#187](https://github.com/baileyrd/nexus/issues/187).
 
-| `NexusPluginContext` field | In `PluginAPI`? | In `SandboxedPluginContext`? | Notes |
-|---|---|---|---|
-| `pluginId: string` | ✗ (passed separately at load time) | ✓ | |
-| `settings: { get(): Promise<Record<string, unknown>> }` | Partial — under `api.settings` (tab renderer registry, not values) | Different shape — sandbox `settings` exposes get/set for the plugin's own namespace | |
-| `events: { emit }` | ✓ as `api.events` (with `on` + `off` too) | ✓ as `ctx.events` (async over postMessage) | `PluginAPI` is richer; both await-friendly |
-| `ipc: { call }` | ✓ as `api.kernel.invoke` (different verb name) | Routed through `ctx.commands.execute` and host-side IPC | The verb name is the headline divergence here |
-| `editor` | ✓ but with a *different* surface (`active`, `onChange`); registration verbs live on `viewRegistry` / `commands` | Absent — sandboxed plugins can't reach into the editor realm | |
-| `ui` | Split across `api.notifications`, `api.views`, `api.activityBar`, `api.uri`, `api.statusBar` | Equivalent subset under `ctx.notifications`, `ctx.views`, `ctx.activityBar`, `ctx.statusBar` (async) | |
-| `workspace: WorkspaceAPI` | ✓ as `api.workspace` (the live Leaf/View facade) | ✗ — live object refs can't cross postMessage | |
-| `ai: AiAPI` | ✗ — not yet wired into `PluginAPI` | ✗ | |
-| `disposables: DisposableStore` | ✗ — `PluginAPI` consumers track disposables manually | ✗ — sandbox host auto-sweeps `register*` results | |
+## The common contract
 
-## `ScriptPlugin` vs. runtime entry points
+`NexusPluginContext` promises exactly the verbs available in **every**
+tier:
 
-| Hook | `ScriptPlugin` | Runtime equivalent |
+`pluginId` · `commands.{register,execute}` · `kernel.{invoke,on}` ·
+`platform.{fs,dialog,window,shell}` · `events.{on,emit}` ·
+`storage.{get,set,delete}` · `notifications.show` ·
+`context.{set,get,evaluate}` · `input.{prompt,confirm}` ·
+`uri.register` · `activityBar.{addItem,removeItem}` ·
+`statusBar.createItem`
+
+Portable rules:
+
+1. **Always `await`** `MaybePromise`-returning calls (`storage.*`,
+   `notifications.show`, `context.set/evaluate`,
+   `statusBar.createItem`) and treat `context.get` results as
+   promise-wrapped. Awaiting a plain value is a no-op, so portable code
+   pays nothing in the sync tier.
+2. **Don't rely on `register`/`addItem` return values.** The sandbox
+   tier returns a `Disposable`; the in-process tier returns `void` and
+   sweeps registrations via `PluginRegistry.unregisterAll`.
+3. **Treat status-bar handles as `NexusStatusBarItemHandle`** —
+   `dispose` is the only cross-tier verb.
+
+## What stays tier-specific
+
+| Surface | Tier | Why it can't be common (today) |
 |---|---|---|
-| Load | `loadScriptPlugin` (not implemented anywhere) | In-process: `extensionHost.loadFirstPartyPlugin` (different shape). Sandbox: `bootstrapSandboxedPlugin(SandboxedPlugin)`. |
-| Init | `onInit(ctx)` | In-process: first-party module's exported `activate(api)`. Sandbox: collapsed into `SandboxedPlugin.activate(ctx)`. |
-| Start | `onStart(ctx)` | Collapsed into the same `activate` hook in both runtimes. |
-| Per-command | `dispatch(handlerId, args, ctx)` | In-process: command handlers registered via `api.commands.register`. Sandbox: ditto via `ctx.commands.register`. |
-| Stop | `onStop(ctx)` | In-process: first-party module's exported `deactivate()`. Sandbox: `SandboxedPlugin.deactivate?()`. |
+| `workspace` / `viewRegistry` (live Leaf/View facade) | in-process only | live object refs can't cross `postMessage` |
+| `views.register` (React component slots) | in-process only | React nodes can't be structured-cloned |
+| `views.registerPanel` (declarative `PanelNode`) | sandbox only | the in-process tier registers React components instead |
+| `configuration` / `settings` / `keybindings` / `fs` / `editor` | in-process only | not yet bridged over RPC (`configuration` is the sandbox TODO in `./src/sandbox/context.ts`) |
+| `internal` | in-process core plugins only | trust boundary |
+| `input.pick`, `kernel.available`, `storage.clear`, `commands.all` | in-process only | additive conveniences; candidates for promotion into the contract once the sandbox bridges them |
 
-## Recommended migration
+Closing rows in this table (bridging `configuration`, promoting
+`input.pick`, …) is the remaining #187 follow-up work — each bridged
+surface moves from this table into the common contract with the
+conformance tests keeping both tiers honest.
 
-The audit recommends:
+## Entry points
 
-1. **Choose one canonical shape.** Most likely `PluginAPI` (the
-   in-process runtime is the senior consumer); the aspirational
-   `NexusPluginContext` can then be re-derived as a strict subset that
-   the sandbox runtime can also satisfy after the async conversion.
-2. **Add a type-level conformance test** asserting the chosen runtime
-   shape `extends` the exported contract. The current divergence makes
-   such a test impossible to write green today — that's the gating
-   signal.
-3. **Drop "frozen 1.0.0" framing** from the package surface until the
-   above lands. ← *covered by the same PR that landed this document.*
+The entry-point contract resolved to the two-hook shape both runtimes
+already use:
 
-Tracking issue: [#187](https://github.com/baileyrd/nexus/issues/187).
+| Hook | In-process (`Plugin`, shell-side) | Sandbox (`SandboxedPlugin`) |
+|---|---|---|
+| Activate | exported `activate(api: PluginAPI)` | `activate(ctx: SandboxedPluginContext)` |
+| Deactivate | exported `deactivate()` | `deactivate?()` |
+
+`ScriptPlugin` (the four-hook `dispatch`/`onInit`/`onStart`/`onStop`
+shape) was never implemented by any runtime and is **deprecated** as of
+0.1.0 — see [`DEPRECATED.md`](./DEPRECATED.md). Removal target: 0.2.0.
+
+## Versioning
+
+Re-cut from `1.0.0` to `0.1.0` (V9): the original tag predated the
+runtime audit and implied a structural freeze that did not exist.
+`1.0.0` will be re-cut once the common contract and its conformance
+gates have soaked for a release. In-repo consumers are unaffected
+(`workspace:*`).

@@ -175,6 +175,17 @@ export interface Plugin {
 // require splitting the file without simplifying any consumer.
 
 export interface PluginAPI {
+  /**
+   * Stable id of the plugin this API instance was built for (#187).
+   * Baked in by `buildPluginAPI` from the validated
+   * `BuildOptions.pluginId` — the same string that namespaces
+   * `storage` keys and tags `PluginRegistry` ownership, so it is
+   * host-asserted, never self-asserted. Mirrors
+   * `SandboxedPluginContext.pluginId` so both tiers satisfy the common
+   * `NexusPluginContext` contract (see
+   * `shell/src/types/contractConformance.test-d.ts`).
+   */
+  readonly pluginId: string
   commands: CommandsAPI
   /**
    * Chrome-slot registration only (titleBar, activityBar, statusBarLeft,

@@ -1,9 +1,8 @@
 # @nexus/extension-api
 
-Forward-looking TypeScript types for authoring Nexus plugins. See
-[`CONTRACT_STATUS.md`](./CONTRACT_STATUS.md) for the current runtime
-divergence vs. the headline `NexusPluginContext` / `ScriptPlugin`
-shapes (#187).
+TypeScript plugin contract for authoring Nexus plugins. See
+[`CONTRACT_STATUS.md`](./CONTRACT_STATUS.md) for the contract history
+and the per-tier surface inventory (#187).
 
 ## Install
 
@@ -13,63 +12,69 @@ npm install --save-dev @nexus/extension-api
 
 ## Status
 
-The `NexusPluginContext` / `ScriptPlugin` shapes this package exports
-are the *target* contract — they are **not** what any current Nexus
-runtime supplies. Today the in-process shell host hands plugins a
-`PluginAPI` (`shell/src/types/plugin.ts`) and the sandbox runtime hands
-plugins a `SandboxedPluginContext` (`./src/sandbox/context.ts`); both
-overlap with the target shape on the verbs that matter but diverge on
-field names and on the sync-versus-async boundary. See
-[`CONTRACT_STATUS.md`](./CONTRACT_STATUS.md) for the per-field
-inventory.
+`NexusPluginContext` is the **common plugin contract** — the subset of
+verbs both in-tree runtimes hand plugins today. Each runtime's context
+is a structural superset:
 
-Until reconciliation lands, plugin authors should import the
-runtime-specific context types directly. The `NexusPluginContext`
-example in the next section compiles fine but the resulting plugin
-will not load — `loadScriptPlugin` is not implemented in either
-runtime.
+- the in-process shell host hands first-party plugins a `PluginAPI`
+  (`shell/src/types/plugin.ts`);
+- the iframe sandbox runtime hands community plugins a
+  `SandboxedPluginContext` (`./src/sandbox/context.ts`).
 
-## Aspirational usage (target contract, #187)
+Conformance is locked by compile-only tests
+(`src/contractConformance.test-d.ts` here,
+`shell/src/types/contractConformance.test-d.ts` shell-side) — a
+contract edit either runtime cannot satisfy fails `tsc` in CI.
+
+Where the tiers disagree on sync-versus-async, the contract's return
+types are `MaybePromise<T>`; portable code should `await`
+unconditionally (awaiting a plain value is a no-op).
+
+## Portable usage (common contract)
+
+Plugin *logic* can be typed against `NexusPluginContext` and handed
+either runtime's context object:
 
 ```ts
-import type { ScriptPlugin, NexusPluginContext } from "@nexus/extension-api";
+import type { NexusPluginContext } from "@nexus/extension-api";
 
-const plugin: ScriptPlugin = {
-  async onInit(ctx) {
-    ctx.disposables.add(
-      ctx.editor.registerSnippet({
-        id: "plugin:com.example.todo:insert",
-        trigger: "td",
-        body: "- [ ] $CURSOR",
-      }),
-    );
-  },
-
-  async dispatch(_handlerId, _args, ctx) {
-    ctx.ui.notify("info", "hello from com.example.todo");
-  },
-};
-
-export default plugin;
+// Runs unchanged against either tier's context. Always `await`
+// MaybePromise results.
+export async function greet(ctx: NexusPluginContext): Promise<void> {
+  const last = await ctx.storage.get("last-greeting");
+  await ctx.storage.set("last-greeting", String(Date.now()));
+  await ctx.notifications.show({
+    message: last
+      ? `Hello again from ${ctx.pluginId}!`
+      : `Hello from ${ctx.pluginId}!`,
+  });
+}
 ```
+
+Plugin *entry points* remain tier-specific: sandboxed plugins export a
+`SandboxedPlugin` (`activate(ctx)` / `deactivate()`), first-party
+plugins export the shell-side `Plugin` shape (`activate(api)` /
+`deactivate()`). The four-hook `ScriptPlugin` shape is deprecated —
+see [`DEPRECATED.md`](./DEPRECATED.md).
 
 ## What this package gives you
 
-- **Forward-looking type definitions** for `NexusPluginContext` and
-  every contribution DTO (`EditorBlockType`, `Snippet`, `MenuItem`,
-  `UriHandler`, `WebviewPanelConfig`, `TreeDataProvider`, `PanelNode`,
-  …).
-- **The aspirational `ScriptPlugin` shape** a plugin's default export
-  will eventually satisfy.
+- **The common contract** (`NexusPluginContext`, `MaybePromise`,
+  `NexusStatusBarItemHandle`) plus every contribution DTO
+  (`EditorBlockType`, `Snippet`, `MenuItem`, `UriHandler`,
+  `WebviewPanelConfig`, `TreeDataProvider`, `PanelNode`, …).
 - **Sandbox-side runtime contracts** (`SandboxedPlugin`,
-  `SandboxedPluginContext`) — these *are* implemented today by the
-  iframe sandbox runtime and are safe to depend on.
+  `SandboxedPluginContext`) — implemented by the iframe sandbox
+  runtime and safe to depend on.
+- **ts-rs–generated Rust contract types** (`Capability`, `IpcError`,
+  `PluginInfo`, `NexusEvent`, …) re-exported from `./generated`.
 
 ## What it does *not* give you
 
-- A runtime for the headline `NexusPluginContext` / `ScriptPlugin`
-  shapes. Neither the in-process shell nor the sandbox runtime
-  implements them; see Status above.
+- The tier-specific surfaces beyond the common contract (`workspace`,
+  `viewRegistry`, `configuration`, `editor` registration verbs, …) —
+  those live on the runtime contracts; see the "tier-specific" table in
+  [`CONTRACT_STATUS.md`](./CONTRACT_STATUS.md).
 - React. Plugins that ship JSX must depend on `react` themselves; we
   intentionally avoid the dependency so the type package stays small.
 - CodeMirror 6 extension types. Plugins that contribute decorations
@@ -79,24 +84,23 @@ export default plugin;
 
 ## Versioning
 
-The current `1.0.0` tag predates the runtime audit that surfaced the
-divergence above; it does **not** yet imply structural freeze. A
-future release will cut the line cleanly once one runtime shape is
-canonical and the others adopt it. Until then, treat the headline
-shapes as forward-looking documentation rather than as a stability
-guarantee. The sandbox-side shapes (`SandboxedPlugin`,
-`SandboxedPluginContext`) are tracked separately and *are* the live
-contract for sandboxed plugins.
+Re-cut to `0.1.0` (repo-review V9 / #187): the original `1.0.0` tag
+predated the runtime audit that surfaced the contract divergence and
+implied a structural freeze that did not exist. `1.0.0` will be re-cut
+once the common contract and its conformance gates have soaked for a
+release. In-repo consumers are unaffected (`workspace:*`).
 
 ## Sandboxed Community Plugins
 
 Community plugins run inside a null-origin iframe sandbox (WI-30). They
-import a **different** context shape — `SandboxedPluginContext` —
-because every method has to cross `postMessage`. Key differences from
-first-party `NexusPluginContext`:
+receive a `SandboxedPluginContext` — the common contract plus
+declarative panels — because every method has to cross `postMessage`.
+Key characteristics:
 
-- Several sync methods become `async` (`storage.*`, `notifications.show`,
-  `context.*`, `statusBar.createItem`, …).
+- Methods that are sync in the in-process tier are `async` here
+  (`storage.*`, `notifications.show`, `context.*`,
+  `statusBar.createItem`, …) — exactly the `MaybePromise` seams in the
+  common contract.
 - UI contributions are **declarative** — `views.registerPanel` takes a
   `render()` that returns a `PanelNode` tree. No React components
   (they can't be structured-cloned).
@@ -143,15 +147,11 @@ bootstrapSandboxedPlugin(plugin);
 
 ### Runtime import path
 
-`bootstrapSandboxedPlugin` lives in the sandbox runtime module and is
-**not** re-exported from the top-level barrel — it's only useful
-inside a sandboxed plugin bundle (it runs top-level side effects on
-import). Bring it in directly:
-
-```ts
-import { bootstrapSandboxedPlugin } from '@nexus/extension-api/sandbox/runtime';
-import type { SandboxedPlugin } from '@nexus/extension-api';
-```
+`bootstrapSandboxedPlugin` is re-exported from the top-level barrel
+(WI-30e) so a plugin source file needs a single import; the deep
+`sandbox/runtime` path also works. The function is only *useful*
+inside a sandboxed plugin bundle — the host never calls it, and
+tree-shaking drops it from any host bundle that doesn't reference it.
 
 Types (`SandboxedPlugin`, `SandboxedPluginContext`, `PanelNode`, …)
 come from the root barrel and are safe to import anywhere.

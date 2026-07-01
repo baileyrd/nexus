@@ -163,3 +163,44 @@ test('two PluginAPI instances built with different ids have isolated storage nam
     else delete g.localStorage
   }
 })
+
+test('built PluginAPI exposes every namespace of the common contract (#187)', () => {
+  const api = buildPluginAPI(makeRegistry(), {
+    pluginId: 'plugin.contract',
+    isCore: false,
+  })
+
+  // `pluginId` is host-asserted from `BuildOptions`, mirroring the
+  // sandbox tier's handshake-bound id.
+  assert.equal(api.pluginId, 'plugin.contract')
+
+  // One entry per `NexusPluginContext` member — keep in lockstep with
+  // packages/nexus-extension-api/src/index.ts. The compile-only twin
+  // (src/types/contractConformance.test-d.ts) checks the types; this
+  // checks the built object actually carries the members at runtime.
+  const contractMembers: Record<string, string[]> = {
+    commands: ['register', 'execute'],
+    kernel: ['invoke', 'on'],
+    platform: ['fs', 'dialog', 'window', 'shell'],
+    events: ['on', 'emit'],
+    storage: ['get', 'set', 'delete'],
+    notifications: ['show'],
+    context: ['set', 'get', 'evaluate'],
+    input: ['prompt', 'confirm'],
+    uri: ['register'],
+    activityBar: ['addItem', 'removeItem'],
+    statusBar: ['createItem'],
+  }
+  for (const [ns, members] of Object.entries(contractMembers)) {
+    const surface = (api as unknown as Record<string, Record<string, unknown>>)[
+      ns
+    ]
+    assert.ok(surface, `api.${ns} missing from the built PluginAPI`)
+    for (const member of members) {
+      assert.ok(
+        member in surface,
+        `api.${ns}.${member} missing from the built PluginAPI`,
+      )
+    }
+  }
+})
