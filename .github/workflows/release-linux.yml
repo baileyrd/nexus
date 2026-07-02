@@ -1,0 +1,108 @@
+# Build the Linux packages for `nexus-shell` on a version tag.
+#
+# Tauri 2's `bundle.targets = "all"` produces `.deb`, `.rpm`, and
+# `.AppImage` on Linux. All three are uploaded as workflow artifacts AND
+# attached to the draft GitHub Release named after the tag (shared with
+# the Windows/macOS release workflows — softprops/action-gh-release
+# appends to an existing draft rather than duplicating it), ready for
+# manual review before publishing.
+#
+# `workflow_dispatch` is included so you can do a dry-run build off main
+# without cutting a tag — the artifact upload still works, the Release
+# step is skipped (no tag context).
+#
+# Packages are unsigned (same gap as Windows — see RELEASE.md "Not yet
+# in place"). A SHA256SUMS sidecar is generated so users can at least
+# verify download integrity.
+name: Release Linux build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build Tauri packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # softprops/action-gh-release needs this to create the Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tauri 2 Linux prerequisites (webkit2gtk-4.1 + soup3 era). Matches
+      # the dev-dependency note in CLAUDE.md for `pnpm tauri:dev`.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            build-essential \
+            curl wget file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo target
+        uses: Swatinem/rust-cache@v2
+        with:
+          # `shell/` is intentionally excluded from the root Cargo workspace
+          # (see CLAUDE.md), so its target dir lives under shell/src-tauri/.
+          workspaces: shell/src-tauri -> target
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri (Linux packages)
+        run: pnpm --filter nexus-shell tauri:build
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd shell/src-tauri/target/release/bundle
+          sha256sum deb/*.deb rpm/*.rpm appimage/*.AppImage \
+            > "SHA256SUMS-linux-${{ github.ref_name }}.txt"
+          cat "SHA256SUMS-linux-${{ github.ref_name }}.txt"
+
+      - name: Upload packages as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-shell-linux-${{ github.ref_name }}
+          path: |
+            shell/src-tauri/target/release/bundle/deb/*.deb
+            shell/src-tauri/target/release/bundle/rpm/*.rpm
+            shell/src-tauri/target/release/bundle/appimage/*.AppImage
+            shell/src-tauri/target/release/bundle/SHA256SUMS-linux-*.txt
+          if-no-files-found: error
+
+      - name: Attach packages to a draft Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            shell/src-tauri/target/release/bundle/deb/*.deb
+            shell/src-tauri/target/release/bundle/rpm/*.rpm
+            shell/src-tauri/target/release/bundle/appimage/*.AppImage
+            shell/src-tauri/target/release/bundle/SHA256SUMS-linux-*.txt
+          fail_on_unmatched_files: true

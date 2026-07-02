@@ -9,6 +9,14 @@ lives in the git log and in `docs/0.1.2/audits/`.
 ## [Unreleased]
 
 ### Added
+- **Linux + macOS release pipelines** — `release-linux.yml` (`.deb` /
+  `.rpm` / `.AppImage`) and `release-macos.yml` (aarch64 + x86_64
+  `.dmg`s) mirror the Windows workflow: tag-triggered, artifacts +
+  `SHA256SUMS-<platform>-<tag>.txt` checksums attached to one shared
+  draft Release, `workflow_dispatch` dry-runs. The Windows workflow
+  gains the same checksum sidecar. Auto-updater key-handling steps are
+  documented in `RELEASE.md` (owner-generated secrets; no updater code
+  yet).
 - **Hybrid forge search** (`com.nexus.storage::hybrid_search`, handler id
   76) — reciprocal-rank fusion (`k=60`, matching `nexus-memory`'s recall)
   of the Tantivy BM25 arm and the vector-store cosine arm, with 4×

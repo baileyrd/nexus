@@ -52,6 +52,20 @@ jobs:
       - name: Build Tauri (Windows installers)
         run: pnpm --filter nexus-shell tauri:build
 
+      - name: Generate SHA256SUMS
+        shell: pwsh
+        run: |
+          Set-Location shell/src-tauri/target/release/bundle
+          $files = @(Get-ChildItem msi/*.msi) + @(Get-ChildItem nsis/*.exe)
+          $lines = $files | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $rel = [IO.Path]::GetRelativePath((Get-Location), $_.FullName) -replace '\\', '/'
+            "$h  $rel"
+          }
+          $out = "SHA256SUMS-windows-${{ github.ref_name }}.txt"
+          $lines | Set-Content -Encoding ascii $out
+          Get-Content $out
+
       - name: Upload installers as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -59,6 +73,7 @@ jobs:
           path: |
             shell/src-tauri/target/release/bundle/msi/*.msi
             shell/src-tauri/target/release/bundle/nsis/*.exe
+            shell/src-tauri/target/release/bundle/SHA256SUMS-windows-*.txt
           if-no-files-found: error
 
       - name: Attach installers to a draft Release
@@ -71,4 +86,5 @@ jobs:
           files: |
             shell/src-tauri/target/release/bundle/msi/*.msi
             shell/src-tauri/target/release/bundle/nsis/*.exe
+            shell/src-tauri/target/release/bundle/SHA256SUMS-windows-*.txt
           fail_on_unmatched_files: true
