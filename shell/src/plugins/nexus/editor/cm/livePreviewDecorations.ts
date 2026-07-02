@@ -1,8 +1,74 @@
 import { syntaxTree } from '@codemirror/language'
-import type { EditorState } from '@codemirror/state'
+import { Facet, type EditorState } from '@codemirror/state'
 import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
 import { renderMarkdown } from '../markdownRender'
 import { fencedCodeRegistry } from './fencedCodeRegistry'
+
+// ── C1 (#354) — forge-image rendering context ────────────────────────
+//
+// The image block widget needs to turn a markdown src into displayable
+// bytes, which requires the note's relpath (relative resolution) and a
+// kernel handle (storage read). Both arrive via this facet, provided
+// by `livePreviewExt({ forgeImages })`; when absent (tests, tabs
+// without a kernel), images keep the v1 mark-only styling.
+
+export interface ForgeImageContext {
+  /** Relpath of the note being edited — part of the widget identity so
+   *  switching tabs re-resolves relative srcs. */
+  noteRelpath: string
+  /** Resolve a (possibly relative, URI-encoded) image src to a
+   *  data: URL, or `null` when the file isn't in the forge. */
+  loadImage: (src: string) => Promise<string | null>
+}
+
+export const forgeImageContext = Facet.define<
+  ForgeImageContext,
+  ForgeImageContext | null
+>({
+  combine: (values) => values[0] ?? null,
+})
+
+export class ForgeImageWidget extends WidgetType {
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+    readonly context: ForgeImageContext,
+  ) {
+    super()
+  }
+  eq(other: ForgeImageWidget): boolean {
+    return (
+      this.src === other.src &&
+      this.alt === other.alt &&
+      this.context.noteRelpath === other.context.noteRelpath
+    )
+  }
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-image-widget'
+    wrap.dataset.src = this.src
+    const img = document.createElement('img')
+    img.alt = this.alt
+    img.className = 'nx-forge-image'
+    wrap.appendChild(img)
+    void this.context.loadImage(this.src).then((url) => {
+      if (!wrap.isConnected) return
+      if (url) {
+        img.src = url
+      } else {
+        wrap.replaceChildren()
+        const chip = document.createElement('span')
+        chip.className = 'cm-md-image-missing'
+        chip.textContent = `image not found: ${this.src}`
+        wrap.appendChild(chip)
+      }
+    })
+    return wrap
+  }
+  ignoreEvent(): boolean {
+    return true
+  }
+}
 
 class HrWidget extends WidgetType {
   eq(_other: HrWidget): boolean {
@@ -306,7 +372,12 @@ function visit(
     return
   }
   if (name === 'Image') {
-    handleImage(node.node, items)
+    // C1 (#354) — whole-line images swap to a block widget (emitted
+    // here so the combined builder's output matches the field+plugin
+    // union); everything else keeps the v1 mark-only styling.
+    if (!handleImageBlock(node.node, doc, state, active, items)) {
+      handleImage(node.node, items)
+    }
     return
   }
   if (/^ATXHeading[1-6]$/.test(name)) {
@@ -389,6 +460,81 @@ function visitBlock(
     handleSetextHeadingBlock(node.node, state, active, doc, items)
     return
   }
+  if (name === 'Image') {
+    // C1 (#354) — block-widget swap for whole-line images. CM6
+    // requires block widgets to originate from the StateField source,
+    // same constraint as tables / HRs.
+    handleImageBlock(node.node, doc, state, active, items)
+    return
+  }
+}
+
+/**
+ * C1 (#354) — swap a whole-line `![alt](src)` for a rendered image
+ * block widget. Fires only when:
+ *   - a [`forgeImageContext`] is installed (kernel-backed tab),
+ *   - the image is the *entire* trimmed content of a single line
+ *     (mid-sentence images keep mark-only styling — a block swap
+ *     would reflow the surrounding text), and
+ *   - the line isn't active (cursor moves onto it → syntax reveals,
+ *     mirroring the table behaviour).
+ * Returns `true` when the widget was emitted so inline callers can
+ * skip the mark fallback for the same node.
+ */
+function handleImageBlock(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  state: EditorState,
+  active: Set<number>,
+  items: DecorationItem[],
+): boolean {
+  const ctx = state.facet(forgeImageContext)
+  if (!ctx) return false
+  const startLine = doc.lineAt(node.from)
+  if (doc.lineAt(node.to).number !== startLine.number) return false
+  if (active.has(startLine.number)) return false
+  if (startLine.text.trim() !== doc.sliceString(node.from, node.to).trim()) {
+    return false
+  }
+  let src = ''
+  const marks: { from: number; to: number }[] = []
+  let cur: SyntaxNode | null = node.firstChild
+  while (cur) {
+    if (cur.name === 'URL') src = doc.sliceString(cur.from, cur.to)
+    else if (cur.name === 'LinkMark') marks.push({ from: cur.from, to: cur.to })
+    cur = cur.nextSibling
+  }
+  // Angle-bracketed destinations (`![](<a b.png>)`) include the
+  // brackets in the URL node — strip them.
+  src = src.replace(/^<|>$/g, '').trim()
+  if (src.length === 0) return false
+  const alt =
+    marks.length >= 2 && marks[1]!.from > marks[0]!.to
+      ? doc.sliceString(marks[0]!.to, marks[1]!.from)
+      : ''
+  items.push({
+    from: startLine.from,
+    to: startLine.to,
+    deco: Decoration.replace({
+      widget: new ForgeImageWidget(src, alt, ctx),
+      block: true,
+      inclusive: false,
+    }),
+  })
+  return true
+}
+
+/** Predicate twin of [`handleImageBlock`] for the inline visitor:
+ *  runs the exact same logic against a throwaway items array so the
+ *  two sources can never drift. Widget construction without `toDOM`
+ *  is allocation-only, so the cost is negligible. */
+function imageBlockOwned(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  state: EditorState,
+  active: Set<number>,
+): boolean {
+  return handleImageBlock(node, doc, state, active, [])
 }
 
 // The cross-line replace that hides the `===` / `---` underline row
@@ -451,7 +597,11 @@ function visitInline(
     return
   }
   if (name === 'Image') {
-    handleImage(node.node, items)
+    // C1 (#354) — the StateField source owns whole-line images (block
+    // widget); emit the mark fallback only when it doesn't fire.
+    if (!imageBlockOwned(node.node, doc, state, active)) {
+      handleImage(node.node, items)
+    }
     return
   }
   if (/^ATXHeading[1-6]$/.test(name)) {

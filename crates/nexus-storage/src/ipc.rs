@@ -750,6 +750,33 @@ pub struct StorageRenameEntryArgs {
     pub from: String,
     /// Forge-relative path of the destination.
     pub to: String,
+    /// C2 (#355) — when `true`, rewrite inbound wikilinks / embeds /
+    /// markdown links in referencing files so they keep resolving
+    /// after the move. Defaults to `false` for backward compatibility;
+    /// frontends pass the user's "Automatically update internal links"
+    /// setting.
+    #[serde(default)]
+    pub update_links: bool,
+}
+
+/// Return type for `com.nexus.storage::rename_entry`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageRenameEntryResult {
+    /// Always `true` on success (errors surface as `IpcError`).
+    pub ok: bool,
+    /// C2 (#355) — referencing files whose links were rewritten.
+    pub files_rewritten: usize,
+    /// C2 (#355) — total link occurrences updated across those files.
+    pub links_updated: usize,
 }
 
 // ── #190 / R7 — search.rs handlers ──────────────────────────────────────────

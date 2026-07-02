@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageRenameEntryResult",
+  "description": "Return type for `com.nexus.storage::rename_entry`.",
+  "type": "object",
+  "properties": {
+    "files_rewritten": {
+      "description": "C2 (#355) — referencing files whose links were rewritten.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "links_updated": {
+      "description": "C2 (#355) — total link occurrences updated across those files.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "ok": {
+      "description": "Always `true` on success (errors surface as `IpcError`).",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "files_rewritten",
+    "links_updated"
+  ]
+}

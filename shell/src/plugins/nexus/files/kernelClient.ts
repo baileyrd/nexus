@@ -6,6 +6,7 @@
 import type { KernelAPI } from '../../../types/plugin'
 import type { FilesDirEntry } from './filesStore'
 import { clientLogger } from '../../../clientLogger'
+import { configStore } from '../../../stores/configStore'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 
@@ -76,9 +77,12 @@ export async function createDir(relpath: string): Promise<void> {
  */
 export async function renameEntry(from: string, to: string): Promise<void> {
   if (!kernel) throw new Error('kernel handle missing')
+  // C2 (#355) — the storage handler rewrites inbound links in
+  // referencing notes when the user's link-update setting is on.
   await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'rename_entry', {
     from,
     to,
+    update_links: configStore.get<boolean>('nexus.settings.links.autoUpdate', true),
   })
 }
 

@@ -374,3 +374,24 @@
   max-width: 100%;
   border-radius: var(--radius-s);
 }
+
+/* C1 (#354) — forge-image hydration states. `.nx-forge-image` is
+   tagged by the reading-view hydrator before the async load resolves;
+   `--missing` marks srcs that resolved to nothing in the forge. */
+.nexus-markdown-body img.nx-forge-image--missing {
+  min-height: 1.6em;
+  padding: 2px 8px;
+  border: 1px dashed var(--divider-color);
+  border-radius: var(--radius-s);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* `![[…]]` embeds of non-image targets render as a wikilink chip. */
+.nexus-markdown-body .nx-embed {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--divider-color);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}

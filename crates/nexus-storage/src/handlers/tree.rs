@@ -4,7 +4,10 @@
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{StorageListDirArgs, StorageOk, StorageRelpathArgs, StorageRenameEntryArgs};
+use crate::ipc::{
+    StorageListDirArgs, StorageOk, StorageRelpathArgs, StorageRenameEntryArgs,
+    StorageRenameEntryResult,
+};
 use crate::StorageEngine;
 
 use super::shared::{exec_err, parse_args, to_value};
@@ -38,11 +41,23 @@ pub(crate) fn create_dir(engine: &StorageEngine, args: &Value) -> Result<Value, 
 
 pub(crate) fn rename_entry(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     // #190 / R7 — strict-parse via `StorageRenameEntryArgs`.
-    let StorageRenameEntryArgs { from, to } = parse_args(args, "rename_entry")?;
-    engine
-        .rename_entry(&from, &to)
+    let StorageRenameEntryArgs {
+        from,
+        to,
+        update_links,
+    } = parse_args(args, "rename_entry")?;
+    // C2 (#355) — optionally rewrite inbound links in referencing files.
+    let (files_rewritten, links_updated) = engine
+        .rename_entry_with_links(&from, &to, update_links)
         .map_err(|e| exec_err(format!("rename_entry: {e}")))?;
-    to_value(&StorageOk { ok: true }, "rename_entry")
+    to_value(
+        &StorageRenameEntryResult {
+            ok: true,
+            files_rewritten,
+            links_updated,
+        },
+        "rename_entry",
+    )
 }
 
 pub(crate) fn delete_entry(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {

@@ -11,6 +11,11 @@
     "to": {
       "description": "Forge-relative path of the destination.",
       "type": "string"
+    },
+    "update_links": {
+      "description": "C2 (#355) — when `true`, rewrite inbound wikilinks / embeds /\nmarkdown links in referencing files so they keep resolving\nafter the move. Defaults to `false` for backward compatibility;\nfrontends pass the user's \"Automatically update internal links\"\nsetting.",
+      "type": "boolean",
+      "default": false
     }
   },
   "additionalProperties": false,

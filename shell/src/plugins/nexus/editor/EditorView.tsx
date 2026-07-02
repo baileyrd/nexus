@@ -3,6 +3,9 @@ import { EditorView as CMEditorView } from '@codemirror/view'
 import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStore'
 import { snap, useFrameSnapshot } from '../../../stores/useFrameSnapshot'
 import { renderMarkdown, hydrateFencedCode } from './markdownRender'
+// C1 (#354) — forge-image resolution + paste/drop attachment import.
+import { hydrateForgeImages, makeForgeImageContext } from './attachments'
+import { attachmentPasteExt } from './cm/attachmentPaste'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
@@ -434,9 +437,20 @@ export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
   // BL-008 — swap fenced-code placeholders for rendered widgets after the
   // sanitized markdown HTML has been mounted by React. Fired keyed on the
   // HTML string so a content edit re-runs hydration against the new tree.
+  // C1 (#354) — same pass resolves forge-relative <img> srcs (and
+  // `![[…]]` embed placeholders) into data: URLs read via storage IPC.
   useEffect(() => {
     if (!markdownHtml) return
     hydrateFencedCode(markdownBodyRef.current)
+    const relpath = activeTab?.relpath
+    if (relpath) {
+      hydrateForgeImages(markdownBodyRef.current, {
+        noteRelpath: relpath,
+        kernel: getEditorRuntime()?.kernel ?? null,
+      })
+    }
+    // Keyed on the HTML string (which changes with content/relpath).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdownHtml])
 
   const rootStyle: React.CSSProperties = {
@@ -1037,6 +1051,13 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
                       invoke: (plugin, cmd, args) =>
                         runtime.kernel!.invoke(plugin, cmd, args),
                     }),
+                    // C1 (#354) — paste/drop attachment import for
+                    // markdown tabs (both live and source mode).
+                    attachmentPasteExt({
+                      relpath: tab.relpath,
+                      kernel: runtime.kernel,
+                      onError: runtime.reportBridgeError,
+                    }),
                   ]
                 : []),
               remoteCursorsExt({ relpath: tab.relpath }),
@@ -1044,7 +1065,13 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             return tab.mode === 'live'
               ? [
                   ...base,
-                  livePreviewExt(),
+                  livePreviewExt(
+                    // C1 (#354) — kernel-backed tabs render whole-line
+                    // images as block widgets.
+                    runtime.kernel
+                      ? { forgeImages: makeForgeImageContext(tab.relpath, runtime.kernel) }
+                      : {},
+                  ),
                   databaseViewExt({
                     client: runtime.kernelClient,
                     onError: runtime.reportBridgeError,
@@ -1232,7 +1259,24 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       if (gitBlameExtension !== null) base.push(gitBlameExtension)
       if (lspClientExtension !== null) base.push(lspClientExtension)
       if (tab.mode === 'live' && languageExtension === null) {
-        base.push(livePreviewExt())
+        base.push(
+          livePreviewExt(
+            runtime?.kernel && !isUntitled(tab.relpath)
+              ? { forgeImages: makeForgeImageContext(tab.relpath, runtime.kernel) }
+              : {},
+          ),
+        )
+      }
+      // C1 (#354) — markdown tabs on the fallback path (untitled /
+      // pre-session) still get paste/drop attachment import.
+      if (runtime?.kernel && isMarkdown(tab.name)) {
+        base.push(
+          attachmentPasteExt({
+            relpath: tab.relpath,
+            kernel: runtime.kernel,
+            onError: runtime.reportBridgeError,
+          }),
+        )
       }
       // BL-139 — per-keystroke FIM prediction in code-mode (and the
       // markdown fallback above). The extension is always installed

@@ -985,6 +985,21 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
           />
         }
       />
+      {/* C1 (#354) — companion path for the `specific` mode above.
+          Consumed by the editor's paste/drop attachment importer
+          (`editor/attachments.ts::attachmentDirFor`). */}
+      <StubRow
+        title="Attachment folder path"
+        description="Folder used when the location above is 'Specific folder…'."
+        control={
+          <WiredText
+            settingKey="nexus.settings.files.attachmentFolderPath"
+            defaultValue="attachments"
+            label="Attachment folder path"
+            placeholder="attachments"
+          />
+        }
+      />
 
       <div className="settings-section-title" style={{ marginTop: 24 }}>Links</div>
 
@@ -1004,13 +1019,16 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
           />
         }
       />
+      {/* C2 (#355) — consumed by the rename flows (files tree +
+          editor rename/move commands): `rename_entry` rewrites
+          inbound wikilinks/embeds/markdown links when this is on. */}
       <StubRow
         title="Automatically update internal links"
-        description="Turn off to be prompted to update links after renaming a file."
+        description="Update wikilinks and markdown links in other notes when a file is renamed or moved."
         control={
           <WiredToggle
             settingKey="nexus.settings.links.autoUpdate"
-            defaultValue={false}
+            defaultValue={true}
             label="Toggle automatic link updates"
           />
         }

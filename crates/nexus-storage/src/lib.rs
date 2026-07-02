@@ -32,6 +32,7 @@ pub mod hybrid;
 /// BL-083: forge-to-forge import / migration planning + apply.
 pub mod import;
 mod index;
+mod link_rewrite;
 /// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
 pub mod lfs;
 pub mod mdx;
@@ -1234,6 +1235,74 @@ impl StorageEngine {
             }
         }
         Ok(())
+    }
+
+    /// C2 (#355) — [`rename_entry`](Self::rename_entry), then rewrite
+    /// inbound links in every referencing file so wikilinks / embeds /
+    /// markdown links keep resolving after the move. Referencing files
+    /// come from the `links` table (`target_file_id` join) — the same
+    /// resolution the index committed to at parse time — and each
+    /// rewritten file is persisted through [`write_file`](Self::write_file),
+    /// so its own index rows (fts, links, tags) refresh atomically.
+    ///
+    /// Returns `(files_rewritten, links_updated)`; `(0, 0)` when
+    /// `update_links` is `false` or nothing referenced the file.
+    ///
+    /// # Errors
+    ///
+    /// Same failure modes as `rename_entry` plus [`StorageError`] from
+    /// reading/writing a referencing file. The rename itself is never
+    /// rolled back by a rewrite failure — callers get the error after
+    /// the disk rename already happened, matching the watcher-reconcile
+    /// contract for partial states.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn rename_entry_with_links(
+        &self,
+        from: &str,
+        to: &str,
+        update_links: bool,
+    ) -> Result<(usize, usize), StorageError> {
+        // Collect referencing files BEFORE the rename: write_file() on
+        // each referencing file after the rename refreshes its rows,
+        // but the query itself must see the pre-rename link graph.
+        let sources: Vec<String> = if update_links {
+            let conn = self.pool.get().map_err(|e| {
+                StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT sf.path FROM links l
+                 JOIN files sf ON sf.id = l.source_file_id
+                 JOIN files tf ON tf.id = l.target_file_id
+                 WHERE tf.path = ?1 AND sf.is_deleted = 0;",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![from], |r| r.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
+        };
+
+        self.rename_entry(from, to)?;
+
+        let mut files_rewritten = 0usize;
+        let mut links_updated = 0usize;
+        for source in sources {
+            if source == from || source == to {
+                continue; // self-links re-key with the file itself
+            }
+            let abs = resolve_within(self.forge.root(), &source)?;
+            let Ok(text) = std::fs::read_to_string(&abs) else {
+                continue; // non-UTF-8 / vanished — skip, don't fail the rename
+            };
+            if let Some((rewritten, n)) = link_rewrite::rewrite_links(&text, from, to) {
+                self.write_file(&source, rewritten.as_bytes())?;
+                files_rewritten += 1;
+                links_updated += n;
+            }
+        }
+        Ok((files_rewritten, links_updated))
     }
 
     /// Delete an entry within the forge. Handles both files and directories.

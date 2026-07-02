@@ -51,7 +51,8 @@ use nexus_storage::ipc::{
     StorageNoteAppendArgs, StorageNoteAppendResult, StorageOk, StoragePathArgs,
     StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageQueryTagsArgs, StorageReadFileArgs,
     StorageReadFileResult, StorageReadFrontmatterArgs, StorageReadLinesArgs,
-    StorageReadLinesResult, StorageRelpathArgs, StorageRenameEntryArgs, StorageSearchArgs,
+    StorageReadLinesResult, StorageRelpathArgs, StorageRenameEntryArgs, StorageRenameEntryResult,
+    StorageSearchArgs,
     StorageSearchHit, StorageSearchResult, StorageSettingsWriteArgs, StorageSymbolRow,
     StorageToggleTaskArgs, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
     StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
@@ -326,6 +327,8 @@ fn emit_all_schemas_impl() {
     // ── com.nexus.storage::tree handlers (#190) ──────────────────────────
     write_schema::<StorageRelpathArgs>("com_nexus_storage__relpath_args", "shared");
     write_schema::<StorageRenameEntryArgs>("com_nexus_storage__rename_entry", "args");
+    // C2 (#355) — rename now reports link-rewrite counts.
+    write_schema::<StorageRenameEntryResult>("com_nexus_storage__rename_entry", "result");
 
     // ── com.nexus.storage::query_tags / config_* / settings_write (#190) ─
     write_schema::<StorageQueryTagsArgs>("com_nexus_storage__query_tags", "args");

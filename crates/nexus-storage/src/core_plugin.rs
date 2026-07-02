@@ -110,7 +110,7 @@ pub const HANDLER_LIST_DIR: u32 = 27;
 pub const HANDLER_CREATE_FILE: u32 = 28;
 /// Handler id for `create_dir`. Args: `{ "relpath": String }`; Returns: `{}`.
 pub const HANDLER_CREATE_DIR: u32 = 29;
-/// Handler id for `rename_entry`. Args: `{ "from": String, "to": String }`; Returns: `{}`.
+/// Handler id for `rename_entry`. Args: `{ "from": String, "to": String, "update_links": bool? }`; Returns: `{ "ok": bool, "files_rewritten": usize, "links_updated": usize }`.
 pub const HANDLER_RENAME_ENTRY: u32 = 30;
 /// Handler id for `delete_entry`. Args: `{ "relpath": String }`; Returns: `{}`.
 /// Unlike [`HANDLER_DELETE_FILE`], this handles both files and directories.
