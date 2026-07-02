@@ -9,6 +9,22 @@ lives in the git log and in `docs/0.1.2/audits/`.
 ## [Unreleased]
 
 ### Added
+- **Prometheus exit path for kernel metrics** (BL-093 closure) —
+  `MetricsSnapshot::to_prometheus_text()` renders the registry in the
+  text exposition format (counters, the queue-depth gauge, and
+  p50/p95/p99 summaries in seconds; sorted/deterministic output;
+  label escaping per spec), exposed as
+  `com.nexus.security::metrics_prometheus` (handler id 10, unrestricted
+  read-only) so any frontend or a scrape sidecar can reach it via
+  `ipc_call`.
+- **Linux + macOS release pipelines** — `release-linux.yml` (`.deb` /
+  `.rpm` / `.AppImage`) and `release-macos.yml` (aarch64 + x86_64
+  `.dmg`s) mirror the Windows workflow: tag-triggered, artifacts +
+  `SHA256SUMS-<platform>-<tag>.txt` checksums attached to one shared
+  draft Release, `workflow_dispatch` dry-runs. The Windows workflow
+  gains the same checksum sidecar. Auto-updater key-handling steps are
+  documented in `RELEASE.md` (owner-generated secrets; no updater code
+  yet).
 - **Hybrid forge search** (`com.nexus.storage::hybrid_search`, handler id
   76) — reciprocal-rank fusion (`k=60`, matching `nexus-memory`'s recall)
   of the Tantivy BM25 arm and the vector-store cosine arm, with 4×

@@ -48,6 +48,12 @@ pub const HANDLER_SANDBOX_POLICY: u32 = 8;
 /// `download` handler id (async) — brokered, allowlisted download.
 pub const HANDLER_DOWNLOAD: u32 = 9;
 
+/// Handler id for `metrics_prometheus` — the BL-093 registry rendered
+/// in the Prometheus text exposition format (the scrape "exit path").
+/// No args; returns `{ "text": "<exposition>" }`, or `{ "text": null }`
+/// when no global metrics registry is installed.
+pub const HANDLER_METRICS_PROMETHEUS: u32 = 10;
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::security::register`.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
@@ -58,6 +64,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("query_audit_log", HANDLER_QUERY_AUDIT_LOG),
     ("clear_audit_log", HANDLER_CLEAR_AUDIT_LOG),
     ("metrics_snapshot", HANDLER_METRICS_SNAPSHOT),
+    ("metrics_prometheus", HANDLER_METRICS_PROMETHEUS),
     ("sandbox_policy", HANDLER_SANDBOX_POLICY),
     ("download", HANDLER_DOWNLOAD),
 ];
@@ -278,6 +285,11 @@ impl CorePlugin for SecurityCorePlugin {
                     nexus_kernel::metrics::global().map(nexus_kernel::KernelMetrics::snapshot);
                 Ok(serde_json::to_value(&snap).unwrap_or(json!(null)))
             }
+            HANDLER_METRICS_PROMETHEUS => {
+                let text =
+                    nexus_kernel::metrics::global().map(|m| m.snapshot().to_prometheus_text());
+                Ok(json!({ "text": text }))
+            }
             HANDLER_CLEAR_AUDIT_LOG => {
                 let typed: crate::ipc::ClearAuditLogArgs = parse_args(args, "clear_audit_log")?;
                 let removed = nexus_kernel::audit_store::clear(typed.before_ts);
@@ -462,6 +474,18 @@ mod tests {
     fn on_stop_succeeds_without_bus() {
         let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
         plugin.on_stop();
+    }
+
+    #[test]
+    fn dispatch_metrics_prometheus_returns_text_field() {
+        // The reply shape { "text": ... } is the contract whether or not
+        // a global metrics registry is installed (text is null without
+        // one, the exposition string with one).
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let reply = plugin
+            .dispatch(HANDLER_METRICS_PROMETHEUS, &serde_json::json!({}))
+            .expect("metrics_prometheus dispatch");
+        assert!(reply.get("text").is_some(), "reply must carry a text field");
     }
 
     #[test]

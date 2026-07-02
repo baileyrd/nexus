@@ -1032,6 +1032,11 @@ unrestricted = "read-only snapshot of kernel metrics for observability"
 
 [[handler]]
 plugin = "com.nexus.security"
+command = "metrics_prometheus"
+unrestricted = "read-only Prometheus text rendering of the kernel metrics snapshot"
+
+[[handler]]
+plugin = "com.nexus.security"
 command = "sandbox_policy"
 unrestricted = "read-only introspection of the active OS-sandbox config from sandbox.toml"
 

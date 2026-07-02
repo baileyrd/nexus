@@ -384,6 +384,158 @@ impl KernelMetrics {
     }
 }
 
+// ── Prometheus text exposition (BL-093 exit path) ────────────────────────────
+
+/// Escape a label value per the Prometheus text exposition format:
+/// backslash, double-quote, and newline must be escaped.
+fn escape_label(v: &str) -> String {
+    v.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+/// Nanoseconds → seconds for Prometheus base units. `f64` default
+/// formatting is the shortest round-trip representation, so output is
+/// deterministic.
+#[allow(clippy::cast_precision_loss)] // ns fit f64's mantissa for any realistic uptime
+fn ns_to_secs(ns: u64) -> f64 {
+    ns as f64 / 1_000_000_000.0
+}
+
+/// Render a flattened `<a>::<b>[::<c>]` counter key as a Prometheus
+/// label set with the given label names. Keys that don't split into
+/// exactly `names.len()` parts fall back to a single `key="<raw>"`
+/// label rather than being dropped — visibility over tidiness.
+fn labels_for(key: &str, names: &[&str]) -> String {
+    let parts: Vec<&str> = key.split("::").collect();
+    if parts.len() == names.len() {
+        let pairs: Vec<String> = names
+            .iter()
+            .zip(&parts)
+            .map(|(n, p)| format!("{n}=\"{}\"", escape_label(p)))
+            .collect();
+        format!("{{{}}}", pairs.join(","))
+    } else {
+        format!("{{key=\"{}\"}}", escape_label(key))
+    }
+}
+
+impl MetricsSnapshot {
+    /// Render the snapshot in the Prometheus text exposition format
+    /// (version 0.0.4) — the missing "exit path" for the BL-093
+    /// registry. Counters map to `counter`, the queue-depth gauge to
+    /// `gauge`, and the percentile histograms to `summary` (quantile
+    /// labels), since [`HistogramSnapshot`] carries p50/p95/p99 rather
+    /// than raw bucket counts. Durations are converted to seconds
+    /// (Prometheus base units). Output is sorted by key so scrapes and
+    /// tests are deterministic.
+    #[must_use]
+    pub fn to_prometheus_text(&self) -> String {
+        let mut out = String::new();
+
+        let mut counter = |out: &mut String,
+                           name: &str,
+                           help: &str,
+                           map: &HashMap<String, u64>,
+                           labels: &[&str]| {
+            out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} counter\n"));
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            for k in keys {
+                out.push_str(&format!("{name}{} {}\n", labels_for(k, labels), map[k]));
+            }
+        };
+
+        counter(
+            &mut out,
+            "nexus_ipc_calls_total",
+            "IPC calls dispatched, by plugin, command, and outcome.",
+            &self.ipc_calls_total,
+            &["plugin_id", "command", "status"],
+        );
+        counter(
+            &mut out,
+            "nexus_event_bus_published_total",
+            "Events published to the kernel bus, by plugin.",
+            &self.event_bus_published_total,
+            &["plugin_id"],
+        );
+        counter(
+            &mut out,
+            "nexus_capability_checks_total",
+            "Capability checks performed, by plugin, capability, and result.",
+            &self.capability_checks_total,
+            &["plugin_id", "capability", "result"],
+        );
+
+        let mut summary = |out: &mut String,
+                           name: &str,
+                           help: &str,
+                           map: &HashMap<String, HistogramSnapshot>,
+                           labels: &[&str]| {
+            out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} summary\n"));
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            for k in keys {
+                let h = &map[k];
+                let base = labels_for(k, labels);
+                // Splice the quantile label into the existing label set.
+                let with_q = |q: &str| -> String {
+                    let inner = base.trim_start_matches('{').trim_end_matches('}');
+                    format!("{{{inner},quantile=\"{q}\"}}")
+                };
+                out.push_str(&format!(
+                    "{name}{} {}\n",
+                    with_q("0.5"),
+                    ns_to_secs(h.p50_ns)
+                ));
+                out.push_str(&format!(
+                    "{name}{} {}\n",
+                    with_q("0.95"),
+                    ns_to_secs(h.p95_ns)
+                ));
+                out.push_str(&format!(
+                    "{name}{} {}\n",
+                    with_q("0.99"),
+                    ns_to_secs(h.p99_ns)
+                ));
+                out.push_str(&format!("{name}_sum{base} {}\n", ns_to_secs(h.sum_ns)));
+                out.push_str(&format!("{name}_count{base} {}\n", h.count));
+            }
+        };
+
+        summary(
+            &mut out,
+            "nexus_ipc_call_duration_seconds",
+            "IPC call latency, by plugin and command.",
+            &self.ipc_call_duration,
+            &["plugin_id", "command"],
+        );
+        summary(
+            &mut out,
+            "nexus_plugin_lifecycle_duration_seconds",
+            "Plugin lifecycle hook latency, by plugin and hook.",
+            &self.plugin_lifecycle_duration,
+            &["plugin_id", "hook"],
+        );
+
+        out.push_str(&format!(
+            "# HELP nexus_event_bus_queue_depth Instantaneous broadcast-channel buffer occupancy.\n\
+             # TYPE nexus_event_bus_queue_depth gauge\n\
+             nexus_event_bus_queue_depth {}\n",
+            self.event_bus_queue_depth
+        ));
+        out.push_str(&format!(
+            "# HELP nexus_metrics_dropped_total Metric writes dropped by the per-metric key cap.\n\
+             # TYPE nexus_metrics_dropped_total counter\n\
+             nexus_metrics_dropped_total {}\n",
+            self.metrics_dropped_total
+        ));
+
+        out
+    }
+}
+
 // ── Global accessor ──────────────────────────────────────────────────────────
 
 static GLOBAL_METRICS: OnceLock<Arc<KernelMetrics>> = OnceLock::new();
@@ -525,5 +677,48 @@ mod tests {
         // snapshot field is reachable.
         let s = m.snapshot();
         assert_eq!(s.metrics_dropped_total, 0);
+    }
+
+    #[test]
+    fn prometheus_text_renders_counters_gauges_and_summaries() {
+        let m = KernelMetrics::new();
+        m.record_ipc_call("com.nexus.storage", "search", CallStatus::Ok, 5_000_000);
+        m.record_event_publish("com.nexus.editor");
+        let text = m.snapshot().to_prometheus_text();
+
+        assert!(text.contains("# TYPE nexus_ipc_calls_total counter"));
+        assert!(text.contains(
+            "nexus_ipc_calls_total{plugin_id=\"com.nexus.storage\",command=\"search\",status=\"ok\"} 1"
+        ));
+        assert!(text.contains("# TYPE nexus_ipc_call_duration_seconds summary"));
+        assert!(text.contains("nexus_ipc_call_duration_seconds_count{plugin_id=\"com.nexus.storage\",command=\"search\"} 1"));
+        assert!(text.contains("quantile=\"0.99\""));
+        assert!(text.contains("nexus_event_bus_published_total{plugin_id=\"com.nexus.editor\"} 1"));
+        assert!(text.contains("# TYPE nexus_event_bus_queue_depth gauge"));
+        assert!(text.contains("nexus_metrics_dropped_total 0"));
+    }
+
+    #[test]
+    fn prometheus_text_is_deterministic_and_sorted() {
+        let m = KernelMetrics::new();
+        m.record_event_publish("zeta");
+        m.record_event_publish("alpha");
+        let a = m.snapshot().to_prometheus_text();
+        let b = m.snapshot().to_prometheus_text();
+        assert_eq!(a, b);
+        let alpha = a.find("plugin_id=\"alpha\"").expect("alpha present");
+        let zeta = a.find("plugin_id=\"zeta\"").expect("zeta present");
+        assert!(alpha < zeta, "output must be key-sorted");
+    }
+
+    #[test]
+    fn prometheus_label_escaping_and_malformed_key_fallback() {
+        assert_eq!(escape_label("a\"b\\c\n"), "a\\\"b\\\\c\\n");
+        // A key that doesn't split into the expected label count falls
+        // back to a raw `key` label instead of being dropped.
+        assert_eq!(
+            labels_for("only-one-part", &["plugin_id", "command"]),
+            "{key=\"only-one-part\"}"
+        );
     }
 }

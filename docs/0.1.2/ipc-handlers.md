@@ -26,7 +26,7 @@
 | `com.nexus.ai.runtime` | 12 |
 | `com.nexus.skills` | 8 |
 | `com.nexus.acp` | 8 |
-| `com.nexus.security` | 9 |
+| `com.nexus.security` | 10 |
 | `com.nexus.comments` | 7 |
 | `com.nexus.memory` | 21 |
 | `com.nexus.database` | 6 |
@@ -259,7 +259,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.security (9)
+## com.nexus.security (10)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -268,6 +268,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `list_secret_names` | — | names only (no values) |
 | `query_audit_log` | `security.audit.read` | V12 (2026-06-10) — log discloses cross-plugin telemetry; previously unrestricted |
 | `metrics_snapshot` | — | read-only observability |
+| `metrics_prometheus` | — | read-only Prometheus text exposition of the kernel metrics (BL-093 exit path) |
 | `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
 | `sandbox_policy` | — | read-only introspection of the active OS-sandbox config (`sandbox.toml`) |
 | `download` | `net.http` | **async** — brokered, allowlisted download into a writable root (`{ url, dest, cwd? }`) |
