@@ -398,7 +398,15 @@ pub async fn retrieve(
         .into_iter()
         .next()
         .ok_or_else(|| AiError::Provider("embedding returned no vectors".into()))?;
-    vectorstore::search(ctx, &q_embedding, limit).await
+    let mut matches = vectorstore::search(ctx, &q_embedding, limit).await?;
+    // C28 (#381) — defense-in-depth: pattern-filter hits from paths
+    // excluded via .aiignore. (Frontmatter-excluded notes lose their
+    // chunks at index time, so no per-hit frontmatter read is needed.)
+    let patterns = crate::exclusion::cached_patterns(ctx).await;
+    if !patterns.is_empty() {
+        matches.retain(|m| !crate::exclusion::path_excluded(&patterns, &m.file_path));
+    }
+    Ok(matches)
 }
 
 /// BL-040: Embed `query` and return the top-`limit` matching chunks
