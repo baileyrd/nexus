@@ -233,7 +233,24 @@ impl StorageEngine {
         //    level. See issue #72.
         let abs_target = resolve_within(self.forge.root(), path)?;
         atomic_write(&abs_target, content, &self.forge.temp_dir())?;
+        self.index_file_content(path, content)
+    }
 
+    /// C17 (#371) — index `content` for `path` without writing to disk.
+    /// The index-update core of [`write_file`](Self::write_file), split
+    /// out so the watcher bridge can index externally-authored changes
+    /// (vim, Obsidian, a sync client) without re-writing bytes that are
+    /// already on disk — which would emit another watcher event and
+    /// loop.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database failure or non-UTF-8 content.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    fn index_file_content(&self, path: &str, content: &[u8]) -> Result<FileMetadata, StorageError> {
         // 2. Decode content as UTF-8.
         let text = std::str::from_utf8(content).map_err(|e| StorageError::CorruptFile {
             path: path.to_string(),
@@ -375,6 +392,77 @@ impl StorageEngine {
                 content_hash: parsed.content_hash,
             })
         }
+    }
+
+    /// C17 (#371) — bring the index up to date for a file the watcher
+    /// saw change on disk (created or modified outside the engine).
+    ///
+    /// Reads the current bytes and re-indexes them, with two skips that
+    /// make the call safe to fire on *every* watcher event:
+    ///
+    ///   - **echo suppression** — when the stored `content_hash` already
+    ///     matches the on-disk bytes (the event was our own `write_file`
+    ///     landing), nothing happens;
+    ///   - **binary content** — non-UTF-8 files carry no block index;
+    ///     they are left for the reconcile pass's metadata handling.
+    ///
+    /// Returns the new [`FileMetadata`] when the index was updated,
+    /// `None` when skipped (including a file already gone again).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn index_external_change(
+        &self,
+        path: &str,
+    ) -> Result<Option<FileMetadata>, StorageError> {
+        let abs = resolve_within(self.forge.root(), path)?;
+        let bytes = match std::fs::read(&abs) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        if std::str::from_utf8(&bytes).is_err() {
+            return Ok(None);
+        }
+        let hash = nexus_formats::sha256_hex(&bytes);
+        {
+            use rusqlite::OptionalExtension as _;
+            let conn = self.pool.get().map_err(|e| {
+                StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
+            let existing: Option<String> = conn
+                .query_row(
+                    "SELECT content_hash FROM files WHERE path = ?1 AND is_deleted = 0;",
+                    rusqlite::params![path],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if existing.as_deref() == Some(hash.as_str()) {
+                return Ok(None);
+            }
+        }
+        self.index_file_content(path, &bytes).map(Some)
+    }
+
+    /// C17 (#371) — drop the index rows for a file the watcher saw
+    /// deleted on disk. Soft-deletes the `files` row (same semantics as
+    /// the trash flow) so reconcile can resurrect it if the file comes
+    /// back.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn index_external_delete(&self, path: &str) -> Result<(), StorageError> {
+        self.soft_delete_index_entry(path, false)
     }
 
     /// Write `content` to `path` (vault-relative) atomically **without**

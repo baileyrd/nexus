@@ -5,11 +5,14 @@
 //!
 //! # Re-indexing
 //!
-//! The bridge thread publishes bus events; it does **not** update the `SQLite`
-//! index.  Callers that need real-time index updates should call
-//! [`StorageEngine::process_watcher_events`] on their own polling loop, or
-//! call [`StorageEngine::rebuild_index`] / [`StorageEngine::reconcile_index`]
-//! explicitly after batches of changes.
+//! C17 (#371): the bridge thread now **consumes** watcher events before
+//! publishing them — per-file incremental index updates for
+//! created/modified/deleted/renamed (with echo suppression for
+//! engine-initiated writes) and a full [`StorageEngine::reconcile_index`]
+//! on `ReconcileRequested` — so external edits (vim, Obsidian, sync
+//! clients) reach search/backlinks/graph without waiting for a git
+//! commit or a manual rebuild. Subscribers therefore read fresh rows
+//! when a `com.nexus.storage.file_*` event arrives.
 
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -642,9 +645,12 @@ impl CorePlugin for StorageCorePlugin {
         let (stop_tx, stop_rx) = mpsc::sync_channel::<()>(1);
         self.stop_tx = Some(stop_tx);
 
+        // C17 (#371) — the bridge now consumes events too (incremental
+        // index updates), so it needs the engine handle.
+        let bridge_engine = self.engine.clone();
         let handle = std::thread::Builder::new()
             .name("nexus-storage-bridge".to_string())
-            .spawn(move || bridge_loop(watcher, bus, stop_rx))
+            .spawn(move || bridge_loop(watcher, bus, bridge_engine, stop_rx))
             .map_err(|e| PluginError::LifecycleError {
                 plugin_id: PLUGIN_ID.to_string(),
                 hook: "on_start".to_string(),
@@ -974,8 +980,8 @@ fn locate_frontmatter(content: &str) -> Option<(usize, usize, usize)> {
 /// Polls the watcher until the stop signal arrives, translating each
 /// [`StorageEvent`] into a [`NexusEvent`] published on the kernel bus.
 ///
-/// The bridge only handles event translation and publication.  Index updates
-/// (`write_file`, `delete_file`, etc.) remain the caller's responsibility.
+/// C17 (#371): the bridge consumes each event (incremental index
+/// update via [`apply_index_update`]) before publishing it.
 #[allow(clippy::needless_pass_by_value)]
 /// BL-114: drain `com.nexus.git.commit` events and run an incremental
 /// reconcile so the FTS / knowledge graph / code-symbol indices catch
@@ -1022,7 +1028,12 @@ fn git_commit_loop(
     }
 }
 
-fn bridge_loop(watcher: Watcher, bus: Arc<EventBus>, stop_rx: mpsc::Receiver<()>) {
+fn bridge_loop(
+    watcher: Watcher,
+    bus: Arc<EventBus>,
+    engine: Option<Arc<StorageEngine>>,
+    stop_rx: mpsc::Receiver<()>,
+) {
     let rx = watcher.events();
 
     loop {
@@ -1037,7 +1048,50 @@ fn bridge_loop(watcher: Watcher, bus: Arc<EventBus>, stop_rx: mpsc::Receiver<()>
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
 
+        // C17 (#371) — apply the index update BEFORE publishing, so
+        // subscribers reacting to the event (AI indexing daemon,
+        // outline refresh, …) read fresh rows instead of stale ones.
+        if let Some(engine) = engine.as_ref() {
+            apply_index_update(engine, &storage_event);
+        }
         publish_event(&storage_event, &bus);
+    }
+}
+
+/// C17 (#371) — incremental index consumption of one watcher event.
+/// Errors are logged, never fatal: the reconcile pass remains the
+/// backstop for anything a per-file update misses.
+fn apply_index_update(engine: &StorageEngine, event: &StorageEvent) {
+    match event {
+        StorageEvent::FileCreated { path, .. } | StorageEvent::FileModified { path, .. } => {
+            if let Err(err) = engine.index_external_change(path) {
+                tracing::warn!(%err, path, "C17: external-change index update failed");
+            }
+        }
+        StorageEvent::FileDeleted { path } => {
+            if let Err(err) = engine.index_external_delete(path) {
+                tracing::warn!(%err, path, "C17: external-delete index update failed");
+            }
+        }
+        StorageEvent::FileRenamed { from, to, .. } => {
+            // The watcher's rename detection pairs a delete+create; the
+            // create side re-indexes the new path, so only the old path
+            // needs cleanup here.
+            if let Err(err) = engine.index_external_delete(from) {
+                tracing::warn!(%err, from, "C17: rename-source index cleanup failed");
+            }
+            if let Err(err) = engine.index_external_change(to) {
+                tracing::warn!(%err, to, "C17: rename-target index update failed");
+            }
+        }
+        StorageEvent::ReconcileRequested { .. } => {
+            // Handled in publish_event's bracket — see below. The
+            // actual reconcile runs here so `indexing.completed` stops
+            // firing without anything having been indexed.
+            if let Err(err) = engine.reconcile_index() {
+                tracing::warn!(%err, "C17: watcher-requested reconcile failed");
+            }
+        }
     }
 }
 
@@ -1079,8 +1133,9 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             // the watcher accumulated since the previous reconcile so
             // operators can see how much state needed recovery.
             // Bracket the indexing window with started/completed events
-            // so subscribers can debounce UI refreshes. The actual
-            // reconcile is the consumer's responsibility (#84).
+            // so subscribers can debounce UI refreshes. C17 (#371): the
+            // reconcile itself ran in `apply_index_update` just before
+            // this publish, so `completed` is no longer a no-op signal.
             publish_storage_event(
                 bus,
                 "com.nexus.storage.indexing.started",
