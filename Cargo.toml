@@ -182,6 +182,7 @@ seccompiler = "0.5"
 filetime = "0.2"
 
 # Test utilities
+trash = "5"
 tempfile = "3"
 
 # Bench harness (BL-092)

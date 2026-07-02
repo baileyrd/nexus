@@ -128,6 +128,8 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 
 `.gitattributes` (at the forge root, not inside `.forge/`) is also written by `nexus crdt init` per `nexus-cli/src/commands/crdt.rs:133` to register the CRDT merge driver.
 
+`.trash/` (at the forge root, C3 #356) holds recoverable deletes — one timestamped bucket per deletion with a `meta.json` sidecar (`nexus-storage/src/trash.rs`). Excluded from the watcher, reconcile scans, and root `list_dir`; managed via `com.nexus.storage::trash_{entry,list,restore,empty}` and `nexus trash list|restore|empty`. Which destination deletes use (system / forge / permanent) is the shell setting `nexus.settings.files.deletedFilesDestination`.
+
 > **Removed:** `.forge/acp.toml` was previously listed as reserved. ADR 0027 §Phase 4 keeps ACP greenfield with no flat-TOML loader — see `crates/nexus-acp/src/lib.rs:13` and `crates/nexus-bootstrap/src/acp_contribution_wiring.rs:8`. Do not introduce one.
 
 ## How to add a setting

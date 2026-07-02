@@ -779,6 +779,154 @@ pub struct StorageRenameEntryResult {
     pub links_updated: usize,
 }
 
+// ── C3 (#356) — trash handlers ───────────────────────────────────────────────
+
+/// Args for `com.nexus.storage::trash_entry`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashEntryArgs {
+    /// Forge-relative path of the file or directory to trash.
+    pub relpath: String,
+    /// `"forge"` (default) moves into `<forge>/.trash/`; `"system"`
+    /// moves into the OS trash / recycle bin. Anything else is
+    /// rejected at the handler boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// Return type for `com.nexus.storage::trash_entry`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashEntryResult {
+    /// Always `true` on success.
+    pub ok: bool,
+    /// Bucket id for forge-trash deletes — pass to `trash_restore`.
+    /// `null` for OS-trash deletes (restore happens via the OS).
+    pub trash_id: Option<String>,
+}
+
+/// One trashed entry, as returned by `com.nexus.storage::trash_list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashRow {
+    /// Bucket id — pass to `trash_restore`.
+    pub trash_id: String,
+    /// Forge-relative path the entry lived at before deletion.
+    pub original_path: String,
+    /// Unix epoch milliseconds at deletion time.
+    pub deleted_at_ms: i64,
+    /// Whether the entry is a directory.
+    pub is_dir: bool,
+    /// Recursive size of the trashed content in bytes.
+    pub size_bytes: u64,
+}
+
+/// Return type for `com.nexus.storage::trash_list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashListResult {
+    /// Trash buckets, newest first.
+    pub entries: Vec<StorageTrashRow>,
+}
+
+/// Args for `com.nexus.storage::trash_restore`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashRestoreArgs {
+    /// Bucket id from `trash_entry` / `trash_list`.
+    pub trash_id: String,
+}
+
+/// Return type for `com.nexus.storage::trash_restore`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashRestoreResult {
+    /// Forge-relative path the entry was restored to.
+    pub restored_path: String,
+}
+
+/// Args for `com.nexus.storage::trash_empty`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashEmptyArgs {
+    /// Only remove buckets older than this many days. Omitted →
+    /// everything goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub older_than_days: Option<u64>,
+}
+
+/// Return type for `com.nexus.storage::trash_empty`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTrashEmptyResult {
+    /// Number of buckets permanently removed.
+    pub removed: usize,
+}
+
 // ── #190 / R7 — search.rs handlers ──────────────────────────────────────────
 
 /// Args for `com.nexus.storage::query_tags`.

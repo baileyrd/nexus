@@ -114,7 +114,10 @@ pub enum StorageEvent {
 #[must_use]
 pub fn should_ignore(path: &Path) -> bool {
     use std::path::Component;
-    const IGNORED_DIR_COMPONENTS: &[&str] = &[".git", ".forge", "node_modules", "target"];
+    // `.trash` — C3 (#356): forge-level trash; trashed content must not
+    // re-enter the index via watcher events or reconcile scans.
+    const IGNORED_DIR_COMPONENTS: &[&str] =
+        &[".git", ".forge", ".trash", "node_modules", "target"];
 
     for component in path.components() {
         if let Component::Normal(seg) = component {

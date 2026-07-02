@@ -93,7 +93,28 @@ export async function renameEntry(from: string, to: string): Promise<void> {
  */
 export async function deleteEntry(relpath: string): Promise<void> {
   if (!kernel) throw new Error('kernel handle missing')
-  await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'delete_entry', {
-    relpath,
-  })
+  // C3 (#356) — honour the "Deleted files" setting: `system` / `forge`
+  // route through the recoverable trash_entry verb; `permanent` keeps
+  // the destructive delete_entry.
+  const dest = deleteDestination()
+  if (dest === 'permanent') {
+    await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'delete_entry', {
+      relpath,
+    })
+    return
+  }
+  await kernel.invoke<{ ok: boolean; trash_id: string | null }>(
+    STORAGE_PLUGIN_ID,
+    'trash_entry',
+    { relpath, destination: dest },
+  )
+}
+
+/** Where deletes go, per the Settings → Files & Links select. */
+export function deleteDestination(): 'system' | 'forge' | 'permanent' {
+  const raw = configStore.get<string>(
+    'nexus.settings.files.deletedFilesDestination',
+    'system',
+  )
+  return raw === 'forge' || raw === 'permanent' ? raw : 'system'
 }

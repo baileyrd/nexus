@@ -320,6 +320,90 @@ pub async fn delete_file(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -
     Ok(())
 }
 
+// ── C3 (#356) — trash verbs ──────────────────────────────────────────────────
+
+/// One trashed entry, as returned by [`trash_list`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct TrashRow {
+    /// Bucket id — pass to [`trash_restore`].
+    pub trash_id: String,
+    /// Forge-relative path the entry lived at before deletion.
+    pub original_path: String,
+    /// Unix epoch milliseconds at deletion time.
+    pub deleted_at_ms: i64,
+    /// Whether the entry is a directory.
+    pub is_dir: bool,
+    /// Recursive size of the trashed content in bytes.
+    pub size_bytes: u64,
+}
+
+/// Move an entry to the forge (`"forge"`) or OS (`"system"`) trash.
+/// Returns the forge-trash bucket id (`None` for the OS trash).
+pub async fn trash_entry(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    relpath: &str,
+    destination: &str,
+) -> Result<Option<String>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        trash_id: Option<String>,
+    }
+    let resp: Resp = call(
+        invoker,
+        "trash_entry",
+        serde_json::json!({ "relpath": relpath, "destination": destination }),
+    )
+    .await?;
+    Ok(resp.trash_id)
+}
+
+/// List trash buckets, newest first.
+pub async fn trash_list(invoker: &(dyn IpcInvoker + Send + Sync)) -> Result<Vec<TrashRow>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        entries: Vec<TrashRow>,
+    }
+    let resp: Resp = call(invoker, "trash_list", serde_json::json!({})).await?;
+    Ok(resp.entries)
+}
+
+/// Restore a trashed entry; returns the restored forge-relative path.
+pub async fn trash_restore(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    trash_id: &str,
+) -> Result<String> {
+    #[derive(Deserialize)]
+    struct Resp {
+        restored_path: String,
+    }
+    let resp: Resp = call(
+        invoker,
+        "trash_restore",
+        serde_json::json!({ "trash_id": trash_id }),
+    )
+    .await?;
+    Ok(resp.restored_path)
+}
+
+/// Permanently delete trash buckets (optionally only those older than
+/// `older_than_days`). Returns the number removed.
+pub async fn trash_empty(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    older_than_days: Option<u64>,
+) -> Result<usize> {
+    #[derive(Deserialize)]
+    struct Resp {
+        removed: usize,
+    }
+    let resp: Resp = call(
+        invoker,
+        "trash_empty",
+        serde_json::json!({ "older_than_days": older_than_days }),
+    )
+    .await?;
+    Ok(resp.removed)
+}
+
 /// Check whether a file at `path` exists in the forge.
 pub async fn file_exists(invoker: &(dyn IpcInvoker + Send + Sync), path: &str) -> Result<bool> {
     #[derive(Deserialize)]

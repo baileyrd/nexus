@@ -17,6 +17,8 @@ nexus-hashline = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# C3 (#356) — OS-trash destination for deletes (XDG trash on Linux).
+trash = { workspace = true }
 serde_yml = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }

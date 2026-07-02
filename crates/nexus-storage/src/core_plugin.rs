@@ -393,6 +393,26 @@ pub const HANDLER_AST_QUERY: u32 = 75;
 /// decision D-1).
 pub const HANDLER_HYBRID_SEARCH: u32 = 76;
 
+/// Handler id for `trash_entry` (C3 / #356). Args: `{ "relpath": String,
+/// "destination": "forge"|"system"? }`; Returns: `{ "ok": bool,
+/// "trash_id": String? }`. Recoverable delete — moves the entry into
+/// `<forge>/.trash/` (or the OS trash) and soft-deletes its index rows.
+pub const HANDLER_TRASH_ENTRY: u32 = 77;
+
+/// Handler id for `trash_list` (C3 / #356). Args: `{}`; Returns:
+/// `{ "entries": [TrashRow] }`, newest first.
+pub const HANDLER_TRASH_LIST: u32 = 78;
+
+/// Handler id for `trash_restore` (C3 / #356). Args: `{ "trash_id":
+/// String }`; Returns: `{ "restored_path": String }`. Moves the entry
+/// back and reindexes it (markdown re-parses; other files resurrect
+/// their soft-deleted index row).
+pub const HANDLER_TRASH_RESTORE: u32 = 79;
+
+/// Handler id for `trash_empty` (C3 / #356). Args: `{ "older_than_days":
+/// u64? }`; Returns: `{ "removed": usize }`. Permanent.
+pub const HANDLER_TRASH_EMPTY: u32 = 80;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -467,6 +487,10 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("create_dir", HANDLER_CREATE_DIR),
     ("rename_entry", HANDLER_RENAME_ENTRY),
     ("delete_entry", HANDLER_DELETE_ENTRY),
+    ("trash_entry", HANDLER_TRASH_ENTRY),
+    ("trash_list", HANDLER_TRASH_LIST),
+    ("trash_restore", HANDLER_TRASH_RESTORE),
+    ("trash_empty", HANDLER_TRASH_EMPTY),
     ("canvas_read", HANDLER_CANVAS_READ),
     ("canvas_write", HANDLER_CANVAS_WRITE),
     ("canvas_patch", HANDLER_CANVAS_PATCH),
@@ -794,6 +818,10 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_CREATE_DIR => crate::handlers::tree::create_dir(engine, args),
             HANDLER_RENAME_ENTRY => crate::handlers::tree::rename_entry(engine, args),
             HANDLER_DELETE_ENTRY => crate::handlers::tree::delete_entry(engine, args),
+            HANDLER_TRASH_ENTRY => crate::handlers::tree::trash_entry(engine, args),
+            HANDLER_TRASH_LIST => crate::handlers::tree::trash_list(engine, args),
+            HANDLER_TRASH_RESTORE => crate::handlers::tree::trash_restore(engine, args),
+            HANDLER_TRASH_EMPTY => crate::handlers::tree::trash_empty(engine, args),
             HANDLER_BASE_QUERY => crate::handlers::bases::query(engine, args),
             HANDLER_OBSIDIAN_BASE_QUERY => {
                 crate::handlers::index::obsidian_base_query(engine, args)

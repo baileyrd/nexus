@@ -33,6 +33,7 @@ pub mod hybrid;
 pub mod import;
 mod index;
 mod link_rewrite;
+mod trash;
 /// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
 pub mod lfs;
 pub mod mdx;
@@ -142,6 +143,18 @@ impl Default for StorageConfig {
 }
 
 // ── StorageEngine ─────────────────────────────────────────────────────────────
+
+/// C3 (#356) — where a deleted entry goes. `Permanent` matches the
+/// pre-C3 behaviour; the trash destinations are recoverable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteDestination {
+    /// Remove bytes immediately (unrecoverable).
+    Permanent,
+    /// Move into the forge-level `.trash/` (restorable in-app).
+    ForgeTrash,
+    /// Move into the operating system's trash / recycle bin.
+    SystemTrash,
+}
 
 /// Facade that composes all storage subsystems into a single public API.
 ///
@@ -1102,7 +1115,7 @@ impl StorageEngine {
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
                 continue;
             };
-            if relpath.is_empty() && name == ".forge" {
+            if relpath.is_empty() && (name == ".forge" || name == trash::TRASH_DIR) {
                 continue;
             }
             let rel = if relpath.is_empty() {
@@ -1347,6 +1360,171 @@ impl StorageEngine {
         } else {
             self.delete_file(relpath)
         }
+    }
+
+    // ── Trash (C3 / #356) ─────────────────────────────────────────────────────
+    //
+    // See [`DeleteDestination`] for the three delete modes and
+    // [`trash`] (module docs) for the on-disk bucket layout.
+
+    /// Delete an entry to the given destination: permanently (the
+    /// pre-C3 behaviour), into the forge-level `.trash/`, or into the
+    /// OS trash. Returns the trash bucket id for forge-trash deletes
+    /// (`None` otherwise).
+    ///
+    /// Trash destinations soft-delete the index rows (same semantics
+    /// as [`delete_entry`](Self::delete_entry)'s directory branch), so
+    /// a restore — or a reconcile pass after an OS-trash "Put Back" —
+    /// resurrects them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::PermissionDenied`] when `relpath`
+    /// escapes the forge root or names the forge internals
+    /// (`.forge` / `.trash`), plus I/O and database failures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn delete_entry_to(
+        &self,
+        relpath: &str,
+        destination: DeleteDestination,
+    ) -> Result<Option<String>, StorageError> {
+        if matches!(destination, DeleteDestination::Permanent) {
+            self.delete_entry(relpath)?;
+            return Ok(None);
+        }
+        let trimmed = relpath.trim_matches('/');
+        if trimmed.is_empty()
+            || trimmed == trash::TRASH_DIR
+            || trimmed == ".forge"
+            || trimmed.starts_with(".trash/")
+            || trimmed.starts_with(".forge/")
+        {
+            return Err(StorageError::PermissionDenied(format!(
+                "cannot trash '{relpath}'"
+            )));
+        }
+        let abs = resolve_within(self.forge.root(), trimmed)?;
+        if !abs.exists() {
+            return Err(StorageError::FileNotFound(trimmed.to_string()));
+        }
+        let is_dir = abs.is_dir();
+        let trash_id = match destination {
+            DeleteDestination::ForgeTrash => {
+                Some(trash::move_to_trash(self.forge.root(), trimmed, &abs)?)
+            }
+            DeleteDestination::SystemTrash => {
+                ::trash::delete(&abs).map_err(|e| StorageError::WriteFailed {
+                    path: trimmed.to_string(),
+                    reason: format!("OS trash: {e}"),
+                })?;
+                None
+            }
+            DeleteDestination::Permanent => unreachable!("handled above"),
+        };
+        self.soft_delete_index_entry(trimmed, is_dir)?;
+        Ok(trash_id)
+    }
+
+    /// Soft-delete the index rows for a removed file or directory
+    /// prefix: FTS rows go, `files` rows keep their UNIQUE path slot
+    /// with `is_deleted = 1` so restore / reconcile can resurrect
+    /// them. Mirrors `delete_entry`'s directory branch.
+    fn soft_delete_index_entry(&self, relpath: &str, is_dir: bool) -> Result<(), StorageError> {
+        let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let tx = conn.transaction()?;
+        if is_dir {
+            let prefix = format!("{}/", relpath.trim_end_matches('/'));
+            tx.execute(
+                "DELETE FROM fts_blocks WHERE file_path LIKE ?1;",
+                rusqlite::params![format!("{prefix}%")],
+            )?;
+            tx.execute(
+                "UPDATE files SET is_deleted = 1 WHERE path LIKE ?1;",
+                rusqlite::params![format!("{prefix}%")],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM fts_blocks WHERE file_path = ?1;",
+                rusqlite::params![relpath],
+            )?;
+            tx.execute(
+                "UPDATE files SET is_deleted = 1 WHERE path = ?1;",
+                rusqlite::params![relpath],
+            )?;
+        }
+        tx.commit()?;
+        if !is_dir {
+            // #199 tier-2: panic on poison — mutation path.
+            let mut g = self.graph.write().expect("graph lock poisoned");
+            g.remove_note(relpath);
+        }
+        Ok(())
+    }
+
+    /// List trash buckets, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Io`] on directory-scan failure.
+    pub fn trash_list(&self) -> Result<Vec<trash::TrashBucket>, StorageError> {
+        trash::list(self.forge.root())
+    }
+
+    /// Restore a trashed entry to its original path and reindex it.
+    /// Markdown files re-enter through [`write_file`](Self::write_file)
+    /// (full parse: fts, links, tags); other files just have their
+    /// soft-deleted `files` row resurrected. Returns the restored
+    /// forge-relative path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] for an unknown bucket,
+    /// [`StorageError::WriteFailed`] when the original path is
+    /// occupied again, plus I/O and database failures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn trash_restore(&self, trash_id: &str) -> Result<String, StorageError> {
+        let meta = trash::restore(self.forge.root(), trash_id)?;
+        let abs = self.forge.root().join(&meta.original_path);
+        for rel in trash::walk_restored_files(&abs, &meta.original_path) {
+            let lower = rel.to_lowercase();
+            if lower.ends_with(".md") || lower.ends_with(".markdown") {
+                if let Ok(bytes) = std::fs::read(self.forge.root().join(&rel)) {
+                    // Full reindex; a parse failure must not abort the
+                    // restore — the file is already back on disk.
+                    let _ = self.write_file(&rel, &bytes);
+                }
+            } else {
+                let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+                conn.execute(
+                    "UPDATE files SET is_deleted = 0 WHERE path = ?1;",
+                    rusqlite::params![rel],
+                )?;
+            }
+        }
+        Ok(meta.original_path)
+    }
+
+    /// Permanently delete trash buckets, optionally only those older
+    /// than `older_than_days`. Returns the number removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Io`] on removal failure.
+    pub fn trash_empty(&self, older_than_days: Option<u64>) -> Result<usize, StorageError> {
+        let cutoff = older_than_days.map(|days| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+                .unwrap_or(0);
+            now - i64::try_from(days).unwrap_or(0) * 24 * 60 * 60 * 1000
+        });
+        trash::empty(self.forge.root(), cutoff)
     }
 
     // ── Index queries ─────────────────────────────────────────────────────────

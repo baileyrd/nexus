@@ -65,6 +65,36 @@ pub(crate) enum ForgeCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Trash (C3 / #356)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub(crate) struct TrashArgs {
+    #[command(subcommand)]
+    pub(crate) command: TrashCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TrashCommand {
+    /// List trashed entries, newest first
+    List,
+    /// Restore a trashed entry to its original path
+    Restore {
+        /// Bucket id (from `nexus trash list` or the delete output)
+        trash_id: String,
+    },
+    /// Permanently delete trashed entries
+    Empty {
+        /// Only remove entries older than this many days
+        #[arg(long, value_name = "DAYS")]
+        older_than: Option<u64>,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Content
 // ---------------------------------------------------------------------------
 
@@ -112,13 +142,16 @@ pub(crate) enum ContentCommand {
         #[arg(long)]
         raw: bool,
     },
-    /// Delete a content node
+    /// Delete a content node (moves to the forge trash by default)
     Delete {
         /// Path of the node to delete
         path: String,
         /// Skip confirmation prompt
         #[arg(short, long)]
         force: bool,
+        /// Bypass the trash and delete permanently (pre-C3 behaviour)
+        #[arg(long)]
+        permanent: bool,
     },
     /// Search content nodes
     Search {

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashEmptyResult",
+  "description": "Return type for `com.nexus.storage::trash_empty`.",
+  "type": "object",
+  "properties": {
+    "removed": {
+      "description": "Number of buckets permanently removed.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "removed"
+  ]
+}

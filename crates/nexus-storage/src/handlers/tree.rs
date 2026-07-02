@@ -6,9 +6,11 @@ use serde_json::Value;
 
 use crate::ipc::{
     StorageListDirArgs, StorageOk, StorageRelpathArgs, StorageRenameEntryArgs,
-    StorageRenameEntryResult,
+    StorageRenameEntryResult, StorageTrashEmptyArgs, StorageTrashEmptyResult,
+    StorageTrashEntryArgs, StorageTrashEntryResult, StorageTrashListResult,
+    StorageTrashRestoreArgs, StorageTrashRestoreResult, StorageTrashRow,
 };
-use crate::StorageEngine;
+use crate::{DeleteDestination, StorageEngine};
 
 use super::shared::{exec_err, parse_args, to_value};
 
@@ -66,4 +68,60 @@ pub(crate) fn delete_entry(engine: &StorageEngine, args: &Value) -> Result<Value
         .delete_entry(&relpath)
         .map_err(|e| exec_err(format!("delete_entry: {e}")))?;
     to_value(&StorageOk { ok: true }, "delete_entry")
+}
+
+// ── C3 (#356) — trash verbs ──────────────────────────────────────────────────
+
+pub(crate) fn trash_entry(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let StorageTrashEntryArgs {
+        relpath,
+        destination,
+    } = parse_args(args, "trash_entry")?;
+    let dest = match destination.as_deref() {
+        None | Some("forge") => DeleteDestination::ForgeTrash,
+        Some("system") => DeleteDestination::SystemTrash,
+        Some(other) => {
+            return Err(exec_err(format!(
+                "trash_entry: unknown destination '{other}' (expected 'forge' or 'system')"
+            )))
+        }
+    };
+    let trash_id = engine
+        .delete_entry_to(&relpath, dest)
+        .map_err(|e| exec_err(format!("trash_entry: {e}")))?;
+    to_value(&StorageTrashEntryResult { ok: true, trash_id }, "trash_entry")
+}
+
+pub(crate) fn trash_list(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    // Accept `{}` — no parameters.
+    let _: serde_json::Map<String, Value> = parse_args(args, "trash_list")?;
+    let entries = engine
+        .trash_list()
+        .map_err(|e| exec_err(format!("trash_list: {e}")))?
+        .into_iter()
+        .map(|b| StorageTrashRow {
+            trash_id: b.trash_id,
+            original_path: b.meta.original_path,
+            deleted_at_ms: b.meta.deleted_at_ms,
+            is_dir: b.meta.is_dir,
+            size_bytes: b.size_bytes,
+        })
+        .collect();
+    to_value(&StorageTrashListResult { entries }, "trash_list")
+}
+
+pub(crate) fn trash_restore(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let StorageTrashRestoreArgs { trash_id } = parse_args(args, "trash_restore")?;
+    let restored_path = engine
+        .trash_restore(&trash_id)
+        .map_err(|e| exec_err(format!("trash_restore: {e}")))?;
+    to_value(&StorageTrashRestoreResult { restored_path }, "trash_restore")
+}
+
+pub(crate) fn trash_empty(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let StorageTrashEmptyArgs { older_than_days } = parse_args(args, "trash_empty")?;
+    let removed = engine
+        .trash_empty(older_than_days)
+        .map_err(|e| exec_err(format!("trash_empty: {e}")))?;
+    to_value(&StorageTrashEmptyResult { removed }, "trash_empty")
 }
