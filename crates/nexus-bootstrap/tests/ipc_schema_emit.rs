@@ -52,7 +52,9 @@ use nexus_storage::ipc::{
     StorageQuerySymbolArgs, StorageQuerySymbolResult, StorageQueryTagsArgs, StorageReadFileArgs,
     StorageReadFileResult, StorageReadFrontmatterArgs, StorageReadLinesArgs,
     StorageReadLinesResult, StorageRelpathArgs, StorageRenameEntryArgs, StorageRenameEntryResult,
-    StorageSearchArgs,
+    StorageSearchArgs, StorageTrashEmptyArgs, StorageTrashEmptyResult, StorageTrashEntryArgs,
+    StorageTrashEntryResult, StorageTrashListResult, StorageTrashRestoreArgs,
+    StorageTrashRestoreResult, StorageTrashRow,
     StorageSearchHit, StorageSearchResult, StorageSettingsWriteArgs, StorageSymbolRow,
     StorageToggleTaskArgs, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
     StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
@@ -329,6 +331,15 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageRenameEntryArgs>("com_nexus_storage__rename_entry", "args");
     // C2 (#355) — rename now reports link-rewrite counts.
     write_schema::<StorageRenameEntryResult>("com_nexus_storage__rename_entry", "result");
+    // C3 (#356) — trash verbs.
+    write_schema::<StorageTrashEntryArgs>("com_nexus_storage__trash_entry", "args");
+    write_schema::<StorageTrashEntryResult>("com_nexus_storage__trash_entry", "result");
+    write_schema::<StorageTrashListResult>("com_nexus_storage__trash_list", "result");
+    write_schema::<StorageTrashRow>("com_nexus_storage__trash_row", "shape");
+    write_schema::<StorageTrashRestoreArgs>("com_nexus_storage__trash_restore", "args");
+    write_schema::<StorageTrashRestoreResult>("com_nexus_storage__trash_restore", "result");
+    write_schema::<StorageTrashEmptyArgs>("com_nexus_storage__trash_empty", "args");
+    write_schema::<StorageTrashEmptyResult>("com_nexus_storage__trash_empty", "result");
 
     // ── com.nexus.storage::query_tags / config_* / settings_write (#190) ─
     write_schema::<StorageQueryTagsArgs>("com_nexus_storage__query_tags", "args");

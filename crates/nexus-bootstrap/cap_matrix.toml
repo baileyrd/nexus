@@ -1443,6 +1443,26 @@ unrestricted = "deletes a forge-relative entry (file or dir) — downstream fs.w
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "trash_entry"
+unrestricted = "moves a forge-relative entry to forge/OS trash (recoverable delete, C3 #356) — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "trash_list"
+unrestricted = "lists trashed entries (read-only, forge-scoped, C3 #356)"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "trash_restore"
+unrestricted = "restores a trashed entry to its original forge path (C3 #356) — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
+command = "trash_empty"
+unrestricted = "permanently deletes trashed entries (C3 #356) — downstream fs.write gated"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "rename_entry"
 unrestricted = "renames a forge-relative entry — downstream fs.write gated"
 

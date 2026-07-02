@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashRestoreArgs",
+  "description": "Args for `com.nexus.storage::trash_restore`.",
+  "type": "object",
+  "properties": {
+    "trash_id": {
+      "description": "Bucket id from `trash_entry` / `trash_list`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "trash_id"
+  ]
+}

@@ -81,6 +81,8 @@ enum Commands {
     Forge(ForgeArgs),
     /// Manage content nodes
     Content(ContentArgs),
+    /// Manage the forge trash (C3 / #356)
+    Trash(TrashArgs),
     /// Manage plugins
     Plugin(PluginArgs),
     /// Watch filesystem for changes
@@ -298,9 +300,11 @@ fn main() {
             } => commands::content::update(&mut app, &path, content.as_deref(), stdin),
             ContentCommand::List { prefix } => commands::content::list(&mut app, prefix.as_deref()),
             ContentCommand::Read { path, raw } => commands::content::read(&mut app, &path, raw),
-            ContentCommand::Delete { path, force } => {
-                commands::content::delete(&mut app, &path, force)
-            }
+            ContentCommand::Delete {
+                path,
+                force,
+                permanent,
+            } => commands::content::delete(&mut app, &path, force, permanent),
             ContentCommand::Search { query, limit } => {
                 commands::content::search(&mut app, &query, limit)
             }
@@ -318,6 +322,13 @@ fn main() {
             }
         },
 
+        Commands::Trash(args) => match args.command {
+            TrashCommand::List => commands::trash::list(&mut app),
+            TrashCommand::Restore { trash_id } => commands::trash::restore(&mut app, &trash_id),
+            TrashCommand::Empty { older_than, force } => {
+                commands::trash::empty(&mut app, older_than, force)
+            }
+        },
         Commands::Plugin(args) => match args.command {
             PluginCommand::Install { plugin } => {
                 commands::plugin::install_dispatch(&mut app, &plugin)

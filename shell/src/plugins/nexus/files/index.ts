@@ -8,6 +8,7 @@ import { useFilesStore, type FilesDirEntry } from './filesStore'
 import {
   createDir,
   createFile,
+  deleteDestination,
   deleteEntry,
   loadChildren,
   renameEntry,
@@ -297,10 +298,17 @@ export const filesPlugin: Plugin = {
       const entry = findEntry(target)
       const isDir = entry?.isDir ?? false
       const name = basename(target)
+      // C3 (#356) — copy reflects the "Deleted files" setting: trash
+      // destinations are recoverable, permanent is not.
+      const toTrash = deleteDestination() !== 'permanent'
       const ok = await api.input.confirm(
         isDir
-          ? `Delete folder "${name}" and everything inside? This cannot be undone.`
-          : `Delete "${name}"? This cannot be undone.`,
+          ? toTrash
+            ? `Move folder "${name}" and everything inside to the trash?`
+            : `Delete folder "${name}" and everything inside? This cannot be undone.`
+          : toTrash
+            ? `Move "${name}" to the trash?`
+            : `Delete "${name}"? This cannot be undone.`,
       )
       if (!ok) return
       try {

@@ -177,7 +177,38 @@ impl Runtime {
 // be a cross-crate API break without changing the implementation.
 #[allow(clippy::needless_pass_by_value)]
 pub fn build_cli_runtime(forge_root: PathBuf) -> Result<Runtime> {
-    build(&forge_root, CLI_PLUGIN_ID, "Nexus CLI")
+    build(&forge_root, CLI_PLUGIN_ID, "Nexus CLI", &BootOptions::default())
+}
+
+/// C18 (#370) — per-frontend boot tuning threaded down to plugin
+/// registration. Defaults preserve pre-C18 behaviour.
+#[derive(Debug, Clone, Default)]
+pub struct BootOptions {
+    /// Skip the synchronous reconcile inside `StorageEngine::open` and
+    /// run it on a background thread after `on_start` instead
+    /// (bracketed by `com.nexus.storage.indexing.started/completed`).
+    /// Set by long-lived frontends (shell, TUI); short-lived CLI runs
+    /// keep the blocking default so their reads are fresh.
+    pub defer_startup_reconcile: bool,
+}
+
+/// Build a runtime for the desktop shell: same invoker registration as
+/// [`build_cli_runtime`], but with the startup reconcile deferred to a
+/// background pass (C18 / #370) so boot is O(1) in forge size.
+///
+/// # Errors
+/// See [`build_cli_runtime`].
+// See `build_cli_runtime` for the rationale on keeping PathBuf.
+#[allow(clippy::needless_pass_by_value)]
+pub fn build_shell_runtime(forge_root: PathBuf) -> Result<Runtime> {
+    build(
+        &forge_root,
+        CLI_PLUGIN_ID,
+        "Nexus CLI",
+        &BootOptions {
+            defer_startup_reconcile: true,
+        },
+    )
 }
 
 /// Create an empty forge at `forge_root`.
@@ -203,13 +234,22 @@ pub fn init_forge(forge_root: &std::path::Path) -> Result<()> {
 // See `build_cli_runtime` for the rationale on keeping PathBuf.
 #[allow(clippy::needless_pass_by_value)]
 pub fn build_tui_runtime(forge_root: PathBuf) -> Result<Runtime> {
-    build(&forge_root, TUI_PLUGIN_ID, "Nexus TUI")
+    // C18 (#370): the TUI is long-lived — defer the first reconcile.
+    build(
+        &forge_root,
+        TUI_PLUGIN_ID,
+        "Nexus TUI",
+        &BootOptions {
+            defer_startup_reconcile: true,
+        },
+    )
 }
 
 fn build(
     forge_root: &std::path::Path,
     invoker_id: &'static str,
     invoker_name: &str,
+    options: &BootOptions,
 ) -> Result<Runtime> {
     let config = KernelConfig::load(forge_root)
         .with_context(|| format!("failed to load kernel config at '{}'", forge_root.display()))?;
@@ -266,7 +306,7 @@ fn build(
     // Register every in-tree core plugin. Order matters where lifecycle hooks
     // of later plugins rely on earlier ones publishing events; in practice
     // each plugin is independent today.
-    plugins::register_all(&mut loader, forge_root, &event_bus)?;
+    plugins::register_all(&mut loader, forge_root, &event_bus, options)?;
 
     // Register the invoker (CLI or TUI) as a Core plugin so it holds a real
     // plugin identity with Capability::ALL.

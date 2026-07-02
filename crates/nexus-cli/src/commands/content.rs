@@ -168,10 +168,17 @@ pub fn read(app: &mut App, path: &str, raw: bool) -> Result<()> {
     Ok(())
 }
 
-/// Delete the content node at `path`.
-pub fn delete(app: &mut App, path: &str, force: bool) -> Result<()> {
+/// Delete the content node at `path`. Moves to the forge trash by
+/// default (C3 / #356 — restorable via `nexus trash restore`); pass
+/// `permanent` for the unrecoverable pre-C3 behaviour.
+pub fn delete(app: &mut App, path: &str, force: bool, permanent: bool) -> Result<()> {
     if !force {
-        eprint!("Delete '{path}'? [y/N] ");
+        let verb = if permanent {
+            "Permanently delete"
+        } else {
+            "Move to trash"
+        };
+        eprint!("{verb} '{path}'? [y/N] ");
         let mut answer = String::new();
         std::io::stdin()
             .read_line(&mut answer)
@@ -185,14 +192,30 @@ pub fn delete(app: &mut App, path: &str, force: bool) -> Result<()> {
 
     let format = app.format();
     let (invoker, rt) = app.invoker()?;
-    rt.block_on(ipc::delete_file(&*invoker, path))
-        .map_err(|e| anyhow::anyhow!("failed to delete file '{path}': {e}"))?;
-
-    print_success(
-        format,
-        &format!("deleted '{path}'"),
-        &serde_json::json!({ "path": path }),
-    );
+    if permanent {
+        rt.block_on(ipc::delete_file(&*invoker, path))
+            .map_err(|e| anyhow::anyhow!("failed to delete file '{path}': {e}"))?;
+        print_success(
+            format,
+            &format!("deleted '{path}'"),
+            &serde_json::json!({ "path": path }),
+        );
+    } else {
+        let trash_id = rt
+            .block_on(ipc::trash_entry(&*invoker, path, "forge"))
+            .map_err(|e| anyhow::anyhow!("failed to trash '{path}': {e}"))?;
+        print_success(
+            format,
+            &format!(
+                "moved '{path}' to trash{}",
+                trash_id
+                    .as_deref()
+                    .map(|id| format!(" (restore with `nexus trash restore {id}`)"))
+                    .unwrap_or_default()
+            ),
+            &serde_json::json!({ "path": path, "trash_id": trash_id }),
+        );
+    }
 
     Ok(())
 }

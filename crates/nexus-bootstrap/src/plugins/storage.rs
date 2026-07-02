@@ -20,7 +20,15 @@ pub(super) fn register(
     loader: &mut PluginLoader,
     forge_root: &std::path::Path,
     event_bus: &Arc<EventBus>,
+    options: &crate::BootOptions,
 ) -> Result<()> {
+    // C18 (#370) — long-lived frontends defer the first reconcile to a
+    // background pass so boot never blocks on (or times out over) a
+    // large forge's initial index build.
+    let storage_config = StorageConfig {
+        defer_startup_reconcile: options.defer_startup_reconcile,
+        ..StorageConfig::default()
+    };
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -36,7 +44,7 @@ pub(super) fn register(
             forge_root,
             Box::new(StorageCorePlugin::new(
                 forge_root.to_path_buf(),
-                &StorageConfig::default(),
+                &storage_config,
                 Arc::clone(event_bus),
             )),
         )

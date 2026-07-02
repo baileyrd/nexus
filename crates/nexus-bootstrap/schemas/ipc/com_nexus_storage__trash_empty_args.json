@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashEmptyArgs",
+  "description": "Args for `com.nexus.storage::trash_empty`.",
+  "type": "object",
+  "properties": {
+    "older_than_days": {
+      "description": "Only remove buckets older than this many days. Omitted →\neverything goes.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

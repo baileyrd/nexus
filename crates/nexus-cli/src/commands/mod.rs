@@ -27,6 +27,7 @@ pub mod tags;
 pub mod template;
 pub mod term;
 pub mod tool;
+pub mod trash;
 pub mod tui;
 pub mod watch;
 pub mod workflow;

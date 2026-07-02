@@ -1733,14 +1733,30 @@ export const editorPlugin: Plugin = {
         await confirmAndClose(relpath)
         return
       }
+      // C3 (#356) — honour the "Deleted files" setting; trash
+      // destinations are recoverable via `trash_restore`.
+      const deleteDest = configStore.get<string>(
+        'nexus.settings.files.deletedFilesDestination',
+        'system',
+      )
+      const toTrash = deleteDest === 'system' || deleteDest === 'forge'
       const ok = await api.input.confirm(
-        `Delete "${relpath}"? This cannot be undone.`,
+        toTrash
+          ? `Move "${relpath}" to the trash?`
+          : `Delete "${relpath}"? This cannot be undone.`,
       )
       if (!ok) return
       try {
-        await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, DELETE_FILE_HANDLER, {
-          path: relpath,
-        })
+        if (toTrash) {
+          await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'trash_entry', {
+            relpath,
+            destination: deleteDest,
+          })
+        } else {
+          await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, DELETE_FILE_HANDLER, {
+            path: relpath,
+          })
+        }
         useEditorStore.getState().closeTab(relpath)
       } catch (err) {
         api.notifications.show({

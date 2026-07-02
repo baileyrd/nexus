@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashRow",
+  "description": "One trashed entry, as returned by `com.nexus.storage::trash_list`.",
+  "type": "object",
+  "properties": {
+    "deleted_at_ms": {
+      "description": "Unix epoch milliseconds at deletion time.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "is_dir": {
+      "description": "Whether the entry is a directory.",
+      "type": "boolean"
+    },
+    "original_path": {
+      "description": "Forge-relative path the entry lived at before deletion.",
+      "type": "string"
+    },
+    "size_bytes": {
+      "description": "Recursive size of the trashed content in bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "trash_id": {
+      "description": "Bucket id — pass to `trash_restore`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "trash_id",
+    "original_path",
+    "deleted_at_ms",
+    "is_dir",
+    "size_bytes"
+  ]
+}

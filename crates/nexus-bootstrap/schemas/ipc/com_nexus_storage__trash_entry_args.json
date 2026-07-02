@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashEntryArgs",
+  "description": "Args for `com.nexus.storage::trash_entry`.",
+  "type": "object",
+  "properties": {
+    "destination": {
+      "description": "`\"forge\"` (default) moves into `<forge>/.trash/`; `\"system\"`\nmoves into the OS trash / recycle bin. Anything else is\nrejected at the handler boundary.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relpath": {
+      "description": "Forge-relative path of the file or directory to trash.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relpath"
+  ]
+}

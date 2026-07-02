@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashRestoreResult",
+  "description": "Return type for `com.nexus.storage::trash_restore`.",
+  "type": "object",
+  "properties": {
+    "restored_path": {
+      "description": "Forge-relative path the entry was restored to.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "restored_path"
+  ]
+}

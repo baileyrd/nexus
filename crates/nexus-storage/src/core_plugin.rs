@@ -5,11 +5,14 @@
 //!
 //! # Re-indexing
 //!
-//! The bridge thread publishes bus events; it does **not** update the `SQLite`
-//! index.  Callers that need real-time index updates should call
-//! [`StorageEngine::process_watcher_events`] on their own polling loop, or
-//! call [`StorageEngine::rebuild_index`] / [`StorageEngine::reconcile_index`]
-//! explicitly after batches of changes.
+//! C17 (#371): the bridge thread now **consumes** watcher events before
+//! publishing them — per-file incremental index updates for
+//! created/modified/deleted/renamed (with echo suppression for
+//! engine-initiated writes) and a full [`StorageEngine::reconcile_index`]
+//! on `ReconcileRequested` — so external edits (vim, Obsidian, sync
+//! clients) reach search/backlinks/graph without waiting for a git
+//! commit or a manual rebuild. Subscribers therefore read fresh rows
+//! when a `com.nexus.storage.file_*` event arrives.
 
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -393,6 +396,26 @@ pub const HANDLER_AST_QUERY: u32 = 75;
 /// decision D-1).
 pub const HANDLER_HYBRID_SEARCH: u32 = 76;
 
+/// Handler id for `trash_entry` (C3 / #356). Args: `{ "relpath": String,
+/// "destination": "forge"|"system"? }`; Returns: `{ "ok": bool,
+/// "trash_id": String? }`. Recoverable delete — moves the entry into
+/// `<forge>/.trash/` (or the OS trash) and soft-deletes its index rows.
+pub const HANDLER_TRASH_ENTRY: u32 = 77;
+
+/// Handler id for `trash_list` (C3 / #356). Args: `{}`; Returns:
+/// `{ "entries": [TrashRow] }`, newest first.
+pub const HANDLER_TRASH_LIST: u32 = 78;
+
+/// Handler id for `trash_restore` (C3 / #356). Args: `{ "trash_id":
+/// String }`; Returns: `{ "restored_path": String }`. Moves the entry
+/// back and reindexes it (markdown re-parses; other files resurrect
+/// their soft-deleted index row).
+pub const HANDLER_TRASH_RESTORE: u32 = 79;
+
+/// Handler id for `trash_empty` (C3 / #356). Args: `{ "older_than_days":
+/// u64? }`; Returns: `{ "removed": usize }`. Permanent.
+pub const HANDLER_TRASH_EMPTY: u32 = 80;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -467,6 +490,10 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("create_dir", HANDLER_CREATE_DIR),
     ("rename_entry", HANDLER_RENAME_ENTRY),
     ("delete_entry", HANDLER_DELETE_ENTRY),
+    ("trash_entry", HANDLER_TRASH_ENTRY),
+    ("trash_list", HANDLER_TRASH_LIST),
+    ("trash_restore", HANDLER_TRASH_RESTORE),
+    ("trash_empty", HANDLER_TRASH_EMPTY),
     ("canvas_read", HANDLER_CANVAS_READ),
     ("canvas_write", HANDLER_CANVAS_WRITE),
     ("canvas_patch", HANDLER_CANVAS_PATCH),
@@ -618,9 +645,12 @@ impl CorePlugin for StorageCorePlugin {
         let (stop_tx, stop_rx) = mpsc::sync_channel::<()>(1);
         self.stop_tx = Some(stop_tx);
 
+        // C17 (#371) — the bridge now consumes events too (incremental
+        // index updates), so it needs the engine handle.
+        let bridge_engine = self.engine.clone();
         let handle = std::thread::Builder::new()
             .name("nexus-storage-bridge".to_string())
-            .spawn(move || bridge_loop(watcher, bus, stop_rx))
+            .spawn(move || bridge_loop(watcher, bus, bridge_engine, stop_rx))
             .map_err(|e| PluginError::LifecycleError {
                 plugin_id: PLUGIN_ID.to_string(),
                 hook: "on_start".to_string(),
@@ -628,6 +658,58 @@ impl CorePlugin for StorageCorePlugin {
             })?;
 
         self.bridge_thread = Some(handle);
+
+        // C18 (#370) — when the open deferred the startup reconcile,
+        // run it now on a one-shot background thread so a large forge's
+        // first index build can't trip the 30s lifecycle watchdog or
+        // block boot. Bracketed by indexing.started/completed events
+        // (with delta counts) so frontends can show progress state.
+        // One-shot and not joined on stop: reconcile holds the write
+        // connection only in short bursts and exits on its own.
+        if self.config.defer_startup_reconcile {
+            if let Some(engine) = self.engine.as_ref().map(Arc::clone) {
+                let bus = Arc::clone(&self.event_bus);
+                let spawned = std::thread::Builder::new()
+                    .name("nexus-storage-startup-reconcile".to_string())
+                    .spawn(move || {
+                        publish_storage_event(
+                            &bus,
+                            "com.nexus.storage.indexing.started",
+                            serde_json::json!({ "mode": "startup" }),
+                        );
+                        match engine.reconcile_index_full() {
+                            Ok(delta) => {
+                                tracing::info!(?delta, "C18: deferred startup reconcile done");
+                                publish_storage_event(
+                                    &bus,
+                                    "com.nexus.storage.indexing.completed",
+                                    serde_json::json!({
+                                        "mode": "startup",
+                                        "created": delta.created,
+                                        "modified": delta.modified,
+                                        "renamed": delta.renamed,
+                                        "deleted": delta.deleted,
+                                    }),
+                                );
+                            }
+                            Err(err) => {
+                                tracing::warn!(%err, "C18: deferred startup reconcile failed");
+                                publish_storage_event(
+                                    &bus,
+                                    "com.nexus.storage.indexing.completed",
+                                    serde_json::json!({
+                                        "mode": "startup",
+                                        "error": err.to_string(),
+                                    }),
+                                );
+                            }
+                        }
+                    });
+                if let Err(err) = spawned {
+                    tracing::warn!(%err, "C18: failed to spawn startup-reconcile thread");
+                }
+            }
+        }
 
         // BL-114: subscribe to git.commit. Subscribe on the *parent*
         // thread before spawning so an event emitted between spawn
@@ -794,6 +876,10 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_CREATE_DIR => crate::handlers::tree::create_dir(engine, args),
             HANDLER_RENAME_ENTRY => crate::handlers::tree::rename_entry(engine, args),
             HANDLER_DELETE_ENTRY => crate::handlers::tree::delete_entry(engine, args),
+            HANDLER_TRASH_ENTRY => crate::handlers::tree::trash_entry(engine, args),
+            HANDLER_TRASH_LIST => crate::handlers::tree::trash_list(engine, args),
+            HANDLER_TRASH_RESTORE => crate::handlers::tree::trash_restore(engine, args),
+            HANDLER_TRASH_EMPTY => crate::handlers::tree::trash_empty(engine, args),
             HANDLER_BASE_QUERY => crate::handlers::bases::query(engine, args),
             HANDLER_OBSIDIAN_BASE_QUERY => {
                 crate::handlers::index::obsidian_base_query(engine, args)
@@ -946,8 +1032,8 @@ fn locate_frontmatter(content: &str) -> Option<(usize, usize, usize)> {
 /// Polls the watcher until the stop signal arrives, translating each
 /// [`StorageEvent`] into a [`NexusEvent`] published on the kernel bus.
 ///
-/// The bridge only handles event translation and publication.  Index updates
-/// (`write_file`, `delete_file`, etc.) remain the caller's responsibility.
+/// C17 (#371): the bridge consumes each event (incremental index
+/// update via [`apply_index_update`]) before publishing it.
 #[allow(clippy::needless_pass_by_value)]
 /// BL-114: drain `com.nexus.git.commit` events and run an incremental
 /// reconcile so the FTS / knowledge graph / code-symbol indices catch
@@ -994,7 +1080,12 @@ fn git_commit_loop(
     }
 }
 
-fn bridge_loop(watcher: Watcher, bus: Arc<EventBus>, stop_rx: mpsc::Receiver<()>) {
+fn bridge_loop(
+    watcher: Watcher,
+    bus: Arc<EventBus>,
+    engine: Option<Arc<StorageEngine>>,
+    stop_rx: mpsc::Receiver<()>,
+) {
     let rx = watcher.events();
 
     loop {
@@ -1009,7 +1100,50 @@ fn bridge_loop(watcher: Watcher, bus: Arc<EventBus>, stop_rx: mpsc::Receiver<()>
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
 
+        // C17 (#371) — apply the index update BEFORE publishing, so
+        // subscribers reacting to the event (AI indexing daemon,
+        // outline refresh, …) read fresh rows instead of stale ones.
+        if let Some(engine) = engine.as_ref() {
+            apply_index_update(engine, &storage_event);
+        }
         publish_event(&storage_event, &bus);
+    }
+}
+
+/// C17 (#371) — incremental index consumption of one watcher event.
+/// Errors are logged, never fatal: the reconcile pass remains the
+/// backstop for anything a per-file update misses.
+fn apply_index_update(engine: &StorageEngine, event: &StorageEvent) {
+    match event {
+        StorageEvent::FileCreated { path, .. } | StorageEvent::FileModified { path, .. } => {
+            if let Err(err) = engine.index_external_change(path) {
+                tracing::warn!(%err, path, "C17: external-change index update failed");
+            }
+        }
+        StorageEvent::FileDeleted { path } => {
+            if let Err(err) = engine.index_external_delete(path) {
+                tracing::warn!(%err, path, "C17: external-delete index update failed");
+            }
+        }
+        StorageEvent::FileRenamed { from, to, .. } => {
+            // The watcher's rename detection pairs a delete+create; the
+            // create side re-indexes the new path, so only the old path
+            // needs cleanup here.
+            if let Err(err) = engine.index_external_delete(from) {
+                tracing::warn!(%err, from, "C17: rename-source index cleanup failed");
+            }
+            if let Err(err) = engine.index_external_change(to) {
+                tracing::warn!(%err, to, "C17: rename-target index update failed");
+            }
+        }
+        StorageEvent::ReconcileRequested { .. } => {
+            // Handled in publish_event's bracket — see below. The
+            // actual reconcile runs here so `indexing.completed` stops
+            // firing without anything having been indexed.
+            if let Err(err) = engine.reconcile_index() {
+                tracing::warn!(%err, "C17: watcher-requested reconcile failed");
+            }
+        }
     }
 }
 
@@ -1051,8 +1185,9 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
             // the watcher accumulated since the previous reconcile so
             // operators can see how much state needed recovery.
             // Bracket the indexing window with started/completed events
-            // so subscribers can debounce UI refreshes. The actual
-            // reconcile is the consumer's responsibility (#84).
+            // so subscribers can debounce UI refreshes. C17 (#371): the
+            // reconcile itself ran in `apply_index_update` just before
+            // this publish, so `completed` is no longer a no-op signal.
             publish_storage_event(
                 bus,
                 "com.nexus.storage.indexing.started",

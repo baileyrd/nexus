@@ -33,6 +33,7 @@ pub mod hybrid;
 pub mod import;
 mod index;
 mod link_rewrite;
+mod trash;
 /// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
 pub mod lfs;
 pub mod mdx;
@@ -129,6 +130,15 @@ pub struct StorageConfig {
     pub debounce_ms: u64,
     /// Number of Rayon threads (0 = auto-detect). Default: 0.
     pub rayon_threads: usize,
+    /// C18 (#370) — skip the synchronous reconcile inside
+    /// [`StorageEngine::open`] and let the core plugin run it on a
+    /// background thread after `on_start` (bracketed by
+    /// `com.nexus.storage.indexing.started/completed` events).
+    /// Long-lived frontends (shell, TUI) set this so a large forge's
+    /// first index build can't trip the 30s lifecycle watchdog or
+    /// block boot; short-lived CLI invocations keep the blocking
+    /// default so their reads are fresh. Default: `false`.
+    pub defer_startup_reconcile: bool,
 }
 
 impl Default for StorageConfig {
@@ -137,11 +147,24 @@ impl Default for StorageConfig {
             pool_size: 4,
             debounce_ms: 300,
             rayon_threads: 0,
+            defer_startup_reconcile: false,
         }
     }
 }
 
 // ── StorageEngine ─────────────────────────────────────────────────────────────
+
+/// C3 (#356) — where a deleted entry goes. `Permanent` matches the
+/// pre-C3 behaviour; the trash destinations are recoverable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteDestination {
+    /// Remove bytes immediately (unrecoverable).
+    Permanent,
+    /// Move into the forge-level `.trash/` (restorable in-app).
+    ForgeTrash,
+    /// Move into the operating system's trash / recycle bin.
+    SystemTrash,
+}
 
 /// Facade that composes all storage subsystems into a single public API.
 ///
@@ -220,7 +243,24 @@ impl StorageEngine {
         //    level. See issue #72.
         let abs_target = resolve_within(self.forge.root(), path)?;
         atomic_write(&abs_target, content, &self.forge.temp_dir())?;
+        self.index_file_content(path, content)
+    }
 
+    /// C17 (#371) — index `content` for `path` without writing to disk.
+    /// The index-update core of [`write_file`](Self::write_file), split
+    /// out so the watcher bridge can index externally-authored changes
+    /// (vim, Obsidian, a sync client) without re-writing bytes that are
+    /// already on disk — which would emit another watcher event and
+    /// loop.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database failure or non-UTF-8 content.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    fn index_file_content(&self, path: &str, content: &[u8]) -> Result<FileMetadata, StorageError> {
         // 2. Decode content as UTF-8.
         let text = std::str::from_utf8(content).map_err(|e| StorageError::CorruptFile {
             path: path.to_string(),
@@ -362,6 +402,77 @@ impl StorageEngine {
                 content_hash: parsed.content_hash,
             })
         }
+    }
+
+    /// C17 (#371) — bring the index up to date for a file the watcher
+    /// saw change on disk (created or modified outside the engine).
+    ///
+    /// Reads the current bytes and re-indexes them, with two skips that
+    /// make the call safe to fire on *every* watcher event:
+    ///
+    ///   - **echo suppression** — when the stored `content_hash` already
+    ///     matches the on-disk bytes (the event was our own `write_file`
+    ///     landing), nothing happens;
+    ///   - **binary content** — non-UTF-8 files carry no block index;
+    ///     they are left for the reconcile pass's metadata handling.
+    ///
+    /// Returns the new [`FileMetadata`] when the index was updated,
+    /// `None` when skipped (including a file already gone again).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn index_external_change(
+        &self,
+        path: &str,
+    ) -> Result<Option<FileMetadata>, StorageError> {
+        let abs = resolve_within(self.forge.root(), path)?;
+        let bytes = match std::fs::read(&abs) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        if std::str::from_utf8(&bytes).is_err() {
+            return Ok(None);
+        }
+        let hash = nexus_formats::sha256_hex(&bytes);
+        {
+            use rusqlite::OptionalExtension as _;
+            let conn = self.pool.get().map_err(|e| {
+                StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
+            let existing: Option<String> = conn
+                .query_row(
+                    "SELECT content_hash FROM files WHERE path = ?1 AND is_deleted = 0;",
+                    rusqlite::params![path],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if existing.as_deref() == Some(hash.as_str()) {
+                return Ok(None);
+            }
+        }
+        self.index_file_content(path, &bytes).map(Some)
+    }
+
+    /// C17 (#371) — drop the index rows for a file the watcher saw
+    /// deleted on disk. Soft-deletes the `files` row (same semantics as
+    /// the trash flow) so reconcile can resurrect it if the file comes
+    /// back.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn index_external_delete(&self, path: &str) -> Result<(), StorageError> {
+        self.soft_delete_index_entry(path, false)
     }
 
     /// Write `content` to `path` (vault-relative) atomically **without**
@@ -1102,7 +1213,7 @@ impl StorageEngine {
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
                 continue;
             };
-            if relpath.is_empty() && name == ".forge" {
+            if relpath.is_empty() && (name == ".forge" || name == trash::TRASH_DIR) {
                 continue;
             }
             let rel = if relpath.is_empty() {
@@ -1349,6 +1460,171 @@ impl StorageEngine {
         }
     }
 
+    // ── Trash (C3 / #356) ─────────────────────────────────────────────────────
+    //
+    // See [`DeleteDestination`] for the three delete modes and
+    // [`trash`] (module docs) for the on-disk bucket layout.
+
+    /// Delete an entry to the given destination: permanently (the
+    /// pre-C3 behaviour), into the forge-level `.trash/`, or into the
+    /// OS trash. Returns the trash bucket id for forge-trash deletes
+    /// (`None` otherwise).
+    ///
+    /// Trash destinations soft-delete the index rows (same semantics
+    /// as [`delete_entry`](Self::delete_entry)'s directory branch), so
+    /// a restore — or a reconcile pass after an OS-trash "Put Back" —
+    /// resurrects them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::PermissionDenied`] when `relpath`
+    /// escapes the forge root or names the forge internals
+    /// (`.forge` / `.trash`), plus I/O and database failures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn delete_entry_to(
+        &self,
+        relpath: &str,
+        destination: DeleteDestination,
+    ) -> Result<Option<String>, StorageError> {
+        if matches!(destination, DeleteDestination::Permanent) {
+            self.delete_entry(relpath)?;
+            return Ok(None);
+        }
+        let trimmed = relpath.trim_matches('/');
+        if trimmed.is_empty()
+            || trimmed == trash::TRASH_DIR
+            || trimmed == ".forge"
+            || trimmed.starts_with(".trash/")
+            || trimmed.starts_with(".forge/")
+        {
+            return Err(StorageError::PermissionDenied(format!(
+                "cannot trash '{relpath}'"
+            )));
+        }
+        let abs = resolve_within(self.forge.root(), trimmed)?;
+        if !abs.exists() {
+            return Err(StorageError::FileNotFound(trimmed.to_string()));
+        }
+        let is_dir = abs.is_dir();
+        let trash_id = match destination {
+            DeleteDestination::ForgeTrash => {
+                Some(trash::move_to_trash(self.forge.root(), trimmed, &abs)?)
+            }
+            DeleteDestination::SystemTrash => {
+                ::trash::delete(&abs).map_err(|e| StorageError::WriteFailed {
+                    path: trimmed.to_string(),
+                    reason: format!("OS trash: {e}"),
+                })?;
+                None
+            }
+            DeleteDestination::Permanent => unreachable!("handled above"),
+        };
+        self.soft_delete_index_entry(trimmed, is_dir)?;
+        Ok(trash_id)
+    }
+
+    /// Soft-delete the index rows for a removed file or directory
+    /// prefix: FTS rows go, `files` rows keep their UNIQUE path slot
+    /// with `is_deleted = 1` so restore / reconcile can resurrect
+    /// them. Mirrors `delete_entry`'s directory branch.
+    fn soft_delete_index_entry(&self, relpath: &str, is_dir: bool) -> Result<(), StorageError> {
+        let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let tx = conn.transaction()?;
+        if is_dir {
+            let prefix = format!("{}/", relpath.trim_end_matches('/'));
+            tx.execute(
+                "DELETE FROM fts_blocks WHERE file_path LIKE ?1;",
+                rusqlite::params![format!("{prefix}%")],
+            )?;
+            tx.execute(
+                "UPDATE files SET is_deleted = 1 WHERE path LIKE ?1;",
+                rusqlite::params![format!("{prefix}%")],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM fts_blocks WHERE file_path = ?1;",
+                rusqlite::params![relpath],
+            )?;
+            tx.execute(
+                "UPDATE files SET is_deleted = 1 WHERE path = ?1;",
+                rusqlite::params![relpath],
+            )?;
+        }
+        tx.commit()?;
+        if !is_dir {
+            // #199 tier-2: panic on poison — mutation path.
+            let mut g = self.graph.write().expect("graph lock poisoned");
+            g.remove_note(relpath);
+        }
+        Ok(())
+    }
+
+    /// List trash buckets, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Io`] on directory-scan failure.
+    pub fn trash_list(&self) -> Result<Vec<trash::TrashBucket>, StorageError> {
+        trash::list(self.forge.root())
+    }
+
+    /// Restore a trashed entry to its original path and reindex it.
+    /// Markdown files re-enter through [`write_file`](Self::write_file)
+    /// (full parse: fts, links, tags); other files just have their
+    /// soft-deleted `files` row resurrected. Returns the restored
+    /// forge-relative path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] for an unknown bucket,
+    /// [`StorageError::WriteFailed`] when the original path is
+    /// occupied again, plus I/O and database failures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn trash_restore(&self, trash_id: &str) -> Result<String, StorageError> {
+        let meta = trash::restore(self.forge.root(), trash_id)?;
+        let abs = self.forge.root().join(&meta.original_path);
+        for rel in trash::walk_restored_files(&abs, &meta.original_path) {
+            let lower = rel.to_lowercase();
+            if lower.ends_with(".md") || lower.ends_with(".markdown") {
+                if let Ok(bytes) = std::fs::read(self.forge.root().join(&rel)) {
+                    // Full reindex; a parse failure must not abort the
+                    // restore — the file is already back on disk.
+                    let _ = self.write_file(&rel, &bytes);
+                }
+            } else {
+                let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+                conn.execute(
+                    "UPDATE files SET is_deleted = 0 WHERE path = ?1;",
+                    rusqlite::params![rel],
+                )?;
+            }
+        }
+        Ok(meta.original_path)
+    }
+
+    /// Permanently delete trash buckets, optionally only those older
+    /// than `older_than_days`. Returns the number removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Io`] on removal failure.
+    pub fn trash_empty(&self, older_than_days: Option<u64>) -> Result<usize, StorageError> {
+        let cutoff = older_than_days.map(|days| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+                .unwrap_or(0);
+            now - i64::try_from(days).unwrap_or(0) * 24 * 60 * 60 * 1000
+        });
+        trash::empty(self.forge.root(), cutoff)
+    }
+
     // ── Index queries ─────────────────────────────────────────────────────────
 
     /// Query the file index with optional prefix and type filters.
@@ -1578,6 +1854,31 @@ impl StorageEngine {
     pub fn reconcile_index(&self) -> Result<ReconcileDelta, StorageError> {
         let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
         reconcile(&conn, self.forge.root())
+    }
+
+    /// C18 (#370) — deferred-startup variant of
+    /// [`reconcile_index`](Self::reconcile_index): reconciles, then
+    /// rebuilds the in-memory knowledge graph from the refreshed DB.
+    /// Needed because a deferred open built the graph from the stale
+    /// pre-reconcile rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn reconcile_index_full(&self) -> Result<ReconcileDelta, StorageError> {
+        let (delta, kg) = {
+            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+            let delta = reconcile(&conn, self.forge.root())?;
+            let kg = graph::KnowledgeGraph::rebuild_from_db(&conn)?;
+            (delta, kg)
+        };
+        // #199 tier-2: panic on poison — mutation path.
+        *self.graph.write().expect("graph lock poisoned") = kg;
+        Ok(delta)
     }
 
     // ── Graph queries ────────────────────────────────────────────────────────
@@ -2005,8 +2306,9 @@ fn open_internal(
     // the production watcher and moves it into a dedicated bridge
     // thread; the engine no longer needs its own.)
 
-    // 8. If not new: run reconcile against write_conn.
-    if !is_new {
+    // 8. If not new: run reconcile against write_conn — unless the
+    //    caller deferred it to a post-boot background pass (C18/#370).
+    if !is_new && !config.defer_startup_reconcile {
         reconcile(&write_conn, forge.root())?;
     }
 

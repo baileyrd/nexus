@@ -92,6 +92,7 @@ A "forge" is a user's directory of markdown files. Nexus stores its index alongs
 │   ├── plugins/          # community WASM plugins (forge-scoped)
 │   ├── logs/  temp/  .lock
 │   └── …
+├── .trash/               # recoverable deletes (C3 #356) — excluded from index/watcher/list_dir
 └── <user markdown files>
 ```
 

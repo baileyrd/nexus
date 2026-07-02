@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageTrashEntryResult",
+  "description": "Return type for `com.nexus.storage::trash_entry`.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `true` on success.",
+      "type": "boolean"
+    },
+    "trash_id": {
+      "description": "Bucket id for forge-trash deletes — pass to `trash_restore`.\n`null` for OS-trash deletes (restore happens via the OS).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok"
+  ]
+}

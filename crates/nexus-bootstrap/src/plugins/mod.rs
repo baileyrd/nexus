@@ -46,9 +46,10 @@ pub(crate) fn register_all(
     loader: &mut PluginLoader,
     forge_root: &std::path::Path,
     event_bus: &Arc<EventBus>,
+    options: &crate::BootOptions,
 ) -> Result<()> {
     security::register(loader, forge_root, event_bus)?;
-    storage::register(loader, forge_root, event_bus)?;
+    storage::register(loader, forge_root, event_bus, options)?;
     // Native memory engine — owns its own .forge/memory store, no inter-plugin
     // deps, so it loads right after storage.
     memory::register(loader, forge_root, event_bus)?;
