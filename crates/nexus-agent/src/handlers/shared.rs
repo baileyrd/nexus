@@ -739,6 +739,11 @@ async fn propose_call(
 pub(crate) struct KernelToolBridge {
     pub(crate) ctx: Arc<KernelPluginContext>,
     pub(crate) timeout: Duration,
+    /// C29 (#382) — when set, storage writes dispatched through this
+    /// bridge capture pre-write snapshots into the session's trail
+    /// (`.forge/agent/snapshots/<id>.json`) for `session_changes` /
+    /// `session_revert`.
+    pub(crate) session_id: Option<String>,
 }
 
 #[async_trait]
@@ -750,7 +755,17 @@ impl ToolDispatcher for KernelToolBridge {
         let timeout = crate::AgentToolRegistry::global()
             .dispatch_timeout_for(&call.target_plugin_id, &call.command_id)
             .unwrap_or(self.timeout);
-        self.ctx
+        // C29 (#382) — capture pre-write state for storage writes so
+        // the session leaves a revertible trail. Best-effort: snapshot
+        // failures never block or fail the tool call itself.
+        let pending = match &self.session_id {
+            Some(_) if call.target_plugin_id == "com.nexus.storage" => {
+                crate::snapshots::capture_before(&self.ctx, &call.command_id, &call.args).await
+            }
+            _ => Vec::new(),
+        };
+        let result = self
+            .ctx
             .ipc_call(
                 &call.target_plugin_id,
                 &call.command_id,
@@ -758,7 +773,14 @@ impl ToolDispatcher for KernelToolBridge {
                 timeout,
             )
             .await
-            .map_err(|e| ipc_error_to_dispatch_error(&e))
+            .map_err(|e| ipc_error_to_dispatch_error(&e));
+        if result.is_ok() && !pending.is_empty() {
+            if let Some(session_id) = &self.session_id {
+                crate::snapshots::commit_after(&self.ctx, session_id, &call.command_id, pending)
+                    .await;
+            }
+        }
+        result
     }
 }
 

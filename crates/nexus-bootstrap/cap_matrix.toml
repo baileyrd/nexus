@@ -427,6 +427,16 @@ unrestricted = "removes a named checkpoint — metadata write gated downstream b
 
 [[handler]]
 plugin = "com.nexus.agent"
+command = "session_changes"
+unrestricted = "reads a session write-snapshot trail (C29 #382) - read-only, forge-scoped"
+
+[[handler]]
+plugin = "com.nexus.agent"
+command = "session_revert"
+unrestricted = "restores pre-session file content from the snapshot trail (C29 #382) - downstream fs.write gated; guarded against post-session user edits"
+
+[[handler]]
+plugin = "com.nexus.agent"
 command = "session_get"
 unrestricted = "read-only fetch of a stored agent session"
 

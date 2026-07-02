@@ -164,6 +164,17 @@ pub const HANDLER_SESSION_CHECKPOINTS: u32 = 32;
 /// `session_checkpoint_delete` (RFC 0008) — remove a checkpoint by name.
 pub const HANDLER_SESSION_CHECKPOINT_DELETE: u32 = 33;
 
+/// C29 (#382) — `session_changes`. Args: `{ "session_id": String }`;
+/// Returns the session's write-snapshot trail with per-path
+/// `modified_since` flags.
+pub const HANDLER_SESSION_CHANGES: u32 = 34;
+
+/// C29 (#382) — `session_revert`. Args: `{ "session_id": String,
+/// "paths": [String]?, "force": bool? }`; restores pre-session file
+/// content (session-created files move to the forge trash), skipping
+/// paths the user edited since unless `force`.
+pub const HANDLER_SESSION_REVERT: u32 = 35;
+
 /// Plugin ids this plugin invokes during planning + tool dispatch.
 /// `mcp.host` is intentionally omitted — it loads after agent in
 /// `register_all`, so its dynamic tool fan-out happens once both
@@ -211,6 +222,8 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
         "session_checkpoint_delete",
         HANDLER_SESSION_CHECKPOINT_DELETE,
     ),
+    ("session_changes", HANDLER_SESSION_CHANGES),
+    ("session_revert", HANDLER_SESSION_REVERT),
 ];
 
 /// Core plugin instance.
@@ -345,6 +358,12 @@ impl CorePlugin for AgentCorePlugin {
                 }
                 HANDLER_SESSION_CHECKPOINT_DELETE => {
                     handlers::checkpoint::handle_session_checkpoint_delete(ctx, &args).await
+                }
+                HANDLER_SESSION_CHANGES => {
+                    handlers::changes::handle_session_changes(ctx, &args).await
+                }
+                HANDLER_SESSION_REVERT => {
+                    handlers::changes::handle_session_revert(ctx, &args).await
                 }
                 HANDLER_SESSION_LIST => handlers::session::handle_session_list(ctx).await,
                 HANDLER_SESSION_GET => handlers::session::handle_session_get(ctx, &args).await,

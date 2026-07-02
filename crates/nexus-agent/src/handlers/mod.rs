@@ -4,6 +4,7 @@
 //! into these by handler id. Cross-cutting helpers live in `shared`.
 
 pub(crate) mod ask;
+pub(crate) mod changes;
 pub(crate) mod checkpoint;
 pub(crate) mod custom;
 pub(crate) mod delegate;
