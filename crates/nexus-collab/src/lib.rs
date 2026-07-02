@@ -40,7 +40,7 @@ pub mod reconnect_client;
 pub mod server;
 pub mod url;
 
-pub use auth::{Token, TokenError};
+pub use auth::{Token, TokenError, TokenSet, TokenSetError};
 pub use client::{
     CollabClient, CollabClientConfig, ConnectError, ConnectParams, COLLAB_BRIDGE_PLUGIN_ID,
     COLLAB_PLUGIN_ID, DEFAULT_HANDSHAKE_TIMEOUT, EDITOR_PLUGIN_ID, OPS_TOPIC_PREFIX,
