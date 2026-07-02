@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::embedding::EmbeddingProvider;
 use crate::error::AiError;
 use crate::provider::{
-    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall,
+    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, TokenUsage,
+    ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSchema;
 
@@ -42,9 +43,28 @@ pub struct OllamaProvider {
     chat_model: String,
     embedding_model: String,
     fim_temperature: f32,
+    /// C27 (#380) — usage accumulated across this instance's calls.
+    usage: std::sync::Mutex<Option<TokenUsage>>,
 }
 
 impl OllamaProvider {
+    /// C27 (#380) — fold one response's token counts into the tally.
+    /// Ollama reports `prompt_eval_count` / `eval_count` on the final
+    /// message of both streaming and non-streaming responses.
+    fn record_counts(&self, prompt: Option<u64>, eval: Option<u64>) {
+        if prompt.is_none() && eval.is_none() {
+            return;
+        }
+        if let Ok(mut guard) = self.usage.lock() {
+            let mut total = guard.unwrap_or_default();
+            total.add(TokenUsage {
+                input_tokens: prompt.unwrap_or(0),
+                output_tokens: eval.unwrap_or(0),
+            });
+            *guard = Some(total);
+        }
+    }
+
     /// Create a new Ollama provider.
     ///
     /// `None` for any argument falls back to the corresponding
@@ -83,6 +103,7 @@ impl OllamaProvider {
             chat_model: chat_model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
             embedding_model: embedding_model.unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
             fim_temperature: fim_temperature.unwrap_or(DEFAULT_FIM_TEMPERATURE),
+            usage: std::sync::Mutex::new(None),
         }
     }
 }
@@ -112,6 +133,10 @@ struct OllamaChatMessage<'a> {
 #[derive(Deserialize)]
 struct OllamaChatResponse {
     message: OllamaResponseMessage,
+    #[serde(default)]
+    prompt_eval_count: Option<u64>,
+    #[serde(default)]
+    eval_count: Option<u64>,
 }
 
 /// A single NDJSON line from a streaming Ollama chat response.
@@ -120,6 +145,11 @@ struct OllamaStreamChunk {
     message: OllamaStreamMessage,
     #[serde(default)]
     done: bool,
+    // C27 (#380) — present on the final (`done: true`) chunk.
+    #[serde(default)]
+    prompt_eval_count: Option<u64>,
+    #[serde(default)]
+    eval_count: Option<u64>,
 }
 
 /// The message payload in an Ollama stream chunk.
@@ -305,6 +335,10 @@ struct OllamaEmbedResponse {
 
 #[async_trait]
 impl AiProvider for OllamaProvider {
+    fn take_usage(&self) -> Option<TokenUsage> {
+        self.usage.lock().ok().and_then(|mut g| g.take())
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],
@@ -362,6 +396,7 @@ impl AiProvider for OllamaProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_counts(parsed.prompt_eval_count, parsed.eval_count);
 
         Ok(parsed.message.content)
     }
@@ -433,6 +468,7 @@ impl AiProvider for OllamaProvider {
                         on_chunk(chunk.message.content);
                     }
                     if chunk.done {
+                        self.record_counts(chunk.prompt_eval_count, chunk.eval_count);
                         break;
                     }
                 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AiError;
 use crate::provider::{
-    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall,
+    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall, TokenUsage,
 };
 use crate::tools::ToolSchema;
 
@@ -22,6 +22,32 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     max_tokens: u32,
+    /// C27 (#380) — usage accumulated across this instance's calls.
+    usage: std::sync::Mutex<Option<TokenUsage>>,
+}
+
+impl AnthropicProvider {
+    /// Fold one response's usage block into the instance tally.
+    fn record_usage(&self, usage: Option<AnthropicUsage>) {
+        let Some(u) = usage else { return };
+        if let Ok(mut guard) = self.usage.lock() {
+            let mut total = guard.unwrap_or_default();
+            total.add(TokenUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+            });
+            *guard = Some(total);
+        }
+    }
+}
+
+/// The `usage` block of an Anthropic Messages response.
+#[derive(Deserialize, Debug, Clone, Copy)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
 }
 
 impl AnthropicProvider {
@@ -44,6 +70,7 @@ impl AnthropicProvider {
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             max_tokens,
+            usage: std::sync::Mutex::new(None),
         }
     }
 }
@@ -69,6 +96,8 @@ struct AnthropicMessage<'a> {
 #[derive(Deserialize)]
 struct AnthropicResponse {
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
 }
 
 /// A content block in an Anthropic response.
@@ -79,6 +108,10 @@ struct ContentBlock {
 
 #[async_trait]
 impl AiProvider for AnthropicProvider {
+    fn take_usage(&self) -> Option<TokenUsage> {
+        self.usage.lock().ok().and_then(|mut g| g.take())
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],
@@ -129,6 +162,7 @@ impl AiProvider for AnthropicProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         parsed
             .content
@@ -185,6 +219,7 @@ impl AiProvider for AnthropicProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         Ok(parse_tool_response(parsed, on_chunk))
     }
@@ -262,6 +297,8 @@ enum AnthropicBlock {
 struct AnthropicToolResponse {
     #[serde(default)]
     content: Vec<AnthropicResponseBlock>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
 }
 
 /// One response block. Anthropic includes a `type` discriminator;
@@ -589,5 +626,31 @@ mod tests {
         let on_chunk = |_: String| {};
         let out = parse_tool_response(parsed, &on_chunk);
         assert_eq!(out.text, "ok");
+    }
+
+    // C27 (#380) — usage block parses and accumulates across rounds.
+    #[test]
+    fn usage_block_parses_and_take_usage_drains() {
+        let provider = AnthropicProvider::new("k".into(), None, 1024, false);
+        let body = serde_json::json!({
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 11, "output_tokens": 7}
+        });
+        let parsed: AnthropicToolResponse = serde_json::from_value(body).expect("parse");
+        provider.record_usage(parsed.usage);
+        provider.record_usage(parsed.usage); // second tool round
+        let total = provider.take_usage().expect("usage recorded");
+        assert_eq!(total.input_tokens, 22);
+        assert_eq!(total.output_tokens, 14);
+        assert!(provider.take_usage().is_none(), "take drains the tally");
+    }
+
+    #[test]
+    fn missing_usage_block_is_tolerated() {
+        let provider = AnthropicProvider::new("k".into(), None, 1024, false);
+        let body = serde_json::json!({ "content": [{"type": "text", "text": "hi"}] });
+        let parsed: AnthropicToolResponse = serde_json::from_value(body).expect("parse");
+        provider.record_usage(parsed.usage);
+        assert!(provider.take_usage().is_none());
     }
 }

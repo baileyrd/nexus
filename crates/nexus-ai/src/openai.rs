@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::embedding::EmbeddingProvider;
 use crate::error::AiError;
 use crate::provider::{
-    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall,
+    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, TokenUsage,
+    ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSchema;
 
@@ -35,9 +36,33 @@ pub struct OpenAiProvider {
     api_key: String,
     chat_model: String,
     max_tokens: u32,
+    /// C27 (#380) — usage accumulated across this instance's calls.
+    usage: std::sync::Mutex<Option<TokenUsage>>,
+}
+
+/// The `usage` block of an OpenAI chat-completions response.
+#[derive(serde::Deserialize, Debug, Clone, Copy)]
+struct OpenAiUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
 }
 
 impl OpenAiProvider {
+    /// C27 (#380) — fold one response's usage block into the tally.
+    fn record_usage(&self, usage: Option<OpenAiUsage>) {
+        let Some(u) = usage else { return };
+        if let Ok(mut guard) = self.usage.lock() {
+            let mut total = guard.unwrap_or_default();
+            total.add(TokenUsage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+            });
+            *guard = Some(total);
+        }
+    }
+
     /// Create a new `OpenAI` provider.
     ///
     /// If `model` is `None`, defaults to `gpt-4o` for chat and
@@ -57,6 +82,7 @@ impl OpenAiProvider {
             api_key,
             chat_model: model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
             max_tokens,
+            usage: std::sync::Mutex::new(None),
         }
     }
 }
@@ -82,6 +108,8 @@ struct ChatRequestMessage<'a> {
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 /// A single choice in a chat response.
@@ -119,6 +147,10 @@ struct EmbeddingData {
 
 #[async_trait]
 impl AiProvider for OpenAiProvider {
+    fn take_usage(&self) -> Option<TokenUsage> {
+        self.usage.lock().ok().and_then(|mut g| g.take())
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],
@@ -175,6 +207,7 @@ impl AiProvider for OpenAiProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         parsed
             .choices
@@ -229,6 +262,7 @@ impl AiProvider for OpenAiProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         parse_openai_response(parsed, on_chunk)
     }
@@ -358,6 +392,8 @@ impl<'a> From<&'a ToolSchema> for OpenAiTool<'a> {
 #[derive(Deserialize, Debug)]
 struct OpenAiToolResponse {
     choices: Vec<OpenAiToolChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Deserialize, Debug)]

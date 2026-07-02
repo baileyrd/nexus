@@ -77,6 +77,8 @@ pub(crate) async fn handle_stream_chat(
     let envelope = EngineEnvelope::new(Arc::clone(&ctx), session_id.clone());
     envelope.publish_start();
 
+    // C27 (#380) — provider-reported token usage for this call.
+    let mut usage: Option<crate::provider::TokenUsage> = None;
     let outcome = match mode {
         AiStreamChatMode::Chat => {
             let registry = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
@@ -116,7 +118,10 @@ pub(crate) async fn handle_stream_chat(
             )
             .await
             {
-                Ok(o) => o,
+                Ok(o) => {
+                    usage = ai.take_usage();
+                    o
+                }
                 Err(e) => {
                     let msg = format!("stream_chat: {e}");
                     record_activity_error(
@@ -179,6 +184,7 @@ pub(crate) async fn handle_stream_chat(
                     return Err(exec_err(msg));
                 }
             };
+            usage = ai.take_usage();
             ToolDispatchOutcome {
                 text,
                 tool_calls: Vec::new(),
@@ -187,7 +193,7 @@ pub(crate) async fn handle_stream_chat(
         }
     };
 
-    envelope.publish_done(&outcome.text);
+    envelope.publish_done(&outcome.text, usage);
 
     if let Some(rec) = activity {
         let entry = ActivityEntry {
@@ -208,5 +214,10 @@ pub(crate) async fn handle_stream_chat(
         rec.append(entry).await;
     }
 
-    Ok(serde_json::json!({"session_id": session_id, "text": outcome.text}))
+    let mut reply = serde_json::json!({"session_id": session_id, "text": outcome.text});
+    if let Some(u) = usage {
+        reply["usage"] =
+            serde_json::json!({"input_tokens": u.input_tokens, "output_tokens": u.output_tokens});
+    }
+    Ok(reply)
 }
