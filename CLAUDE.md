@@ -93,6 +93,7 @@ A "forge" is a user's directory of markdown files. Nexus stores its index alongs
 │   ├── logs/  temp/  .lock
 │   └── …
 ├── .trash/               # recoverable deletes (C3 #356) — excluded from index/watcher/list_dir
+├── .aiignore             # AI exclusion patterns (C28 #381) — with `ai: exclude` frontmatter, keeps notes out of embedding/RAG/enrichment
 └── <user markdown files>
 ```
 

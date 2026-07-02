@@ -1,12 +1,14 @@
 //! `OpenAI` AI and embedding provider implementation.
 
 use async_trait::async_trait;
+use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
 
 use crate::embedding::EmbeddingProvider;
 use crate::error::AiError;
 use crate::provider::{
-    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall,
+    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, TokenUsage,
+    ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSchema;
 
@@ -35,9 +37,44 @@ pub struct OpenAiProvider {
     api_key: String,
     chat_model: String,
     max_tokens: u32,
+    /// C27 (#380) — usage accumulated across this instance's calls.
+    usage: std::sync::Mutex<Option<TokenUsage>>,
+    /// C26 (#379) — cooperative cancel flag; checked between SSE chunks.
+    cancel: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+}
+
+/// The `usage` block of an OpenAI chat-completions response.
+#[derive(serde::Deserialize, Debug, Clone, Copy)]
+struct OpenAiUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
 }
 
 impl OpenAiProvider {
+    /// C26 (#379) — `true` when the installed cancel flag fired.
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)))
+            .unwrap_or(false)
+    }
+
+    /// C27 (#380) — fold one response's usage block into the tally.
+    fn record_usage(&self, usage: Option<OpenAiUsage>) {
+        let Some(u) = usage else { return };
+        if let Ok(mut guard) = self.usage.lock() {
+            let mut total = guard.unwrap_or_default();
+            total.add(TokenUsage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+            });
+            *guard = Some(total);
+        }
+    }
+
     /// Create a new `OpenAI` provider.
     ///
     /// If `model` is `None`, defaults to `gpt-4o` for chat and
@@ -57,6 +94,8 @@ impl OpenAiProvider {
             api_key,
             chat_model: model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
             max_tokens,
+            usage: std::sync::Mutex::new(None),
+            cancel: std::sync::Mutex::new(None),
         }
     }
 }
@@ -69,6 +108,40 @@ struct ChatRequest<'a> {
     model: &'a str,
     max_tokens: u32,
     messages: Vec<ChatRequestMessage<'a>>,
+    /// C26 (#379) — SSE streaming for `chat_stream_with`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
+    /// C26/C27 — ask for the usage block on the final stream chunk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+}
+
+/// `stream_options` for an OpenAI streaming request.
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+/// C26 (#379) — one SSE chunk of a streaming chat response. The final
+/// chunk (empty `choices`) carries `usage` when requested.
+#[derive(Deserialize, Debug)]
+struct ChatStreamChunk {
+    #[serde(default)]
+    choices: Vec<ChatStreamChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ChatStreamChoice {
+    #[serde(default)]
+    delta: ChatStreamDelta,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct ChatStreamDelta {
+    #[serde(default)]
+    content: Option<String>,
 }
 
 /// A message in an `OpenAI` chat request.
@@ -82,6 +155,8 @@ struct ChatRequestMessage<'a> {
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 /// A single choice in a chat response.
@@ -119,6 +194,122 @@ struct EmbeddingData {
 
 #[async_trait]
 impl AiProvider for OpenAiProvider {
+    fn take_usage(&self) -> Option<TokenUsage> {
+        self.usage.lock().ok().and_then(|mut g| g.take())
+    }
+
+    fn install_cancel_flag(&self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        if let Ok(mut guard) = self.cancel.lock() {
+            *guard = Some(flag);
+        }
+    }
+
+    /// C26 (#379) — true SSE streaming (pre-C26 the default collected
+    /// the whole reply and emitted one burst). Honours the cancel flag
+    /// between chunks; the final chunk's usage block feeds C27.
+    async fn chat_stream_with(
+        &self,
+        messages: &[ChatMessage],
+        system: Option<&str>,
+        on_chunk: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<String, AiError> {
+        let mut api_messages: Vec<ChatRequestMessage<'_>> = Vec::new();
+        if let Some(sys) = system {
+            api_messages.push(ChatRequestMessage {
+                role: "system",
+                content: sys,
+            });
+        }
+        for msg in messages {
+            let role = match msg.role {
+                Role::System => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
+            };
+            api_messages.push(ChatRequestMessage {
+                role,
+                content: &msg.content,
+            });
+        }
+        let body = ChatRequest {
+            model: &self.chat_model,
+            max_tokens: self.max_tokens,
+            messages: api_messages,
+            stream: true,
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
+        };
+
+        let response = self
+            .client
+            .post(CHAT_URL)
+            .header("authorization", format!("Bearer {}", self.api_key))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if response.status().as_u16() == 401 {
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::AuthFailed(text));
+        }
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::Provider(format!("{status}: {text}")));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+
+        'outer: while let Some(chunk) = stream.next().await {
+            if self.cancelled() {
+                return Err(AiError::Cancelled);
+            }
+            let bytes = chunk.map_err(|e| AiError::Provider(e.to_string()))?;
+            buf.extend_from_slice(&bytes);
+
+            while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = buf.drain(..=newline_pos).collect();
+                let line = std::str::from_utf8(&line_bytes).unwrap_or("").trim();
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
+                let data = data.trim();
+                if data.is_empty() {
+                    continue;
+                }
+                if data == "[DONE]" {
+                    break 'outer;
+                }
+                if let Ok(chunk) = serde_json::from_str::<ChatStreamChunk>(data) {
+                    self.record_usage(chunk.usage);
+                    if let Some(text) = chunk
+                        .choices
+                        .into_iter()
+                        .next()
+                        .and_then(|c| c.delta.content)
+                    {
+                        if !text.is_empty() {
+                            full_text.push_str(&text);
+                            on_chunk(text);
+                        }
+                    }
+                }
+                if self.cancelled() {
+                    break 'outer;
+                }
+            }
+        }
+
+        if self.cancelled() {
+            return Err(AiError::Cancelled);
+        }
+        Ok(full_text)
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],
@@ -149,6 +340,8 @@ impl AiProvider for OpenAiProvider {
             model: &self.chat_model,
             max_tokens: self.max_tokens,
             messages: api_messages,
+            stream: false,
+            stream_options: None,
         };
 
         let response = self
@@ -175,6 +368,7 @@ impl AiProvider for OpenAiProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         parsed
             .choices
@@ -229,6 +423,7 @@ impl AiProvider for OpenAiProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         parse_openai_response(parsed, on_chunk)
     }
@@ -358,6 +553,8 @@ impl<'a> From<&'a ToolSchema> for OpenAiTool<'a> {
 #[derive(Deserialize, Debug)]
 struct OpenAiToolResponse {
     choices: Vec<OpenAiToolChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Deserialize, Debug)]

@@ -130,6 +130,8 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 
 `.trash/` (at the forge root, C3 #356) holds recoverable deletes — one timestamped bucket per deletion with a `meta.json` sidecar (`nexus-storage/src/trash.rs`). Excluded from the watcher, reconcile scans, and root `list_dir`; managed via `com.nexus.storage::trash_{entry,list,restore,empty}` and `nexus trash list|restore|empty`. Which destination deletes use (system / forge / permanent) is the shell setting `nexus.settings.files.deletedFilesDestination`.
 
+`.aiignore` (at the forge root, C28 #381) holds AI-exclusion patterns — one per line, `#` comments; trailing `/` excludes a subtree, `*`/`?` wildcards, bare names also match basenames (`nexus-ai/src/exclusion.rs`). Together with `ai: exclude` note frontmatter it keeps content out of embedding (indexing daemon skips + reaps existing vectors), RAG retrieval, and `enrich_file`. No negation (`!`) support.
+
 > **Removed:** `.forge/acp.toml` was previously listed as reserved. ADR 0027 §Phase 4 keeps ACP greenfield with no flat-TOML loader — see `crates/nexus-acp/src/lib.rs:13` and `crates/nexus-bootstrap/src/acp_contribution_wiring.rs:8`. Do not introduce one.
 
 ## How to add a setting

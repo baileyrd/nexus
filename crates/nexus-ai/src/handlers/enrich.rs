@@ -20,6 +20,14 @@ pub(crate) async fn handle_enrich_file(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| exec_err("enrich_file: missing 'path' string".to_string()))?;
 
+    // C28 (#381) — excluded notes never reach a provider, even when
+    // the user invokes enrichment explicitly.
+    if crate::exclusion::is_excluded(ctx, path).await {
+        return Err(exec_err(format!(
+            "enrich_file: '{path}' is excluded from AI (.aiignore or `ai: exclude` frontmatter)"
+        )));
+    }
+
     let ai_cfg = ai_cfg
         .ok_or_else(|| exec_err("enrich_file: no AI chat provider configured".to_string()))?;
     let embed_cfg = embed_cfg

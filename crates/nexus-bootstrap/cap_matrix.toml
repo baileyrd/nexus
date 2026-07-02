@@ -71,6 +71,12 @@ note = "ADR 0022 Phase 2 — tools=auto requires ai.tools.write; auto_with_mcp a
 
 [[handler]]
 plugin = "com.nexus.ai"
+command = "cancel_stream"
+caps = ["ai.chat"]
+note = "C26 (#379) - fires the cooperative cancel flag for a live stream_chat session; same gate as starting one"
+
+[[handler]]
+plugin = "com.nexus.ai"
 command = "stream_ask"
 caps = ["ai.chat"]
 

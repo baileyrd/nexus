@@ -608,6 +608,22 @@ async fn process_batch(
 
     for path in batch.touched {
         let path_str = path.to_string_lossy().to_string();
+        // C28 (#381) — excluded notes are never embedded; reap any
+        // chunks indexed before the exclusion was added so a fresh
+        // `.aiignore` line / `ai: exclude` frontmatter takes effect on
+        // the file's next change event.
+        if crate::exclusion::is_excluded(ctx, &path_str).await {
+            tracing::debug!(path = %path_str, "C28: excluded from AI indexing");
+            let _ = ctx
+                .ipc_call(
+                    STORAGE_PLUGIN_ID,
+                    CMD_VECTOR_DELETE_BY_FILE,
+                    serde_json::json!({ "path": path_str }),
+                    IPC_TIMEOUT,
+                )
+                .await;
+            continue;
+        }
         let blocks_res = ctx
             .ipc_call(
                 STORAGE_PLUGIN_ID,

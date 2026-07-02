@@ -95,6 +95,11 @@ pub(crate) async fn handle_stream_ask(
             return Err(exec_err(e));
         }
     };
+    // C26 (#379) — register + install the cooperative cancel flag; the
+    // guard sweeps the registry entry on every exit path.
+    let cancel_flag = crate::cancel::register(&session_id);
+    let _cancel_guard = crate::cancel::CancelGuard(session_id.clone());
+    ai.install_cancel_flag(std::sync::Arc::clone(&cancel_flag));
     let embedder = match build_embedding_provider(&embed_cfg) {
         Ok(p) => p,
         Err(e) => {
@@ -144,6 +149,22 @@ pub(crate) async fn handle_stream_ask(
         .await
     {
         Ok(t) => t,
+        Err(crate::error::AiError::Cancelled) => {
+            // C26 (#379) — user Stop: the chunks already emitted stand
+            // as the partial answer; signal termination so the chat
+            // surface stops its spinner.
+            let _ = ctx.publish(
+                "com.nexus.ai.stream_done",
+                serde_json::json!({
+                    "session_id": &session_id,
+                    "text": "",
+                    "cancelled": true,
+                }),
+            );
+            return Ok(serde_json::json!({
+                "session_id": session_id, "cancelled": true
+            }));
+        }
         Err(e) => {
             let msg = format!("stream_ask: {e}");
             record_err(msg.clone()).await;
@@ -155,15 +176,20 @@ pub(crate) async fn handle_stream_ask(
     // shell can render `[N]` markers in the answer as clickable chips.
     let citations = crate::rag::build_citations(&ctx, &sources, &text).await;
 
-    let _ = ctx.publish(
-        "com.nexus.ai.stream_done",
-        serde_json::json!({
-            "session_id": &session_id,
-            "text": &text,
-            "sources": &sources,
-            "citations": &citations,
-        }),
-    );
+    // C27 (#380) — provider-reported usage rides along when available.
+    let mut done_payload = serde_json::json!({
+        "session_id": &session_id,
+        "text": &text,
+        "sources": &sources,
+        "citations": &citations,
+    });
+    if let Some(u) = ai.take_usage() {
+        done_payload["usage"] = serde_json::json!({
+            "input_tokens": u.input_tokens,
+            "output_tokens": u.output_tokens,
+        });
+    }
+    let _ = ctx.publish("com.nexus.ai.stream_done", done_payload);
 
     if let Some(rec) = activity {
         let mut files: Vec<String> = Vec::new();

@@ -500,10 +500,30 @@ impl EngineEnvelope {
         }
     }
 
-    pub(crate) fn publish_done(&self, text: &str) {
+    /// C27 (#380) — `usage` (provider-reported, when available) rides
+    /// along so chat surfaces can show what the call actually cost.
+    pub(crate) fn publish_done(&self, text: &str, usage: Option<crate::provider::TokenUsage>) {
+        let mut payload = serde_json::json!({"session_id": &self.session_id, "text": text});
+        if let Some(u) = usage {
+            payload["usage"] = serde_json::json!({
+                "input_tokens": u.input_tokens,
+                "output_tokens": u.output_tokens,
+            });
+        }
+        let _ = self.ctx.publish("com.nexus.ai.stream_done", payload);
+    }
+
+    /// C26 (#379) — terminate the stream after a user cancel: the
+    /// chunks already emitted stand as the partial reply; `cancelled`
+    /// lets the chat surface stop its spinner and mark the bubble.
+    pub(crate) fn publish_cancelled(&self) {
         let _ = self.ctx.publish(
             "com.nexus.ai.stream_done",
-            serde_json::json!({"session_id": &self.session_id, "text": text}),
+            serde_json::json!({
+                "session_id": &self.session_id,
+                "text": "",
+                "cancelled": true,
+            }),
         );
     }
 }

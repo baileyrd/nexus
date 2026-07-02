@@ -109,6 +109,28 @@ pub struct ChatTurnOutput {
     pub tool_calls: Vec<ToolCall>,
 }
 
+/// C27 (#380) — provider-reported token usage, accumulated across the
+/// calls made through one provider instance. Providers are built
+/// per-request by `build_ai_provider`, so an instance's tally spans
+/// exactly one logical operation — including every round of a
+/// multi-turn tool loop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TokenUsage {
+    /// Tokens the provider billed for the request side (prompt /
+    /// input, provider-reported — not estimated).
+    pub input_tokens: u64,
+    /// Tokens the provider billed for the response side.
+    pub output_tokens: u64,
+}
+
+impl TokenUsage {
+    /// Accumulate another round's usage into this tally.
+    pub fn add(&mut self, other: TokenUsage) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+    }
+}
+
 /// Trait for AI chat completion providers.
 ///
 /// Implementors provide access to a large language model capable of
@@ -121,6 +143,22 @@ pub trait AiProvider: Send + Sync {
     /// prompt provides high-level instructions to the model.
     async fn chat(&self, messages: &[ChatMessage], system: Option<&str>)
         -> Result<String, AiError>;
+
+    /// C27 (#380) — drain the token usage accumulated by this provider
+    /// instance since construction (or the previous drain). `None` for
+    /// providers that don't report usage. Call after the last round of
+    /// a chat / tool loop to get the operation's total.
+    fn take_usage(&self) -> Option<TokenUsage> {
+        None
+    }
+
+    /// C26 (#379) — install a cooperative cancel flag. Streaming
+    /// providers check it between chunks and bail with
+    /// [`AiError::Cancelled`], dropping the HTTP response (which
+    /// closes the connection, so the provider stops generating and
+    /// billing). Default: ignored — non-streaming calls run to
+    /// completion.
+    fn install_cancel_flag(&self, _flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {}
 
     /// Stream a chat response, calling `on_chunk` with each token as it arrives.
     ///

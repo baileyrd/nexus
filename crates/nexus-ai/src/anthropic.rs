@@ -1,11 +1,12 @@
 //! Anthropic (Claude) AI provider implementation.
 
 use async_trait::async_trait;
+use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AiError;
 use crate::provider::{
-    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall,
+    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall, TokenUsage,
 };
 use crate::tools::ToolSchema;
 
@@ -22,6 +23,43 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     max_tokens: u32,
+    /// C27 (#380) — usage accumulated across this instance's calls.
+    usage: std::sync::Mutex<Option<TokenUsage>>,
+    /// C26 (#379) — cooperative cancel flag; checked between SSE chunks.
+    cancel: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+}
+
+impl AnthropicProvider {
+    /// C26 (#379) — `true` when the installed cancel flag fired.
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)))
+            .unwrap_or(false)
+    }
+
+    /// Fold one response's usage block into the instance tally.
+    fn record_usage(&self, usage: Option<AnthropicUsage>) {
+        let Some(u) = usage else { return };
+        if let Ok(mut guard) = self.usage.lock() {
+            let mut total = guard.unwrap_or_default();
+            total.add(TokenUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+            });
+            *guard = Some(total);
+        }
+    }
+}
+
+/// The `usage` block of an Anthropic Messages response.
+#[derive(Deserialize, Debug, Clone, Copy)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
 }
 
 impl AnthropicProvider {
@@ -44,6 +82,8 @@ impl AnthropicProvider {
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             max_tokens,
+            usage: std::sync::Mutex::new(None),
+            cancel: std::sync::Mutex::new(None),
         }
     }
 }
@@ -56,6 +96,8 @@ struct AnthropicRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<&'a str>,
     messages: Vec<AnthropicMessage<'a>>,
+    /// C26 (#379) — SSE streaming for `chat_stream_with`.
+    stream: bool,
 }
 
 /// A single message in an Anthropic API request.
@@ -65,10 +107,47 @@ struct AnthropicMessage<'a> {
     content: &'a str,
 }
 
+/// C26 (#379) — the SSE event shapes `chat_stream_with` consumes.
+/// Every other event type (`ping`, `content_block_start`, …) parses
+/// into `Other` and is skipped.
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicSseEvent {
+    MessageStart { message: AnthropicSseMessageStart },
+    ContentBlockDelta { delta: AnthropicSseDelta },
+    MessageDelta { usage: Option<AnthropicSseOutputUsage> },
+    Error { error: serde_json::Value },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize, Debug)]
+struct AnthropicSseMessageStart {
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicSseDelta {
+    TextDelta { text: String },
+    #[serde(other)]
+    Other,
+}
+
+/// `message_delta.usage` carries only the (cumulative) output tally.
+#[derive(Deserialize, Debug, Clone, Copy)]
+struct AnthropicSseOutputUsage {
+    #[serde(default)]
+    output_tokens: u64,
+}
+
 /// Top-level response from the Anthropic Messages API.
 #[derive(Deserialize)]
 struct AnthropicResponse {
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
 }
 
 /// A content block in an Anthropic response.
@@ -79,6 +158,131 @@ struct ContentBlock {
 
 #[async_trait]
 impl AiProvider for AnthropicProvider {
+    fn take_usage(&self) -> Option<TokenUsage> {
+        self.usage.lock().ok().and_then(|mut g| g.take())
+    }
+
+    fn install_cancel_flag(&self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        if let Ok(mut guard) = self.cancel.lock() {
+            *guard = Some(flag);
+        }
+    }
+
+    /// C26 (#379) — true SSE streaming. Pre-C26 this replayed the
+    /// non-streaming response in one burst; now each `text_delta`
+    /// reaches `on_chunk` as it arrives, the cancel flag is honoured
+    /// between events, and the `message_start` / `message_delta`
+    /// usage tallies feed C27's accounting.
+    async fn chat_stream_with(
+        &self,
+        messages: &[ChatMessage],
+        system: Option<&str>,
+        on_chunk: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<String, AiError> {
+        let api_messages: Vec<AnthropicMessage<'_>> = messages
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .map(|m| AnthropicMessage {
+                role: match m.role {
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::System => unreachable!(),
+                },
+                content: &m.content,
+            })
+            .collect();
+        let body = AnthropicRequest {
+            model: &self.model,
+            max_tokens: self.max_tokens,
+            system,
+            messages: api_messages,
+            stream: true,
+        };
+
+        let response = self
+            .client
+            .post(API_URL)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if response.status().as_u16() == 401 {
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::AuthFailed(text));
+        }
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::Provider(format!("{status}: {text}")));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+        let mut input_tokens = 0u64;
+        let mut output_tokens = 0u64;
+
+        'outer: while let Some(chunk) = stream.next().await {
+            if self.cancelled() {
+                return Err(AiError::Cancelled);
+            }
+            let bytes = chunk.map_err(|e| AiError::Provider(e.to_string()))?;
+            buf.extend_from_slice(&bytes);
+
+            while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = buf.drain(..=newline_pos).collect();
+                let line = std::str::from_utf8(&line_bytes).unwrap_or("").trim();
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue; // `event:` lines, comments, blanks
+                };
+                let data = data.trim();
+                if data.is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<AnthropicSseEvent>(data) {
+                    Ok(AnthropicSseEvent::MessageStart { message }) => {
+                        if let Some(u) = message.usage {
+                            input_tokens = u.input_tokens;
+                        }
+                    }
+                    Ok(AnthropicSseEvent::ContentBlockDelta {
+                        delta: AnthropicSseDelta::TextDelta { text },
+                    }) => {
+                        full_text.push_str(&text);
+                        on_chunk(text);
+                    }
+                    Ok(AnthropicSseEvent::MessageDelta { usage }) => {
+                        // Cumulative output tally — the last one wins.
+                        if let Some(u) = usage {
+                            output_tokens = u.output_tokens;
+                        }
+                    }
+                    Ok(AnthropicSseEvent::Error { error }) => {
+                        return Err(AiError::Provider(format!("stream error: {error}")));
+                    }
+                    Ok(_) | Err(_) => { /* ping / unknown event — skip */ }
+                }
+                if self.cancelled() {
+                    break 'outer;
+                }
+            }
+        }
+
+        if self.cancelled() {
+            return Err(AiError::Cancelled);
+        }
+        if input_tokens > 0 || output_tokens > 0 {
+            self.record_usage(Some(AnthropicUsage {
+                input_tokens,
+                output_tokens,
+            }));
+        }
+        Ok(full_text)
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],
@@ -102,6 +306,7 @@ impl AiProvider for AnthropicProvider {
             max_tokens: self.max_tokens,
             system,
             messages: api_messages,
+            stream: false,
         };
 
         let response = self
@@ -129,6 +334,7 @@ impl AiProvider for AnthropicProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         parsed
             .content
@@ -185,6 +391,7 @@ impl AiProvider for AnthropicProvider {
             .json()
             .await
             .map_err(|e| AiError::Serialization(e.to_string()))?;
+        self.record_usage(parsed.usage);
 
         Ok(parse_tool_response(parsed, on_chunk))
     }
@@ -262,6 +469,8 @@ enum AnthropicBlock {
 struct AnthropicToolResponse {
     #[serde(default)]
     content: Vec<AnthropicResponseBlock>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
 }
 
 /// One response block. Anthropic includes a `type` discriminator;
@@ -589,5 +798,31 @@ mod tests {
         let on_chunk = |_: String| {};
         let out = parse_tool_response(parsed, &on_chunk);
         assert_eq!(out.text, "ok");
+    }
+
+    // C27 (#380) — usage block parses and accumulates across rounds.
+    #[test]
+    fn usage_block_parses_and_take_usage_drains() {
+        let provider = AnthropicProvider::new("k".into(), None, 1024, false);
+        let body = serde_json::json!({
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 11, "output_tokens": 7}
+        });
+        let parsed: AnthropicToolResponse = serde_json::from_value(body).expect("parse");
+        provider.record_usage(parsed.usage);
+        provider.record_usage(parsed.usage); // second tool round
+        let total = provider.take_usage().expect("usage recorded");
+        assert_eq!(total.input_tokens, 22);
+        assert_eq!(total.output_tokens, 14);
+        assert!(provider.take_usage().is_none(), "take drains the tally");
+    }
+
+    #[test]
+    fn missing_usage_block_is_tolerated() {
+        let provider = AnthropicProvider::new("k".into(), None, 1024, false);
+        let body = serde_json::json!({ "content": [{"type": "text", "text": "hi"}] });
+        let parsed: AnthropicToolResponse = serde_json::from_value(body).expect("parse");
+        provider.record_usage(parsed.usage);
+        assert!(provider.take_usage().is_none());
     }
 }

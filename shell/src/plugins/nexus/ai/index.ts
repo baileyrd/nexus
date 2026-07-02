@@ -220,7 +220,7 @@ export const aiPlugin: Plugin = {
     // view can fire them without re-importing the API. Closures keep
     // the wiring local to this file and out of the view component.
     const onSend = (q: string) => submitQuestion(api, q)
-    const onCancel = () => cancelInFlight()
+    const onCancel = () => cancelInFlight(api)
     const onRetry = () => retryLast(api)
     // RAG source chips emit `files:open` so the editor plugin opens
     // the cited document. Routed through PluginAPI's event bus, not
@@ -282,7 +282,7 @@ export const aiPlugin: Plugin = {
     // delete doesn't keep accruing chunks into nothing. `clearTurns`
     // (vs `reset`) preserves the hydrated config + composer text.
     api.commands.register(COMMAND_CLEAR, () => {
-      cancelInFlight()
+      cancelInFlight(api)
       useAiStore.getState().clearTurns()
     })
 
@@ -315,7 +315,7 @@ export const aiPlugin: Plugin = {
     // tear down the subscription — PluginRegistry handles that on
     // plugin unload.
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
-      cancelInFlight()
+      cancelInFlight(api)
       flushAutosave()
       useAiStore.getState().reset()
       useAiStore.setState({ config: null })
