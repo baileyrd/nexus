@@ -1019,13 +1019,16 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
           />
         }
       />
+      {/* C2 (#355) — consumed by the rename flows (files tree +
+          editor rename/move commands): `rename_entry` rewrites
+          inbound wikilinks/embeds/markdown links when this is on. */}
       <StubRow
         title="Automatically update internal links"
-        description="Turn off to be prompted to update links after renaming a file."
+        description="Update wikilinks and markdown links in other notes when a file is renamed or moved."
         control={
           <WiredToggle
             settingKey="nexus.settings.links.autoUpdate"
-            defaultValue={false}
+            defaultValue={true}
             label="Toggle automatic link updates"
           />
         }

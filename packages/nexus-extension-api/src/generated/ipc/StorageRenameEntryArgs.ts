@@ -11,4 +11,12 @@ from: string,
 /**
  * Forge-relative path of the destination.
  */
-to: string, };
+to: string, 
+/**
+ * C2 (#355) — when `true`, rewrite inbound wikilinks / embeds /
+ * markdown links in referencing files so they keep resolving
+ * after the move. Defaults to `false` for backward compatibility;
+ * frontends pass the user's "Automatically update internal links"
+ * setting.
+ */
+update_links: boolean, };

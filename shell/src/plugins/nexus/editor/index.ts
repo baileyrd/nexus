@@ -57,6 +57,8 @@ import {
 } from './replKernels.ts'
 // BL-142 Phase 2b.1 — tab-close teardown for REPL sessions.
 import { makeReplClient } from './replClient.ts'
+// C2 (#355) — rename commands read the link-update setting.
+import { configStore } from '../../../stores/configStore'
 import { useReplStore } from './replStore.ts'
 // BL-142 Phase 2b.2 — bus pump that routes
 // `com.nexus.terminal.output.<sessionId>` events into the per-cell
@@ -1437,6 +1439,8 @@ export const editorPlugin: Plugin = {
         await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'rename_entry', {
           from: relpath,
           to,
+          // C2 (#355) — rewrite inbound links per the user setting.
+          update_links: configStore.get<boolean>('nexus.settings.links.autoUpdate', true),
         })
         // The editor reacts to filesystem events for the renamed file —
         // closing the old tab here keeps the tab strip tidy. The watcher
@@ -1463,6 +1467,8 @@ export const editorPlugin: Plugin = {
         await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'rename_entry', {
           from: relpath,
           to,
+          // C2 (#355) — rewrite inbound links per the user setting.
+          update_links: configStore.get<boolean>('nexus.settings.links.autoUpdate', true),
         })
         const base = to.includes('/') ? to.slice(to.lastIndexOf('/') + 1) : to
         useEditorStore.getState().closeTab(relpath)
