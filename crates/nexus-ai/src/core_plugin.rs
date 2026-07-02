@@ -239,6 +239,12 @@ pub const HANDLER_EMBED_TEXT: u32 = 27;
 /// The synthesis primitive behind memory's LLM-wiki pages.
 pub const HANDLER_GENERATE: u32 = 28;
 
+/// C26 (#379) — `cancel_stream`. Args: `{ "session_id": String }`;
+/// Returns: `{ "cancelled": bool }` (`false` = no live stream by that
+/// id). Fires the cooperative cancel flag the streaming providers
+/// check between SSE chunks.
+pub const HANDLER_CANCEL_STREAM: u32 = 29;
+
 /// Plugin ids this plugin requires already loaded. `ai-runtime` is
 /// hard — `wire_context` grabs the shared tokio worker-pool handle
 /// the runtime publishes. `storage` underwrites every RAG / vector
@@ -261,6 +267,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("status", HANDLER_STATUS),
     ("config", HANDLER_CONFIG),
     ("stream_chat", HANDLER_STREAM_CHAT),
+    ("cancel_stream", HANDLER_CANCEL_STREAM),
     ("stream_ask", HANDLER_STREAM_ASK),
     ("session_load", HANDLER_SESSION_LOAD),
     ("session_save", HANDLER_SESSION_SAVE),
@@ -515,6 +522,18 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
                 HANDLER_STREAM_CHAT => {
                     handle_stream_chat(ctx, ai_cfg, tools, activity, &args).await
+                }
+                HANDLER_CANCEL_STREAM => {
+                    let session_id = args
+                        .get("session_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            crate::handlers::shared::exec_err(
+                                "cancel_stream: missing 'session_id' string".to_string(),
+                            )
+                        })?;
+                    let cancelled = crate::cancel::cancel(session_id);
+                    Ok(serde_json::json!({ "cancelled": cancelled }))
                 }
                 HANDLER_STREAM_ASK => {
                     handle_stream_ask(ctx, ai_cfg, embed_cfg, activity, &args).await

@@ -13,6 +13,8 @@ pub mod ipc;
 
 pub mod activity_log;
 mod anthropic;
+// C26 (#379) — session-keyed stream cancellation.
+mod cancel;
 mod chunker;
 mod config;
 pub mod core_plugin;

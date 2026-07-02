@@ -77,6 +77,11 @@ pub(crate) async fn handle_stream_chat(
     let envelope = EngineEnvelope::new(Arc::clone(&ctx), session_id.clone());
     envelope.publish_start();
 
+    // C26 (#379) — register the cooperative cancel flag under this
+    // session id; the guard sweeps it on every exit path.
+    let cancel_flag = crate::cancel::register(&session_id);
+    let _cancel_guard = crate::cancel::CancelGuard(session_id.clone());
+
     // C27 (#380) — provider-reported token usage for this call.
     let mut usage: Option<crate::provider::TokenUsage> = None;
     let outcome = match mode {
@@ -108,6 +113,7 @@ pub(crate) async fn handle_stream_chat(
                     return Err(exec_err(e));
                 }
             };
+            ai.install_cancel_flag(std::sync::Arc::clone(&cancel_flag));
             let effective_system = compose_chat_system(system.as_deref());
             match run_tool_dispatch_loop(
                 ai.as_ref(),
@@ -121,6 +127,14 @@ pub(crate) async fn handle_stream_chat(
                 Ok(o) => {
                     usage = ai.take_usage();
                     o
+                }
+                // The loop stringifies AiError upstream; Cancelled's
+                // Display is exactly "cancelled" (error.rs).
+                Err(ref e) if e.contains("cancelled") => {
+                    envelope.publish_cancelled();
+                    return Ok(serde_json::json!({
+                        "session_id": session_id, "cancelled": true
+                    }));
                 }
                 Err(e) => {
                     let msg = format!("stream_chat: {e}");
@@ -157,6 +171,7 @@ pub(crate) async fn handle_stream_chat(
                     return Err(exec_err(e));
                 }
             };
+            ai.install_cancel_flag(std::sync::Arc::clone(&cancel_flag));
             let on_chunk = envelope.chunk_sink();
             let text = match run_complete(
                 ai.as_ref(),
@@ -168,6 +183,14 @@ pub(crate) async fn handle_stream_chat(
             .await
             {
                 Ok(t) => t,
+                // The loop stringifies AiError upstream; Cancelled's
+                // Display is exactly "cancelled" (error.rs).
+                Err(ref e) if e.contains("cancelled") => {
+                    envelope.publish_cancelled();
+                    return Ok(serde_json::json!({
+                        "session_id": session_id, "cancelled": true
+                    }));
+                }
                 Err(e) => {
                     let msg = format!("stream_chat: {e}");
                     record_activity_error(

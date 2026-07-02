@@ -5,6 +5,10 @@ use thiserror::Error;
 /// Errors that can occur during AI operations.
 #[derive(Debug, Error)]
 pub enum AiError {
+    /// C26 (#379) — the request was cancelled by the user (Stop).
+    #[error("cancelled")]
+    Cancelled,
+
     /// Authentication failed (invalid or missing API key).
     #[error("authentication failed: {0}")]
     AuthFailed(String),

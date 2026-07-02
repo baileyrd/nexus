@@ -512,6 +512,20 @@ impl EngineEnvelope {
         }
         let _ = self.ctx.publish("com.nexus.ai.stream_done", payload);
     }
+
+    /// C26 (#379) — terminate the stream after a user cancel: the
+    /// chunks already emitted stand as the partial reply; `cancelled`
+    /// lets the chat surface stop its spinner and mark the bubble.
+    pub(crate) fn publish_cancelled(&self) {
+        let _ = self.ctx.publish(
+            "com.nexus.ai.stream_done",
+            serde_json::json!({
+                "session_id": &self.session_id,
+                "text": "",
+                "cancelled": true,
+            }),
+        );
+    }
 }
 
 // ─── mode=complete post-processing ─────────────────────────────────────────

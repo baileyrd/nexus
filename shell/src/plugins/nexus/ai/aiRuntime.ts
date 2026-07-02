@@ -486,14 +486,30 @@ export async function submitQuestion(
 }
 
 /**
- * Shell-side cancel. The store flips the in-flight assistant turn to
- * 'done' (preserving streamedText as finalText) and drops the
+ * Cancel the in-flight ask. The store flips the streaming assistant
+ * turn to 'done' (preserving streamedText as finalText) and drops the
  * request_id correlation; further chunks bounce off the matching-turn
- * guard. Does NOT cancel the kernel-side stream.
+ * guard. C26 (#379): when `api` is provided, the kernel-side stream is
+ * cancelled too via `com.nexus.ai::cancel_stream`, so the provider
+ * request stops generating (and billing) instead of running to
+ * completion. Best-effort — an id that already finished is a no-op.
  */
-export function cancelInFlight(): void {
+export function cancelInFlight(api?: PluginAPI): void {
   clearWatchdog()
+  const streaming = useAiStore
+    .getState()
+    .turns.find(
+      (t): t is Extract<AiTurn, { kind: 'assistant' }> =>
+        t.kind === 'assistant' && t.status === 'streaming',
+    )
   useAiStore.getState().cancel()
+  if (api && streaming) {
+    void api.kernel
+      .invoke(AI_PLUGIN_ID, 'cancel_stream', { session_id: streaming.requestId })
+      .catch(() => {
+        /* stream already finished — nothing to cancel */
+      })
+  }
 }
 
 /**

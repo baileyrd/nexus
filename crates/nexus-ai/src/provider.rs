@@ -152,6 +152,14 @@ pub trait AiProvider: Send + Sync {
         None
     }
 
+    /// C26 (#379) — install a cooperative cancel flag. Streaming
+    /// providers check it between chunks and bail with
+    /// [`AiError::Cancelled`], dropping the HTTP response (which
+    /// closes the connection, so the provider stops generating and
+    /// billing). Default: ignored — non-streaming calls run to
+    /// completion.
+    fn install_cancel_flag(&self, _flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {}
+
     /// Stream a chat response, calling `on_chunk` with each token as it arrives.
     ///
     /// Returns the complete concatenated response when the stream ends.
