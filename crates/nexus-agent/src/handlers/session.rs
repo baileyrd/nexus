@@ -366,6 +366,8 @@ async fn run_and_persist_session(
     let dispatcher = crate::todo::TodoDispatcher::new(KernelToolBridge {
         ctx: Arc::clone(&ctx),
         timeout: DEFAULT_TOOL_TIMEOUT,
+        // C29 (#382) — key the write-snapshot trail by this session.
+        session_id: Some(req.session_id.clone()),
     });
 
     let resolved = match &req.archetype {

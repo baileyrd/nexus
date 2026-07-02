@@ -52,6 +52,8 @@ mod handlers;
 mod llm;
 pub mod memory;
 pub mod session;
+// C29 (#382) — session write-snapshots + revert.
+pub mod snapshots;
 /// RFC 0007 PR 1 — headless subagent process spawning (the lowest layer of
 /// process-level subagent isolation; not yet wired into `delegate`).
 pub mod subagent;
