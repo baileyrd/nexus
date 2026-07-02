@@ -130,6 +130,15 @@ pub struct StorageConfig {
     pub debounce_ms: u64,
     /// Number of Rayon threads (0 = auto-detect). Default: 0.
     pub rayon_threads: usize,
+    /// C18 (#370) — skip the synchronous reconcile inside
+    /// [`StorageEngine::open`] and let the core plugin run it on a
+    /// background thread after `on_start` (bracketed by
+    /// `com.nexus.storage.indexing.started/completed` events).
+    /// Long-lived frontends (shell, TUI) set this so a large forge's
+    /// first index build can't trip the 30s lifecycle watchdog or
+    /// block boot; short-lived CLI invocations keep the blocking
+    /// default so their reads are fresh. Default: `false`.
+    pub defer_startup_reconcile: bool,
 }
 
 impl Default for StorageConfig {
@@ -138,6 +147,7 @@ impl Default for StorageConfig {
             pool_size: 4,
             debounce_ms: 300,
             rayon_threads: 0,
+            defer_startup_reconcile: false,
         }
     }
 }
@@ -1846,6 +1856,31 @@ impl StorageEngine {
         reconcile(&conn, self.forge.root())
     }
 
+    /// C18 (#370) — deferred-startup variant of
+    /// [`reconcile_index`](Self::reconcile_index): reconciles, then
+    /// rebuilds the in-memory knowledge graph from the refreshed DB.
+    /// Needed because a deferred open built the graph from the stale
+    /// pre-reconcile rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn reconcile_index_full(&self) -> Result<ReconcileDelta, StorageError> {
+        let (delta, kg) = {
+            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+            let delta = reconcile(&conn, self.forge.root())?;
+            let kg = graph::KnowledgeGraph::rebuild_from_db(&conn)?;
+            (delta, kg)
+        };
+        // #199 tier-2: panic on poison — mutation path.
+        *self.graph.write().expect("graph lock poisoned") = kg;
+        Ok(delta)
+    }
+
     // ── Graph queries ────────────────────────────────────────────────────────
 
     /// Acquire the graph read lock, recovering from poison.
@@ -2271,8 +2306,9 @@ fn open_internal(
     // the production watcher and moves it into a dedicated bridge
     // thread; the engine no longer needs its own.)
 
-    // 8. If not new: run reconcile against write_conn.
-    if !is_new {
+    // 8. If not new: run reconcile against write_conn — unless the
+    //    caller deferred it to a post-boot background pass (C18/#370).
+    if !is_new && !config.defer_startup_reconcile {
         reconcile(&write_conn, forge.root())?;
     }
 

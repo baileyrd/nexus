@@ -23,6 +23,7 @@ fn public_type_surface_is_accessible() {
         pool_size: 2,
         debounce_ms: 100,
         rayon_threads: 0,
+        defer_startup_reconcile: false,
     };
     assert_eq!(cfg.pool_size, 2);
     assert_eq!(cfg.debounce_ms, 100);

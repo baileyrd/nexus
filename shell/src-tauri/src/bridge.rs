@@ -5,7 +5,7 @@
 //! slot. The lifecycle commands are:
 //!
 //! * [`init_forge`] — prepare an on-disk forge (mkdir + SQLite schema).
-//! * [`boot_kernel`] — run `nexus_bootstrap::build_cli_runtime` and swap the
+//! * [`boot_kernel`] — run `nexus_bootstrap::build_shell_runtime` and swap the
 //!   resulting runtime pieces into the slot.
 //! * [`shutdown_kernel`] — drain the runtime (kernel + plugin loader).
 //!
@@ -293,7 +293,7 @@ impl KernelRuntime {
             kernel,
             context,
             loader,
-        } = nexus_bootstrap::build_cli_runtime(path.to_path_buf())
+        } = nexus_bootstrap::build_shell_runtime(path.to_path_buf())
             .map_err(|e| format!("{e:#}"))?;
         *guard = Some(BootedRuntime::Local {
             kernel,

@@ -659,6 +659,58 @@ impl CorePlugin for StorageCorePlugin {
 
         self.bridge_thread = Some(handle);
 
+        // C18 (#370) — when the open deferred the startup reconcile,
+        // run it now on a one-shot background thread so a large forge's
+        // first index build can't trip the 30s lifecycle watchdog or
+        // block boot. Bracketed by indexing.started/completed events
+        // (with delta counts) so frontends can show progress state.
+        // One-shot and not joined on stop: reconcile holds the write
+        // connection only in short bursts and exits on its own.
+        if self.config.defer_startup_reconcile {
+            if let Some(engine) = self.engine.as_ref().map(Arc::clone) {
+                let bus = Arc::clone(&self.event_bus);
+                let spawned = std::thread::Builder::new()
+                    .name("nexus-storage-startup-reconcile".to_string())
+                    .spawn(move || {
+                        publish_storage_event(
+                            &bus,
+                            "com.nexus.storage.indexing.started",
+                            serde_json::json!({ "mode": "startup" }),
+                        );
+                        match engine.reconcile_index_full() {
+                            Ok(delta) => {
+                                tracing::info!(?delta, "C18: deferred startup reconcile done");
+                                publish_storage_event(
+                                    &bus,
+                                    "com.nexus.storage.indexing.completed",
+                                    serde_json::json!({
+                                        "mode": "startup",
+                                        "created": delta.created,
+                                        "modified": delta.modified,
+                                        "renamed": delta.renamed,
+                                        "deleted": delta.deleted,
+                                    }),
+                                );
+                            }
+                            Err(err) => {
+                                tracing::warn!(%err, "C18: deferred startup reconcile failed");
+                                publish_storage_event(
+                                    &bus,
+                                    "com.nexus.storage.indexing.completed",
+                                    serde_json::json!({
+                                        "mode": "startup",
+                                        "error": err.to_string(),
+                                    }),
+                                );
+                            }
+                        }
+                    });
+                if let Err(err) = spawned {
+                    tracing::warn!(%err, "C18: failed to spawn startup-reconcile thread");
+                }
+            }
+        }
+
         // BL-114: subscribe to git.commit. Subscribe on the *parent*
         // thread before spawning so an event emitted between spawn
         // and subscribe isn't lost — same pattern as the BL-007
