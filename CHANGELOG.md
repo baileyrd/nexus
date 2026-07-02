@@ -9,6 +9,14 @@ lives in the git log and in `docs/0.1.2/audits/`.
 ## [Unreleased]
 
 ### Added
+- **Per-user relay credentials** (`nexus-collab`, gap-analysis §1.4) —
+  new `TokenSet`: named tokens with constant-time, full-scan
+  verification that returns *which* credential authenticated, so joins
+  are attributable in the relay log and one user's token can be
+  rotated/revoked without re-keying every peer.
+  `RelayServer::new_with_tokens(TokenSet)` alongside the unchanged
+  Phase-1 `new(Token)` (now a one-entry set named `default`). TLS
+  remains deferred — front the relay with a TLS-terminating proxy.
 - **Prometheus exit path for kernel metrics** (BL-093 closure) —
   `MetricsSnapshot::to_prometheus_text()` renders the registry in the
   text exposition format (counters, the queue-depth gauge, and

@@ -28,7 +28,7 @@ use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::auth::Token;
+use crate::auth::{Token, TokenSet};
 use crate::protocol::{
     ClientMessage, PeerInfo, ServerMessage, ERR_AUTH, ERR_BAD_FRAME, ERR_HANDSHAKE,
 };
@@ -102,7 +102,7 @@ impl PeerRegistry {
 /// tasks live for the duration of their sockets unless `shutdown`
 /// aborts them.
 pub struct RelayServer {
-    token: Token,
+    tokens: TokenSet,
     broadcast_tx: broadcast::Sender<Routed>,
     registry: Arc<Mutex<PeerRegistry>>,
     /// One-shot shutdown signal observed by `serve_listener` and the
@@ -112,14 +112,22 @@ pub struct RelayServer {
 }
 
 impl RelayServer {
-    /// Construct a server bound to the given token. The token is
-    /// checked against the handshake frame on every connection.
+    /// Construct a server bound to a single shared token (Phase-1
+    /// shape) — equivalent to a one-entry [`TokenSet`] named `default`.
     #[must_use]
     pub fn new(token: Token) -> Self {
+        Self::new_with_tokens(TokenSet::single(token))
+    }
+
+    /// Construct a server bound to a set of named per-user tokens.
+    /// Every handshake is checked against the whole set; the matching
+    /// entry's name is attributed to the peer in the relay log.
+    #[must_use]
+    pub fn new_with_tokens(tokens: TokenSet) -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         let (shutdown, _) = broadcast::channel(1);
         Self {
-            token,
+            tokens,
             broadcast_tx,
             registry: Arc::new(Mutex::new(PeerRegistry::default())),
             shutdown,
@@ -235,10 +243,10 @@ impl RelayServer {
                 return Ok(());
             }
         };
-        if !self.token.verify(&token) {
+        let Some(token_name) = self.tokens.verify(&token) else {
             send_error(&mut sink, ERR_AUTH, "invalid token").await;
             return Ok(());
-        }
+        };
         if peer_id.is_empty() {
             send_error(&mut sink, ERR_HANDSHAKE, "peer_id must not be empty").await;
             return Ok(());
@@ -264,6 +272,11 @@ impl RelayServer {
                 display_name: display_name.clone(),
             });
         }
+        tracing::info!(
+            peer = %peer_id,
+            token = %token_name,
+            "nexus-collab: peer authenticated"
+        );
 
         // Tell the new arrival who else is here.
         let hello_reply = ServerMessage::Hello {

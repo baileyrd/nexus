@@ -319,3 +319,48 @@ async fn three_peer_fanout_routes_envelope_to_both_others() {
         }
     }
 }
+
+/// Gap-analysis 2026-07-01 §1.4 — per-user credentials: a relay built
+/// over a named `TokenSet` accepts any member token and rejects
+/// non-members, while the Phase-1 single-token constructor keeps
+/// working (covered by every other test in this file).
+#[tokio::test]
+async fn token_set_accepts_any_named_member_and_rejects_others() {
+    use nexus_collab::TokenSet;
+
+    let tokens = TokenSet::new([("alice", "secret-a"), ("bob", "secret-b")]).unwrap();
+    let server = Arc::new(RelayServer::new_with_tokens(tokens));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn({
+        let server = Arc::clone(&server);
+        async move {
+            let _ = server.serve_listener(listener).await;
+        }
+    });
+
+    // Both named tokens authenticate.
+    let mut alice = connect(addr).await;
+    let reply = handshake(&mut alice, "secret-a", "peer-alice", "Alice").await;
+    assert!(matches!(reply, ServerMessage::Hello { .. }));
+    let mut bob = connect(addr).await;
+    let reply = handshake(&mut bob, "secret-b", "peer-bob", "Bob").await;
+    assert!(matches!(reply, ServerMessage::Hello { .. }));
+
+    // A non-member token is rejected.
+    let mut eve = connect(addr).await;
+    send(
+        &mut eve,
+        &ClientMessage::Hello {
+            token: "secret-eve".to_string(),
+            peer_id: "peer-eve".to_string(),
+            display_name: "Eve".to_string(),
+        },
+    )
+    .await;
+    let denied = recv_close_or_error(&mut eve).await;
+    assert!(
+        matches!(denied, Some(ServerMessage::Error { .. }) | None),
+        "non-member token must be rejected"
+    );
+}
