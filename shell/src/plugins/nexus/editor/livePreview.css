@@ -494,3 +494,22 @@
   border: 1px solid var(--divider-color);
   border-radius: 0 0 4px 4px;
 }
+
+/* C1 (#354) — whole-line image block widget. Mirrors the reading
+   view's image treatment; the missing-file chip matches the fenced
+   error chip's quiet tone. */
+.cm-content .cm-md-image-widget {
+  padding: 2px 0;
+}
+.cm-content .cm-md-image-widget img {
+  max-width: 100%;
+  border-radius: var(--radius-s);
+}
+.cm-content .cm-md-image-missing {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--divider-color);
+  border-radius: var(--radius-s);
+  color: var(--text-faint);
+  font-size: 12px;
+}

@@ -253,3 +253,29 @@ test('safe http(s)/mailto schemes round-trip unharmed', () => {
     /href="mailto:foo@bar\.com"/,
   )
 })
+
+// ── C1 (#354) — `![[…]]` embeds + image passthrough ──────────────
+
+test('![[image]] embeds render as an img with data-forge-src, no src', () => {
+  const html = renderMarkdown('Before ![[assets/pic.png]] after.')
+  assert.match(html, /<img[^>]*class="nx-forge-image"[^>]*>/)
+  assert.match(html, /data-forge-src="assets\/pic\.png"/)
+  assert.doesNotMatch(html, /<img[^>]*\ssrc=/)
+})
+
+test('![[image|alias]] carries the alias as alt text', () => {
+  const html = renderMarkdown('![[pic.png|My diagram]]')
+  assert.match(html, /alt="My diagram"/)
+})
+
+test('![[note]] embeds of non-images degrade to a wikilink chip', () => {
+  const html = renderMarkdown('See ![[Some Note]] for details.')
+  assert.match(html, /<span class="nx-embed">/)
+  assert.match(html, /data-wikilink="Some Note"/)
+  assert.doesNotMatch(html, /<img/)
+})
+
+test('standard ![](relative) images survive sanitization with their src', () => {
+  const html = renderMarkdown('![shot](attachments/shot.png)')
+  assert.match(html, /<img[^>]*src="attachments\/shot\.png"[^>]*>/)
+})

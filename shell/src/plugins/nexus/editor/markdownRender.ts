@@ -54,7 +54,7 @@ function ensureFencedRendererPatch(): void {
   if (rendererPatched) return
   rendererPatched = true
   marked.use({
-    extensions: [wikilinkExtension(), calloutExtension()],
+    extensions: [embedExtension(), wikilinkExtension(), calloutExtension()],
     renderer: {
       code(this: { parser: { parse: unknown } }, token: Tokens.Code): string | false {
         const lang = (token.lang ?? '').trim().split(/\s+/)[0] ?? ''
@@ -113,6 +113,61 @@ function escapeHtml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+// ── C1 (#354) — `![[…]]` embed extension ─────────────────────────
+//
+// Obsidian-style embeds. Image targets render as an `<img>` carrying
+// the target in `data-forge-src` (no `src` — the reading view's
+// `hydrateForgeImages` pass resolves forge bytes into a data: URL, so
+// no broken-image glyph flashes while loading). Non-image targets
+// degrade to a wikilink wrapped in an embed chip. Registered *before*
+// the wikilink extension so `![[x]]` isn't consumed as `!` + `[[x]]`.
+
+/** Image extensions the embed renderer recognises. Kept local (vs
+ *  importing `attachments.ts`) so this renderer keeps its zero-store
+ *  dependency profile — it's reused by chat/canvas/agent surfaces. */
+const EMBED_IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i
+
+interface EmbedToken {
+  type: 'embed'
+  raw: string
+  target: string
+  display: string
+}
+
+function embedExtension() {
+  return {
+    name: 'embed',
+    level: 'inline' as const,
+    start(src: string): number | undefined {
+      const idx = src.indexOf('![[')
+      return idx >= 0 ? idx : undefined
+    },
+    tokenizer(src: string): EmbedToken | undefined {
+      const m = /^!\[\[([^\]\n|#]+)(\|[^\]\n]+)?\]\]/.exec(src)
+      if (!m) return undefined
+      const target = m[1]!.trim()
+      const display = m[2] ? m[2]!.slice(1).trim() : target
+      return { type: 'embed', raw: m[0], target, display }
+    },
+    renderer(token: EmbedToken): string {
+      if (EMBED_IMAGE_RE.test(token.target)) {
+        return (
+          `<img class="nx-forge-image" ` +
+          `data-forge-src="${escapeAttr(token.target)}" ` +
+          `alt="${escapeAttr(token.display)}">`
+        )
+      }
+      const href = encodeURI(token.target)
+      const label = escapeHtml(token.display)
+      return (
+        `<span class="nx-embed">` +
+        `<a class="nx-wikilink" href="${href}" data-wikilink="${escapeAttr(token.target)}">${label}</a>` +
+        `</span>`
+      )
+    },
+  }
 }
 
 // ── BL-053 Phase 2b — wikilink extension ─────────────────────────
@@ -415,6 +470,9 @@ export function renderMarkdown(
       `${FENCED_PENDING_ATTR}-lang`,
       `${FENCED_PENDING_ATTR}-source`,
       'data-wikilink',
+      // C1 (#354) — carries the forge-relative embed target through
+      // sanitization for the reading view's image hydrator.
+      'data-forge-src',
     ],
   })
 }

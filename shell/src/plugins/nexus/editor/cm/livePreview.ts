@@ -11,6 +11,8 @@ import {
 import {
   buildLivePreviewBlockDecorations,
   buildLivePreviewInlineDecorations,
+  forgeImageContext,
+  type ForgeImageContext,
 } from './livePreviewDecorations'
 import { fencedCodeRegistry } from './fencedCodeRegistry'
 
@@ -44,7 +46,15 @@ const fencedRegistryChanged = StateEffect.define<null>()
  * via the `fencedRegistryChanged` effect — without this, existing
  * fenced blocks stay raw until the next doc edit or selection move.
  */
-export function livePreviewExt(): Extension {
+export interface LivePreviewOptions {
+  /** C1 (#354) — when present, whole-line `![](…)` images render as
+   *  block widgets (see `forgeImageContext`). Absent → images keep
+   *  the v1 mark-only styling; every existing caller/test that passes
+   *  no options is unchanged. */
+  forgeImages?: ForgeImageContext
+}
+
+export function livePreviewExt(options: LivePreviewOptions = {}): Extension {
   const blockField = StateField.define<DecorationSet>({
     create(state) {
       return buildLivePreviewBlockDecorations(state)
@@ -129,7 +139,11 @@ export function livePreviewExt(): Extension {
     }
   })
 
-  return [blockField, inlinePlugin, watcher]
+  const exts: Extension[] = [blockField, inlinePlugin, watcher]
+  if (options.forgeImages) {
+    exts.push(forgeImageContext.of(options.forgeImages))
+  }
+  return exts
 }
 
 // Reference to silence "unused" warnings for the legacy `Range` type

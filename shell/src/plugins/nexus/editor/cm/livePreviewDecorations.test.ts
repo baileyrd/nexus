@@ -738,3 +738,73 @@ test('BL-125: combined block + inline matches the full-walk reference', () => {
   const reference = norm(fullItems)
   assert.deepEqual(combined, reference, 'split sources reproduce the full walk')
 })
+
+// ── C1 (#354) — whole-line image block widget ─────────────────────
+
+import {
+  forgeImageContext,
+  ForgeImageWidget,
+  type ForgeImageContext,
+} from './livePreviewDecorations.ts'
+
+const testImageContext: ForgeImageContext = {
+  noteRelpath: 'notes/a.md',
+  loadImage: async () => 'data:image/png;base64,SGk=',
+}
+
+function imageDecosFor(doc: string, ctx: ForgeImageContext | null, cursor = 0) {
+  const state = EditorState.create({
+    doc,
+    selection: EditorSelection.cursor(cursor),
+    extensions: [
+      markdown({ extensions: [Table] }),
+      ...(ctx ? [forgeImageContext.of(ctx)] : []),
+    ],
+  })
+  const set: DecorationSet = buildLivePreviewDecorations(state)
+  const out: Array<{ from: number; to: number; widget: unknown; block: boolean }> = []
+  const cur = set.iter()
+  while (cur.value) {
+    const spec = cur.value.spec as { widget?: unknown; block?: boolean }
+    if (spec.widget instanceof ForgeImageWidget) {
+      out.push({
+        from: cur.from,
+        to: cur.to,
+        widget: spec.widget,
+        block: spec.block === true,
+      })
+    }
+    cur.next()
+  }
+  return out
+}
+
+test('whole-line image swaps to a ForgeImageWidget block replace', () => {
+  const doc = '![alt](img.png)\n\ntrailing text'
+  const widgets = imageDecosFor(doc, testImageContext, doc.length)
+  assert.equal(widgets.length, 1)
+  assert.equal(widgets[0]!.block, true)
+  assert.equal(widgets[0]!.from, 0)
+  assert.equal(widgets[0]!.to, '![alt](img.png)'.length)
+  const w = widgets[0]!.widget as ForgeImageWidget
+  assert.equal(w.src, 'img.png')
+  assert.equal(w.alt, 'alt')
+})
+
+test('image on the active line keeps its syntax (no widget)', () => {
+  const doc = '![alt](img.png)\n\ntrailing text'
+  const widgets = imageDecosFor(doc, testImageContext, 3)
+  assert.equal(widgets.length, 0)
+})
+
+test('inline image mixed with text keeps mark-only styling', () => {
+  const doc = 'see ![alt](img.png) here\n\nend'
+  const widgets = imageDecosFor(doc, testImageContext, doc.length)
+  assert.equal(widgets.length, 0)
+})
+
+test('no forgeImageContext → no widget (v1 behaviour preserved)', () => {
+  const doc = '![alt](img.png)\n\ntrailing text'
+  const widgets = imageDecosFor(doc, null, doc.length)
+  assert.equal(widgets.length, 0)
+})

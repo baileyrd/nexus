@@ -985,6 +985,21 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
           />
         }
       />
+      {/* C1 (#354) — companion path for the `specific` mode above.
+          Consumed by the editor's paste/drop attachment importer
+          (`editor/attachments.ts::attachmentDirFor`). */}
+      <StubRow
+        title="Attachment folder path"
+        description="Folder used when the location above is 'Specific folder…'."
+        control={
+          <WiredText
+            settingKey="nexus.settings.files.attachmentFolderPath"
+            defaultValue="attachments"
+            label="Attachment folder path"
+            placeholder="attachments"
+          />
+        }
+      />
 
       <div className="settings-section-title" style={{ marginTop: 24 }}>Links</div>
 
