@@ -168,16 +168,20 @@ Not in the code's plans, but the microkernel makes them unusually cheap:
 
 ## 6. Suggested priority order
 
-| # | Item | Why first |
-|---|------|-----------|
-| 1 | Extension-API unification + conformance tests (#187) | Blocks the entire community-plugin ecosystem |
-| 2 | Memory SQLite persistence (Phase 5) | Core product promise currently lost on restart |
-| 3 | Hybrid search (BM25 + vector RRF) | Days of work; both engines already in one crate |
-| 4 | Auto-update + macOS/Linux release pipelines | Distribution table stakes for a desktop app |
-| 5 | Collab/hub auth + TLS | Prerequisite for any real multi-user story |
-| 6 | E2E suite + terminal/agent/ai integration tests | Regression safety before the surface grows |
-| 7 | Metrics exporter + log rotation | Data already exists; needs an exit path |
-| 8 | Marketplace (WI-44), then i18n groundwork | Ecosystem growth once #1 lands |
+> **Status as of 2026-07-02** — worked in order via PRs #348–#351;
+> per-item state below. The unfinished slices of item 5 are the live
+> backlog before item 6 completes.
+
+| # | Item | Why first | Status |
+|---|------|-----------|--------|
+| 1 | Extension-API unification + conformance tests (#187) | Blocks the entire community-plugin ecosystem | ✅ #348 |
+| 2 | Memory SQLite persistence (Phase 5) | Core product promise currently lost on restart | ✅ #348 |
+| 3 | Hybrid search (BM25 + vector RRF) | Days of work; both engines already in one crate | ✅ #348 |
+| 4 | Auto-update + macOS/Linux release pipelines | Distribution table stakes for a desktop app | ✅ #350 (pipelines + checksums; updater blocked on owner keys — steps in `RELEASE.md`) |
+| 5 | Collab/hub auth + TLS | Prerequisite for any real multi-user story | 🔶 #351 landed the relay core (named `TokenSet` + attribution). **Remaining:** (a) `nexus-memory-hub` per-node tokens over the same `TokenSet` shape, (b) `nexus collab token add/remove/list` issuance verbs, (c) TLS (interim: TLS-terminating proxy, documented) |
+| 6 | E2E suite + terminal/agent/ai integration tests | Regression safety before the surface grows | ⏭️ next up |
+| 7 | Metrics exporter + log rotation | Data already exists; needs an exit path | ✅ #350 (exporter; rotation descoped — no file-based tracing exists) |
+| 8 | Marketplace (WI-44), then i18n groundwork | Ecosystem growth once #1 lands | queued |
 
 ## Strengths to preserve (unchanged from prior audits)
 
