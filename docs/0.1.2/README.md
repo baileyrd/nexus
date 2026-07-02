@@ -55,6 +55,7 @@ docs/0.1.2/
 - **Adding a setting (the right way):** [`settings/README.md`](settings/README.md) → [`settings/hardcoded-rust.md`](settings/hardcoded-rust.md) / [`settings/hardcoded-shell.md`](settings/hardcoded-shell.md) for already-flagged candidates.
 - **Security review:** [`capabilities.md`](capabilities.md) → [`amplifier-laundering.md`](amplifier-laundering.md) → [`reference/audit-flags.md`](reference/audit-flags.md).
 - **Adherence / point-in-time reviews:** [`architecture-adherence.md`](architecture-adherence.md) (living) → [`audits/architecture-review-2026-06-19.md`](audits/architecture-review-2026-06-19.md) (focused: kernel / AI-first-class / everything-a-plugin).
+- **What to build next:** [`audits/gap-analysis-2026-07-01.md`](audits/gap-analysis-2026-07-01.md) (what the code says is unfinished — the live backlog) → [`audits/capability-assessment-2026-07-02.md`](audits/capability-assessment-2026-07-02.md) (90 verified capability gaps & feature opportunities *beyond* that backlog).
 
 ## What's not here yet
 
