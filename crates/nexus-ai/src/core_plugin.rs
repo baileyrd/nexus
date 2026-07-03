@@ -247,7 +247,7 @@ pub const HANDLER_GENERATE: u32 = 28;
 /// check between SSE chunks.
 pub const HANDLER_CANCEL_STREAM: u32 = 29;
 
-/// C44 (#422) — `extract_entities`: read a note through storage, ask
+/// C44 (#397) — `extract_entities`: read a note through storage, ask
 /// the AI provider to name distinct entities it substantively
 /// discusses, and (unless `dry_run`) birth each genuinely-new one as
 /// a bare entity stub via `entity_upsert`. The BL-129 Dream Cycle's

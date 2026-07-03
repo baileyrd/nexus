@@ -193,7 +193,7 @@ impl Default for GitSettings {
 
 /// Dream Cycle (BL-129) — scheduled entity-graph maintenance.
 ///
-/// Phases run in sequence — `extract` (C44 #422, opt-in), `dedup`,
+/// Phases run in sequence — `extract` (C44 #397, opt-in), `dedup`,
 /// `decay`, `enrich`, `infer` — against the BL-128 entity graph. The
 /// first four settings below (`enabled` through `decay_floor`) are the
 /// BL-129 close-out; the `extract_*` settings are the C44 addition.
@@ -226,7 +226,7 @@ pub struct DreamCycleSettings {
     /// already at or below the floor are skipped (no churn). Range
     /// `[0.0, 1.0]`; default `0.1`.
     pub decay_floor: f32,
-    /// C44 (#422) — when `true`, an `extract` phase runs first each
+    /// C44 (#397) — when `true`, an `extract` phase runs first each
     /// cycle, scanning recently-changed notes and proposing new
     /// entities via `com.nexus.ai::extract_entities`. Defaults to
     /// `false`: unlike the other three phases (which only ever

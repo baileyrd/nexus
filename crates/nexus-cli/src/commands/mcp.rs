@@ -28,7 +28,7 @@ pub fn serve(app: &App) -> Result<()> {
     let runtime = build_cli_runtime(forge_root.clone())
         .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
 
-    // C46 (#421) — spawn the BL-129 dream-cycle scheduler for the
+    // C46 (#399) — spawn the BL-129 dream-cycle scheduler for the
     // lifetime of this long-running server process, mirroring the TUI
     // (crates/nexus-tui/src/app.rs::TuiApp::new) and the shell
     // (shell/src-tauri/src/bridge.rs::KernelRuntime::boot_at). Must

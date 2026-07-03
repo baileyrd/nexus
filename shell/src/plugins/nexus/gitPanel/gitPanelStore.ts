@@ -74,7 +74,7 @@ interface GitPanelState {
   committing: boolean
   pushAfterCommit: boolean
 
-  // C49 (#425) — pull is repo-wide, not scoped to the Changes tab, but
+  // C49 (#402) — pull is repo-wide, not scoped to the Changes tab, but
   // lives alongside the other commit-area async-action flags for
   // consistency.
   pulling: boolean

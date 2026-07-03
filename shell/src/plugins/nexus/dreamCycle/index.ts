@@ -43,7 +43,7 @@ const APPROVE_CONFIDENCE = 1.0
 const MOON_ICON_PATH = 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'
 
 /** Wire shape published by `nexus-bootstrap`'s `dream_cycle::run_cycle`.
- *  `entities_extracted` (C44 #422) is optional so a payload from an
+ *  `entities_extracted` (C44 #397) is optional so a payload from an
  *  older backend build (field simply absent) still decodes. */
 export interface DreamCycleProposalsPayload {
   proposals_total: number

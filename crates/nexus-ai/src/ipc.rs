@@ -815,7 +815,7 @@ pub struct InferEntityRelationsResult {
     pub applied: bool,
 }
 
-/// Args for `com.nexus.ai::extract_entities` (handler 30, C44 #422).
+/// Args for `com.nexus.ai::extract_entities` (handler 30, C44 #397).
 ///
 /// Reads the note at `path` through `com.nexus.storage::read_file`, asks
 /// the AI provider to name distinct, substantively-discussed entities, and

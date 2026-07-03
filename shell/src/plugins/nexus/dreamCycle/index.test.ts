@@ -1,4 +1,4 @@
-// C44 (#422) — composeToast now reports relation proposals and/or newly
+// C44 (#397) — composeToast now reports relation proposals and/or newly
 // extracted entities. Pure logic, no kernel mock needed.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

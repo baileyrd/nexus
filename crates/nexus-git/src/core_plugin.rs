@@ -232,16 +232,16 @@ pub const HANDLER_WORKTREE_REMOVE: u32 = 41;
 /// [`crate::ipc::GitWorktreeCommitReply`].
 pub const HANDLER_WORKTREE_COMMIT: u32 = 42;
 
-/// C49 (#425) — fetch all refs from a remote. Args:
+/// C49 (#402) — fetch all refs from a remote. Args:
 /// [`crate::ipc::GitFetchArgs`]. Same credential machinery as `push`
 /// (SSH-agent / keyring / libgit2 default).
 pub const HANDLER_FETCH: u32 = 43;
-/// C49 (#425) — fetch + merge a remote tracking branch. Args:
+/// C49 (#402) — fetch + merge a remote tracking branch. Args:
 /// [`crate::ipc::GitPushArgs`] (same `{remote, branch}` shape as
 /// `push`); returns [`crate::ipc::GitMergeReply`] (`pull` = `fetch`
 /// then `merge` against `<remote>/<branch>`).
 pub const HANDLER_PULL: u32 = 44;
-/// C49 (#425) — list configured remote names. No args; returns
+/// C49 (#402) — list configured remote names. No args; returns
 /// [`crate::ipc::GitRemotesReply`]. Read-only local enumeration.
 pub const HANDLER_REMOTES: u32 = 45;
 
@@ -1168,7 +1168,7 @@ mod tests {
         );
     }
 
-    /// C49 (#425) — shared setup for the fetch/pull/remotes tests: a
+    /// C49 (#402) — shared setup for the fetch/pull/remotes tests: a
     /// repo with committer identity configured, one commit, and its
     /// active branch forced to `main` regardless of the host's
     /// `init.defaultBranch`.

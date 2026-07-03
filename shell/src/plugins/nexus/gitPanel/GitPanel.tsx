@@ -77,7 +77,7 @@ async function loadStash(): Promise<void> {
   }
 }
 
-// C49 (#425) — the desktop Git panel could push after commit but had
+// C49 (#402) — the desktop Git panel could push after commit but had
 // no way to fetch/pull at all (the com.nexus.git IPC surface had no
 // fetch/pull/remotes handler until this finding). Derives remote +
 // branch from the current HEAD's upstream, same as the push-after-
@@ -153,7 +153,7 @@ export function GitPanel() {
   const conflictedCount = useGitPanelStore((s) =>
     s.files.reduce((n, f) => (f.status === 'Conflicted' ? n + 1 : n), 0),
   )
-  // C49 (#425) — Pull button, repo-wide so it lives in the tab bar
+  // C49 (#402) — Pull button, repo-wide so it lives in the tab bar
   // rather than a specific tab's toolbar.
   const pulling = useGitPanelStore((s) => s.pulling)
   const pullError = useGitPanelStore((s) => s.pullError)

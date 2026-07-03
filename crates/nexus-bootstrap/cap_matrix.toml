@@ -116,7 +116,7 @@ plugin = "com.nexus.ai"
 command = "infer_entity_relations"
 caps = ["ai.chat"]
 
-# C44 (#422) — the Dream-Cycle acquisition phase; reads a note through
+# C44 (#397) — the Dream-Cycle acquisition phase; reads a note through
 # storage and (unless dry_run) creates bare entity stubs via entity_upsert.
 [[handler]]
 plugin = "com.nexus.ai"
@@ -844,18 +844,18 @@ note = "P1-04 — publishes tags to a remote; same posture as push"
 plugin = "com.nexus.git"
 command = "fetch"
 caps = ["net.http"]
-note = "C49 (#425) — pulls refs from a remote; same outbound-network posture as push"
+note = "C49 (#402) — pulls refs from a remote; same outbound-network posture as push"
 
 [[handler]]
 plugin = "com.nexus.git"
 command = "pull"
 caps = ["net.http"]
-note = "C49 (#425) — fetch + merge; same posture as fetch, plus a local merge (already unrestricted elsewhere)"
+note = "C49 (#402) — fetch + merge; same posture as fetch, plus a local merge (already unrestricted elsewhere)"
 
 [[handler]]
 plugin = "com.nexus.git"
 command = "remotes"
-unrestricted = "C49 (#425) — read-only enumeration of configured remote names, no network access itself"
+unrestricted = "C49 (#402) — read-only enumeration of configured remote names, no network access itself"
 
 [[handler]]
 plugin = "com.nexus.git"

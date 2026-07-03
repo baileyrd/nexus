@@ -819,7 +819,7 @@ pub struct GitLfsStatusReply {
     pub git_lfs_installed: bool,
 }
 
-/// C49 (#425) — args for `fetch` (handler id `43`).
+/// C49 (#402) — args for `fetch` (handler id `43`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
@@ -835,7 +835,7 @@ pub struct GitFetchArgs {
     pub remote: String,
 }
 
-/// C49 (#425) — return type for `remotes` (handler id `45`).
+/// C49 (#402) — return type for `remotes` (handler id `45`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(

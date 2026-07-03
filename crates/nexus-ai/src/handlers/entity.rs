@@ -1,5 +1,5 @@
 //! BL-129 — entity enrichment + relation inference handlers.
-//! C44 (#422) — entity extraction (the acquisition phase BL-129 shipped
+//! C44 (#397) — entity extraction (the acquisition phase BL-129 shipped
 //! without).
 
 use nexus_kernel::{Ipc as _, KernelPluginContext};
@@ -557,7 +557,7 @@ pub(crate) async fn handle_infer_entity_relations(
     .map_err(|e| exec_err(format!("infer_entity_relations: serialise: {e}")))
 }
 
-// ── C44 (#422) — extract_entities ────────────────────────────────────────
+// ── C44 (#397) — extract_entities ────────────────────────────────────────
 
 const EXTRACT_DEFAULT_MAX_ENTITIES: u32 = 3;
 /// Below this many characters a note is treated as too thin to bother

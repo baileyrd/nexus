@@ -59,14 +59,14 @@ pub(crate) fn push(h: &GitWorkerHandle, args: &Value) -> Result<Value, PluginErr
     to_value(&GitOk { ok: true }, "push")
 }
 
-/// C49 (#425) — list configured remote names. Read-only local
+/// C49 (#402) — list configured remote names. Read-only local
 /// enumeration (no network access itself).
 pub(crate) fn remotes(h: &GitWorkerHandle) -> Result<Value, PluginError> {
     let remotes = h.with(|e| e.remotes()).map_err(map_err)?;
     to_value(&GitRemotesReply { remotes }, "remotes")
 }
 
-/// C49 (#425) — fetch all refs from a remote. Same credential
+/// C49 (#402) — fetch all refs from a remote. Same credential
 /// machinery as `push` (SSH-agent → default keys → keyring
 /// passphrase → libgit2 default).
 pub(crate) fn fetch(h: &GitWorkerHandle, args: &Value) -> Result<Value, PluginError> {
@@ -75,7 +75,7 @@ pub(crate) fn fetch(h: &GitWorkerHandle, args: &Value) -> Result<Value, PluginEr
     to_value(&GitOk { ok: true }, "fetch")
 }
 
-/// C49 (#425) — fetch + merge a remote tracking branch. Reuses
+/// C49 (#402) — fetch + merge a remote tracking branch. Reuses
 /// `GitPushArgs` (same `{remote, branch}` shape as `push`) and
 /// `GitMergeReply` (same result shape as `merge`, since `pull` is
 /// `fetch` followed by a merge against `<remote>/<branch>`).

@@ -261,7 +261,7 @@ fn load_settings(
     Ok(cfg.dream_cycle)
 }
 
-/// C44 (#422) — pick the notes an `extract` phase scans this cycle from a
+/// C44 (#397) — pick the notes an `extract` phase scans this cycle from a
 /// `com.nexus.storage::query_files` reply (a JSON array of file-record
 /// objects). Pure and synchronous so it's unit-testable without a live
 /// kernel context: filters out `entities/*` (extraction reads *notes*,
@@ -314,7 +314,7 @@ async fn run_cycle(
 
     let mut report = CycleReport::default();
 
-    // ── extract (C44 #422) ───────────────────────────────────────────────
+    // ── extract (C44 #397) ───────────────────────────────────────────────
     // Runs first so any entity born this cycle is eligible for dedup /
     // decay / enrich / infer in the same pass. Opt-in (`extract_enabled`
     // defaults `false`) since — unlike the other three phases, which only
@@ -509,7 +509,7 @@ async fn run_cycle(
         // relation proposals from Dream Cycle" notification. The
         // payload includes the total + the cycle's tracing timestamp
         // so duplicate-notification dedup is straightforward.
-        // `entities_extracted` (C44 #422) also gates this: a cycle
+        // `entities_extracted` (C44 #397) also gates this: a cycle
         // that only birthed new entities (no relation proposals yet —
         // those follow once `infer` picks the new entity up on a
         // later cycle) is still worth surfacing.

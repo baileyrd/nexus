@@ -119,7 +119,7 @@ enum BootedRuntime {
         kernel: Kernel,
         context: Arc<KernelPluginContext>,
         loader: Arc<SharedPluginLoader>,
-        /// C46 (#421) — the BL-129 background maintenance scheduler.
+        /// C46 (#399) — the BL-129 background maintenance scheduler.
         /// `None` when it failed to spawn (logged at warn); gates its
         /// own work on `[dream_cycle].enabled` so a forge that hasn't
         /// opted in does nothing beyond a 60s config-poll loop. Never
@@ -299,7 +299,7 @@ impl KernelRuntime {
         }
         let runtime = nexus_bootstrap::build_shell_runtime(path.to_path_buf())
             .map_err(|e| format!("{e:#}"))?;
-        // C46 (#421) — spawn the dream-cycle scheduler for this boot,
+        // C46 (#399) — spawn the dream-cycle scheduler for this boot,
         // mirroring the TUI (crates/nexus-tui/src/app.rs::TuiApp::new).
         // Must happen before the `Runtime` below is destructured —
         // `spawn` needs the whole struct (kernel kv store, event bus,
@@ -516,7 +516,7 @@ impl KernelRuntime {
                 dream_cycle,
                 ..
             } => {
-                // C46 (#421) — stop the scheduler before tearing down
+                // C46 (#399) — stop the scheduler before tearing down
                 // the kernel so its in-flight ipc_calls don't race a
                 // torn-down dispatcher. `stop()` joins the worker
                 // thread synchronously (up to `IPC_TIMEOUT` if a

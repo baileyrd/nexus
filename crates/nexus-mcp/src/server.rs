@@ -607,14 +607,14 @@ struct NexusDetectChangesOutput {
     degraded_reason: Option<String>,
 }
 
-/// Input for `nexus_git_fetch` (C49 #425).
+/// Input for `nexus_git_fetch` (C49 #402).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct NexusGitFetchInput {
     /// Remote name (e.g. `"origin"`).
     remote: String,
 }
 
-/// Input for `nexus_git_pull` (C49 #425).
+/// Input for `nexus_git_pull` (C49 #402).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct NexusGitPullInput {
     /// Remote name (e.g. `"origin"`).
@@ -623,7 +623,7 @@ struct NexusGitPullInput {
     branch: String,
 }
 
-/// Input for `nexus_git_remotes` (C49 #425). No parameters.
+/// Input for `nexus_git_remotes` (C49 #402). No parameters.
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct NexusGitRemotesInput {}
 
@@ -985,7 +985,7 @@ impl NexusMcpServer {
     }
 
     /// BL-115 — `com.nexus.git` IPC client, originally added for
-    /// `nexus_detect_changes`; C49 (#425) reuses it for the
+    /// `nexus_detect_changes`; C49 (#402) reuses it for the
     /// `nexus_git_*` remote-sync tools.
     async fn git_call<T: serde::de::DeserializeOwned>(
         &self,
@@ -2579,7 +2579,7 @@ impl NexusMcpServer {
         })
     }
 
-    // C49 (#425) — GitEngine's fetch/pull/remotes existed with full
+    // C49 (#402) — GitEngine's fetch/pull/remotes existed with full
     // SSH-agent + keyring credential support but had no IPC handler at
     // all, so no frontend — shell, TUI, or MCP — could reach them; only
     // the CLI could, via a direct (non-IPC) GitEngine call. These three
