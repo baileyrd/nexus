@@ -905,10 +905,21 @@ impl TuiApp {
             .enable_all()
             .build()
             .context("failed to start tokio runtime")?;
+        // C76 — enter the runtime before building so `build_tui_runtime`'s
+        // synchronous plugin wiring runs inside a live tokio context.
+        // Without this, `tokio::runtime::Handle::try_current()` fails
+        // inside the workflow plugin's cron / file_event / git_event /
+        // mcp_event / digest trigger engines
+        // (crates/nexus-workflow/src/core_plugin.rs) and they silently
+        // disable themselves. The TUI is long-lived for the whole
+        // session, so — unlike a CLI one-shot — there's no risk of a
+        // trigger firing during an unrelated, momentary command.
+        let guard = rt.enter();
         let runtime = Arc::new(
             build_tui_runtime(forge_root.clone())
                 .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?,
         );
+        drop(guard);
 
         // BL-129 — spawn the dream-cycle scheduler. The handle gates
         // its own work on `[dream_cycle].enabled`, so a forge that

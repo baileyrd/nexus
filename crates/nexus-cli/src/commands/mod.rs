@@ -7,6 +7,7 @@ pub mod collab;
 pub mod config;
 pub mod content;
 pub mod crdt;
+pub mod daemon;
 pub mod db;
 pub mod desktop;
 pub mod export;

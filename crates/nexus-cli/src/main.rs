@@ -147,6 +147,12 @@ enum Commands {
     /// local frontend can drive this headless instance. Phase 2 (SSH
     /// transport + `ssh://` forge URIs) lands separately.
     Serve(ServeArgs),
+    /// C76 — headless, long-running host for workflow triggers (cron,
+    /// file/git/mcp events, digests). Blocks until Ctrl+C or SIGTERM
+    /// (systemd-friendly), gracefully unloading every plugin on stop.
+    /// No UI, no stdio protocol — just the trigger engines that
+    /// otherwise only run inside the desktop shell.
+    Daemon,
     /// Sync the forge against a git remote: fetch, pull (rebase),
     /// then push. A thin convenience wrapper over `nexus git
     /// fetch|pull|push`.
@@ -718,6 +724,7 @@ fn main() {
                 ))
             }
         }
+        Commands::Daemon => commands::daemon::run(&app),
         Commands::Sync {
             remote,
             branch,
