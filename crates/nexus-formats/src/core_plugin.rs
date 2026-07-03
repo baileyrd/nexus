@@ -7,10 +7,11 @@
 //!
 //! # Handlers
 //!
-//! | Id | Command         | Args                                  | Purpose                          |
-//! |---:|-----------------|---------------------------------------|----------------------------------|
-//! | 1  | `import_notion` | `{ source: PathBuf, dest?: PathBuf }` | Import a Notion zip-export.      |
-//! | 2  | `export_notion` | `{ source?: PathBuf, dest: PathBuf }` | Export a forge subdirectory.     |
+//! | Id | Command         | Args                                                          | Purpose                          |
+//! |---:|-----------------|----------------------------------------------------------------|----------------------------------|
+//! | 1  | `import_notion` | `{ source: PathBuf, dest?: PathBuf }`                           | Import a Notion zip-export.      |
+//! | 2  | `export_notion` | `{ source?: PathBuf, dest: PathBuf }`                           | Export a forge subdirectory.     |
+//! | 3  | `export_html`   | `{ source: PathBuf, title?: String, dest?: PathBuf }`           | Render a note to standalone HTML.|
 //!
 //! Ids are append-only.
 //!
@@ -69,6 +70,30 @@ pub struct ExportNotionArgs {
     pub dest: PathBuf,
 }
 
+/// Args for `com.nexus.formats::export_html` (handler `3`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExportHtmlArgs {
+    /// Forge-relative (or absolute) path to the markdown note to render.
+    pub source: PathBuf,
+    /// Document title. Defaults to the source file's stem.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Forge-relative (or absolute) output path. When given, the HTML is
+    /// written there and the response reports `{ written: true, dest }`.
+    /// When omitted the rendered HTML is returned inline as `{ html }`.
+    #[serde(default)]
+    pub dest: Option<PathBuf>,
+}
+
 // ── Handler ids ─────────────────────────────────────────────────────────────
 
 /// Reverse-DNS plugin id.
@@ -78,12 +103,15 @@ pub const PLUGIN_ID: &str = "com.nexus.formats";
 pub const HANDLER_IMPORT_NOTION: u32 = 1;
 /// `export_notion` handler id.
 pub const HANDLER_EXPORT_NOTION: u32 = 2;
+/// `export_html` handler id.
+pub const HANDLER_EXPORT_HTML: u32 = 3;
 
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::formats::register`.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("import_notion", HANDLER_IMPORT_NOTION),
     ("export_notion", HANDLER_EXPORT_NOTION),
+    ("export_html", HANDLER_EXPORT_HTML),
 ];
 
 // ── Plugin ──────────────────────────────────────────────────────────────────
@@ -110,6 +138,7 @@ impl CorePlugin for FormatsCorePlugin {
         match handler_id {
             HANDLER_IMPORT_NOTION => self.dispatch_import_notion(args),
             HANDLER_EXPORT_NOTION => self.dispatch_export_notion(args),
+            HANDLER_EXPORT_HTML => self.dispatch_export_html(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -168,6 +197,48 @@ impl FormatsCorePlugin {
             "warnings": report.warnings,
             "dest": a.dest.display().to_string(),
         }))
+    }
+
+    fn dispatch_export_html(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+        let a: ExportHtmlArgs = parse_args(args, "export_html")?;
+        let source_abs = if a.source.is_absolute() {
+            a.source.clone()
+        } else {
+            self.forge_root.join(&a.source)
+        };
+        let content = std::fs::read_to_string(&source_abs)
+            .map_err(|e| exec_err(format!("export_html: failed to read {}: {e}", source_abs.display())))?;
+        let title = a.title.clone().unwrap_or_else(|| {
+            a.source
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Untitled")
+                .to_string()
+        });
+        let html = crate::markdown::export_to_html(&content, &title);
+
+        match a.dest {
+            Some(dest) => {
+                let dest_abs = if dest.is_absolute() {
+                    dest
+                } else {
+                    self.forge_root.join(dest)
+                };
+                if let Some(parent) = dest_abs.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        exec_err(format!("export_html: failed to create {}: {e}", parent.display()))
+                    })?;
+                }
+                std::fs::write(&dest_abs, &html).map_err(|e| {
+                    exec_err(format!("export_html: failed to write {}: {e}", dest_abs.display()))
+                })?;
+                Ok(serde_json::json!({
+                    "written": true,
+                    "dest": dest_abs.display().to_string(),
+                }))
+            }
+            None => Ok(serde_json::json!({ "html": html })),
+        }
     }
 }
 
@@ -254,6 +325,50 @@ mod tests {
             .path()
             .join("Hello aaaa1111aaaa1111aaaa1111aaaa1111.md")
             .exists());
+    }
+
+    #[test]
+    fn export_html_returns_inline_html_by_default() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("Hello.md"), "# Hello\n\nWorld\n").unwrap();
+
+        let mut plugin = FormatsCorePlugin::open(dir.path().to_path_buf());
+        let result = plugin
+            .dispatch(HANDLER_EXPORT_HTML, &serde_json::json!({ "source": "Hello.md" }))
+            .unwrap();
+        let html = result["html"].as_str().unwrap();
+        assert!(html.contains("<h1>Hello</h1>"), "{html}");
+        assert!(html.contains("<title>Hello</title>"), "{html}");
+        assert!(html.contains("<!DOCTYPE html>"), "{html}");
+    }
+
+    #[test]
+    fn export_html_writes_to_dest_when_given() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("Note.md"), "# Note\n\nBody.\n").unwrap();
+
+        let mut plugin = FormatsCorePlugin::open(dir.path().to_path_buf());
+        let result = plugin
+            .dispatch(
+                HANDLER_EXPORT_HTML,
+                &serde_json::json!({ "source": "Note.md", "title": "Custom Title", "dest": "out/note.html" }),
+            )
+            .unwrap();
+        assert_eq!(result["written"].as_bool(), Some(true));
+        let written = std::fs::read_to_string(dir.path().join("out/note.html")).unwrap();
+        assert!(written.contains("<title>Custom Title</title>"), "{written}");
+        assert!(written.contains("Body."), "{written}");
+    }
+
+    #[test]
+    fn export_html_with_missing_source_errors() {
+        let dir = tempdir().unwrap();
+        let mut plugin = FormatsCorePlugin::open(dir.path().to_path_buf());
+        let err = plugin
+            .dispatch(HANDLER_EXPORT_HTML, &serde_json::json!({ "source": "nope.md" }))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("failed to read"), "{msg}");
     }
 
     #[test]

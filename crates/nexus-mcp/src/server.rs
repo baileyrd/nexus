@@ -47,6 +47,9 @@ const SECURITY_PLUGIN: &str = plugin_ids::SECURITY;
 /// `search`/`add`/`list`/`facts`/`entities` IPC handlers. No centralized
 /// `plugin_ids` const yet, so the id is inline.
 const MEMORY_PLUGIN: &str = "com.nexus.memory";
+/// C66 (#419) — `nexus_export_html` reaches into `com.nexus.formats` for
+/// the styled single-note HTML exporter's `export_html` handler.
+const FORMATS_PLUGIN: &str = plugin_ids::FORMATS;
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
 /// Override via a future `[mcp.timeouts] ipc_secs = N` block
@@ -995,6 +998,20 @@ impl NexusMcpServer {
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
     }
+
+    /// `com.nexus.formats` IPC client for `nexus_export_html` (C66).
+    async fn formats_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(FORMATS_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
 }
 
 // ── Tool implementations ─────────────────────────────────────────────────────
@@ -1292,6 +1309,29 @@ struct MemoryListOutput {
 struct MemoryItemOutput {
     /// The stored memory object (or an `{ "error": … }` object on failure).
     memory: serde_json::Value,
+}
+
+/// Input for `nexus_export_html` (C66) — render a forge note to standalone HTML.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExportHtmlInput {
+    /// Forge-relative path to the markdown note to render.
+    path: String,
+    /// Document title. Defaults to the source file's stem.
+    #[serde(default)]
+    title: Option<String>,
+    /// Forge-relative output path. When given, the HTML is written there
+    /// instead of being returned inline.
+    #[serde(default)]
+    dest: Option<String>,
+}
+
+/// Reply from `nexus_export_html`: either `{ html }` or `{ written, dest }`
+/// (or an `{ "error": … }` object on failure), as returned by
+/// `com.nexus.formats::export_html`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ExportHtmlOutput {
+    /// The formats plugin's reply.
+    result: serde_json::Value,
 }
 
 #[tool_router]
@@ -1864,6 +1904,33 @@ impl NexusMcpServer {
         match self.memory_call::<serde_json::Value>("delete", args).await {
             Ok(result) => Json(MemoryResultOutput { result }),
             Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C66 (#419) — the styled single-note HTML exporter
+    // (crates/nexus-formats/src/markdown/html.rs) had an IPC handler
+    // (com.nexus.formats::export_html) but no MCP tool reached it.
+    #[tool(
+        name = "nexus_export_html",
+        description = "Render a forge note to a standalone styled HTML document. Returns the HTML inline, or writes it to `dest` when given"
+    )]
+    async fn export_html(
+        &self,
+        Parameters(input): Parameters<ExportHtmlInput>,
+    ) -> Json<ExportHtmlOutput> {
+        let args = serde_json::json!({
+            "source": input.path,
+            "title": input.title,
+            "dest": input.dest,
+        });
+        match self
+            .formats_call::<serde_json::Value>("export_html", args)
+            .await
+        {
+            Ok(result) => Json(ExportHtmlOutput { result }),
+            Err(e) => Json(ExportHtmlOutput {
                 result: serde_json::json!({ "error": e }),
             }),
         }

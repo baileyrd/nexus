@@ -34,9 +34,9 @@
 | `com.nexus.templates` | 5 |
 | `com.nexus.collab` | 4 |
 | `com.nexus.audio` | 3 |
-| `com.nexus.formats` | 2 |
+| `com.nexus.formats` | 3 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **391** |
+| **Total** | **392** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -369,9 +369,11 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 
 ---
 
-## com.nexus.formats (2)
+## com.nexus.formats (3)
 
 `import_notion`, `export_notion` — pure parse / serialize; fs ops route through storage.
+
+`export_html` (C66 #419) — renders a forge note to a standalone styled HTML document via `markdown::export_to_html`; fs ops route through storage.
 
 ---
 

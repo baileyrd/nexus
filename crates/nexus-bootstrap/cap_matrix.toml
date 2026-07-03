@@ -659,6 +659,11 @@ plugin = "com.nexus.formats"
 command = "export_notion"
 unrestricted = "serialises forge state to the Notion shape — fs writes route through storage"
 
+[[handler]]
+plugin = "com.nexus.formats"
+command = "export_html"
+unrestricted = "renders a forge note to a standalone HTML string or file — fs access is forge-scoped, same as import/export_notion"
+
 # ─── com.nexus.git — operates on `.git` inside the forge root ────────
 
 [[handler]]

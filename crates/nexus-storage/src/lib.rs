@@ -23,7 +23,6 @@ pub mod core_plugin;
 /// `entity_get` / `entity_relations` IPC handlers.
 pub mod entity_index;
 mod error;
-mod export;
 mod find_replace;
 mod forge;
 mod graph;
@@ -81,7 +80,6 @@ pub use canvas::{
     CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeRecord, CanvasNodeType, CanvasPatchError,
     CanvasPatchOp,
 };
-pub use export::export_to_html;
 pub use find_replace::{
     find_in_files, replace_in_files, FileMatches, FindInFilesArgs, LineMatch, ReplaceError,
     ReplaceInFilesArgs, ReplaceReport,

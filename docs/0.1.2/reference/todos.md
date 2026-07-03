@@ -121,6 +121,8 @@ Real settings live in the plugins themselves (see [`settings/plugin-manifest-def
 | `nexus.editor.stub.mergeFile` | Merge file |
 | `nexus.editor.stub.exportPdf` | Export to PDF… |
 
+The new `nexus.editor.exportHtml` ("Export as HTML…") command (C66 #419) is fully wired from the start — it renders through `com.nexus.formats::export_html` and saves via the native save dialog, so it was never added to the stub list above.
+
 ### Canvas right rail — `shell/src/plugins/nexus/canvas/CanvasRightRail.tsx:8-9`
 
 | Inspector item | Status |

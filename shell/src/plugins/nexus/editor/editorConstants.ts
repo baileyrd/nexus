@@ -24,6 +24,12 @@ export const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 export const READ_FILE_COMMAND = 'read_file'
 export const WRITE_FILE_COMMAND = 'write_file'
 
+// C66 (#419) — `com.nexus.formats::export_html` renders a note to a
+// standalone styled HTML document; args `{ source: string, title?: string }`
+// (relpath, forge-relative) → `{ html: string }` when `dest` is omitted.
+export const FORMATS_PLUGIN_ID = 'com.nexus.formats'
+export const EXPORT_HTML_COMMAND = 'export_html'
+
 export const COMMAND_CLOSE_TAB = 'nexus.editor.closeTab'
 export const COMMAND_SAVE = 'nexus.editor.save'
 export const COMMAND_NEW_UNTITLED = 'nexus.editor.newUntitled'
@@ -38,6 +44,9 @@ export const COMMAND_REVEAL_IN_NAV = 'nexus.editor.revealInNavigation'
 export const COMMAND_REVEAL_IN_OS = 'nexus.editor.revealInOS'
 export const COMMAND_OPEN_DEFAULT_APP = 'nexus.editor.openInDefaultApp'
 export const COMMAND_DELETE_FILE = 'nexus.editor.deleteFile'
+// C66 (#419) — renders the active note through com.nexus.formats::export_html
+// (styled standalone HTML doc) and saves it via the native save dialog.
+export const COMMAND_EXPORT_HTML = 'nexus.editor.exportHtml'
 // BL-079 — toggle the inline-blame annotations on the active tab.
 // Reads / writes `useEditorBlameStore`; the editor view subscribes
 // and remounts CM6 with / without the blame extension on flip.

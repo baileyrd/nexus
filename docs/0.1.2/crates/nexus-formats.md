@@ -8,7 +8,7 @@
 
 The crate is deliberately **SQL-free and service-free**: every public function is a pure transformation over strings, paths, or byte buffers (the only side effects are direct filesystem reads/writes in the config loaders and the Notion zip walker). It holds no database handle, spawns no threads, and subscribes to no events. This is by design — under the file-as-truth invariant, the SQLite index and Tantivy FTS index in `.forge/` are *derived* from the markdown/canvas files, so the code that parses those files must be reusable from storage's indexer, from the editor, from the CLI, and from the shell without dragging a runtime along. Bases *types* themselves live in `nexus_types::bases`, not here; the active runtime consumers (database/CLI/storage) build on that type hierarchy, and `nexus-formats` only touches bases as a serialization target during Notion conversion.
 
-Within the microkernel architecture the library half is consumed directly by leaf crates that already sit above it (storage, editor, crdt, cli), while the *forge-mutating* surface — Notion import/export, which walks filesystems — is exposed through a thin `CorePlugin` (`com.nexus.formats`) with exactly two IPC handlers. That keeps the file-walking, path-resolution side effects on one IPC path reachable uniformly from CLI, TUI, MCP, and the shell, rather than scattered as direct calls. Everything else (parse a markdown string, load `app.toml`, slugify a title) is a plain function call against the library.
+Within the microkernel architecture the library half is consumed directly by leaf crates that already sit above it (storage, editor, crdt, cli), while the *forge-mutating* surface — Notion import/export plus single-note HTML export, all of which walk/write the filesystem — is exposed through a thin `CorePlugin` (`com.nexus.formats`) with three IPC handlers. That keeps the file-walking, path-resolution side effects on one IPC path reachable uniformly from CLI, TUI, MCP, and the shell, rather than scattered as direct calls. Everything else (parse a markdown string, load `app.toml`, slugify a title) is a plain function call against the library.
 
 The crate's `lib.rs` enforces `#![deny(missing_docs)]` and `#![warn(clippy::pedantic)]`.
 
@@ -82,8 +82,8 @@ The crate's `lib.rs` enforces `#![deny(missing_docs)]` and `#![warn(clippy::peda
 
 ### `core_plugin`
 - `FormatsCorePlugin::open(forge_root) -> Self`; implements `CorePlugin`.
-- Consts: `PLUGIN_ID`, `HANDLER_IMPORT_NOTION` (1), `HANDLER_EXPORT_NOTION` (2), `IPC_HANDLERS` (the `(command, id)` pairs consumed by bootstrap).
-- Arg structs: `ImportNotionArgs { source: PathBuf, dest: Option<PathBuf> }`, `ExportNotionArgs { source: Option<PathBuf>, dest: PathBuf }` (both `#[serde(deny_unknown_fields)]`, TS/schema-exported under `ts-export`).
+- Consts: `PLUGIN_ID`, `HANDLER_IMPORT_NOTION` (1), `HANDLER_EXPORT_NOTION` (2), `HANDLER_EXPORT_HTML` (3, C66 #419), `IPC_HANDLERS` (the `(command, id)` pairs consumed by bootstrap).
+- Arg structs: `ImportNotionArgs { source: PathBuf, dest: Option<PathBuf> }`, `ExportNotionArgs { source: Option<PathBuf>, dest: PathBuf }`, `ExportHtmlArgs { source: PathBuf, title: Option<String>, dest: Option<PathBuf> }` (all `#[serde(deny_unknown_fields)]`, TS/schema-exported under `ts-export`).
 
 ## IPC handlers
 
@@ -91,8 +91,9 @@ The crate's `lib.rs` enforces `#![deny(missing_docs)]` and `#![warn(clippy::peda
 |---------|------|---------|------------|-------------|
 | `import_notion` (handler 1) | `{ source: PathBuf, dest?: PathBuf }` | `{ pages_written, bases_written, attachments_copied, warnings: [string], dest: string }` | none enforced (core trust) | Import a Notion "Markdown & CSV" zip export. `source` must exist (else error). `dest` is forge-relative if not absolute; defaults to `<forge>/Imported from Notion`. Delegates to `notion::import_notion_zip`. |
 | `export_notion` (handler 2) | `{ source?: PathBuf, dest: PathBuf }` | `{ pages_written, databases_written, attachments_copied, warnings: [string], dest: string }` | none enforced (core trust) | Export a forge subdirectory to a Notion-compatible folder tree. `source` is forge-relative if not absolute and defaults to the whole forge root; must be a directory (else error). Delegates to `notion::export_to_notion`. |
+| `export_html` (handler 3) | `{ source: PathBuf, title?: String, dest?: PathBuf }` | `{ html: string }` when `dest` is omitted, else `{ written: true, dest: string }` | none enforced (core trust) | C66 (#419) — render a single forge note to a standalone styled HTML document via `markdown::export_to_html`. `source` is forge-relative if not absolute; read failures error. `title` defaults to `source`'s file stem. When `dest` is given (forge-relative if not absolute) the HTML is written there (parent dirs created) instead of returned inline. Reachable from the CLI (`nexus content export`, via `nexus_bootstrap::export_to_html` calling the library function directly rather than this handler), the MCP `nexus_export_html` tool, and the shell's editor "Export as HTML" command. |
 
-Both handlers are synchronous/blocking (they walk the filesystem and parse files); the kernel runs each dispatch on a dedicated thread. Handler ids are append-only. Bootstrap also registers `.v1` aliases for each command via `with_v1_aliases` (ADR 0021). Unknown handler ids return an execution error.
+All three handlers are synchronous/blocking (they walk the filesystem and parse files); the kernel runs each dispatch on a dedicated thread. Handler ids are append-only. Bootstrap also registers `.v1` aliases for each command via `with_v1_aliases` (ADR 0021). Unknown handler ids return an execution error.
 
 ## Capabilities
 
@@ -163,5 +164,5 @@ Comprehensive in-module `#[cfg(test)]` coverage plus one integration test file:
 - `config/env_subst.rs` — passthrough, single/multiple substitution, undefined-var error.
 - `util/{slug,filename,mime,attachment}.rs` — slug edge cases, filename/path validation (forbidden chars, reserved names, length), MIME mapping/case/fallback, SHA-256 known-value/determinism, attachment-name format.
 - `notion/{mod,filename,property,markdown,database,export}.rs` — zip round-trip, internal-link rewrite, callout/property-table extraction, CSV→bases, UUID strip rules, link/callout/property/bases export round-trips, missing-wikilink warning, dotfile skipping.
-- `core_plugin.rs` — `import_notion`/`export_notion` dispatch through IPC, missing-source error, export round-trip, unknown-handler error.
+- `core_plugin.rs` — `import_notion`/`export_notion` dispatch through IPC, missing-source error, export round-trip, unknown-handler error; C66 (#419): `export_html` inline-HTML reply, write-to-`dest` reply, missing-source error.
 - `tests/issue_78_bounds.rs` (integration) — oversize frontmatter rejection, normal-size acceptance, oversize-canvas-byte rejection, excessive-element-count rejection, realistic-canvas acceptance.

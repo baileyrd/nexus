@@ -161,5 +161,11 @@ export function buildTabContextMenu(args: {
       commandId: 'nexus.editor.stub.exportPdf',
       tooltip: COMING_SOON_TOOLTIP,
     },
+    {
+      // C66 (#419) — wired via com.nexus.formats::export_html + save dialog.
+      kind: 'item',
+      label: 'Export as HTML...',
+      commandId: 'nexus.editor.exportHtml',
+    },
   ]
 }
