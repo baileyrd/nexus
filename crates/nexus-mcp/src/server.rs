@@ -1171,6 +1171,49 @@ struct MemoryConsolidateInput {
     dry_run: Option<bool>,
 }
 
+/// Input for `nexus_memory_get`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryGetInput {
+    /// The memory id (UUID string) to fetch.
+    id: String,
+}
+
+/// Input for `nexus_memory_update` (C35). Only the provided fields change;
+/// omitted fields keep their stored value.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryUpdateInput {
+    /// The memory id (UUID string) to update.
+    id: String,
+    /// New content, if changing.
+    #[serde(default)]
+    content: Option<String>,
+    /// New category, if changing.
+    #[serde(default)]
+    category: Option<String>,
+    /// Replacement tag list, if changing.
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    /// New lifecycle status (`active` | `archived` | `superseded`), if changing.
+    #[serde(default)]
+    status: Option<String>,
+    /// New SPO subject, if changing.
+    #[serde(default)]
+    subject: Option<String>,
+    /// New SPO predicate, if changing.
+    #[serde(default)]
+    predicate: Option<String>,
+    /// New SPO object, if changing.
+    #[serde(default)]
+    object: Option<String>,
+}
+
+/// Input for `nexus_memory_delete` (C35) — "forget this memory".
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryDeleteInput {
+    /// The memory id (UUID string) to delete.
+    id: String,
+}
+
 /// Wraps a memory operation's JSON reply (or `{ "error": … }` on failure).
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct MemoryResultOutput {
@@ -1757,6 +1800,69 @@ impl NexusMcpServer {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
                 memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_get",
+        description = "Fetch a single memory by id (records access for vitality ranking)"
+    )]
+    async fn memory_get(
+        &self,
+        Parameters(input): Parameters<MemoryGetInput>,
+    ) -> Json<MemoryItemOutput> {
+        let args = serde_json::json!({ "id": input.id });
+        match self.memory_call::<serde_json::Value>("get", args).await {
+            Ok(memory) => Json(MemoryItemOutput { memory }),
+            Err(e) => Json(MemoryItemOutput {
+                memory: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C35 (#388) — the update/delete IPC handlers already existed
+    // (crates/nexus-memory/src/core_plugin.rs) but no MCP tool reached them,
+    // so an agent asked to "forget this" or "fix that memory" had no path.
+    #[tool(
+        name = "nexus_memory_update",
+        description = "Patch a stored memory's fields (content, category, tags, status, SPO fact fields). Only provided fields change"
+    )]
+    async fn memory_update(
+        &self,
+        Parameters(input): Parameters<MemoryUpdateInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({
+            "id": input.id,
+            "content": input.content,
+            "category": input.category,
+            "tags": input.tags,
+            "status": input.status,
+            "subject": input.subject,
+            "predicate": input.predicate,
+            "object": input.object,
+        });
+        match self.memory_call::<serde_json::Value>("update", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_delete",
+        description = "Permanently forget a memory by id"
+    )]
+    async fn memory_delete(
+        &self,
+        Parameters(input): Parameters<MemoryDeleteInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({ "id": input.id });
+        match self.memory_call::<serde_json::Value>("delete", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
             }),
         }
     }

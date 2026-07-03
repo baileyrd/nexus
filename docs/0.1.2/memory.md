@@ -42,8 +42,8 @@ Beyond explicit `add` / `auto_capture`, the plugin subscribes to the kernel even
 
 - **CLI** — `nexus` memory subcommands, including **import** (read a `remind_me` SQLite DB or chat-log export and replay it through `add`; import is a CLI-side adapter, not an IPC handler).
 - **TUI** — memory browse/search panes.
-- **MCP** — `nexus_memory_*` tools (search/recall/add/facts/entities/stats/export/capture/consolidate/…) in `nexus-mcp`.
-- **Shell** — the *Memory Dashboard* plugin (`shell/src/plugins/nexus/memoryDashboard/`): Search, Recall, Recent, Facts, Entities, Tags, Vitality, Stats, Sync, Capture, Consolidate, Wiki — from the command palette.
+- **MCP** — `nexus_memory_*` tools (search/recall/add/get/update/delete/facts/entities/stats/export/capture/consolidate/…) in `nexus-mcp`. `get`/`update`/`delete` (C35, #388) close the "forget this" gap — the underlying IPC handlers always existed but had no MCP tool reaching them.
+- **Shell** — the *Memory Dashboard* plugin (`shell/src/plugins/nexus/memoryDashboard/`): Search, Recall, Recent, Facts, Entities, Tags, Vitality, Stats, Sync, Capture, Consolidate, Wiki — from the command palette. Picking a memory (C35, #388) now opens a View / Edit / Forget action menu instead of only toasting its content.
 
 ## Relationship to other crates
 
