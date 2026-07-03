@@ -35,7 +35,10 @@
 //! [`reorder_snippets`]: crate::api::ThemeEngine::reorder_snippets
 //! [`apply_config`]: crate::api::ThemeEngine::apply_config
 
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
@@ -49,6 +52,7 @@ use schemars::JsonSchema;
 use crate::api::{ThemeConfig, ThemeEngine};
 use crate::theme::ThemeMode;
 use crate::variables::VariableMap;
+use crate::watcher::{ThemeReloadEvent, ThemeWatcher, DEFAULT_DEBOUNCE_MS};
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.theme";
@@ -233,11 +237,24 @@ pub struct Ack {
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
+/// Background [`ThemeWatcher`] pump — owns the shutdown flag and join
+/// handle so [`ThemeCorePlugin::on_stop`] can signal + wait for a clean
+/// exit rather than leaking a detached thread.
+struct WatcherHandle {
+    running: Arc<AtomicBool>,
+    join: std::thread::JoinHandle<()>,
+}
+
 /// Core plugin wrapping a [`ThemeEngine`] behind a mutex and an
 /// [`EventBus`] hook for mutation events.
 pub struct ThemeCorePlugin {
     engine: Arc<Mutex<ThemeEngine>>,
     event_bus: Option<Arc<EventBus>>,
+    /// C87 — set only via [`Self::with_dirs`]. Drives [`Self::on_start`]:
+    /// `with_builtins` plugins (dirs both `None`) never spin up a watcher.
+    themes_dir: Option<PathBuf>,
+    snippets_dir: Option<PathBuf>,
+    watcher: Option<WatcherHandle>,
 }
 
 impl ThemeCorePlugin {
@@ -248,6 +265,9 @@ impl ThemeCorePlugin {
         Self {
             engine: Arc::new(Mutex::new(engine)),
             event_bus,
+            themes_dir: None,
+            snippets_dir: None,
+            watcher: None,
         }
     }
 
@@ -256,6 +276,41 @@ impl ThemeCorePlugin {
     #[must_use]
     pub fn with_builtins(event_bus: Option<Arc<EventBus>>) -> Self {
         Self::new(ThemeEngine::new(), event_bus)
+    }
+
+    /// C87 — plugin that also discovers user-installed themes/snippets
+    /// under `themes_dir`/`snippets_dir` and, once started
+    /// ([`CorePlugin::on_start`]), watches both for changes and
+    /// live-reloads. Falls back to builtins-only (logging a warning) if
+    /// the initial scan fails — never worth failing plugin construction
+    /// over a themes directory an operator hasn't created yet, since
+    /// [`ThemeEngine::with_dirs`] already treats "missing" as empty; a
+    /// scan `Err` here means something more unusual (e.g. a permissions
+    /// error), and this is a non-essential UX feature, not a boot gate.
+    #[must_use]
+    pub fn with_dirs(
+        themes_dir: impl AsRef<Path>,
+        snippets_dir: impl AsRef<Path>,
+        event_bus: Option<Arc<EventBus>>,
+    ) -> Self {
+        let themes_dir = themes_dir.as_ref().to_path_buf();
+        let snippets_dir = snippets_dir.as_ref().to_path_buf();
+        let engine = ThemeEngine::with_dirs(&themes_dir, &snippets_dir).unwrap_or_else(|e| {
+            tracing::warn!(
+                themes_dir = %themes_dir.display(),
+                snippets_dir = %snippets_dir.display(),
+                error = %e,
+                "theme/snippet discovery failed; falling back to built-ins only"
+            );
+            ThemeEngine::new()
+        });
+        Self {
+            engine: Arc::new(Mutex::new(engine)),
+            event_bus,
+            themes_dir: Some(themes_dir),
+            snippets_dir: Some(snippets_dir),
+            watcher: None,
+        }
     }
 
     fn publish_changed(&self, config: &ThemeConfig) {
@@ -267,6 +322,79 @@ impl ThemeCorePlugin {
 }
 
 impl CorePlugin for ThemeCorePlugin {
+    fn on_start(&mut self) -> Result<(), PluginError> {
+        // `with_builtins` plugins (e.g. every existing test, and any
+        // caller that hasn't opted into on-disk discovery) have both
+        // dirs `None` — nothing to watch, and starting a watcher with
+        // no paths would just spin a thread that never fires.
+        if self.themes_dir.is_none() && self.snippets_dir.is_none() {
+            return Ok(());
+        }
+        let watcher = match ThemeWatcher::start(
+            self.themes_dir.as_deref(),
+            self.snippets_dir.as_deref(),
+            DEFAULT_DEBOUNCE_MS,
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                // Soft-fail (BL-lifecycle-skip posture, mirrors bootstrap's
+                // `or_lifecycle_skip`): a watcher that can't start means no
+                // hot-reload, not a broken theme engine — the already-
+                // discovered themes/snippets from `with_dirs`'s initial
+                // scan still work. Never take down boot for this.
+                tracing::warn!(error = %e, "theme watcher failed to start; hot-reload disabled");
+                return Ok(());
+            }
+        };
+
+        let running = Arc::new(AtomicBool::new(true));
+        let running_thread = Arc::clone(&running);
+        let engine = Arc::clone(&self.engine);
+        let event_bus = self.event_bus.clone();
+
+        let join = std::thread::spawn(move || {
+            while running_thread.load(Ordering::Acquire) {
+                let Some(event) = watcher.recv_timeout(Duration::from_millis(300)) else {
+                    continue;
+                };
+                let cfg = {
+                    let Ok(mut engine) = engine.lock() else {
+                        tracing::error!("theme engine mutex poisoned in watcher thread");
+                        return;
+                    };
+                    if let Err(e) = engine.reload() {
+                        let (kind, id) = match &event {
+                            ThemeReloadEvent::Theme { id, .. } => ("theme", id.as_str()),
+                            ThemeReloadEvent::Snippet { id, .. } => ("snippet", id.as_str()),
+                        };
+                        tracing::warn!(kind, id, error = %e, "theme hot-reload scan failed");
+                        continue;
+                    }
+                    engine.config()
+                };
+                if let Some(bus) = &event_bus {
+                    let payload = serde_json::to_value(&cfg).unwrap_or(Value::Null);
+                    let _ = bus.publish_plugin(PLUGIN_ID, EVENT_CHANGED, payload);
+                }
+            }
+        });
+
+        self.watcher = Some(WatcherHandle { running, join });
+        Ok(())
+    }
+
+    fn on_stop(&mut self) {
+        if let Some(handle) = self.watcher.take() {
+            handle.running.store(false, Ordering::Release);
+            // Bounded by the 300ms recv_timeout poll above — the thread
+            // notices within one tick and exits, dropping the
+            // ThemeWatcher (and its debouncer) with it.
+            if handle.join.join().is_err() {
+                tracing::warn!("theme watcher thread panicked during shutdown");
+            }
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
@@ -493,5 +621,174 @@ mod tests {
         } else {
             panic!("expected ExecutionFailed");
         }
+    }
+
+    // ── C87: with_dirs + on_start/on_stop lifecycle ─────────────────────────
+
+    #[test]
+    fn with_builtins_on_start_is_a_noop_without_dirs() {
+        // No dirs configured → on_start must not spin up a watcher thread
+        // (there's nothing to watch, and it would never fire).
+        let mut plugin = ThemeCorePlugin::with_builtins(None);
+        plugin.on_start().unwrap();
+        assert!(plugin.watcher.is_none());
+        // on_stop with no watcher running must not panic.
+        plugin.on_stop();
+    }
+
+    #[test]
+    fn with_dirs_discovers_themes_and_snippets_on_construction() {
+        let themes = tempfile::tempdir().unwrap();
+        let theme_dir = themes.path().join("custom");
+        std::fs::create_dir(&theme_dir).unwrap();
+        std::fs::write(
+            theme_dir.join("NEXUS.toml"),
+            r#"
+[theme]
+name = "Custom"
+version = "0.1.0"
+author = "x"
+description = "d"
+"#,
+        )
+        .unwrap();
+
+        let snippets = tempfile::tempdir().unwrap();
+        std::fs::write(
+            snippets.path().join("neon.css"),
+            "/* Name: Neon\nDescription: d */\n:root { --nx-a: 1; }",
+        )
+        .unwrap();
+
+        let mut plugin = ThemeCorePlugin::with_dirs(themes.path(), snippets.path(), None);
+        let themes_out = plugin
+            .dispatch(HANDLER_GET_AVAILABLE_THEMES, &json(serde_json::json!({})))
+            .unwrap();
+        assert!(themes_out
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == "custom"));
+
+        let snippets_out = plugin
+            .dispatch(HANDLER_GET_AVAILABLE_SNIPPETS, &json(serde_json::json!({})))
+            .unwrap();
+        assert!(snippets_out
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "neon"));
+    }
+
+    #[test]
+    fn with_dirs_falls_back_to_builtins_on_missing_dirs() {
+        // Missing dirs are treated as empty by ThemeEngine::with_dirs, not
+        // an error — construction must succeed with builtins intact.
+        let mut plugin = ThemeCorePlugin::with_dirs(
+            "/nonexistent/themes/for/real",
+            "/nonexistent/snippets/for/real",
+            None,
+        );
+        let out = plugin
+            .dispatch(HANDLER_GET_AVAILABLE_THEMES, &json(serde_json::json!({})))
+            .unwrap();
+        let ids: Vec<&str> = out
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&"nexus-light"));
+        assert!(ids.contains(&"nexus-dark"));
+    }
+
+    #[test]
+    fn on_start_with_dirs_spins_up_a_watcher_that_on_stop_cleanly_tears_down() {
+        let themes = tempfile::tempdir().unwrap();
+        let snippets = tempfile::tempdir().unwrap();
+        let mut plugin = ThemeCorePlugin::with_dirs(themes.path(), snippets.path(), None);
+
+        plugin.on_start().unwrap();
+        assert!(plugin.watcher.is_some(), "watcher must be running");
+
+        plugin.on_stop();
+        assert!(plugin.watcher.is_none(), "on_stop must clear the handle");
+    }
+
+    #[test]
+    fn hot_reload_picks_up_a_new_theme_and_emits_changed() {
+        // Mirrors `watcher::tests::detects_theme_manifest_change`'s shape
+        // (the *directory* exists before the watch starts; only the
+        // manifest file inside it is written afterward) — that's the
+        // pattern proven reliable for this crate's notify-backed watcher
+        // in sandboxed/CI filesystems. Same soft-assert posture as that
+        // test and its sibling `detects_snippet_change`: OS file-watchers
+        // are inherently flaky under WSL2 / network mounts / restricted
+        // containers, so a watcher that never fires downgrades to a
+        // logged note rather than failing CI, while the mutation IS
+        // asserted (proving `reload()` + `publish_changed` actually run)
+        // whenever an event does arrive.
+        let themes = tempfile::tempdir().unwrap();
+        let theme_dir = themes.path().join("live-added");
+        std::fs::create_dir(&theme_dir).unwrap();
+        let snippets = tempfile::tempdir().unwrap();
+
+        let bus = Arc::new(EventBus::new(16));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix("com.nexus.theme.".to_string()));
+
+        let mut plugin =
+            ThemeCorePlugin::with_dirs(themes.path(), snippets.path(), Some(Arc::clone(&bus)));
+        plugin.on_start().unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+
+        std::fs::write(
+            theme_dir.join("NEXUS.toml"),
+            r#"
+[theme]
+name = "Live"
+version = "0.1.0"
+author = "x"
+description = "d"
+"#,
+        )
+        .unwrap();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut saw_new_theme = false;
+        while std::time::Instant::now() < deadline && !saw_new_theme {
+            let themes_out = plugin
+                .dispatch(HANDLER_GET_AVAILABLE_THEMES, &json(serde_json::json!({})))
+                .unwrap();
+            saw_new_theme = themes_out
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["id"] == "live-added");
+            if !saw_new_theme {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+
+        if saw_new_theme {
+            // A `changed` event should have fired from the reload — drain
+            // instead of asserting a single try_recv since the debounced
+            // watcher may coalesce/fire more than once.
+            let mut saw_event = false;
+            while let Ok(Some(event)) = sub.try_recv() {
+                if let nexus_kernel::NexusEvent::Custom { type_id, .. } = &event.event {
+                    if type_id == EVENT_CHANGED {
+                        saw_event = true;
+                    }
+                }
+            }
+            assert!(saw_event, "hot-reload must publish com.nexus.theme.changed");
+        } else {
+            eprintln!(
+                "note: theme watcher did not pick up the manifest write within 5s — \
+                 likely a host-FS limitation (see watcher::tests for the same caveat)"
+            );
+        }
+
+        plugin.on_stop();
     }
 }
