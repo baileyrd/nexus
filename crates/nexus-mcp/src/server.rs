@@ -607,6 +607,33 @@ struct NexusDetectChangesOutput {
     degraded_reason: Option<String>,
 }
 
+/// Input for `nexus_git_fetch` (C49 #425).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NexusGitFetchInput {
+    /// Remote name (e.g. `"origin"`).
+    remote: String,
+}
+
+/// Input for `nexus_git_pull` (C49 #425).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NexusGitPullInput {
+    /// Remote name (e.g. `"origin"`).
+    remote: String,
+    /// Branch name to merge in (e.g. `"main"`).
+    branch: String,
+}
+
+/// Input for `nexus_git_remotes` (C49 #425). No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct NexusGitRemotesInput {}
+
+/// Reply for `nexus_git_fetch` / a generic ok-flag git op.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct GitOkOutput {
+    /// The git plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
 /// Output for `nexus_kernel_stats` (BL-137). Mirrors the
 /// `MetricsSnapshot` shape returned by
 /// `com.nexus.security::metrics_snapshot`. Field names + types match
@@ -957,7 +984,9 @@ impl NexusMcpServer {
         })
     }
 
-    /// BL-115 — `com.nexus.git` IPC client used by `nexus_detect_changes`.
+    /// BL-115 — `com.nexus.git` IPC client, originally added for
+    /// `nexus_detect_changes`; C49 (#425) reuses it for the
+    /// `nexus_git_*` remote-sync tools.
     async fn git_call<T: serde::de::DeserializeOwned>(
         &self,
         command: &str,
@@ -2548,6 +2577,71 @@ impl NexusMcpServer {
             degraded: true,
             degraded_reason: Some(BL115_DEGRADED_REASON.to_string()),
         })
+    }
+
+    // C49 (#425) — GitEngine's fetch/pull/remotes existed with full
+    // SSH-agent + keyring credential support but had no IPC handler at
+    // all, so no frontend — shell, TUI, or MCP — could reach them; only
+    // the CLI could, via a direct (non-IPC) GitEngine call. These three
+    // tools are thin wrappers over the new com.nexus.git handlers.
+    #[tool(
+        name = "nexus_git_remotes",
+        description = "List the forge repository's configured git remote names (e.g. [\"origin\"]). Read-only, no network access."
+    )]
+    async fn nexus_git_remotes(
+        &self,
+        Parameters(_input): Parameters<NexusGitRemotesInput>,
+    ) -> Json<GitOkOutput> {
+        match self
+            .git_call::<serde_json::Value>("remotes", serde_json::json!({}))
+            .await
+        {
+            Ok(result) => Json(GitOkOutput { result }),
+            Err(e) => Json(GitOkOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_git_fetch",
+        description = "Fetch all refs from a remote into the forge repository's remote-tracking branches. Does not modify the working tree or HEAD — use nexus_git_pull to also merge."
+    )]
+    async fn nexus_git_fetch(
+        &self,
+        Parameters(input): Parameters<NexusGitFetchInput>,
+    ) -> Json<GitOkOutput> {
+        match self
+            .git_call::<serde_json::Value>("fetch", serde_json::json!({ "remote": input.remote }))
+            .await
+        {
+            Ok(result) => Json(GitOkOutput { result }),
+            Err(e) => Json(GitOkOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_git_pull",
+        description = "Fetch from a remote and merge the named branch into HEAD. Returns { fast_forward, conflicts, commit_hash } — a non-empty `conflicts` list means the merge paused mid-flight and needs manual resolution (or com.nexus.git::abort_merge)."
+    )]
+    async fn nexus_git_pull(
+        &self,
+        Parameters(input): Parameters<NexusGitPullInput>,
+    ) -> Json<GitOkOutput> {
+        match self
+            .git_call::<serde_json::Value>(
+                "pull",
+                serde_json::json!({ "remote": input.remote, "branch": input.branch }),
+            )
+            .await
+        {
+            Ok(result) => Json(GitOkOutput { result }),
+            Err(e) => Json(GitOkOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
     }
 
     #[tool(

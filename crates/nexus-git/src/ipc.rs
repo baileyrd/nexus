@@ -818,3 +818,35 @@ pub struct GitLfsStatusReply {
     /// availability).
     pub git_lfs_installed: bool,
 }
+
+/// C49 (#425) — args for `fetch` (handler id `43`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitFetchArgs {
+    /// Remote name (e.g. `"origin"`).
+    pub remote: String,
+}
+
+/// C49 (#425) — return type for `remotes` (handler id `45`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitRemotesReply {
+    /// Configured remote names (e.g. `["origin"]`).
+    pub remotes: Vec<String>,
+}

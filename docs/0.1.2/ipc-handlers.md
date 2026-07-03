@@ -13,7 +13,7 @@
 | Plugin | Handlers |
 |--------|---------:|
 | `com.nexus.storage` | 80 |
-| `com.nexus.git` | 42 |
+| `com.nexus.git` | 45 |
 | `com.nexus.terminal` | 34 |
 | `com.nexus.ai` | 30 |
 | `com.nexus.agent` | 28 |
@@ -36,7 +36,7 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 3 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **392** |
+| **Total** | **395** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -92,15 +92,15 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.git (42)
+## com.nexus.git (45)
 
 | Command | Caps | Note |
 |---------|------|------|
-| `status` / `log` / `branches` / `blame` / `diff_file` / `diff_staged` / `file_status` / `file_statuses` / `lfs_status` / `list_tags` / `conflict_files` / `conflict_versions` / `stash_list` | — | read-only inspection |
+| `status` / `log` / `branches` / `blame` / `diff_file` / `diff_staged` / `file_status` / `file_statuses` / `lfs_status` / `list_tags` / `conflict_files` / `conflict_versions` / `stash_list` / `remotes` | — | read-only inspection; `remotes` (C49 #425) lists configured remote names, no network access itself |
 | `stage_file` / `stage_all` / `stage_hunks` / `unstage_file` / `unstage_all` / `unstage_hunks` / `discard_hunks` | — | working-tree / index mutation inside forge root |
 | `commit` | — | writes commit object |
 | `create_branch` / `delete_branch` / `switch_branch` / `create_tag` / `delete_tag` | — | ref mutation |
-| `push` / `push_tags` | — | **AUDIT** — outbound network, candidate for `net.http` |
+| `push` / `push_tags` / `fetch` / `pull` | `net.http` | outbound network + SSH-agent/keyring credential read; `fetch`/`pull` added by C49 (#425) — same posture as `push`/`push_tags`, which were already classified `net.http` despite a stale **AUDIT** note here previously claiming otherwise |
 | `merge` / `abort_merge` / `rebase` / `abort_rebase` / `cherry_pick` / `abort_cherry_pick` | — | history mutation |
 | `worktree_list` / `worktree_create` / `worktree_remove` / `worktree_commit` | — | git worktrees for subagent isolation (RFC 0006/0007); worktrees live under `.forge/worktrees/`; `worktree_commit` stages + commits a worktree's delta to its branch |
 | `stash_push` / `stash_pop` / `stash_drop` | — | stash mgmt |
