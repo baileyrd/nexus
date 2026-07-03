@@ -160,6 +160,16 @@ pub(crate) enum ContentCommand {
         /// Maximum number of results
         #[arg(short, long, default_value_t = 20)]
         limit: usize,
+        /// Vector-only semantic search (embedding similarity) instead
+        /// of lexical FTS. Requires an AI embedding provider
+        /// (`nexus ai config`). Mutually exclusive with `--hybrid`.
+        #[arg(long, conflicts_with = "hybrid")]
+        semantic: bool,
+        /// Hybrid search: RRF fusion of lexical FTS (BM25) and vector
+        /// similarity (C78 #431). Requires an AI embedding provider.
+        /// Mutually exclusive with `--semantic`.
+        #[arg(long, conflicts_with = "semantic")]
+        hybrid: bool,
     },
     /// List tasks across the forge
     Tasks {

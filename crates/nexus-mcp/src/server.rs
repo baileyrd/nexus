@@ -400,6 +400,39 @@ struct AskInput {
     question: String,
 }
 
+/// Input for `nexus_semantic_search` (C78 #431).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SemanticSearchInput {
+    /// Query to embed and retrieve against — natural language, not
+    /// keyword syntax.
+    query: String,
+    /// Maximum number of ranked chunks to return.
+    #[serde(default = "default_semantic_search_limit")]
+    limit: u32,
+    /// Fuse the vector ranking with lexical Tantivy BM25 (RRF) instead
+    /// of vector-only retrieval. Surfaces keyword-exact hits that
+    /// embed poorly alongside semantic hits that share no keywords.
+    #[serde(default)]
+    hybrid: bool,
+}
+
+fn default_semantic_search_limit() -> u32 {
+    10
+}
+
+/// Reply for `nexus_semantic_search`: raw ranked chunk hits, unlike
+/// `nexus_ask` which synthesizes a chat answer. `matches` carries
+/// `ChunkMatch` shape (`file_path`, `block_id`, `chunk_text`, `score`)
+/// for vector-only retrieval, or the hybrid `StorageHybridMatch` shape
+/// (`file_path`, `block_id`, `block_type`, `excerpt`, `score`,
+/// `fts_rank`, `vector_rank`) when `hybrid: true`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SemanticSearchOutput {
+    /// The AI plugin's `semantic_search` reply (or an `{ "error": … }`
+    /// object on failure).
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_list_skills` (no parameters).
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct ListSkillsInput {}
@@ -2578,6 +2611,38 @@ impl NexusMcpServer {
                 answer: format!("nexus_ask: failed to decode response: {e}"),
                 model: String::new(),
                 source_count: 0,
+            }),
+        }
+    }
+
+    // C78 (#431) — nexus_ask synthesizes a chat answer with only a
+    // source *count*; agents/scripts that want the raw ranked hits
+    // (file_path, score, excerpt) for their own use had no MCP tool
+    // to call — this exposes the same com.nexus.ai::semantic_search
+    // handler the shell's "Search by Meaning" already uses, with
+    // `hybrid: true` fusing in lexical BM25 via RRF instead of
+    // vector-only retrieval.
+    #[tool(
+        name = "nexus_semantic_search",
+        description = "Embedding-driven retrieval over your notes: returns raw ranked chunk hits (file_path, score, excerpt/chunk_text) rather than a synthesized answer. Pass hybrid=true to fuse vector similarity with lexical BM25 (RRF) instead of vector-only. Requires an AI embedding provider to be configured."
+    )]
+    async fn nexus_semantic_search(
+        &self,
+        Parameters(input): Parameters<SemanticSearchInput>,
+    ) -> Json<SemanticSearchOutput> {
+        let args = serde_json::json!({
+            "query": input.query,
+            "limit": input.limit,
+            "hybrid": input.hybrid,
+        });
+        match self
+            .context
+            .ipc_call(AI_PLUGIN, "semantic_search", args, AI_IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(SemanticSearchOutput { result }),
+            Err(e) => Json(SemanticSearchOutput {
+                result: serde_json::json!({ "error": e.to_string() }),
             }),
         }
     }

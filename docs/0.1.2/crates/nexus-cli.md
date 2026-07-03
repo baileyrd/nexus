@@ -44,7 +44,8 @@ Unless noted, handlers route through `context.ipc_call(plugin_id, …)`. Plugin 
 - `forge init [dir] [--template os]` — init a forge (local-only path; `os` lays out the BL-054 folder scaffold). `forge status`, `forge reindex`, `forge doctor [--fix]` (file-vs-index drift, BL-137), `forge import <source> [--dry-run] [--on-conflict skip|overwrite|rename]` (BL-083).
 
 **Content nodes** (`com.nexus.storage`, mostly via `bootstrap::storage` typed helpers)
-- `content create|update <path> [--content … | --stdin]`, `content list [--prefix …]`, `content read <path> [--raw]`, `content delete <path> [-f]`, `content search <query> [-l]`, `content tasks [--completed] [--all] [--file …]`, `content task-toggle <id>`, `content links|backlinks <path>`, `content daily [--date]`, `content export <path> [-o]`.
+- `content create|update <path> [--content … | --stdin]`, `content list [--prefix …]`, `content read <path> [--raw]`, `content delete <path> [-f]`, `content search <query> [-l] [--semantic | --hybrid]`, `content tasks [--completed] [--all] [--file …]`, `content task-toggle <id>`, `content links|backlinks <path>`, `content daily [--date]`, `content export <path> [-o]`.
+  - `--semantic`/`--hybrid` (C78 #431; mutually exclusive) bypass lexical FTS and call `com.nexus.ai::semantic_search` directly (embedding similarity, or `hybrid: true` for RRF fusion with Tantivy BM25) — same handler the shell's "Search by Meaning" uses. Requires an AI embedding provider (`nexus ai config`).
 
 **Knowledge graph** (`com.nexus.storage`)
 - `graph status|unresolved`, `graph neighbors <path> [-d]`, `graph entity list|show|search|related|duplicates …` (BL-128 personal entity graph), `graph dream-cycle run [--phase dedup|decay|enrich|infer] [--decay-factor] [--decay-floor] [--review-threshold] [--merge-threshold] [--dry-run]` (BL-129; enrich/infer require an AI provider).

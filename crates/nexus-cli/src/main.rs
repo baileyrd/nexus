@@ -315,8 +315,17 @@ fn main() {
                 force,
                 permanent,
             } => commands::content::delete(&mut app, &path, force, permanent),
-            ContentCommand::Search { query, limit } => {
-                commands::content::search(&mut app, &query, limit)
+            ContentCommand::Search {
+                query,
+                limit,
+                semantic,
+                hybrid,
+            } => {
+                if semantic || hybrid {
+                    commands::content::semantic_search(&mut app, &query, limit, hybrid)
+                } else {
+                    commands::content::search(&mut app, &query, limit)
+                }
             }
             ContentCommand::Tasks {
                 completed,
@@ -1007,6 +1016,61 @@ mod tests {
             },
             _ => panic!("expected Content subcommand"),
         }
+    }
+
+    #[test]
+    fn parse_content_search_defaults_semantic_and_hybrid_to_false() {
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "some query"])
+            .expect("parse content search");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search {
+                    query,
+                    semantic,
+                    hybrid,
+                    ..
+                } => {
+                    assert_eq!(query, "some query");
+                    assert!(!semantic);
+                    assert!(!hybrid);
+                }
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_search_accepts_semantic_and_hybrid_flags() {
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "q", "--semantic"])
+            .expect("parse content search --semantic");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search { semantic, .. } => assert!(semantic),
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "q", "--hybrid"])
+            .expect("parse content search --hybrid");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search { hybrid, .. } => assert!(hybrid),
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_search_rejects_semantic_and_hybrid_together() {
+        let result =
+            Cli::try_parse_from(["nexus", "content", "search", "q", "--semantic", "--hybrid"]);
+        assert!(
+            result.is_err(),
+            "--semantic and --hybrid should be mutually exclusive"
+        );
     }
 
     #[test]
