@@ -815,6 +815,83 @@ pub struct InferEntityRelationsResult {
     pub applied: bool,
 }
 
+/// Args for `com.nexus.ai::extract_entities` (handler 30, C44 #422).
+///
+/// Reads the note at `path` through `com.nexus.storage::read_file`, asks
+/// the AI provider to name distinct, substantively-discussed entities, and
+/// (unless `dry_run`) births each genuinely-new one as a bare entity stub
+/// via `com.nexus.storage::entity_upsert` (no relations — the existing
+/// `infer_entity_relations` phase proposes those in the same Dream Cycle,
+/// once the new entity exists to be a candidate). Entities that already
+/// exist are always skipped, never re-enriched — that's `enrich_entity`'s
+/// job, not extraction's.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractEntitiesArgs {
+    /// Forge-relative path of the note to extract entities from.
+    pub path: String,
+    /// Maximum number of new entities to create from this note.
+    /// Defaults to `3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entities: Option<u32>,
+    /// When `true`, the handler computes proposals but does not create
+    /// any entity files. Proposals are still included in the reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+}
+
+/// One proposed entity in [`ExtractEntitiesResult::proposals`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractedEntityRow {
+    /// Slugified candidate entity id.
+    pub id: String,
+    /// Free-form entity type (`person`, `project`, `organization`,
+    /// `tool`, `concept`, ...).
+    pub entity_type: String,
+    /// One-sentence description grounded in the source note.
+    pub description: String,
+}
+
+/// Reply for `com.nexus.ai::extract_entities`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractEntitiesResult {
+    /// The note path that was scanned.
+    pub path: String,
+    /// Ids of entities actually created on disk. Empty when `dry_run`
+    /// or when every proposal already existed / was filtered out.
+    pub created: Vec<String>,
+    /// Every candidate that survived id/description validation and the
+    /// pre-existence check, whether or not it was written (see
+    /// `created` for what was actually written).
+    pub proposals: Vec<ExtractedEntityRow>,
+}
+
 // ─── com.nexus.ai::predict (BL-139) ─────────────────────────────────────────
 //
 // Per-keystroke edit prediction. Caller supplies the cursor split

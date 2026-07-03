@@ -15,7 +15,7 @@
 | `com.nexus.storage` | 80 |
 | `com.nexus.git` | 42 |
 | `com.nexus.terminal` | 34 |
-| `com.nexus.ai` | 29 |
+| `com.nexus.ai` | 30 |
 | `com.nexus.agent` | 28 |
 | `com.nexus.dap` | 21 |
 | `com.nexus.memory` | 21 |
@@ -107,14 +107,14 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.ai (29)
+## com.nexus.ai (30)
 
 ### Generation (gated by `ai.chat`)
 
 | Command | Caps | Policy | Note |
 |---------|------|--------|------|
 | `stream_chat` | `ai.chat` | `ai_tools_policy` | tools=auto → +`ai.tools.write`; auto_with_mcp → +`ai.tools.mcp` |
-| `stream_ask` / `ask` / `semantic_search` / `embed_text` / `generate` / `enrich_file` / `enrich_entity` / `infer_entity_relations` / `generate_docs` / `predict` | `ai.chat` | — | one provider round-trip per call |
+| `stream_ask` / `ask` / `semantic_search` / `embed_text` / `generate` / `enrich_file` / `enrich_entity` / `infer_entity_relations` / `extract_entities` / `generate_docs` / `predict` | `ai.chat` | — | one provider round-trip per call |
 | `propose_tool_calls` | `ai.chat` | `ai_tools_policy` | same policy as `stream_chat` |
 
 ### Index + sessions + config

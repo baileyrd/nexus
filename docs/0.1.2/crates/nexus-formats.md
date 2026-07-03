@@ -111,7 +111,7 @@ Top-level `#[serde(default)]`. Sections:
 - `search: SearchSettings` — `enable_full_text` (true), `index_interval_ms` (5000), `max_results` (50).
 - `plugins: PluginSettings` — `enabled: Vec<String>` (empty).
 - `git: GitSettings` — `enabled` (true), `auto_commit` (false), `auto_commit_interval_secs` (1800), `auto_commit_on_save` (false), `auto_commit_debounce_secs` (5), `poll_interval_secs` (Option, skip-if-none → git crate default 2 s), `auto_commit_tick_secs` (Option → git default 30 s).
-- `dream_cycle: DreamCycleSettings` (BL-129) — `enabled` (false), `schedule` ("0 2 * * *"), `merge_threshold` (0.97), `review_threshold` (0.92), `decay_factor` (0.95), `decay_floor` (0.10).
+- `dream_cycle: DreamCycleSettings` (BL-129) — `enabled` (false), `schedule` ("0 2 * * *"), `merge_threshold` (0.97), `review_threshold` (0.92), `decay_factor` (0.95), `decay_floor` (0.10); C44 (#422) extraction sub-settings — `extract_enabled` (false, opt-in even when `enabled` is true), `extract_lookback_hours` (24), `extract_max_notes_per_cycle` (10), `extract_max_entities_per_note` (3).
 - `settings: BTreeMap<String, toml::Value>` — flat `pluginId.fieldName` bag mirrored by the shell's settings registry; `BTreeMap` keeps on-disk order stable.
 
 ### `WorkspaceState` → `workspace.json` (JSON)

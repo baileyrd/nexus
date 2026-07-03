@@ -116,6 +116,13 @@ plugin = "com.nexus.ai"
 command = "infer_entity_relations"
 caps = ["ai.chat"]
 
+# C44 (#422) — the Dream-Cycle acquisition phase; reads a note through
+# storage and (unless dry_run) creates bare entity stubs via entity_upsert.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "extract_entities"
+caps = ["ai.chat"]
+
 [[handler]]
 plugin = "com.nexus.ai"
 command = "propose_tool_calls"

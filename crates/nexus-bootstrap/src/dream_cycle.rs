@@ -224,6 +224,8 @@ fn run_loop(
             Ok(report) => {
                 tracing::info!(
                     elapsed_ms = started.elapsed().as_millis() as u64,
+                    notes_scanned = report.notes_scanned,
+                    extracted = report.entities_extracted,
                     merged = report.merged,
                     review = report.review,
                     decayed = report.relations_decayed,
@@ -259,9 +261,44 @@ fn load_settings(
     Ok(cfg.dream_cycle)
 }
 
+/// C44 (#422) — pick the notes an `extract` phase scans this cycle from a
+/// `com.nexus.storage::query_files` reply (a JSON array of file-record
+/// objects). Pure and synchronous so it's unit-testable without a live
+/// kernel context: filters out `entities/*` (extraction reads *notes*,
+/// entity records are the graph's own storage) and anything not modified
+/// within `lookback_hours` of `now` (unix seconds), then returns paths
+/// most-recently-modified first, capped to `max_notes`.
+fn select_extract_candidates(
+    files: &[serde_json::Value],
+    now: i64,
+    lookback_hours: u32,
+    max_notes: u32,
+) -> Vec<String> {
+    let cutoff = now - i64::from(lookback_hours) * 3600;
+    let mut candidates: Vec<(String, i64)> = files
+        .iter()
+        .filter_map(|f| {
+            let path = f.get("path").and_then(serde_json::Value::as_str)?;
+            if path.starts_with("entities/") {
+                return None;
+            }
+            let modified_at = f.get("modified_at").and_then(serde_json::Value::as_i64)?;
+            if modified_at < cutoff {
+                return None;
+            }
+            Some((path.to_string(), modified_at))
+        })
+        .collect();
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.truncate(max_notes as usize);
+    candidates.into_iter().map(|(path, _)| path).collect()
+}
+
 /// Per-cycle summary, surfaced via tracing.
 #[derive(Debug, Default)]
 struct CycleReport {
+    notes_scanned: u32,
+    entities_extracted: u32,
     merged: u32,
     review: u32,
     relations_decayed: u32,
@@ -276,6 +313,65 @@ async fn run_cycle(
     use nexus_kernel::{Events as _, Ipc as _};
 
     let mut report = CycleReport::default();
+
+    // ── extract (C44 #422) ───────────────────────────────────────────────
+    // Runs first so any entity born this cycle is eligible for dedup /
+    // decay / enrich / infer in the same pass. Opt-in (`extract_enabled`
+    // defaults `false`) since — unlike the other three phases, which only
+    // ever merge/decay/enrich entities a user already created — this one
+    // creates new entity files on its own.
+    if cfg.extract_enabled {
+        match ctx
+            .ipc_call(
+                "com.nexus.storage",
+                "query_files",
+                serde_json::json!({ "file_type": "markdown" }),
+                IPC_TIMEOUT,
+            )
+            .await
+        {
+            Ok(files_val) => {
+                let now = Utc::now().timestamp();
+                let candidates = select_extract_candidates(
+                    files_val.as_array().map(Vec::as_slice).unwrap_or(&[]),
+                    now,
+                    cfg.extract_lookback_hours,
+                    cfg.extract_max_notes_per_cycle,
+                );
+                report.notes_scanned = u32::try_from(candidates.len()).unwrap_or(u32::MAX);
+
+                for path in candidates {
+                    match ctx
+                        .ipc_call(
+                            "com.nexus.ai",
+                            "extract_entities",
+                            serde_json::json!({
+                                "path": path,
+                                "max_entities": cfg.extract_max_entities_per_note,
+                            }),
+                            IPC_TIMEOUT,
+                        )
+                        .await
+                    {
+                        Ok(reply) => {
+                            if let Some(created) =
+                                reply.get("created").and_then(serde_json::Value::as_array)
+                            {
+                                report.entities_extracted +=
+                                    u32::try_from(created.len()).unwrap_or(0);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(path = %path, error = %e, "dream_cycle: extract_entities failed");
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "dream_cycle: query_files (extract) failed");
+            }
+        }
+    }
 
     // ── dedup ─────────────────────────────────────────────────────────────
     let dedup_floor = cfg.review_threshold.min(cfg.merge_threshold);
@@ -408,18 +504,23 @@ async fn run_cycle(
         }
     }
 
-    if report.proposals_total > 0 {
+    if report.proposals_total > 0 || report.entities_extracted > 0 {
         // Emit a kernel event so the shell can render a "N new
         // relation proposals from Dream Cycle" notification. The
         // payload includes the total + the cycle's tracing timestamp
         // so duplicate-notification dedup is straightforward.
+        // `entities_extracted` (C44 #422) also gates this: a cycle
+        // that only birthed new entities (no relation proposals yet —
+        // those follow once `infer` picks the new entity up on a
+        // later cycle) is still worth surfacing.
         if let Err(e) = ctx.publish(
             "com.nexus.dream_cycle.proposals",
             serde_json::json!({
-                "proposals_total":   report.proposals_total,
-                "entities_enriched": report.entities_enriched,
-                "merged":            report.merged,
-                "review":            report.review,
+                "proposals_total":    report.proposals_total,
+                "entities_enriched":  report.entities_enriched,
+                "entities_extracted": report.entities_extracted,
+                "merged":             report.merged,
+                "review":             report.review,
             }),
         ) {
             tracing::debug!(error = %e, "dream_cycle: publish notification failed");
@@ -427,4 +528,96 @@ async fn run_cycle(
     }
 
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_extract_candidates;
+
+    fn file(path: &str, modified_at: i64) -> serde_json::Value {
+        serde_json::json!({ "path": path, "modified_at": modified_at, "file_type": "markdown" })
+    }
+
+    #[test]
+    fn excludes_entity_files() {
+        let files = [file("notes/a.md", 1000), file("entities/ada.md", 1000)];
+        let got = select_extract_candidates(&files, 1000, 24, 10);
+        assert_eq!(got, vec!["notes/a.md".to_string()]);
+    }
+
+    #[test]
+    fn excludes_files_outside_the_lookback_window() {
+        let now = 100_000;
+        let files = [
+            file("notes/recent.md", now - 3600),      // 1h ago — in window
+            file("notes/stale.md", now - 30 * 3600),   // 30h ago — outside a 24h window
+        ];
+        let got = select_extract_candidates(&files, now, 24, 10);
+        assert_eq!(got, vec!["notes/recent.md".to_string()]);
+    }
+
+    #[test]
+    fn boundary_modified_at_exactly_at_cutoff_is_included() {
+        let now = 100_000;
+        let lookback_hours = 24;
+        let cutoff = now - i64::from(lookback_hours) * 3600;
+        let files = [file("notes/edge.md", cutoff)];
+        let got = select_extract_candidates(&files, now, lookback_hours, 10);
+        assert_eq!(got, vec!["notes/edge.md".to_string()]);
+    }
+
+    #[test]
+    fn sorts_most_recently_modified_first() {
+        let now = 100_000;
+        let files = [
+            file("notes/oldest.md", now - 100),
+            file("notes/newest.md", now - 10),
+            file("notes/middle.md", now - 50),
+        ];
+        let got = select_extract_candidates(&files, now, 24, 10);
+        assert_eq!(
+            got,
+            vec![
+                "notes/newest.md".to_string(),
+                "notes/middle.md".to_string(),
+                "notes/oldest.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn truncates_to_max_notes() {
+        let now = 100_000;
+        let files: Vec<serde_json::Value> = (0..5)
+            .map(|i| file(&format!("notes/{i}.md"), now - i))
+            .collect();
+        let got = select_extract_candidates(&files, now, 24, 2);
+        assert_eq!(got.len(), 2);
+        // The two most recent (smallest `i`, since modified_at = now - i).
+        assert_eq!(got, vec!["notes/0.md".to_string(), "notes/1.md".to_string()]);
+    }
+
+    #[test]
+    fn skips_entries_missing_path_or_modified_at() {
+        let files = [
+            serde_json::json!({ "modified_at": 1000 }),
+            serde_json::json!({ "path": "notes/no-timestamp.md" }),
+            file("notes/valid.md", 1000),
+        ];
+        let got = select_extract_candidates(&files, 1000, 24, 10);
+        assert_eq!(got, vec!["notes/valid.md".to_string()]);
+    }
+
+    #[test]
+    fn empty_input_yields_empty_output() {
+        let got = select_extract_candidates(&[], 1000, 24, 10);
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn zero_max_notes_yields_empty_output() {
+        let files = [file("notes/a.md", 1000)];
+        let got = select_extract_candidates(&files, 1000, 24, 0);
+        assert!(got.is_empty());
+    }
 }

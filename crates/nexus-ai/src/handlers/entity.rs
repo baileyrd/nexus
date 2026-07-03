@@ -1,4 +1,6 @@
 //! BL-129 — entity enrichment + relation inference handlers.
+//! C44 (#422) — entity extraction (the acquisition phase BL-129 shipped
+//! without).
 
 use nexus_kernel::{Ipc as _, KernelPluginContext};
 use nexus_plugins::PluginError;
@@ -553,4 +555,265 @@ pub(crate) async fn handle_infer_entity_relations(
         applied,
     })
     .map_err(|e| exec_err(format!("infer_entity_relations: serialise: {e}")))
+}
+
+// ── C44 (#422) — extract_entities ────────────────────────────────────────
+
+const EXTRACT_DEFAULT_MAX_ENTITIES: u32 = 3;
+/// Below this many characters a note is treated as too thin to bother
+/// extracting from (daily-note skeletons, stub files, ...).
+const EXTRACT_MIN_CONTENT_CHARS: usize = 40;
+/// Prompt budget — long notes are truncated rather than rejected so a
+/// large journal entry still yields whatever's mentioned early on.
+const EXTRACT_MAX_CONTENT_CHARS: usize = 4000;
+
+#[derive(serde::Deserialize)]
+struct ExtractReadFileReply {
+    #[serde(default)]
+    bytes: Option<Vec<u8>>,
+}
+
+pub(crate) async fn handle_extract_entities(
+    ctx: &KernelPluginContext,
+    ai_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    use crate::ipc::{ExtractEntitiesArgs, ExtractEntitiesResult, ExtractedEntityRow};
+    use crate::provider::{ChatMessage, Role};
+
+    let parsed: ExtractEntitiesArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("extract_entities: parse args: {e}")))?;
+    let path = parsed.path.trim();
+    if path.is_empty() {
+        return Err(exec_err(
+            "extract_entities: 'path' must be non-empty".to_string(),
+        ));
+    }
+    let max_entities = parsed
+        .max_entities
+        .unwrap_or(EXTRACT_DEFAULT_MAX_ENTITIES)
+        .max(1) as usize;
+    let dry_run = parsed.dry_run.unwrap_or(false);
+
+    // ── 1. Read the note through storage ───────────────────────────────────
+    let raw = ctx
+        .ipc_call(
+            "com.nexus.storage",
+            "read_file",
+            serde_json::json!({ "path": path }),
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .map_err(|e| exec_err(format!("extract_entities: read_file: {e}")))?;
+    let reply: ExtractReadFileReply = serde_json::from_value(raw)
+        .map_err(|e| exec_err(format!("extract_entities: decode read_file: {e}")))?;
+    let bytes = reply
+        .bytes
+        .ok_or_else(|| exec_err(format!("extract_entities: note not found: {path}")))?;
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+
+    if content.trim().chars().count() < EXTRACT_MIN_CONTENT_CHARS {
+        return serde_json::to_value(&ExtractEntitiesResult {
+            path: path.to_string(),
+            created: Vec::new(),
+            proposals: Vec::new(),
+        })
+        .map_err(|e| exec_err(format!("extract_entities: serialise: {e}")));
+    }
+    let truncated: String = content.chars().take(EXTRACT_MAX_CONTENT_CHARS).collect();
+
+    // ── 2. Prompt the model for candidate entities (JSON-only reply) ──────
+    let ai_cfg = ai_cfg
+        .ok_or_else(|| exec_err("extract_entities: no AI chat provider configured".to_string()))?;
+    let provider = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+
+    let mut prompt = String::new();
+    prompt.push_str(
+        "You extract distinct, substantively-discussed named entities (people, projects, \
+         organizations, tools, products, or concepts) from a note. Skip generic or \
+         passing mentions — only entities the note actually says something about.\n\n",
+    );
+    prompt.push_str(&format!("Note path: {path}\nNote content:\n{truncated}\n\n"));
+    prompt.push_str(&format!(
+        "Reply with a JSON array of at most {max_entities} entities. Each item: \
+         {{\"id\": <lowercase-hyphenated-slug, 2-4 words>, \"entity_type\": <one of: \
+         person, project, organization, tool, concept>, \"description\": <one \
+         sentence, grounded in the note>}}. Do not include any text outside the JSON \
+         array."
+    ));
+
+    let messages = [ChatMessage {
+        role: Role::User,
+        content: prompt,
+    }];
+    let raw_reply = provider
+        .chat(&messages, None)
+        .await
+        .map_err(|e| exec_err(format!("extract_entities: provider chat: {e}")))?;
+    let parsed_array: Vec<serde_json::Value> = extract_json_array(&raw_reply).unwrap_or_default();
+
+    // ── 3. Filter to genuinely new entities + create them ─────────────────
+    let mut proposals: Vec<ExtractedEntityRow> = Vec::new();
+    let mut created: Vec<String> = Vec::new();
+    let mut seen_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for item in parsed_array {
+        let Some(raw_id) = item.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let id = slugify_entity_id(raw_id);
+        if id.is_empty() || !seen_ids.insert(id.clone()) {
+            continue;
+        }
+        let entity_type = item
+            .get("entity_type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let entity_type = if entity_type.is_empty() {
+            "concept".to_string()
+        } else {
+            entity_type
+        };
+        let description = item
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if description.is_empty() {
+            continue;
+        }
+
+        // Extraction only births new stubs — never touches an entity
+        // that already exists. Enriching an existing entity's
+        // description is `enrich_entity`'s dedicated job; letting
+        // extraction overwrite hand-curated content on every mention
+        // would be a footgun.
+        let already_exists = ctx
+            .ipc_call(
+                "com.nexus.storage",
+                "entity_get",
+                serde_json::json!({ "id": &id }),
+                std::time::Duration::from_secs(5),
+            )
+            .await
+            .ok()
+            .is_some_and(|r| r.get("entity").and_then(serde_json::Value::as_object).is_some());
+        if already_exists {
+            continue;
+        }
+
+        proposals.push(ExtractedEntityRow {
+            id: id.clone(),
+            entity_type: entity_type.clone(),
+            description: description.clone(),
+        });
+
+        if !dry_run {
+            let upsert_args = serde_json::json!({
+                "id":          id,
+                "entity_type": entity_type,
+                "aliases":     Vec::<String>::new(),
+                "description": description,
+                "relations":   Vec::<serde_json::Value>::new(),
+            });
+            if ctx
+                .ipc_call(
+                    "com.nexus.storage",
+                    "entity_upsert",
+                    upsert_args,
+                    std::time::Duration::from_secs(10),
+                )
+                .await
+                .is_ok()
+            {
+                created.push(id);
+            }
+        }
+
+        if proposals.len() >= max_entities {
+            break;
+        }
+    }
+
+    serde_json::to_value(&ExtractEntitiesResult {
+        path: path.to_string(),
+        created,
+        proposals,
+    })
+    .map_err(|e| exec_err(format!("extract_entities: serialise: {e}")))
+}
+
+/// Slugify a model-supplied candidate id: lowercase ASCII
+/// alphanumerics, runs of everything else collapsed to a single `-`,
+/// no leading/trailing `-`. Mirrors the relation-kind canonicalization
+/// a few lines up (`infer_entity_relations`) rather than pulling in
+/// `nexus-formats::util::slugify` for one call site (this crate has no
+/// dependency on `nexus-formats`).
+fn slugify_entity_id(input: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = true; // suppresses a leading '-'
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+#[cfg(test)]
+mod slugify_tests {
+    use super::slugify_entity_id;
+
+    #[test]
+    fn lowercases_and_hyphenates_spaces() {
+        assert_eq!(slugify_entity_id("Ada Lovelace"), "ada-lovelace");
+    }
+
+    #[test]
+    fn collapses_runs_of_non_alnum_to_one_hyphen() {
+        assert_eq!(slugify_entity_id("Nexus  --  Project!!"), "nexus-project");
+    }
+
+    #[test]
+    fn strips_leading_and_trailing_punctuation() {
+        assert_eq!(slugify_entity_id("  -Ada-  "), "ada");
+    }
+
+    #[test]
+    fn preserves_already_slugified_input() {
+        assert_eq!(slugify_entity_id("ada-lovelace"), "ada-lovelace");
+    }
+
+    #[test]
+    fn empty_input_yields_empty_string() {
+        assert_eq!(slugify_entity_id(""), "");
+    }
+
+    #[test]
+    fn punctuation_only_input_yields_empty_string() {
+        assert_eq!(slugify_entity_id("!!! ---"), "");
+    }
+
+    #[test]
+    fn unicode_letters_are_dropped_not_panicked_on() {
+        // Non-ASCII-alphanumeric chars (café's é) are treated as
+        // separators, matching the ASCII-only slug the prompt asks
+        // for — this documents that behaviour rather than mandating
+        // transliteration support.
+        assert_eq!(slugify_entity_id("café"), "caf");
+    }
+
+    #[test]
+    fn digits_are_kept() {
+        assert_eq!(slugify_entity_id("Nexus 0.1.2"), "nexus-0-1-2");
+    }
 }

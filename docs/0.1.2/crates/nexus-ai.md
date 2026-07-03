@@ -98,6 +98,7 @@ Handler ids and `(command, id)` pairs come from `core_plugin::IPC_HANDLERS` / `H
 | `enrich_entity` | 24 | `EnrichEntityArgs{entity_id, min_description_chars?=80, dry_run?}` | `EnrichEntityResult{entity_id, original_description, new_description, skipped, applied}` | `ai.chat` | BL-129 expand an entity description (writes via `entity_upsert` unless dry_run). |
 | `infer_entity_relations` | 25 | `InferEntityRelationsArgs{entity_id, max_proposals?=3, dry_run?}` | `InferEntityRelationsResult{entity_id, proposals, applied}` | `ai.chat` | BL-129 propose new entity relations at `confidence: 0.5` (writes via `entity_upsert` unless dry_run). |
 | `predict` | 26 | `AiPredictArgs{prefix, suffix, language, file_path, max_tokens?}` | `AiPredictReply{completion}` | `ai.chat` | BL-139 per-keystroke FIM. Ollama `/api/generate` (suffix); chat-shaped FIM fallback for OpenAI/Anthropic. Not listed in `IPC_HANDLERS` (reached via streaming surfaces). |
+| `extract_entities` | 30 | `ExtractEntitiesArgs{path, max_entities?=3, dry_run?}` | `ExtractEntitiesResult{path, created, proposals}` | `ai.chat` | C44 (#422) read a note via `storage::read_file`, ask the provider to name distinct entities it substantively discusses, create each genuinely-new one as a bare entity stub via `entity_upsert` (no relations — `infer_entity_relations` picks it up next cycle); entities that already exist are always skipped, never re-enriched. The BL-129 Dream Cycle's `extract` phase (opt-in, `[dream_cycle].extract_enabled`) drives this over recently-changed notes. |
 
 Note: `nexus-bootstrap` registers v1 aliases (`with_v1_aliases`) for these commands. `HANDLER_PREDICT` (26) is intentionally absent from `IPC_HANDLERS` but is dispatched in `dispatch_async`.
 
@@ -106,7 +107,7 @@ Note: `nexus-bootstrap` registers v1 aliases (`with_v1_aliases`) for these comma
 The `com.nexus.ai` plugin context (granted at bootstrap) holds `IpcCall` plus the FS caps needed for session-file persistence; every nested storage/git/terminal/mcp call is re-checked against the *target* plugin's gate. The built-in tools deliberately route through `ipc_call` rather than depending on `nexus-storage` / `nexus-editor` directly (CLAUDE.md invariant 3).
 
 Caller-facing gates (declared in `cap_matrix.toml`, ADR 0022):
-- `ai.chat` — all chat-class verbs (`ask`, `stream_chat`, `stream_ask`, `semantic_search`, `enrich_file`, `enrich_entity`, `infer_entity_relations`, `propose_tool_calls`, `generate_docs`, `predict`).
+- `ai.chat` — all chat-class verbs (`ask`, `stream_chat`, `stream_ask`, `semantic_search`, `enrich_file`, `enrich_entity`, `infer_entity_relations`, `extract_entities`, `propose_tool_calls`, `generate_docs`, `predict`).
 - Args-aware policy `ai_tools_policy` (`ipc::extra_caps_for_policy`): `tools=auto` ⇒ +`ai.tools.write`; `auto_with_mcp` ⇒ +`ai.tools.write` +`ai.tools.mcp`; `none` / `auto_readonly` ⇒ no extra caps. Applies to `stream_chat` + `propose_tool_calls`.
 - `ai.index` (`index_file`, `index_trigger`), `ai.session.read` / `ai.session.write`, `ai.config.write` (`set_config` — flagged "equivalent in surface to process.spawn"), `ai.activity.write` (`activity_clear`).
 - Read-only/unrestricted: `status`, `config`, `index_status`, `vectorstore_count`, `activity_list`, `entity_recall`, `enrich_apply`.

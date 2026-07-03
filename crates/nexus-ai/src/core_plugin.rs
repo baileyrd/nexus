@@ -35,7 +35,9 @@ use crate::handlers::activity::{handle_activity_clear, handle_activity_list};
 use crate::handlers::ask::{handle_ask, handle_generate};
 use crate::handlers::config::handle_set_config;
 use crate::handlers::enrich::{handle_enrich_apply, handle_enrich_file};
-use crate::handlers::entity::{handle_enrich_entity, handle_infer_entity_relations};
+use crate::handlers::entity::{
+    handle_enrich_entity, handle_extract_entities, handle_infer_entity_relations,
+};
 use crate::handlers::index::{
     handle_index_file, handle_index_trigger, handle_status, handle_vectorstore_count,
 };
@@ -245,6 +247,16 @@ pub const HANDLER_GENERATE: u32 = 28;
 /// check between SSE chunks.
 pub const HANDLER_CANCEL_STREAM: u32 = 29;
 
+/// C44 (#422) — `extract_entities`: read a note through storage, ask
+/// the AI provider to name distinct entities it substantively
+/// discusses, and (unless `dry_run`) birth each genuinely-new one as
+/// a bare entity stub via `entity_upsert`. The BL-129 Dream Cycle's
+/// new `extract` phase drives this over recently-changed notes so the
+/// entity graph acquires entities on its own instead of only ever
+/// shrinking. Args: [`crate::ipc::ExtractEntitiesArgs`]. Returns
+/// [`crate::ipc::ExtractEntitiesResult`].
+pub const HANDLER_EXTRACT_ENTITIES: u32 = 30;
+
 /// Plugin ids this plugin requires already loaded. `ai-runtime` is
 /// hard — `wire_context` grabs the shared tokio worker-pool handle
 /// the runtime publishes. `storage` underwrites every RAG / vector
@@ -289,6 +301,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("infer_entity_relations", HANDLER_INFER_ENTITY_RELATIONS),
     ("embed_text", HANDLER_EMBED_TEXT),
     ("generate", HANDLER_GENERATE),
+    ("extract_entities", HANDLER_EXTRACT_ENTITIES),
 ];
 
 /// Core plugin for AI integration.
@@ -556,6 +569,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_INFER_ENTITY_RELATIONS => {
                     handle_infer_entity_relations(&ctx, ai_cfg, embed_cfg, &args).await
                 }
+                HANDLER_EXTRACT_ENTITIES => handle_extract_entities(&ctx, ai_cfg, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -1622,6 +1636,40 @@ mod semantic_search_dispatch_tests {
     #[test]
     fn generate_handler_id_is_twentyeight() {
         assert_eq!(HANDLER_GENERATE, 28);
+    }
+
+    #[tokio::test]
+    async fn extract_entities_handler_rejects_empty_path() {
+        // Validated before any IPC call, so this doesn't need a live
+        // storage/AI dispatcher — mirrors
+        // `generate_handler_rejects_missing_prompt`'s shape.
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_EXTRACT_ENTITIES, &serde_json::json!({ "path": "" }))
+            .expect("HANDLER_EXTRACT_ENTITIES must be async");
+        let err = fut.await.expect_err("empty path should error");
+        assert!(
+            format!("{err}").contains("must be non-empty"),
+            "expected empty-path error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_entities_handler_rejects_missing_path() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_EXTRACT_ENTITIES, &serde_json::json!({}))
+            .expect("HANDLER_EXTRACT_ENTITIES must be async");
+        let err = fut.await.expect_err("missing path should error");
+        assert!(
+            format!("{err}").contains("parse args"),
+            "expected parse-args error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn extract_entities_handler_id_is_thirty() {
+        assert_eq!(HANDLER_EXTRACT_ENTITIES, 30);
     }
 
     #[tokio::test]

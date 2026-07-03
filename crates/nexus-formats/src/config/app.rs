@@ -193,10 +193,10 @@ impl Default for GitSettings {
 
 /// Dream Cycle (BL-129) — scheduled entity-graph maintenance.
 ///
-/// Four phases run in sequence (`dedup`, `enrich`, `decay`, `infer`)
-/// against the BL-128 entity graph. The thin slice surfaces only
-/// `dedup` + `decay`; the remaining phases land in the BL-129
-/// close-out and inherit the same configuration block.
+/// Phases run in sequence — `extract` (C44 #422, opt-in), `dedup`,
+/// `decay`, `enrich`, `infer` — against the BL-128 entity graph. The
+/// first four settings below (`enabled` through `decay_floor`) are the
+/// BL-129 close-out; the `extract_*` settings are the C44 addition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DreamCycleSettings {
@@ -226,6 +226,24 @@ pub struct DreamCycleSettings {
     /// already at or below the floor are skipped (no churn). Range
     /// `[0.0, 1.0]`; default `0.1`.
     pub decay_floor: f32,
+    /// C44 (#422) — when `true`, an `extract` phase runs first each
+    /// cycle, scanning recently-changed notes and proposing new
+    /// entities via `com.nexus.ai::extract_entities`. Defaults to
+    /// `false`: unlike the other three phases (which only ever
+    /// merge/decay/enrich entities a user already created), extract
+    /// creates new entity files on its own, so it ships opt-in even
+    /// when `[dream_cycle].enabled` is `true`.
+    pub extract_enabled: bool,
+    /// How far back (in hours) `extract` looks for "recently changed"
+    /// notes. Default `24`.
+    pub extract_lookback_hours: u32,
+    /// Maximum number of notes scanned by `extract` per cycle. Bounds
+    /// LLM-call volume on forges with a large edit volume. Default `10`.
+    pub extract_max_notes_per_cycle: u32,
+    /// Maximum number of new entities `extract` may create per note.
+    /// Passed through as `extract_entities`'s `max_entities` arg.
+    /// Default `3`.
+    pub extract_max_entities_per_note: u32,
 }
 
 impl Default for DreamCycleSettings {
@@ -237,6 +255,10 @@ impl Default for DreamCycleSettings {
             review_threshold: 0.92,
             decay_factor: 0.95,
             decay_floor: 0.10,
+            extract_enabled: false,
+            extract_lookback_hours: 24,
+            extract_max_notes_per_cycle: 10,
+            extract_max_entities_per_note: 3,
         }
     }
 }
