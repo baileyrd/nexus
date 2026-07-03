@@ -256,8 +256,15 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.commandPalette', name: 'Command Palette',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Ctrl+P fuzzy-finder for every command contributed by the shell and plugins.',
+    description: 'Ctrl+Shift+P fuzzy-finder for every command contributed by the shell and plugins.',
     load: () => import('./nexus/commandPalette').then(m => m.commandPalettePlugin),
+  },
+  {
+    id: 'nexus.quickSwitcher', name: 'Quick Switcher',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.storage'],
+    description: 'Ctrl+P fuzzy file switcher with per-forge recents and create-on-Enter.',
+    load: () => import('./nexus/quickSwitcher').then(m => m.quickSwitcherPlugin),
   },
   {
     id: 'nexus.confirm', name: 'Confirm',
@@ -336,6 +343,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     dependsOn: ['com.nexus.memory'],
     description: 'Search, browse, and view the native memory store from the command palette.',
     load: () => import('./nexus/memoryDashboard').then(m => m.memoryDashboardPlugin),
+  },
+  {
+    id: 'nexus.taskDashboard', name: 'Tasks',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.paneMode', 'nexus.activityBar'],
+    description: 'Checkbox tasks across the forge, grouped by due date, with click-to-toggle.',
+    load: () => import('./nexus/taskDashboard').then(m => m.taskDashboardPlugin),
   },
   {
     id: 'nexus.sandboxPanel', name: 'Sandbox Panel',
@@ -425,6 +439,13 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.files'],
     description: 'Insert templated notes from a library, with variable expansion and folder targeting.',
     load: () => import('./nexus/templates').then(m => m.templatesPlugin),
+  },
+  {
+    id: 'nexus.dailyNotes', name: 'Daily Notes',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.storage', 'nexus.paneMode', 'nexus.activityBar'],
+    description: 'Idempotent "open today" command, prev/next day navigation, and a month-calendar pane.',
+    load: () => import('./nexus/dailyNotes').then(m => m.dailyNotesPlugin),
   },
   {
     id: 'nexus.notionImport', name: 'Notion Import',

@@ -12,6 +12,7 @@ use nexus_types::SandboxPolicy;
 use serde::{Deserialize, Serialize};
 
 use crate::downloads::DownloadPolicy;
+use crate::http_policy::HttpPolicy;
 
 /// Path to the sandbox config, relative to the forge root.
 pub const SANDBOX_CONFIG_RELPATH: &str = ".forge/sandbox.toml";
@@ -24,6 +25,10 @@ pub struct SandboxConfig {
     pub policy: SandboxPolicy,
     /// Permissioned-download broker policy.
     pub downloads: DownloadPolicy,
+    /// Brokered outbound HTTP-request policy (C81) — distinct allowlist from
+    /// `downloads` since `http_request` returns response bytes to the caller
+    /// rather than writing GET-only fetches to a sandboxed file.
+    pub http: HttpPolicy,
     /// When true, *sandboxed* terminal sessions launch the bundled `nexus-rush`
     /// shell instead of the detected system shell (RFC 0002). Off by default —
     /// the system shell stays the default everywhere until rush hardens (RFC
@@ -67,8 +72,31 @@ mod tests {
         let cfg = SandboxConfig::default();
         assert_eq!(cfg.policy, SandboxPolicy::ReadOnly);
         assert!(!cfg.downloads.enabled);
+        assert!(!cfg.http.enabled);
         // Bundled shell is opt-in: off by default (system shell is the default).
         assert!(!cfg.bundled_shell_for_sandbox);
+    }
+
+    #[test]
+    fn parses_an_http_policy_section() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".forge")).unwrap();
+        std::fs::write(
+            dir.path().join(SANDBOX_CONFIG_RELPATH),
+            r#"
+[http]
+enabled = true
+allowed_hosts = ["api.github.com"]
+max_response_bytes = 4096
+timeout_ms = 10000
+"#,
+        )
+        .unwrap();
+        let cfg = SandboxConfig::load(dir.path());
+        assert!(cfg.http.enabled);
+        assert_eq!(cfg.http.allowed_hosts, vec!["api.github.com"]);
+        assert_eq!(cfg.http.max_response_bytes, 4096);
+        assert_eq!(cfg.http.timeout_ms, 10000);
     }
 
     #[test]

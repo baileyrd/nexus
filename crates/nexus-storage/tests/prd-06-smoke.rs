@@ -308,14 +308,6 @@ fn search_with_combined_scopes() {
 }
 
 #[test]
-fn html_export_renders_markdown() {
-    let html = nexus_storage::export_to_html("# Hello\n\nWorld\n", "Test");
-    assert!(html.contains("<h1>Hello</h1>"));
-    assert!(html.contains("World"));
-    assert!(html.contains("<!DOCTYPE html>"));
-}
-
-#[test]
 fn daily_note_template_is_indexed() {
     let (_dir, engine) = engine();
 

@@ -19,6 +19,8 @@ mod credential;
 /// Permissioned download broker (approved egress for the network-off sandbox).
 pub mod downloads;
 mod error;
+/// Policy + execution for the brokered `http_request` IPC handler (C81).
+pub mod http_policy;
 /// IPC wire types for `com.nexus.security`.
 pub mod ipc;
 /// OS process sandbox enforcement (Phase 4 F1) for `nexus_types::SandboxPolicy`.
@@ -36,6 +38,7 @@ pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
 pub use downloads::{DownloadError, DownloadPolicy, DownloadRequest};
 pub use error::SecurityError;
+pub use http_policy::{HttpPolicy, HttpPolicyError};
 // Spawn-site helpers live in the leaf `nexus-types` (so a spawn site can wrap
 // a command without linking this engine); re-exported here for convenience.
 pub use nexus_types::{default_helper_path, sandbox_argv};

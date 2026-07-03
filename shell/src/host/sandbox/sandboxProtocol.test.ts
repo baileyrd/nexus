@@ -166,6 +166,7 @@ function makeApi(overrides: Partial<PluginAPI> = {}): PluginAPI {
         onResize: unused('platform.window.onResize'),
       },
       shell: { openExternal: unused('platform.shell.openExternal') },
+      net: { request: unused('platform.net.request') },
     },
     activityBar: {
       addItem: unused('activityBar.addItem'),
@@ -332,6 +333,7 @@ test('capability-gated method with grant succeeds', async () => {
         dialog: {} as PluginAPI['platform']['dialog'],
         window: {} as PluginAPI['platform']['window'],
         shell: {} as PluginAPI['platform']['shell'],
+        net: {} as PluginAPI['platform']['net'],
       },
     }),
   })
@@ -343,6 +345,65 @@ test('capability-gated method with grant succeeds', async () => {
   assert.equal(resp.error, undefined)
   assert.equal(resp.payload, 'hello')
   assert.equal(readPath, '/tmp/a')
+  ctx.router.dispose()
+})
+
+test('platform.net.request without NetHttp grant returns capability_denied', async () => {
+  const ctx = buildRouter({ grants: new Set() }) // no NetHttp
+  await completeHandshake(ctx)
+  ctx.host.sent.length = 0
+  ctx.guest.postMessage(
+    makeRequest('req-net-denied', 'platform.net.request', {
+      method: 'GET',
+      url: 'https://api.example.com/x',
+    }),
+  )
+  await tick(4)
+  const resp = latest<RpcEnvelope>(ctx.host)
+  assert.equal(resp.error?.kind, 'capability_denied')
+  assert.match(String(resp.error?.message), /NetHttp/)
+  ctx.router.dispose()
+})
+
+test('platform.net.request with NetHttp grant forwards to api.platform.net.request', async () => {
+  let received: unknown
+  const ctx = buildRouter({
+    grants: new Set(['NetHttp']),
+    api: makeApi({
+      platform: {
+        fs: {} as PluginAPI['platform']['fs'],
+        dialog: {} as PluginAPI['platform']['dialog'],
+        window: {} as PluginAPI['platform']['window'],
+        shell: {} as PluginAPI['platform']['shell'],
+        net: {
+          request: async (req) => {
+            received = req
+            return { status: 200, headers: { 'x-test': 'yes' }, body: 'aGVsbG8=' }
+          },
+        },
+      },
+    }),
+  })
+  await completeHandshake(ctx)
+  ctx.host.sent.length = 0
+  ctx.guest.postMessage(
+    makeRequest('req-net-ok', 'platform.net.request', {
+      method: 'get',
+      url: 'https://api.example.com/x',
+      headers: { 'x-api-key': 'secret' },
+      body: 'payload',
+    }),
+  )
+  await tick(4)
+  const resp = latest<RpcEnvelope>(ctx.host)
+  assert.equal(resp.error, undefined)
+  assert.deepEqual(resp.payload, { status: 200, headers: { 'x-test': 'yes' }, body: 'aGVsbG8=' })
+  assert.deepEqual(received, {
+    method: 'get',
+    url: 'https://api.example.com/x',
+    headers: { 'x-api-key': 'secret' },
+    body: 'payload',
+  })
   ctx.router.dispose()
 })
 
@@ -522,6 +583,7 @@ test('dispatch errors from the backing API surface surface as dispatch_failed', 
         dialog: {} as PluginAPI['platform']['dialog'],
         window: {} as PluginAPI['platform']['window'],
         shell: {} as PluginAPI['platform']['shell'],
+        net: {} as PluginAPI['platform']['net'],
       },
     }),
   })

@@ -760,9 +760,9 @@ export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'
         }}
-        onClick={() => runCommand('nexus.commandPalette.open')}
+        onClick={() => runCommand('nexus.quickSwitcher.open')}
       >
-        Go to file<span style={hintStyle}>({chordFor('nexus.commandPalette.open', 'Ctrl + O')})</span>
+        Go to file<span style={hintStyle}>({chordFor('nexus.quickSwitcher.open', 'Ctrl + P')})</span>
       </button>
       {hasAnyTab && (
         <button
@@ -1356,6 +1356,12 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     return (
       <div
         ref={markdownBodyRef}
+        // C65 (#418) — id="nexus-print-root" is the scoped-print target
+        // that shell/src/shell/print.css isolates via visibility:hidden
+        // on everything else. Only reached in preview mode (source/live
+        // return earlier above), which is exactly the mode the "Export
+        // to PDF" command switches into before calling window.print().
+        id="nexus-print-root"
         className="nexus-markdown-body"
         dangerouslySetInnerHTML={{ __html: markdownHtml }}
       />

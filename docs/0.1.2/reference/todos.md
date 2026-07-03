@@ -104,7 +104,7 @@ Real settings live in the plugins themselves (see [`settings/plugin-manifest-def
 
 ### Tab context menu — `shell/src/plugins/nexus/editor/`
 
-12 tab-action stubs surface a `${stub.label} — coming soon` toast. Centralized through `TabContextMenu.tsx::COMING_SOON_TOOLTIP`. Per `editor/index.ts:107-142`:
+11 tab-action stubs surface a `${stub.label} — coming soon` toast. Centralized through `TabContextMenu.tsx::COMING_SOON_TOOLTIP`. Per `editor/index.ts:107-142`:
 
 | Stub command id | Label |
 |-----------------|-------|
@@ -119,7 +119,8 @@ Real settings live in the plugins themselves (see [`settings/plugin-manifest-def
 | `nexus.editor.stub.backlinksInDocument` | Backlinks in document |
 | `nexus.editor.stub.versionHistory` | Version history |
 | `nexus.editor.stub.mergeFile` | Merge file |
-| `nexus.editor.stub.exportPdf` | Export to PDF… |
+
+`nexus.editor.stub.exportPdf` ("Export to PDF…") and `nexus.editor.exportHtml` ("Export as HTML…") are both fully wired (C65 #418, C66 #419) — PDF export prints the active note's rendered preview scoped via `shell/src/shell/print.css`, HTML export renders through `com.nexus.formats::export_html` and saves via the native save dialog. Neither shows the "coming soon" tooltip.
 
 ### Canvas right rail — `shell/src/plugins/nexus/canvas/CanvasRightRail.tsx:8-9`
 

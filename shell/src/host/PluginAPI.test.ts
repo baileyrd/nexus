@@ -181,7 +181,7 @@ test('built PluginAPI exposes every namespace of the common contract (#187)', ()
   const contractMembers: Record<string, string[]> = {
     commands: ['register', 'execute'],
     kernel: ['invoke', 'on'],
-    platform: ['fs', 'dialog', 'window', 'shell'],
+    platform: ['fs', 'dialog', 'window', 'shell', 'net'],
     events: ['on', 'emit'],
     storage: ['get', 'set', 'delete'],
     notifications: ['show'],

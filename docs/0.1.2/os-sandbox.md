@@ -64,6 +64,14 @@ A network-off policy denies raw sockets outright (seccomp). Rather than poke a h
 
 The broker is reachable over IPC via `com.nexus.security::download` (`{ url, dest, cwd? }`), gated by the `net.http` capability *and* the `sandbox.toml` allowlist + writable-root checks. The active config is introspectable via `com.nexus.security::sandbox_policy`, loaded from [`SandboxConfig`](../../crates/nexus-security/src/sandbox_config.rs) (`.forge/sandbox.toml`, closed by default).
 
+### Permissioned outbound HTTP (C81)
+
+`download` is GET-only, writes straight to a sandboxed file, and never returns bytes to the caller — no good for the integration-plugin category (RSS, Zotero, GitHub/Jira sync, Readwise) that needs arbitrary method/headers/body and the response back. [`http_policy`](../../crates/nexus-security/src/http_policy.rs) is the sibling broker for that case: `validate(method, url, policy)` (pure) enforces the request is an allowed method (`GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`), the scheme **https**, and the host on the **allowlist**; `execute` then sends it with a per-request timeout and streams the response with a byte cap (aborting rather than silently truncating).
+
+`HttpPolicy { enabled, allowed_hosts, max_response_bytes, timeout_ms }` is **off by default** and configured in `sandbox.toml`'s `[http]` section — a *distinct* allowlist from `[downloads]`, since a request's response body leaves the sandbox and reaches the caller (the exfiltration surface the 2026-05-18 sandbox-security audit flagged; `download` only ever reads bytes *in*).
+
+The broker is reachable over IPC via `com.nexus.security::http_request` (`{ method, url, headers?, body? }` → `{ status, headers, body: base64 }`), gated by `net.http` *and* the `[http]` policy. Unlike `download`, this capability is also reachable from sandboxed community plugins — the WASM host import `host::http_request` (blocking, mirrors the existing blocking `host::read_file`/`write_file` I/O) and the script-plugin sandbox RPC method `platform.net.request` both re-check `NetHttp` and the same policy before dispatching, closing the gap where `net.http` was grantable but no plugin tier could actually issue a request.
+
 ### What remains
 
 The enforcement primitives, config surface, download IPC, and the opt-in terminal spawn path are complete. To fully *activate* confinement for autonomous work, the agent should pass its `SandboxPolicy` (from `sandbox.toml`) when spawning terminal sessions for tool execution — and, in the same call, thread `bundled_shell_for_sandbox` (read back from the `sandbox_policy` introspection handler) into `SessionConfig.bundled_shell`. Both ride the same per-caller activation: the mechanism — config load, IPC introspection, and the `use_bundled_shell` spawn decision — is in place and tested; flipping it on is the agent-spawn integration that remains.

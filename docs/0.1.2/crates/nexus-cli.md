@@ -44,7 +44,8 @@ Unless noted, handlers route through `context.ipc_call(plugin_id, …)`. Plugin 
 - `forge init [dir] [--template os]` — init a forge (local-only path; `os` lays out the BL-054 folder scaffold). `forge status`, `forge reindex`, `forge doctor [--fix]` (file-vs-index drift, BL-137), `forge import <source> [--dry-run] [--on-conflict skip|overwrite|rename]` (BL-083).
 
 **Content nodes** (`com.nexus.storage`, mostly via `bootstrap::storage` typed helpers)
-- `content create|update <path> [--content … | --stdin]`, `content list [--prefix …]`, `content read <path> [--raw]`, `content delete <path> [-f]`, `content search <query> [-l]`, `content tasks [--completed] [--all] [--file …]`, `content task-toggle <id>`, `content links|backlinks <path>`, `content daily [--date]`, `content export <path> [-o]`.
+- `content create|update <path> [--content … | --stdin]`, `content list [--prefix …]`, `content read <path> [--raw]`, `content delete <path> [-f]`, `content search <query> [-l] [--semantic | --hybrid]`, `content tasks [--completed] [--all] [--file …]`, `content task-toggle <id>`, `content links|backlinks <path>`, `content daily [--date]`, `content export <path> [-o]`.
+  - `--semantic`/`--hybrid` (C78 #431; mutually exclusive) bypass lexical FTS and call `com.nexus.ai::semantic_search` directly (embedding similarity, or `hybrid: true` for RRF fusion with Tantivy BM25) — same handler the shell's "Search by Meaning" uses. Requires an AI embedding provider (`nexus ai config`).
 
 **Knowledge graph** (`com.nexus.storage`)
 - `graph status|unresolved`, `graph neighbors <path> [-d]`, `graph entity list|show|search|related|duplicates …` (BL-128 personal entity graph), `graph dream-cycle run [--phase dedup|decay|enrich|infer] [--decay-factor] [--decay-floor] [--review-threshold] [--merge-threshold] [--dry-run]` (BL-129; enrich/infer require an AI provider).
@@ -60,6 +61,9 @@ Unless noted, handlers route through `context.ipc_call(plugin_id, …)`. Plugin 
 - Session tree (RFC 0008): `agent sessions` (list stored sessions with `↳` fork markers), `agent show <id>` (assembled transcript), `agent resume <id> <message>` (fork at the tip), `agent branch <id> <round> <message>` (fork at a round), `agent rewind <id> <round> [message]` (non-destructive redo). All route through the `session_resume` / `session_branch` / `session_rewind` / `session_list` / `session_get` handlers.
 - Checkpoints (RFC 0008): `agent checkpoint <id> <round> <name>` (bookmark a `(session, round)`), `agent checkpoints` (list), `agent checkpoint-rm <name>` (remove). Route through `session_checkpoint` / `session_checkpoints` / `session_checkpoint_delete`.
 - `tool list [--capability ID]…` — list catalogued agent tools.
+
+**Comments** (`com.nexus.comments`) — C74 (#427)
+- `comments list <path>`, `comments create-thread <path> <body> [--block-index N] [--author]`, `comments add-reply <path> <thread-id> <body> [--author]`, `comments resolve|unresolve <path> <thread-id> [--author]`, `comments edit-comment <path> <thread-id> <comment-id> <body>`, `comments delete-comment <path> <thread-id> <comment-id>`, `comments delete-thread <path> <thread-id>`. Headless parity with the shell's comment pane — a non-destructive annotation channel distinct from editing the note body. `create-thread` also reaches `com.nexus.editor` (`open` → `get_tree` → `stamp_block`) to resolve `--block-index` (0-based into the file's top-level blocks, default 0) to a stable anchor, since a headless caller has no editor selection to offer.
 
 **Database / bases**
 - `bases create|list|show|add-record|query|import|export|formula …` — filesystem-layer `.bases` operations.

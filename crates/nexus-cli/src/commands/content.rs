@@ -1,10 +1,17 @@
 use std::io::Read as _;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use nexus_bootstrap::storage::{self as ipc, TaskFilter};
+use nexus_types::constants::IPC_TIMEOUT_LONG;
+use nexus_types::plugin_ids;
+use serde_json::Value;
 
 use crate::app::App;
 use crate::output::{print_list, print_success, OutputFormat};
+
+/// C78 (#431) — `--semantic`/`--hybrid` reach `com.nexus.ai::semantic_search`
+/// directly; no `nexus_bootstrap::storage` wrapper exists for `com.nexus.ai`.
+const AI_PLUGIN: &str = plugin_ids::AI;
 
 /// Create a new content node at `path`.
 pub fn create(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> Result<()> {
@@ -254,6 +261,70 @@ pub fn search(app: &mut App, query: &str, limit: usize) -> Result<()> {
     Ok(())
 }
 
+/// C78 (#431) — `nexus content search --semantic|--hybrid <query>`:
+/// embedding-driven retrieval via `com.nexus.ai::semantic_search`,
+/// bypassing lexical FTS entirely. `hybrid=true` fuses the vector
+/// ranking with Tantivy BM25 (RRF) instead of vector-only; requires
+/// an AI embedding provider (`nexus ai config`) either way.
+pub fn semantic_search(app: &mut App, query: &str, limit: usize, hybrid: bool) -> Result<()> {
+    let format = app.format();
+    let (invoker, rt) = app.invoker()?;
+
+    let args = serde_json::json!({ "query": query, "limit": limit, "hybrid": hybrid });
+    let response: Value = rt
+        .block_on(invoker.ipc_call(AI_PLUGIN, "semantic_search", args, IPC_TIMEOUT_LONG))
+        .with_context(|| "semantic_search ipc call failed")?;
+
+    let matches = response
+        .get("matches")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if matches.is_empty() {
+        println!("No results found.");
+        return Ok(());
+    }
+
+    let headers = &["Path", "Score", "Excerpt"];
+    let rows: Vec<Vec<String>> = matches
+        .iter()
+        .map(|m| {
+            let path = m.get("file_path").and_then(Value::as_str).unwrap_or("?");
+            let score = m.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+            // Vector-only hits carry `chunk_text`; hybrid hits carry `excerpt`.
+            let text = m
+                .get("excerpt")
+                .or_else(|| m.get("chunk_text"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            vec![
+                path.to_string(),
+                format!("{score:.4}"),
+                truncate_excerpt(text, 80),
+            ]
+        })
+        .collect();
+
+    print_list(format, headers, &rows);
+
+    Ok(())
+}
+
+/// Truncate `s` to at most `max` bytes on a char boundary, appending
+/// `…`. Also collapses embedded newlines so each excerpt stays one
+/// table row.
+fn truncate_excerpt(s: &str, max: usize) -> String {
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.len() <= max {
+        return flat;
+    }
+    let mut cut = max;
+    while cut > 0 && !flat.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…", &flat[..cut])
+}
+
 /// List tasks across the forge.
 pub fn tasks(app: &mut App, completed: bool, all: bool, file: Option<&str>) -> Result<()> {
     let format = app.format();
@@ -440,4 +511,38 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
     println!("Created: {}", meta.path);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_excerpt_passes_short_text_through() {
+        assert_eq!(truncate_excerpt("short excerpt", 80), "short excerpt");
+    }
+
+    #[test]
+    fn truncate_excerpt_collapses_embedded_newlines() {
+        assert_eq!(
+            truncate_excerpt("line one\nline two\n\nline three", 80),
+            "line one line two line three"
+        );
+    }
+
+    #[test]
+    fn truncate_excerpt_ellipsizes_long_text() {
+        let long = "word ".repeat(40);
+        let out = truncate_excerpt(&long, 20);
+        assert_eq!(out.chars().count(), 21); // 20 chars + ellipsis
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_excerpt_respects_char_boundaries() {
+        let s = "ααααα"; // each α is 2 bytes
+        let out = truncate_excerpt(s, 3);
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with('α'));
+    }
 }

@@ -8,7 +8,7 @@ This directory documents **every** configuration surface in Nexus. The promise: 
 
 | File | Scope |
 |------|-------|
-| [`forge-config.md`](forge-config.md) | Per-forge TOML/JSON files under `<forge>/.forge/` — `app.toml`, `workspace.json`, `ai.toml`, `mcp.toml`, `notifications.toml`, `lsp.toml`, `dap.toml`, `sandbox.toml`, `config.toml` (multi-section: `[audio]` / `[collab]` / `[digests]` / `[notifications.<channel>]` / `[mcp]`) |
+| [`forge-config.md`](forge-config.md) | Per-forge TOML/JSON files under `<forge>/.forge/` — `app.toml`, `workspace.json`, `ai.toml`, `mcp.toml`, `notifications.toml`, `lsp.toml`, `dap.toml`, `sandbox.toml`, `config.toml` (multi-section: `[audio]` / `[collab]` / `[memory]` / `[digests]` / `[notifications.<channel>]` / `[mcp]`) |
 | [`plugin-manifests.md`](plugin-manifests.md) | `plugin.toml` schema for community plugins (and the parallel `plugin.json` shape the shell expects) |
 | [`env-vars.md`](env-vars.md) | Every env var the code reads at runtime |
 | [`hardcoded-rust.md`](hardcoded-rust.md) | Rust-side hardcoded values flagged for promotion to settings or named constants |
@@ -32,8 +32,8 @@ Every TOML/JSON file the code reads at runtime as config (not test fixtures, not
 | **notifications.toml** | `<forge>/.forge/notifications.toml` | `NotificationsConfig` — `nexus-notifications/src/config.rs:272` | `NotificationsConfig::load` — `config.rs:300` |
 | **lsp.toml** | `<forge>/.forge/lsp.toml` | `LspHostConfig` — `nexus-lsp/src/config.rs:106` | `LspHostConfig::load` |
 | **dap.toml** | `<forge>/.forge/dap.toml` | `DapHostConfig` — `nexus-dap/src/config.rs:115` | `DapHostConfig::load` |
-| **sandbox.toml** | `<forge>/.forge/sandbox.toml` | `SandboxConfig` (`policy` = `SandboxPolicy`, `downloads` = `DownloadPolicy`, `bundled_shell_for_sandbox` = `bool`) — `nexus-security/src/sandbox_config.rs` | `SandboxConfig::load` — same file. See [`os-sandbox.md`](../os-sandbox.md). Defaults closed (read-only, downloads off, bundled shell off). `bundled_shell_for_sandbox` (RFC 0002): when `true`, *sandboxed* terminal sessions launch the bundled `nexus-rush` shell instead of the detected system shell |
-| **config.toml** | `<forge>/.forge/config.toml` | Multi-section (`[audio]` `nexus-audio/src/config.rs:66`, `[collab]` `nexus-collab/src/core_plugin.rs:75`, `[digests]` `nexus-workflow/src/digests.rs:51`, `[notifications.*]`, `[mcp]`) | Per-section loader on each subsystem |
+| **sandbox.toml** | `<forge>/.forge/sandbox.toml` | `SandboxConfig` (`policy` = `SandboxPolicy`, `downloads` = `DownloadPolicy`, `http` = `HttpPolicy`, `bundled_shell_for_sandbox` = `bool`) — `nexus-security/src/sandbox_config.rs` | `SandboxConfig::load` — same file. See [`os-sandbox.md`](../os-sandbox.md). Defaults closed (read-only, downloads off, brokered HTTP off, bundled shell off). `bundled_shell_for_sandbox` (RFC 0002): when `true`, *sandboxed* terminal sessions launch the bundled `nexus-rush` shell instead of the detected system shell. `[http]` (C81) — `enabled`, `allowed_hosts`, `max_response_bytes` (default 10 MiB), `timeout_ms` (default 30000) — gates `com.nexus.security::http_request` plus its WASM (`host::http_request`) and script-plugin (`platform.net.request`) mirrors; a distinct allowlist from `[downloads]` since the response body leaves the sandbox |
+| **config.toml** | `<forge>/.forge/config.toml` | Multi-section (`[audio]` `nexus-audio/src/config.rs:66`, `[collab]` `nexus-collab/src/core_plugin.rs:75`, `[memory]` `nexus-bootstrap/src/memory_capture.rs` (C37, #390), `[digests]` `nexus-workflow/src/digests.rs:51`, `[notifications.*]`, `[mcp]`) | Per-section loader on each subsystem |
 | ~~**acp.toml**~~ | ~~`<forge>/.forge/acp.toml`~~ | `AcpHostConfig` — `nexus-acp/src/config.rs:81` | _no flat-TOML loader (ADR 0027 §Phase 4 — adapters arrive via `com.nexus.acp::register_server`)_ |
 | **kernel config.toml** | `<forge>/.nexus/config.toml` | `KernelConfig` — `nexus-kernel/src/config.rs:12` | `KernelConfig::load` — line 104 |
 
@@ -50,6 +50,15 @@ The Tauri shell maintains its own state outside the forge (so it survives `--for
 | **shell-state.json** | `<app_config_dir>/shell-state.json` | `ShellState` — `shell/src-tauri/src/persistence.rs:50` | `get_shell_state` Tauri command |
 | **plugin granted_caps.json** | `~/.nexus-shell/plugins/<plugin>/granted_caps.json` | sealed `GrantedCaps` — `shell/src-tauri/src/lib.rs:364` | `get_plugin_granted_capabilities` |
 | **community plugin.json** | `~/.nexus-shell/plugins/<plugin>/plugin.json` | `CommunityPluginManifest` — `shell/src-tauri/src/lib.rs:100` | `scan_plugin_directory` |
+
+### Machine-wide user directories (not forge-scoped)
+
+Resolved by `nexus-bootstrap` at kernel start, independent of which forge is open — same reasoning as `~/.nexus-shell/plugins/` above but kernel-tier rather than shell-tier.
+
+| Directory | Path | Contents | Discovered by |
+|-----------|------|----------|----------------|
+| **user themes (C87)** | `~/.nexus/themes/<id>/NEXUS.toml` | On-disk theme packages, one subdirectory per theme id — same shape as the built-ins, generated by the shell's Theme Builder | `ThemeCorePlugin::with_dirs` at boot, then live via `ThemeWatcher` (`crates/nexus-bootstrap/src/plugins/theme.rs`) |
+| **user CSS snippets (C87)** | `~/.nexus/snippets/<id>.css` | CSS snippet files with a `/* Name: … Description: … Mode: … */` header, toggled on/off per-session via `com.nexus.theme::toggle_snippet` | same as above |
 
 ### Per-plugin settings schemas
 
@@ -92,7 +101,7 @@ Full table in [`env-vars.md`](env-vars.md). Categories:
 | `.forge/dap.toml` | DAP adapter specs | user |
 | ~~`.forge/acp.toml`~~ | _intentionally absent — adapters arrive via `com.nexus.acp::register_server` (ADR 0027 §Phase 4)_ | — |
 | `.forge/notifications.toml` | Notification channels + routing | user |
-| `.forge/config.toml` | Multi-section TOML for non-standalone subsystems (`[audio]`, `[collab]`, `[digests]`, `[notifications.<channel>]`, `[mcp]`, …) | user / plugins |
+| `.forge/config.toml` | Multi-section TOML for non-standalone subsystems (`[audio]`, `[collab]`, `[memory]`, `[digests]`, `[notifications.<channel>]`, `[mcp]`, …) | user / plugins |
 | `.forge/notifications/inbox.db` | SQLite inbox | `nexus-notifications/src/lib.rs:84` |
 | `.forge/procmgr.sqlite` | Terminal process manager | `nexus-bootstrap/src/plugins/terminal.rs:26` |
 | `.forge/sessions.sqlite` | Terminal session scrollback | bootstrap terminal:72 |

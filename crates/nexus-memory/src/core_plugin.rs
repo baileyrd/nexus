@@ -13,7 +13,7 @@
 //! | 3  | `list`   | `{ limit? }`                  | Recent memories, newest first    |
 //! | 4  | `search` | `{ query, limit? }`           | Full-text search (`FTS5`)        |
 //! | 5  | `update` | `{ id, content?, … }`         | Patch mutable fields             |
-//! | 6  | `delete` | `{ id }`                      | Remove a memory                  |
+//! | 6  | `delete` | `{ id }`                      | Tombstone a memory (C36 soft-delete, syncable) |
 //! | 7  | `stats`  | `{}`                          | Store statistics (count)         |
 //! | 8  | `facts`  | `{ subject?, predicate?, … }` | Recall SPO entity facts          |
 //! | 9  | `entities` | `{ limit? }`                | Distinct entities + fact counts  |
@@ -174,6 +174,8 @@ pub struct AddArgs {
 }
 
 /// Args for handlers that address a single memory by id (`get`, `delete`).
+/// `delete` tombstones the row (C36); `get` treats a tombstoned id as
+/// not-found, same as an id that was never inserted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
@@ -210,7 +212,9 @@ pub struct ListArgs {
     /// Optional memory-type filter (`episodic` | `semantic` | `procedural` | `unclassified`).
     #[serde(default)]
     pub memory_type: Option<String>,
-    /// Optional lifecycle-status filter (`active` | `archived` | `superseded`).
+    /// Optional lifecycle-status filter (`active` | `archived` | `superseded`
+    /// | `deleted`). Omitted (`None`) means "any status except `deleted`" —
+    /// pass `"deleted"` explicitly to see tombstoned memories (C36).
     #[serde(default)]
     pub status: Option<String>,
     /// Optional tag filter — matches memories whose tag list contains it.
@@ -261,7 +265,9 @@ pub struct UpdateArgs {
     /// Replacement tag list, if changing.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
-    /// New lifecycle status (`active` | `archived` | `superseded`), if changing.
+    /// New lifecycle status (`active` | `archived` | `superseded` |
+    /// `deleted`), if changing. Setting `deleted` here has the same effect
+    /// as the dedicated `delete` handler (C36); prefer `delete` for clarity.
     #[serde(default)]
     pub status: Option<String>,
     /// New SPO subject, if changing.

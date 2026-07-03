@@ -12,7 +12,7 @@ The kernel grants capabilities at IPC dispatch. A plugin's `manifest.capabilitie
 | `fs.write` | `FsWrite` | Medium | `nexus-storage` write paths (forge-relative) |
 | `fs.read.external` | `FsReadExternal` | **High** | `nexus-storage` reads that resolve outside the forge root |
 | `fs.write.external` | `FsWriteExternal` | **High** | `nexus-storage` writes that resolve outside the forge root |
-| `net.http` | `NetHttp` | **High** | `nexus-ai` providers, `nexus-linkpreview`, `nexus-notifications` (webhooks/SMTP), `nexus-collab` (relay client), `nexus-audio` (provider backend), `nexus-git::{push, push_tags}` |
+| `net.http` | `NetHttp` | **High** | `nexus-ai` providers, `nexus-linkpreview`, `nexus-notifications` (webhooks/SMTP), `nexus-collab` (relay client), `nexus-audio` (provider backend), `nexus-git::{push, push_tags}`, `com.nexus.security::{download, http_request}` — the latter (C81) also reachable from WASM (`host::http_request`) and script (`platform.net.request`) community plugins, doubly gated by `sandbox.toml`'s `[http]`/`[downloads]` allowlists |
 | `net.http.localhost` | `NetHttpLocalhost` | Medium | Ollama, local llama.cpp |
 | `process.spawn` | `ProcessSpawn` | **High** | `com.nexus.terminal::{create_session, repl_start, send_input, send_raw_input, run_saved, adhoc_promote, repl_eval}`, `com.nexus.mcp.host::connect`, `com.nexus.dap::launch` / `attach`, `com.nexus.acp::initialize` |
 | `kv.read` | `KvRead` | Low | KV trait reads — `nexus-agent` memory, plugin settings |

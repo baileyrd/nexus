@@ -4,8 +4,19 @@
 //! its memories newer than a keyset cursor to `POST /sync/push`, and pulls
 //! everyone else's from `GET /sync/pull` (excluding its own node), applying each
 //! with last-write-wins ([`MemoryDb::upsert_lww`]). Cursors persist in
-//! `sync_state` so each run resumes where it left off. Deletes are local-only
-//! (no tombstones), matching the hub.
+//! `sync_state` so each run resumes where it left off.
+//!
+//! Deletes propagate as tombstones (C36, #389): [`MemoryDb::delete`] flips
+//! `status = 'deleted'` and bumps `updated_at` instead of issuing a SQL
+//! `DELETE`, so the row is still visible to [`MemoryDb::list_since`] (this
+//! module's push scan) and gets forwarded like any other edit. The hub needs
+//! no changes — it stores records as opaque JSON keyed on `id`/`updated_at`,
+//! so a `status: "deleted"` payload round-trips through push/pull exactly
+//! like every other field. Known v1 limitation shared with regular edits: a
+//! delete only pushes if this node authored the memory (`node_id` unset or
+//! ours) — deleting a foreign-authored memory tombstones it locally but
+//! doesn't propagate outward (see `push`'s authorship filter below); an
+//! authorship-agnostic change outbox would be needed to close that gap.
 //!
 //! Config (`hub_url`, `secret`, `node_id`) is supplied per call by the caller
 //! (CLI/MCP/shell/scheduler), so this stays decoupled from any config file.

@@ -77,6 +77,46 @@ async function loadStash(): Promise<void> {
   }
 }
 
+// C49 (#402) — the desktop Git panel could push after commit but had
+// no way to fetch/pull at all (the com.nexus.git IPC surface had no
+// fetch/pull/remotes handler until this finding). Derives remote +
+// branch from the current HEAD's upstream, same as the push-after-
+// commit flow below.
+async function pull(): Promise<void> {
+  const s = useGitPanelStore.getState()
+  if (s.pulling) return
+  s.setPulling(true)
+  s.setPullError(null)
+  try {
+    const api = getGitPanelApi()
+    const branches = await api.kernel.invoke<BranchEntry[]>(GIT_ID, 'branches', {})
+    const head = branches.find((b) => b.is_head)
+    if (!head?.upstream) {
+      s.setPullError('Current branch has no upstream to pull from.')
+      return
+    }
+    const [remote, ...rest] = head.upstream.split('/')
+    const branch = rest.join('/')
+    const result = await api.kernel.invoke<{
+      fast_forward: boolean
+      conflicts: string[]
+      commit_hash?: string
+    }>(GIT_ID, 'pull', { remote, branch })
+    if (result.conflicts.length > 0) {
+      s.setPullError(
+        `Pull produced ${result.conflicts.length} conflict(s) — resolve in the Changes tab.`,
+      )
+    }
+    await loadFiles()
+    await loadBranches()
+    await loadLog()
+  } catch (err) {
+    s.setPullError(err instanceof Error ? err.message : String(err))
+  } finally {
+    s.setPulling(false)
+  }
+}
+
 async function loadDiff(path: string, staged: boolean): Promise<void> {
   const s = useGitPanelStore.getState()
   s.setLoadingDiff(true)
@@ -113,6 +153,11 @@ export function GitPanel() {
   const conflictedCount = useGitPanelStore((s) =>
     s.files.reduce((n, f) => (f.status === 'Conflicted' ? n + 1 : n), 0),
   )
+  // C49 (#402) — Pull button, repo-wide so it lives in the tab bar
+  // rather than a specific tab's toolbar.
+  const pulling = useGitPanelStore((s) => s.pulling)
+  const pullError = useGitPanelStore((s) => s.pullError)
+  const setPullError = useGitPanelStore((s) => s.setPullError)
 
   // Seed data when the panel mounts (kernel may already be running).
   useEffect(() => {
@@ -162,11 +207,55 @@ export function GitPanel() {
         <ConflictBanner repoState={status.repo_state} conflictCount={conflictedCount} />
       )}
       {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--background-modifier-border)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--background-modifier-border)', flexShrink: 0 }}>
         {TAB('changes', 'Changes')}
         {TAB('branches', 'Branches')}
         {TAB('log', 'Log')}
+        <span style={{ flex: 1 }} />
+        <button
+          onClick={() => void pull()}
+          disabled={pulling}
+          title="Fetch and merge from the current branch's upstream"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--background-modifier-border)',
+            borderRadius: 'var(--radius-s)',
+            color: pulling ? 'var(--text-muted)' : 'var(--text-normal)',
+            fontFamily: 'var(--font-interface)',
+            fontSize: 11,
+            padding: '3px 9px',
+            margin: '0 8px',
+            cursor: pulling ? 'default' : 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          {pulling ? 'Pulling…' : 'Pull'}
+        </button>
       </div>
+      {pullError && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '5px 8px',
+            fontFamily: 'var(--font-interface)',
+            fontSize: 11,
+            color: 'var(--risk)',
+            background: 'var(--background-modifier-error-rgb, rgba(229,62,62,0.12))',
+            flexShrink: 0,
+          }}
+        >
+          <span>{pullError}</span>
+          <button
+            onClick={() => setPullError(null)}
+            style={{ background: 'transparent', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

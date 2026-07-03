@@ -140,7 +140,7 @@ pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 /// manifest's parser internals.
 pub mod contributions;
 pub use contributions::{collect_contributions, ContributedAdapter, ContributedAdapterSet};
-pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
+pub use sandbox::{NetworkPolicy, PluginData, PluginEventForwarder, WasmSandbox};
 
 /// Host function registration + result codes. Re-exported (doc-hidden)
 /// so integration tests can exercise the host-side capability gate

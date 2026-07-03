@@ -42,21 +42,35 @@ const APPROVE_CONFIDENCE = 1.0
  *  the other activity-bar items. Lucide `moon`. */
 const MOON_ICON_PATH = 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'
 
-/** Wire shape published by `nexus-bootstrap`'s `dream_cycle::run_cycle`. */
+/** Wire shape published by `nexus-bootstrap`'s `dream_cycle::run_cycle`.
+ *  `entities_extracted` (C44 #397) is optional so a payload from an
+ *  older backend build (field simply absent) still decodes. */
 export interface DreamCycleProposalsPayload {
   proposals_total: number
   entities_enriched: number
+  entities_extracted?: number
   merged: number
   review: number
 }
 
 /** Compose the toast string. Pure helper so the shape stays tested
- *  without a kernel mock. */
+ *  without a kernel mock. Reports relation proposals and/or newly
+ *  extracted entities — a cycle can produce either, both, or (this
+ *  function isn't called in that case) neither. */
 export function composeToast(payload: DreamCycleProposalsPayload): string {
   const total = Number.isFinite(payload.proposals_total) ? payload.proposals_total : 0
-  if (total <= 0) return ''
-  const noun = total === 1 ? 'proposal' : 'proposals'
-  return `${total} new relation ${noun} from Dream Cycle`
+  const extracted = Number.isFinite(payload.entities_extracted) ? (payload.entities_extracted as number) : 0
+  const parts: string[] = []
+  if (total > 0) {
+    const noun = total === 1 ? 'proposal' : 'proposals'
+    parts.push(`${total} new relation ${noun}`)
+  }
+  if (extracted > 0) {
+    const noun = extracted === 1 ? 'entity' : 'entities'
+    parts.push(`${extracted} new ${noun} extracted`)
+  }
+  if (parts.length === 0) return ''
+  return `${parts.join(', ')} from Dream Cycle`
 }
 
 /** Re-fetch the inbox from `list_draft_relations`. Idempotent on the

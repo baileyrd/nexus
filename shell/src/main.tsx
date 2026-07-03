@@ -28,6 +28,7 @@ import {
 import { workspace as workspaceStore } from './workspace/workspaceStore'
 import { closePopoutTauri } from './workspace/popoutWindowBridge'
 import './shell/shell.css'
+import './shell/print.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
 import './stores/themeStore'

@@ -26,8 +26,25 @@ use crate::app::App;
 /// build, or the server's read/write loop fails irrecoverably.
 pub fn serve(app: &App) -> Result<()> {
     let forge_root = app.forge_root().to_path_buf();
+
+    // C76 — build the tokio runtime *before* the CLI runtime and enter
+    // it first. `build_cli_runtime` synchronously wires every core
+    // plugin, including the workflow plugin's cron / file_event /
+    // git_event / mcp_event / digest trigger engines, each of which
+    // checks `tokio::runtime::Handle::try_current()` and silently
+    // disables itself if no runtime is entered
+    // (crates/nexus-workflow/src/core_plugin.rs). `serve` blocks until
+    // the parent disconnects, so it's long-lived exactly like the TUI —
+    // safe and correct for it to arm triggers, unlike a CLI one-shot
+    // that would exit before any trigger could matter.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
+        .enable_all()
+        .build()?;
+    let guard = rt.enter();
     let runtime = build_cli_runtime(forge_root.clone())
         .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
+    drop(guard);
     let Runtime {
         kernel,
         context,
@@ -37,10 +54,6 @@ pub fn serve(app: &App) -> Result<()> {
     let event_bus = kernel.event_bus();
     let server = nexus_remote::RemoteServer::new(Arc::new(context), event_bus);
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
-        .enable_all()
-        .build()?;
     rt.block_on(async {
         server
             .serve(tokio::io::stdin(), tokio::io::stdout())

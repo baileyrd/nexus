@@ -34,6 +34,7 @@ import {
   type PriorGrant,
 } from '../../core/capabilityPrompt'
 import { getRegistry } from '../../../host/shellRegistry'
+import { rescanCommunityPlugins } from '../../../host/communityPluginLoader'
 
 const VIEW_ID = 'nexus.pluginsMgmt.overlay'
 
@@ -48,6 +49,8 @@ const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
 const COMMAND_DISABLE_BUILTIN = 'nexus.plugins.disableBuiltin'
 /** Open the Settings panel to the given plugin's settings surface. */
 const COMMAND_CONFIGURE = 'nexus.plugins.configure'
+/** C80 — re-scan ~/.nexus-shell/plugins/ for newly-dropped community plugins. */
+const COMMAND_RESCAN_COMMUNITY = 'nexus.plugins.rescanCommunity'
 const CONTEXT_KEY_VISIBLE = 'nexus.plugins.visible'
 
 /**
@@ -511,6 +514,29 @@ export const pluginsMgmtPlugin: Plugin = {
         type: 'info',
         message: `${pluginId} disabled.`,
       })
+    })
+
+    // C80 — collapses the "drop a plugin folder → full shell restart"
+    // loop into a click. `rescanCommunityPlugins` refreshes the
+    // `communityPluginManifests` service itself and emits
+    // `PLUGIN_LIST_CHANGED_EVENT`, so the `api.events.on` subscription
+    // below re-runs `readRows` and the modal updates without this
+    // handler touching the store directly.
+    api.commands.register(COMMAND_RESCAN_COMMUNITY, async () => {
+      const result = await rescanCommunityPlugins()
+      if (result.added.length === 0 && result.errors.length === 0 && result.denied.length === 0) {
+        api.notifications.show({ type: 'info', message: 'No new plugins found.' })
+        return
+      }
+      if (result.added.length > 0) {
+        api.notifications.show({
+          type: 'success',
+          message: `${result.added.length} plugin(s) added: ${result.added.join(', ')}`,
+        })
+      }
+      for (const { id, error } of result.errors) {
+        api.notifications.show({ type: 'error', message: `Failed to load ${id}: ${error}` })
+      }
     })
 
     api.commands.register(COMMAND_TOGGLE_COMMUNITY, async (...args: unknown[]) => {

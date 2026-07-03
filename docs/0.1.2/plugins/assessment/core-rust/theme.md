@@ -50,6 +50,6 @@ Publishes: `com.nexus.theme.changed` (`EVENT_CHANGED`).
 - **What breaks if removed:** active theme application, dark/light mode toggling, CSS variable cascade, snippet system, the entire shell's visual styling pipeline. Basic open/browse/edit/search/git logic would still run headless, but the desktop shell becomes effectively unusable without manual CSS.
 
 ## Notes
-- Bootstrap registers with built-ins only — the `themes_dir` / `snippets_dir` constructor (`api.rs:146`) is unused on the live path; tests are the only callers. Worth tracking as a gap.
+- ~~Bootstrap registers with built-ins only — the `themes_dir` / `snippets_dir` constructor (`api.rs:146`) is unused on the live path; tests are the only callers. Worth tracking as a gap.~~ Fixed (C87): bootstrap now registers via `ThemeCorePlugin::with_dirs(~/.nexus/themes, ~/.nexus/snippets, …)` with `on_start`/`on_stop` wiring a live `ThemeWatcher`.
 - `layout_manager` ships in this crate but is not exercised via any IPC handler in `IPC_HANDLERS` — layout persistence lives in the shell side today.
 - `category` not set on the bootstrap manifest.

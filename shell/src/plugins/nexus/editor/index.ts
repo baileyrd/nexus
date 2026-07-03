@@ -76,6 +76,7 @@ import {
   COMMAND_COPY_ABS_PATH,
   COMMAND_COPY_REL_PATH,
   COMMAND_DELETE_FILE,
+  COMMAND_EXPORT_HTML,
   COMMAND_FIND,
   COMMAND_LSP_CODE_ACTIONS,
   COMMAND_LSP_FIND_REFERENCES,
@@ -110,6 +111,8 @@ import {
   DELETE_FILE_HANDLER,
   EVENT_FILE_OPEN,
   EVENT_WORKSPACE_CLOSED,
+  EXPORT_HTML_COMMAND,
+  FORMATS_PLUGIN_ID,
   READ_FILE_COMMAND,
   STORAGE_PLUGIN_ID,
   STUB_COMMANDS,
@@ -156,6 +159,7 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_REVEAL_IN_OS, title: 'Show in System Explorer', category: 'Editor' },
         { id: COMMAND_OPEN_DEFAULT_APP, title: 'Open in Default App', category: 'Editor' },
         { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
+        { id: COMMAND_EXPORT_HTML, title: 'Export as HTML…', category: 'Editor' },
         { id: COMMAND_TOGGLE_BLAME, title: 'Toggle Inline Git Blame', category: 'Editor' },
         { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
         { id: COMMAND_LSP_RENAME, title: 'Rename Symbol (LSP)', category: 'Editor' },
@@ -1589,6 +1593,56 @@ export const editorPlugin: Plugin = {
         if (previous && previous !== 'preview') {
           useEditorStore.getState().setMode(relpath, previous)
         }
+      }
+    })
+
+    // C66 (#419) — renders the active note through
+    // com.nexus.formats::export_html (the C67-fixed convention-aware
+    // renderer: wikilinks, callouts, image embeds) and saves the result
+    // via the native save dialog, so users can share/archive a note as a
+    // standalone styled HTML file without going through the browser
+    // print pipeline.
+    api.commands.register(COMMAND_EXPORT_HTML, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const base = relpath.includes('/') ? relpath.slice(relpath.lastIndexOf('/') + 1) : relpath
+      const title = base.replace(/\.[^./]+$/, '')
+      let html: string
+      try {
+        const result = await api.kernel.invoke<{ html: string }>(
+          FORMATS_PLUGIN_ID,
+          EXPORT_HTML_COMMAND,
+          { source: relpath, title },
+        )
+        html = result.html
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        api.notifications.show({
+          message: `Export as HTML failed: ${message}`,
+          type: 'error',
+          duration: 8000,
+        })
+        return
+      }
+      const dest = await api.platform.dialog.saveFile({
+        title: 'Export as HTML',
+        defaultPath: `${title}.html`,
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+      })
+      if (!dest) return
+      try {
+        await api.platform.fs.writeText(dest, html)
+        api.notifications.show({
+          message: `Exported to ${dest}`,
+          type: 'success',
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        api.notifications.show({
+          message: `Export as HTML failed: ${message}`,
+          type: 'error',
+          duration: 8000,
+        })
       }
     })
 

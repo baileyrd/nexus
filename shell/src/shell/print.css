@@ -1,0 +1,34 @@
+/* C65 (#418) — scope `window.print()` (the "Export to PDF" tab-context-menu
+ * command, editor/index.ts's `nexus.editor.stub.exportPdf` handler) to the
+ * active note's rendered preview instead of the whole workbench chrome
+ * (sidebars, tab bar, status bar, panels).
+ *
+ * Classic visibility-swap trick: hide everything, then re-reveal only the
+ * print target and its descendants. `visibility` (not `display`) preserves
+ * layout so nested elements aren't collapsed, and the target is pulled out
+ * of flow via `position: absolute` so it isn't pushed down by the
+ * now-invisible-but-still-occupying-space chrome around it.
+ *
+ * The target is `#nexus-print-root`, set on the preview-mode markdown body
+ * in `plugins/nexus/editor/EditorView.tsx` — that element only renders in
+ * `preview` mode (source/live tabs mount a CodeMirror host instead), which
+ * is the mode the export command switches into before calling
+ * `window.print()`.
+ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #nexus-print-root,
+  #nexus-print-root * {
+    visibility: visible;
+  }
+
+  #nexus-print-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

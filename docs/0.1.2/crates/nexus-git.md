@@ -4,7 +4,7 @@
 
 ## Overview
 
-`nexus-git` is the git integration service for Nexus. It wraps libgit2 (via the `git2` crate) and exposes a broad git surface — status, diff, blame, log, staging, commit, branch / tag / stash management, merge / rebase / cherry-pick, conflict resolution, push / fetch / pull, and Git-LFS inspection — over the kernel IPC dispatcher under the plugin id `com.nexus.git`. Every frontend (CLI, TUI, MCP, Tauri shell) reaches git through one path: `context.ipc_call("com.nexus.git", command, args)`. There are 38 IPC handlers.
+`nexus-git` is the git integration service for Nexus. It wraps libgit2 (via the `git2` crate) and exposes a broad git surface — status, diff, blame, log, staging, commit, branch / tag / stash management, merge / rebase / cherry-pick, conflict resolution, push / fetch / pull, and Git-LFS inspection — over the kernel IPC dispatcher under the plugin id `com.nexus.git`. Every frontend (CLI, TUI, MCP, Tauri shell) reaches git through one path: `context.ipc_call("com.nexus.git", command, args)`. There are 45 IPC handlers (fetch/pull/remotes added by C49 #402 — previously `GitEngine` implemented them but no IPC handler existed, so only the CLI's direct, non-IPC `GitEngine` calls could reach them).
 
 The crate is layered. [`GitEngine`](#public-api-surface) is the synchronous libgit2 wrapper holding a `git2::Repository`; it is deliberately neither `Send` nor `Sync` (libgit2 state is not thread-safe). [`GitWorker`](#internals--notable-implementation-details) confines one `GitEngine` to a dedicated OS thread and hands out a cheap, `Send + Sync + Clone` [`GitWorkerHandle`] that submits closures over a bounded channel and blocks on the reply — this is what makes git usable from `async` Tauri commands and from the kernel's blocking dispatch. [`GitCorePlugin`](#internals--notable-implementation-details) owns the worker, registers the IPC handlers, runs a background state poller that publishes bus events, and (when enabled) an auto-commit thread. The per-handler logic lives in the `handlers/` modules (`status`, `log`, `branches`, `staging`, `stash`, `tags`, `merge`, plus `shared` helpers); `core_plugin::dispatch` is a thin match on handler id.
 
@@ -26,7 +26,7 @@ Re-exported from `lib.rs`: `GitError`, `GitEngine`, all of `types::*`, `AutoComm
 Read ops: `open` · `repo_root` · `state` (branch, short head oid, dirty flag, repo_state, upstream tracking oid+name) · `file_statuses` · `file_status` · `diff_file` (HEAD vs workdir+index) · `diff_staged` (index vs HEAD, per-file) · `blame` · `log(limit)` · `log_file(path, limit)` (commits that changed a path).
 Staging/commit: `stage_file` (LFS-aware) · `stage_all` · `unstage_file` · `unstage_all` · `stage_hunks` · `unstage_hunks` · `discard_hunks` · `commit(message) -> short hash`.
 Branches: `branches` · `create_branch` · `switch_branch` (force checkout, no dirty check) · `delete_branch` (refuses current HEAD).
-Remotes: `remotes` · `fetch` · `push` · `push_tags` · `pull` (fetch + merge).
+Remotes: `remotes` · `fetch` · `push` · `push_tags` · `pull` (fetch + merge). All five are IPC-reachable (`remotes`/`fetch`/`pull` added by C49 #402).
 Tags: `list_tags` · `create_tag` (annotated if message present, else lightweight) · `delete_tag`.
 Stash (`&mut self`): `stash_push` · `stash_list` · `stash_pop` · `stash_apply` · `stash_drop`.
 Merge/rebase/cherry-pick: `merge` (up-to-date / fast-forward / conflict / merge-commit) · `conflict_files` · `abort_merge` (`reset --hard` + `cleanup_state`) · `conflict_versions(relpath) -> base/ours/theirs blob bytes` · `rebase(onto)` (non-interactive, replays commits, pauses on conflict) · `abort_rebase` · `cherry_pick(hash)` · `abort_cherry_pick`.
@@ -93,6 +93,11 @@ All handlers route via `core_plugin::dispatch`. Args/returns are ad-hoc `serde_j
 | 36 | `blame` | `{path}` | `[{commit_hash, author, date, message, start_line, end_line}]` | — | Blame annotations. |
 | 37 | `discard_hunks` | `{path, hunk_indices}` | `{ok:true}` | — | Revert selected workdir hunks to HEAD. |
 | 38 | `file_log` | `{path, limit?: u64=20}` | `[log entry]` | — | Commit history for one file. |
+| 43 | `fetch` | `{remote}` | `{ok:true}` | net + credential read | C49 (#402) fetch all refs from a remote (no working-tree/local-branch change). |
+| 44 | `pull` | `{remote, branch}` | `{fast_forward, conflicts, commit_hash}` | net + credential read | C49 (#402) fetch + merge `<remote>/<branch>` into HEAD. |
+| 45 | `remotes` | none | `{remotes: [String]}` | — | C49 (#402) configured remote names — read-only, no network. |
+
+(Handler ids 39–42 are the worktree operations — `worktree_list`/`worktree_create`/`worktree_remove`/`worktree_commit`, RFC 0006/0007 — missing from this table; a pre-existing gap unrelated to C49.)
 
 (Bootstrap also registers `v1` aliases for these command names via `with_v1_aliases`.)
 
@@ -134,7 +139,7 @@ A missing or unparseable `app.toml` falls back to defaults silently.
 - **Credential callback** (`make_callbacks`): SSH agent → unencrypted default keys → keyring passphrase via `CredentialVault` (`ssh-passphrase:<key>`) → libgit2 default (HTTPS). A fresh vault is constructed per probe (cheap).
 - **LFS staging** (`stage_file`): if the path exists and `is_lfs_tracked`, routes through `git add` (CLI) so the `clean` filter writes the pointer instead of raw bytes (BL-091 write-side twin). Deletes take the libgit2 `remove_path` fast path.
 - **Threading model.** `GitWorker` confines the non-`Send` engine to one thread; `GitWorkerHandle::with` is the only way handlers touch the engine. Bounded channel (depth 32) gives backpressure; `Drop` sends `Shutdown` and joins.
-- **Doc drift to flag.** The `worker.rs` module docs still claim "Git is an invoker-local capability — the kernel does not expose git as an IPC surface … `GitWorker` … does not become a core plugin." This is stale: `GitCorePlugin` *is* a registered core plugin with 38 IPC handlers wrapping exactly this worker. The implementation matches the rest of the crate; only the comment is out of date.
+- **Doc drift to flag.** The `worker.rs` module docs still claim "Git is an invoker-local capability — the kernel does not expose git as an IPC surface … `GitWorker` … does not become a core plugin." This is stale: `GitCorePlugin` *is* a registered core plugin with 45 IPC handlers wrapping exactly this worker. The implementation matches the rest of the crate; only the comment is out of date.
 
 ## Tests
 

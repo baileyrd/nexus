@@ -156,10 +156,16 @@ export function buildTabContextMenu(args: {
       tooltip: COMING_SOON_TOOLTIP,
     },
     {
+      // C65 (#418) — wired (scoped print stylesheet); no longer "coming soon".
       kind: 'item',
       label: 'Export to PDF...',
       commandId: 'nexus.editor.stub.exportPdf',
-      tooltip: COMING_SOON_TOOLTIP,
+    },
+    {
+      // C66 (#419) — wired via com.nexus.formats::export_html + save dialog.
+      kind: 'item',
+      label: 'Export as HTML...',
+      commandId: 'nexus.editor.exportHtml',
     },
   ]
 }

@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use base64::Engine as _;
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::{json, Value};
@@ -54,6 +55,10 @@ pub const HANDLER_DOWNLOAD: u32 = 9;
 /// when no global metrics registry is installed.
 pub const HANDLER_METRICS_PROMETHEUS: u32 = 10;
 
+/// `http_request` handler id (async) — brokered, allowlisted outbound HTTP
+/// request with the response returned to the caller (C81).
+pub const HANDLER_HTTP_REQUEST: u32 = 11;
+
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::security::register`.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
@@ -67,6 +72,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("metrics_prometheus", HANDLER_METRICS_PROMETHEUS),
     ("sandbox_policy", HANDLER_SANDBOX_POLICY),
     ("download", HANDLER_DOWNLOAD),
+    ("http_request", HANDLER_HTTP_REQUEST),
 ];
 
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
@@ -310,20 +316,29 @@ impl CorePlugin for SecurityCorePlugin {
     }
 
     fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
-        // `download` performs outbound HTTP (async); everything else is sync.
-        if handler_id != HANDLER_DOWNLOAD {
-            return None;
-        }
+        // `download` and `http_request` perform outbound HTTP (async);
+        // everything else is sync.
         let config = self.sandbox_config.clone();
         let args = args.clone();
-        Some(Box::pin(async move {
-            download_handler(config, args)
-                .await
-                .map_err(|reason| PluginError::ExecutionFailed {
-                    plugin_id: PLUGIN_ID.to_string(),
-                    reason,
-                })
-        }))
+        match handler_id {
+            HANDLER_DOWNLOAD => Some(Box::pin(async move {
+                download_handler(config, args)
+                    .await
+                    .map_err(|reason| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason,
+                    })
+            })),
+            HANDLER_HTTP_REQUEST => Some(Box::pin(async move {
+                http_request_handler(config, args)
+                    .await
+                    .map_err(|reason| PluginError::ExecutionFailed {
+                        plugin_id: PLUGIN_ID.to_string(),
+                        reason,
+                    })
+            })),
+            _ => None,
+        }
     }
 }
 
@@ -367,6 +382,37 @@ async fn download_handler(config: crate::SandboxConfig, args: Value) -> Result<V
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "bytes_written": bytes }))
+}
+
+/// Async `http_request` handler (C81): [`crate::http_policy::validate`] then
+/// [`crate::http_policy::execute`]. Returns
+/// `{ status, headers, body: <base64>, truncated }`.
+async fn http_request_handler(config: crate::SandboxConfig, args: Value) -> Result<Value, String> {
+    let typed: crate::ipc::HttpRequestArgs =
+        serde_json::from_value(args).map_err(|e| format!("http_request: invalid args: {e}"))?;
+    let validated = crate::http_policy::validate(&typed.method, &typed.url, &config.http)
+        .map_err(|e| e.to_string())?;
+    let headers = typed.headers.unwrap_or_default();
+    let timeout = std::time::Duration::from_millis(config.http.timeout_ms);
+    let result = crate::http_policy::execute(
+        &validated,
+        &headers,
+        typed.body.as_deref(),
+        config.http.max_response_bytes,
+        timeout,
+    )
+    .await;
+    let resp = result.map_err(|e| e.to_string())?;
+    let body = base64::engine::general_purpose::STANDARD.encode(&resp.body);
+    to_typed(
+        &crate::ipc::HttpRequestResult {
+            status: resp.status,
+            headers: resp.headers,
+            body,
+        },
+        "http_request",
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Strict-parse `args` into the typed envelope `T` (must be
@@ -669,6 +715,70 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result, serde_json::json!({"ok": false}));
+    }
+
+    #[test]
+    fn dispatch_async_declines_unknown_handlers() {
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        assert!(plugin.dispatch_async(HANDLER_GET_SECRET, &json!({})).is_none());
+    }
+
+    #[test]
+    fn dispatch_async_offers_http_request() {
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        assert!(plugin
+            .dispatch_async(HANDLER_HTTP_REQUEST, &json!({}))
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn http_request_handler_refuses_when_disabled() {
+        // Default config: http requests disabled → refused before any I/O.
+        let err = http_request_handler(
+            crate::SandboxConfig::default(),
+            json!({ "method": "GET", "url": "https://api.example.com/x" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("disabled"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn http_request_handler_refuses_host_off_allowlist() {
+        let cfg = crate::SandboxConfig {
+            http: crate::HttpPolicy {
+                enabled: true,
+                allowed_hosts: vec!["good.example".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = http_request_handler(
+            cfg,
+            json!({ "method": "GET", "url": "https://evil.example.com/x" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("not on the http allowlist"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn http_request_handler_rejects_non_https() {
+        let cfg = crate::SandboxConfig {
+            http: crate::HttpPolicy {
+                enabled: true,
+                allowed_hosts: vec!["api.example.com".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = http_request_handler(
+            cfg,
+            json!({ "method": "GET", "url": "http://api.example.com/x" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("https"), "got: {err}");
     }
 
     #[test]

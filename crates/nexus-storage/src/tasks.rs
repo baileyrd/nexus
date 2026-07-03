@@ -12,12 +12,19 @@ use crate::StorageError;
 /// A task item parsed from a markdown checkbox list.
 #[derive(Debug, Clone)]
 pub struct ParsedTask {
-    /// Task text without the checkbox prefix.
+    /// Task text without the checkbox prefix, and without any recognized
+    /// due-date/priority tokens (C7 — see [`crate::parser::extract_task_tokens`]).
     pub content: String,
     /// Whether the checkbox is checked (`[x]`).
     pub completed: bool,
     /// 1-indexed line number in the source file.
     pub line_number: u32,
+    /// Due date in `YYYY-MM-DD` form, if a `📅 YYYY-MM-DD` or `due:YYYY-MM-DD`
+    /// token was found in the task text (C7, #360).
+    pub due_date: Option<String>,
+    /// Priority (`high` | `medium` | `low`), if a `!high`/`!medium`/`!low`
+    /// token was found in the task text (C7, #360).
+    pub priority: Option<String>,
 }
 
 // ── DB record types ──────────────────────────────────────────────────────────
@@ -37,6 +44,10 @@ pub struct TaskRecord {
     pub completed: bool,
     /// 1-indexed line number in the source file.
     pub line_number: u32,
+    /// Due date in `YYYY-MM-DD` form, if parsed from the task text (C7).
+    pub due_date: Option<String>,
+    /// Priority (`high` | `medium` | `low`), if parsed from the task text (C7).
+    pub priority: Option<String>,
     /// Unix timestamp of first insert.
     pub created_at: i64,
     /// Unix timestamp of last modification.
@@ -51,6 +62,8 @@ pub struct TaskFilter {
     pub completed: Option<bool>,
     /// Only return tasks from the file at this path.
     pub file_path: Option<String>,
+    /// Only return tasks with this priority (`high` | `medium` | `low`).
+    pub priority: Option<String>,
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -77,13 +90,15 @@ pub fn insert_tasks(
 
     for task in tasks {
         conn.execute(
-            "INSERT INTO tasks (file_id, content, completed, line_number, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5);",
+            "INSERT INTO tasks (file_id, content, completed, line_number, due_date, priority, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7);",
             params![
                 file_id.cast_signed(),
                 task.content,
                 task.completed,
                 task.line_number,
+                task.due_date,
+                task.priority,
                 now,
             ],
         )?;
@@ -116,6 +131,11 @@ pub fn query_tasks(
         param_values.push(Box::new(file_path.clone()));
     }
 
+    if let Some(priority) = &filter.priority {
+        clauses.push(format!("t.priority = ?{}", param_values.len() + 1));
+        param_values.push(Box::new(priority.clone()));
+    }
+
     let where_clause = if clauses.is_empty() {
         String::new()
     } else {
@@ -124,7 +144,7 @@ pub fn query_tasks(
 
     let sql = format!(
         "SELECT t.id, t.file_id, f.path, t.content, t.completed, t.line_number,
-                t.created_at, t.updated_at
+                t.due_date, t.priority, t.created_at, t.updated_at
          FROM tasks t JOIN files f ON f.id = t.file_id
          {where_clause}
          ORDER BY f.path, t.line_number;"
@@ -164,7 +184,7 @@ pub fn toggle_task(conn: &Connection, task_id: u64) -> Result<TaskRecord, Storag
 
     let record = conn.query_row(
         "SELECT t.id, t.file_id, f.path, t.content, t.completed, t.line_number,
-                t.created_at, t.updated_at
+                t.due_date, t.priority, t.created_at, t.updated_at
          FROM tasks t JOIN files f ON f.id = t.file_id
          WHERE t.id = ?1;",
         params![task_id.cast_signed()],
@@ -252,8 +272,10 @@ fn map_task_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         content: row.get(3)?,
         completed: row.get::<_, bool>(4)?,
         line_number: u32::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        due_date: row.get(6)?,
+        priority: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -302,11 +324,15 @@ mod tests {
                 content: "Buy groceries".to_string(),
                 completed: false,
                 line_number: 3,
+                due_date: None,
+                priority: None,
             },
             ParsedTask {
                 content: "Write tests".to_string(),
                 completed: true,
                 line_number: 4,
+                due_date: None,
+                priority: None,
             },
         ];
 
@@ -328,11 +354,15 @@ mod tests {
                 content: "Done task".to_string(),
                 completed: true,
                 line_number: 1,
+                due_date: None,
+                priority: None,
             },
             ParsedTask {
                 content: "Pending task".to_string(),
                 completed: false,
                 line_number: 2,
+                due_date: None,
+                priority: None,
             },
         ];
 
@@ -384,6 +414,8 @@ mod tests {
             content: "Toggleable".to_string(),
             completed: false,
             line_number: 1,
+            due_date: None,
+            priority: None,
         }];
 
         insert_tasks(&conn, file_id, &tasks).unwrap();
@@ -415,6 +447,8 @@ mod tests {
             content: "Original".to_string(),
             completed: false,
             line_number: 1,
+            due_date: None,
+            priority: None,
         }];
         insert_tasks(&conn, file_id, &batch1).unwrap();
 
@@ -427,11 +461,15 @@ mod tests {
                 content: "Replacement A".to_string(),
                 completed: false,
                 line_number: 1,
+                due_date: None,
+                priority: None,
             },
             ParsedTask {
                 content: "Replacement B".to_string(),
                 completed: true,
                 line_number: 2,
+                due_date: None,
+                priority: None,
             },
         ];
         insert_tasks(&conn, file_id, &batch2).unwrap();
@@ -443,6 +481,62 @@ mod tests {
             "expected 2 tasks after replace, got {}",
             after_second.len()
         );
+    }
+
+    // ── 4b. due_date_and_priority_round_trip_and_filter (C7, #360) ──────────
+
+    #[test]
+    fn due_date_and_priority_round_trip_and_filter() {
+        let conn = setup_db();
+        let file_id = insert_test_file(&conn);
+
+        let tasks = vec![
+            ParsedTask {
+                content: "Ship the release".to_string(),
+                completed: false,
+                line_number: 1,
+                due_date: Some("2026-07-04".to_string()),
+                priority: Some("high".to_string()),
+            },
+            ParsedTask {
+                content: "Water the plants".to_string(),
+                completed: false,
+                line_number: 2,
+                due_date: None,
+                priority: Some("low".to_string()),
+            },
+            ParsedTask {
+                content: "No tokens at all".to_string(),
+                completed: false,
+                line_number: 3,
+                due_date: None,
+                priority: None,
+            },
+        ];
+        insert_tasks(&conn, file_id, &tasks).unwrap();
+
+        let all = query_tasks(&conn, &TaskFilter::default()).unwrap();
+        assert_eq!(all.len(), 3);
+        let ship = all.iter().find(|t| t.content == "Ship the release").unwrap();
+        assert_eq!(ship.due_date.as_deref(), Some("2026-07-04"));
+        assert_eq!(ship.priority.as_deref(), Some("high"));
+        let plants = all.iter().find(|t| t.content == "Water the plants").unwrap();
+        assert_eq!(plants.due_date, None);
+        assert_eq!(plants.priority.as_deref(), Some("low"));
+        let untouched = all.iter().find(|t| t.content == "No tokens at all").unwrap();
+        assert_eq!(untouched.due_date, None);
+        assert_eq!(untouched.priority, None);
+
+        let high_only = query_tasks(
+            &conn,
+            &TaskFilter {
+                priority: Some("high".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(high_only.len(), 1);
+        assert_eq!(high_only[0].content, "Ship the release");
     }
 
     // ── 5. toggle_task_in_file_checks ────────────────────────────────────────

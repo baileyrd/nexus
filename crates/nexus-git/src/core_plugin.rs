@@ -232,6 +232,19 @@ pub const HANDLER_WORKTREE_REMOVE: u32 = 41;
 /// [`crate::ipc::GitWorktreeCommitReply`].
 pub const HANDLER_WORKTREE_COMMIT: u32 = 42;
 
+/// C49 (#402) — fetch all refs from a remote. Args:
+/// [`crate::ipc::GitFetchArgs`]. Same credential machinery as `push`
+/// (SSH-agent / keyring / libgit2 default).
+pub const HANDLER_FETCH: u32 = 43;
+/// C49 (#402) — fetch + merge a remote tracking branch. Args:
+/// [`crate::ipc::GitPushArgs`] (same `{remote, branch}` shape as
+/// `push`); returns [`crate::ipc::GitMergeReply`] (`pull` = `fetch`
+/// then `merge` against `<remote>/<branch>`).
+pub const HANDLER_PULL: u32 = 44;
+/// C49 (#402) — list configured remote names. No args; returns
+/// [`crate::ipc::GitRemotesReply`]. Read-only local enumeration.
+pub const HANDLER_REMOTES: u32 = 45;
+
 /// Plugin ids this plugin requires already loaded — `nexus-security`
 /// provides the capability + credential types this crate uses.
 pub const MANIFEST_DEPS: &[&str] = &["com.nexus.security"];
@@ -283,6 +296,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("worktree_create", HANDLER_WORKTREE_CREATE),
     ("worktree_remove", HANDLER_WORKTREE_REMOVE),
     ("worktree_commit", HANDLER_WORKTREE_COMMIT),
+    ("fetch", HANDLER_FETCH),
+    ("pull", HANDLER_PULL),
+    ("remotes", HANDLER_REMOTES),
 ];
 
 /// P2-06 — interval the background git-state watcher sleeps between
@@ -477,6 +493,9 @@ impl CorePlugin for GitCorePlugin {
             HANDLER_WORKTREE_CREATE => worktree::worktree_create(&h, args, root),
             HANDLER_WORKTREE_REMOVE => worktree::worktree_remove(&h, args),
             HANDLER_WORKTREE_COMMIT => worktree::worktree_commit(&h, args),
+            HANDLER_FETCH => branches::fetch(&h, args),
+            HANDLER_PULL => branches::pull(&h, args),
+            HANDLER_REMOTES => branches::remotes(&h),
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),
@@ -1147,5 +1166,151 @@ mod tests {
             first["start_line"].as_u64().unwrap() >= 1,
             "start_line is 1-based"
         );
+    }
+
+    /// C49 (#402) — shared setup for the fetch/pull/remotes tests: a
+    /// repo with committer identity configured, one commit, and its
+    /// active branch forced to `main` regardless of the host's
+    /// `init.defaultBranch`.
+    fn init_repo_with_commit(path: &std::path::Path, filename: &str, content: &str, message: &str) {
+        init_repo(path);
+        let _ = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(path)
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(path)
+            .status();
+        std::fs::write(path.join(filename), content).unwrap();
+        let _ = Command::new("git")
+            .args(["add", filename])
+            .current_dir(path)
+            .status();
+        let _ = Command::new("git")
+            .args(["commit", "-m", message, "--quiet"])
+            .current_dir(path)
+            .status();
+        let _ = Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(path)
+            .status();
+    }
+
+    /// Clone `upstream` into `downstream` via the real `git` binary —
+    /// this is the cheapest way to get a correctly-configured `origin`
+    /// remote + tracking branch without hand-rolling libgit2 remote
+    /// setup. No network access: both paths are local.
+    fn clone_repo(upstream: &std::path::Path, downstream: &std::path::Path) {
+        let ok = Command::new("git")
+            .args([
+                "clone",
+                "--quiet",
+                upstream.to_str().unwrap(),
+                downstream.to_str().unwrap(),
+            ])
+            .status()
+            .expect("git clone");
+        assert!(ok.success(), "git clone failed");
+    }
+
+    #[test]
+    fn remotes_handler_lists_configured_remote_names() {
+        let upstream = tempdir().unwrap();
+        init_repo_with_commit(upstream.path(), "a.txt", "hello", "init");
+        let downstream = tempdir().unwrap();
+        clone_repo(upstream.path(), downstream.path());
+
+        let mut plugin = GitCorePlugin::new(downstream.path().to_path_buf(), None);
+        plugin.on_init().unwrap();
+        let resp = plugin
+            .dispatch(HANDLER_REMOTES, &json!({}))
+            .expect("remotes ok");
+        let remotes = resp["remotes"].as_array().expect("array");
+        assert_eq!(remotes.len(), 1);
+        assert_eq!(remotes[0].as_str(), Some("origin"));
+    }
+
+    #[test]
+    fn fetch_handler_retrieves_new_commits_from_local_remote() {
+        let upstream = tempdir().unwrap();
+        init_repo_with_commit(upstream.path(), "a.txt", "v1", "init");
+        let downstream = tempdir().unwrap();
+        clone_repo(upstream.path(), downstream.path());
+
+        // Advance upstream with a commit the clone doesn't have yet.
+        std::fs::write(upstream.path().join("b.txt"), "v2").unwrap();
+        let _ = Command::new("git")
+            .args(["add", "b.txt"])
+            .current_dir(upstream.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "second", "--quiet"])
+            .current_dir(upstream.path())
+            .status();
+
+        let mut plugin = GitCorePlugin::new(downstream.path().to_path_buf(), None);
+        plugin.on_init().unwrap();
+        let resp = plugin
+            .dispatch(HANDLER_FETCH, &json!({ "remote": "origin" }))
+            .expect("fetch ok");
+        assert_eq!(resp["ok"], serde_json::json!(true));
+
+        // `fetch` alone must not touch the working tree or local branch —
+        // only the remote-tracking ref advances.
+        assert!(
+            !downstream.path().join("b.txt").exists(),
+            "fetch must not modify the working tree"
+        );
+        let out = Command::new("git")
+            .args(["log", "-1", "--format=%s", "refs/remotes/origin/main"])
+            .current_dir(downstream.path())
+            .output()
+            .expect("git log");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "second");
+    }
+
+    #[test]
+    fn pull_handler_fast_forwards_local_branch_from_remote() {
+        let upstream = tempdir().unwrap();
+        init_repo_with_commit(upstream.path(), "a.txt", "v1", "init");
+        let downstream = tempdir().unwrap();
+        clone_repo(upstream.path(), downstream.path());
+
+        std::fs::write(upstream.path().join("b.txt"), "v2").unwrap();
+        let _ = Command::new("git")
+            .args(["add", "b.txt"])
+            .current_dir(upstream.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "second", "--quiet"])
+            .current_dir(upstream.path())
+            .status();
+
+        let mut plugin = GitCorePlugin::new(downstream.path().to_path_buf(), None);
+        plugin.on_init().unwrap();
+        let resp = plugin
+            .dispatch(HANDLER_PULL, &json!({ "remote": "origin", "branch": "main" }))
+            .expect("pull ok");
+        assert_eq!(resp["fast_forward"], serde_json::json!(true));
+        assert!(resp["conflicts"].as_array().unwrap().is_empty());
+        assert!(
+            downstream.path().join("b.txt").exists(),
+            "pull should fast-forward the working tree"
+        );
+    }
+
+    #[test]
+    fn fetch_handler_with_unknown_remote_errors() {
+        let dir = tempdir().unwrap();
+        init_repo_with_commit(dir.path(), "a.txt", "v1", "init");
+        let mut plugin = GitCorePlugin::new(dir.path().to_path_buf(), None);
+        plugin.on_init().unwrap();
+        let err = plugin
+            .dispatch(HANDLER_FETCH, &json!({ "remote": "does-not-exist" }))
+            .expect_err("fetch from unknown remote must fail");
+        // Just confirm it surfaces as an execution error rather than
+        // panicking or silently succeeding; exact libgit2 wording varies.
+        assert!(matches!(err, PluginError::ExecutionFailed { .. }));
     }
 }

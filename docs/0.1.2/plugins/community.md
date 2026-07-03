@@ -82,6 +82,12 @@ Fuel + epoch checks happen per-call inside the sandbox.
 
 A crash quarantine counter is incremented per failure; after 3 crashes the plugin is disabled until manually re-enabled.
 
+**Reaching it (C80).** The machinery above ships with `hot_reload: true` as `PluginManagerConfig`'s default, but every production frontend used to override it to `false` (`App::plugins()`, `crates/nexus-cli/src/app.rs`) or never constructed a `PluginManager` with a watcher at all — the mechanism was real but unreachable. `nexus plugin dev <dir>` (`crates/nexus-cli/src/commands/plugin.rs`) is the fix: a long-running CLI session that builds its own `hot_reload: true` manager rooted at `<dir>` (same one-subdirectory-per-plugin layout as `.forge/plugins/`), loads everything found, and polls `poll_reloads()` every 250ms until Ctrl+C, printing a line per hot-swap. It's deliberately a standalone session — no live forge kernel/storage boot required — so `nexus plugin dev ~/my-plugin-workspace` works the same regardless of `--forge-path`.
+
+This only covers WASM community plugins, where `reload_plugin` can safely rebuild the whole sandbox from scratch (no live state to preserve). Script (JS) plugins run in-realm with commands/subscriptions/DOM already registered by `activate()`, and the shell has no general mechanism to unwind that — so the shell-side half of C80 is narrower: the Plugins modal's **Rescan** button (`shell/src/host/communityPluginLoader.ts::rescanCommunityPlugins`, replacing the old "drop a folder and restart" hint) discovers and activates *newly dropped* community plugins without a restart, but does not attempt to hot-swap an already-loaded plugin's changed code — editing an existing script plugin still needs a reload.
+
+The forge-scoped `hot_reload_enabled` setting (`<forge>/.forge/app.toml`, see [`settings/forge-config.md`](../settings/forge-config.md)) remains unwired — there's no clean place to route it into the CLI dev-mode path, which is deliberately forge-independent. Not fixed by C80; flagged here so it doesn't read as shipped.
+
 ## Signing (BL-099)
 
 Manifests can carry an ed25519 signature:

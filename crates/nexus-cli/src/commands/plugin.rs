@@ -2,7 +2,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use nexus_plugins::{scaffold as nexus_scaffold, PluginError, PluginTemplate, ScaffoldConfig};
+use nexus_plugins::{
+    scaffold as nexus_scaffold, PluginError, PluginManager, PluginManagerConfig, PluginTemplate,
+    ScaffoldConfig,
+};
 
 use crate::app::App;
 use crate::output::{print_list, print_success, print_value};
@@ -316,6 +319,95 @@ pub fn verify(plugin_dir: &Path, keys_dir: Option<&Path>) -> Result<()> {
         "OK — {} signed by '{}' ({})",
         manifest.id, sig.signer_key_id, sig.algorithm
     );
+    Ok(())
+}
+
+/// Build a `hot_reload: true` `PluginManager` rooted at `dir` and run its
+/// initial `load_all` scan. Split out of [`dev`] so the setup half —
+/// "does dev mode actually turn hot_reload on and load what's there" — is
+/// unit-testable without also driving the infinite Ctrl+C loop.
+///
+/// # Errors
+/// Returns an error if the plugin manager cannot be created at `dir`
+/// (see [`PluginManager::new`]) or if the initial `load_all` scan fails.
+fn start_dev_manager(dir: &Path) -> Result<(PluginManager, Vec<nexus_kernel::PluginInfo>)> {
+    // `PluginManagerConfig::default()` already carries `hot_reload: true`
+    // — it's `App::plugins()`'s override to `false` (app.rs:258) that
+    // silences it for every other command. Spelled out here so the
+    // C80 fix reads as a config choice, not an accident of the default.
+    let config = PluginManagerConfig {
+        hot_reload: true,
+        ..Default::default()
+    };
+    let mut manager = PluginManager::new(dir, &config)
+        .with_context(|| format!("failed to start plugin dev mode at '{}'", dir.display()))?;
+    let loaded = manager
+        .load_all()
+        .with_context(|| format!("failed to load plugins from '{}'", dir.display()))?;
+    Ok((manager, loaded))
+}
+
+/// C80 — run a long-lived plugin-development session rooted at `dir`.
+///
+/// `dir` follows the same layout `.forge/plugins/` uses: one subdirectory
+/// per plugin, each with its own `manifest.toml` (exactly what
+/// `PluginLoader::load_all` already scans for). Point it at a scratch
+/// directory containing the one plugin you're iterating on, or at
+/// `.forge/plugins/` itself to live-reload everything installed there.
+///
+/// Loads every plugin found, then polls the existing (already fully
+/// tested — `crates/nexus-plugins/src/hot_reload.rs`) `HotReloader` /
+/// `PluginManager::poll_reloads` machinery every 250ms and hot-swaps the
+/// sandbox for any plugin whose `.wasm` changed on disk, printing a line
+/// per reload, until Ctrl+C. This is a standalone session — deliberately
+/// does not touch a live forge's kernel/storage runtime (dev mode has
+/// nothing to do with a specific forge), so it works the same whether or
+/// not `--forge-path` even resolves to something real.
+///
+/// # Errors
+/// Returns an error if the plugin manager cannot be created at `dir`
+/// (see [`PluginManager::new`]) or if the initial `load_all` scan fails.
+pub fn dev(dir: &Path) -> Result<()> {
+    let (mut manager, loaded) = start_dev_manager(dir)?;
+    if loaded.is_empty() {
+        println!("No plugins found under '{}'.", dir.display());
+    } else {
+        for info in &loaded {
+            println!("loaded   {} ({}) [{:?}]", info.id, info.name, info.status);
+        }
+    }
+    println!(
+        "Watching '{}' for .wasm changes. Press Ctrl+C to stop.",
+        dir.display()
+    );
+
+    // A dedicated single-thread runtime, not `App::runtime()` — dev mode
+    // doesn't need (and shouldn't require) a live forge's kernel/storage
+    // boot just to watch a directory and poll a debounced file-change
+    // queue.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to start tokio runtime")?;
+    rt.block_on(async {
+        loop {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => break,
+                () = tokio::time::sleep(std::time::Duration::from_millis(250)) => {
+                    match manager.poll_reloads() {
+                        Ok(reloaded) => {
+                            for id in reloaded {
+                                println!("reloaded {id}");
+                            }
+                        }
+                        Err(e) => println!("reload error: {e}"),
+                    }
+                }
+            }
+        }
+    });
+
+    println!("Stopped.");
     Ok(())
 }
 
@@ -772,5 +864,117 @@ mod shell_plugin_tests {
         let (name, version) = read_plugin_manifest(&path).unwrap();
         assert_eq!(name, "<unnamed>");
         assert_eq!(version, "?");
+    }
+}
+
+/// C80 — `dev`'s setup half: does it actually turn `hot_reload` on and
+/// load what's there. The infinite Ctrl+C loop itself isn't unit-tested
+/// here (it drives already-tested `PluginManager::poll_reloads` /
+/// `HotReloader` machinery per `crates/nexus-plugins/tests/
+/// hot_reload_caps.rs` — see `start_dev_manager`'s doc comment); this
+/// covers the wiring that's actually new: the CLI command turning
+/// hot-reload on and reporting what got loaded.
+#[cfg(test)]
+mod dev_tests {
+    use super::*;
+
+    fn minimal_plugin_wasm() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../nexus-plugins/tests/fixtures/minimal-plugin.wasm")
+    }
+
+    fn write_plugin(dir: &Path, id: &str) {
+        let plugin_dir = dir.join(id);
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::copy(minimal_plugin_wasm(), plugin_dir.join("test.wasm")).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.toml"),
+            format!(
+                r#"
+[plugin]
+id = "{id}"
+name = "Dev Mode Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[capabilities]
+required = []
+
+[wasm]
+module = "test.wasm"
+
+[lifecycle]
+on_init = false
+on_start = false
+on_stop = false
+"#
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn start_dev_manager_loads_the_one_plugin_under_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin(tmp.path(), "com.test.dev_hot_reload_on");
+        let (_manager, loaded) = start_dev_manager(tmp.path()).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "com.test.dev_hot_reload_on");
+        // Whether hot_reload is actually live (not just that construction
+        // and load succeeded, which would pass even with the pre-C80
+        // `hot_reload: false` default) is the property
+        // `dev_manager_poll_reloads_picks_up_a_touched_wasm` below proves
+        // end-to-end.
+    }
+
+    #[test]
+    fn start_dev_manager_loads_every_plugin_under_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin(tmp.path(), "com.test.dev_multi_a");
+        write_plugin(tmp.path(), "com.test.dev_multi_b");
+        let (_manager, loaded) = start_dev_manager(tmp.path()).unwrap();
+        let mut ids: Vec<&str> = loaded.iter().map(|i| i.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["com.test.dev_multi_a", "com.test.dev_multi_b"]);
+    }
+
+    #[test]
+    fn start_dev_manager_reports_empty_dir_as_no_plugins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_manager, loaded) = start_dev_manager(tmp.path()).unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn dev_manager_poll_reloads_picks_up_a_touched_wasm() {
+        // End-to-end proof (not just construction): touching the plugin's
+        // .wasm after load is actually observed by poll_reloads() through
+        // a manager built the same way `dev` builds one. This is the
+        // property C80 exists to deliver — reusing the debounced
+        // HotReloader that `hot_reload: false` (the pre-C80 CLI default)
+        // silently discarded.
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin(tmp.path(), "com.test.dev_reload_probe");
+        let (mut manager, loaded) = start_dev_manager(tmp.path()).unwrap();
+        assert_eq!(loaded.len(), 1);
+
+        let wasm_path = tmp.path().join("com.test.dev_reload_probe").join("test.wasm");
+        // Debounced watcher needs the mtime to actually move and a beat
+        // to notice — matches the debounce window `PluginManagerConfig::
+        // default().debounce_ms` (500ms) already exercises in
+        // `hot_reload_caps.rs`.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::copy(minimal_plugin_wasm(), &wasm_path).unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut reloaded_ids = Vec::new();
+        while std::time::Instant::now() < deadline && reloaded_ids.is_empty() {
+            reloaded_ids = manager.poll_reloads().unwrap();
+            if reloaded_ids.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        assert_eq!(reloaded_ids, ["com.test.dev_reload_probe"]);
     }
 }

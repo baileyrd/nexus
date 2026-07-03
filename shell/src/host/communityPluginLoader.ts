@@ -15,6 +15,11 @@ import type { SandboxOrchestrator } from './sandbox/SandboxOrchestrator'
 import { parseManifestCapabilities } from '../plugins/nexus/pluginsMgmt/capabilityInfo'
 import { assertValidPluginId } from './PluginAPI'
 import { clientLogger } from './clientLogger'
+import { getHost } from './shellHost'
+import { getRegistry } from './shellRegistry'
+import { runInstallTimeConsent } from '../plugins/core/capabilityPrompt'
+import { PLUGIN_LIST_CHANGED_EVENT } from './pluginActivation'
+import { eventBus } from './EventBus'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -287,6 +292,122 @@ export async function loadEnabledCommunityPlugins(
   }
 
   return plugins
+}
+
+// ── Rescan (C80) ─────────────────────────────────────────────────────────────
+
+/** Outcome of {@link rescanCommunityPlugins}. */
+export interface RescanResult {
+  /** Freshly-scanned manifest list (every plugin found, enabled or not). */
+  manifests: CommunityPluginManifest[]
+  /** Ids of plugins that were newly discovered and successfully activated. */
+  added: string[]
+  /** Ids of newly-discovered plugins the user denied consent for. */
+  denied: string[]
+  /** `{ id, error }` for newly-discovered plugins that failed to load. */
+  errors: Array<{ id: string; error: string }>
+}
+
+/**
+ * C80 — re-scan `~/.nexus-shell/plugins/` for community plugins dropped
+ * in since boot, and activate the ones that are new.
+ *
+ * Deliberately does **not** attempt to hot-swap an already-loaded
+ * plugin's changed code — that would mean unwinding whatever its
+ * `activate()` already did (registered commands, subscriptions, DOM
+ * nodes, …) before re-running it, which the shell has no general
+ * mechanism for. A plugin already in `host.listAll()` is left alone;
+ * only ids the host has never seen this session are loaded. Editing an
+ * existing script plugin still needs a shell reload — this closes the
+ * *other* half of the C80 gap (install a fifth plugin without
+ * restarting), matching the kernel-side `nexus plugin dev` verb, which
+ * genuinely hot-swaps WASM community plugins because `PluginManager::
+ * reload_plugin` rebuilds the whole sandbox from scratch (no live state
+ * to preserve, unlike a script plugin's in-realm DOM/subscriptions).
+ *
+ * Runs the same install-time consent flow `main.tsx`'s boot path does,
+ * scoped to the newly-discovered manifests only — a plugin already
+ * running never re-prompts.
+ */
+export async function rescanCommunityPlugins(): Promise<RescanResult> {
+  const host = getHost()
+  const reg = getRegistry()
+  if (!host || !reg) {
+    return { manifests: [], added: [], denied: [], errors: [{ id: '', error: 'Shell is not booted yet' }] }
+  }
+
+  const manifests = await scanCommunityPlugins()
+  reg.updateService('communityPluginManifests', manifests)
+
+  const known = new Set(host.listAll().map(({ id }) => id))
+  const newManifests = manifests.filter((m) => m.enabled && !known.has(m.id))
+  if (newManifests.length === 0) {
+    return { manifests, added: [], denied: [], errors: [] }
+  }
+
+  let denied = new Set<string>()
+  try {
+    const consent = await runInstallTimeConsent(newManifests)
+    denied = consent.denied
+  } catch (err) {
+    clientLogger.warn('[CommunityLoader] rescan consent flow failed; continuing:', err)
+  }
+  const approved = newManifests.filter((m) => !denied.has(m.id))
+
+  const errors: Array<{ id: string; error: string }> = []
+  if (approved.length > 0) {
+    const orchestrator = reg.hasService('sandboxOrchestrator')
+      ? reg.getService<SandboxOrchestrator>('sandboxOrchestrator')
+      : undefined
+    // Re-blob the runtime source per rescan rather than threading
+    // main.tsx's cached blob URL through — rescanning is a rare, manual
+    // action; the extra Blob allocation is not worth the coupling.
+    // Dynamic import (not a static top-level one): `virtual:sandbox-
+    // runtime` is a Vite-only virtual module — a static import breaks
+    // this file's plain-node unit tests (communityPluginLoader.test.ts),
+    // which never call this function and so never need it resolved.
+    let runtimeUrl: string | null = null
+    const getRuntimeUrl = async () => {
+      if (!runtimeUrl) {
+        const { default: sandboxRuntimeSource } = await import('virtual:sandbox-runtime')
+        runtimeUrl = URL.createObjectURL(
+          new Blob([sandboxRuntimeSource], { type: 'application/javascript' }),
+        )
+      }
+      return runtimeUrl
+    }
+
+    const loaded = await loadEnabledCommunityPlugins(approved, {
+      orchestrator,
+      getRuntimeUrl,
+    })
+    if (loaded.length > 0) {
+      try {
+        await host.loadAll(loaded)
+      } catch (err) {
+        errors.push({
+          id: loaded.map((p) => p.manifest.id).join(', '),
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+  }
+
+  const added = approved
+    .filter((m) => host.getState(m.id) !== undefined && host.getState(m.id) !== 'error')
+    .map((m) => m.id)
+  for (const m of approved) {
+    if (!added.includes(m.id) && host.getState(m.id) === 'error') {
+      errors.push({ id: m.id, error: host.getError(m.id)?.message ?? 'Activation failed' })
+    }
+  }
+
+  clientLogger.info(
+    `[CommunityLoader] rescan: ${added.length} added, ${denied.size} denied, ${errors.length} failed`,
+  )
+  eventBus.emit(PLUGIN_LIST_CHANGED_EVENT, null)
+
+  return { manifests, added, denied: [...denied], errors }
 }
 
 // ── Internal ──────────────────────────────────────────────────────────────────

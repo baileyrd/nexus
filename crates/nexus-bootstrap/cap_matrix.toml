@@ -116,6 +116,13 @@ plugin = "com.nexus.ai"
 command = "infer_entity_relations"
 caps = ["ai.chat"]
 
+# C44 (#397) — the Dream-Cycle acquisition phase; reads a note through
+# storage and (unless dry_run) creates bare entity stubs via entity_upsert.
+[[handler]]
+plugin = "com.nexus.ai"
+command = "extract_entities"
+caps = ["ai.chat"]
+
 [[handler]]
 plugin = "com.nexus.ai"
 command = "propose_tool_calls"
@@ -659,6 +666,11 @@ plugin = "com.nexus.formats"
 command = "export_notion"
 unrestricted = "serialises forge state to the Notion shape — fs writes route through storage"
 
+[[handler]]
+plugin = "com.nexus.formats"
+command = "export_html"
+unrestricted = "renders a forge note to a standalone HTML string or file — fs access is forge-scoped, same as import/export_notion"
+
 # ─── com.nexus.git — operates on `.git` inside the forge root ────────
 
 [[handler]]
@@ -827,6 +839,23 @@ plugin = "com.nexus.git"
 command = "push_tags"
 caps = ["net.http"]
 note = "P1-04 — publishes tags to a remote; same posture as push"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "fetch"
+caps = ["net.http"]
+note = "C49 (#402) — pulls refs from a remote; same outbound-network posture as push"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "pull"
+caps = ["net.http"]
+note = "C49 (#402) — fetch + merge; same posture as fetch, plus a local merge (already unrestricted elsewhere)"
+
+[[handler]]
+plugin = "com.nexus.git"
+command = "remotes"
+unrestricted = "C49 (#402) — read-only enumeration of configured remote names, no network access itself"
 
 [[handler]]
 plugin = "com.nexus.git"
@@ -1061,6 +1090,12 @@ plugin = "com.nexus.security"
 command = "download"
 caps = ["net.http"]
 note = "brokered outbound HTTPS on a confined process's behalf; doubly gated — the cap here, plus the sandbox.toml allowlist + writable-root checks the handler enforces"
+
+[[handler]]
+plugin = "com.nexus.security"
+command = "http_request"
+caps = ["net.http"]
+note = "C81 — brokered outbound HTTPS with arbitrary method/headers/body and the response returned to the caller; doubly gated — the cap here, plus sandbox.toml's [http] host allowlist + response-size cap the handler enforces. Distinct allowlist from 'download' since responses leave the sandbox (exfiltration surface flagged by the 2026-05-18 sandbox-security audit)"
 
 # ─── com.nexus.skills ────────────────────────────────────────────────
 

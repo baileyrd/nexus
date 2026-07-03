@@ -118,6 +118,10 @@ enum Commands {
     Agent(AgentArgs),
     /// Agent tool registry (PRD-15 §4) — list catalogued tools
     Tool(ToolArgs),
+    /// Comment thread operations (C74 #427) — `com.nexus.comments`
+    /// list/create/reply/resolve/edit/delete, headless parity with the
+    /// shell's comment pane.
+    Comments(CommentsArgs),
     /// Forge-format versioning + migrations (PRD-06 §9, DG-43)
     Migrate(MigrateArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
@@ -147,6 +151,12 @@ enum Commands {
     /// local frontend can drive this headless instance. Phase 2 (SSH
     /// transport + `ssh://` forge URIs) lands separately.
     Serve(ServeArgs),
+    /// C76 — headless, long-running host for workflow triggers (cron,
+    /// file/git/mcp events, digests). Blocks until Ctrl+C or SIGTERM
+    /// (systemd-friendly), gracefully unloading every plugin on stop.
+    /// No UI, no stdio protocol — just the trigger engines that
+    /// otherwise only run inside the desktop shell.
+    Daemon,
     /// Sync the forge against a git remote: fetch, pull (rebase),
     /// then push. A thin convenience wrapper over `nexus git
     /// fetch|pull|push`.
@@ -305,8 +315,17 @@ fn main() {
                 force,
                 permanent,
             } => commands::content::delete(&mut app, &path, force, permanent),
-            ContentCommand::Search { query, limit } => {
-                commands::content::search(&mut app, &query, limit)
+            ContentCommand::Search {
+                query,
+                limit,
+                semantic,
+                hybrid,
+            } => {
+                if semantic || hybrid {
+                    commands::content::semantic_search(&mut app, &query, limit, hybrid)
+                } else {
+                    commands::content::search(&mut app, &query, limit)
+                }
             }
             ContentCommand::Tasks {
                 completed,
@@ -370,6 +389,7 @@ fn main() {
             PluginCommand::Reset { plugin_id } => {
                 commands::plugin::reset_crash(&mut app, &plugin_id)
             }
+            PluginCommand::Dev { dir } => commands::plugin::dev(&dir),
             PluginCommand::Settings { plugin_id, set } => {
                 commands::plugin::settings(&mut app, &plugin_id, set.as_deref())
             }
@@ -604,6 +624,58 @@ fn main() {
             ToolCommand::List { capabilities } => commands::tool::list(&mut app, &capabilities),
         },
 
+        Commands::Comments(args) => match args.command {
+            CommentsCommand::List { path } => commands::comments::list(&mut app, &path),
+            CommentsCommand::CreateThread {
+                path,
+                body,
+                block_index,
+                author,
+            } => commands::comments::create_thread(
+                &mut app,
+                &path,
+                &body,
+                block_index,
+                author.as_deref(),
+            ),
+            CommentsCommand::AddReply {
+                path,
+                thread_id,
+                body,
+                author,
+            } => commands::comments::add_reply(
+                &mut app,
+                &path,
+                &thread_id,
+                &body,
+                author.as_deref(),
+            ),
+            CommentsCommand::Resolve {
+                path,
+                thread_id,
+                author,
+            } => commands::comments::resolve(&mut app, &path, &thread_id, author.as_deref()),
+            CommentsCommand::Unresolve {
+                path,
+                thread_id,
+                author,
+            } => commands::comments::unresolve(&mut app, &path, &thread_id, author.as_deref()),
+            CommentsCommand::EditComment {
+                path,
+                thread_id,
+                comment_id,
+                body,
+            } => commands::comments::edit_comment(&mut app, &path, &thread_id, &comment_id, &body),
+            CommentsCommand::DeleteComment {
+                path,
+                thread_id,
+                comment_id,
+            } => commands::comments::delete_comment(&mut app, &path, &thread_id, &comment_id),
+            CommentsCommand::DeleteThread { path, thread_id } => {
+                commands::comments::delete_thread(&mut app, &path, &thread_id)
+            }
+        },
+
         Commands::Migrate(args) => match args.command {
             MigrateCommand::Scan => commands::migrate::scan(&mut app),
             MigrateCommand::Registered => commands::migrate::registered(),
@@ -717,6 +789,7 @@ fn main() {
                 ))
             }
         }
+        Commands::Daemon => commands::daemon::run(&app),
         Commands::Sync {
             remote,
             branch,
@@ -943,6 +1016,61 @@ mod tests {
             },
             _ => panic!("expected Content subcommand"),
         }
+    }
+
+    #[test]
+    fn parse_content_search_defaults_semantic_and_hybrid_to_false() {
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "some query"])
+            .expect("parse content search");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search {
+                    query,
+                    semantic,
+                    hybrid,
+                    ..
+                } => {
+                    assert_eq!(query, "some query");
+                    assert!(!semantic);
+                    assert!(!hybrid);
+                }
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_search_accepts_semantic_and_hybrid_flags() {
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "q", "--semantic"])
+            .expect("parse content search --semantic");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search { semantic, .. } => assert!(semantic),
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "q", "--hybrid"])
+            .expect("parse content search --hybrid");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search { hybrid, .. } => assert!(hybrid),
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_search_rejects_semantic_and_hybrid_together() {
+        let result =
+            Cli::try_parse_from(["nexus", "content", "search", "q", "--semantic", "--hybrid"]);
+        assert!(
+            result.is_err(),
+            "--semantic and --hybrid should be mutually exclusive"
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ sha2 = { workspace = true }
 # Lives here so both subsystems share one pin policy.
 reqwest = { workspace = true }
 toml = { workspace = true }
+base64 = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 
@@ -49,3 +50,4 @@ path = "src/bin/nexus-sandbox.rs"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true }

@@ -74,6 +74,12 @@ interface GitPanelState {
   committing: boolean
   pushAfterCommit: boolean
 
+  // C49 (#402) — pull is repo-wide, not scoped to the Changes tab, but
+  // lives alongside the other commit-area async-action flags for
+  // consistency.
+  pulling: boolean
+  pullError: string | null
+
   // ── Branches tab ───────────────────────────────────────────────────
   branches: BranchEntry[]
   loadingBranches: boolean
@@ -100,6 +106,8 @@ interface GitPanelState {
   setCommitMessage(msg: string): void
   setCommitting(v: boolean): void
   setPushAfterCommit(v: boolean): void
+  setPulling(v: boolean): void
+  setPullError(v: string | null): void
   setBranches(b: BranchEntry[]): void
   setLoadingBranches(v: boolean): void
   setNewBranchName(name: string): void
@@ -122,6 +130,8 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
   commitMessage: '',
   committing: false,
   pushAfterCommit: false,
+  pulling: false,
+  pullError: null,
   branches: [],
   loadingBranches: false,
   newBranchName: '',
@@ -140,6 +150,8 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
   setCommitMessage: (msg) => set({ commitMessage: msg }),
   setCommitting: (v) => set({ committing: v }),
   setPushAfterCommit: (v) => set({ pushAfterCommit: v }),
+  setPulling: (v) => set({ pulling: v }),
+  setPullError: (v) => set({ pullError: v }),
   setBranches: (b) => set({ branches: b }),
   setLoadingBranches: (v) => set({ loadingBranches: v }),
   setNewBranchName: (name) => set({ newBranchName: name }),
@@ -155,6 +167,7 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
     files: [], selectedFile: null, selectedHunks: [],
     branches: [], logEntries: [], commitMessage: '',
     newBranchName: '', committing: false,
+    pulling: false, pullError: null,
     conflict: { content: null, saving: false, error: null },
   }),
 }))

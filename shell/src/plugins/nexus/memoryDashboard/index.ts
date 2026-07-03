@@ -32,6 +32,7 @@ const LIST_LIMIT = 30
 
 /** Subset of a `com.nexus.memory` row the dashboard renders. */
 interface MemoryRow {
+  id?: string
   content: string
   category?: string
   memory_type?: string
@@ -56,13 +57,14 @@ interface MemoryStats {
 }
 
 /** Coerce a `search`/`list`/`facts` response (a JSON array of memory objects). */
-function decodeMemories(raw: unknown): MemoryRow[] {
+export function decodeMemories(raw: unknown): MemoryRow[] {
   if (!Array.isArray(raw)) return []
   const out: MemoryRow[] = []
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue
     const r = item as Record<string, unknown>
     out.push({
+      id: typeof r.id === 'string' ? r.id : undefined,
       content: typeof r.content === 'string' ? r.content : '',
       category: typeof r.category === 'string' ? r.category : undefined,
       memory_type: typeof r.memory_type === 'string' ? r.memory_type : undefined,
@@ -123,7 +125,95 @@ function tripleLabel(m: MemoryRow): string {
   return `${m.subject} ─${m.predicate ?? '?'}→ ${m.object ?? '?'}`
 }
 
-/** Show memories (or facts) in the pick modal; on selection, surface content. */
+// C35 (#388) — the memory plugin's `update`/`delete` IPC handlers already
+// existed but nothing in the shell called them: selecting a memory only
+// ever toasted its content. These two helpers are the actual IPC dispatch
+// for the new "forget" / "edit" actions, kept separate from the pick-modal
+// wiring in `presentMemoryActions` so the argument shaping is unit-testable
+// without mocking the modal stack (mirrors crdtConflict/applyResolution.ts).
+
+/** Delete memory `id`. Returns `null` on success, an error message otherwise. */
+export async function forgetMemory(api: PluginAPI, id: string): Promise<string | null> {
+  try {
+    const res = await api.kernel.invoke<{ deleted?: boolean }>(MEMORY_PLUGIN, 'delete', { id })
+    return res.deleted ? null : 'Memory was already gone.'
+  } catch (e) {
+    return String(e)
+  }
+}
+
+/** Patch memory `id`'s content. Returns `null` on success, an error message otherwise. */
+export async function updateMemoryContent(
+  api: PluginAPI,
+  id: string,
+  content: string,
+): Promise<string | null> {
+  try {
+    const res = await api.kernel.invoke<{ updated?: boolean }>(MEMORY_PLUGIN, 'update', {
+      id,
+      content,
+    })
+    return res.updated ? null : 'Memory was not found.'
+  } catch (e) {
+    return String(e)
+  }
+}
+
+/**
+ * Follow-up action menu for a single picked memory: view its full content,
+ * edit it in place, or forget (delete) it. Memories without an `id` (should
+ * not happen once every store response carries one, but IPC payloads are
+ * never fully trusted) fall back to the old read-only toast.
+ */
+async function presentMemoryActions(api: PluginAPI, m: MemoryRow): Promise<void> {
+  if (!m.id) {
+    api.notifications.show({ message: m.content || '(empty memory)', type: 'info', duration: 8000 })
+    return
+  }
+  const actions: PickItem<'view' | 'edit' | 'delete'>[] = [
+    { label: 'View full content', value: 'view' },
+    { label: 'Edit content…', value: 'edit' },
+    { label: 'Forget (delete)…', value: 'delete' },
+  ]
+  const action = await api.input.pick(actions, {
+    title: excerpt(m.content, 60) || '(empty memory)',
+    placeholder: 'Choose an action',
+  })
+  if (!action) return
+
+  if (action === 'view') {
+    api.notifications.show({ message: m.content || '(empty memory)', type: 'info', duration: 8000 })
+    return
+  }
+
+  if (action === 'edit') {
+    const next = await api.input.prompt('Edit memory content', m.content)
+    if (next === null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === m.content) return
+    const err = await updateMemoryContent(api, m.id, trimmed)
+    api.notifications.show(
+      err
+        ? { message: `Update failed: ${err}`, type: 'error' }
+        : { message: 'Memory updated.', type: 'info' },
+    )
+    return
+  }
+
+  // delete
+  const ok = await api.input.confirm(
+    `Forget this memory? This cannot be undone.\n\n${excerpt(m.content, 120) || '(empty memory)'}`,
+  )
+  if (!ok) return
+  const err = await forgetMemory(api, m.id)
+  api.notifications.show(
+    err
+      ? { message: `Delete failed: ${err}`, type: 'error' }
+      : { message: 'Memory forgotten.', type: 'info' },
+  )
+}
+
+/** Show memories (or facts) in the pick modal; on selection, offer view/edit/forget. */
 async function presentMemories(
   api: PluginAPI,
   rows: MemoryRow[],
@@ -141,14 +231,10 @@ async function presentMemories(
   }))
   const picked = await api.input.pick(items, {
     title: `Memory (${rows.length})`,
-    placeholder: 'Select a memory to view its full content',
+    placeholder: 'Select a memory to view, edit, or forget it',
   })
   if (picked) {
-    api.notifications.show({
-      message: picked.content || '(empty memory)',
-      type: 'info',
-      duration: 8000,
-    })
+    await presentMemoryActions(api, picked)
   }
 }
 

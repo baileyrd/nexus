@@ -12,31 +12,31 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 76 |
-| `com.nexus.git` | 42 |
+| `com.nexus.storage` | 80 |
+| `com.nexus.git` | 45 |
 | `com.nexus.terminal` | 34 |
-| `com.nexus.ai` | 28 |
+| `com.nexus.ai` | 30 |
+| `com.nexus.agent` | 28 |
 | `com.nexus.dap` | 21 |
-| `com.nexus.agent` | 26 |
+| `com.nexus.memory` | 21 |
 | `com.nexus.editor` | 15 |
 | `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
 | `com.nexus.mcp.host` | 12 |
-| `com.nexus.theme` | 11 |
 | `com.nexus.ai.runtime` | 12 |
+| `com.nexus.theme` | 11 |
+| `com.nexus.security` | 11 |
 | `com.nexus.skills` | 8 |
 | `com.nexus.acp` | 8 |
-| `com.nexus.security` | 10 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.memory` | 21 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
 | `com.nexus.collab` | 4 |
 | `com.nexus.audio` | 3 |
-| `com.nexus.formats` | 2 |
+| `com.nexus.formats` | 3 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **347** |
+| **Total** | **395** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (76)
+## com.nexus.storage (80)
 
 ### Read
 
@@ -92,29 +92,29 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.git (42)
+## com.nexus.git (45)
 
 | Command | Caps | Note |
 |---------|------|------|
-| `status` / `log` / `branches` / `blame` / `diff_file` / `diff_staged` / `file_status` / `file_statuses` / `lfs_status` / `list_tags` / `conflict_files` / `conflict_versions` / `stash_list` | — | read-only inspection |
+| `status` / `log` / `branches` / `blame` / `diff_file` / `diff_staged` / `file_status` / `file_statuses` / `lfs_status` / `list_tags` / `conflict_files` / `conflict_versions` / `stash_list` / `remotes` | — | read-only inspection; `remotes` (C49 #402) lists configured remote names, no network access itself |
 | `stage_file` / `stage_all` / `stage_hunks` / `unstage_file` / `unstage_all` / `unstage_hunks` / `discard_hunks` | — | working-tree / index mutation inside forge root |
 | `commit` | — | writes commit object |
 | `create_branch` / `delete_branch` / `switch_branch` / `create_tag` / `delete_tag` | — | ref mutation |
-| `push` / `push_tags` | — | **AUDIT** — outbound network, candidate for `net.http` |
+| `push` / `push_tags` / `fetch` / `pull` | `net.http` | outbound network + SSH-agent/keyring credential read; `fetch`/`pull` added by C49 (#402) — same posture as `push`/`push_tags`, which were already classified `net.http` despite a stale **AUDIT** note here previously claiming otherwise |
 | `merge` / `abort_merge` / `rebase` / `abort_rebase` / `cherry_pick` / `abort_cherry_pick` | — | history mutation |
 | `worktree_list` / `worktree_create` / `worktree_remove` / `worktree_commit` | — | git worktrees for subagent isolation (RFC 0006/0007); worktrees live under `.forge/worktrees/`; `worktree_commit` stages + commits a worktree's delta to its branch |
 | `stash_push` / `stash_pop` / `stash_drop` | — | stash mgmt |
 
 ---
 
-## com.nexus.ai (28)
+## com.nexus.ai (30)
 
 ### Generation (gated by `ai.chat`)
 
 | Command | Caps | Policy | Note |
 |---------|------|--------|------|
 | `stream_chat` | `ai.chat` | `ai_tools_policy` | tools=auto → +`ai.tools.write`; auto_with_mcp → +`ai.tools.mcp` |
-| `stream_ask` / `ask` / `semantic_search` / `embed_text` / `generate` / `enrich_file` / `enrich_entity` / `infer_entity_relations` / `generate_docs` / `predict` | `ai.chat` | — | one provider round-trip per call |
+| `stream_ask` / `ask` / `semantic_search` / `embed_text` / `generate` / `enrich_file` / `enrich_entity` / `infer_entity_relations` / `extract_entities` / `generate_docs` / `predict` | `ai.chat` | — | one provider round-trip per call |
 | `propose_tool_calls` | `ai.chat` | `ai_tools_policy` | same policy as `stream_chat` |
 
 ### Index + sessions + config
@@ -162,7 +162,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.agent (26)
+## com.nexus.agent (28)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -259,7 +259,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.security (10)
+## com.nexus.security (11)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -272,6 +272,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
 | `sandbox_policy` | — | read-only introspection of the active OS-sandbox config (`sandbox.toml`) |
 | `download` | `net.http` | **async** — brokered, allowlisted download into a writable root (`{ url, dest, cwd? }`) |
+| `http_request` | `net.http` | **async** — C81, brokered outbound HTTP with arbitrary method/headers/body; response returned to the caller (`{ method, url, headers?, body? }` → `{ status, headers, body: base64 }`). Doubly gated by `sandbox.toml`'s `[http]` host allowlist — a distinct allowlist from `download` since the response leaves the sandbox. Also reachable from WASM community plugins via `host::http_request` and from script plugins via `platform.net.request` (both re-check `NetHttp` + the same policy). |
 
 ---
 
@@ -368,9 +369,11 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 
 ---
 
-## com.nexus.formats (2)
+## com.nexus.formats (3)
 
 `import_notion`, `export_notion` — pure parse / serialize; fs ops route through storage.
+
+`export_html` (C66 #419) — renders a forge note to a standalone styled HTML document via `markdown::export_to_html`; fs ops route through storage.
 
 ---
 

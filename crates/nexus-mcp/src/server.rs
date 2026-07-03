@@ -27,7 +27,7 @@ use rmcp::ServiceExt as _;
 use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
-use nexus_types::constants::{IPC_TIMEOUT_LONG, IPC_TIMEOUT_SHORT};
+use nexus_types::constants::{IPC_TIMEOUT_EXTENDED, IPC_TIMEOUT_LONG, IPC_TIMEOUT_SHORT};
 use nexus_types::plugin_ids;
 
 const STORAGE_PLUGIN: &str = plugin_ids::STORAGE;
@@ -47,6 +47,26 @@ const SECURITY_PLUGIN: &str = plugin_ids::SECURITY;
 /// `search`/`add`/`list`/`facts`/`entities` IPC handlers. No centralized
 /// `plugin_ids` const yet, so the id is inline.
 const MEMORY_PLUGIN: &str = "com.nexus.memory";
+/// C66 (#419) — `nexus_export_html` reaches into `com.nexus.formats` for
+/// the styled single-note HTML exporter's `export_html` handler.
+const FORMATS_PLUGIN: &str = plugin_ids::FORMATS;
+/// C74 (#427) — the `nexus_comment_*` tools reach into
+/// `com.nexus.comments` for the 7 thread/comment CRUD handlers.
+const COMMENTS_PLUGIN: &str = plugin_ids::COMMENTS;
+/// C74 (#427) — `nexus_comment_create_thread` needs `com.nexus.editor`
+/// to resolve a block-tree position into a stable `block_id` before
+/// it can call `comments::create_thread` (the one handler in the
+/// comments surface with no other anchor to hang a headless
+/// create-thread call on).
+const EDITOR_PLUGIN: &str = plugin_ids::EDITOR;
+/// C75 (#428) — `nexus_agent_run`/`nexus_agent_sessions` reach into
+/// `com.nexus.agent`'s `session_run`/`session_list` handlers so an
+/// external MCP client can delegate a goal to an agent archetype.
+const AGENT_PLUGIN: &str = plugin_ids::AGENT;
+/// C75 (#428) — `nexus_workflow_list`/`nexus_workflow_run` reach into
+/// `com.nexus.workflow`'s `list`/`run` handlers so an external MCP
+/// client can fire a user-authored workflow.
+const WORKFLOW_PLUGIN: &str = plugin_ids::WORKFLOW;
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
 /// Override via a future `[mcp.timeouts] ipc_secs = N` block
@@ -57,6 +77,12 @@ const IPC_TIMEOUT: Duration = DEFAULT_IPC_TIMEOUT;
 /// requests to the chat + embedding providers.
 pub const DEFAULT_AI_IPC_TIMEOUT: Duration = IPC_TIMEOUT_LONG;
 const AI_IPC_TIMEOUT: Duration = DEFAULT_AI_IPC_TIMEOUT;
+/// C75 (#428) — deadline for `nexus_agent_run` / `nexus_workflow_run`:
+/// both can drive many LLM/tool round-trips end-to-end, so they need
+/// the same extended budget the CLI's `agent run` / `workflow run`
+/// use rather than the short default.
+pub const DEFAULT_RUN_IPC_TIMEOUT: Duration = IPC_TIMEOUT_EXTENDED;
+const RUN_IPC_TIMEOUT: Duration = DEFAULT_RUN_IPC_TIMEOUT;
 
 /// URI prefix for MCP resources representing forge notes (PRD-14 §7.1/§7.2).
 ///
@@ -374,6 +400,39 @@ struct AskInput {
     question: String,
 }
 
+/// Input for `nexus_semantic_search` (C78 #431).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SemanticSearchInput {
+    /// Query to embed and retrieve against — natural language, not
+    /// keyword syntax.
+    query: String,
+    /// Maximum number of ranked chunks to return.
+    #[serde(default = "default_semantic_search_limit")]
+    limit: u32,
+    /// Fuse the vector ranking with lexical Tantivy BM25 (RRF) instead
+    /// of vector-only retrieval. Surfaces keyword-exact hits that
+    /// embed poorly alongside semantic hits that share no keywords.
+    #[serde(default)]
+    hybrid: bool,
+}
+
+fn default_semantic_search_limit() -> u32 {
+    10
+}
+
+/// Reply for `nexus_semantic_search`: raw ranked chunk hits, unlike
+/// `nexus_ask` which synthesizes a chat answer. `matches` carries
+/// `ChunkMatch` shape (`file_path`, `block_id`, `chunk_text`, `score`)
+/// for vector-only retrieval, or the hybrid `StorageHybridMatch` shape
+/// (`file_path`, `block_id`, `block_type`, `excerpt`, `score`,
+/// `fts_rank`, `vector_rank`) when `hybrid: true`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SemanticSearchOutput {
+    /// The AI plugin's `semantic_search` reply (or an `{ "error": … }`
+    /// object on failure).
+    result: serde_json::Value,
+}
+
 /// Input for `nexus_list_skills` (no parameters).
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct ListSkillsInput {}
@@ -602,6 +661,170 @@ struct NexusDetectChangesOutput {
     /// Same caveat as `nexus_context` / `nexus_impact`.
     degraded: bool,
     degraded_reason: Option<String>,
+}
+
+/// Input for `nexus_git_fetch` (C49 #402).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NexusGitFetchInput {
+    /// Remote name (e.g. `"origin"`).
+    remote: String,
+}
+
+/// Input for `nexus_git_pull` (C49 #402).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NexusGitPullInput {
+    /// Remote name (e.g. `"origin"`).
+    remote: String,
+    /// Branch name to merge in (e.g. `"main"`).
+    branch: String,
+}
+
+/// Input for `nexus_git_remotes` (C49 #402). No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct NexusGitRemotesInput {}
+
+/// Reply for `nexus_git_fetch` / a generic ok-flag git op.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct GitOkOutput {
+    /// The git plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
+// ── C74 (#427) — nexus_comment_* tools ───────────────────────────────────────
+
+/// Input for `nexus_comment_list`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentListInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+}
+
+/// Input for `nexus_comment_create_thread`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentCreateThreadInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Body text of the first comment in the new thread.
+    body: String,
+    /// 0-based index into the file's top-level blocks (as returned by
+    /// `com.nexus.editor::get_tree`'s `tree.root_blocks`) to anchor
+    /// the thread to. Defaults to `0` (the file's first block) — a
+    /// headless caller with no editor selection has no other natural
+    /// anchor to offer.
+    #[serde(default)]
+    block_index: Option<u32>,
+    /// Optional author display name.
+    #[serde(default)]
+    author: Option<String>,
+}
+
+/// Input for `nexus_comment_add_reply`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentAddReplyInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread to append to.
+    thread_id: String,
+    /// Reply body.
+    body: String,
+    /// Optional author display name.
+    #[serde(default)]
+    author: Option<String>,
+}
+
+/// Input for `nexus_comment_set_resolved`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentSetResolvedInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread to mark.
+    thread_id: String,
+    /// New resolved flag.
+    resolved: bool,
+    /// Author of the resolution flip (best-effort).
+    #[serde(default)]
+    author: Option<String>,
+}
+
+/// Input for `nexus_comment_delete_thread`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentDeleteThreadInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread to delete.
+    thread_id: String,
+}
+
+/// Input for `nexus_comment_delete_comment`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentDeleteCommentInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread containing the comment.
+    thread_id: String,
+    /// Comment to delete.
+    comment_id: String,
+}
+
+/// Input for `nexus_comment_edit_comment`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentEditCommentInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread containing the comment.
+    thread_id: String,
+    /// Comment to edit.
+    comment_id: String,
+    /// New body text.
+    body: String,
+}
+
+/// Reply for every `nexus_comment_*` tool.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct CommentResultOutput {
+    /// The comments plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
+// ── C75 (#428) — nexus_agent_* / nexus_workflow_* tools ──────────────────────
+
+/// Input for `nexus_agent_run`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AgentRunInput {
+    /// Natural-language goal for the agent to pursue.
+    goal: String,
+    /// Archetype — writer / coder / researcher / general (default).
+    #[serde(default)]
+    archetype: Option<String>,
+}
+
+/// Input for `nexus_agent_sessions`. No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct AgentSessionsInput {}
+
+/// Reply for `nexus_agent_run` / `nexus_agent_sessions`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AgentResultOutput {
+    /// The agent plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
+/// Input for `nexus_workflow_list`. No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct WorkflowListInput {}
+
+/// Input for `nexus_workflow_run`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct WorkflowRunInput {
+    /// Name of a loaded `.workflow.toml` to execute end-to-end.
+    name: String,
+}
+
+/// Reply for `nexus_workflow_list` / `nexus_workflow_run`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct WorkflowResultOutput {
+    /// The workflow plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
 }
 
 /// Output for `nexus_kernel_stats` (BL-137). Mirrors the
@@ -954,7 +1177,9 @@ impl NexusMcpServer {
         })
     }
 
-    /// BL-115 — `com.nexus.git` IPC client used by `nexus_detect_changes`.
+    /// BL-115 — `com.nexus.git` IPC client, originally added for
+    /// `nexus_detect_changes`; C49 (#402) reuses it for the
+    /// `nexus_git_*` remote-sync tools.
     async fn git_call<T: serde::de::DeserializeOwned>(
         &self,
         command: &str,
@@ -991,6 +1216,90 @@ impl NexusMcpServer {
         let value = self
             .context
             .ipc_call(MEMORY_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// `com.nexus.formats` IPC client for `nexus_export_html` (C66).
+    async fn formats_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(FORMATS_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C74 (#427) — `com.nexus.comments` IPC client for the
+    /// `nexus_comment_*` tools.
+    async fn comments_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(COMMENTS_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C74 (#427) — `com.nexus.editor` IPC client used only by
+    /// `nexus_comment_create_thread`'s block-id anchor resolution
+    /// (`open` → `get_tree` → `stamp_block`).
+    async fn editor_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(EDITOR_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C75 (#428) — `com.nexus.agent` IPC client for `nexus_agent_run` /
+    /// `nexus_agent_sessions`. `nexus_agent_run` drives a full
+    /// tool-calling session (possibly many LLM round-trips), so it
+    /// gets the same extended deadline the CLI's `agent run` uses;
+    /// `nexus_agent_sessions` is a plain read and uses the default.
+    async fn agent_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(AGENT_PLUGIN, command, args, timeout)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C75 (#428) — `com.nexus.workflow` IPC client for
+    /// `nexus_workflow_list` / `nexus_workflow_run`. `run` executes
+    /// every step of a user-authored workflow (may itself call AI or
+    /// other IPC handlers) so it gets the same extended deadline
+    /// `nexus_agent_run` and the CLI's `workflow run` use; `list` is
+    /// a plain read and uses the default.
+    async fn workflow_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(WORKFLOW_PLUGIN, command, args, timeout)
             .await
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
@@ -1171,6 +1480,51 @@ struct MemoryConsolidateInput {
     dry_run: Option<bool>,
 }
 
+/// Input for `nexus_memory_get`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryGetInput {
+    /// The memory id (UUID string) to fetch.
+    id: String,
+}
+
+/// Input for `nexus_memory_update` (C35). Only the provided fields change;
+/// omitted fields keep their stored value.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryUpdateInput {
+    /// The memory id (UUID string) to update.
+    id: String,
+    /// New content, if changing.
+    #[serde(default)]
+    content: Option<String>,
+    /// New category, if changing.
+    #[serde(default)]
+    category: Option<String>,
+    /// Replacement tag list, if changing.
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    /// New lifecycle status (`active` | `archived` | `superseded` |
+    /// `deleted`), if changing. Prefer `nexus_memory_delete` over setting
+    /// `deleted` here — same effect, clearer intent (C36).
+    #[serde(default)]
+    status: Option<String>,
+    /// New SPO subject, if changing.
+    #[serde(default)]
+    subject: Option<String>,
+    /// New SPO predicate, if changing.
+    #[serde(default)]
+    predicate: Option<String>,
+    /// New SPO object, if changing.
+    #[serde(default)]
+    object: Option<String>,
+}
+
+/// Input for `nexus_memory_delete` (C35) — "forget this memory".
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryDeleteInput {
+    /// The memory id (UUID string) to delete.
+    id: String,
+}
+
 /// Wraps a memory operation's JSON reply (or `{ "error": … }` on failure).
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct MemoryResultOutput {
@@ -1247,6 +1601,29 @@ struct MemoryListOutput {
 struct MemoryItemOutput {
     /// The stored memory object (or an `{ "error": … }` object on failure).
     memory: serde_json::Value,
+}
+
+/// Input for `nexus_export_html` (C66) — render a forge note to standalone HTML.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExportHtmlInput {
+    /// Forge-relative path to the markdown note to render.
+    path: String,
+    /// Document title. Defaults to the source file's stem.
+    #[serde(default)]
+    title: Option<String>,
+    /// Forge-relative output path. When given, the HTML is written there
+    /// instead of being returned inline.
+    #[serde(default)]
+    dest: Option<String>,
+}
+
+/// Reply from `nexus_export_html`: either `{ html }` or `{ written, dest }`
+/// (or an `{ "error": … }` object on failure), as returned by
+/// `com.nexus.formats::export_html`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ExportHtmlOutput {
+    /// The formats plugin's reply.
+    result: serde_json::Value,
 }
 
 #[tool_router]
@@ -1762,6 +2139,96 @@ impl NexusMcpServer {
     }
 
     #[tool(
+        name = "nexus_memory_get",
+        description = "Fetch a single memory by id (records access for vitality ranking)"
+    )]
+    async fn memory_get(
+        &self,
+        Parameters(input): Parameters<MemoryGetInput>,
+    ) -> Json<MemoryItemOutput> {
+        let args = serde_json::json!({ "id": input.id });
+        match self.memory_call::<serde_json::Value>("get", args).await {
+            Ok(memory) => Json(MemoryItemOutput { memory }),
+            Err(e) => Json(MemoryItemOutput {
+                memory: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C35 (#388) — the update/delete IPC handlers already existed
+    // (crates/nexus-memory/src/core_plugin.rs) but no MCP tool reached them,
+    // so an agent asked to "forget this" or "fix that memory" had no path.
+    #[tool(
+        name = "nexus_memory_update",
+        description = "Patch a stored memory's fields (content, category, tags, status, SPO fact fields). Only provided fields change"
+    )]
+    async fn memory_update(
+        &self,
+        Parameters(input): Parameters<MemoryUpdateInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({
+            "id": input.id,
+            "content": input.content,
+            "category": input.category,
+            "tags": input.tags,
+            "status": input.status,
+            "subject": input.subject,
+            "predicate": input.predicate,
+            "object": input.object,
+        });
+        match self.memory_call::<serde_json::Value>("update", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_memory_delete",
+        description = "Permanently forget a memory by id"
+    )]
+    async fn memory_delete(
+        &self,
+        Parameters(input): Parameters<MemoryDeleteInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({ "id": input.id });
+        match self.memory_call::<serde_json::Value>("delete", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C66 (#419) — the styled single-note HTML exporter
+    // (crates/nexus-formats/src/markdown/html.rs) had an IPC handler
+    // (com.nexus.formats::export_html) but no MCP tool reached it.
+    #[tool(
+        name = "nexus_export_html",
+        description = "Render a forge note to a standalone styled HTML document. Returns the HTML inline, or writes it to `dest` when given"
+    )]
+    async fn export_html(
+        &self,
+        Parameters(input): Parameters<ExportHtmlInput>,
+    ) -> Json<ExportHtmlOutput> {
+        let args = serde_json::json!({
+            "source": input.path,
+            "title": input.title,
+            "dest": input.dest,
+        });
+        match self
+            .formats_call::<serde_json::Value>("export_html", args)
+            .await
+        {
+            Ok(result) => Json(ExportHtmlOutput { result }),
+            Err(e) => Json(ExportHtmlOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
         name = "nexus_list_notes",
         description = "List notes in the forge, optionally filtered by a path prefix"
     )]
@@ -2148,6 +2615,38 @@ impl NexusMcpServer {
         }
     }
 
+    // C78 (#431) — nexus_ask synthesizes a chat answer with only a
+    // source *count*; agents/scripts that want the raw ranked hits
+    // (file_path, score, excerpt) for their own use had no MCP tool
+    // to call — this exposes the same com.nexus.ai::semantic_search
+    // handler the shell's "Search by Meaning" already uses, with
+    // `hybrid: true` fusing in lexical BM25 via RRF instead of
+    // vector-only retrieval.
+    #[tool(
+        name = "nexus_semantic_search",
+        description = "Embedding-driven retrieval over your notes: returns raw ranked chunk hits (file_path, score, excerpt/chunk_text) rather than a synthesized answer. Pass hybrid=true to fuse vector similarity with lexical BM25 (RRF) instead of vector-only. Requires an AI embedding provider to be configured."
+    )]
+    async fn nexus_semantic_search(
+        &self,
+        Parameters(input): Parameters<SemanticSearchInput>,
+    ) -> Json<SemanticSearchOutput> {
+        let args = serde_json::json!({
+            "query": input.query,
+            "limit": input.limit,
+            "hybrid": input.hybrid,
+        });
+        match self
+            .context
+            .ipc_call(AI_PLUGIN, "semantic_search", args, AI_IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(SemanticSearchOutput { result }),
+            Err(e) => Json(SemanticSearchOutput {
+                result: serde_json::json!({ "error": e.to_string() }),
+            }),
+        }
+    }
+
     #[tool(
         name = "nexus_list_skills",
         description = "List all skills (authored prompt templates) declared in the forge's .forge/skills directory"
@@ -2373,6 +2872,403 @@ impl NexusMcpServer {
             degraded: true,
             degraded_reason: Some(BL115_DEGRADED_REASON.to_string()),
         })
+    }
+
+    // C49 (#402) — GitEngine's fetch/pull/remotes existed with full
+    // SSH-agent + keyring credential support but had no IPC handler at
+    // all, so no frontend — shell, TUI, or MCP — could reach them; only
+    // the CLI could, via a direct (non-IPC) GitEngine call. These three
+    // tools are thin wrappers over the new com.nexus.git handlers.
+    #[tool(
+        name = "nexus_git_remotes",
+        description = "List the forge repository's configured git remote names (e.g. [\"origin\"]). Read-only, no network access."
+    )]
+    async fn nexus_git_remotes(
+        &self,
+        Parameters(_input): Parameters<NexusGitRemotesInput>,
+    ) -> Json<GitOkOutput> {
+        match self
+            .git_call::<serde_json::Value>("remotes", serde_json::json!({}))
+            .await
+        {
+            Ok(result) => Json(GitOkOutput { result }),
+            Err(e) => Json(GitOkOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_git_fetch",
+        description = "Fetch all refs from a remote into the forge repository's remote-tracking branches. Does not modify the working tree or HEAD — use nexus_git_pull to also merge."
+    )]
+    async fn nexus_git_fetch(
+        &self,
+        Parameters(input): Parameters<NexusGitFetchInput>,
+    ) -> Json<GitOkOutput> {
+        match self
+            .git_call::<serde_json::Value>("fetch", serde_json::json!({ "remote": input.remote }))
+            .await
+        {
+            Ok(result) => Json(GitOkOutput { result }),
+            Err(e) => Json(GitOkOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_git_pull",
+        description = "Fetch from a remote and merge the named branch into HEAD. Returns { fast_forward, conflicts, commit_hash } — a non-empty `conflicts` list means the merge paused mid-flight and needs manual resolution (or com.nexus.git::abort_merge)."
+    )]
+    async fn nexus_git_pull(
+        &self,
+        Parameters(input): Parameters<NexusGitPullInput>,
+    ) -> Json<GitOkOutput> {
+        match self
+            .git_call::<serde_json::Value>(
+                "pull",
+                serde_json::json!({ "remote": input.remote, "branch": input.branch }),
+            )
+            .await
+        {
+            Ok(result) => Json(GitOkOutput { result }),
+            Err(e) => Json(GitOkOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C74 (#427) — com.nexus.comments exposed 7 IPC handlers but the
+    // sole frontend consumer was the shell (commentsApi.ts); an AI
+    // reviewer over MCP had to edit note files instead of using this
+    // non-destructive annotation channel. These 7 tools are thin
+    // mappings over the existing handlers, except create_thread,
+    // which needs an anchor-resolution step (see below).
+    #[tool(
+        name = "nexus_comment_list",
+        description = "List every comment thread on a note, each with its full reply history. Threads are anchored to a specific block; use nexus_comment_create_thread / nexus_comment_add_reply to write."
+    )]
+    async fn nexus_comment_list(
+        &self,
+        Parameters(input): Parameters<CommentListInput>,
+    ) -> Json<CommentResultOutput> {
+        match self
+            .comments_call::<serde_json::Value>(
+                "list",
+                serde_json::json!({ "file_path": input.file_path }),
+            )
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_create_thread",
+        description = "Start a new comment thread on a note, anchored to one of its top-level blocks (block_index, 0-based, default 0 = the first block). Comments are file-as-truth JSON sidecars — a non-destructive annotation channel, distinct from editing the note body directly. Internally resolves the anchor via com.nexus.editor's open/get_tree/stamp_block chain, the same machinery the shell's comment pane uses."
+    )]
+    async fn nexus_comment_create_thread(
+        &self,
+        Parameters(input): Parameters<CommentCreateThreadInput>,
+    ) -> Json<CommentResultOutput> {
+        let block_index = input.block_index.unwrap_or(0) as usize;
+
+        if let Err(e) = self
+            .editor_call::<serde_json::Value>(
+                "open",
+                serde_json::json!({ "relpath": input.file_path }),
+            )
+            .await
+        {
+            return Json(CommentResultOutput {
+                result: serde_json::json!({ "error": format!("editor open: {e}") }),
+            });
+        }
+
+        #[derive(Deserialize)]
+        struct TreeReply {
+            tree: TreeBody,
+        }
+        #[derive(Deserialize)]
+        struct TreeBody {
+            root_blocks: Vec<String>,
+        }
+        let tree = match self
+            .editor_call::<TreeReply>(
+                "get_tree",
+                serde_json::json!({ "relpath": input.file_path }),
+            )
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                return Json(CommentResultOutput {
+                    result: serde_json::json!({ "error": format!("editor get_tree: {e}") }),
+                })
+            }
+        };
+        let Some(block_id) = tree.tree.root_blocks.get(block_index) else {
+            return Json(CommentResultOutput {
+                result: serde_json::json!({
+                    "error": format!(
+                        "block_index {block_index} out of range — '{}' has {} top-level block(s)",
+                        input.file_path,
+                        tree.tree.root_blocks.len(),
+                    ),
+                }),
+            });
+        };
+
+        #[derive(Deserialize)]
+        struct StampReply {
+            stable_id: String,
+        }
+        let stamp = match self
+            .editor_call::<StampReply>(
+                "stamp_block",
+                serde_json::json!({ "relpath": input.file_path, "block_id": block_id }),
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                return Json(CommentResultOutput {
+                    result: serde_json::json!({ "error": format!("editor stamp_block: {e}") }),
+                })
+            }
+        };
+
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "block_id": stamp.stable_id,
+            "body": input.body,
+            "author": input.author,
+        });
+        match self
+            .comments_call::<serde_json::Value>("create_thread", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_add_reply",
+        description = "Append a reply to an existing comment thread."
+    )]
+    async fn nexus_comment_add_reply(
+        &self,
+        Parameters(input): Parameters<CommentAddReplyInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "body": input.body,
+            "author": input.author,
+        });
+        match self
+            .comments_call::<serde_json::Value>("add_reply", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_set_resolved",
+        description = "Mark a comment thread resolved or unresolved."
+    )]
+    async fn nexus_comment_set_resolved(
+        &self,
+        Parameters(input): Parameters<CommentSetResolvedInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "resolved": input.resolved,
+            "author": input.author,
+        });
+        match self
+            .comments_call::<serde_json::Value>("set_resolved", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_edit_comment",
+        description = "Edit an existing comment's body in place."
+    )]
+    async fn nexus_comment_edit_comment(
+        &self,
+        Parameters(input): Parameters<CommentEditCommentInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "comment_id": input.comment_id,
+            "body": input.body,
+        });
+        match self
+            .comments_call::<serde_json::Value>("edit_comment", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_delete_comment",
+        description = "Delete a single comment from a thread. Deleting a thread's only comment leaves an empty thread — use nexus_comment_delete_thread to remove the whole thread instead."
+    )]
+    async fn nexus_comment_delete_comment(
+        &self,
+        Parameters(input): Parameters<CommentDeleteCommentInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "comment_id": input.comment_id,
+        });
+        match self
+            .comments_call::<serde_json::Value>("delete_comment", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_delete_thread",
+        description = "Delete an entire comment thread, including all its replies."
+    )]
+    async fn nexus_comment_delete_thread(
+        &self,
+        Parameters(input): Parameters<CommentDeleteThreadInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+        });
+        match self
+            .comments_call::<serde_json::Value>("delete_thread", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C75 (#428) — the MCP server's static tools previously covered
+    // notes/graph/tasks/RAG/skills/git/security/memory/comments but
+    // could not drive either of Nexus's two execution surfaces: an
+    // agent session or a user-authored workflow. `nexus_agent_run`
+    // always sets `auto_approve: true` — a synchronous MCP tool call
+    // has no bidirectional channel for the CLI's interactive
+    // round_proposed/round_decide approval loop (BL-132), so it
+    // mirrors the CLI's non-interactive default instead.
+    #[tool(
+        name = "nexus_agent_run",
+        description = "Delegate a goal to a Nexus agent session and run it end-to-end (auto-approving every tool call — there is no interactive approval channel over MCP). Returns the full transcript: rounds, tool calls, and outcome. Archetype selects the system prompt / tool profile (writer / coder / researcher / general, default general)."
+    )]
+    async fn nexus_agent_run(
+        &self,
+        Parameters(input): Parameters<AgentRunInput>,
+    ) -> Json<AgentResultOutput> {
+        let args = serde_json::json!({
+            "goal": input.goal,
+            "archetype": input.archetype,
+            "auto_approve": true,
+        });
+        match self
+            .agent_call::<serde_json::Value>("session_run", args, RUN_IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(AgentResultOutput { result }),
+            Err(e) => Json(AgentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_agent_sessions",
+        description = "List stored agent sessions — id, outcome, goal, and fork lineage (parent_id / branch_point) for sessions created via resume/branch/rewind. Read-only."
+    )]
+    async fn nexus_agent_sessions(
+        &self,
+        Parameters(_input): Parameters<AgentSessionsInput>,
+    ) -> Json<AgentResultOutput> {
+        match self
+            .agent_call::<serde_json::Value>("session_list", serde_json::json!({}), IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(AgentResultOutput { result }),
+            Err(e) => Json(AgentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_workflow_list",
+        description = "List every loaded `.workflow.toml` — name, trigger config, and step count. Read-only."
+    )]
+    async fn nexus_workflow_list(
+        &self,
+        Parameters(_input): Parameters<WorkflowListInput>,
+    ) -> Json<WorkflowResultOutput> {
+        match self
+            .workflow_call::<serde_json::Value>("list", serde_json::json!({}), IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(WorkflowResultOutput { result }),
+            Err(e) => Json(WorkflowResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_workflow_run",
+        description = "Fire a user-authored workflow on demand and run every step to completion. Each step is still gated by its own target handler's capabilities (issue #77 — the workflow boundary itself imposes no additional cap ceiling), so this can have side effects as broad as the workflow's steps."
+    )]
+    async fn nexus_workflow_run(
+        &self,
+        Parameters(input): Parameters<WorkflowRunInput>,
+    ) -> Json<WorkflowResultOutput> {
+        let args = serde_json::json!({ "name": input.name });
+        match self
+            .workflow_call::<serde_json::Value>("run", args, RUN_IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(WorkflowResultOutput { result }),
+            Err(e) => Json(WorkflowResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
     }
 
     #[tool(
@@ -2824,6 +3720,72 @@ mod tests {
         assert_eq!(input.id, "skill-b");
         assert_eq!(input.values.len(), 2);
         assert_eq!(input.values["topic"], serde_json::json!("rust"));
+    }
+
+    #[test]
+    fn comment_create_thread_input_defaults_block_index_and_author_to_none() {
+        let input: CommentCreateThreadInput = serde_json::from_value(serde_json::json!({
+            "file_path": "notes/a.md",
+            "body": "first comment"
+        }))
+        .unwrap();
+        assert_eq!(input.file_path, "notes/a.md");
+        assert_eq!(input.body, "first comment");
+        assert_eq!(input.block_index, None);
+        assert_eq!(input.author, None);
+    }
+
+    #[test]
+    fn comment_create_thread_input_round_trips_block_index_and_author() {
+        let input: CommentCreateThreadInput = serde_json::from_value(serde_json::json!({
+            "file_path": "notes/a.md",
+            "body": "first comment",
+            "block_index": 2,
+            "author": "reviewer"
+        }))
+        .unwrap();
+        assert_eq!(input.block_index, Some(2));
+        assert_eq!(input.author.as_deref(), Some("reviewer"));
+    }
+
+    #[test]
+    fn comment_add_reply_input_defaults_author_to_none() {
+        let input: CommentAddReplyInput = serde_json::from_value(serde_json::json!({
+            "file_path": "notes/a.md",
+            "thread_id": "11111111-1111-1111-1111-111111111111",
+            "body": "a reply"
+        }))
+        .unwrap();
+        assert_eq!(input.author, None);
+    }
+
+    #[test]
+    fn agent_run_input_defaults_archetype_to_none() {
+        let input: AgentRunInput = serde_json::from_value(serde_json::json!({
+            "goal": "summarize yesterday's notes"
+        }))
+        .unwrap();
+        assert_eq!(input.goal, "summarize yesterday's notes");
+        assert_eq!(input.archetype, None);
+    }
+
+    #[test]
+    fn agent_run_input_round_trips_archetype() {
+        let input: AgentRunInput = serde_json::from_value(serde_json::json!({
+            "goal": "draft a proposal",
+            "archetype": "writer"
+        }))
+        .unwrap();
+        assert_eq!(input.archetype.as_deref(), Some("writer"));
+    }
+
+    #[test]
+    fn workflow_run_input_requires_name() {
+        let input: WorkflowRunInput = serde_json::from_value(serde_json::json!({
+            "name": "daily-journal"
+        }))
+        .unwrap();
+        assert_eq!(input.name, "daily-journal");
     }
 
     #[test]
