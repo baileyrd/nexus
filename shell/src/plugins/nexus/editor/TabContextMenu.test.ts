@@ -1,5 +1,6 @@
-// C66 (#419) — regression coverage for the new "Export as HTML…" tab-actions
-// menu entry: it must appear wired (no "coming soon" tooltip) from the start.
+// C65 (#418) / C66 (#419) — regression coverage for the tab-actions menu:
+// both export commands must appear with no "coming soon" tooltip now that
+// they're fully wired (scoped print stylesheet / com.nexus.formats IPC).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -20,6 +21,12 @@ function findItem(commandId: string) {
   assert.ok(found, `expected a menu item with commandId ${commandId}`)
   return found
 }
+
+test('export to PDF is wired — no coming-soon tooltip', () => {
+  const item = findItem('nexus.editor.stub.exportPdf')
+  assert.equal(item.label, 'Export to PDF...')
+  assert.equal(item.tooltip, undefined)
+})
 
 test('export as HTML is present and wired — no coming-soon tooltip', () => {
   const item = findItem('nexus.editor.exportHtml')

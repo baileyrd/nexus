@@ -115,6 +115,11 @@ export const STUB_COMMANDS: ReadonlyArray<{ id: string; title: string; label: st
     title: 'Merge entire file with…',
     label: 'Merge entire file',
   },
+  // C65 (#418) — no longer a stub: the command below prints the active
+  // preview through a scoped print stylesheet. Left in this list so the
+  // command-palette title/category registration stays centralized; the
+  // WIRED set in index.ts's activate() excludes it from the generic
+  // "coming soon" fallback registration.
   { id: 'nexus.editor.stub.exportPdf', title: 'Export to PDF…', label: 'Export to PDF' },
 ]
 export const DELETE_FILE_HANDLER = 'delete_file'
