@@ -118,6 +118,10 @@ enum Commands {
     Agent(AgentArgs),
     /// Agent tool registry (PRD-15 §4) — list catalogued tools
     Tool(ToolArgs),
+    /// Comment thread operations (C74 #427) — `com.nexus.comments`
+    /// list/create/reply/resolve/edit/delete, headless parity with the
+    /// shell's comment pane.
+    Comments(CommentsArgs),
     /// Forge-format versioning + migrations (PRD-06 §9, DG-43)
     Migrate(MigrateArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
@@ -609,6 +613,58 @@ fn main() {
 
         Commands::Tool(args) => match args.command {
             ToolCommand::List { capabilities } => commands::tool::list(&mut app, &capabilities),
+        },
+
+        Commands::Comments(args) => match args.command {
+            CommentsCommand::List { path } => commands::comments::list(&mut app, &path),
+            CommentsCommand::CreateThread {
+                path,
+                body,
+                block_index,
+                author,
+            } => commands::comments::create_thread(
+                &mut app,
+                &path,
+                &body,
+                block_index,
+                author.as_deref(),
+            ),
+            CommentsCommand::AddReply {
+                path,
+                thread_id,
+                body,
+                author,
+            } => commands::comments::add_reply(
+                &mut app,
+                &path,
+                &thread_id,
+                &body,
+                author.as_deref(),
+            ),
+            CommentsCommand::Resolve {
+                path,
+                thread_id,
+                author,
+            } => commands::comments::resolve(&mut app, &path, &thread_id, author.as_deref()),
+            CommentsCommand::Unresolve {
+                path,
+                thread_id,
+                author,
+            } => commands::comments::unresolve(&mut app, &path, &thread_id, author.as_deref()),
+            CommentsCommand::EditComment {
+                path,
+                thread_id,
+                comment_id,
+                body,
+            } => commands::comments::edit_comment(&mut app, &path, &thread_id, &comment_id, &body),
+            CommentsCommand::DeleteComment {
+                path,
+                thread_id,
+                comment_id,
+            } => commands::comments::delete_comment(&mut app, &path, &thread_id, &comment_id),
+            CommentsCommand::DeleteThread { path, thread_id } => {
+                commands::comments::delete_thread(&mut app, &path, &thread_id)
+            }
         },
 
         Commands::Migrate(args) => match args.command {

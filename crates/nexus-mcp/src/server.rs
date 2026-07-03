@@ -50,6 +50,15 @@ const MEMORY_PLUGIN: &str = "com.nexus.memory";
 /// C66 (#419) — `nexus_export_html` reaches into `com.nexus.formats` for
 /// the styled single-note HTML exporter's `export_html` handler.
 const FORMATS_PLUGIN: &str = plugin_ids::FORMATS;
+/// C74 (#427) — the `nexus_comment_*` tools reach into
+/// `com.nexus.comments` for the 7 thread/comment CRUD handlers.
+const COMMENTS_PLUGIN: &str = plugin_ids::COMMENTS;
+/// C74 (#427) — `nexus_comment_create_thread` needs `com.nexus.editor`
+/// to resolve a block-tree position into a stable `block_id` before
+/// it can call `comments::create_thread` (the one handler in the
+/// comments surface with no other anchor to hang a headless
+/// create-thread call on).
+const EDITOR_PLUGIN: &str = plugin_ids::EDITOR;
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
 /// Override via a future `[mcp.timeouts] ipc_secs = N` block
@@ -634,6 +643,102 @@ struct GitOkOutput {
     result: serde_json::Value,
 }
 
+// ── C74 (#427) — nexus_comment_* tools ───────────────────────────────────────
+
+/// Input for `nexus_comment_list`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentListInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+}
+
+/// Input for `nexus_comment_create_thread`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentCreateThreadInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Body text of the first comment in the new thread.
+    body: String,
+    /// 0-based index into the file's top-level blocks (as returned by
+    /// `com.nexus.editor::get_tree`'s `tree.root_blocks`) to anchor
+    /// the thread to. Defaults to `0` (the file's first block) — a
+    /// headless caller with no editor selection has no other natural
+    /// anchor to offer.
+    #[serde(default)]
+    block_index: Option<u32>,
+    /// Optional author display name.
+    #[serde(default)]
+    author: Option<String>,
+}
+
+/// Input for `nexus_comment_add_reply`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentAddReplyInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread to append to.
+    thread_id: String,
+    /// Reply body.
+    body: String,
+    /// Optional author display name.
+    #[serde(default)]
+    author: Option<String>,
+}
+
+/// Input for `nexus_comment_set_resolved`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentSetResolvedInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread to mark.
+    thread_id: String,
+    /// New resolved flag.
+    resolved: bool,
+    /// Author of the resolution flip (best-effort).
+    #[serde(default)]
+    author: Option<String>,
+}
+
+/// Input for `nexus_comment_delete_thread`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentDeleteThreadInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread to delete.
+    thread_id: String,
+}
+
+/// Input for `nexus_comment_delete_comment`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentDeleteCommentInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread containing the comment.
+    thread_id: String,
+    /// Comment to delete.
+    comment_id: String,
+}
+
+/// Input for `nexus_comment_edit_comment`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CommentEditCommentInput {
+    /// Forge-relative path of the markdown file.
+    file_path: String,
+    /// Thread containing the comment.
+    thread_id: String,
+    /// Comment to edit.
+    comment_id: String,
+    /// New body text.
+    body: String,
+}
+
+/// Reply for every `nexus_comment_*` tool.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct CommentResultOutput {
+    /// The comments plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
 /// Output for `nexus_kernel_stats` (BL-137). Mirrors the
 /// `MetricsSnapshot` shape returned by
 /// `com.nexus.security::metrics_snapshot`. Field names + types match
@@ -1037,6 +1142,37 @@ impl NexusMcpServer {
         let value = self
             .context
             .ipc_call(FORMATS_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C74 (#427) — `com.nexus.comments` IPC client for the
+    /// `nexus_comment_*` tools.
+    async fn comments_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(COMMENTS_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C74 (#427) — `com.nexus.editor` IPC client used only by
+    /// `nexus_comment_create_thread`'s block-id anchor resolution
+    /// (`open` → `get_tree` → `stamp_block`).
+    async fn editor_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(EDITOR_PLUGIN, command, args, IPC_TIMEOUT)
             .await
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
@@ -2644,6 +2780,248 @@ impl NexusMcpServer {
         }
     }
 
+    // C74 (#427) — com.nexus.comments exposed 7 IPC handlers but the
+    // sole frontend consumer was the shell (commentsApi.ts); an AI
+    // reviewer over MCP had to edit note files instead of using this
+    // non-destructive annotation channel. These 7 tools are thin
+    // mappings over the existing handlers, except create_thread,
+    // which needs an anchor-resolution step (see below).
+    #[tool(
+        name = "nexus_comment_list",
+        description = "List every comment thread on a note, each with its full reply history. Threads are anchored to a specific block; use nexus_comment_create_thread / nexus_comment_add_reply to write."
+    )]
+    async fn nexus_comment_list(
+        &self,
+        Parameters(input): Parameters<CommentListInput>,
+    ) -> Json<CommentResultOutput> {
+        match self
+            .comments_call::<serde_json::Value>(
+                "list",
+                serde_json::json!({ "file_path": input.file_path }),
+            )
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_create_thread",
+        description = "Start a new comment thread on a note, anchored to one of its top-level blocks (block_index, 0-based, default 0 = the first block). Comments are file-as-truth JSON sidecars — a non-destructive annotation channel, distinct from editing the note body directly. Internally resolves the anchor via com.nexus.editor's open/get_tree/stamp_block chain, the same machinery the shell's comment pane uses."
+    )]
+    async fn nexus_comment_create_thread(
+        &self,
+        Parameters(input): Parameters<CommentCreateThreadInput>,
+    ) -> Json<CommentResultOutput> {
+        let block_index = input.block_index.unwrap_or(0) as usize;
+
+        if let Err(e) = self
+            .editor_call::<serde_json::Value>(
+                "open",
+                serde_json::json!({ "relpath": input.file_path }),
+            )
+            .await
+        {
+            return Json(CommentResultOutput {
+                result: serde_json::json!({ "error": format!("editor open: {e}") }),
+            });
+        }
+
+        #[derive(Deserialize)]
+        struct TreeReply {
+            tree: TreeBody,
+        }
+        #[derive(Deserialize)]
+        struct TreeBody {
+            root_blocks: Vec<String>,
+        }
+        let tree = match self
+            .editor_call::<TreeReply>(
+                "get_tree",
+                serde_json::json!({ "relpath": input.file_path }),
+            )
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                return Json(CommentResultOutput {
+                    result: serde_json::json!({ "error": format!("editor get_tree: {e}") }),
+                })
+            }
+        };
+        let Some(block_id) = tree.tree.root_blocks.get(block_index) else {
+            return Json(CommentResultOutput {
+                result: serde_json::json!({
+                    "error": format!(
+                        "block_index {block_index} out of range — '{}' has {} top-level block(s)",
+                        input.file_path,
+                        tree.tree.root_blocks.len(),
+                    ),
+                }),
+            });
+        };
+
+        #[derive(Deserialize)]
+        struct StampReply {
+            stable_id: String,
+        }
+        let stamp = match self
+            .editor_call::<StampReply>(
+                "stamp_block",
+                serde_json::json!({ "relpath": input.file_path, "block_id": block_id }),
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                return Json(CommentResultOutput {
+                    result: serde_json::json!({ "error": format!("editor stamp_block: {e}") }),
+                })
+            }
+        };
+
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "block_id": stamp.stable_id,
+            "body": input.body,
+            "author": input.author,
+        });
+        match self
+            .comments_call::<serde_json::Value>("create_thread", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_add_reply",
+        description = "Append a reply to an existing comment thread."
+    )]
+    async fn nexus_comment_add_reply(
+        &self,
+        Parameters(input): Parameters<CommentAddReplyInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "body": input.body,
+            "author": input.author,
+        });
+        match self
+            .comments_call::<serde_json::Value>("add_reply", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_set_resolved",
+        description = "Mark a comment thread resolved or unresolved."
+    )]
+    async fn nexus_comment_set_resolved(
+        &self,
+        Parameters(input): Parameters<CommentSetResolvedInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "resolved": input.resolved,
+            "author": input.author,
+        });
+        match self
+            .comments_call::<serde_json::Value>("set_resolved", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_edit_comment",
+        description = "Edit an existing comment's body in place."
+    )]
+    async fn nexus_comment_edit_comment(
+        &self,
+        Parameters(input): Parameters<CommentEditCommentInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "comment_id": input.comment_id,
+            "body": input.body,
+        });
+        match self
+            .comments_call::<serde_json::Value>("edit_comment", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_delete_comment",
+        description = "Delete a single comment from a thread. Deleting a thread's only comment leaves an empty thread — use nexus_comment_delete_thread to remove the whole thread instead."
+    )]
+    async fn nexus_comment_delete_comment(
+        &self,
+        Parameters(input): Parameters<CommentDeleteCommentInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+            "comment_id": input.comment_id,
+        });
+        match self
+            .comments_call::<serde_json::Value>("delete_comment", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_comment_delete_thread",
+        description = "Delete an entire comment thread, including all its replies."
+    )]
+    async fn nexus_comment_delete_thread(
+        &self,
+        Parameters(input): Parameters<CommentDeleteThreadInput>,
+    ) -> Json<CommentResultOutput> {
+        let args = serde_json::json!({
+            "file_path": input.file_path,
+            "thread_id": input.thread_id,
+        });
+        match self
+            .comments_call::<serde_json::Value>("delete_thread", args)
+            .await
+        {
+            Ok(result) => Json(CommentResultOutput { result }),
+            Err(e) => Json(CommentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
     #[tool(
         name = "nexus_kernel_stats",
         description = "Snapshot the kernel's BL-093 metrics: per-(plugin, command) IPC call counters + duration histograms (p50/p95/p99), event-bus publish counters, capability-check counters by outcome, plugin-lifecycle-hook histograms, current event-bus queue depth, and `metrics_dropped_total` (sentinel for the per-metric key cap). Read-only. Useful for monitoring kernel hot paths or diagnosing latency / capability-deny regressions from an agent."
@@ -3093,6 +3471,43 @@ mod tests {
         assert_eq!(input.id, "skill-b");
         assert_eq!(input.values.len(), 2);
         assert_eq!(input.values["topic"], serde_json::json!("rust"));
+    }
+
+    #[test]
+    fn comment_create_thread_input_defaults_block_index_and_author_to_none() {
+        let input: CommentCreateThreadInput = serde_json::from_value(serde_json::json!({
+            "file_path": "notes/a.md",
+            "body": "first comment"
+        }))
+        .unwrap();
+        assert_eq!(input.file_path, "notes/a.md");
+        assert_eq!(input.body, "first comment");
+        assert_eq!(input.block_index, None);
+        assert_eq!(input.author, None);
+    }
+
+    #[test]
+    fn comment_create_thread_input_round_trips_block_index_and_author() {
+        let input: CommentCreateThreadInput = serde_json::from_value(serde_json::json!({
+            "file_path": "notes/a.md",
+            "body": "first comment",
+            "block_index": 2,
+            "author": "reviewer"
+        }))
+        .unwrap();
+        assert_eq!(input.block_index, Some(2));
+        assert_eq!(input.author.as_deref(), Some("reviewer"));
+    }
+
+    #[test]
+    fn comment_add_reply_input_defaults_author_to_none() {
+        let input: CommentAddReplyInput = serde_json::from_value(serde_json::json!({
+            "file_path": "notes/a.md",
+            "thread_id": "11111111-1111-1111-1111-111111111111",
+            "body": "a reply"
+        }))
+        .unwrap();
+        assert_eq!(input.author, None);
     }
 
     #[test]

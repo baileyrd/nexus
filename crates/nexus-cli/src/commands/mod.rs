@@ -4,6 +4,7 @@ pub mod ai;
 pub mod bases;
 pub mod canvas;
 pub mod collab;
+pub mod comments;
 pub mod config;
 pub mod content;
 pub mod crdt;

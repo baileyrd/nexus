@@ -61,6 +61,9 @@ Unless noted, handlers route through `context.ipc_call(plugin_id, …)`. Plugin 
 - Checkpoints (RFC 0008): `agent checkpoint <id> <round> <name>` (bookmark a `(session, round)`), `agent checkpoints` (list), `agent checkpoint-rm <name>` (remove). Route through `session_checkpoint` / `session_checkpoints` / `session_checkpoint_delete`.
 - `tool list [--capability ID]…` — list catalogued agent tools.
 
+**Comments** (`com.nexus.comments`) — C74 (#427)
+- `comments list <path>`, `comments create-thread <path> <body> [--block-index N] [--author]`, `comments add-reply <path> <thread-id> <body> [--author]`, `comments resolve|unresolve <path> <thread-id> [--author]`, `comments edit-comment <path> <thread-id> <comment-id> <body>`, `comments delete-comment <path> <thread-id> <comment-id>`, `comments delete-thread <path> <thread-id>`. Headless parity with the shell's comment pane — a non-destructive annotation channel distinct from editing the note body. `create-thread` also reaches `com.nexus.editor` (`open` → `get_tree` → `stamp_block`) to resolve `--block-index` (0-based into the file's top-level blocks, default 0) to a stable anchor, since a headless caller has no editor selection to offer.
+
 **Database / bases**
 - `bases create|list|show|add-record|query|import|export|formula …` — filesystem-layer `.bases` operations.
 - `db <cmd>` — lower-level twin wrapping `com.nexus.database` IPC handlers (raw records / formulas).

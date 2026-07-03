@@ -451,6 +451,104 @@ pub(crate) enum ToolCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Comments (C74 #427)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub(crate) struct CommentsArgs {
+    #[command(subcommand)]
+    pub(crate) command: CommentsCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum CommentsCommand {
+    /// List every comment thread on a note, with full reply history.
+    List {
+        /// Forge-relative path of the markdown file.
+        path: String,
+    },
+    /// Start a new comment thread anchored to a top-level block.
+    #[command(name = "create-thread")]
+    CreateThread {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Body text of the first comment in the thread.
+        body: String,
+        /// 0-based index into the file's top-level blocks (default 0
+        /// — the file's first block). A headless CLI session has no
+        /// editor selection, so this is the only anchor it can offer.
+        #[arg(long)]
+        block_index: Option<u32>,
+        /// Optional author display name.
+        #[arg(long)]
+        author: Option<String>,
+    },
+    /// Append a reply to an existing comment thread.
+    #[command(name = "add-reply")]
+    AddReply {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Thread to append to.
+        thread_id: String,
+        /// Reply body.
+        body: String,
+        /// Optional author display name.
+        #[arg(long)]
+        author: Option<String>,
+    },
+    /// Mark a comment thread resolved.
+    Resolve {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Thread to mark.
+        thread_id: String,
+        /// Author of the resolution flip (best-effort).
+        #[arg(long)]
+        author: Option<String>,
+    },
+    /// Mark a comment thread unresolved.
+    Unresolve {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Thread to mark.
+        thread_id: String,
+        /// Author of the resolution flip (best-effort).
+        #[arg(long)]
+        author: Option<String>,
+    },
+    /// Edit an existing comment's body in place.
+    #[command(name = "edit-comment")]
+    EditComment {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Thread containing the comment.
+        thread_id: String,
+        /// Comment to edit.
+        comment_id: String,
+        /// New body text.
+        body: String,
+    },
+    /// Delete a single comment from a thread.
+    #[command(name = "delete-comment")]
+    DeleteComment {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Thread containing the comment.
+        thread_id: String,
+        /// Comment to delete.
+        comment_id: String,
+    },
+    /// Delete an entire comment thread, including all its replies.
+    #[command(name = "delete-thread")]
+    DeleteThread {
+        /// Forge-relative path of the markdown file.
+        path: String,
+        /// Thread to delete.
+        thread_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Agent (PRD-15)
 // ---------------------------------------------------------------------------
 
