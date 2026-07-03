@@ -256,8 +256,15 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.commandPalette', name: 'Command Palette',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Ctrl+P fuzzy-finder for every command contributed by the shell and plugins.',
+    description: 'Ctrl+Shift+P fuzzy-finder for every command contributed by the shell and plugins.',
     load: () => import('./nexus/commandPalette').then(m => m.commandPalettePlugin),
+  },
+  {
+    id: 'nexus.quickSwitcher', name: 'Quick Switcher',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.storage'],
+    description: 'Ctrl+P fuzzy file switcher with per-forge recents and create-on-Enter.',
+    load: () => import('./nexus/quickSwitcher').then(m => m.quickSwitcherPlugin),
   },
   {
     id: 'nexus.confirm', name: 'Confirm',

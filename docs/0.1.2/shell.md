@@ -50,13 +50,13 @@ Provided by the host from `shell/src/plugins/core/`; plugin id begins with `core
 
 > Earlier drafts listed 17 `core.*` chrome plugins (`core.activityBar`, `core.editorArea`, `core.fileExplorer`, `core.panelArea`, `core.sidebar`, `core.statusBar`, `core.rightPanel`, `core.terminal`, `core.titleBar`, `core.commandPalette`). Those were refactored into `nexus.*` first-party plugins (e.g. `nexus.activityBar`, `nexus.rightPanel`, `nexus.statusBar`, `nexus.terminal`, `nexus.commandPalette`) or folded into built-in chrome; they are no longer core plugins.
 
-## Nexus first-party plugins (59)
+## Nexus first-party plugins (60)
 
 Folder names under `shell/src/plugins/nexus/` (each is one `nexus.*` plugin id; a few folders register more than one catalog entry — e.g. `graph` → `nexus.graph` + `nexus.graph.global`). The enable/disable split is curated in `shell/src/plugins/catalog.ts`: a default-on set loaded at boot plus a default-off set the user opts into from **Settings → Plugins** (backend-gated features such as `collab`, `crdtConflict`, and `dreamCycle` ship default-off). Domain groupings:
 
 - **Editing & content:** `editor`, `outline`, `paneMode`, `comments`, `crdtConflict`, `templates`, `linkSuggest`
 - **AI surfaces:** `ai`, `aiSettings`, `agent`, `sessions` (session-tree navigator — resume/branch/rewind/checkpoint, RFC 0008), `recall`, `semanticSearch`, `enrich`, `dreamCycle`, `skills`, `memory`, `memoryDashboard`
-- **Navigation & context:** `files`, `search`, `searchPanel`, `bookmarks`, `launcher`, `workspace`, `noteContext` (backlinks / outgoing links / tags / per-file graph), `taskDashboard` (checkbox tasks grouped by due date, click-to-toggle — C7 #360)
+- **Navigation & context:** `files`, `search`, `searchPanel`, `bookmarks`, `launcher`, `workspace`, `noteContext` (backlinks / outgoing links / tags / per-file graph), `taskDashboard` (checkbox tasks grouped by due date, click-to-toggle — C7 #360), `quickSwitcher` (Ctrl+P fuzzy file switcher with per-forge recents — C5 #358)
 - **Visualisation:** `canvas`, `graph`, `bases`, `osArchitecture`, `activityTimeline`, `viewBuilder`
 - **Tools / processes:** `processes`, `terminal`, `gitPanel`, `gitStatus`, `mcp`, `workflow`, `debugger`, `sandboxPanel`
 - **System / chrome supplements:** `activityBar`, `rightPanel`, `statusBar`, `commandPalette`

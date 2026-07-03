@@ -33,10 +33,9 @@ export const commandPalettePlugin: Plugin = {
       keybindings: [
         // Primary binding. Mirrors VS Code / virtually every IDE.
         { command: COMMAND_OPEN, key: 'ctrl+shift+p', mac: 'cmd+shift+p' },
-        // Alias — to be reclaimed when a file quick-open plugin lands
-        // (the spec carves out Ctrl+P for that). Until then it opens
-        // the same command-only palette.
-        { command: COMMAND_OPEN, key: 'ctrl+p', mac: 'cmd+p' },
+        // C5 (#358) — the `ctrl+p`/`cmd+p` alias that used to live here
+        // has been reclaimed by nexus.quickSwitcher (the file quick-open
+        // plugin this comment used to say "when it lands").
         // Note: this `escape` binding exists for completeness, but
         // the App.tsx global handler short-circuits on INPUT focus —
         // so when the user actually has focus in the palette input,

@@ -760,9 +760,9 @@ export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'
         }}
-        onClick={() => runCommand('nexus.commandPalette.open')}
+        onClick={() => runCommand('nexus.quickSwitcher.open')}
       >
-        Go to file<span style={hintStyle}>({chordFor('nexus.commandPalette.open', 'Ctrl + O')})</span>
+        Go to file<span style={hintStyle}>({chordFor('nexus.quickSwitcher.open', 'Ctrl + P')})</span>
       </button>
       {hasAnyTab && (
         <button
