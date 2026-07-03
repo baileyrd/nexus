@@ -370,6 +370,7 @@ fn main() {
             PluginCommand::Reset { plugin_id } => {
                 commands::plugin::reset_crash(&mut app, &plugin_id)
             }
+            PluginCommand::Dev { dir } => commands::plugin::dev(&dir),
             PluginCommand::Settings { plugin_id, set } => {
                 commands::plugin::settings(&mut app, &plugin_id, set.as_deref())
             }

@@ -22,6 +22,7 @@ const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
 const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
 const COMMAND_DISABLE_BUILTIN = 'nexus.plugins.disableBuiltin'
 const COMMAND_CONFIGURE = 'nexus.plugins.configure'
+const COMMAND_RESCAN_COMMUNITY = 'nexus.plugins.rescanCommunity'
 
 /**
  * Modal listing every plugin the shell has loaded — built-in (nexus.* /
@@ -96,6 +97,23 @@ export function PluginsMgmtInline({
 
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [highRiskOnly, setHighRiskOnly] = useState(false)
+  const [rescanning, setRescanning] = useState(false)
+
+  // C80 — "Rescan" replaces the old "drop a folder and restart" hint.
+  // `rescanCommunityPlugins` (invoked via COMMAND_RESCAN_COMMUNITY, same
+  // indirection every other row action here uses) emits
+  // PLUGIN_LIST_CHANGED_EVENT itself, so the store's rows refresh through
+  // the same subscription Enable/Disable already rely on — this handler
+  // only needs to track the button's own pending state.
+  const onRescan = async () => {
+    if (rescanning) return
+    setRescanning(true)
+    try {
+      await getApi().commands.execute(COMMAND_RESCAN_COMMUNITY)
+    } finally {
+      setRescanning(false)
+    }
+  }
 
   const filtered = useMemo<PluginRow[]>(() => {
     const q = query.trim().toLowerCase()
@@ -242,18 +260,41 @@ export function PluginsMgmtInline({
         )}
       </div>
 
-      {/* Footer hint */}
+      {/* Footer: rescan for newly-dropped community plugins (C80) */}
       <div
         style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
           padding: '8px 16px',
           borderTop: '1px solid var(--divider-color)',
-          textAlign: 'right',
           color: 'var(--text-faint)',
           fontFamily: 'var(--font-interface)',
           fontSize: 11,
         }}
       >
-        Drop plugin folders into ~/.nexus-shell/plugins/ and restart.
+        <span>Drop plugin folders into ~/.nexus-shell/plugins/, then rescan.</span>
+        <button
+          type="button"
+          onClick={onRescan}
+          disabled={rescanning}
+          title="Scan ~/.nexus-shell/plugins/ for newly-dropped plugins and activate them"
+          style={{
+            padding: '4px 12px',
+            background: 'var(--background-primary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--background-modifier-border)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-interface)',
+            fontSize: 11,
+            fontWeight: 500,
+            cursor: rescanning ? 'default' : 'pointer',
+            opacity: rescanning ? 0.6 : 1,
+          }}
+        >
+          {rescanning ? 'Rescanning…' : 'Rescan'}
+        </button>
       </div>
     </div>
   )

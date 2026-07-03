@@ -993,6 +993,16 @@ pub(crate) enum PluginCommand {
         /// Plugin identifier
         plugin_id: String,
     },
+    /// C80 — run a long-lived plugin-development session: loads every
+    /// plugin under `dir` (same one-subdirectory-per-plugin layout as
+    /// `.forge/plugins/`), then watches for `.wasm` changes and
+    /// hot-reloads the affected plugin until Ctrl+C.
+    Dev {
+        /// Directory to load plugins from and watch (e.g. a scratch dir
+        /// containing the one plugin you're iterating on, or
+        /// `.forge/plugins/` to live-reload everything installed there).
+        dir: PathBuf,
+    },
     /// View or update plugin settings
     Settings {
         /// Plugin identifier

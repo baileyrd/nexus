@@ -201,7 +201,7 @@ Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::
 forge_root = "/path/to/forge"          # set at boot; informational
 event_bus_capacity = 2048              # tokio broadcast channel capacity
 plugin_search_paths = []               # additional dirs scanned by the plugin loader
-hot_reload_enabled = true              # plugin file-watcher
+hot_reload_enabled = true              # plugin file-watcher — parsed but not read by anything (C80); use `nexus plugin dev <dir>` instead, see plugins/community.md#hot-reload
 lifecycle_timeout_secs = 30            # on_init / on_start budget per plugin
 tls_pinning_enabled = false            # global TLS pinning kill-switch
 require_signatures = false             # reject unsigned community plugins
