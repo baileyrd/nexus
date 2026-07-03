@@ -27,7 +27,7 @@ use rmcp::ServiceExt as _;
 use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
-use nexus_types::constants::{IPC_TIMEOUT_LONG, IPC_TIMEOUT_SHORT};
+use nexus_types::constants::{IPC_TIMEOUT_EXTENDED, IPC_TIMEOUT_LONG, IPC_TIMEOUT_SHORT};
 use nexus_types::plugin_ids;
 
 const STORAGE_PLUGIN: &str = plugin_ids::STORAGE;
@@ -59,6 +59,14 @@ const COMMENTS_PLUGIN: &str = plugin_ids::COMMENTS;
 /// comments surface with no other anchor to hang a headless
 /// create-thread call on).
 const EDITOR_PLUGIN: &str = plugin_ids::EDITOR;
+/// C75 (#428) — `nexus_agent_run`/`nexus_agent_sessions` reach into
+/// `com.nexus.agent`'s `session_run`/`session_list` handlers so an
+/// external MCP client can delegate a goal to an agent archetype.
+const AGENT_PLUGIN: &str = plugin_ids::AGENT;
+/// C75 (#428) — `nexus_workflow_list`/`nexus_workflow_run` reach into
+/// `com.nexus.workflow`'s `list`/`run` handlers so an external MCP
+/// client can fire a user-authored workflow.
+const WORKFLOW_PLUGIN: &str = plugin_ids::WORKFLOW;
 /// P2-06 — default deadline the MCP server applies to inbound IPC
 /// calls into kernel-side plugins (storage, git, security, …).
 /// Override via a future `[mcp.timeouts] ipc_secs = N` block
@@ -69,6 +77,12 @@ const IPC_TIMEOUT: Duration = DEFAULT_IPC_TIMEOUT;
 /// requests to the chat + embedding providers.
 pub const DEFAULT_AI_IPC_TIMEOUT: Duration = IPC_TIMEOUT_LONG;
 const AI_IPC_TIMEOUT: Duration = DEFAULT_AI_IPC_TIMEOUT;
+/// C75 (#428) — deadline for `nexus_agent_run` / `nexus_workflow_run`:
+/// both can drive many LLM/tool round-trips end-to-end, so they need
+/// the same extended budget the CLI's `agent run` / `workflow run`
+/// use rather than the short default.
+pub const DEFAULT_RUN_IPC_TIMEOUT: Duration = IPC_TIMEOUT_EXTENDED;
+const RUN_IPC_TIMEOUT: Duration = DEFAULT_RUN_IPC_TIMEOUT;
 
 /// URI prefix for MCP resources representing forge notes (PRD-14 §7.1/§7.2).
 ///
@@ -739,6 +753,47 @@ struct CommentResultOutput {
     result: serde_json::Value,
 }
 
+// ── C75 (#428) — nexus_agent_* / nexus_workflow_* tools ──────────────────────
+
+/// Input for `nexus_agent_run`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AgentRunInput {
+    /// Natural-language goal for the agent to pursue.
+    goal: String,
+    /// Archetype — writer / coder / researcher / general (default).
+    #[serde(default)]
+    archetype: Option<String>,
+}
+
+/// Input for `nexus_agent_sessions`. No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct AgentSessionsInput {}
+
+/// Reply for `nexus_agent_run` / `nexus_agent_sessions`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AgentResultOutput {
+    /// The agent plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
+/// Input for `nexus_workflow_list`. No parameters.
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct WorkflowListInput {}
+
+/// Input for `nexus_workflow_run`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct WorkflowRunInput {
+    /// Name of a loaded `.workflow.toml` to execute end-to-end.
+    name: String,
+}
+
+/// Reply for `nexus_workflow_list` / `nexus_workflow_run`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct WorkflowResultOutput {
+    /// The workflow plugin's reply (or an `{ "error": … }` object on failure).
+    result: serde_json::Value,
+}
+
 /// Output for `nexus_kernel_stats` (BL-137). Mirrors the
 /// `MetricsSnapshot` shape returned by
 /// `com.nexus.security::metrics_snapshot`. Field names + types match
@@ -1173,6 +1228,45 @@ impl NexusMcpServer {
         let value = self
             .context
             .ipc_call(EDITOR_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C75 (#428) — `com.nexus.agent` IPC client for `nexus_agent_run` /
+    /// `nexus_agent_sessions`. `nexus_agent_run` drives a full
+    /// tool-calling session (possibly many LLM round-trips), so it
+    /// gets the same extended deadline the CLI's `agent run` uses;
+    /// `nexus_agent_sessions` is a plain read and uses the default.
+    async fn agent_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(AGENT_PLUGIN, command, args, timeout)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    /// C75 (#428) — `com.nexus.workflow` IPC client for
+    /// `nexus_workflow_list` / `nexus_workflow_run`. `run` executes
+    /// every step of a user-authored workflow (may itself call AI or
+    /// other IPC handlers) so it gets the same extended deadline
+    /// `nexus_agent_run` and the CLI's `workflow run` use; `list` is
+    /// a plain read and uses the default.
+    async fn workflow_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(WORKFLOW_PLUGIN, command, args, timeout)
             .await
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
@@ -3022,6 +3116,96 @@ impl NexusMcpServer {
         }
     }
 
+    // C75 (#428) — the MCP server's static tools previously covered
+    // notes/graph/tasks/RAG/skills/git/security/memory/comments but
+    // could not drive either of Nexus's two execution surfaces: an
+    // agent session or a user-authored workflow. `nexus_agent_run`
+    // always sets `auto_approve: true` — a synchronous MCP tool call
+    // has no bidirectional channel for the CLI's interactive
+    // round_proposed/round_decide approval loop (BL-132), so it
+    // mirrors the CLI's non-interactive default instead.
+    #[tool(
+        name = "nexus_agent_run",
+        description = "Delegate a goal to a Nexus agent session and run it end-to-end (auto-approving every tool call — there is no interactive approval channel over MCP). Returns the full transcript: rounds, tool calls, and outcome. Archetype selects the system prompt / tool profile (writer / coder / researcher / general, default general)."
+    )]
+    async fn nexus_agent_run(
+        &self,
+        Parameters(input): Parameters<AgentRunInput>,
+    ) -> Json<AgentResultOutput> {
+        let args = serde_json::json!({
+            "goal": input.goal,
+            "archetype": input.archetype,
+            "auto_approve": true,
+        });
+        match self
+            .agent_call::<serde_json::Value>("session_run", args, RUN_IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(AgentResultOutput { result }),
+            Err(e) => Json(AgentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_agent_sessions",
+        description = "List stored agent sessions — id, outcome, goal, and fork lineage (parent_id / branch_point) for sessions created via resume/branch/rewind. Read-only."
+    )]
+    async fn nexus_agent_sessions(
+        &self,
+        Parameters(_input): Parameters<AgentSessionsInput>,
+    ) -> Json<AgentResultOutput> {
+        match self
+            .agent_call::<serde_json::Value>("session_list", serde_json::json!({}), IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(AgentResultOutput { result }),
+            Err(e) => Json(AgentResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_workflow_list",
+        description = "List every loaded `.workflow.toml` — name, trigger config, and step count. Read-only."
+    )]
+    async fn nexus_workflow_list(
+        &self,
+        Parameters(_input): Parameters<WorkflowListInput>,
+    ) -> Json<WorkflowResultOutput> {
+        match self
+            .workflow_call::<serde_json::Value>("list", serde_json::json!({}), IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(WorkflowResultOutput { result }),
+            Err(e) => Json(WorkflowResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    #[tool(
+        name = "nexus_workflow_run",
+        description = "Fire a user-authored workflow on demand and run every step to completion. Each step is still gated by its own target handler's capabilities (issue #77 — the workflow boundary itself imposes no additional cap ceiling), so this can have side effects as broad as the workflow's steps."
+    )]
+    async fn nexus_workflow_run(
+        &self,
+        Parameters(input): Parameters<WorkflowRunInput>,
+    ) -> Json<WorkflowResultOutput> {
+        let args = serde_json::json!({ "name": input.name });
+        match self
+            .workflow_call::<serde_json::Value>("run", args, RUN_IPC_TIMEOUT)
+            .await
+        {
+            Ok(result) => Json(WorkflowResultOutput { result }),
+            Err(e) => Json(WorkflowResultOutput {
+                result: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
     #[tool(
         name = "nexus_kernel_stats",
         description = "Snapshot the kernel's BL-093 metrics: per-(plugin, command) IPC call counters + duration histograms (p50/p95/p99), event-bus publish counters, capability-check counters by outcome, plugin-lifecycle-hook histograms, current event-bus queue depth, and `metrics_dropped_total` (sentinel for the per-metric key cap). Read-only. Useful for monitoring kernel hot paths or diagnosing latency / capability-deny regressions from an agent."
@@ -3508,6 +3692,35 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(input.author, None);
+    }
+
+    #[test]
+    fn agent_run_input_defaults_archetype_to_none() {
+        let input: AgentRunInput = serde_json::from_value(serde_json::json!({
+            "goal": "summarize yesterday's notes"
+        }))
+        .unwrap();
+        assert_eq!(input.goal, "summarize yesterday's notes");
+        assert_eq!(input.archetype, None);
+    }
+
+    #[test]
+    fn agent_run_input_round_trips_archetype() {
+        let input: AgentRunInput = serde_json::from_value(serde_json::json!({
+            "goal": "draft a proposal",
+            "archetype": "writer"
+        }))
+        .unwrap();
+        assert_eq!(input.archetype.as_deref(), Some("writer"));
+    }
+
+    #[test]
+    fn workflow_run_input_requires_name() {
+        let input: WorkflowRunInput = serde_json::from_value(serde_json::json!({
+            "name": "daily-journal"
+        }))
+        .unwrap();
+        assert_eq!(input.name, "daily-journal");
     }
 
     #[test]
