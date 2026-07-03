@@ -52,7 +52,7 @@ Module-by-module. `lib.rs` declares `#![deny(missing_docs)]` and re-exports the 
   - Index queries: `query_files`, `query_symbols`, `query_blocks`(`_by_path`), `query_links`, `query_backlinks`, `query_tags`.
   - Rebuild/reconcile: `rebuild_index` (clears fts_blocks/code_symbols/files → reconcile → refresh FTS — the FTS refresh is part of the contract), `reconcile_index`.
   - Graph: `backlinks`, `backlinks_to_block`, `outgoing_links`, `unresolved_links`, `graph_stats`, `list_all_links`, `graph_neighbors`.
-  - Tasks: `query_tasks`, `toggle_task` (DB + file write-back).
+  - Tasks: `query_tasks`, `toggle_task` (DB + file write-back). `ParsedTask`/`TaskRecord` carry `due_date`/`priority` parsed from inline `📅 YYYY-MM-DD` / `due:YYYY-MM-DD` / `!high`/`!medium`/`!low` tokens (`parser::extract_task_tokens`, C7 #360); `TaskFilter` gained a matching `priority` filter.
   - Search: `search` (scope-parse + Tantivy + SQLite post-filter), `rebuild_search_index`.
   - Obsidian base: `obsidian_base_query`.
   - Vector store: `vector_insert`, `vector_query`, `vector_delete_by_file`, `vectorstore_count`.
@@ -67,7 +67,7 @@ Directory-layout manager. Path accessors (`root`, `notes_dir`, `attachments_dir`
 Temp-fsync-rename with parent-dir fsync for durability (issue #84). Up to 3 retries (100/400/1600 ms back-off) on *transient* `io::ErrorKind`s only (`Interrupted`, `WouldBlock`, `TimedOut`, `ConnectionReset`, `UnexpectedEof`); permanent failures bail immediately. Windows skips the parent-dir fsync (NTFS journals rename metadata).
 
 ### `schema.rs` — SQLite schema + migrations
-`CURRENT_VERSION = 8`. `configure_pragmas` (WAL, `synchronous=NORMAL`, 16 MB cache, foreign keys ON); `migrate` (`_schema_version` tracking table, each migration in its own transaction). Tables: `files`, `blocks`, `links`, `tags`, `properties` (+ typed `value_num`/`value_date`/`value_bool` columns, mig 3), `fts_blocks` (FTS5 virtual), `tasks` (mig 2), `embeddings` (mig 4), `jsx_components` (mig 5), `canvas_nodes`/`canvas_edges`/`bases`/`bases_records`/`bases_views` (mig 6), `bases_schema_versions` (mig 7), `code_symbols` (mig 8, BL-114, self-referential `parent_id` with `ON DELETE CASCADE`).
+`CURRENT_VERSION = 10`. `configure_pragmas` (WAL, `synchronous=NORMAL`, 16 MB cache, foreign keys ON); `migrate` (`_schema_version` tracking table, each migration in its own transaction). Tables: `files`, `blocks`, `links`, `tags`, `properties` (+ typed `value_num`/`value_date`/`value_bool` columns, mig 3), `fts_blocks` (FTS5 virtual), `tasks` (mig 2; `due_date`/`priority` columns added mig 10, C7 #360), `embeddings` (mig 4; `namespace` column added mig 9), `jsx_components` (mig 5), `canvas_nodes`/`canvas_edges`/`bases`/`bases_records`/`bases_views` (mig 6), `bases_schema_versions` (mig 7), `code_symbols` (mig 8, BL-114, self-referential `parent_id` with `ON DELETE CASCADE`).
 
 ### `parser.rs` — markdown parser
 `parse_markdown(text) -> ParsedFile`. Public types `ParsedFile { content_hash, frontmatter, blocks, links, tags, tasks }`, `Property`, `ParsedBlock` (block_type, level, content, line range, block_ref_id `^anchor`, callout_type), `ParsedLink` (link_text, target_path, link_type wikilink/markdown/embed, fragment), `ParsedTag`. comrak AST walk extracts blocks; YAML frontmatter parsed separately.

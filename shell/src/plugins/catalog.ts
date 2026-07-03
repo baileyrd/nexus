@@ -338,6 +338,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/memoryDashboard').then(m => m.memoryDashboardPlugin),
   },
   {
+    id: 'nexus.taskDashboard', name: 'Tasks',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['nexus.paneMode', 'nexus.activityBar'],
+    description: 'Checkbox tasks across the forge, grouped by due date, with click-to-toggle.',
+    load: () => import('./nexus/taskDashboard').then(m => m.taskDashboardPlugin),
+  },
+  {
     id: 'nexus.sandboxPanel', name: 'Sandbox Panel',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     dependsOn: ['com.nexus.security'],

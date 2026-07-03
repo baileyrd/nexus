@@ -21,7 +21,7 @@ use rusqlite::Connection;
 /// `#[allow(dead_code)]` documents the intentional unused-locally
 /// state without leaking the suppression to the rest of the module.
 #[allow(dead_code)]
-pub const CURRENT_VERSION: u32 = 9;
+pub const CURRENT_VERSION: u32 = 10;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -51,6 +51,7 @@ pub fn configure_pragmas(conn: &Connection) -> Result<(), StorageError> {
 /// # Errors
 ///
 /// Returns `StorageError` if the database operation fails.
+#[allow(clippy::too_many_lines)] // repetitive `if current < N { apply; record; }` per version — one more block per migration, not a complexity increase worth restructuring around.
 pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
     // Ensure the version-tracking table exists.
     conn.execute_batch(
@@ -152,6 +153,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_009(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (9, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 10 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_010(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (10, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -290,6 +301,18 @@ fn apply_migration_009(conn: &Connection) -> Result<(), StorageError> {
     conn.execute_batch(
         "ALTER TABLE embeddings ADD COLUMN namespace TEXT NOT NULL DEFAULT 'notes';
         CREATE INDEX IF NOT EXISTS idx_embeddings_ns_file ON embeddings(namespace, file_path);",
+    )?;
+    Ok(())
+}
+
+/// C7 (#360) — inline task tokens: `due_date` (`YYYY-MM-DD`, parsed from a
+/// `📅 YYYY-MM-DD` or `due:YYYY-MM-DD` token) and `priority`
+/// (`high`/`medium`/`low`, parsed from a `!high`/`!medium`/`!low` token).
+fn apply_migration_010(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "ALTER TABLE tasks ADD COLUMN due_date TEXT;
+        ALTER TABLE tasks ADD COLUMN priority TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date) WHERE due_date IS NOT NULL;",
     )?;
     Ok(())
 }
@@ -1019,5 +1042,35 @@ mod tests {
             rusqlite::params![fid],
         )
         .unwrap();
+    }
+
+    // ── 22. migrate_v10_adds_task_due_date_and_priority_columns (C7, #360) ──
+    #[test]
+    fn migrate_v10_adds_task_due_date_and_priority_columns() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('tasks2.md', 'markdown', 'h10', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO tasks (file_id, content, completed, line_number, due_date, priority, created_at, updated_at)
+             VALUES (?1, 'Ship it', 0, 1, '2026-07-04', 'high', 0, 0);",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let tid: i64 = conn.last_insert_rowid();
+        let (due, prio): (String, String) = conn
+            .query_row(
+                "SELECT due_date, priority FROM tasks WHERE id = ?1;",
+                rusqlite::params![tid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(due, "2026-07-04");
+        assert_eq!(prio, "high");
     }
 }

@@ -500,15 +500,92 @@ fn extract_tasks<'a>(list_node: &'a AstNode<'a>, tasks: &mut Vec<ParsedTask>) {
     for item in list_node.children() {
         let ast = item.data.borrow();
         if let NodeValue::TaskItem(nti) = &ast.value {
-            let text = collect_text(item).trim().to_string();
+            let raw_text = collect_text(item).trim().to_string();
+            let (content, due_date, priority) = extract_task_tokens(&raw_text);
             let line = u32::try_from(ast.sourcepos.start.line).unwrap_or(0);
             tasks.push(ParsedTask {
-                content: text,
+                content,
                 completed: nti.symbol.is_some(),
                 line_number: line,
+                due_date,
+                priority,
             });
         }
     }
+}
+
+/// C7 (#360) — extract due-date / priority tokens from a task's collected
+/// text, returning `(cleaned_content, due_date, priority)`. Recognizes two
+/// due-date forms — the Obsidian-Tasks-style emoji `📅 YYYY-MM-DD` and the
+/// plain `due:YYYY-MM-DD` — and priority via a `!high` / `!medium` / `!low`
+/// word (case-insensitive). Recognized tokens are removed from the returned
+/// content; only the first due-date token and first priority token found
+/// are honored (a second occurrence is left in place as ordinary text,
+/// mirroring [`extract_block_ref`]'s single-match-per-block precedent).
+///
+/// Whitespace runs collapse to single spaces in the output — safe here
+/// because the input is already AST-collected inline text (see
+/// [`collect_text`]), not raw markdown, so there is no formatting to
+/// preserve beyond word boundaries.
+pub(crate) fn extract_task_tokens(text: &str) -> (String, Option<String>, Option<String>) {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut kept: Vec<&str> = Vec::with_capacity(words.len());
+    let mut due_date = None;
+    let mut priority = None;
+    let mut i = 0;
+    while i < words.len() {
+        let word = words[i];
+        if word == "📅" {
+            if let Some(next) = words.get(i + 1) {
+                if due_date.is_none() && is_date_shaped(next) {
+                    due_date = Some((*next).to_string());
+                    i += 2;
+                    continue;
+                }
+            }
+        } else if let Some(rest) = word.strip_prefix("due:") {
+            if due_date.is_none() && is_date_shaped(rest) {
+                due_date = Some(rest.to_string());
+                i += 1;
+                continue;
+            }
+        } else if priority.is_none() {
+            if let Some(p) = parse_priority_token(word) {
+                priority = Some(p.to_string());
+                i += 1;
+                continue;
+            }
+        }
+        kept.push(word);
+        i += 1;
+    }
+    (kept.join(" "), due_date, priority)
+}
+
+/// Match a `!high` / `!medium` / `!low` priority token, case-insensitively.
+fn parse_priority_token(word: &str) -> Option<&'static str> {
+    match word.to_ascii_lowercase().as_str() {
+        "!high" => Some("high"),
+        "!medium" => Some("medium"),
+        "!low" => Some("low"),
+        _ => None,
+    }
+}
+
+/// `true` when `s` is shaped like `YYYY-MM-DD` (10 ASCII bytes, digits and
+/// dashes in the right places). Doesn't validate calendar correctness (e.g.
+/// month `13`) — a malformed-but-shaped date just sorts/filters oddly
+/// downstream rather than being rejected at parse time, matching this
+/// crate's fail-open indexing philosophy (a bad token in one note must not
+/// break indexing of the rest of the forge).
+fn is_date_shaped(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..10].iter().all(u8::is_ascii_digit)
 }
 
 /// Detect whether a blockquote is a callout.
@@ -852,5 +929,75 @@ mod tests {
         let md = "- item one\n- item two\n";
         let pf = parse_markdown(md).unwrap();
         assert!(pf.tasks.is_empty());
+    }
+
+    // ── task token extraction (C7, #360) ─────────────────────────────────
+
+    #[test]
+    fn parse_task_with_emoji_due_date() {
+        let md = "- [ ] Ship the release 📅 2026-07-04\n";
+        let pf = parse_markdown(md).unwrap();
+        assert_eq!(pf.tasks[0].content, "Ship the release");
+        assert_eq!(pf.tasks[0].due_date.as_deref(), Some("2026-07-04"));
+        assert_eq!(pf.tasks[0].priority, None);
+    }
+
+    #[test]
+    fn parse_task_with_due_colon_date() {
+        let md = "- [ ] Renew passport due:2026-12-01\n";
+        let pf = parse_markdown(md).unwrap();
+        assert_eq!(pf.tasks[0].content, "Renew passport");
+        assert_eq!(pf.tasks[0].due_date.as_deref(), Some("2026-12-01"));
+    }
+
+    #[test]
+    fn parse_task_with_priority_token_case_insensitive() {
+        let md = "- [ ] Fix the outage !HIGH\n";
+        let pf = parse_markdown(md).unwrap();
+        assert_eq!(pf.tasks[0].content, "Fix the outage");
+        assert_eq!(pf.tasks[0].priority.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn parse_task_with_due_date_and_priority_together() {
+        let md = "- [ ] Renew certificate !medium due:2027-01-15\n";
+        let pf = parse_markdown(md).unwrap();
+        assert_eq!(pf.tasks[0].content, "Renew certificate");
+        assert_eq!(pf.tasks[0].due_date.as_deref(), Some("2027-01-15"));
+        assert_eq!(pf.tasks[0].priority.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn parse_task_without_tokens_leaves_content_untouched() {
+        let md = "- [ ] Just a plain task\n";
+        let pf = parse_markdown(md).unwrap();
+        assert_eq!(pf.tasks[0].content, "Just a plain task");
+        assert_eq!(pf.tasks[0].due_date, None);
+        assert_eq!(pf.tasks[0].priority, None);
+    }
+
+    #[test]
+    fn extract_task_tokens_ignores_malformed_date_shape() {
+        // Not exactly YYYY-MM-DD (single-digit month) — left as plain text
+        // rather than misparsed, matching is_date_shaped's strict-width check.
+        let (content, due, prio) = extract_task_tokens("Call plumber due:2026-7-4");
+        assert_eq!(content, "Call plumber due:2026-7-4");
+        assert_eq!(due, None);
+        assert_eq!(prio, None);
+    }
+
+    #[test]
+    fn extract_task_tokens_only_honors_the_first_due_date() {
+        let (content, due, _) =
+            extract_task_tokens("Two dates due:2026-01-01 due:2026-02-02");
+        assert_eq!(content, "Two dates due:2026-02-02");
+        assert_eq!(due.as_deref(), Some("2026-01-01"));
+    }
+
+    #[test]
+    fn extract_task_tokens_bare_calendar_emoji_without_a_date_is_left_alone() {
+        let (content, due, _) = extract_task_tokens("Reminder 📅 soon");
+        assert_eq!(content, "Reminder 📅 soon");
+        assert_eq!(due, None);
     }
 }
