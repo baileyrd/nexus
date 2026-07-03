@@ -441,6 +441,13 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/templates').then(m => m.templatesPlugin),
   },
   {
+    id: 'nexus.dailyNotes', name: 'Daily Notes',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.storage', 'nexus.paneMode', 'nexus.activityBar'],
+    description: 'Idempotent "open today" command, prev/next day navigation, and a month-calendar pane.',
+    load: () => import('./nexus/dailyNotes').then(m => m.dailyNotesPlugin),
+  },
+  {
     id: 'nexus.notionImport', name: 'Notion Import',
     version: '0.2.0', core: false, activationEvents: ['onStartup'],
     legacyPluginIds: ['nexus.notion'],
