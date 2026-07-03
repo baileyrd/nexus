@@ -62,6 +62,13 @@ pub enum MemoryStatus {
     Archived,
     /// Replaced by a newer memory (see [`Memory::superseded_by`]).
     Superseded,
+    /// Tombstoned (C36, #389): hidden from every normal read path
+    /// (`get`/`list`/`search`/`facts`/`entities`/`export`/`stats`) but the
+    /// row itself is retained — not hard-deleted — so its bumped
+    /// `updated_at` is still visible to the sync push scan
+    /// (`MemoryDb::list_since` does not filter by status) and the deletion
+    /// propagates to the hub and every peer instead of resurrecting there.
+    Deleted,
 }
 
 impl MemoryStatus {
@@ -72,6 +79,7 @@ impl MemoryStatus {
             Self::Active => "active",
             Self::Archived => "archived",
             Self::Superseded => "superseded",
+            Self::Deleted => "deleted",
         }
     }
 
@@ -81,6 +89,7 @@ impl MemoryStatus {
         match s {
             "archived" => Self::Archived,
             "superseded" => Self::Superseded,
+            "deleted" => Self::Deleted,
             _ => Self::Active,
         }
     }

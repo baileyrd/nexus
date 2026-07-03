@@ -1193,7 +1193,9 @@ struct MemoryUpdateInput {
     /// Replacement tag list, if changing.
     #[serde(default)]
     tags: Option<Vec<String>>,
-    /// New lifecycle status (`active` | `archived` | `superseded`), if changing.
+    /// New lifecycle status (`active` | `archived` | `superseded` |
+    /// `deleted`), if changing. Prefer `nexus_memory_delete` over setting
+    /// `deleted` here — same effect, clearer intent (C36).
     #[serde(default)]
     status: Option<String>,
     /// New SPO subject, if changing.

@@ -12,7 +12,7 @@ Unlike the forge's markdown (file-as-truth), the memory store is **authoritative
 
 ## Data model
 
-A `Memory` row carries: `content`, `category`, `memory_type` (episodic / semantic / procedural), `source`, `tags`, optional SPO triple (`subject` / `predicate` / `object`), ACT-R `vitality` fields (access count + timestamps), `embedding` (for vector recall), `capture_id` / `source_capture_id` (capture lineage), and `status` + `superseded_by` (lifecycle / consolidation).
+A `Memory` row carries: `content`, `category`, `memory_type` (episodic / semantic / procedural), `source`, `tags`, optional SPO triple (`subject` / `predicate` / `object`), ACT-R `vitality` fields (access count + timestamps), `embedding` (for vector recall), `capture_id` / `source_capture_id` (capture lineage), and `status` + `superseded_by` (lifecycle / consolidation). `status` is `active` | `archived` | `superseded` | `deleted` — `deleted` (C36, #389) is a tombstone: the row is retained (not SQL-`DELETE`d) but every normal read path (`get`/`list`/`search`/`facts`/`entities`/`export`/`stats`) treats it as gone.
 
 ## IPC surface — 21 handlers
 
@@ -20,7 +20,7 @@ Source of truth: `IPC_HANDLERS` in `crates/nexus-memory/src/core_plugin.rs`. Han
 
 | Group | Handlers |
 |-------|----------|
-| **CRUD + list** | `add`, `get`, `list`, `update`, `delete` |
+| **CRUD + list** | `add`, `get`, `list`, `update`, `delete` (tombstones — C36, #389) |
 | **Search / recall** | `search` (FTS5), `recall` (hybrid FTS + vector, fused with Reciprocal Rank Fusion), `vector_sync` (back-fill embeddings) |
 | **Knowledge graph** | `facts` (SPO triples), `entities` (entity index from subjects/objects) |
 | **Tags / vitality / stats** | `tags`, `vitality_report` (ACT-R decay ranking), `stats` (aggregate counts by category/type/source) |
@@ -32,7 +32,7 @@ Capability classification for every handler is in [`reference/audit-flags.md`](r
 
 ## Cross-instance sync — `nexus-memory-hub`
 
-`sync` replicates memories against a **standalone HTTP hub** (`crates/nexus-memory-hub`, a deployable binary — not a bootstrap plugin). Multiple Nexus instances pointed at one hub converge their stores (last-writer-wins on `updated_at`), so memory follows the user across machines.
+`sync` replicates memories against a **standalone HTTP hub** (`crates/nexus-memory-hub`, a deployable binary — not a bootstrap plugin). Multiple Nexus instances pointed at one hub converge their stores (last-writer-wins on `updated_at`), so memory follows the user across machines. Deletes propagate too (C36, #389): `delete` tombstones the row locally (`status = 'deleted'` + a bumped `updated_at`) rather than hard-deleting it, so the sync push scan (`MemoryDb::list_since`, which does not filter by status) still observes it and forwards the tombstone — the hub needs no changes since it stores records as opaque JSON. Known v1 limitation shared with regular edits: a delete only propagates outward if this node authored the memory (`node_id` unset or ours); deleting a foreign-authored memory tombstones it locally but doesn't push back out.
 
 ## Passive bus capture
 

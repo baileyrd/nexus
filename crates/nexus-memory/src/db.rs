@@ -333,13 +333,16 @@ impl MemoryDb {
         Ok(())
     }
 
-    /// Fetch a memory by id.
+    /// Fetch a memory by id. A tombstoned (`status = 'deleted'`, C36) row
+    /// reads as absent, same as a row that was never inserted.
     ///
     /// # Errors
     /// Returns an error on a query or decode failure.
     pub fn get(&self, id: Uuid) -> Result<Option<Memory>> {
         let conn = self.pool.get()?;
-        let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM memories m WHERE m.id = ?1"))?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories m WHERE m.id = ?1 AND m.status != 'deleted'"
+        ))?;
         let mut rows = stmt.query(params![id.to_string()])?;
         match rows.next()? {
             Some(row) => Ok(Some(row_to_memory(row)?)),
@@ -446,6 +449,11 @@ impl MemoryDb {
     /// the column names are fixed literals, so the dynamic `WHERE` is
     /// injection-safe. `tag` matches rows whose JSON `tags` array contains it.
     ///
+    /// When `status` is `None` ("any status"), tombstoned rows
+    /// (`status = 'deleted'`, C36) are still excluded — callers that want to
+    /// see them must pass `status: Some("deleted")` explicitly, same as any
+    /// other status value.
+    ///
     /// # Errors
     /// Returns an error on a query or decode failure.
     pub fn list_filtered(
@@ -467,6 +475,9 @@ impl MemoryDb {
                 vals.push(v.to_string());
                 conds.push(format!("{col} = ?{}", vals.len()));
             }
+        }
+        if status.is_none() {
+            conds.push("m.status != 'deleted'".to_string());
         }
         if let Some(t) = tag {
             vals.push(t.to_string());
@@ -507,8 +518,13 @@ impl MemoryDb {
         object: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Memory>> {
-        // A fact is any row with a subject; the optional equality filters narrow it.
-        let mut conds: Vec<String> = vec!["m.subject IS NOT NULL".to_string()];
+        // A fact is any row with a subject; the optional equality filters narrow
+        // it. Tombstoned rows (C36) are always excluded — facts have no
+        // "show deleted" escape hatch, unlike list_filtered's explicit status arg.
+        let mut conds: Vec<String> = vec![
+            "m.subject IS NOT NULL".to_string(),
+            "m.status != 'deleted'".to_string(),
+        ];
         let mut vals: Vec<String> = Vec::new();
         for (col, val) in [
             ("m.subject", subject),
@@ -534,16 +550,19 @@ impl MemoryDb {
         Ok(out)
     }
 
-    /// Export every stored memory as a full record, **oldest first** — the
-    /// stable order suitable for a reproducible dump that can be fed back
-    /// through an importer (round-trips the `remind_me`-parity schema).
+    /// Export every **non-tombstoned** (C36) stored memory as a full record,
+    /// **oldest first** — the stable order suitable for a reproducible dump
+    /// that can be fed back through an importer (round-trips the
+    /// `remind_me`-parity schema). Forgotten memories stay forgotten in the
+    /// export, matching the export's use as a backup/reimport source.
     ///
     /// # Errors
     /// Returns an error on a query or decode failure.
     pub fn export_all(&self) -> Result<Vec<Memory>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(&format!(
-            "SELECT {COLS} FROM memories m ORDER BY m.created_at ASC, m.id ASC"
+            "SELECT {COLS} FROM memories m WHERE m.status != 'deleted' \
+             ORDER BY m.created_at ASC, m.id ASC"
         ))?;
         let out = stmt
             .query_map([], |row| row_to_memory(row).map_err(|e| into_rusqlite(&e)))?
@@ -552,9 +571,9 @@ impl MemoryDb {
     }
 
     /// Distinct entities mentioned by SPO facts — every non-null `subject` and
-    /// `object` — with the number of facts that mention each, most-frequent
-    /// first (ties broken alphabetically). The `key` of each [`CategoryCount`]
-    /// is the entity name.
+    /// `object` on a non-tombstoned (C36) row — with the number of facts that
+    /// mention each, most-frequent first (ties broken alphabetically). The
+    /// `key` of each [`CategoryCount`] is the entity name.
     ///
     /// # Errors
     /// Returns an error on a query failure.
@@ -562,9 +581,9 @@ impl MemoryDb {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
             "SELECT name AS k, COUNT(*) AS c FROM (
-                 SELECT subject AS name FROM memories WHERE subject IS NOT NULL
+                 SELECT subject AS name FROM memories WHERE subject IS NOT NULL AND status != 'deleted'
                  UNION ALL
-                 SELECT object AS name FROM memories WHERE object IS NOT NULL
+                 SELECT object AS name FROM memories WHERE object IS NOT NULL AND status != 'deleted'
              ) GROUP BY name ORDER BY c DESC, k ASC LIMIT ?1",
         )?;
         let rows = stmt
@@ -579,9 +598,9 @@ impl MemoryDb {
         Ok(rows)
     }
 
-    /// Distinct tags across all memories, with the number of memories carrying
-    /// each, most-frequent first (ties alphabetical). The `key` of each
-    /// [`CategoryCount`] is the tag.
+    /// Distinct tags across all non-tombstoned (C36) memories, with the
+    /// number of memories carrying each, most-frequent first (ties
+    /// alphabetical). The `key` of each [`CategoryCount`] is the tag.
     ///
     /// # Errors
     /// Returns an error on a query failure.
@@ -589,7 +608,7 @@ impl MemoryDb {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
             "SELECT je.value AS k, COUNT(*) AS c FROM memories m, json_each(m.tags) je \
-             GROUP BY je.value ORDER BY c DESC, k ASC LIMIT ?1",
+             WHERE m.status != 'deleted' GROUP BY je.value ORDER BY c DESC, k ASC LIMIT ?1",
         )?;
         let rows = stmt
             .query_map(params![clamp_limit(limit)], |r| {
@@ -604,6 +623,10 @@ impl MemoryDb {
     }
 
     /// Full-text search over content/category/tags, best matches first.
+    /// Tombstoning (C36) is a status flip, not a SQL `DELETE`, so a deleted
+    /// row's content is still sitting in the external-content FTS index
+    /// (the `memories_ad` delete trigger never fires); the join back to
+    /// `memories` is what actually excludes it here.
     ///
     /// # Errors
     /// Returns an error on a query or decode failure.
@@ -611,7 +634,7 @@ impl MemoryDb {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(&format!(
             "SELECT {COLS} FROM memories m JOIN memories_fts f ON f.rowid = m.rowid \
-             WHERE memories_fts MATCH ?1 ORDER BY rank LIMIT ?2"
+             WHERE memories_fts MATCH ?1 AND m.status != 'deleted' ORDER BY rank LIMIT ?2"
         ))?;
         let out = stmt
             .query_map(params![query, clamp_limit(limit)], |row| {
@@ -693,37 +716,59 @@ impl MemoryDb {
         Ok(n > 0)
     }
 
-    /// Delete a memory by id. Returns `true` if a row was removed.
+    /// Tombstone a memory by id (C36, #389): sets `status = 'deleted'` and
+    /// bumps `updated_at` rather than issuing a SQL `DELETE`. A hard delete
+    /// is invisible to [`Self::list_since`] (the sync push scan), so a
+    /// locally hard-deleted memory could never be observed by push and would
+    /// silently resurrect from the hub or any peer that still had it. The
+    /// row stays in the table — every normal read path
+    /// (`get`/`list_filtered`/`search`/`list_facts`/`list_entities`/
+    /// `export_all`/`stats`) excludes `status = 'deleted'` so it reads as
+    /// gone — but push still scans it, sees the fresh `updated_at`, and
+    /// forwards the tombstone.
+    ///
+    /// Returns `true` if a row was newly tombstoned (idempotent: deleting an
+    /// already-deleted or nonexistent id returns `false`).
     ///
     /// # Errors
     /// Returns an error on a write failure.
     pub fn delete(&self, id: Uuid) -> Result<bool> {
         let conn = self.pool.get()?;
         let n = conn.execute(
-            "DELETE FROM memories WHERE id = ?1",
-            params![id.to_string()],
+            "UPDATE memories SET status = 'deleted', updated_at = ?2 \
+             WHERE id = ?1 AND status != 'deleted'",
+            params![id.to_string(), Utc::now().to_rfc3339()],
         )?;
         Ok(n > 0)
     }
 
-    /// Total number of stored memories.
+    /// Total number of non-tombstoned (C36) stored memories.
     ///
     /// # Errors
     /// Returns an error on a query failure.
     pub fn count(&self) -> Result<u64> {
         let conn = self.pool.get()?;
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE status != 'deleted'",
+            [],
+            |r| r.get(0),
+        )?;
         Ok(u64::try_from(n).unwrap_or(0))
     }
 
-    /// Aggregate statistics: total count plus counts grouped by category,
-    /// memory type, and source (each most-frequent first).
+    /// Aggregate statistics over non-tombstoned (C36) memories: total count
+    /// plus counts grouped by category, memory type, and source (each
+    /// most-frequent first).
     ///
     /// # Errors
     /// Returns an error on a query failure.
     pub fn stats(&self) -> Result<MemoryStats> {
         let conn = self.pool.get()?;
-        let total: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE status != 'deleted'",
+            [],
+            |r| r.get(0),
+        )?;
         Ok(MemoryStats {
             count: u64::try_from(total).unwrap_or(0),
             by_category: grouped_count(&conn, "category")?,
@@ -930,12 +975,14 @@ impl MemoryDb {
     }
 }
 
-/// Count rows grouped by a fixed column (`category` / `memory_type` /
-/// `source`), most-frequent first. `column` is an internal literal supplied by
-/// [`MemoryDb::stats`] — never user input — so interpolating it is safe.
+/// Count non-tombstoned (C36) rows grouped by a fixed column (`category` /
+/// `memory_type` / `source`), most-frequent first. `column` is an internal
+/// literal supplied by [`MemoryDb::stats`] — never user input — so
+/// interpolating it is safe.
 fn grouped_count(conn: &rusqlite::Connection, column: &str) -> Result<Vec<CategoryCount>> {
     let sql = format!(
-        "SELECT {column} AS k, COUNT(*) AS c FROM memories GROUP BY {column} ORDER BY c DESC, k ASC"
+        "SELECT {column} AS k, COUNT(*) AS c FROM memories WHERE status != 'deleted' \
+         GROUP BY {column} ORDER BY c DESC, k ASC"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
@@ -1153,6 +1200,63 @@ mod tests {
         assert!(db.get(m.id).unwrap().is_none());
         assert_eq!(db.search("zebras", 10).unwrap().len(), 0);
         assert_eq!(db.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn delete_tombstones_the_row_instead_of_hard_deleting_it() {
+        // C36 (#389) — a hard DELETE is invisible to list_since (the sync
+        // push scan), so a deletion could never propagate to the hub or
+        // other peers; delete() must instead flip status to leave a
+        // syncable tombstone that every normal read path still treats as gone.
+        let db = MemoryDb::open_in_memory().unwrap();
+        let m = Memory::new("ephemeral note about zebras");
+        db.insert(&m).unwrap();
+
+        assert!(db.delete(m.id).unwrap());
+
+        // list_since (the push scan) still observes the row, carrying the
+        // deleted status forward so the tombstone can propagate.
+        let since = db.list_since("1970-01-01T00:00:00+00:00", "", 10).unwrap();
+        assert_eq!(since.len(), 1);
+        assert_eq!(since[0].id, m.id);
+        assert_eq!(since[0].status, MemoryStatus::Deleted);
+
+        // Explicitly asking for deleted status still surfaces it (a future
+        // "trash" view could use this); "any status" (None) does not.
+        assert_eq!(
+            db.list_filtered(None, None, Some("deleted"), None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_filtered(None, None, None, None, 10).unwrap().len(),
+            0
+        );
+
+        // Idempotent: deleting an already-tombstoned (or nonexistent) id is
+        // a no-op that reports no change.
+        assert!(!db.delete(m.id).unwrap());
+        assert!(!db.delete(Uuid::now_v7()).unwrap());
+    }
+
+    #[test]
+    fn upsert_lww_applies_a_tombstone_pulled_from_a_peer() {
+        // C36 — a peer's tombstone (status: deleted, newer updated_at) must
+        // win over our still-active local copy via the same LWW rule as any
+        // other field, since pull applies every record through upsert_lww.
+        let db = MemoryDb::open_in_memory().unwrap();
+        let mut m = Memory::new("shared note");
+        db.insert(&m).unwrap();
+        assert!(db.get(m.id).unwrap().is_some());
+
+        m.status = MemoryStatus::Deleted;
+        m.updated_at = Utc::now() + chrono::Duration::seconds(1);
+        assert!(db.upsert_lww(&m).unwrap());
+
+        assert!(db.get(m.id).unwrap().is_none());
+        let since = db.list_since("1970-01-01T00:00:00+00:00", "", 10).unwrap();
+        assert_eq!(since[0].status, MemoryStatus::Deleted);
     }
 
     #[test]
