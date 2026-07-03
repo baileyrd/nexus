@@ -742,6 +742,28 @@ impl MemoryDb {
         Ok(n > 0)
     }
 
+    /// Prune passively-captured event rows (`source = 'event'`, C37 — the
+    /// bus-capture pump's output) beyond `max_rows`, oldest (`created_at`)
+    /// first. Hard-deletes: unlike [`Self::delete`], these are ambient bus
+    /// captures rather than deliberate user memories, so there is no
+    /// tombstone to sync — retention pruning is purely a local storage
+    /// bound, mirroring [`Self::episodic_append`]'s per-write cap. Deliberate
+    /// memories (`source` = `manual`/`capture`/`import`) are never touched.
+    /// Returns the number of rows removed.
+    ///
+    /// # Errors
+    /// Returns an error on a write failure.
+    pub fn prune_event_rows(&self, max_rows: u64) -> Result<u64> {
+        let conn = self.pool.get()?;
+        let n = conn.execute(
+            "DELETE FROM memories WHERE source = 'event' AND id NOT IN ( \
+                 SELECT id FROM memories WHERE source = 'event' \
+                 ORDER BY created_at DESC LIMIT ?1)",
+            params![i64::try_from(max_rows).unwrap_or(i64::MAX)],
+        )?;
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
     /// Total number of non-tombstoned (C36) stored memories.
     ///
     /// # Errors

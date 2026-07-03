@@ -179,6 +179,11 @@ backoff_factor = 2.0                                    # P2-06 — ReconnectCon
 buffer_capacity = 256                                   # ReconnectConfig.buffer_capacity override
 handshake_timeout_secs = 10                             # P2-06 forward-compat — pending ReconnectingClient knob
 
+[memory]                                                # MemoryConfig — crates/nexus-bootstrap/src/memory_capture.rs (C37, #390)
+capture_enabled = true                                  # master switch for the passive bus-capture pump; default true (preserves pre-C37 always-on behavior)
+capture_exclude_plugins = ["com.nexus.terminal"]        # source-plugin-id prefixes to skip capturing; default [] (capture everything)
+event_retention_max_rows = 20000                        # prune captured (source="event") rows beyond this count, oldest first; default null = unbounded
+
 [digests]                                               # DigestConfig — crates/nexus-workflow/src/digests.rs:56
 enabled = false                                         # master switch; cron loop only fires when true
 daily_cron = "0 7 * * *"                                # 5-field cron; null disables daily
@@ -191,7 +196,7 @@ enabled = false                                         # master switch; HTTP li
 bind = "127.0.0.1:18080"                                # host:port
 ```
 
-Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::collab::load_config(forge_root)` — `collab.rs:100`; `nexus_bootstrap::load_digest_config(forge_root)` — `lib.rs:488`; `nexus_bootstrap::load_webhook_config(forge_root)` — `lib.rs:923`. Missing file / missing block ⇒ defaults. The `enabled = false` default for both `[digests]` and `[webhooks]` keeps the cron loop and HTTP listener dormant; manual `com.nexus.workflow::run_digest` IPC calls still work regardless.
+Loaders: `AudioConfig::load(forge_root)` — `config.rs:155`; `nexus_bootstrap::collab::load_config(forge_root)` — `collab.rs:100`; `nexus_bootstrap::memory_capture::load_config(forge_root)` — `memory_capture.rs` (C37, #390 — private to the module, read internally by `start_capture`); `nexus_bootstrap::load_digest_config(forge_root)` — `lib.rs:488`; `nexus_bootstrap::load_webhook_config(forge_root)` — `lib.rs:923`. Missing file / missing block ⇒ defaults. The `enabled = false` default for both `[digests]` and `[webhooks]` keeps the cron loop and HTTP listener dormant; manual `com.nexus.workflow::run_digest` IPC calls still work regardless. `[memory].capture_enabled` defaults `true` instead — unlike those two, passive memory capture has run unconditionally since it shipped, so the default preserves existing behavior rather than introducing an opt-in gate.
 
 ## `<forge>/.nexus/config.toml`
 

@@ -36,7 +36,7 @@ Capability classification for every handler is in [`reference/audit-flags.md`](r
 
 ## Passive bus capture
 
-Beyond explicit `add` / `auto_capture`, the plugin subscribes to the kernel event bus and turns salient events into episodic memories (`crate::capture`), so the store accrues context without every caller remembering to write to it.
+Beyond explicit `add` / `auto_capture`, the plugin subscribes to the kernel event bus and turns salient events into episodic memories (`crate::capture`), so the store accrues context without every caller remembering to write to it. Governed by an optional `[memory]` block in `.forge/config.toml` (C37, #390 — see [`settings/forge-config.md`](settings/forge-config.md)): `capture_enabled` (default `true`, preserving the historical always-on behavior), `capture_exclude_plugins` (source-plugin-id prefixes to skip), and `event_retention_max_rows` (prunes passively-captured `source = "event"` rows oldest-first after each insert; deliberate memories are never pruned by this setting). Loader: `nexus_bootstrap::memory_capture::start_capture` (`memory_capture.rs`).
 
 ## Surfaces
 
