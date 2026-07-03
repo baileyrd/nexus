@@ -207,6 +207,10 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
         openExternal: (target) =>
           request('platform.shell.openExternal', { target }) as Promise<void>,
       },
+      net: {
+        request: (req) =>
+          request('platform.net.request', req) as ReturnType<PlatformAPI['net']['request']>,
+      },
     };
 
     const ctx: SandboxedPluginContext = {

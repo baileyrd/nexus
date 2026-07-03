@@ -12,23 +12,23 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 76 |
+| `com.nexus.storage` | 80 |
 | `com.nexus.git` | 42 |
 | `com.nexus.terminal` | 34 |
-| `com.nexus.ai` | 28 |
+| `com.nexus.ai` | 29 |
+| `com.nexus.agent` | 28 |
 | `com.nexus.dap` | 21 |
-| `com.nexus.agent` | 26 |
+| `com.nexus.memory` | 21 |
 | `com.nexus.editor` | 15 |
 | `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
 | `com.nexus.mcp.host` | 12 |
-| `com.nexus.theme` | 11 |
 | `com.nexus.ai.runtime` | 12 |
+| `com.nexus.theme` | 11 |
+| `com.nexus.security` | 11 |
 | `com.nexus.skills` | 8 |
 | `com.nexus.acp` | 8 |
-| `com.nexus.security` | 10 |
 | `com.nexus.comments` | 7 |
-| `com.nexus.memory` | 21 |
 | `com.nexus.database` | 6 |
 | `com.nexus.notifications` | 5 |
 | `com.nexus.templates` | 5 |
@@ -36,7 +36,7 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 2 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **347** |
+| **Total** | **391** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (76)
+## com.nexus.storage (80)
 
 ### Read
 
@@ -107,7 +107,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.ai (28)
+## com.nexus.ai (29)
 
 ### Generation (gated by `ai.chat`)
 
@@ -162,7 +162,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.agent (26)
+## com.nexus.agent (28)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -259,7 +259,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.security (10)
+## com.nexus.security (11)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -272,6 +272,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `clear_audit_log` | `security.audit.write` | P1-01 — destroys audit history |
 | `sandbox_policy` | — | read-only introspection of the active OS-sandbox config (`sandbox.toml`) |
 | `download` | `net.http` | **async** — brokered, allowlisted download into a writable root (`{ url, dest, cwd? }`) |
+| `http_request` | `net.http` | **async** — C81, brokered outbound HTTP with arbitrary method/headers/body; response returned to the caller (`{ method, url, headers?, body? }` → `{ status, headers, body: base64 }`). Doubly gated by `sandbox.toml`'s `[http]` host allowlist — a distinct allowlist from `download` since the response leaves the sandbox. Also reachable from WASM community plugins via `host::http_request` and from script plugins via `platform.net.request` (both re-check `NetHttp` + the same policy). |
 
 ---
 

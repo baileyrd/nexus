@@ -72,6 +72,78 @@ pub struct PluginData {
     /// lines per second per plugin. Prevents a runaway plugin from
     /// flooding the host logger and consuming disk/CPU.
     pub log_rate: Arc<Mutex<TokenBucket>>,
+    /// Policy governing `host::http_request` (C81). Closed by default;
+    /// [`crate::loader::PluginLoader::set_network_policy`] installs the
+    /// operator's `<forge>/.forge/sandbox.toml` `[http]` values at
+    /// bootstrap, threaded into every subsequently loaded plugin's
+    /// `PluginData`.
+    pub network_policy: NetworkPolicy,
+}
+
+/// Policy governing the `host::http_request` WASM host function (C81).
+///
+/// Mirrors `nexus_security::HttpPolicy`'s shape without depending on that
+/// crate — `nexus-security` depends on `nexus-plugins` (it implements
+/// [`crate::CorePlugin`]), so the reverse dependency isn't available.
+/// `nexus-bootstrap`, which already depends on both, copies the operator's
+/// `sandbox.toml` `[http]` values across at wiring time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NetworkPolicy {
+    /// Whether `host::http_request` is permitted at all.
+    pub enabled: bool,
+    /// Hosts that may be requested (exact host match).
+    pub allowed_hosts: Vec<String>,
+    /// Hard cap on a single response body, in bytes.
+    pub max_response_bytes: u64,
+    /// Per-request timeout, in milliseconds.
+    pub timeout_ms: u64,
+}
+
+impl Default for NetworkPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowed_hosts: Vec::new(),
+            max_response_bytes: 10 * 1024 * 1024,
+            timeout_ms: 30_000,
+        }
+    }
+}
+
+/// Methods `NetworkPolicy::validate` will forward. Deliberately excludes
+/// `CONNECT`/`TRACE` and anything non-standard.
+const NETWORK_POLICY_ALLOWED_METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"];
+
+impl NetworkPolicy {
+    /// Validate `method` + `url` against this policy. Pure — performs no
+    /// I/O. Returns the uppercased method and parsed URL on success, or a
+    /// human-readable refusal reason.
+    ///
+    /// # Errors
+    /// Returns a `String` describing the first rule that failed.
+    pub fn validate(&self, method: &str, url: &str) -> Result<(String, reqwest::Url), String> {
+        if !self.enabled {
+            return Err("brokered http requests are disabled by policy".to_string());
+        }
+        let method = method.to_ascii_uppercase();
+        if !NETWORK_POLICY_ALLOWED_METHODS.contains(&method.as_str()) {
+            return Err(format!("unsupported method {method:?}"));
+        }
+        let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
+        if parsed.scheme() != "https" {
+            return Err(format!(
+                "only https requests are permitted (got scheme {:?})",
+                parsed.scheme()
+            ));
+        }
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| "invalid url: missing host".to_string())?;
+        if !self.allowed_hosts.iter().any(|h| h == host) {
+            return Err(format!("host {host:?} is not on the http allowlist"));
+        }
+        Ok((method, parsed))
+    }
 }
 
 /// Token bucket limiter: refills `refill_per_sec` tokens per second up to
@@ -139,6 +211,7 @@ impl Default for PluginData {
             // 1k lines/sec sustained. Matches the "1000 lines/second"
             // target from F-6.2.2.
             log_rate: Arc::new(Mutex::new(TokenBucket::new(2000.0, 1000.0))),
+            network_policy: NetworkPolicy::default(),
         }
     }
 }
@@ -545,6 +618,73 @@ mod tests {
     use super::*;
 
     // ── Unit tests ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn network_policy_default_is_closed() {
+        let p = NetworkPolicy::default();
+        assert!(!p.enabled);
+        assert!(p.allowed_hosts.is_empty());
+        assert_eq!(p.max_response_bytes, 10 * 1024 * 1024);
+        assert_eq!(p.timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn network_policy_validate_rejects_when_disabled() {
+        let p = NetworkPolicy::default();
+        let err = p.validate("GET", "https://api.example.com/x").unwrap_err();
+        assert!(err.contains("disabled"), "got: {err}");
+    }
+
+    #[test]
+    fn network_policy_validate_rejects_unsupported_method() {
+        let p = NetworkPolicy {
+            enabled: true,
+            allowed_hosts: vec!["api.example.com".to_string()],
+            ..Default::default()
+        };
+        let err = p.validate("CONNECT", "https://api.example.com/x").unwrap_err();
+        assert!(err.contains("unsupported method"), "got: {err}");
+    }
+
+    #[test]
+    fn network_policy_validate_rejects_non_https() {
+        let p = NetworkPolicy {
+            enabled: true,
+            allowed_hosts: vec!["api.example.com".to_string()],
+            ..Default::default()
+        };
+        let err = p.validate("GET", "http://api.example.com/x").unwrap_err();
+        assert!(err.contains("https"), "got: {err}");
+    }
+
+    #[test]
+    fn network_policy_validate_rejects_host_off_allowlist() {
+        let p = NetworkPolicy {
+            enabled: true,
+            allowed_hosts: vec!["good.example.com".to_string()],
+            ..Default::default()
+        };
+        let err = p.validate("GET", "https://evil.example.com/x").unwrap_err();
+        assert!(err.contains("not on the http allowlist"), "got: {err}");
+    }
+
+    #[test]
+    fn network_policy_validate_accepts_allowlisted_https() {
+        let p = NetworkPolicy {
+            enabled: true,
+            allowed_hosts: vec!["api.example.com".to_string()],
+            ..Default::default()
+        };
+        let (method, url) = p.validate("get", "https://api.example.com/x").unwrap();
+        assert_eq!(method, "GET");
+        assert_eq!(url.host_str(), Some("api.example.com"));
+    }
+
+    #[test]
+    fn plugin_data_default_network_policy_is_closed() {
+        let pd = PluginData::default();
+        assert!(!pd.network_policy.enabled);
+    }
 
     #[test]
     fn plugin_data_stores_id_and_capabilities() {

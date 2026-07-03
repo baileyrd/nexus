@@ -181,6 +181,12 @@ export interface SandboxMethodCatalog {
     returns: void
   }
 
+  // ── Platform: net (C81) ─────────────────────────────────────────────────
+  'platform.net.request': {
+    args: { method: string; url: string; headers?: Record<string, string>; body?: string }
+    returns: { status: number; headers: Record<string, string>; body: string }
+  }
+
   // ── Events ──────────────────────────────────────────────────────────────
   'events.on': {
     args: { event: string; handlerSub: string }
@@ -306,6 +312,7 @@ export const SANDBOX_METHOD_NAMES = [
   'platform.window.close',
   'platform.window.isMaximized',
   'platform.shell.openExternal',
+  'platform.net.request',
   'events.on',
   'events.off',
   'events.emit',

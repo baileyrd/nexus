@@ -302,6 +302,18 @@ fn build(
     // P1-09 — clamp every per-plugin WasmConfig against the kernel-wide
     // ceiling so a hostile manifest can't out-run metering.
     loader.set_wasm_caps_ceiling(Some(kernel.config().wasm_caps));
+    // C81 — thread the operator's sandbox.toml `[http]` policy into
+    // `host::http_request`'s gate for every WASM plugin this loader loads.
+    // `nexus-plugins` cannot depend on `nexus-security` (reverse of the
+    // real dependency), so bootstrap — which links both — copies the
+    // parsed fields across into the local `nexus_plugins::NetworkPolicy`.
+    let http_policy = nexus_security::SandboxConfig::load(forge_root).http;
+    loader.set_network_policy(nexus_plugins::NetworkPolicy {
+        enabled: http_policy.enabled,
+        allowed_hosts: http_policy.allowed_hosts,
+        max_response_bytes: http_policy.max_response_bytes,
+        timeout_ms: http_policy.timeout_ms,
+    });
 
     // Register every in-tree core plugin. Order matters where lifecycle hooks
     // of later plugins rely on earlier ones publishing events; in practice

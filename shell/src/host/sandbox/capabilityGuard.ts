@@ -95,6 +95,13 @@ export const METHOD_CAPABILITY_MAP: Record<SandboxMethodName, RequiredCap> = {
   // yet; a future `ShellOpen` would flip this.
   'platform.shell.openExternal': null,
 
+  // Platform: net (C81) — brokered outbound HTTP, gated on NetHttp same
+  // as the WASM host::http_request and the com.nexus.security::http_request
+  // IPC handler it's implemented on top of. The kernel-side sandbox.toml
+  // `[http]` policy (host allowlist, https-only, response-size cap) is the
+  // authoritative backstop this guard can't see.
+  'platform.net.request': 'NetHttp',
+
   // Events — intra-process pub/sub, no external reach.
   'events.on': null,
   'events.off': null,

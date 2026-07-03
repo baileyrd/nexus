@@ -31,6 +31,11 @@ ed25519-dalek = { workspace = true }
 base64 = { workspace = true }
 dirs = { workspace = true }
 sha2 = { workspace = true }
+# C81 — host::http_request performs a blocking outbound request (mirrors the
+# already-blocking std::fs I/O in host::read_file/write_file). `blocking`
+# pulls its own dedicated background-thread runtime, so it's safe to call
+# from a host fn even when the guest call itself runs inside a tokio worker.
+reqwest = { workspace = true, features = ["blocking"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -427,6 +427,11 @@ pub struct PluginLoader {
     /// behaviour where the manifest declares whatever budget it
     /// wants. Bootstrap wires this from `KernelConfig::wasm_caps`.
     wasm_caps_ceiling: Option<nexus_kernel::WasmCapsCeiling>,
+    /// C81 — policy for `host::http_request`, threaded into every
+    /// subsequently loaded WASM plugin's `PluginData`. Closed by default;
+    /// bootstrap installs the operator's `sandbox.toml` `[http]` values via
+    /// [`Self::set_network_policy`].
+    network_policy: crate::sandbox::NetworkPolicy,
 }
 
 impl PluginLoader {
@@ -448,6 +453,7 @@ impl PluginLoader {
             signature_verifier: None,
             require_signatures: false,
             wasm_caps_ceiling: None,
+            network_policy: crate::sandbox::NetworkPolicy::default(),
         }
     }
 
@@ -458,6 +464,15 @@ impl PluginLoader {
     /// [`KernelConfig::wasm_caps`](nexus_kernel::KernelConfig::wasm_caps).
     pub fn set_wasm_caps_ceiling(&mut self, ceiling: Option<nexus_kernel::WasmCapsCeiling>) {
         self.wasm_caps_ceiling = ceiling;
+    }
+
+    /// C81 — install the policy `host::http_request` enforces for every
+    /// subsequently loaded WASM plugin. The bootstrap path passes values
+    /// copied from `nexus_security::SandboxConfig::load(forge_root).http`
+    /// (`nexus-plugins` cannot depend on `nexus-security` — see
+    /// [`crate::sandbox::NetworkPolicy`]'s doc comment).
+    pub fn set_network_policy(&mut self, policy: crate::sandbox::NetworkPolicy) {
+        self.network_policy = policy;
     }
 
     /// P1-09 — return a `WasmConfig` clone with `memory_mb` / `fuel`
@@ -784,6 +799,7 @@ impl PluginLoader {
                 forge_root: plugin_dir.to_path_buf(),
                 path_validator,
                 settings_json: Some(settings_cache.clone()),
+                network_policy: self.network_policy.clone(),
                 ..Default::default()
             };
             PluginBackend::Community(WasmSandbox::new(&wasm_bytes, wasm_cfg, plugin_data)?)

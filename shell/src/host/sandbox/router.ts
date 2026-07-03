@@ -759,6 +759,18 @@ export class SandboxRouter {
         await this.api.platform.shell.openExternal(String(args.target))
         return undefined
 
+      // ── Platform: net (C81) ──────────────────────────────────────
+      case 'platform.net.request': {
+        const headers = args.headers as Record<string, string> | undefined
+        const body = typeof args.body === 'string' ? args.body : undefined
+        return await this.api.platform.net.request({
+          method: String(args.method),
+          url: String(args.url),
+          headers,
+          body,
+        })
+      }
+
       // ── Events ──────────────────────────────────────────────────
       case 'events.on': {
         const ev = String(args.event)

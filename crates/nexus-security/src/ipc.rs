@@ -4,6 +4,8 @@
 //! a plugin cannot read another plugin's secrets. The vault key stored in
 //! the OS keyring is `"{plugin_id}:{name}"`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ts-export")]
@@ -252,4 +254,57 @@ pub struct ListSecretNamesResult {
     /// names set in previous sessions and not re-set are not enumerable
     /// (the OS keyring does not support listing).
     pub names: Vec<String>,
+}
+
+// ── http_request (C81) ──────────────────────────────────────────────────────
+
+/// Args for `com.nexus.security::http_request` (handler id `11`).
+///
+/// Gated on the `net.http` capability, and doubly gated by the operator's
+/// `[http]` section in `<forge>/.forge/sandbox.toml` (host allowlist,
+/// https-only, response-size cap) — mirrors `download`'s two-layer gate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct HttpRequestArgs {
+    /// HTTP method: one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`
+    /// (case-insensitive).
+    pub method: String,
+    /// Request URL. Must be `https` and match the `[http].allowed_hosts`
+    /// allowlist.
+    pub url: String,
+    /// Request headers to send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<BTreeMap<String, String>>,
+    /// Request body, sent as raw UTF-8 text (e.g. a JSON payload). Omit for
+    /// methods that carry no body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+/// Return type for `com.nexus.security::http_request`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct HttpRequestResult {
+    /// HTTP status code.
+    pub status: u16,
+    /// Response headers. Repeated header names are joined with `", "`.
+    pub headers: BTreeMap<String, String>,
+    /// Response body, base64-encoded so binary responses round-trip safely.
+    pub body: String,
 }

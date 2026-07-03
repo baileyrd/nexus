@@ -878,11 +878,50 @@ export interface PlatformShellAPI {
   openExternal(target: string): Promise<void>;
 }
 
+/** A brokered outbound HTTP request (C81). */
+export interface PlatformNetRequest {
+  /** HTTP method: one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` (case-insensitive). */
+  method: string;
+  /** Request URL. Must be `https` and match the operator's `sandbox.toml` `[http].allowed_hosts` allowlist. */
+  url: string;
+  /** Request headers to send. */
+  headers?: Record<string, string>;
+  /** Request body, sent as raw UTF-8 text (e.g. a JSON payload). Omit for methods that carry no body. */
+  body?: string;
+}
+
+/** The response to a [`PlatformNetRequest`](PlatformNetRequest) (C81). */
+export interface PlatformNetResponse {
+  /** HTTP status code. */
+  status: number;
+  /** Response headers. Repeated header names are joined with `", "`. */
+  headers: Record<string, string>;
+  /** Response body, base64-encoded so binary responses round-trip safely. */
+  body: string;
+}
+
+/**
+ * Brokered outbound HTTP for script (JS) plugins (C81).
+ *
+ * **Capability model.** Requires `NetHttp`, checked at the sandbox boundary
+ * by `capabilityGuard.METHOD_CAPABILITY_MAP`. Unlike `platform.fs.*`, this
+ * is not a thin Tauri-plugin wrapper — it forwards through
+ * `com.nexus.security::http_request`, which is doubly gated by the
+ * operator's `sandbox.toml` `[http]` section (https-only, host allowlist,
+ * response-size cap). A request the kernel-side policy refuses fails even
+ * when the plugin holds `NetHttp`.
+ */
+export interface PlatformNetAPI {
+  /** Issue a brokered HTTP request. Requires `NetHttp`. */
+  request(req: PlatformNetRequest): Promise<PlatformNetResponse>;
+}
+
 export interface PlatformAPI {
   fs: PlatformFsAPI;
   dialog: PlatformDialogAPI;
   window: PlatformWindowAPI;
   shell: PlatformShellAPI;
+  net: PlatformNetAPI;
 }
 
 // ─── URI handler surface (api.uri.*) ─────────────────────────────────────────

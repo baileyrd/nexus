@@ -1062,6 +1062,12 @@ command = "download"
 caps = ["net.http"]
 note = "brokered outbound HTTPS on a confined process's behalf; doubly gated — the cap here, plus the sandbox.toml allowlist + writable-root checks the handler enforces"
 
+[[handler]]
+plugin = "com.nexus.security"
+command = "http_request"
+caps = ["net.http"]
+note = "C81 — brokered outbound HTTPS with arbitrary method/headers/body and the response returned to the caller; doubly gated — the cap here, plus sandbox.toml's [http] host allowlist + response-size cap the handler enforces. Distinct allowlist from 'download' since responses leave the sandbox (exfiltration surface flagged by the 2026-05-18 sandbox-security audit)"
+
 # ─── com.nexus.skills ────────────────────────────────────────────────
 
 [[handler]]

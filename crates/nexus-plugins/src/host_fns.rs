@@ -3,8 +3,10 @@
 //! Registers all `("host", "*")` functions onto a wasmtime [`Linker`] so that
 //! WASM plugins can call back into the host environment.
 
+use std::io::Read as _;
 use std::path::Path;
 
+use base64::Engine as _;
 use wasmtime::{Caller, Linker};
 
 use nexus_kernel::{audit, Capability, IpcErrorEnvelope, IpcErrorKind};
@@ -112,6 +114,7 @@ fn deny_path_traversal(plugin_id: &str, requested_path: &Path, forge_root: &Path
 /// - `host::emit_event` — publish a custom event to the kernel event bus.
 /// - `host::read_file` — read a file from within the plugin's forge root.
 /// - `host::notify` — show an in-app toast notification in the UI.
+/// - `host::http_request` — brokered outbound HTTP request (C81).
 ///
 /// # Errors
 /// Returns [`PluginError::WasmLoadFailed`] (with a synthetic plugin id) if
@@ -126,6 +129,7 @@ pub fn register_host_fns(linker: &mut Linker<PluginData>) -> Result<(), PluginEr
     register_host_invoke_command(linker)?;
     register_host_get_settings(linker)?;
     register_host_notify(linker)?;
+    register_host_http_request(linker)?;
     Ok(())
 }
 
@@ -956,6 +960,185 @@ fn register_host_notify(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
         .map_err(|e| PluginError::WasmLoadFailed {
             plugin_id: "<host>".to_string(),
             reason: format!("failed to register host::notify: {e}"),
+        })?;
+    Ok(())
+}
+
+// ─── host::http_request ─────────────────────────────────────────────────────
+
+/// `host::http_request(req_ptr, req_len, out_ptr, out_cap) -> i32`
+///
+/// `req` is a JSON blob `{ method, url, headers?, body? }` (mirrors
+/// `nexus_security::ipc::HttpRequestArgs`). Performs a **blocking** brokered
+/// HTTP request — mirrors the blocking `std::fs` I/O already used by
+/// `host::read_file`/`write_file`. `reqwest::blocking::Client` runs its own
+/// dedicated background-thread runtime, so this is safe to call even when
+/// the guest call itself is being driven from within a tokio worker (no
+/// "runtime within a runtime" hazard).
+///
+/// Writes a JSON blob `{ status, headers, body: <base64> }` to
+/// `[out_ptr, out_ptr+out_cap)` on success.
+///
+/// Requires `NetHttp`. Doubly gated by the plugin loader's injected
+/// [`crate::sandbox::NetworkPolicy`] (https-only, host allowlist,
+/// response-size cap, timeout) — mirrors the `com.nexus.security::download`
+/// IPC handler's two-layer gate.
+///
+/// Returns bytes written on success, `HOST_CAPABILITY_DENIED` if the plugin
+/// lacks `NetHttp`, `HOST_BUFFER_OVERFLOW` when the JSON response exceeds
+/// `out_cap`, or `HOST_ERROR` on any other failure (invalid request JSON,
+/// policy refusal, transport error, response-size cap exceeded).
+fn register_host_http_request(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
+    linker
+        .func_wrap(
+            "host",
+            "http_request",
+            |mut caller: Caller<'_, PluginData>,
+             req_ptr: i32,
+             req_len: i32,
+             out_ptr: i32,
+             out_cap: i32|
+             -> i32 {
+                let plugin_id = caller.data().plugin_id.clone();
+
+                if !caller.data().capabilities.contains(Capability::NetHttp) {
+                    return deny_capability(&plugin_id, "net.http");
+                }
+
+                let policy = caller.data().network_policy.clone();
+
+                let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
+                    return HOST_ERROR;
+                };
+                let Some(req_bytes) = read_wasm_bytes(&memory, &caller, req_ptr, req_len) else {
+                    return HOST_ERROR;
+                };
+                let req: serde_json::Value = match serde_json::from_slice(&req_bytes) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(plugin_id = %plugin_id, "host::http_request: invalid request JSON: {e}");
+                        return HOST_ERROR;
+                    }
+                };
+
+                let Some(method) = req.get("method").and_then(serde_json::Value::as_str) else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::http_request: missing 'method'");
+                    return HOST_ERROR;
+                };
+                let Some(url) = req.get("url").and_then(serde_json::Value::as_str) else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::http_request: missing 'url'");
+                    return HOST_ERROR;
+                };
+                let headers: std::collections::BTreeMap<String, String> = req
+                    .get("headers")
+                    .and_then(|h| serde_json::from_value(h.clone()).ok())
+                    .unwrap_or_default();
+                let body = req
+                    .get("body")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+
+                let (method, parsed_url) = match policy.validate(method, url) {
+                    Ok(v) => v,
+                    Err(reason) => {
+                        tracing::warn!(plugin_id = %plugin_id, "host::http_request: {reason}");
+                        return HOST_ERROR;
+                    }
+                };
+
+                let client = match reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_millis(policy.timeout_ms))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(plugin_id = %plugin_id, "host::http_request: client build failed: {e}");
+                        return HOST_ERROR;
+                    }
+                };
+                let Ok(reqwest_method) = reqwest::Method::from_bytes(method.as_bytes()) else {
+                    return HOST_ERROR;
+                };
+                let mut builder = client.request(reqwest_method, parsed_url);
+                for (name, value) in &headers {
+                    builder = builder.header(name, value);
+                }
+                if let Some(b) = body {
+                    builder = builder.body(b);
+                }
+
+                let resp = match builder.send() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(plugin_id = %plugin_id, "host::http_request: transport error: {e}");
+                        return HOST_ERROR;
+                    }
+                };
+                let status = resp.status().as_u16();
+                let mut resp_headers = std::collections::BTreeMap::new();
+                for (name, value) in resp.headers() {
+                    let Ok(value_str) = value.to_str() else {
+                        continue;
+                    };
+                    resp_headers
+                        .entry(name.as_str().to_string())
+                        .and_modify(|existing: &mut String| {
+                            existing.push_str(", ");
+                            existing.push_str(value_str);
+                        })
+                        .or_insert_with(|| value_str.to_string());
+                }
+
+                // Bound memory use regardless of what (or whether) the
+                // server declares Content-Length: read at most cap+1 bytes
+                // so an over-cap response is detected without buffering
+                // the whole thing.
+                let mut body_bytes = Vec::new();
+                let mut limited = resp.take(policy.max_response_bytes.saturating_add(1));
+                if let Err(e) = limited.read_to_end(&mut body_bytes) {
+                    tracing::warn!(plugin_id = %plugin_id, "host::http_request: body read failed: {e}");
+                    return HOST_ERROR;
+                }
+                if u64::try_from(body_bytes.len()).unwrap_or(u64::MAX) > policy.max_response_bytes {
+                    tracing::warn!(
+                        plugin_id = %plugin_id,
+                        "host::http_request: response exceeded the {}-byte cap",
+                        policy.max_response_bytes
+                    );
+                    return HOST_ERROR;
+                }
+
+                let body_b64 = base64::engine::general_purpose::STANDARD.encode(&body_bytes);
+                let result = serde_json::json!({
+                    "status": status,
+                    "headers": resp_headers,
+                    "body": body_b64,
+                });
+                let result_bytes = match serde_json::to_vec(&result) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(plugin_id = %plugin_id, "host::http_request: result serialization failed: {e}");
+                        return HOST_ERROR;
+                    }
+                };
+
+                let Ok(o_start) = usize::try_from(out_ptr) else { return HOST_ERROR; };
+                let Ok(o_cap) = usize::try_from(out_cap) else { return HOST_ERROR; };
+                if result_bytes.len() > o_cap {
+                    return HOST_BUFFER_OVERFLOW;
+                }
+                let end = o_start + result_bytes.len();
+                let mem_data = memory.data_mut(&mut caller);
+                if end > mem_data.len() {
+                    return HOST_ERROR;
+                }
+                mem_data[o_start..end].copy_from_slice(&result_bytes);
+                i32::try_from(result_bytes.len()).unwrap_or(HOST_ERROR)
+            },
+        )
+        .map_err(|e| PluginError::WasmLoadFailed {
+            plugin_id: "<host>".to_string(),
+            reason: format!("failed to register host::http_request: {e}"),
         })?;
     Ok(())
 }

@@ -9,6 +9,7 @@ import type {
   KernelEventEnvelope,
   FencedRenderer,
   Snippet,
+  PlatformNetResponse,
 } from '../types/plugin'
 import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
@@ -512,6 +513,28 @@ export function buildPluginAPI(
       shell: {
         async openExternal(target) {
           await openInShell(target)
+        },
+      },
+      net: {
+        async request(req) {
+          // Forwards to `com.nexus.security::http_request` — the same
+          // brokered path core-trust frontends use — rather than a raw
+          // `fetch()`, which the main webview's Tauri CSP blocks anyway
+          // (connect-src 'self'/ipc only). Doubly gated: NetHttp here,
+          // then the operator's sandbox.toml `[http]` policy server-side.
+          try {
+            return await invoke<PlatformNetResponse>('kernel_invoke', {
+              pluginId: 'com.nexus.security',
+              commandId: 'http_request',
+              args: req,
+              timeoutMs: null,
+            })
+          } catch (raw) {
+            if (KernelIpcError.isEnvelope(raw)) {
+              throw new KernelIpcError(raw)
+            }
+            throw raw
+          }
         },
       },
     },
