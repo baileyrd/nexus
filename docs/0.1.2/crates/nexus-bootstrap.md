@@ -60,7 +60,7 @@ Three cross-cutting responsibilities live here precisely because they would crea
 
 **`collab.rs`** — `CollabConfig` + `start_if_enabled(forge_root, bus)`: opt-in WebSocket relay bridge for `com.nexus.editor.ops.*` (BL-143).
 
-**`dream_cycle.rs`** — `DreamCycleScheduler` + `spawn(runtime, forge_root)`: cron-driven graph-maintenance phases for long-running invokers (BL-129).
+**`dream_cycle.rs`** — `DreamCycleScheduler` + `spawn(runtime, forge_root)`: cron-driven graph-maintenance phases (`dedup`, `decay`, `enrich`, `infer`) for long-running invokers (BL-129). C46 (#421) — every long-running invoker now calls `spawn`: the TUI (`crates/nexus-tui/src/app.rs::TuiApp::new`), the Tauri shell (`shell/src-tauri/src/bridge.rs::KernelRuntime::boot_at`, `Local` runtime only — a `Remote` boot's kernel lives on the far end of the SSH connection and spawns its own scheduler there), and `nexus mcp serve` (`crates/nexus-cli/src/commands/mcp.rs::serve`). One-shot CLI invocations don't spawn it — `nexus graph dream-cycle run` already covers on-demand execution of the four phases.
 
 **`forge_template.rs`** — `ForgeTemplate` enum + `apply(root, template)`: idempotent forge scaffolding shared by CLI `forge init --template` and the shell's `init_forge` (BL-054).
 

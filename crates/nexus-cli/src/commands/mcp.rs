@@ -28,6 +28,23 @@ pub fn serve(app: &App) -> Result<()> {
     let runtime = build_cli_runtime(forge_root.clone())
         .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
 
+    // C46 (#421) — spawn the BL-129 dream-cycle scheduler for the
+    // lifetime of this long-running server process, mirroring the TUI
+    // (crates/nexus-tui/src/app.rs::TuiApp::new) and the shell
+    // (shell/src-tauri/src/bridge.rs::KernelRuntime::boot_at). Must
+    // happen before `Runtime` below is destructured — `spawn` needs
+    // the whole struct (kernel kv store, event bus, plugin loader).
+    // The handle gates its own work on `[dream_cycle].enabled`, so a
+    // forge that hasn't opted in does nothing beyond a 60s config-poll
+    // loop.
+    let dream_cycle = match nexus_bootstrap::dream_cycle::spawn(&runtime, forge_root.clone()) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            tracing::warn!(error = %e, "dream_cycle: scheduler not spawned");
+            None
+        }
+    };
+
     // Destructure Runtime so we can move `context` into an Arc while keeping
     // the kernel and loader alive for the server's lifetime.
     let Runtime {
@@ -43,8 +60,16 @@ pub fn serve(app: &App) -> Result<()> {
         .max_blocking_threads(nexus_types::constants::KERNEL_BLOCKING_POOL_SIZE)
         .enable_all()
         .build()?;
-    rt.block_on(server.serve_stdio())
-        .map_err(|e| anyhow::anyhow!("MCP server error: {e}"))?;
+    let result = rt.block_on(server.serve_stdio());
+
+    // Stop the scheduler before this function (and the process) exits
+    // so its worker thread doesn't outlive the kernel it's been
+    // calling into.
+    if let Some(handle) = dream_cycle {
+        handle.stop();
+    }
+
+    result.map_err(|e| anyhow::anyhow!("MCP server error: {e}"))?;
 
     Ok(())
 }

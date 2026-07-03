@@ -35,6 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use nexus_bootstrap::dream_cycle::DreamCycleScheduler;
 use nexus_bootstrap::invoker::{IpcInvoker, IpcInvokerError};
 use nexus_bootstrap::reconnect::{
     ConnectionState, ReconnectingRuntime, SshConnectionFactory,
@@ -51,12 +52,12 @@ use tauri::{AppHandle, Emitter, WebviewWindow};
 use tauri::async_runtime::JoinHandle;
 use tokio::sync::{mpsc, Mutex};
 
-// Invoker plugin id note: we currently call
-// `nexus_bootstrap::build_cli_runtime`, which registers the invoker as
-// `com.nexus.cli`. The private `build(forge_root, invoker_id, invoker_name)`
-// is the only place that parameter is configurable, and we're not modifying
-// nexus-bootstrap in this task — so the shell rides on the CLI identity until
-// a `build_shell_runtime` entry is added upstream.
+// Invoker plugin id note: `nexus_bootstrap::build_shell_runtime` still
+// registers the invoker as `com.nexus.cli` internally (it only defers the
+// startup reconcile relative to `build_cli_runtime`; both pass the same
+// `CLI_PLUGIN_ID`/"Nexus CLI" identity to the private `build(...)`). The
+// shell rides on the CLI invoker identity until a dedicated shell identity
+// is added upstream.
 
 /// Default `kernel_invoke` timeout when the caller doesn't supply one.
 const DEFAULT_INVOKE_TIMEOUT_MS: u64 = 30_000;
@@ -118,6 +119,13 @@ enum BootedRuntime {
         kernel: Kernel,
         context: Arc<KernelPluginContext>,
         loader: Arc<SharedPluginLoader>,
+        /// C46 (#421) — the BL-129 background maintenance scheduler.
+        /// `None` when it failed to spawn (logged at warn); gates its
+        /// own work on `[dream_cycle].enabled` so a forge that hasn't
+        /// opted in does nothing beyond a 60s config-poll loop. Never
+        /// spawned for `Remote` — that kernel (and its scheduler, if
+        /// any) lives on the far end of the SSH connection.
+        dream_cycle: Option<DreamCycleScheduler>,
     },
     Remote {
         runtime: Arc<ReconnectingRuntime>,
@@ -289,16 +297,30 @@ impl KernelRuntime {
         if guard.is_some() {
             return Err("kernel already booted".to_string());
         }
+        let runtime = nexus_bootstrap::build_shell_runtime(path.to_path_buf())
+            .map_err(|e| format!("{e:#}"))?;
+        // C46 (#421) — spawn the dream-cycle scheduler for this boot,
+        // mirroring the TUI (crates/nexus-tui/src/app.rs::TuiApp::new).
+        // Must happen before the `Runtime` below is destructured —
+        // `spawn` needs the whole struct (kernel kv store, event bus,
+        // plugin loader).
+        let dream_cycle = match nexus_bootstrap::dream_cycle::spawn(&runtime, path.to_path_buf()) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                tracing::warn!(error = %e, "dream_cycle: scheduler not spawned");
+                None
+            }
+        };
         let Runtime {
             kernel,
             context,
             loader,
-        } = nexus_bootstrap::build_shell_runtime(path.to_path_buf())
-            .map_err(|e| format!("{e:#}"))?;
+        } = runtime;
         *guard = Some(BootedRuntime::Local {
             kernel,
             context: Arc::new(context),
             loader,
+            dream_cycle,
         });
         self.booted.store(true, Ordering::Release);
         Ok(())
@@ -489,8 +511,29 @@ impl KernelRuntime {
 
         match runtime {
             BootedRuntime::Local {
-                kernel, loader, ..
+                kernel,
+                loader,
+                dream_cycle,
+                ..
             } => {
+                // C46 (#421) — stop the scheduler before tearing down
+                // the kernel so its in-flight ipc_calls don't race a
+                // torn-down dispatcher. `stop()` joins the worker
+                // thread synchronously (up to `IPC_TIMEOUT` if a
+                // phase is mid-flight); run it via
+                // `tauri::async_runtime::spawn_blocking` (this crate's
+                // own `tokio` dependency only enables the `sync`
+                // feature — `task`/`spawn_blocking` isn't guaranteed
+                // available on it directly) so it doesn't stall this
+                // async task's executor thread.
+                if let Some(handle) = dream_cycle {
+                    if let Err(e) =
+                        tauri::async_runtime::spawn_blocking(move || handle.stop()).await
+                    {
+                        errors.push(format!("dream_cycle stop: {e}"));
+                    }
+                }
+
                 if let Err(e) = kernel.shutdown().await {
                     errors.push(format!("kernel shutdown: {e:#}"));
                 }
@@ -582,7 +625,7 @@ pub async fn init_forge(path: String, template: Option<String>) -> Result<(), St
 /// before booting against a different forge — keeping the two operations
 /// explicit avoids hidden re-entrancy during a workspace swap.
 ///
-/// On any error mid-boot the slot stays `None`: `build_cli_runtime` either
+/// On any error mid-boot the slot stays `None`: `build_shell_runtime` either
 /// succeeds and returns a `Runtime`, or fails and leaves nothing behind to
 /// clean up.
 #[tauri::command]
