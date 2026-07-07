@@ -42,6 +42,8 @@ docs/0.1.2/
 ├── plugins/
 │   ├── core.md                ← in-tree CorePlugin impls
 │   └── community.md           ← WASM/script community plugin contract
+├── testing/
+│   └── user-validation-test-plan.md  ← manual UVT: fresh forge → every capability, all 4 frontends
 └── reference/
     ├── audit-flags.md         ← every AUDIT: row in cap_matrix.toml (candidates for cap elevation)
     ├── todos.md               ← every TODO/FIXME/coming-soon/stub marker, categorized
