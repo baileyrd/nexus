@@ -54,6 +54,7 @@ import { remoteCursorsExt } from '../collab/remoteCursors'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
+import nexusLogoUrl from './assets/nexus-logo.png'
 import './markdown.css'
 import './livePreview.css'
 
@@ -738,6 +739,19 @@ export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
         gap: 6,
       }}
     >
+      <img
+        src={nexusLogoUrl}
+        alt="Nexus — Forge your knowledge"
+        style={{
+          width: 'min(60vw, 320px)',
+          height: 'auto',
+          marginBottom: 12,
+          opacity: 0.9,
+          userSelect: 'none',
+          pointerEvents: 'none',
+        }}
+        draggable={false}
+      />
       <button
         type="button"
         style={linkStyle}

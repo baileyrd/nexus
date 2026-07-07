@@ -634,6 +634,21 @@ pub fn run() {
                 main.open_devtools();
             }
 
+            // Set the window icon explicitly. Tauri auto-applies bundle
+            // icons in installed builds, but on Linux dev mode the WM has
+            // no .desktop file to consult and falls back to a generic
+            // (Tux) icon — calling set_icon here covers both cases.
+            if let Some(window) = app.get_webview_window("main") {
+                match tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                    Ok(icon) => {
+                        if let Err(e) = window.set_icon(icon) {
+                            eprintln!("[startup] window.set_icon failed: {e}");
+                        }
+                    }
+                    Err(e) => eprintln!("[startup] decode window icon failed: {e}"),
+                }
+            }
+
             // WI-13 follow-up: bridge OS-level `nexus://…` deep-links into
             // the frontend's `uriHandlerRegistry`. The plugin delivers one
             // event per OS open — we emit each URL as a string payload on
