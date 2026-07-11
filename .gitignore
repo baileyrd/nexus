@@ -19,6 +19,8 @@ sweep.timestamp
 # LibreOffice lockfiles
 .~lock.*#
 .superpowers/
+# Serena MCP tool metadata
+.serena/
 .claude/*
 !.claude/hooks/
 !.claude/settings.json

@@ -59,12 +59,55 @@ pub struct PoolMetrics {
     pub workers: u32,
 }
 
-/// Owning handle for the pool. Drop joins all workers (tokio
-/// `Runtime::Drop` waits for in-flight tasks unless `shutdown_*` was
-/// called explicitly).
+/// Owning handle for the pool.
+///
+/// The tokio [`Runtime`] is dropped off the calling thread (see
+/// [`Drop for WorkerPool`]) because `Runtime::Drop` blocks to join its
+/// worker threads, and tokio panics if that blocking join runs inside
+/// an async context. The field is an [`Option`] so `Drop` can move the
+/// `Runtime` out and hand it to a dedicated OS thread.
 pub struct WorkerPool {
-    runtime: Arc<Runtime>,
+    /// `Some` for the pool's whole life; taken by `Drop` so the
+    /// `Runtime` can be torn down on a non-async thread.
+    runtime: Option<Arc<Runtime>>,
     metrics: PoolMetrics,
+}
+
+impl Drop for WorkerPool {
+    fn drop(&mut self) {
+        // A tokio `Runtime` must never be *dropped* from within an async
+        // context: `Runtime::Drop` blocks to join its worker threads,
+        // and tokio panics ("Cannot drop a runtime in a context where
+        // blocking is not allowed") when that blocking happens on a
+        // runtime worker thread. During kernel teardown this `Drop` runs
+        // on the host runtime's worker thread (the ai-runtime plugin is
+        // dropped from inside an async shutdown task), so we move the
+        // sole `Arc<Runtime>` onto a dedicated OS thread and let the
+        // blocking join complete there.
+        //
+        // The thread is detached: at a forge switch it finishes the join
+        // in the background; at process exit the OS reclaims it. We took
+        // the `Arc` out of the field, so the helper thread is the only
+        // owner — the last-reference drop (and its blocking join) is
+        // therefore guaranteed to run off any tokio worker thread.
+        let Some(runtime) = self.runtime.take() else {
+            return;
+        };
+        if let Err(e) = std::thread::Builder::new()
+            .name("nexus-ai-pool-shutdown".to_string())
+            .spawn(move || drop(runtime))
+        {
+            // Spawn failed (thread exhaustion): `runtime` was dropped by
+            // the failed `spawn`, i.e. torn down inline on this thread.
+            // That only risks the original panic under the rare combo of
+            // thread-exhaustion *and* being on a tokio worker thread —
+            // strictly no worse than the pre-fix unconditional drop.
+            tracing::warn!(
+                error = ?e,
+                "nexus-ai-runtime: pool-shutdown thread spawn failed; runtime dropped inline",
+            );
+        }
+    }
 }
 
 impl WorkerPool {
@@ -87,7 +130,7 @@ impl WorkerPool {
             })
             .build()?;
         Ok(Self {
-            runtime: Arc::new(runtime),
+            runtime: Some(Arc::new(runtime)),
             metrics: PoolMetrics {
                 workers: u32::try_from(workers).unwrap_or(u32::MAX),
             },
@@ -97,9 +140,17 @@ impl WorkerPool {
     /// Borrow the runtime handle so callers can `spawn` onto the
     /// dedicated executor. The handle is `Clone` and cheap to copy
     /// across worker tasks.
+    ///
+    /// # Panics
+    /// Only if called after `Drop` has taken the runtime — impossible
+    /// for a live `WorkerPool`, since `Drop` is the sole `take()` site.
     #[must_use]
     pub fn handle(&self) -> tokio::runtime::Handle {
-        self.runtime.handle().clone()
+        self.runtime
+            .as_ref()
+            .expect("WorkerPool runtime present for the pool's lifetime")
+            .handle()
+            .clone()
     }
 
     /// Snapshot the immutable pool dimensions. Live inflight counts
@@ -176,5 +227,28 @@ mod tests {
         let handle = pool.handle();
         let result = handle.block_on(async { 7_u32 + 35 });
         assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn dropping_pool_inside_async_context_does_not_panic() {
+        // Regression: the pool's `Runtime` must not be dropped on a
+        // tokio worker thread — `Runtime::Drop` blocks to join workers,
+        // which tokio rejects inside an async context with "Cannot drop
+        // a runtime in a context where blocking is not allowed". This
+        // mirrors kernel teardown, where the ai-runtime plugin (and its
+        // pool) is dropped from inside an async shutdown task. Pre-fix
+        // this `drop(pool)` panicked the `block_on` thread; with the
+        // `Drop` offload it returns normally.
+        let outer = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("outer runtime builds");
+        outer.block_on(async {
+            let pool = WorkerPool::start(Some(2)).expect("pool starts");
+            // Touch the handle so the pool is genuinely live before drop.
+            let _ = pool.handle();
+            drop(pool); // would panic on this worker thread pre-fix
+        });
     }
 }

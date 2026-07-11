@@ -85,11 +85,40 @@ export const themePickerPlugin: Plugin = {
     })
 
     // Clear the swatch cache whenever the kernel reloads themes so the
-    // next picker open re-fetches fresh colours. PluginRegistry auto-cleans
-    // the unsub on plugin deactivate.
-    void api.kernel.on(THEME_CHANGED_EVENT, (topic) => {
-      if (topic !== THEME_CHANGED_EVENT) return
-      useThemePickerStore.getState().setSwatchCache({})
+    // next picker open re-fetches fresh colours. The kernel boots lazily
+    // on forge open, so a subscribe attempted during pre-forge activation
+    // rejects with "kernel not booted" — using `void` on that promise
+    // leaked the rejection to the global handler. Guard it (gitPanel
+    // idiom) and (re-)subscribe on workspace:opened. PluginRegistry
+    // auto-cleans the live unsub on plugin deactivate.
+    let themeUnsubs: Array<() => void> = []
+    const subscribeThemeChanged = async () => {
+      if (themeUnsubs.length > 0) return
+      try {
+        const unsub = await api.kernel.on(THEME_CHANGED_EVENT, (topic) => {
+          if (topic !== THEME_CHANGED_EVENT) return
+          useThemePickerStore.getState().setSwatchCache({})
+        })
+        themeUnsubs = [unsub]
+      } catch {
+        // Kernel not booted yet — workspace:opened re-subscribes.
+        themeUnsubs = []
+      }
+    }
+    api.events.on('workspace:opened', () => void subscribeThemeChanged())
+    api.events.on('workspace:closed', () => {
+      for (const unsub of themeUnsubs) {
+        try {
+          unsub()
+        } catch {
+          /* ignored */
+        }
+      }
+      themeUnsubs = []
     })
+    // Initial attempt — covers the case where a forge is already open by
+    // the time we activate; no-ops safely (caught) when the kernel isn't
+    // booted yet.
+    void subscribeThemeChanged()
   },
 }

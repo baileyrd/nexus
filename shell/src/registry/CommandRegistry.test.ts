@@ -226,6 +226,45 @@ test('OI-11 — soft warn fires before cancel for a moderately slow handler', as
   )
 })
 
+test('boot deadlock fix — kernel-boot commands are exempt from the hard cancel', async () => {
+  // Regression: `nexus.workspace.open` boots the kernel (init_forge +
+  // boot_kernel), which on a cold/debug build exceeds the 5s cancel
+  // budget. Racing it against the cancel made the launcher tear down a
+  // still-booting kernel and retry into a forge-lock deadlock. The
+  // command id is in DEFAULT_NO_CANCEL_COMMANDS, so even a 20ms cancel
+  // threshold must NOT cancel a 60ms "boot".
+  const reg = new CommandRegistry()
+  reg.register('nexus.workspace', 'nexus.workspace.open', async () => {
+    await sleep(60)
+    return 'booted'
+  })
+
+  const cancellations: unknown[] = []
+  const off = eventBus.on('command:cancelled', (e) => { cancellations.push(e) })
+  try {
+    await withTimeouts(0, 20, async () => {
+      const r = await reg.execute('nexus.workspace.open')
+      assert.equal(r, 'booted', 'exempt command must run to completion')
+    })
+  } finally {
+    off()
+  }
+  assert.equal(cancellations.length, 0, 'exempt command must not emit command:cancelled')
+})
+
+test('boot deadlock fix — non-exempt commands are still hard-cancelled', async () => {
+  // Guard: the exemption is scoped to the named boot commands only —
+  // an ordinary slow handler must still be cancelled as before.
+  const reg = new CommandRegistry()
+  reg.register('p.slow', 'cmd.ordinary', async () => { await sleep(200) })
+  await withTimeouts(0, 20, async () => {
+    await assert.rejects(
+      () => reg.execute('cmd.ordinary'),
+      (err: unknown) => err instanceof CommandCancelledError,
+    )
+  })
+})
+
 test('OI-11 — warnMs=0 disables the soft-warn path', async () => {
   const reg = new CommandRegistry()
   reg.register('p.silent', 'cmd.silent', async () => {
