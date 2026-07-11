@@ -13,6 +13,30 @@ const DEFAULT_WARN_MS = 250
 const DEFAULT_CANCEL_MS = 5000
 
 /**
+ * Commands that drive an inherently long-running backend operation and
+ * therefore must NOT be torn down by the UI-thread cancel budget
+ * (OI-11). Cold kernel boot (`init_forge` + `boot_kernel`) routinely
+ * exceeds `DEFAULT_CANCEL_MS`: a debug build granting hundreds of
+ * plugin capabilities can take 10s+. Racing boot against the 5s cancel
+ * made the launcher observe a *spurious* failure, fire `shutdown_kernel`
+ * on the still-booting kernel, and retry — and the retry then deadlocked
+ * on the forge lock the first (succeeding) boot still held, while the
+ * torn-down shutdown panicked the ai-runtime pool. Exempting these
+ * commands breaks that whole cascade: the awaiter waits for boot to
+ * actually finish. They keep the soft warn timer for observability.
+ *
+ * Overridable via the `shell.command.noCancelCommands` config key (an
+ * array of command ids) for users who want to re-arm or extend the set.
+ */
+const DEFAULT_NO_CANCEL_COMMANDS: readonly string[] = [
+  'nexus.workspace.open',
+  'nexus.workspace.setRoot',
+  'nexus.workspace.openWithTemplate',
+  'nexus.workspace.openRemote',
+  'nexus.workspace.close',
+]
+
+/**
  * Thrown by `CommandRegistry.execute` when a handler hasn't resolved
  * within `shell.command.timeoutCancelMs`. The handler keeps running —
  * JavaScript promises aren't cancellable — but the awaiter gets
@@ -93,7 +117,17 @@ export class CommandRegistry {
     // users who explicitly opt out of cancellation. The handler keeps
     // running after a hard cancel; this only releases the awaiter.
     const warnMs = configStore.get('shell.command.timeoutWarnMs', DEFAULT_WARN_MS)
-    const cancelMs = configStore.get('shell.command.timeoutCancelMs', DEFAULT_CANCEL_MS)
+    // Long-running backend commands (kernel boot) opt out of the hard
+    // cancel — see DEFAULT_NO_CANCEL_COMMANDS. A 0 cancel budget below
+    // disables the cancel tier entirely (cancelPromise stays null).
+    const noCancel = configStore.get<readonly string[]>(
+      'shell.command.noCancelCommands',
+      DEFAULT_NO_CANCEL_COMMANDS,
+    )
+    const cancelExempt = Array.isArray(noCancel) && noCancel.includes(id)
+    const cancelMs = cancelExempt
+      ? 0
+      : configStore.get('shell.command.timeoutCancelMs', DEFAULT_CANCEL_MS)
     let warnTimer: ReturnType<typeof setTimeout> | undefined
     let cancelTimer: ReturnType<typeof setTimeout> | undefined
 

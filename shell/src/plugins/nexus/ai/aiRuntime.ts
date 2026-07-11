@@ -274,10 +274,19 @@ function buildMessageHistory(): Array<{ role: 'user' | 'assistant'; content: str
  */
 export async function hydrateConfig(api: PluginAPI): Promise<void> {
   try {
+    // The kernel boots lazily when a forge is opened, but plugins
+    // activate (and call this) at startup — before any forge exists.
+    // Skip the round-trip until the kernel is up rather than firing an
+    // `invoke` that rejects with "kernel not booted" (which surfaced as
+    // a warn here and, via the uncaught activation path, an unhandled
+    // promise rejection at the global handler). nexus.aiSettings
+    // re-pushes provider config on `workspace:opened`, so the snapshot
+    // hydrates once the kernel is actually available.
+    if (!(await api.kernel.available())) return
     const cfg = await api.kernel.invoke<AiConfig>(AI_PLUGIN_ID, HANDLER_CONFIG, {})
     useAiStore.getState().setConfig(cfg)
   } catch (err) {
-     
+
     clientLogger.warn('[nexus.ai] hydrateConfig failed', err)
   }
 }
