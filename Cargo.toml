@@ -172,6 +172,13 @@ serde_yml = "0.0.12"
 
 # System interfaces
 libc = "0.2"
+# rustils' portable process/terminal layer (Linux backend only — rustils has
+# no macOS/BSD backend yet). Used by nexus-rush's job control for the
+# tcsetpgrp terminal handoff (D1/D9, baileyrd/rustils#43); pinned per
+# rustils' own cross-repo versioning policy (docs/versioning.md §3 there),
+# never left tracking a branch.
+platform = { git = "https://github.com/baileyrd/rustils", rev = "df1f75ff94094517720f70e9a0b36a0a9d77e8ee" }
+platform-linux = { git = "https://github.com/baileyrd/rustils", rev = "df1f75ff94094517720f70e9a0b36a0a9d77e8ee" }
 # OS process sandbox (Linux) — Landlock LSM filesystem restrictions +
 # seccomp-bpf network-syscall blocking. See crates/nexus-security/src/os_sandbox.rs
 # and docs/0.1.2/os-sandbox.md.

@@ -81,10 +81,11 @@ pub fn init() {
             for &sig in &JOB_SIGNALS {
                 libc::signal(sig, libc::SIG_IGN);
             }
-            // Become a process-group leader and take the terminal.
+            // Become a process-group leader.
             libc::setpgid(pid, pid);
-            libc::tcsetpgrp(libc::STDIN_FILENO, pid);
         }
+        // ...and take the terminal.
+        tcsetpgrp_impl(pid);
     }
 
     STATE.with(|s| {
@@ -444,12 +445,34 @@ fn notify_and_prune() {
 
 // ---- terminal + status helpers ----------------------------------------------
 
+/// Hand the controlling terminal's foreground process group to `pgid`
+/// (`tcsetpgrp`), unconditionally — callers gate on [`job_control_enabled`]
+/// themselves (see [`give_terminal`]) or, in [`init`]'s case, haven't set
+/// that flag yet.
+///
+/// On Linux this goes through `platform::term::JobControlTerminal`
+/// (rustils' D1/D9 terminal handoff, forced by this exact call site —
+/// see `baileyrd/rustils#43`), which ignores `SIGTTOU` itself on every
+/// call. Other Unix targets keep the raw `tcsetpgrp` call: rustils has no
+/// macOS/BSD backend yet, and `init`'s own `SIG_IGN` on `SIGTTOU` (in
+/// `JOB_SIGNALS`) already covers the same precondition there.
+#[cfg(target_os = "linux")]
+fn tcsetpgrp_impl(pgid: pid_t) {
+    use platform::term::JobControlTerminal;
+    let _ = platform_linux::LinuxTerminal::new().give_terminal(pgid as u32);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn tcsetpgrp_impl(pgid: pid_t) {
+    unsafe {
+        // SIGTTOU is ignored in the shell, so this never stops us.
+        libc::tcsetpgrp(libc::STDIN_FILENO, pgid);
+    }
+}
+
 fn give_terminal(pgid: pid_t) {
     if job_control_enabled() {
-        unsafe {
-            // SIGTTOU is ignored in the shell, so this never stops us.
-            libc::tcsetpgrp(libc::STDIN_FILENO, pgid);
-        }
+        tcsetpgrp_impl(pgid);
     }
 }
 
