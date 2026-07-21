@@ -122,6 +122,8 @@ Real settings live in the plugins themselves (see [`settings/plugin-manifest-def
 
 `nexus.editor.stub.exportPdf` ("Export to PDF…") and `nexus.editor.exportHtml` ("Export as HTML…") are both fully wired (C65 #418, C66 #419) — PDF export prints the active note's rendered preview scoped via `shell/src/shell/print.css`, HTML export renders through `com.nexus.formats::export_html` and saves via the native save dialog. Neither shows the "coming soon" tooltip.
 
+`nexus.editor.copyAsRichText` ("Copy as Rich Text") is also fully wired (C68 #421) — renders the active selection (or the whole note when nothing is selected) through the shared `markdownRender.ts` pipeline and writes it to the clipboard as `text/html` + a derived `text/plain` fallback (`shell/src/plugins/nexus/editor/richTextClipboard.ts`), so pastes into Gmail/Docs/Slack/Word arrive formatted.
+
 ### Canvas right rail — `shell/src/plugins/nexus/canvas/CanvasRightRail.tsx:8-9`
 
 | Inspector item | Status |

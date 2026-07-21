@@ -167,5 +167,12 @@ export function buildTabContextMenu(args: {
       label: 'Export as HTML...',
       commandId: 'nexus.editor.exportHtml',
     },
+    {
+      // C68 (#421) — wired via the shared markdownRender pipeline + a
+      // multi-MIME clipboard write (text/html + text/plain fallback).
+      kind: 'item',
+      label: 'Copy as Rich Text',
+      commandId: 'nexus.editor.copyAsRichText',
+    },
   ]
 }

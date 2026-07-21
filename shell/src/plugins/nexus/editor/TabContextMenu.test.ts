@@ -34,6 +34,12 @@ test('export as HTML is present and wired — no coming-soon tooltip', () => {
   assert.equal(item.tooltip, undefined)
 })
 
+test('copy as rich text is present and wired — no coming-soon tooltip', () => {
+  const item = findItem('nexus.editor.copyAsRichText')
+  assert.equal(item.label, 'Copy as Rich Text')
+  assert.equal(item.tooltip, undefined)
+})
+
 test('menu still carries genuinely unwired stubs with the coming-soon tooltip', () => {
   const item = findItem('nexus.editor.stub.rename')
   assert.equal(item.tooltip, 'Coming soon')

@@ -17,6 +17,8 @@ import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
 import { registerEditorHostSurface } from '../../../host/EditorHostSurface'
 import { computeActiveEditor, activeEditorEquals } from '../../../host/activeEditor'
 import { fencedCodeRegistry } from './cm/fencedCodeRegistry'
+import { renderMarkdown } from './markdownRender'
+import { copyRichTextToClipboard } from './richTextClipboard'
 import { useEditorBlameStore } from './blameStore'
 import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
@@ -75,6 +77,7 @@ import {
   COMMAND_CLOSE_TAB,
   COMMAND_COPY_ABS_PATH,
   COMMAND_COPY_REL_PATH,
+  COMMAND_COPY_RICH_TEXT,
   COMMAND_DELETE_FILE,
   COMMAND_EXPORT_HTML,
   COMMAND_FIND,
@@ -160,6 +163,7 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_OPEN_DEFAULT_APP, title: 'Open in Default App', category: 'Editor' },
         { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
         { id: COMMAND_EXPORT_HTML, title: 'Export as HTML…', category: 'Editor' },
+        { id: COMMAND_COPY_RICH_TEXT, title: 'Copy as Rich Text', category: 'Editor' },
         { id: COMMAND_TOGGLE_BLAME, title: 'Toggle Inline Git Blame', category: 'Editor' },
         { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
         { id: COMMAND_LSP_RENAME, title: 'Rename Symbol (LSP)', category: 'Editor' },
@@ -1642,6 +1646,40 @@ export const editorPlugin: Plugin = {
           message: `Export as HTML failed: ${message}`,
           type: 'error',
           duration: 8000,
+        })
+      }
+    })
+
+    // C68 (#421) — copies the active selection (or the whole note, when
+    // nothing is selected) as rendered rich text: a text/html blob plus a
+    // text/plain fallback, so pastes into Gmail/Docs/Slack/Word arrive
+    // formatted instead of as raw markdown. Reuses the same sanitized
+    // renderer as the live preview (`markdownRender.ts`) rather than the
+    // server-side `export_html` path, so headings/lists/callouts/wikilinks
+    // render exactly as the user sees them in-editor.
+    api.commands.register(COMMAND_COPY_RICH_TEXT, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const store = useEditorStore.getState()
+      const tab = store.tabs.find((t) => t.relpath === relpath)
+      if (!tab) return
+
+      const view = getActiveCmView()
+      const sel = view?.state.selection.main
+      const source =
+        sel && !sel.empty ? view!.state.doc.sliceString(sel.from, sel.to) : tab.content
+
+      const html = renderMarkdown(source)
+      try {
+        await copyRichTextToClipboard(html)
+        api.notifications.show({
+          type: 'success',
+          message: sel && !sel.empty ? 'Selection copied as rich text.' : 'Note copied as rich text.',
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Copy as rich text failed: ${err instanceof Error ? err.message : String(err)}`,
         })
       }
     })
