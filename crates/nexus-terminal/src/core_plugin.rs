@@ -471,6 +471,14 @@ pub(crate) struct MemoryState {
     /// entries (sessions that never reached the poller's `live` set)
     /// get retained via the per-round live-id sweep.
     pub(crate) pending_overrides: HashMap<String, MemoryLimits>,
+    /// #409 — sessions that have already had a `SoftLimitExceeded`
+    /// published for their *current* excursion above the soft
+    /// threshold. Without this, a session sitting above the soft
+    /// limit would re-publish every poller round (1 Hz) forever. A
+    /// session is removed from this set (so a future crossing warns
+    /// again) as soon as a sample comes back at or under the soft
+    /// limit, or when the session stops being tracked.
+    pub(crate) soft_warned: std::collections::HashSet<String>,
 }
 
 impl MemoryState {
@@ -480,6 +488,7 @@ impl MemoryState {
             latest_rss: HashMap::new(),
             session_pid: HashMap::new(),
             pending_overrides: HashMap::new(),
+            soft_warned: std::collections::HashSet::new(),
         }
     }
 }
@@ -907,6 +916,35 @@ fn memory_poller_loop(
     }
 }
 
+/// #409 — decide whether one sample's [`MemoryLimitAction`] should
+/// produce a `SoftLimitExceeded` publish, debounced against `warned`
+/// (see [`MemoryState::soft_warned`]'s doc comment: publish only on
+/// the `Ok -> SoftExceeded` transition). Mutates `warned` to record
+/// the new state and returns `Some((bytes, limit_mb))` when a publish
+/// is warranted. `HardExceeded` is handled by the caller separately
+/// (it goes to `to_kill`, not `to_warn`) so it's treated the same as
+/// `Ok` here — falls through to clearing `warned`, which is harmless
+/// since the session is about to be killed anyway.
+///
+/// Kept dependency-free (no server/bus handles, no I/O) so the
+/// debounce behavior is unit-testable without spawning a real process
+/// to nudge RSS.
+fn soft_warn_for_sample(
+    id: &str,
+    action: MemoryLimitAction,
+    warned: &mut std::collections::HashSet<String>,
+) -> Option<(u64, u32)> {
+    match action {
+        MemoryLimitAction::SoftExceeded { bytes, limit_mb } => {
+            warned.insert(id.to_string()).then_some((bytes, limit_mb))
+        }
+        MemoryLimitAction::Ok { .. } | MemoryLimitAction::HardExceeded { .. } => {
+            warned.remove(id);
+            None
+        }
+    }
+}
+
 /// One poller round. Returns silently on poisoned locks (the next
 /// round will retry; if it stays poisoned the parent plugin is
 /// already in a degraded state). Splitting the body out keeps the
@@ -964,6 +1002,7 @@ fn memory_poller_round(
                 mem.monitor.untrack(pid);
             }
             mem.latest_rss.remove(id);
+            mem.soft_warned.remove(id);
         }
         // BL-061 follow-up — sweep orphaned overrides whose session
         // never reached `live`. The "track newly seen pids" loop
@@ -989,67 +1028,112 @@ fn memory_poller_round(
         }
     }
 
-    // Sample under the memory lock; collect kill targets without
+    // Sample under the memory lock; collect kill/warn targets without
     // holding any lock across the kill path.
+    let Some((to_kill, to_warn)) = sample_live_sessions(&live, memory, stop) else {
+        return;
+    };
+
+    for (id, rss_bytes, limit_mb) in to_warn {
+        publish_soft_limit_warning(bus, &id, rss_bytes, limit_mb);
+    }
+    for (id, rss_bytes, limit_mb) in to_kill {
+        kill_over_hard_limit(server, bus, &id, rss_bytes, limit_mb);
+    }
+}
+
+type MemorySamplingResult = (Vec<(SessionId, u64, u32)>, Vec<(SessionId, u64, u32)>);
+
+/// Sample every live `(id, pid)` pair under the memory lock, updating
+/// `latest_rss` / `soft_warned` in place, and return `(to_kill,
+/// to_warn)` targets for the caller to act on once the lock is
+/// released. Returns `None` on a poisoned lock or a stop-flag request
+/// mid-scan — both mean the caller should bail out of this round
+/// without publishing anything.
+fn sample_live_sessions(
+    live: &[(SessionId, Option<u32>)],
+    memory: &Arc<Mutex<MemoryState>>,
+    stop: &Arc<AtomicBool>,
+) -> Option<MemorySamplingResult> {
     let mut to_kill: Vec<(SessionId, u64, u32)> = Vec::new();
-    {
-        let Ok(mut mem) = memory.lock() else { return };
-        for (id, pid) in &live {
-            if stop.load(Ordering::Relaxed) {
-                return;
-            }
-            let Some(pid) = pid else { continue };
-            match mem.monitor.sample(*pid) {
-                Ok(action) => {
-                    let bytes = action.bytes();
-                    mem.latest_rss.insert(id.as_str().to_string(), bytes);
-                    if let MemoryLimitAction::HardExceeded { bytes, limit_mb } = action {
-                        to_kill.push((id.clone(), bytes, limit_mb));
-                    }
-                }
-                Err(_) => {
-                    // Process gone / read failed — drop the cache
-                    // entry so a stale RSS doesn't linger after exit.
-                    mem.latest_rss.remove(id.as_str());
-                }
-            }
+    let mut to_warn: Vec<(SessionId, u64, u32)> = Vec::new();
+    let mut mem = memory.lock().ok()?;
+    for (id, pid) in live {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        let Some(pid) = pid else { continue };
+        let Ok(action) = mem.monitor.sample(*pid) else {
+            // Process gone / read failed — drop the cache entry so a
+            // stale RSS doesn't linger after exit.
+            mem.latest_rss.remove(id.as_str());
+            mem.soft_warned.remove(id.as_str());
+            continue;
+        };
+        let bytes = action.bytes();
+        mem.latest_rss.insert(id.as_str().to_string(), bytes);
+        if let MemoryLimitAction::HardExceeded { bytes, limit_mb } = action {
+            to_kill.push((id.clone(), bytes, limit_mb));
+        } else if let Some((bytes, limit_mb)) =
+            soft_warn_for_sample(id.as_str(), action, &mut mem.soft_warned)
+        {
+            to_warn.push((id.clone(), bytes, limit_mb));
         }
     }
+    Some((to_kill, to_warn))
+}
 
-    for (id, rss_bytes, limit_mb) in to_kill {
-        // Publish first so subscribers see the breach before the
-        // ensuing SessionClosed event.
-        let payload = TerminalEvent::MemoryLimitExceeded {
+/// #409 — warning-only signal; publish and move on, no kill. Routed
+/// through `publish_lifecycle_event` (not an inline
+/// `bus.publish_plugin` call) so it also fans out to the activity
+/// timeline via `build_activity_entry`, same as every other lifecycle
+/// event.
+fn publish_soft_limit_warning(bus: &EventBus, id: &SessionId, rss_bytes: u64, limit_mb: u32) {
+    publish_lifecycle_event(
+        bus,
+        &TerminalEvent::SoftLimitExceeded {
             id: id.as_str().to_string(),
             rss_bytes,
             limit_mb,
-        };
-        if let Ok(payload_value) = serde_json::to_value(&payload) {
-            let topic = format!("{EVENT_LIFECYCLE_PREFIX}{id}", id = id.as_str());
-            if let Err(err) = bus.publish_plugin(PLUGIN_ID, &topic, payload_value) {
-                tracing::warn!(
-                    plugin = PLUGIN_ID,
-                    %err,
-                    session = id.as_str(),
-                    "memory poller: publish MemoryLimitExceeded failed",
-                );
-            }
-        }
-        // Close via the server's shutdown ladder so the lifecycle
-        // forwarder picks up `SessionClosed` after the breach event
-        // (in causal order). `close_session` issues SIGTERM then
-        // SIGKILL after a short window, which is the right behaviour
-        // for memory exhaustion — give the process a chance to flush
-        // before we yank it.
-        if let Ok(mut server_guard) = server.lock() {
-            if let Err(err) = server_guard.close_session(&id) {
-                tracing::warn!(
-                    plugin = PLUGIN_ID,
-                    %err,
-                    session = id.as_str(),
-                    "memory poller: close_session failed",
-                );
-            }
+        },
+    );
+}
+
+/// Publish the hard-limit breach, then close the session via the
+/// server's shutdown ladder. Publish happens first so subscribers see
+/// the breach before the ensuing `SessionClosed` event. Routed through
+/// `publish_lifecycle_event` so the activity-timeline fan-out
+/// (`build_activity_entry`'s dedicated "killed (OOM)" row) runs too —
+/// previously this was an inline `bus.publish_plugin` call that
+/// bypassed the fan-out entirely, so the only thing that ever reached
+/// the activity pane was the generic `SessionClosed` row from
+/// `close_session` below.
+fn kill_over_hard_limit(
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    bus: &EventBus,
+    id: &SessionId,
+    rss_bytes: u64,
+    limit_mb: u32,
+) {
+    publish_lifecycle_event(
+        bus,
+        &TerminalEvent::MemoryLimitExceeded {
+            id: id.as_str().to_string(),
+            rss_bytes,
+            limit_mb,
+        },
+    );
+    // `close_session` issues SIGTERM then SIGKILL after a short
+    // window, which is the right behaviour for memory exhaustion —
+    // give the process a chance to flush before we yank it.
+    if let Ok(mut server_guard) = server.lock() {
+        if let Err(err) = server_guard.close_session(id) {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                %err,
+                session = id.as_str(),
+                "memory poller: close_session failed",
+            );
         }
     }
 }
@@ -1395,6 +1479,94 @@ mod tests {
             "shell": "/bin/sh",
             "shell_args": ["-c", script],
         })
+    }
+
+    // ── #409 — soft-limit warn debounce ─────────────────────────────────
+
+    #[test]
+    fn soft_warn_fires_on_first_crossing() {
+        let mut warned = std::collections::HashSet::new();
+        let result = soft_warn_for_sample(
+            "s1",
+            MemoryLimitAction::SoftExceeded {
+                bytes: 300_000_000,
+                limit_mb: 250,
+            },
+            &mut warned,
+        );
+        assert_eq!(result, Some((300_000_000, 250)));
+        assert!(warned.contains("s1"));
+    }
+
+    #[test]
+    fn soft_warn_is_debounced_while_still_over_the_limit() {
+        let mut warned = std::collections::HashSet::new();
+        let action = || MemoryLimitAction::SoftExceeded {
+            bytes: 300_000_000,
+            limit_mb: 250,
+        };
+        assert!(soft_warn_for_sample("s1", action(), &mut warned).is_some());
+        // Same session, still over the soft limit next round.
+        assert_eq!(soft_warn_for_sample("s1", action(), &mut warned), None);
+        assert_eq!(soft_warn_for_sample("s1", action(), &mut warned), None);
+    }
+
+    #[test]
+    fn soft_warn_fires_again_after_recovering_to_ok() {
+        let mut warned = std::collections::HashSet::new();
+        let soft = || MemoryLimitAction::SoftExceeded {
+            bytes: 300_000_000,
+            limit_mb: 250,
+        };
+        assert!(soft_warn_for_sample("s1", soft(), &mut warned).is_some());
+        assert_eq!(
+            soft_warn_for_sample(
+                "s1",
+                MemoryLimitAction::Ok {
+                    bytes: 100_000_000
+                },
+                &mut warned,
+            ),
+            None,
+        );
+        assert!(!warned.contains("s1"), "Ok sample should clear the debounce");
+        // Crossing again after recovery should warn again.
+        assert!(soft_warn_for_sample("s1", soft(), &mut warned).is_some());
+    }
+
+    #[test]
+    fn soft_warn_tracks_multiple_sessions_independently() {
+        let mut warned = std::collections::HashSet::new();
+        let soft = |limit_mb| MemoryLimitAction::SoftExceeded {
+            bytes: 300_000_000,
+            limit_mb,
+        };
+        assert!(soft_warn_for_sample("s1", soft(250), &mut warned).is_some());
+        assert!(soft_warn_for_sample("s2", soft(250), &mut warned).is_some());
+        // s1 already warned; s2 already warned; neither re-fires.
+        assert_eq!(soft_warn_for_sample("s1", soft(250), &mut warned), None);
+        assert_eq!(soft_warn_for_sample("s2", soft(250), &mut warned), None);
+        assert_eq!(warned.len(), 2);
+    }
+
+    #[test]
+    fn soft_warn_never_fires_for_hard_exceeded() {
+        let mut warned = std::collections::HashSet::new();
+        // A jump straight to HardExceeded without a prior SoftExceeded
+        // sample shouldn't produce a warn — the caller routes
+        // HardExceeded to `to_kill` separately.
+        assert_eq!(
+            soft_warn_for_sample(
+                "s1",
+                MemoryLimitAction::HardExceeded {
+                    bytes: 600_000_000,
+                    limit_mb: 500,
+                },
+                &mut warned,
+            ),
+            None,
+        );
+        assert!(!warned.contains("s1"));
     }
 
     #[test]

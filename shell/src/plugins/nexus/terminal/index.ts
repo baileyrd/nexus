@@ -43,6 +43,31 @@ const STREAM_TOPIC_PREFIX = 'com.nexus.terminal.output.'
 // past the supplied byte cursor; coordinate-compatible with the
 // stream's per-session lastCursor.
 const HANDLER_READ_RAW_SINCE = 'read_raw_since'
+// #409 — per-session lifecycle events (session_closed,
+// memory_limit_exceeded, soft_limit_exceeded, ...), keyed by session
+// id suffix same as the output-stream prefix above. Previously this
+// plugin subscribed only to `.output.`, so it never saw a kill/warn
+// in real time — the only trace was the opt-in activity-timeline pane.
+const EVENT_LIFECYCLE_PREFIX = 'com.nexus.terminal.events.'
+// #409 — no per-sample RSS event exists (only threshold-crossing
+// ones), so the tab-strip memory chip needs a periodic list_sessions
+// poll to show a number for sessions that never cross a threshold.
+// Gated on the panel being visible so a hidden terminal pane doesn't
+// keep polling in the background.
+const HANDLER_LIST_SESSIONS = 'list_sessions'
+const RSS_POLL_INTERVAL_MS = 3000
+
+interface TerminalLifecycleEvent {
+  kind: string
+  id: string
+  rss_bytes?: number
+  limit_mb?: number
+}
+
+interface SessionInfoResponse {
+  id: string
+  rss_bytes?: number
+}
 // Recovery snapshot deadline. Long enough to drain a sizeable backlog
 // (~MB of stdout from a build) but well below the user-visible "the
 // terminal froze" threshold.
@@ -488,14 +513,91 @@ export const terminalPlugin: Plugin = {
       streamUnsub = null
     }
 
+    // #409 — react to kill/warn in real time instead of only via the
+    // opt-in activity-timeline pane.
+    let lifecycleUnsub: (() => void) | null = null
+    const subscribeLifecycle = async () => {
+      if (lifecycleUnsub) return
+      try {
+        lifecycleUnsub = await api.kernel.on<TerminalLifecycleEvent>(
+          EVENT_LIFECYCLE_PREFIX,
+          (_topic, payload) => {
+            if (typeof payload.rss_bytes === 'number') {
+              useTerminalStore.getState().setRssBytes(payload.id, payload.rss_bytes)
+            }
+            if (payload.kind === 'memory_limit_exceeded') {
+              api.notifications.show({
+                type: 'error',
+                message: `Terminal session killed: memory exceeded ${payload.limit_mb}MB`,
+              })
+            } else if (payload.kind === 'soft_limit_exceeded') {
+              api.notifications.show({
+                type: 'warning',
+                message: `Terminal session approaching memory limit (${payload.limit_mb}MB)`,
+              })
+            }
+          },
+        )
+      } catch (err) {
+        clientLogger.warn('[nexus.terminal] failed to subscribe to lifecycle events:', err)
+        lifecycleUnsub = null
+      }
+    }
+    const unsubscribeLifecycle = () => {
+      if (!lifecycleUnsub) return
+      try {
+        lifecycleUnsub()
+      } catch (err) {
+        clientLogger.warn('[nexus.terminal] lifecycle unsubscribe failed:', err)
+      }
+      lifecycleUnsub = null
+    }
+
+    // #409 — periodic RSS poll for the tab-strip memory chip. Only
+    // threshold-crossing events exist on the bus (no per-sample
+    // event), so most sessions (never crossing the soft limit) would
+    // otherwise show no chip at all. Gated on panel visibility so a
+    // hidden terminal doesn't poll in the background.
+    let rssPollTimer: ReturnType<typeof setInterval> | null = null
+    const pollRss = async () => {
+      if (!useTerminalStore.getState().visible) return
+      if (useTerminalStore.getState().tabs.length === 0) return
+      try {
+        const sessions = await api.kernel.invoke<SessionInfoResponse[]>(
+          PLUGIN_ID,
+          HANDLER_LIST_SESSIONS,
+        )
+        for (const session of sessions) {
+          if (typeof session.rss_bytes === 'number') {
+            useTerminalStore.getState().setRssBytes(session.id, session.rss_bytes)
+          }
+        }
+      } catch (err) {
+        clientLogger.warn('[nexus.terminal] list_sessions poll failed:', err)
+      }
+    }
+    const startRssPoll = () => {
+      if (rssPollTimer) return
+      rssPollTimer = setInterval(() => void pollRss(), RSS_POLL_INTERVAL_MS)
+    }
+    const stopRssPoll = () => {
+      if (!rssPollTimer) return
+      clearInterval(rssPollTimer)
+      rssPollTimer = null
+    }
+
     api.events.on(EVENT_WORKSPACE_OPENED, () => {
       void subscribeStream()
+      void subscribeLifecycle()
+      startRssPoll()
       void ensureSession()
     })
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       void destroyAllSessions()
       unsubscribeStream()
+      unsubscribeLifecycle()
+      stopRssPoll()
       useTerminalStore.getState().resetStreams()
       useTerminalStore.getState().setVisible(false)
       api.context.set(CONTEXT_KEY_VISIBLE, false)

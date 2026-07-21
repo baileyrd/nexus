@@ -223,6 +223,22 @@ pub enum TerminalEvent {
         /// Hard threshold (MB) that was crossed.
         limit_mb: u32,
     },
+    /// #409 — the session's RSS crossed the configured *soft* limit.
+    /// Unlike [`Self::MemoryLimitExceeded`] this never kills the
+    /// session; it's a warning-only signal so a subscriber can turn a
+    /// memory badge yellow (`MemoryLimits::soft_mb`'s doc comment).
+    /// Fires at most once per threshold crossing — the poller only
+    /// publishes on the `Ok -> SoftExceeded` transition, not on every
+    /// sample while already over the soft limit (see
+    /// `memory_poller_round`'s `warned` set).
+    SoftLimitExceeded {
+        /// Session id.
+        id: String,
+        /// Resident-set size at the threshold breach, in bytes.
+        rss_bytes: u64,
+        /// Soft threshold (MB) that was crossed.
+        limit_mb: u32,
+    },
     /// BL-062 — the session was removed from the manager to make
     /// room for a new spawn (LRU eviction). Only **stopped**
     /// sessions are evicted; a running session is never auto-killed
@@ -280,6 +296,7 @@ impl TerminalEvent {
             | TerminalEvent::PatternMatched { id, .. }
             | TerminalEvent::SessionClosed { id, .. }
             | TerminalEvent::MemoryLimitExceeded { id, .. }
+            | TerminalEvent::SoftLimitExceeded { id, .. }
             | TerminalEvent::SessionEvicted { id, .. }
             | TerminalEvent::CommandFinished { id, .. } => id,
         }

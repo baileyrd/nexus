@@ -87,6 +87,16 @@ interface TerminalState {
   streams: Record<string, SessionStreamState>
   sinks: Record<string, SessionSink>
   recoverFn: RecoverFn | null
+  /**
+   * #409 — last known RSS (bytes) per session, for the tab-strip
+   * memory chip. Populated two ways: (a) a periodic `list_sessions`
+   * poll while the panel is visible (`index.ts`'s `pollRss`), since
+   * most sessions never cross a threshold and would otherwise show no
+   * chip at all, and (b) immediately from a `memory_limit_exceeded` /
+   * `soft_limit_exceeded` lifecycle event, so a breach reflects
+   * instantly rather than waiting for the next poll tick.
+   */
+  rssBytesBySession: Record<string, number>
 
   /**
    * Append a tab and make it active. `custom` defaults to `false` (an
@@ -156,10 +166,27 @@ interface TerminalState {
    * sinks) — used on workspace close.
    */
   resetStreams(): void
+
+  /** #409 — record the latest known RSS (bytes) for `sessionId`. */
+  setRssBytes(sessionId: string, bytes: number): void
 }
 
 function emptyStream(): SessionStreamState {
   return { lastSeq: 0, lastCursor: 0, recoveryInFlight: false }
+}
+
+/**
+ * #409 — format a byte count for the tab-strip memory chip. MB below
+ * 1 GiB (no decimal — the chip is a glance-value, not a precise
+ * reading), GB above with one decimal. Exported so the formatting
+ * logic is unit-testable without mounting `TerminalTabsView`.
+ */
+export function formatBytesForChip(bytes: number): string {
+  const mib = bytes / (1024 * 1024)
+  if (mib < 1024) {
+    return `${Math.round(mib)} MB`
+  }
+  return `${(mib / 1024).toFixed(1)} GB`
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
@@ -169,6 +196,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   streams: {},
   sinks: {},
   recoverFn: null,
+  rssBytesBySession: {},
 
   addTab: (tab) =>
     set((s) => {
@@ -190,7 +218,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         const neighbour = tabs[idx - 1] ?? tabs[idx] ?? null
         activeSessionId = neighbour ? neighbour.id : null
       }
-      return { tabs, activeSessionId }
+      const rssBytesBySession = { ...s.rssBytesBySession }
+      delete rssBytesBySession[id]
+      return { tabs, activeSessionId, rssBytesBySession }
     }),
 
   setActiveSession: (id) => set({ activeSessionId: id }),
@@ -324,5 +354,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   resetStreams: () =>
-    set({ streams: {}, sinks: {}, tabs: [], activeSessionId: null }),
+    set({
+      streams: {},
+      sinks: {},
+      tabs: [],
+      activeSessionId: null,
+      rssBytesBySession: {},
+    }),
+
+  setRssBytes: (sessionId, bytes) =>
+    set((s) => ({
+      rssBytesBySession: { ...s.rssBytesBySession, [sessionId]: bytes },
+    })),
 }))

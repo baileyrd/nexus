@@ -94,6 +94,14 @@
   white-space: nowrap;
 }
 
+/* #409 — memory chip: small, muted, glance-value only. */
+.nexus-terminal-tab-rss {
+  flex: 0 0 auto;
+  font-size: 0.85em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 /* Inline rename field — sized to roughly match the title span so the
    tab doesn't jump when entering edit mode. Inherits the tab's font. */
 .nexus-terminal-tab-rename {
