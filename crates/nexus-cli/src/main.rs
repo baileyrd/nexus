@@ -87,6 +87,8 @@ enum Commands {
     Plugin(PluginArgs),
     /// Watch filesystem for changes
     Watch(WatchArgs),
+    /// Tail the kernel event bus (C85 / #438)
+    Events(EventsArgs),
     /// View logs
     Logs(LogsArgs),
 
@@ -403,6 +405,10 @@ fn main() {
         },
 
         Commands::Watch(args) => commands::watch::run(&mut app, &args.glob),
+
+        Commands::Events(args) => match args.command {
+            EventsCommand::Tail { filter } => commands::events::tail(&mut app, &filter),
+        },
 
         Commands::Logs(args) => match args.command {
             LogsCommand::Tail { level, lines } => commands::logs::tail(&app, Some(&level), lines),

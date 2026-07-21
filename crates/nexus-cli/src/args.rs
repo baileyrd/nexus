@@ -1155,6 +1155,28 @@ pub(crate) struct WatchArgs {
 }
 
 // ---------------------------------------------------------------------------
+// Events (C85 / #438)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub(crate) struct EventsArgs {
+    #[command(subcommand)]
+    pub(crate) command: EventsCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum EventsCommand {
+    /// Tail the kernel event bus and print every matching event
+    Tail {
+        /// Event filter: "" or "*" for everything, a bare kernel variant
+        /// name (e.g. "PluginLoaded"), a "prefix.*" custom-event prefix
+        /// (e.g. "com.nexus.storage.*"), or an exact custom `type_id`.
+        #[arg(long, default_value = "*")]
+        filter: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------
 
