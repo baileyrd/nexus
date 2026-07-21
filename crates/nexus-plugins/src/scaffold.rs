@@ -124,6 +124,20 @@ const SCRIPT_INDEX_TS: &str = include_str!("../templates/script/index.ts");
 const SCRIPT_README_MD: &str = include_str!("../templates/script/README.md");
 const SCRIPT_PACKAGE_JSON: &str = include_str!("../templates/script/package.json");
 const SCRIPT_TSCONFIG_JSON: &str = include_str!("../templates/script/tsconfig.json");
+/// C89 (#442) — smoke test exercising `activate(ctx)` against a fake
+/// `SandboxedPluginContext`, so scaffolded plugins have a real test from
+/// the start instead of zero test coverage.
+const SCRIPT_INDEX_TEST_TS: &str = include_str!("../templates/script/index.test.ts");
+/// C89 (#442) — separate tsconfig for test files (adds `types: ["node"]`
+/// for `node:test`/`node:assert`, mirroring `shell/tsconfig.test.json`).
+const SCRIPT_TSCONFIG_TEST_JSON: &str = include_str!("../templates/script/tsconfig.test.json");
+/// C89 (#442) — GitHub Actions workflow running typecheck/test/build,
+/// written to `.github/workflows/ci.yml` in the scaffolded output.
+const SCRIPT_CI_YML: &str = include_str!("../templates/script/ci.yml");
+/// C89 (#442) — happy-dom global shim, registered via `node --import`
+/// before the test file loads. `index.ts` calls `bootstrapSandboxedPlugin`
+/// at module scope, which expects real `window`/`postMessage` globals.
+const SCRIPT_TEST_SETUP_TS: &str = include_str!("../templates/script/test-setup.ts");
 
 const SRC_LIB_RS_TEMPLATE: &str = r#"//! {{plugin-name}} — Nexus plugin.
 
@@ -348,6 +362,26 @@ fn scaffold_script(output_dir: &Path, config: &ScaffoldConfig) -> Result<(), Plu
         &output_dir.join("tsconfig.json"),
         apply_substitutions(SCRIPT_TSCONFIG_JSON, config),
     )?;
+    // C89 (#442) — test + CI scaffolding, so a fresh plugin has real
+    // coverage and a gate from the start instead of neither.
+    write_file(
+        &output_dir.join("index.test.ts"),
+        apply_substitutions(SCRIPT_INDEX_TEST_TS, config),
+    )?;
+    write_file(
+        &output_dir.join("tsconfig.test.json"),
+        apply_substitutions(SCRIPT_TSCONFIG_TEST_JSON, config),
+    )?;
+    write_file(
+        &output_dir.join("test-setup.ts"),
+        apply_substitutions(SCRIPT_TEST_SETUP_TS, config),
+    )?;
+    let workflows_dir = output_dir.join(".github").join("workflows");
+    std::fs::create_dir_all(&workflows_dir)?;
+    write_file(
+        &workflows_dir.join("ci.yml"),
+        apply_substitutions(SCRIPT_CI_YML, config),
+    )?;
 
     Ok(())
 }
@@ -487,6 +521,10 @@ mod tests {
             "README.md",
             "package.json",
             "tsconfig.json",
+            "index.test.ts",
+            "tsconfig.test.json",
+            "test-setup.ts",
+            ".github/workflows/ci.yml",
         ] {
             assert!(out.join(f).exists(), "script template missing file: {f}");
         }
@@ -602,6 +640,108 @@ mod tests {
         assert_eq!(cfg["compilerOptions"]["target"], "ES2020");
         assert_eq!(cfg["compilerOptions"]["module"], "esnext");
         assert_eq!(cfg["compilerOptions"]["strict"], true);
+    }
+
+    #[test]
+    fn scaffold_script_test_file_exercises_activate_and_has_no_unreplaced_placeholders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-test");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let test_src = std::fs::read_to_string(out.join("index.test.ts")).unwrap();
+        assert!(
+            // Imports the *bundled* output, not `./index.ts` directly — see
+            // the file's own doc comment for why (bootstrapSandboxedPlugin's
+            // DOM globals + @nexus/extension-api's bundler-only resolution).
+            test_src.contains("from './.test-bundle.mjs'"),
+            "index.test.ts must import the pretest-bundled plugin output"
+        );
+        assert!(
+            test_src.contains("plugin.activate"),
+            "index.test.ts must exercise activate()"
+        );
+        assert!(
+            !test_src.contains("{{plugin-id}}") && !test_src.contains("{{plugin-name}}"),
+            "unreplaced placeholder in index.test.ts"
+        );
+    }
+
+    #[test]
+    fn scaffold_script_test_setup_registers_happy_dom() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-test-setup");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let setup_src = std::fs::read_to_string(out.join("test-setup.ts")).unwrap();
+        assert!(
+            setup_src.contains("@happy-dom/global-registrator"),
+            "test-setup.ts must register the happy-dom DOM shim"
+        );
+    }
+
+    #[test]
+    fn scaffold_script_package_wires_test_scripts_and_devdeps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-test-pkg");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let pkg_str = std::fs::read_to_string(out.join("package.json")).unwrap();
+        let pkg: serde_json::Value =
+            serde_json::from_str(&pkg_str).expect("package.json must parse as JSON");
+
+        let test_script = pkg["scripts"]["test"]
+            .as_str()
+            .expect("test script must exist");
+        assert!(test_script.contains("node --import tsx"));
+        assert!(
+            test_script.contains("--import ./test-setup.ts"),
+            "test script must register the happy-dom setup file"
+        );
+        // The bundle `index.test.ts` imports is produced by `pretest`, not
+        // `build` — a separate output so tsx's .js->.ts sibling lookup
+        // doesn't redirect back to unbundled source (see index.test.ts).
+        assert!(pkg["scripts"]["pretest"]
+            .as_str()
+            .expect("pretest script must exist")
+            .contains(".test-bundle.mjs"));
+        assert!(pkg["scripts"]["typecheck:test"].is_string());
+        assert!(pkg["devDependencies"]["tsx"].is_string());
+        assert!(pkg["devDependencies"]["@types/node"].is_string());
+        assert!(pkg["devDependencies"]["happy-dom"].is_string());
+        assert!(pkg["devDependencies"]["@happy-dom/global-registrator"].is_string());
+    }
+
+    #[test]
+    fn scaffold_script_tsconfig_test_extends_base_and_includes_test_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-tsconfig-test");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let raw = std::fs::read_to_string(out.join("tsconfig.test.json")).unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_str(&raw).expect("tsconfig.test.json must parse as JSON");
+        assert_eq!(cfg["extends"], "./tsconfig.json");
+        assert_eq!(cfg["compilerOptions"]["types"][0], "node");
+        let includes = cfg["include"]
+            .as_array()
+            .expect("include must be an array");
+        assert!(includes.iter().any(|v| v == "*.test.ts"));
+    }
+
+    #[test]
+    fn scaffold_script_ci_workflow_runs_typecheck_test_and_build() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-ci");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let workflow = std::fs::read_to_string(out.join(".github/workflows/ci.yml")).unwrap();
+        assert!(workflow.contains("jobs:"), "ci.yml must define jobs");
+        for needle in ["pnpm install", "pnpm typecheck", "pnpm test", "pnpm build"] {
+            assert!(
+                workflow.contains(needle),
+                "ci.yml missing expected step containing '{needle}'"
+            );
+        }
     }
 
     #[test]
