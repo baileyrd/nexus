@@ -128,6 +128,7 @@ mod tests {
             block_type: "paragraph".to_string(),
             excerpt: format!("excerpt for {path}#{block}"),
             score,
+            mtime: 0,
         }
     }
 

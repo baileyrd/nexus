@@ -23,6 +23,11 @@ block_type: string,
  */
 excerpt: string, 
 /**
- * BM25 relevance score.
+ * BM25 relevance score. `0.0` when the request's `sort` was
+ * `mtime_desc`/`mtime_asc`.
  */
-score: number, };
+score: number, 
+/**
+ * #375 — the block's file mtime, Unix seconds.
+ */
+mtime: bigint, };

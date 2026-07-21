@@ -31,10 +31,9 @@ pub mod hybrid;
 /// BL-083: forge-to-forge import / migration planning + apply.
 pub mod import;
 mod index;
-mod link_rewrite;
-mod trash;
 /// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
 pub mod lfs;
+mod link_rewrite;
 pub mod mdx;
 pub mod obsidian_base;
 mod parser;
@@ -43,6 +42,7 @@ pub mod schema;
 mod search;
 mod search_scope;
 mod tasks;
+mod trash;
 pub mod vectorstore;
 mod watcher;
 
@@ -99,7 +99,7 @@ pub use index::{
 pub use mdx::{parse_mdx, MdxParseResult, ParsedJsxComponent};
 pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
 pub use reconcile::{reconcile, ReconcileDelta};
-pub use search::{SearchIndex, SearchResult};
+pub use search::{SearchIndex, SearchOptions, SearchResult, SearchSort};
 
 /// Oversampling multiplier for each hybrid-search arm: both the FTS and
 /// vector arms fetch `limit × this` candidates before fusion so a block
@@ -424,10 +424,7 @@ impl StorageEngine {
     /// # Panics
     ///
     /// Panics if the internal write-connection mutex is poisoned.
-    pub fn index_external_change(
-        &self,
-        path: &str,
-    ) -> Result<Option<FileMetadata>, StorageError> {
+    pub fn index_external_change(&self, path: &str) -> Result<Option<FileMetadata>, StorageError> {
         let abs = resolve_within(self.forge.root(), path)?;
         let bytes = match std::fs::read(&abs) {
             Ok(b) => b,
@@ -2028,6 +2025,8 @@ impl StorageEngine {
     // ── Search ────────────────────────────────────────────────────────────────
 
     /// Search the Tantivy index for `query`, returning up to `limit` results.
+    /// Shorthand for [`Self::search_with_options`] with
+    /// [`SearchOptions::default`].
     ///
     /// Supports scope operators: `tag:NAME`, `path:PREFIX`, `prop:KEY:VALUE`.
     /// Scopes are extracted from the query, Tantivy searches the remaining
@@ -2037,6 +2036,24 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError`] on Tantivy or database failure.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, StorageError> {
+        self.search_with_options(query, limit, SearchOptions::default())
+    }
+
+    /// Search with paging/sort/date-range knobs (#375) — see
+    /// [`SearchIndex::search_with_options`] for their semantics. For a
+    /// scope-only query (no free-text portion, so Tantivy never runs)
+    /// `offset`/`sort`/the mtime range apply directly to the `SQLite`
+    /// fallback query instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on Tantivy or database failure.
+    pub fn search_with_options(
+        &self,
+        query: &str,
+        limit: usize,
+        options: SearchOptions,
+    ) -> Result<Vec<SearchResult>, StorageError> {
         let (text, filters) = search_scope::parse_scoped_query(query);
 
         // Run Tantivy on the plain-text portion.
@@ -2045,26 +2062,43 @@ impl StorageEngine {
             let conn = self.pool.get().map_err(|e| {
                 StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
             })?;
-            let mut stmt = conn.prepare(
-                "SELECT f.path, b.id, b.block_type, b.content
+            let order_by = match options.sort {
+                SearchSort::Relevance => "f.path, b.start_line",
+                SearchSort::MtimeDesc => "f.modified_at DESC, f.path, b.start_line",
+                SearchSort::MtimeAsc => "f.modified_at ASC, f.path, b.start_line",
+            };
+            let mtime_after_clause = options
+                .mtime_after
+                .map(|v| format!(" AND f.modified_at >= {v}"))
+                .unwrap_or_default();
+            let mtime_before_clause = options
+                .mtime_before
+                .map(|v| format!(" AND f.modified_at <= {v}"))
+                .unwrap_or_default();
+            let sql = format!(
+                "SELECT f.path, b.id, b.block_type, b.content, f.modified_at
                  FROM blocks b JOIN files f ON f.id = b.file_id
-                 WHERE f.is_deleted = 0
-                 ORDER BY f.path, b.start_line
-                 LIMIT ?1;",
-            )?;
+                 WHERE f.is_deleted = 0{mtime_after_clause}{mtime_before_clause}
+                 ORDER BY {order_by}
+                 LIMIT ?1 OFFSET ?2;"
+            );
+            let mut stmt = conn.prepare(&sql)?;
             let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
-            let rows = stmt.query_map(rusqlite::params![limit_i64], |row| {
+            let offset_i64 = i64::try_from(options.offset).unwrap_or(i64::MAX);
+            let rows = stmt.query_map(rusqlite::params![limit_i64, offset_i64], |row| {
                 Ok(SearchResult {
                     file_path: row.get(0)?,
                     block_id: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
                     block_type: row.get(2)?,
                     excerpt: String::new(),
                     score: 0.0,
+                    mtime: row.get(4)?,
                 })
             })?;
             rows.filter_map(std::result::Result::ok).collect()
         } else {
-            self.search_index.search(&text, limit)?
+            self.search_index
+                .search_with_options(&text, limit, options)?
         };
 
         // Post-filter with scopes if any.
@@ -2093,9 +2127,13 @@ impl StorageEngine {
             StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
-        // Iterate all blocks joined with files.
+        // Iterate all blocks joined with files. #375 — f.modified_at
+        // backfills the Tantivy mtime field so a rebuild (this
+        // function, or the full `rebuild_index` that always calls it)
+        // is enough to populate mtime for every block; no separate
+        // migration path is needed.
         let mut stmt = conn.prepare(
-            "SELECT b.id, b.block_type, b.content, f.path
+            "SELECT b.id, b.block_type, b.content, f.path, f.modified_at
              FROM blocks b JOIN files f ON f.id = b.file_id
              WHERE f.is_deleted = 0;",
         )?;
@@ -2106,16 +2144,18 @@ impl StorageEngine {
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         })?;
 
         for row in rows {
-            let (block_id, block_type, content, file_path) = row?;
+            let (block_id, block_type, content, file_path, modified_at) = row?;
             self.search_index.add_block(
                 &file_path,
                 u64::try_from(block_id).unwrap_or(0),
                 &block_type,
                 &content,
+                modified_at,
             )?;
         }
 

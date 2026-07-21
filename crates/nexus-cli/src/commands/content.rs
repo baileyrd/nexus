@@ -228,15 +228,35 @@ pub fn delete(app: &mut App, path: &str, force: bool, permanent: bool) -> Result
 }
 
 /// Search content nodes with `query`, returning up to `limit` results.
-pub fn search(app: &mut App, query: &str, limit: usize) -> Result<()> {
+pub fn search(
+    app: &mut App,
+    query: &str,
+    limit: usize,
+    offset: usize,
+    sort: &str,
+    mtime_after: Option<i64>,
+    mtime_before: Option<i64>,
+) -> Result<()> {
     let format = app.format();
     let (invoker, rt) = app.invoker()?;
 
     rt.block_on(ipc::rebuild_search_index(&*invoker))
         .map_err(|e| anyhow::anyhow!("failed to rebuild search index: {e}"))?;
 
+    let sort = parse_sort_flag(sort)?;
+
     let results = rt
-        .block_on(ipc::search(&*invoker, query, limit))
+        .block_on(ipc::search_with_options(
+            &*invoker,
+            query,
+            limit,
+            ipc::SearchOptions {
+                offset,
+                sort,
+                mtime_after,
+                mtime_before,
+            },
+        ))
         .map_err(|e| anyhow::anyhow!("search failed: {e}"))?;
 
     if results.is_empty() {
@@ -259,6 +279,25 @@ pub fn search(app: &mut App, query: &str, limit: usize) -> Result<()> {
     print_list(format, headers, &rows);
 
     Ok(())
+}
+
+/// #375 — parse `nexus content search --sort <value>`. `-`/`_` are
+/// both accepted (`mtime-desc`/`mtime_desc`) so the flag and a
+/// hypothetical config-file key can share one spelling either way.
+///
+/// # Errors
+///
+/// Returns an error listing the accepted values if `sort` doesn't
+/// match any of them.
+fn parse_sort_flag(sort: &str) -> Result<ipc::SearchSort> {
+    match sort.replace('-', "_").as_str() {
+        "relevance" => Ok(ipc::SearchSort::Relevance),
+        "mtime_desc" => Ok(ipc::SearchSort::MtimeDesc),
+        "mtime_asc" => Ok(ipc::SearchSort::MtimeAsc),
+        other => anyhow::bail!(
+            "unknown --sort '{other}' (expected 'relevance', 'mtime-desc', or 'mtime-asc')"
+        ),
+    }
 }
 
 /// C78 (#431) — `nexus content search --semantic|--hybrid <query>`:
@@ -544,5 +583,26 @@ mod tests {
         let out = truncate_excerpt(s, 3);
         assert!(out.ends_with('…'));
         assert!(out.starts_with('α'));
+    }
+
+    // ── #375 — --sort flag parsing ───────────────────────────────────────
+
+    #[test]
+    fn parse_sort_flag_accepts_relevance() {
+        assert_eq!(parse_sort_flag("relevance").unwrap(), ipc::SearchSort::Relevance);
+    }
+
+    #[test]
+    fn parse_sort_flag_accepts_hyphenated_and_underscored_mtime_variants() {
+        assert_eq!(parse_sort_flag("mtime-desc").unwrap(), ipc::SearchSort::MtimeDesc);
+        assert_eq!(parse_sort_flag("mtime_desc").unwrap(), ipc::SearchSort::MtimeDesc);
+        assert_eq!(parse_sort_flag("mtime-asc").unwrap(), ipc::SearchSort::MtimeAsc);
+        assert_eq!(parse_sort_flag("mtime_asc").unwrap(), ipc::SearchSort::MtimeAsc);
+    }
+
+    #[test]
+    fn parse_sort_flag_rejects_unknown_values() {
+        let err = parse_sort_flag("bogus").unwrap_err();
+        assert!(err.to_string().contains("unknown --sort 'bogus'"));
     }
 }

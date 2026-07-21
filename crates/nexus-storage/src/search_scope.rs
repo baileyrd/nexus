@@ -542,6 +542,7 @@ mod tests {
                 block_type: "paragraph".to_string(),
                 excerpt: String::new(),
                 score: 1.0,
+                mtime: 0,
             },
             SearchResult {
                 file_path: "notes/b.md".to_string(),
@@ -549,6 +550,7 @@ mod tests {
                 block_type: "paragraph".to_string(),
                 excerpt: String::new(),
                 score: 0.5,
+                mtime: 0,
             },
         ];
 
@@ -567,6 +569,7 @@ mod tests {
                 block_type: "paragraph".to_string(),
                 excerpt: String::new(),
                 score: 1.0,
+                mtime: 0,
             },
             SearchResult {
                 file_path: "docs/b.md".to_string(),
@@ -574,6 +577,7 @@ mod tests {
                 block_type: "paragraph".to_string(),
                 excerpt: String::new(),
                 score: 0.5,
+                mtime: 0,
             },
         ];
 
@@ -592,6 +596,7 @@ mod tests {
             block_type: "paragraph".to_string(),
             excerpt: String::new(),
             score: 1.0,
+            mtime: 0,
         }];
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -624,6 +629,7 @@ mod tests {
                 block_type: "heading".to_string(),
                 excerpt: String::new(),
                 score: 1.0,
+                mtime: 0,
             },
             SearchResult {
                 file_path: "notes/b.md".to_string(),
@@ -631,6 +637,7 @@ mod tests {
                 block_type: "paragraph".to_string(),
                 excerpt: String::new(),
                 score: 0.5,
+                mtime: 0,
             },
         ];
 
@@ -695,6 +702,7 @@ mod tests {
             block_type: "paragraph".to_string(),
             excerpt: String::new(),
             score: 1.0,
+            mtime: 0,
         }
     }
 

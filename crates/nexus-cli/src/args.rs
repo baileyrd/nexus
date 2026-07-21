@@ -160,6 +160,22 @@ pub(crate) enum ContentCommand {
         /// Maximum number of results
         #[arg(short, long, default_value_t = 20)]
         limit: usize,
+        /// #375 — skip this many ranked hits before taking the page of
+        /// `--limit`, for paging through results.
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        /// #375 — sort order: "relevance" (default), "mtime-desc", or
+        /// "mtime-asc".
+        #[arg(long, default_value = "relevance")]
+        sort: String,
+        /// #375 — only include blocks whose file mtime is on or after
+        /// this Unix-seconds timestamp.
+        #[arg(long)]
+        mtime_after: Option<i64>,
+        /// #375 — only include blocks whose file mtime is on or before
+        /// this Unix-seconds timestamp.
+        #[arg(long)]
+        mtime_before: Option<i64>,
         /// Vector-only semantic search (embedding similarity) instead
         /// of lexical FTS. Requires an AI embedding provider
         /// (`nexus ai config`). Mutually exclusive with `--hybrid`.

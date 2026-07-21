@@ -172,12 +172,30 @@ fn index_queries_return_parsed_data() {
 fn search_index_standalone() {
     let idx = SearchIndex::open_in_memory().expect("open_in_memory");
 
-    idx.add_block("notes/a.md", 1, "paragraph", "rust programming is great")
-        .expect("add_block");
-    idx.add_block("notes/b.md", 2, "heading", "introduction to rust")
-        .expect("add_block");
-    idx.add_block("notes/c.md", 3, "paragraph", "python is also good")
-        .expect("add_block");
+    idx.add_block(
+        "notes/a.md",
+        1,
+        "paragraph",
+        "rust programming is great",
+        1_700_000_000,
+    )
+    .expect("add_block");
+    idx.add_block(
+        "notes/b.md",
+        2,
+        "heading",
+        "introduction to rust",
+        1_700_000_000,
+    )
+    .expect("add_block");
+    idx.add_block(
+        "notes/c.md",
+        3,
+        "paragraph",
+        "python is also good",
+        1_700_000_000,
+    )
+    .expect("add_block");
     idx.commit().expect("commit");
 
     let results: Vec<SearchResult> = idx.search("rust", 10).expect("search");
