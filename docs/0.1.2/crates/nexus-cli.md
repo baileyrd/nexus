@@ -55,6 +55,7 @@ Unless noted, handlers route through `context.ipc_call(plugin_id, …)`. Plugin 
 - `ai ask <question>` (RAG), `ai embed [--file …]` (index one/all files), `ai status`, `ai config`.
 - `ai chat [--context FILE] [--model …] [--session …] [--system …]` — multi-turn streaming REPL (rustyline). Subscribes to the `com.nexus.ai.stream_*` bus prefix, invokes `stream_chat`, prints chunk events live. Slash commands: `/help /clear /save <file> /model <name> /context <file> /system <prompt> /quit|/exit`. Ctrl-C exits 130; Ctrl-D/`/quit` exit 0.
 - `ai complete <file> [--line] [--col] [--context …]` — headless single-shot completion (`mode=complete`), shares the same stream pump as `chat`.
+- `ai runtime list [--status …] [--limit …]`, `ai runtime get <task_id>`, `ai runtime cancel <task_id> [--reason …]`, `ai runtime pool-stats`, `ai runtime triggers` (C79 #432) — observe/control `com.nexus.ai.runtime` background tasks (agent delegate fan-out, async workflow steps); pure frontend wiring over the pre-existing observe/control handlers (`crates/nexus-cli/src/commands/ai_runtime.rs`).
 
 **Agent** (`com.nexus.agent`)
 - `agent plan <goal> [--archetype]`, `agent run <goal> [--archetype] [--interactive] [--notify-after-secs 30]`, `agent list-custom`. `--interactive` subscribes to `com.nexus.agent.round_proposed`, prompts y/n on stderr, and replies via `round_decide` (BL-132). The notify threshold dispatches a notification through `com.nexus.notifications` when a run overruns (BL-133).

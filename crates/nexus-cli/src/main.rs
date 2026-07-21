@@ -587,6 +587,17 @@ fn main() {
             AiCommand::Export { id, out } => {
                 commands::ai::export(&mut app, id.as_deref(), out.as_deref())
             }
+            AiCommand::Runtime { command } => match command {
+                AiRuntimeCommand::List { status, limit } => {
+                    commands::ai_runtime::list(&mut app, status.as_deref(), limit)
+                }
+                AiRuntimeCommand::Get { task_id } => commands::ai_runtime::get(&mut app, &task_id),
+                AiRuntimeCommand::Cancel { task_id, reason } => {
+                    commands::ai_runtime::cancel(&mut app, &task_id, reason.as_deref())
+                }
+                AiRuntimeCommand::PoolStats => commands::ai_runtime::pool_stats(&mut app),
+                AiRuntimeCommand::Triggers => commands::ai_runtime::triggers(&mut app),
+            },
         },
 
         Commands::Agent(args) => match args.command {
@@ -1198,6 +1209,107 @@ mod tests {
                 _ => panic!("expected Grant"),
             },
             _ => panic!("expected Plugin subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_ai_runtime_list_defaults_status_and_limit_to_none() {
+        let cli = Cli::try_parse_from(["nexus", "ai", "runtime", "list"])
+            .expect("parse ai runtime list");
+        match cli.command {
+            Commands::Ai(args) => match args.command {
+                AiCommand::Runtime { command } => match command {
+                    AiRuntimeCommand::List { status, limit } => {
+                        assert!(status.is_none());
+                        assert!(limit.is_none());
+                    }
+                    _ => panic!("expected List"),
+                },
+                _ => panic!("expected Runtime"),
+            },
+            _ => panic!("expected Ai subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_ai_runtime_list_accepts_status_and_limit_flags() {
+        let cli = Cli::try_parse_from([
+            "nexus", "ai", "runtime", "list", "--status", "running", "--limit", "5",
+        ])
+        .expect("parse ai runtime list --status --limit");
+        match cli.command {
+            Commands::Ai(args) => match args.command {
+                AiCommand::Runtime { command } => match command {
+                    AiRuntimeCommand::List { status, limit } => {
+                        assert_eq!(status.as_deref(), Some("running"));
+                        assert_eq!(limit, Some(5));
+                    }
+                    _ => panic!("expected List"),
+                },
+                _ => panic!("expected Runtime"),
+            },
+            _ => panic!("expected Ai subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_ai_runtime_get_and_cancel() {
+        let cli = Cli::try_parse_from(["nexus", "ai", "runtime", "get", "abc-123"])
+            .expect("parse ai runtime get");
+        match cli.command {
+            Commands::Ai(args) => match args.command {
+                AiCommand::Runtime { command } => match command {
+                    AiRuntimeCommand::Get { task_id } => assert_eq!(task_id, "abc-123"),
+                    _ => panic!("expected Get"),
+                },
+                _ => panic!("expected Runtime"),
+            },
+            _ => panic!("expected Ai subcommand"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "nexus", "ai", "runtime", "cancel", "abc-123", "--reason", "stuck",
+        ])
+        .expect("parse ai runtime cancel --reason");
+        match cli.command {
+            Commands::Ai(args) => match args.command {
+                AiCommand::Runtime { command } => match command {
+                    AiRuntimeCommand::Cancel { task_id, reason } => {
+                        assert_eq!(task_id, "abc-123");
+                        assert_eq!(reason.as_deref(), Some("stuck"));
+                    }
+                    _ => panic!("expected Cancel"),
+                },
+                _ => panic!("expected Runtime"),
+            },
+            _ => panic!("expected Ai subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_ai_runtime_pool_stats_and_triggers() {
+        let cli = Cli::try_parse_from(["nexus", "ai", "runtime", "pool-stats"])
+            .expect("parse ai runtime pool-stats");
+        match cli.command {
+            Commands::Ai(args) => match args.command {
+                AiCommand::Runtime { command } => {
+                    assert!(matches!(command, AiRuntimeCommand::PoolStats));
+                }
+                _ => panic!("expected Runtime"),
+            },
+            _ => panic!("expected Ai subcommand"),
+        }
+
+        let cli = Cli::try_parse_from(["nexus", "ai", "runtime", "triggers"])
+            .expect("parse ai runtime triggers");
+        match cli.command {
+            Commands::Ai(args) => match args.command {
+                AiCommand::Runtime { command } => {
+                    assert!(matches!(command, AiRuntimeCommand::Triggers));
+                }
+                _ => panic!("expected Runtime"),
+            },
+            _ => panic!("expected Ai subcommand"),
         }
     }
 

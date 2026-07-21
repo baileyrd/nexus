@@ -438,6 +438,45 @@ pub(crate) enum AiCommand {
         #[arg(long)]
         out: Option<String>,
     },
+    /// Observe/control `com.nexus.ai.runtime` background tasks (C79 #432):
+    /// agent delegate fan-out and async workflow steps. No backend work
+    /// needed — the observe/control IPC handlers already exist; this is
+    /// the first frontend to reach them.
+    Runtime {
+        #[command(subcommand)]
+        command: AiRuntimeCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AiRuntimeCommand {
+    /// List background tasks, optionally filtered by status.
+    List {
+        /// Only show tasks in this status (queued, running, paused,
+        /// cancelled, completed, failed). Omit to show every status.
+        #[arg(long)]
+        status: Option<String>,
+        /// Cap the number of rows returned.
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// Show full detail for one task.
+    Get {
+        /// Task id (uuid), as printed by `list`.
+        task_id: String,
+    },
+    /// Request cancellation of a queued or running task.
+    Cancel {
+        /// Task id (uuid), as printed by `list`.
+        task_id: String,
+        /// Human-readable reason, captured in the task's `Cancelled` event.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Show current worker-pool utilization (queued/running/max workers).
+    PoolStats,
+    /// List registered ambient triggers.
+    Triggers,
 }
 
 // ---------------------------------------------------------------------------
