@@ -183,6 +183,14 @@ pub struct MetricsSnapshot {
     /// error from `tokio::sync::broadcast`. Cap is the bus capacity
     /// from `KernelConfig` (default 1024).
     pub event_bus_queue_depth: u64,
+    /// `plugin_wasm_fuel_consumed{plugin_id}` — fuel spent on that
+    /// plugin's most recent WASM dispatch (0 when fuel metering is
+    /// disabled for the plugin, i.e. its manifest sets `fuel = 0`).
+    /// C86 / #439.
+    pub plugin_wasm_fuel_consumed: HashMap<String, u64>,
+    /// `plugin_wasm_memory_bytes{plugin_id}` — linear-memory size
+    /// sampled after that plugin's most recent WASM dispatch. C86 / #439.
+    pub plugin_wasm_memory_bytes: HashMap<String, u64>,
     /// Sentinel — number of metric writes dropped because a
     /// per-metric key cap was hit.
     pub metrics_dropped_total: u64,
@@ -241,6 +249,44 @@ impl CounterMap {
     }
 }
 
+/// A keyed [`Gauge`] map — last-value-wins per key, same cardinality
+/// cap as [`CounterMap`]. Used for per-plugin instantaneous samples
+/// (e.g. WASM fuel consumed / linear-memory size on the most recent
+/// dispatch) where history isn't the point, just "how close to its
+/// budget is this plugin right now."
+#[derive(Default)]
+struct GaugeMap {
+    inner: Mutex<HashMap<String, AtomicU64>>,
+}
+
+impl GaugeMap {
+    fn set(&self, key: String, value: u64, dropped: &AtomicU64) {
+        let mut m = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(slot) = m.get(&key) {
+            slot.store(value, Ordering::Relaxed);
+            return;
+        }
+        if m.len() >= MAX_KEYS_PER_METRIC {
+            dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        m.insert(key, AtomicU64::new(value));
+    }
+
+    fn snapshot(&self) -> HashMap<String, u64> {
+        let m = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        m.iter()
+            .map(|(k, v)| (k.clone(), v.load(Ordering::Relaxed)))
+            .collect()
+    }
+}
+
 #[derive(Default)]
 struct HistogramMap {
     inner: Mutex<HashMap<String, Histogram>>,
@@ -285,6 +331,8 @@ pub struct KernelMetrics {
     capability_checks_total: CounterMap,
     plugin_lifecycle_duration: HistogramMap,
     event_bus_queue_depth: Gauge,
+    plugin_wasm_fuel_consumed: GaugeMap,
+    plugin_wasm_memory_bytes: GaugeMap,
     metrics_dropped_total: AtomicU64,
 }
 
@@ -340,6 +388,28 @@ impl KernelMetrics {
         );
     }
 
+    /// Record fuel spent on a WASM plugin's most recent dispatch call.
+    /// C86 / #439 — makes the manifest's `fuel` budget debuggable
+    /// instead of only fatal (an `OutOfFuel` trap with no prior
+    /// visibility into how close the plugin was running to its cap).
+    pub fn record_plugin_fuel_consumed(&self, plugin_id: &str, fuel_consumed: u64) {
+        self.plugin_wasm_fuel_consumed.set(
+            plugin_id.to_string(),
+            fuel_consumed,
+            &self.metrics_dropped_total,
+        );
+    }
+
+    /// Record a WASM plugin's linear-memory size, sampled after its
+    /// most recent dispatch call. C86 / #439.
+    pub fn record_plugin_memory_bytes(&self, plugin_id: &str, bytes: u64) {
+        self.plugin_wasm_memory_bytes.set(
+            plugin_id.to_string(),
+            bytes,
+            &self.metrics_dropped_total,
+        );
+    }
+
     /// Record the duration of one plugin lifecycle hook
     /// (`on_init`, `on_start`, `on_stop`, …).
     pub fn record_lifecycle_duration(&self, plugin_id: &str, hook: &str, duration_ns: u64) {
@@ -379,6 +449,8 @@ impl KernelMetrics {
             capability_checks_total: self.capability_checks_total.snapshot(),
             plugin_lifecycle_duration: self.plugin_lifecycle_duration.snapshot(),
             event_bus_queue_depth: self.event_bus_queue_depth.get(),
+            plugin_wasm_fuel_consumed: self.plugin_wasm_fuel_consumed.snapshot(),
+            plugin_wasm_memory_bytes: self.plugin_wasm_memory_bytes.snapshot(),
             metrics_dropped_total: self.metrics_dropped_total.load(Ordering::Relaxed),
         }
     }
@@ -420,6 +492,82 @@ fn labels_for(key: &str, names: &[&str]) -> String {
     }
 }
 
+/// Render a `u64` counter map as Prometheus `# TYPE ... counter` text.
+/// Split out of [`MetricsSnapshot::to_prometheus_text`] so that
+/// function stays under clippy's line-count threshold as the number of
+/// exposed metrics grows. C86 / #439.
+fn render_counter_by_key(
+    out: &mut String,
+    name: &str,
+    help: &str,
+    map: &HashMap<String, u64>,
+    labels: &[&str],
+) {
+    out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} counter\n"));
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort();
+    for k in keys {
+        out.push_str(&format!("{name}{} {}\n", labels_for(k, labels), map[k]));
+    }
+}
+
+/// Render a [`HistogramSnapshot`] map as Prometheus `# TYPE ... summary`
+/// text (p50/p95/p99 quantiles plus `_sum`/`_count`). Split out of
+/// [`MetricsSnapshot::to_prometheus_text`] for the same reason as
+/// [`render_counter_by_key`]. C86 / #439.
+fn render_summary_by_key(
+    out: &mut String,
+    name: &str,
+    help: &str,
+    map: &HashMap<String, HistogramSnapshot>,
+    labels: &[&str],
+) {
+    out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} summary\n"));
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort();
+    for k in keys {
+        let h = &map[k];
+        let base = labels_for(k, labels);
+        // Splice the quantile label into the existing label set.
+        let with_q = |q: &str| -> String {
+            let inner = base.trim_start_matches('{').trim_end_matches('}');
+            format!("{{{inner},quantile=\"{q}\"}}")
+        };
+        out.push_str(&format!(
+            "{name}{} {}\n",
+            with_q("0.5"),
+            ns_to_secs(h.p50_ns)
+        ));
+        out.push_str(&format!(
+            "{name}{} {}\n",
+            with_q("0.95"),
+            ns_to_secs(h.p95_ns)
+        ));
+        out.push_str(&format!(
+            "{name}{} {}\n",
+            with_q("0.99"),
+            ns_to_secs(h.p99_ns)
+        ));
+        out.push_str(&format!("{name}_sum{base} {}\n", ns_to_secs(h.sum_ns)));
+        out.push_str(&format!("{name}_count{base} {}\n", h.count));
+    }
+}
+
+/// Render a per-plugin last-value gauge map ([`GaugeMap`] via
+/// [`KernelMetrics::snapshot`]) as Prometheus `# TYPE ... gauge` text.
+/// Split out of [`MetricsSnapshot::to_prometheus_text`] for the same
+/// reason as [`render_counter_by_key`]. C86 / #439.
+fn render_gauge_by_plugin(out: &mut String, name: &str, help: &str, map: &HashMap<String, u64>) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(out, "# HELP {name} {help}\n# TYPE {name} gauge");
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort();
+    for k in keys {
+        let _ = writeln!(out, "{name}{} {}", labels_for(k, &["plugin_id"]), map[k]);
+    }
+}
+
 impl MetricsSnapshot {
     /// Render the snapshot in the Prometheus text exposition format
     /// (version 0.0.4) — the missing "exit path" for the BL-093
@@ -433,34 +581,21 @@ impl MetricsSnapshot {
     pub fn to_prometheus_text(&self) -> String {
         let mut out = String::new();
 
-        let mut counter = |out: &mut String,
-                           name: &str,
-                           help: &str,
-                           map: &HashMap<String, u64>,
-                           labels: &[&str]| {
-            out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} counter\n"));
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            for k in keys {
-                out.push_str(&format!("{name}{} {}\n", labels_for(k, labels), map[k]));
-            }
-        };
-
-        counter(
+        render_counter_by_key(
             &mut out,
             "nexus_ipc_calls_total",
             "IPC calls dispatched, by plugin, command, and outcome.",
             &self.ipc_calls_total,
             &["plugin_id", "command", "status"],
         );
-        counter(
+        render_counter_by_key(
             &mut out,
             "nexus_event_bus_published_total",
             "Events published to the kernel bus, by plugin.",
             &self.event_bus_published_total,
             &["plugin_id"],
         );
-        counter(
+        render_counter_by_key(
             &mut out,
             "nexus_capability_checks_total",
             "Capability checks performed, by plugin, capability, and result.",
@@ -468,50 +603,14 @@ impl MetricsSnapshot {
             &["plugin_id", "capability", "result"],
         );
 
-        let mut summary = |out: &mut String,
-                           name: &str,
-                           help: &str,
-                           map: &HashMap<String, HistogramSnapshot>,
-                           labels: &[&str]| {
-            out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} summary\n"));
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            for k in keys {
-                let h = &map[k];
-                let base = labels_for(k, labels);
-                // Splice the quantile label into the existing label set.
-                let with_q = |q: &str| -> String {
-                    let inner = base.trim_start_matches('{').trim_end_matches('}');
-                    format!("{{{inner},quantile=\"{q}\"}}")
-                };
-                out.push_str(&format!(
-                    "{name}{} {}\n",
-                    with_q("0.5"),
-                    ns_to_secs(h.p50_ns)
-                ));
-                out.push_str(&format!(
-                    "{name}{} {}\n",
-                    with_q("0.95"),
-                    ns_to_secs(h.p95_ns)
-                ));
-                out.push_str(&format!(
-                    "{name}{} {}\n",
-                    with_q("0.99"),
-                    ns_to_secs(h.p99_ns)
-                ));
-                out.push_str(&format!("{name}_sum{base} {}\n", ns_to_secs(h.sum_ns)));
-                out.push_str(&format!("{name}_count{base} {}\n", h.count));
-            }
-        };
-
-        summary(
+        render_summary_by_key(
             &mut out,
             "nexus_ipc_call_duration_seconds",
             "IPC call latency, by plugin and command.",
             &self.ipc_call_duration,
             &["plugin_id", "command"],
         );
-        summary(
+        render_summary_by_key(
             &mut out,
             "nexus_plugin_lifecycle_duration_seconds",
             "Plugin lifecycle hook latency, by plugin and hook.",
@@ -525,6 +624,19 @@ impl MetricsSnapshot {
              nexus_event_bus_queue_depth {}\n",
             self.event_bus_queue_depth
         ));
+
+        render_gauge_by_plugin(
+            &mut out,
+            "nexus_plugin_wasm_fuel_consumed",
+            "Fuel spent on a WASM plugin's most recent dispatch call (0 = metering disabled).",
+            &self.plugin_wasm_fuel_consumed,
+        );
+        render_gauge_by_plugin(
+            &mut out,
+            "nexus_plugin_wasm_memory_bytes",
+            "A WASM plugin's linear-memory size, sampled after its most recent dispatch call.",
+            &self.plugin_wasm_memory_bytes,
+        );
         out.push_str(&format!(
             "# HELP nexus_metrics_dropped_total Metric writes dropped by the per-metric key cap.\n\
              # TYPE nexus_metrics_dropped_total counter\n\
@@ -696,6 +808,37 @@ mod tests {
         assert!(text.contains("nexus_event_bus_published_total{plugin_id=\"com.nexus.editor\"} 1"));
         assert!(text.contains("# TYPE nexus_event_bus_queue_depth gauge"));
         assert!(text.contains("nexus_metrics_dropped_total 0"));
+    }
+
+    // ── Per-plugin WASM resource gauges (C86 / #439) ────────────────────────
+
+    #[test]
+    fn plugin_wasm_gauges_record_last_value_per_plugin() {
+        let m = KernelMetrics::new();
+        m.record_plugin_fuel_consumed("community.a", 1_000);
+        m.record_plugin_fuel_consumed("community.a", 2_500);
+        m.record_plugin_fuel_consumed("community.b", 999);
+        m.record_plugin_memory_bytes("community.a", 65_536);
+        m.record_plugin_memory_bytes("community.a", 131_072);
+
+        let s = m.snapshot();
+        // Last write wins, same gauge semantic as event_bus_queue_depth.
+        assert_eq!(s.plugin_wasm_fuel_consumed["community.a"], 2_500);
+        assert_eq!(s.plugin_wasm_fuel_consumed["community.b"], 999);
+        assert_eq!(s.plugin_wasm_memory_bytes["community.a"], 131_072);
+    }
+
+    #[test]
+    fn plugin_wasm_gauges_render_as_prometheus_gauges() {
+        let m = KernelMetrics::new();
+        m.record_plugin_fuel_consumed("community.a", 4_200);
+        m.record_plugin_memory_bytes("community.a", 1_048_576);
+        let text = m.snapshot().to_prometheus_text();
+
+        assert!(text.contains("# TYPE nexus_plugin_wasm_fuel_consumed gauge"));
+        assert!(text.contains("nexus_plugin_wasm_fuel_consumed{plugin_id=\"community.a\"} 4200"));
+        assert!(text.contains("# TYPE nexus_plugin_wasm_memory_bytes gauge"));
+        assert!(text.contains("nexus_plugin_wasm_memory_bytes{plugin_id=\"community.a\"} 1048576"));
     }
 
     #[test]
