@@ -549,13 +549,18 @@ pub fn scaffold(
                 "README.md",
                 "package.json",
                 "tsconfig.json",
+                // C89 (#442) — test + CI scaffolding.
+                "index.test.ts",
+                "tsconfig.test.json",
+                "test-setup.ts",
+                ".github/workflows/ci.yml",
             ] {
                 println!("  {}", output_dir.join(f).display());
             }
             println!();
             println!("Next steps:");
             println!(
-                "  cd {} && pnpm install && pnpm build",
+                "  cd {} && pnpm install && pnpm test && pnpm build",
                 output_dir.display()
             );
             println!(

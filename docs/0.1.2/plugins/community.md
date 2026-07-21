@@ -111,7 +111,11 @@ For JS:
 
 ```bash
 nexus plugin scaffold --type script com.example.my-plugin
-# emits plugin.json + index.ts with @nexus/extension-api import
+# emits plugin.json + index.ts with @nexus/extension-api import, plus
+# (C89 #442) index.test.ts, tsconfig.test.json, test-setup.ts, and
+# .github/workflows/ci.yml — `pnpm test` and CI are wired from the start.
 ```
+
+**Test scaffolding (C89 #442).** The `script` template's `index.test.ts` exercises `activate(ctx)` against a fake `SandboxedPluginContext` via `node --test`. It imports a `.test-bundle.mjs` built by the `pretest` script rather than `index.ts` directly, for two reasons: `index.ts` calls `bootstrapSandboxedPlugin` at module scope, which expects real `window`/`postMessage` globals (`test-setup.ts`, registered via `--import`, supplies those with happy-dom); and `@nexus/extension-api`'s bundler-oriented module layout (`moduleResolution: "bundler"`, directory-style `export * from './generated'`) isn't resolvable by Node's own ESM loader without a bundler in the loop — bundling first sidesteps that. The generated `.github/workflows/ci.yml` runs typecheck, typecheck of the test file, test, and build on push/PR.
 
 Reference manifests: `crates/nexus-plugins/src/manifest.rs` (Rust types), [`../settings/plugin-manifests.md`](../settings/plugin-manifests.md) (TOML schema).

@@ -8,11 +8,18 @@
   "main": "index.js",
   "scripts": {
     "build": "esbuild index.ts --bundle --format=esm --target=es2020 --outfile=index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "pretest": "esbuild index.ts --bundle --format=esm --target=es2020 --outfile=.test-bundle.mjs",
+    "test": "node --import tsx --import ./test-setup.ts --test *.test.ts"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.9.0",
     "@nexus/extension-api": "{{extension-api-version}}",
+    "@types/node": "^20.0.0",
     "esbuild": "^0.24.0",
+    "happy-dom": "^20.9.0",
+    "tsx": "^4.0.0",
     "typescript": "^5.5.0"
   }
 }
