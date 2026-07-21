@@ -29,6 +29,13 @@ export const WRITE_FILE_COMMAND = 'write_file'
 // (relpath, forge-relative) → `{ html: string }` when `dest` is omitted.
 export const FORMATS_PLUGIN_ID = 'com.nexus.formats'
 export const EXPORT_HTML_COMMAND = 'export_html'
+// C69 (#422) — `com.nexus.formats::export_pandoc` shells out to a
+// user-installed `pandoc` on PATH; args
+// `{ source: string, format: "docx" | "odt", dest: string }` (both paths
+// forge-relative or absolute) → `{ written: true, dest: string }`. Unlike
+// `export_html`, `dest` is required — the handler writes the binary
+// document straight to disk rather than returning it inline.
+export const EXPORT_PANDOC_COMMAND = 'export_pandoc'
 
 export const COMMAND_CLOSE_TAB = 'nexus.editor.closeTab'
 export const COMMAND_SAVE = 'nexus.editor.save'
@@ -47,6 +54,11 @@ export const COMMAND_DELETE_FILE = 'nexus.editor.deleteFile'
 // C66 (#419) — renders the active note through com.nexus.formats::export_html
 // (styled standalone HTML doc) and saves it via the native save dialog.
 export const COMMAND_EXPORT_HTML = 'nexus.editor.exportHtml'
+// C69 (#422) — converts the active note through com.nexus.formats::export_pandoc
+// (pandoc on PATH) to Word/ODT. The native save dialog picks `dest`; the
+// backend writes the document there directly.
+export const COMMAND_EXPORT_DOCX = 'nexus.editor.exportDocx'
+export const COMMAND_EXPORT_ODT = 'nexus.editor.exportOdt'
 // C68 (#421) — renders the active selection (or whole note, when nothing is
 // selected) through the shared markdownRender pipeline and writes it to the
 // clipboard as text/html + text/plain, so pastes into Gmail/Docs/Slack/Word

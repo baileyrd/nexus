@@ -1,6 +1,6 @@
-// C65 (#418) / C66 (#419) — regression coverage for the tab-actions menu:
-// both export commands must appear with no "coming soon" tooltip now that
-// they're fully wired (scoped print stylesheet / com.nexus.formats IPC).
+// C65 (#418) / C66 (#419) / C69 (#422) — regression coverage for the
+// tab-actions menu: every export command must appear with no "coming soon"
+// tooltip now that it's fully wired (scoped print stylesheet / com.nexus.formats IPC).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -31,6 +31,18 @@ test('export to PDF is wired — no coming-soon tooltip', () => {
 test('export as HTML is present and wired — no coming-soon tooltip', () => {
   const item = findItem('nexus.editor.exportHtml')
   assert.equal(item.label, 'Export as HTML...')
+  assert.equal(item.tooltip, undefined)
+})
+
+test('export as Word (.docx) is present and wired — no coming-soon tooltip', () => {
+  const item = findItem('nexus.editor.exportDocx')
+  assert.equal(item.label, 'Export as Word (.docx)...')
+  assert.equal(item.tooltip, undefined)
+})
+
+test('export as ODT is present and wired — no coming-soon tooltip', () => {
+  const item = findItem('nexus.editor.exportOdt')
+  assert.equal(item.label, 'Export as ODT...')
   assert.equal(item.tooltip, undefined)
 })
 

@@ -79,7 +79,9 @@ import {
   COMMAND_COPY_REL_PATH,
   COMMAND_COPY_RICH_TEXT,
   COMMAND_DELETE_FILE,
+  COMMAND_EXPORT_DOCX,
   COMMAND_EXPORT_HTML,
+  COMMAND_EXPORT_ODT,
   COMMAND_FIND,
   COMMAND_LSP_CODE_ACTIONS,
   COMMAND_LSP_FIND_REFERENCES,
@@ -115,6 +117,7 @@ import {
   EVENT_FILE_OPEN,
   EVENT_WORKSPACE_CLOSED,
   EXPORT_HTML_COMMAND,
+  EXPORT_PANDOC_COMMAND,
   FORMATS_PLUGIN_ID,
   READ_FILE_COMMAND,
   STORAGE_PLUGIN_ID,
@@ -163,6 +166,8 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_OPEN_DEFAULT_APP, title: 'Open in Default App', category: 'Editor' },
         { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
         { id: COMMAND_EXPORT_HTML, title: 'Export as HTML…', category: 'Editor' },
+        { id: COMMAND_EXPORT_DOCX, title: 'Export as Word (.docx)…', category: 'Editor' },
+        { id: COMMAND_EXPORT_ODT, title: 'Export as ODT…', category: 'Editor' },
         { id: COMMAND_COPY_RICH_TEXT, title: 'Copy as Rich Text', category: 'Editor' },
         { id: COMMAND_TOGGLE_BLAME, title: 'Toggle Inline Git Blame', category: 'Editor' },
         { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
@@ -1649,6 +1654,51 @@ export const editorPlugin: Plugin = {
         })
       }
     })
+
+    // C69 (#422) — converts the active note through
+    // com.nexus.formats::export_pandoc (a user-installed `pandoc` on PATH)
+    // to Word or ODT. Unlike export_html, the handler writes the binary
+    // document straight to `dest` on disk itself, so this only needs to
+    // pick a destination and report the outcome.
+    const registerPandocExport = (
+      commandId: string,
+      format: 'docx' | 'odt',
+      extension: string,
+      formatLabel: string,
+    ) => {
+      api.commands.register(commandId, async () => {
+        const relpath = activeTabRelpath()
+        if (!relpath) return
+        const base = relpath.includes('/') ? relpath.slice(relpath.lastIndexOf('/') + 1) : relpath
+        const title = base.replace(/\.[^./]+$/, '')
+        const dest = await api.platform.dialog.saveFile({
+          title: `Export as ${formatLabel}`,
+          defaultPath: `${title}.${extension}`,
+          filters: [{ name: formatLabel, extensions: [extension] }],
+        })
+        if (!dest) return
+        try {
+          await api.kernel.invoke(FORMATS_PLUGIN_ID, EXPORT_PANDOC_COMMAND, {
+            source: relpath,
+            format,
+            dest,
+          })
+          api.notifications.show({
+            message: `Exported to ${dest}`,
+            type: 'success',
+          })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          api.notifications.show({
+            message: `Export as ${formatLabel} failed: ${message}`,
+            type: 'error',
+            duration: 8000,
+          })
+        }
+      })
+    }
+    registerPandocExport(COMMAND_EXPORT_DOCX, 'docx', 'docx', 'Word')
+    registerPandocExport(COMMAND_EXPORT_ODT, 'odt', 'odt', 'ODT')
 
     // C68 (#421) — copies the active selection (or the whole note, when
     // nothing is selected) as rendered rich text: a text/html blob plus a

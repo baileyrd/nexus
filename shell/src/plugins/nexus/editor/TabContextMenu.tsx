@@ -168,6 +168,18 @@ export function buildTabContextMenu(args: {
       commandId: 'nexus.editor.exportHtml',
     },
     {
+      // C69 (#422) — wired via com.nexus.formats::export_pandoc + save dialog.
+      kind: 'item',
+      label: 'Export as Word (.docx)...',
+      commandId: 'nexus.editor.exportDocx',
+    },
+    {
+      // C69 (#422) — wired via com.nexus.formats::export_pandoc + save dialog.
+      kind: 'item',
+      label: 'Export as ODT...',
+      commandId: 'nexus.editor.exportOdt',
+    },
+    {
       // C68 (#421) — wired via the shared markdownRender pipeline + a
       // multi-MIME clipboard write (text/html + text/plain fallback).
       kind: 'item',
