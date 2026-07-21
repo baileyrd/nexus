@@ -270,6 +270,11 @@ pub struct UpdateArgs {
     /// as the dedicated `delete` handler (C36); prefer `delete` for clarity.
     #[serde(default)]
     pub status: Option<String>,
+    /// New cognitive class (`episodic` | `semantic` | `procedural` |
+    /// `unclassified`), if reclassifying. Unknown values map to
+    /// `unclassified` (C41 / #394).
+    #[serde(default)]
+    pub memory_type: Option<String>,
     /// New SPO subject, if changing.
     #[serde(default)]
     pub subject: Option<String>,
@@ -479,6 +484,9 @@ impl MemoryCorePlugin {
         }
         if let Some(s) = a.status {
             m.status = MemoryStatus::from_db(&s);
+        }
+        if let Some(t) = a.memory_type {
+            m.memory_type = MemoryType::from_db(&t);
         }
         if a.subject.is_some() {
             m.subject = a.subject;
@@ -725,6 +733,30 @@ mod tests {
         assert_eq!(got["content"], "new");
         assert_eq!(got["status"], "archived");
         assert_eq!(got["category"], "a"); // untouched
+    }
+
+    #[test]
+    fn update_can_reclassify_memory_type() {
+        // C41 / #394 — a raw capture defaults to unclassified; update()
+        // must be able to promote it to a cognitive class.
+        let mut p = plugin();
+        let id = p
+            .dispatch(HANDLER_ADD, &json!({ "content": "the sky is blue" }))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let before = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
+        assert_eq!(before["memory_type"], "unclassified");
+
+        let upd = p
+            .dispatch(HANDLER_UPDATE, &json!({ "id": id, "memory_type": "semantic" }))
+            .unwrap();
+        assert_eq!(upd["updated"], true);
+
+        let got = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
+        assert_eq!(got["memory_type"], "semantic");
+        assert_eq!(got["content"], "the sky is blue"); // untouched
     }
 
     #[test]

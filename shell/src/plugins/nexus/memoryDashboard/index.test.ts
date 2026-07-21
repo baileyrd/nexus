@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { decodeMemories, forgetMemory, updateMemoryContent } from './index'
+import { decodeMemories, forgetMemory, reclassifyMemory, updateMemoryContent } from './index'
 import type { PluginAPI } from '../../../types/plugin'
 
 interface InvokeCall {
@@ -95,5 +95,31 @@ test('updateMemoryContent returns the IPC error message when the call rejects', 
     throw new Error('ipc down')
   })
   const err = await updateMemoryContent(api, 'mem-1', 'x')
+  assert.strictEqual(err, 'Error: ipc down')
+})
+
+// C41 / #394 — reclassify: same argument-shaping unit as forget/edit above.
+
+test('reclassifyMemory dispatches update with id + memory_type and resolves null on success', async () => {
+  const { api, calls } = fakeApi(async () => ({ updated: true }))
+  const err = await reclassifyMemory(api, 'mem-1', 'semantic')
+  assert.strictEqual(err, null)
+  assert.strictEqual(calls.length, 1)
+  assert.strictEqual(calls[0]?.pluginId, 'com.nexus.memory')
+  assert.strictEqual(calls[0]?.command, 'update')
+  assert.deepStrictEqual(calls[0]?.args, { id: 'mem-1', memory_type: 'semantic' })
+})
+
+test('reclassifyMemory surfaces a message when the store reports updated: false', async () => {
+  const { api } = fakeApi(async () => ({ updated: false }))
+  const err = await reclassifyMemory(api, 'mem-missing', 'procedural')
+  assert.strictEqual(err, 'Memory was not found.')
+})
+
+test('reclassifyMemory returns the IPC error message when the call rejects', async () => {
+  const { api } = fakeApi(async () => {
+    throw new Error('ipc down')
+  })
+  const err = await reclassifyMemory(api, 'mem-1', 'episodic')
   assert.strictEqual(err, 'Error: ipc down')
 })

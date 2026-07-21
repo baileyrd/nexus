@@ -159,6 +159,27 @@ export async function updateMemoryContent(
   }
 }
 
+/** C41 / #394 — the four cognitive classes a memory can be reclassified into. */
+export const MEMORY_TYPES = ['episodic', 'semantic', 'procedural', 'unclassified'] as const
+export type MemoryTypeValue = (typeof MEMORY_TYPES)[number]
+
+/** Patch memory `id`'s cognitive class. Returns `null` on success, an error message otherwise. */
+export async function reclassifyMemory(
+  api: PluginAPI,
+  id: string,
+  memoryType: MemoryTypeValue,
+): Promise<string | null> {
+  try {
+    const res = await api.kernel.invoke<{ updated?: boolean }>(MEMORY_PLUGIN, 'update', {
+      id,
+      memory_type: memoryType,
+    })
+    return res.updated ? null : 'Memory was not found.'
+  } catch (e) {
+    return String(e)
+  }
+}
+
 /**
  * Follow-up action menu for a single picked memory: view its full content,
  * edit it in place, or forget (delete) it. Memories without an `id` (should
@@ -170,9 +191,14 @@ async function presentMemoryActions(api: PluginAPI, m: MemoryRow): Promise<void>
     api.notifications.show({ message: m.content || '(empty memory)', type: 'info', duration: 8000 })
     return
   }
-  const actions: PickItem<'view' | 'edit' | 'delete'>[] = [
+  const actions: PickItem<'view' | 'edit' | 'reclassify' | 'delete'>[] = [
     { label: 'View full content', value: 'view' },
     { label: 'Edit content…', value: 'edit' },
+    {
+      label: 'Reclassify…',
+      value: 'reclassify',
+      description: `Currently: ${m.memory_type ?? 'unclassified'}`,
+    },
     { label: 'Forget (delete)…', value: 'delete' },
   ]
   const action = await api.input.pick(actions, {
@@ -196,6 +222,25 @@ async function presentMemoryActions(api: PluginAPI, m: MemoryRow): Promise<void>
       err
         ? { message: `Update failed: ${err}`, type: 'error' }
         : { message: 'Memory updated.', type: 'info' },
+    )
+    return
+  }
+
+  if (action === 'reclassify') {
+    const typeItems: PickItem<MemoryTypeValue>[] = MEMORY_TYPES.map((t) => ({
+      label: t === m.memory_type ? `${t} (current)` : t,
+      value: t,
+    }))
+    const picked = await api.input.pick(typeItems, {
+      title: 'Reclassify as…',
+      placeholder: 'Choose a cognitive class',
+    })
+    if (!picked || picked === m.memory_type) return
+    const err = await reclassifyMemory(api, m.id, picked)
+    api.notifications.show(
+      err
+        ? { message: `Reclassify failed: ${err}`, type: 'error' }
+        : { message: `Reclassified as ${picked}.`, type: 'info' },
     )
     return
   }
