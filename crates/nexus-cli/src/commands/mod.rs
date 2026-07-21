@@ -11,6 +11,7 @@ pub mod crdt;
 pub mod daemon;
 pub mod db;
 pub mod desktop;
+pub mod events;
 pub mod export;
 pub mod forge;
 pub mod git;
