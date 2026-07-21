@@ -47,6 +47,11 @@ export const COMMAND_DELETE_FILE = 'nexus.editor.deleteFile'
 // C66 (#419) — renders the active note through com.nexus.formats::export_html
 // (styled standalone HTML doc) and saves it via the native save dialog.
 export const COMMAND_EXPORT_HTML = 'nexus.editor.exportHtml'
+// C68 (#421) — renders the active selection (or whole note, when nothing is
+// selected) through the shared markdownRender pipeline and writes it to the
+// clipboard as text/html + text/plain, so pastes into Gmail/Docs/Slack/Word
+// arrive as formatted text instead of raw markdown.
+export const COMMAND_COPY_RICH_TEXT = 'nexus.editor.copyAsRichText'
 // BL-079 — toggle the inline-blame annotations on the active tab.
 // Reads / writes `useEditorBlameStore`; the editor view subscribes
 // and remounts CM6 with / without the blame extension on flip.
