@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
 import { clientLogger } from '../../../clientLogger'
@@ -15,6 +15,7 @@ import { getApi } from './runtime'
 import { NavActionButton, NavButtonsContainer, NavHeader } from '../../../primitives/NavHeader'
 import { FilesContextMenu, type FilesContextMenuItem } from './ContextMenu'
 import { flattenTree, isBundleDir } from './flattenTree'
+import { firstChildIndex, nextVisibleIndex, parentIndex, prevVisibleIndex } from './treeKeyboardNav'
 
 const DRAG_MIME = 'application/x-nexus-relpath'
 const CONTEXT_KEY_FOCUSED = 'nexus.files.focused'
@@ -83,6 +84,16 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // C73 (#426) — roving-tabindex focus targets, keyed by relpath. Only
+  // rows currently mounted by the virtualizer register here; the
+  // focus-follow effect below tolerates a row not being registered yet
+  // (freshly scrolled into view) by retrying across two animation
+  // frames rather than assuming it's already mounted.
+  const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const registerRowRef = (relpath: string, el: HTMLButtonElement | null) => {
+    if (el) rowRefs.current.set(relpath, el)
+    else rowRefs.current.delete(relpath)
+  }
 
   // Install the menu-open callback while this tree is mounted. Pair
   // with cleanup so a remount doesn't leave a stale closure that
@@ -252,6 +263,118 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     setAutoReveal(!autoReveal)
   }
 
+  // C73 (#426) — arrow-key tree navigation. Moves DOM focus (not just
+  // the `selected` store field) via `rowRefs`, since roving tabindex
+  // only works for keyboard/screen-reader users if focus actually
+  // follows selection. The row may not be mounted yet immediately
+  // after `scrollToIndex` (virtualization), so this retries across up
+  // to two animation frames rather than assuming it's already there.
+  const focusRowWhenMounted = (relpath: string) => {
+    requestAnimationFrame(() => {
+      const el = rowRefs.current.get(relpath)
+      if (el) {
+        el.focus()
+        return
+      }
+      requestAnimationFrame(() => {
+        rowRefs.current.get(relpath)?.focus()
+      })
+    })
+  }
+
+  const moveSelectionTo = (idx: number) => {
+    const row = flatRows[idx]
+    if (!row) return
+    setSelected(row.entry.relpath)
+    virtualizer.scrollToIndex(idx, { align: 'auto' })
+    focusRowWhenMounted(row.entry.relpath)
+  }
+
+  // Mirrors `TreeRow`'s click handler: toggle a directory, or select +
+  // open a file. Kept as a free function (reading store setters via
+  // `useFilesStore.getState()`) rather than hoisting `TreeRow`'s own
+  // hook-bound handler, since this needs to apply to an entry looked up
+  // by index rather than one bound to a specific rendered row.
+  const activateAtIndex = (idx: number) => {
+    const row = flatRows[idx]
+    if (!row) return
+    const { entry: target } = row
+    if (target.isDir && !isBundleDir(target)) {
+      useFilesStore.getState().toggleExpanded(target.relpath)
+      if (!useFilesStore.getState().children[target.relpath]) {
+        loadChildren(target.relpath).then((entries) =>
+          useFilesStore.getState().setChildren(target.relpath, entries),
+        )
+      }
+    } else {
+      setSelected(target.relpath)
+      onFileActivate(target)
+    }
+  }
+
+  const NAV_KEYS = new Set(['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Enter', ' '])
+
+  const handleTreeKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!NAV_KEYS.has(e.key)) return
+    if (flatRows.length === 0) return
+    const currentIdx = selected ? flatRows.findIndex((r) => r.entry.relpath === selected) : -1
+
+    // Nothing selected yet — land on the first row instead of also
+    // advancing past it (so a fresh Tab-into-the-tree + ArrowDown
+    // doesn't skip row 0).
+    if (currentIdx < 0) {
+      e.preventDefault()
+      moveSelectionTo(0)
+      return
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        moveSelectionTo(nextVisibleIndex(flatRows, currentIdx))
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        moveSelectionTo(prevVisibleIndex(flatRows, currentIdx))
+        break
+      case 'ArrowRight': {
+        e.preventDefault()
+        const row = flatRows[currentIdx]
+        if (!row.entry.isDir || isBundleDir(row.entry)) break
+        if (!expandedSet.has(row.entry.relpath)) {
+          setExpanded(row.entry.relpath, true)
+          if (!childrenCache[row.entry.relpath]) {
+            loadChildren(row.entry.relpath).then((entries) =>
+              setChildren(row.entry.relpath, entries),
+            )
+          }
+        } else {
+          const child = firstChildIndex(flatRows, currentIdx)
+          if (child !== null) moveSelectionTo(child)
+        }
+        break
+      }
+      case 'ArrowLeft': {
+        e.preventDefault()
+        const row = flatRows[currentIdx]
+        if (row.entry.isDir && !isBundleDir(row.entry) && expandedSet.has(row.entry.relpath)) {
+          setExpanded(row.entry.relpath, false)
+        } else {
+          const parent = parentIndex(flatRows, currentIdx)
+          if (parent !== currentIdx) moveSelectionTo(parent)
+        }
+        break
+      }
+      case 'Enter':
+      case ' ':
+        e.preventDefault()
+        activateAtIndex(currentIdx)
+        break
+      default:
+        break
+    }
+  }
+
   // Right-click on the empty area (not on a row) → "root" menu. Rows
   // call `e.stopPropagation()` in their own context-menu handler, so
   // this only fires when the click landed outside any row.
@@ -279,6 +402,10 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
 
   const virtualRows = virtualizer.getVirtualItems()
   const totalHeight = virtualizer.getTotalSize()
+  // C73 (#426) — roving-tabindex target: the selected row, or the first
+  // row when nothing is selected yet, so Tab-into-the-tree always lands
+  // on a real, focusable treeitem instead of nothing.
+  const rovingTargetRelpath = selected ?? flatRows[0]?.entry.relpath
 
   return (
     <div
@@ -299,6 +426,14 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       <div
         ref={scrollRef}
         className="nav-files-container"
+        role="tree"
+        aria-label="Files"
+        // Real focus lives on the roving-tabindex treeitem buttons, not
+        // this container — `-1` just satisfies jsx-a11y's
+        // interactive-supports-focus (a `role="tree"` element must be
+        // programmatically focusable) without adding it to the Tab order.
+        tabIndex={-1}
+        onKeyDown={handleTreeKeyDown}
         onContextMenu={handleContainerContextMenu}
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
@@ -327,6 +462,8 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
                     depth={row.depth}
                     rootPath={rootPath}
                     onFileActivate={onFileActivate}
+                    isRovingTarget={row.entry.relpath === rovingTargetRelpath}
+                    registerRowRef={registerRowRef}
                   />
                 </div>
               )
@@ -696,11 +833,15 @@ function TreeRow({
   depth,
   rootPath,
   onFileActivate,
+  isRovingTarget,
+  registerRowRef,
 }: {
   entry: FilesDirEntry
   depth: number
   rootPath: string
   onFileActivate: (entry: FilesDirEntry) => void
+  isRovingTarget: boolean
+  registerRowRef: (relpath: string, el: HTMLButtonElement | null) => void
 }) {
   const expanded = useFilesStore((s) => s.expanded.has(entry.relpath))
   const cachedChildren = useFilesStore((s) => s.children[entry.relpath])
@@ -774,6 +915,10 @@ function TreeRow({
   return (
     <div
       className={wrapperClass}
+      // C73 (#426) — this div is a pure drag/drop + layout wrapper with
+      // no tree semantics of its own; hide it from the accessibility
+      // tree so `<Row>`'s treeitem button is the tree's only child node.
+      role="none"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -797,6 +942,8 @@ function TreeRow({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDragStart={handleDragStart}
+        isRovingTarget={isRovingTarget}
+        registerRowRef={registerRowRef}
       />
     </div>
   )
@@ -811,6 +958,8 @@ function Row({
   onClick,
   onContextMenu,
   onDragStart,
+  isRovingTarget,
+  registerRowRef,
 }: {
   entry: FilesDirEntry
   depth: number
@@ -820,6 +969,8 @@ function Row({
   onClick: () => void
   onContextMenu: (e: ReactMouseEvent) => void
   onDragStart: (e: ReactDragEvent<HTMLElement>) => void
+  isRovingTarget: boolean
+  registerRowRef: (relpath: string, el: HTMLButtonElement | null) => void
 }) {
   const bundle = isBundleDir(entry)
   const showAsDir = entry.isDir && !bundle
@@ -831,6 +982,7 @@ function Row({
     (selected ? ' is-active' : '')
   return (
     <button
+      ref={(el) => registerRowRef(entry.relpath, el)}
       type="button"
       draggable
       onDragStart={onDragStart}
@@ -839,6 +991,16 @@ function Row({
       onContextMenu={onContextMenu}
       title={tooltip}
       className={selfClass}
+      // C73 (#426) — tree/treeitem ARIA + roving tabindex. `aria-level`
+      // is 1-indexed per the ARIA spec (`depth` here is 0-indexed).
+      // Real DOM nesting would need `role="group"` wrappers per level,
+      // which this flat virtualized list doesn't have — `aria-level`
+      // is the accepted substitute for virtualized/flattened trees.
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-selected={selected}
+      aria-expanded={showAsDir ? expanded : undefined}
+      tabIndex={isRovingTarget ? 0 : -1}
       style={{
         display: 'flex',
         alignItems: 'center',
