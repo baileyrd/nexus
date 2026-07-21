@@ -198,6 +198,8 @@ export interface SandboxedPluginContext {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
     delete(key: string): Promise<void>;
+    /** List this plugin's own keys, optionally filtered by `prefix`. #377/C24. */
+    list(prefix?: string): Promise<string[]>;
   };
 
   // ─── Notifications ─────────────────────────────────────────────────────

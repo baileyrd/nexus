@@ -180,6 +180,7 @@ function makeStubApi(): PluginAPI {
       set: throwing('storage.set'),
       delete: throwing('storage.delete'),
       clear: throwing('storage.clear'),
+      list: throwing('storage.list'),
     },
     statusBar: { createItem: throwing('statusBar.createItem') },
     configuration: {

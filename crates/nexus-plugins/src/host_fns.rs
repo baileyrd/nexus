@@ -111,6 +111,7 @@ fn deny_path_traversal(plugin_id: &str, requested_path: &Path, forge_root: &Path
 /// - `host::log` — write a log message at the given severity level.
 /// - `host::kv_get` — read a value from the plugin's KV namespace.
 /// - `host::kv_set` — write a value to the plugin's KV namespace.
+/// - `host::kv_list` — list keys in the plugin's KV namespace (C24).
 /// - `host::emit_event` — publish a custom event to the kernel event bus.
 /// - `host::read_file` — read a file from within the plugin's forge root.
 /// - `host::notify` — show an in-app toast notification in the UI.
@@ -123,6 +124,7 @@ pub fn register_host_fns(linker: &mut Linker<PluginData>) -> Result<(), PluginEr
     register_host_log(linker)?;
     register_host_kv_get(linker)?;
     register_host_kv_set(linker)?;
+    register_host_kv_list(linker)?;
     register_host_emit_event(linker)?;
     register_host_write_file(linker)?;
     register_host_read_file(linker)?;
@@ -371,6 +373,82 @@ fn register_host_kv_set(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
         .map_err(|e| PluginError::WasmLoadFailed {
             plugin_id: "<host>".to_string(),
             reason: format!("failed to register host::kv_set: {e}"),
+        })?;
+    Ok(())
+}
+
+// ─── host::kv_list ────────────────────────────────────────────────────────────
+
+/// `host::kv_list(prefix_ptr, prefix_len, out_ptr, out_cap) -> i32`
+///
+/// Lists keys in the plugin's KV namespace starting with `prefix` (empty
+/// prefix lists every key the plugin owns), JSON-encoded as an array of
+/// strings (e.g. `["a","b"]`) and copied into the guest buffer — the same
+/// buffer-copy convention `host::kv_get` and `host::get_settings` use.
+///
+/// Returns the encoded byte length on success, `HOST_CAPABILITY_DENIED` if
+/// the plugin lacks `KvRead`, `HOST_BUFFER_OVERFLOW` if `out_cap` is too
+/// small, or `HOST_ERROR` on any other failure (C24).
+fn register_host_kv_list(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
+    linker
+        .func_wrap(
+            "host",
+            "kv_list",
+            |mut caller: Caller<'_, PluginData>,
+             prefix_ptr: i32,
+             prefix_len: i32,
+             out_ptr: i32,
+             out_cap: i32|
+             -> i32 {
+                let plugin_id = caller.data().plugin_id.clone();
+                let kv = caller.data().kv.clone();
+                let Some(kv) = kv else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::kv_list: kv store not injected");
+                    return HOST_ERROR;
+                };
+                if !caller.data().capabilities.contains(Capability::KvRead) {
+                    return deny_capability(&plugin_id, "kv.read");
+                }
+
+                let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
+                    return HOST_ERROR;
+                };
+                let Some(prefix) = read_wasm_str(&memory, &caller, prefix_ptr, prefix_len) else {
+                    return HOST_ERROR;
+                };
+
+                let keys = match kv.list_keys(&plugin_id, &prefix) {
+                    Ok(keys) => keys,
+                    Err(e) => {
+                        tracing::warn!(plugin_id = %plugin_id, "host::kv_list error: {e}");
+                        return HOST_ERROR;
+                    }
+                };
+                let Ok(bytes) = serde_json::to_vec(&keys) else {
+                    return HOST_ERROR;
+                };
+
+                let Ok(o_start) = usize::try_from(out_ptr) else {
+                    return HOST_ERROR;
+                };
+                let Ok(o_cap) = usize::try_from(out_cap) else {
+                    return HOST_ERROR;
+                };
+                if bytes.len() > o_cap {
+                    return HOST_BUFFER_OVERFLOW;
+                }
+                let end = o_start + bytes.len();
+                let mem_data = memory.data_mut(&mut caller);
+                if end > mem_data.len() {
+                    return HOST_ERROR;
+                }
+                mem_data[o_start..end].copy_from_slice(&bytes);
+                i32::try_from(bytes.len()).unwrap_or(HOST_ERROR)
+            },
+        )
+        .map_err(|e| PluginError::WasmLoadFailed {
+            plugin_id: "<host>".to_string(),
+            reason: format!("failed to register host::kv_list: {e}"),
         })?;
     Ok(())
 }

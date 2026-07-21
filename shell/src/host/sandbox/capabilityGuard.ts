@@ -112,6 +112,7 @@ export const METHOD_CAPABILITY_MAP: Record<SandboxMethodName, RequiredCap> = {
   'storage.set': null,
   'storage.delete': null,
   'storage.clear': null,
+  'storage.list': null,
 
   // Notifications — UI-local toast queue.
   'notifications.show': 'UiNotify',

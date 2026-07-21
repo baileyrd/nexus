@@ -158,6 +158,26 @@ test('two PluginAPI instances built with different ids have isolated storage nam
     apiA.storage.clear()
     assert.equal(apiA.storage.get('shared-key'), null)
     assert.equal(apiB.storage.get('shared-key'), 'B-wrote-this')
+
+    // #377/C24 — list() enumerates only the calling plugin's own keys,
+    // stripped of the internal `plugin:<id>:` namespace prefix, and can
+    // be filtered by a key prefix.
+    apiA.storage.set('settings.theme', 'dark')
+    apiA.storage.set('settings.font', 'mono')
+    apiA.storage.set('cache.foo', '1')
+    assert.deepEqual(
+      [...apiA.storage.list('settings.')].sort(),
+      ['settings.font', 'settings.theme'],
+    )
+    assert.deepEqual(
+      [...apiA.storage.list()].sort(),
+      ['cache.foo', 'settings.font', 'settings.theme'],
+    )
+    assert.deepEqual(
+      apiB.storage.list(),
+      ['shared-key'],
+      "A's keys must not leak into B's list()",
+    )
   } finally {
     if (original) g.localStorage = original
     else delete g.localStorage
@@ -183,7 +203,7 @@ test('built PluginAPI exposes every namespace of the common contract (#187)', ()
     kernel: ['invoke', 'on'],
     platform: ['fs', 'dialog', 'window', 'shell', 'net'],
     events: ['on', 'emit'],
-    storage: ['get', 'set', 'delete'],
+    storage: ['get', 'set', 'delete', 'list'],
     notifications: ['show'],
     context: ['set', 'get', 'evaluate'],
     input: ['prompt', 'confirm'],
