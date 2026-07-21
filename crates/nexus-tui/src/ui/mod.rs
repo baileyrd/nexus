@@ -126,9 +126,15 @@ fn render_search_overlay(frame: &mut Frame, app: &TuiApp) {
     let popup_area = centered_rect(60, 50, frame.area());
     frame.render_widget(Clear, popup_area);
 
-    // Outer block with border.
+    // Outer block with border. C78 (#431) — title reflects the active
+    // lexical/semantic mode, toggled with Tab.
+    let title = if app.search.semantic {
+        " Search [semantic] (Tab: lexical) "
+    } else {
+        " Search [lexical] (Tab: semantic) "
+    };
     let block = Block::default()
-        .title(" Search ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
 

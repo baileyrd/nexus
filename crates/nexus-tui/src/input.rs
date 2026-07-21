@@ -15,8 +15,16 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
+use nexus_bootstrap::invoker::IpcInvoker;
+use nexus_bootstrap::storage::SearchResult;
+use nexus_types::constants::IPC_TIMEOUT_LONG;
 
 use crate::app::{Focus, Mode, TuiApp};
+
+/// C78 (#431) — semantic-mode search runs through `com.nexus.ai` directly
+/// (no `nexus-bootstrap` wrapper exists for it, mirroring how
+/// `AGENT_PLUGIN_ID` is called directly in `app.rs`).
+const AI_PLUGIN_ID: &str = "com.nexus.ai";
 
 /// Top-level event dispatcher.
 ///
@@ -233,10 +241,13 @@ fn handle_search_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             let query = app.search.query.clone();
             if !query.is_empty() {
                 let invoker = app.runtime.invoker();
-                match app
-                    .rt
-                    .block_on(nexus_bootstrap::storage::search(&*invoker, &query, 50))
-                {
+                let outcome = if app.search.semantic {
+                    app.rt.block_on(run_semantic_search(&*invoker, &query))
+                } else {
+                    app.rt
+                        .block_on(nexus_bootstrap::storage::search(&*invoker, &query, 50))
+                };
+                match outcome {
                     Ok(results) => {
                         app.search.results = results;
                         app.search.selected = 0;
@@ -260,6 +271,10 @@ fn handle_search_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             }
             app.mode = Mode::Normal;
         }
+        // C78 (#431) — toggle lexical/semantic search mode.
+        (KeyModifiers::NONE, KeyCode::Tab) => {
+            app.search.semantic = !app.search.semantic;
+        }
         (KeyModifiers::NONE, KeyCode::Down) => {
             let max = app.search.results.len().saturating_sub(1);
             if app.search.selected < max {
@@ -278,6 +293,106 @@ fn handle_search_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// C78 (#431) — run `query` through `com.nexus.ai::semantic_search` in
+/// hybrid mode (RRF-fused vector + BM25 ranking, matching `nexus content
+/// search --hybrid`) and map the reply's `matches` into [`SearchResult`]
+/// so the existing overlay rendering works unchanged. No
+/// `nexus-bootstrap` wrapper exists for `com.nexus.ai` (mirrors the CLI's
+/// direct `ipc_call` in `commands/content.rs`).
+async fn run_semantic_search(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    query: &str,
+) -> anyhow::Result<Vec<SearchResult>> {
+    let args = serde_json::json!({ "query": query, "limit": 50, "hybrid": true });
+    let response = invoker
+        .ipc_call(AI_PLUGIN_ID, "semantic_search", args, IPC_TIMEOUT_LONG)
+        .await?;
+    Ok(parse_semantic_matches(&response))
+}
+
+/// Map a `com.nexus.ai::semantic_search` reply's `matches` array into
+/// [`SearchResult`]s so the existing search-overlay rendering works
+/// unchanged. Vector-only hits carry `chunk_text`; hybrid hits carry
+/// `excerpt` — either is accepted. `mtime` is always `0`: semantic
+/// matches aren't backed by the mtime-aware Tantivy path (#375).
+fn parse_semantic_matches(response: &serde_json::Value) -> Vec<SearchResult> {
+    response
+        .get("matches")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|m| SearchResult {
+            file_path: m
+                .get("file_path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            excerpt: m
+                .get("excerpt")
+                .or_else(|| m.get("chunk_text"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            block_type: "semantic".to_string(),
+            score: m
+                .get("score")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0) as f32,
+            mtime: 0,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod semantic_search_tests {
+    use super::parse_semantic_matches;
+
+    #[test]
+    fn maps_hybrid_matches_using_excerpt_field() {
+        let response = serde_json::json!({
+            "matches": [
+                { "file_path": "notes/a.md", "excerpt": "hello world", "score": 0.9 }
+            ],
+            "hybrid": true,
+        });
+        let results = parse_semantic_matches(&response);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "notes/a.md");
+        assert_eq!(results[0].excerpt, "hello world");
+        assert_eq!(results[0].block_type, "semantic");
+        assert!((results[0].score - 0.9).abs() < f32::EPSILON);
+        assert_eq!(results[0].mtime, 0);
+    }
+
+    #[test]
+    fn maps_vector_only_matches_falling_back_to_chunk_text() {
+        let response = serde_json::json!({
+            "matches": [
+                { "file_path": "notes/b.md", "chunk_text": "vector hit", "score": 0.5 }
+            ],
+        });
+        let results = parse_semantic_matches(&response);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].excerpt, "vector hit");
+    }
+
+    #[test]
+    fn missing_matches_array_yields_empty_vec() {
+        let response = serde_json::json!({ "hybrid": true });
+        assert!(parse_semantic_matches(&response).is_empty());
+    }
+
+    #[test]
+    fn missing_fields_within_a_match_use_safe_defaults() {
+        let response = serde_json::json!({ "matches": [ {} ] });
+        let results = parse_semantic_matches(&response);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "");
+        assert_eq!(results[0].excerpt, "");
+        assert_eq!(results[0].score, 0.0);
+    }
 }
 
 // ── Find mode ─────────────────────────────────────────────────────────────────
