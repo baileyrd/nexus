@@ -1507,6 +1507,10 @@ struct MemoryUpdateInput {
     /// `deleted` here — same effect, clearer intent (C36).
     #[serde(default)]
     status: Option<String>,
+    /// New cognitive class (`episodic` | `semantic` | `procedural` |
+    /// `unclassified`), if reclassifying (C41 / #394).
+    #[serde(default)]
+    memory_type: Option<String>,
     /// New SPO subject, if changing.
     #[serde(default)]
     subject: Option<String>,
@@ -2160,7 +2164,7 @@ impl NexusMcpServer {
     // so an agent asked to "forget this" or "fix that memory" had no path.
     #[tool(
         name = "nexus_memory_update",
-        description = "Patch a stored memory's fields (content, category, tags, status, SPO fact fields). Only provided fields change"
+        description = "Patch a stored memory's fields (content, category, tags, status, memory_type, SPO fact fields). Only provided fields change"
     )]
     async fn memory_update(
         &self,
@@ -2172,6 +2176,7 @@ impl NexusMcpServer {
             "category": input.category,
             "tags": input.tags,
             "status": input.status,
+            "memory_type": input.memory_type,
             "subject": input.subject,
             "predicate": input.predicate,
             "object": input.object,
