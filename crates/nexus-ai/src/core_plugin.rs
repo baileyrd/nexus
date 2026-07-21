@@ -45,7 +45,8 @@ use crate::handlers::predict::handle_predict;
 use crate::handlers::propose::handle_propose_tool_calls;
 use crate::handlers::search::{handle_embed_text, handle_entity_recall, handle_semantic_search};
 use crate::handlers::session::{
-    handle_session_delete, handle_session_list, handle_session_load, handle_session_save,
+    handle_session_delete, handle_session_export, handle_session_list, handle_session_load,
+    handle_session_save,
 };
 use crate::handlers::stream_ask::handle_stream_ask;
 use crate::handlers::stream_chat::handle_stream_chat;
@@ -110,6 +111,10 @@ pub const HANDLER_SESSION_LIST: u32 = 10;
 /// id. Legacy single-session lives outside this tree and isn't
 /// affected.
 pub const HANDLER_SESSION_DELETE: u32 = 11;
+/// Handler id for `session_export` (#384) — render a persisted session
+/// as markdown, mirroring `com.nexus.agent::memory_export`. Read-only;
+/// gated the same as `session_load`/`session_list`.
+pub const HANDLER_SESSION_EXPORT: u32 = 31;
 /// Handler id for `set_config` — replace the in-memory `AiConfig` (and
 /// optionally the embedding `AiConfig`) at runtime. Persistence lives
 /// in the shell's config store; this handler only mutates the live
@@ -285,6 +290,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("session_save", HANDLER_SESSION_SAVE),
     ("session_list", HANDLER_SESSION_LIST),
     ("session_delete", HANDLER_SESSION_DELETE),
+    ("session_export", HANDLER_SESSION_EXPORT),
     ("set_config", HANDLER_SET_CONFIG),
     ("semantic_search", HANDLER_SEMANTIC_SEARCH),
     ("index_status", HANDLER_INDEX_STATUS),
@@ -555,6 +561,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
+                HANDLER_SESSION_EXPORT => handle_session_export(&ctx, &args).await,
                 HANDLER_SEMANTIC_SEARCH => handle_semantic_search(&ctx, embed_cfg, &args).await,
                 HANDLER_EMBED_TEXT => handle_embed_text(embed_cfg, &args).await,
                 HANDLER_GENERATE => handle_generate(ai_cfg, &args).await,
@@ -1891,6 +1898,65 @@ mod semantic_search_dispatch_tests {
             .unwrap();
         let value = fut.await.unwrap();
         assert_eq!(value, serde_json::json!({ "entries": [] }));
+    }
+
+    #[test]
+    fn session_export_handler_id_is_thirty_one() {
+        assert_eq!(HANDLER_SESSION_EXPORT, 31);
+    }
+
+    #[tokio::test]
+    async fn session_export_renders_saved_session_as_markdown() {
+        let mut plugin = wired_plugin_with_caps(fs_caps());
+
+        // Legacy (id-less) session path — writes directly under `.forge/`,
+        // which `wired_plugin_with_caps` already pre-creates. The
+        // multi-session directory (`.forge/chat/sessions/`) isn't
+        // pre-created by this fixture and `write_file` doesn't create
+        // parent directories, so exercising that path here would be
+        // testing a fixture gap rather than `session_export` itself;
+        // `session_path`'s id-routing is already covered by
+        // `session_id_tests::session_path_routes_on_id_presence`.
+        let save_fut = plugin
+            .dispatch_async(
+                HANDLER_SESSION_SAVE,
+                &serde_json::json!({
+                    "title": "Project X planning",
+                    "updated_at": "2026-07-21T00:00:00Z",
+                    "turns": [
+                        { "kind": "user", "question": "What's the plan?" },
+                        { "kind": "assistant", "finalText": "Ship it." },
+                    ],
+                }),
+            )
+            .expect("HANDLER_SESSION_SAVE must be async");
+        save_fut.await.expect("session_save should succeed");
+
+        let export_fut = plugin
+            .dispatch_async(HANDLER_SESSION_EXPORT, &serde_json::json!({}))
+            .expect("HANDLER_SESSION_EXPORT must be async");
+        let value = export_fut.await.expect("session_export should succeed");
+
+        let markdown = value
+            .get("markdown")
+            .and_then(serde_json::Value::as_str)
+            .expect("reply must have a markdown string field");
+        assert!(markdown.contains("# Project X planning"));
+        assert!(markdown.contains("**User:** What's the plan?"));
+        assert!(markdown.contains("**Assistant:** Ship it."));
+    }
+
+    #[tokio::test]
+    async fn session_export_errors_when_session_does_not_exist() {
+        let mut plugin = wired_plugin_with_caps(fs_caps());
+        let fut = plugin
+            .dispatch_async(HANDLER_SESSION_EXPORT, &serde_json::json!({ "id": "nope" }))
+            .expect("HANDLER_SESSION_EXPORT must be async");
+        let err = fut.await.expect_err("exporting a missing session should error");
+        assert!(
+            format!("{err}").contains("no session found"),
+            "expected a 'no session found' error, got: {err}"
+        );
     }
 }
 

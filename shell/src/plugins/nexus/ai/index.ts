@@ -49,6 +49,7 @@ import {
   deleteSession,
   renameSession,
   saveCurrentSession,
+  exportSessionAsNote,
   startNewChat,
   scheduleAutosave,
   flushAutosave,
@@ -237,6 +238,7 @@ export const aiPlugin: Plugin = {
     const onRenameSession = (id: string, title: string) =>
       renameSession(api, id, title)
     const onSaveSession = () => saveCurrentSession(api).then(() => undefined)
+    const onExportSession = (id: string) => exportSessionAsNote(api, id)
     const onOpenSettings = () => {
       void api.commands.execute(COMMAND_OPEN_SETTINGS)
     }
@@ -254,6 +256,7 @@ export const aiPlugin: Plugin = {
           onDeleteSession,
           onRenameSession,
           onSaveSession,
+          onExportSession,
           onOpenSettings,
         }),
       ),

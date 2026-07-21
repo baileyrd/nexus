@@ -83,6 +83,7 @@ Handler ids and `(command, id)` pairs come from `core_plugin::IPC_HANDLERS` / `H
 | `session_save` | 9 | opaque `{id?, …}` object | `{bytes, id}` | `ai.session.write` | Overwrite persisted session JSON. |
 | `session_list` | 10 | none | `[{id, title?, updated_at, bytes}]` | `ai.session.read` | Enumerate multi-session files. |
 | `session_delete` | 11 | `{id: String}` | `{deleted: true, id}` | `ai.session.write` | Remove a multi-session file (id validated). |
+| `session_export` | 31 | `{id?}` | `{markdown: String}` | `ai.session.read` | #384 — render a persisted session (same lookup as `session_load`) as markdown; mirrors `com.nexus.agent::memory_export`. Pure read + render, no disk write. |
 | `set_config` | 12 | `{ai?: {provider, model?, api_key?, base_url?, …} \| null, embedding?: … \| null}` | `config` snapshot | `ai.config.write` | Hot-swap in-memory `AiConfig` (chat/embedding) at runtime; null clears, absent leaves untouched. |
 | `semantic_search` | 13 | `{query: String, limit?: usize=10}` | `{matches: Vec<ChunkMatch>}` | `ai.chat` | BL-040 embed + top-N vector hits, no chat. |
 | `index_status` | 14 | none | `IndexStatus{indexed_files, pending_files, total_seen, last_error, running}` | unrestricted (read-only) | BL-041 daemon counters. Sync. |

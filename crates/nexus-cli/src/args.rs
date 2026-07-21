@@ -414,6 +414,14 @@ pub(crate) enum AiCommand {
         #[arg(long = "context")]
         context_lines: Option<usize>,
     },
+    /// Export a persisted chat session as markdown (#384)
+    Export {
+        /// Session id to export; omit for the legacy single-session file.
+        id: Option<String>,
+        /// Write the markdown to this path instead of stdout.
+        #[arg(long)]
+        out: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------

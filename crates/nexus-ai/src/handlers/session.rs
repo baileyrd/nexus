@@ -147,3 +147,150 @@ pub(crate) async fn handle_session_delete(
         Err(e) => Err(exec_err(format!("session_delete: {e}"))),
     }
 }
+
+/// #384 — render a persisted session as markdown so it can be saved as
+/// a first-class forge note. Mirrors `nexus_agent::memory::export_markdown`
+/// (`memory_export`, handler 23): pure read + render, no frontmatter, no
+/// disk write of its own — the caller decides where the markdown lands.
+pub(crate) async fn handle_session_export(
+    ctx: &KernelPluginContext,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: SessionArgs = serde_json::from_value(args.clone()).unwrap_or_default();
+    let path = session_path(parsed.id.as_deref())?;
+    let bytes = ctx
+        .read_file(&path)
+        .await
+        .map_err(|e| exec_err(format!("session_export: no session found: {e}")))?;
+    let session: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| exec_err(format!("session_export: invalid JSON on disk: {e}")))?;
+    let markdown = render_session_markdown(&session);
+    Ok(serde_json::json!({ "markdown": markdown }))
+}
+
+/// Render a persisted chat session — opaque JSON shaped by the shell
+/// (see [`handle_session_save`]'s doc comment) — as markdown. Every
+/// `user` turn's `question` and every `assistant` turn's `finalText`
+/// become a labeled paragraph, in order; an assistant turn with no
+/// `finalText` (cancelled mid-stream, or errored) renders a placeholder
+/// rather than being silently dropped.
+fn render_session_markdown(session: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+
+    let title = session
+        .get("title")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let turns: Vec<serde_json::Value> = session
+        .get("turns")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut out = String::new();
+    match title {
+        Some(t) => writeln!(out, "# {t}").expect("writeln! to String is infallible"),
+        None => writeln!(out, "# Chat session").expect("writeln! to String is infallible"),
+    }
+    writeln!(out).expect("writeln! to String is infallible");
+    writeln!(out, "{} turns.", turns.len()).expect("writeln! to String is infallible");
+    writeln!(out).expect("writeln! to String is infallible");
+
+    for turn in &turns {
+        let kind = turn.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        match kind {
+            "user" => {
+                let question = turn.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                writeln!(out, "**User:** {question}").expect("writeln! to String is infallible");
+            }
+            "assistant" => {
+                let text = turn
+                    .get("finalText")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+                match text {
+                    Some(t) => writeln!(out, "**Assistant:** {t}")
+                        .expect("writeln! to String is infallible"),
+                    None => writeln!(out, "**Assistant:** _(no response)_")
+                        .expect("writeln! to String is infallible"),
+                }
+            }
+            other => {
+                writeln!(out, "_(unrecognized turn kind `{other}`)_")
+                    .expect("writeln! to String is infallible");
+            }
+        }
+        writeln!(out).expect("writeln! to String is infallible");
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::render_session_markdown;
+    use serde_json::json;
+
+    #[test]
+    fn uses_title_as_the_heading_when_present() {
+        let md = render_session_markdown(&json!({ "title": "My Chat", "turns": [] }));
+        assert!(md.starts_with("# My Chat\n"));
+    }
+
+    #[test]
+    fn falls_back_to_a_generic_heading_when_title_is_missing_or_blank() {
+        let no_title = render_session_markdown(&json!({ "turns": [] }));
+        assert!(no_title.starts_with("# Chat session\n"));
+        let blank_title = render_session_markdown(&json!({ "title": "   ", "turns": [] }));
+        assert!(blank_title.starts_with("# Chat session\n"));
+    }
+
+    #[test]
+    fn renders_the_turn_count() {
+        let md = render_session_markdown(&json!({
+            "turns": [
+                { "kind": "user", "question": "hi" },
+                { "kind": "assistant", "finalText": "hello" },
+            ],
+        }));
+        assert!(md.contains("2 turns."));
+    }
+
+    #[test]
+    fn renders_user_and_assistant_turns_in_order() {
+        let md = render_session_markdown(&json!({
+            "turns": [
+                { "kind": "user", "question": "What's the weather?" },
+                { "kind": "assistant", "finalText": "Sunny." },
+            ],
+        }));
+        let user_pos = md.find("**User:** What's the weather?").expect("user line");
+        let asst_pos = md.find("**Assistant:** Sunny.").expect("assistant line");
+        assert!(user_pos < asst_pos, "user turn should render before assistant turn");
+    }
+
+    #[test]
+    fn assistant_turn_with_no_final_text_gets_a_placeholder() {
+        let md = render_session_markdown(&json!({
+            "turns": [
+                { "kind": "assistant", "finalText": null },
+            ],
+        }));
+        assert!(md.contains("**Assistant:** _(no response)_"));
+    }
+
+    #[test]
+    fn unknown_turn_kind_gets_a_placeholder_instead_of_being_dropped() {
+        let md = render_session_markdown(&json!({
+            "turns": [ { "kind": "system-note" } ],
+        }));
+        assert!(md.contains("_(unrecognized turn kind `system-note`)_"));
+    }
+
+    #[test]
+    fn empty_session_still_renders_a_heading_and_zero_count() {
+        let md = render_session_markdown(&json!({}));
+        assert!(md.contains("# Chat session"));
+        assert!(md.contains("0 turns."));
+    }
+}

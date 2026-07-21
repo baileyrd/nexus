@@ -567,6 +567,9 @@ fn main() {
                 col,
                 context_lines,
             } => commands::ai::complete(&mut app, &file, line, col, context_lines),
+            AiCommand::Export { id, out } => {
+                commands::ai::export(&mut app, id.as_deref(), out.as_deref())
+            }
         },
 
         Commands::Agent(args) => match args.command {

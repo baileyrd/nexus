@@ -60,6 +60,10 @@ export interface ChatViewProps {
   /** Manual save — used by the explicit "Save" button. Auto-save runs
    *  on assistant-done debounced, but power users want a button too. */
   onSaveSession?: () => void | Promise<void>
+  /** Export a saved session to markdown and save it as a forge note
+   *  (#384). Per-session (not per-turn) since it renders the whole
+   *  conversation, not a single answer. */
+  onExportSession?: (id: string) => void | Promise<void>
   /** Open Settings → AI provider section. Wired by the plugin so the
    *  empty-state CTA (and any "no provider" banner) can route the user
    *  to where they configure credentials, no env-var ritual. */
@@ -76,6 +80,7 @@ export function ChatView({
   onDeleteSession,
   onRenameSession,
   onSaveSession,
+  onExportSession,
   onOpenSettings,
 }: ChatViewProps) {
   const status = useAiStore((s) => s.status)
@@ -213,6 +218,7 @@ export function ChatView({
           onLoadSession={onLoadSession}
           onDeleteSession={onDeleteSession}
           onRenameSession={onRenameSession}
+          onExportSession={onExportSession}
           hasContent={turns.length > 0}
         />
       ) : null}
@@ -963,6 +969,7 @@ interface SessionBarProps {
   onLoadSession?: (id: string) => void | Promise<void>
   onDeleteSession?: (id: string) => void | Promise<void>
   onRenameSession?: (id: string, title: string) => void | Promise<void>
+  onExportSession?: (id: string) => void | Promise<void>
 }
 
 function SessionBar({
@@ -977,6 +984,7 @@ function SessionBar({
   onLoadSession,
   onDeleteSession,
   onRenameSession,
+  onExportSession,
 }: SessionBarProps) {
   const activeMeta = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
@@ -1100,6 +1108,7 @@ function SessionBar({
                 onLoad={onLoadSession}
                 onDelete={onDeleteSession}
                 onRename={onRenameSession}
+                onExport={onExportSession}
               />
             ))
           )}
@@ -1115,9 +1124,17 @@ interface SessionListItemProps {
   onLoad?: (id: string) => void | Promise<void>
   onDelete?: (id: string) => void | Promise<void>
   onRename?: (id: string, title: string) => void | Promise<void>
+  onExport?: (id: string) => void | Promise<void>
 }
 
-function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionListItemProps) {
+function SessionListItem({
+  meta,
+  active,
+  onLoad,
+  onDelete,
+  onRename,
+  onExport,
+}: SessionListItemProps) {
   // Inline rename: double-click switches to an input, Enter / blur
   // commits, Escape cancels. Pattern picked over a separate "edit"
   // button to keep the row dense — the activity-bar pane is narrow
@@ -1218,6 +1235,29 @@ function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionLi
         </div>
       )}
 
+      {!editing && onExport ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onExport(meta.id)
+          }}
+          title="Export as note"
+          style={{
+            flex: '0 0 auto',
+            border: '1px solid transparent',
+            background: 'transparent',
+            color: 'var(--text-muted)',
+            borderRadius: 'var(--radius-s)',
+            padding: '0 6px',
+            fontSize: 12,
+            lineHeight: '20px',
+            cursor: 'pointer',
+          }}
+        >
+          ⇩
+        </button>
+      ) : null}
       {!editing && onDelete ? (
         <button
           type="button"

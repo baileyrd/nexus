@@ -201,6 +201,32 @@ pub fn config(app: &mut App) -> Result<()> {
     Ok(())
 }
 
+/// Export a persisted chat session as markdown (#384). `id` selects a
+/// multi-session file (`.forge/chat/sessions/<id>.json`); omit it for
+/// the legacy single-session file. Prints to stdout, or writes to
+/// `out` when given — same `std::fs::write` pattern as the REPL's
+/// `/save` slash command.
+pub fn export(app: &mut App, id: Option<&str>, out: Option<&str>) -> Result<()> {
+    let response = call(
+        app,
+        "session_export",
+        serde_json::json!({ "id": id }),
+    )?;
+    let markdown = response
+        .get("markdown")
+        .and_then(Value::as_str)
+        .context("session_export reply missing 'markdown' field")?;
+
+    match out {
+        Some(path) => {
+            std::fs::write(path, markdown).with_context(|| format!("write {path}"))?;
+            println!("(exported to {path})");
+        }
+        None => print!("{markdown}"),
+    }
+    Ok(())
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
