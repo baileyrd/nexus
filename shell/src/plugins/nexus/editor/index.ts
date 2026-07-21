@@ -1390,9 +1390,9 @@ export const editorPlugin: Plugin = {
 
     // P4-07 — wire the subset of tab-action stubs that have a thin
     // existing backend. The remaining stubs (splitRight/Down,
-    // mergeFile, exportPdf) need either new layout primitives or new
-    // heavy libraries (PDF) and remain "coming soon" until their
-    // dedicated follow-ups land.
+    // mergeFile) need new layout primitives and remain "coming soon"
+    // until their dedicated follow-ups land. exportPdf shipped in
+    // C65 (#418) — scoped print stylesheet, see print.css.
     const WIRED: ReadonlySet<string> = new Set([
       'nexus.editor.stub.bookmark',
       'nexus.editor.stub.rename',
