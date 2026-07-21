@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod agent;
 pub mod ai;
+pub mod ai_runtime;
 pub mod bases;
 pub mod canvas;
 pub mod collab;
