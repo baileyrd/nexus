@@ -322,6 +322,33 @@ impl WasmSandbox {
         })
     }
 
+    /// Fuel consumed by the most recent `dispatch()` call, or `None`
+    /// when fuel metering is disabled for this plugin (manifest
+    /// `fuel = 0`). C86 / #439 — makes quota pressure observable
+    /// instead of only fatal (an `OutOfFuel` trap with no prior
+    /// visibility into how close the plugin was running to its cap).
+    #[must_use]
+    pub fn fuel_consumed_last_call(&self) -> Option<u64> {
+        if self.fuel_per_call == 0 {
+            return None;
+        }
+        self.store
+            .get_fuel()
+            .ok()
+            .map(|remaining| self.fuel_per_call.saturating_sub(remaining))
+    }
+
+    /// Current WASM linear-memory size in bytes, or `None` if the
+    /// module exports no memory (shouldn't happen for a plugin that
+    /// passed [`WasmSandbox::new`], which requires one for the
+    /// dispatch ABI, but a defensive `None` beats a panic). C86 / #439.
+    #[must_use]
+    pub fn memory_size_bytes(&mut self) -> Option<u64> {
+        self.instance
+            .get_memory(&mut self.store, "memory")
+            .map(|m| m.data_size(&self.store) as u64)
+    }
+
     /// Inject an [`IpcDispatcher`] so `host::invoke_command` can route
     /// calls to other loaded plugins. Called by the loader after all
     /// plugins are loaded or after a hot-reload.
@@ -450,6 +477,16 @@ impl WasmSandbox {
         // the next dispatch call.
         if let Some(cancelled) = watcher_guard {
             cancelled.store(true, Ordering::Relaxed);
+        }
+
+        // C86 / #439 — sample resource usage regardless of outcome, so an
+        // `OutOfFuel` trap (the case this metric matters most for) still
+        // gets recorded rather than skipped by an early `?` return below.
+        if let Some(m) = nexus_kernel::metrics::global() {
+            if let Some(fuel) = self.fuel_consumed_last_call() {
+                m.record_plugin_fuel_consumed(&plugin_id, fuel);
+            }
+            m.record_plugin_memory_bytes(&plugin_id, memory.data_size(&self.store) as u64);
         }
 
         let ret = dispatch_result?;
@@ -785,5 +822,60 @@ mod tests {
         let bytes = test_wasm_bytes();
         let sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
         assert_eq!(sandbox.plugin_data().plugin_id, "com.test.minimal");
+    }
+
+    // ── Resource metrics (C86 / #439) ───────────────────────────────────────
+
+    #[test]
+    fn sandbox_reports_no_fuel_consumption_before_any_dispatch() {
+        // Nothing has run yet, so remaining == budget == 0 consumed.
+        let bytes = test_wasm_bytes();
+        let sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
+        assert_eq!(sandbox.fuel_consumed_last_call(), Some(0));
+    }
+
+    #[test]
+    fn sandbox_records_fuel_consumed_after_dispatch() {
+        let bytes = test_wasm_bytes();
+        let mut sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
+        sandbox.dispatch(100, &serde_json::json!({"hello": "world"})).unwrap();
+        let consumed = sandbox
+            .fuel_consumed_last_call()
+            .expect("fuel metering is enabled in test_config()");
+        assert!(consumed > 0, "expected some fuel spent running the echo handler");
+        assert!(
+            consumed <= test_config().fuel,
+            "consumed ({consumed}) must not exceed the per-call budget"
+        );
+    }
+
+    #[test]
+    fn sandbox_fuel_consumed_is_none_when_metering_disabled() {
+        let bytes = test_wasm_bytes();
+        let config = WasmConfig {
+            fuel: 0,
+            ..test_config()
+        };
+        let mut sandbox = WasmSandbox::new(&bytes, &config, test_plugin_data()).unwrap();
+        sandbox.dispatch(100, &serde_json::json!({})).unwrap();
+        assert_eq!(
+            sandbox.fuel_consumed_last_call(),
+            None,
+            "fuel=0 in the manifest means metering is off, not zero consumption"
+        );
+    }
+
+    #[test]
+    fn sandbox_reports_nonzero_memory_size() {
+        let bytes = test_wasm_bytes();
+        let mut sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
+        // A freshly-instantiated module already has at least one memory
+        // page (64 KiB) before any dispatch.
+        let before = sandbox.memory_size_bytes().expect("module exports memory");
+        assert!(before > 0);
+
+        sandbox.dispatch(100, &serde_json::json!({"hello": "world"})).unwrap();
+        let after = sandbox.memory_size_bytes().expect("module exports memory");
+        assert!(after > 0);
     }
 }
