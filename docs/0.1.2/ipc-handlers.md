@@ -34,7 +34,7 @@
 | `com.nexus.templates` | 5 |
 | `com.nexus.collab` | 4 |
 | `com.nexus.audio` | 3 |
-| `com.nexus.formats` | 3 |
+| `com.nexus.formats` | 4 |
 | `com.nexus.linkpreview` | 1 |
 | **Total** | **396** |
 
@@ -370,11 +370,13 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 
 ---
 
-## com.nexus.formats (3)
+## com.nexus.formats (4)
 
 `import_notion`, `export_notion` — pure parse / serialize; fs ops route through storage.
 
 `export_html` (C66 #419) — renders a forge note to a standalone styled HTML document via `markdown::export_to_html`; fs ops route through storage.
+
+`export_pandoc` (C69 #422, `process.spawn`) — pandoc-backed Word/ODT export. Shells out to a user-installed `pandoc` binary on PATH (markdown piped via stdin, output written directly to `dest`); returns a clear "not found" error if pandoc isn't installed rather than a raw spawn failure. Reachable from `nexus content export --format docx|odt`.
 
 ---
 

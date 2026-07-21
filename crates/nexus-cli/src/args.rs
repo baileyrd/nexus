@@ -220,13 +220,18 @@ pub(crate) enum ContentCommand {
         #[arg(long)]
         date: Option<String>,
     },
-    /// Export a note to HTML
+    /// Export a note to HTML, Word (.docx), or OpenDocument Text (.odt)
     Export {
         /// Path of the note to export
         path: String,
-        /// Output file path (prints to stdout if omitted)
+        /// Output file path (prints to stdout if omitted; required for
+        /// `--format docx|odt`, since those are binary formats).
         #[arg(short, long)]
         output: Option<String>,
+        /// Output format: `html` (default), `docx`, or `odt` (C69 #422,
+        /// pandoc-backed — requires `pandoc` on PATH).
+        #[arg(long, default_value = "html")]
+        format: String,
     },
 }
 

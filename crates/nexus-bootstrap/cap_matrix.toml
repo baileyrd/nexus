@@ -676,6 +676,12 @@ plugin = "com.nexus.formats"
 command = "export_html"
 unrestricted = "renders a forge note to a standalone HTML string or file — fs access is forge-scoped, same as import/export_notion"
 
+[[handler]]
+plugin = "com.nexus.formats"
+command = "export_pandoc"
+caps = ["process.spawn"]
+note = "C69 (#422) — shells out to a user-installed `pandoc` binary on PATH to render docx/odt; fs access is otherwise forge-scoped, same as export_html"
+
 # ─── com.nexus.git — operates on `.git` inside the forge root ────────
 
 [[handler]]
