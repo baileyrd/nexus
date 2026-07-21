@@ -1248,6 +1248,11 @@ plugin = "com.nexus.memory"
 command = "consolidate"
 unrestricted = "supersedes duplicate rows in the plugin's own memory store (deterministic; no AI/network)"
 
+[[handler]]
+plugin = "com.nexus.memory"
+command = "import"
+unrestricted = "bulk upsert-by-id into the plugin's own memory store (last-write-wins by updated_at); no kernel-mediated resource"
+
 # ─── com.nexus.storage — read-only handlers ──────────────────────────
 
 [[handler]]
