@@ -106,8 +106,9 @@ fn validate_channel(s: &str) -> Result<&'static str> {
         "discord" => Ok("discord"),
         "telegram" => Ok("telegram"),
         "email" => Ok("email"),
+        "webhook" => Ok("webhook"),
         other => Err(anyhow::anyhow!(
-            "unknown channel '{other}': expected one of desktop / discord / telegram / email"
+            "unknown channel '{other}': expected one of desktop / discord / telegram / email / webhook"
         )),
     }
 }
@@ -138,6 +139,9 @@ mod tests {
         assert_eq!(validate_channel("email").unwrap(), "email");
         assert_eq!(validate_channel("Email").unwrap(), "email");
         assert_eq!(validate_channel("EMAIL").unwrap(), "email");
+        assert_eq!(validate_channel("webhook").unwrap(), "webhook");
+        assert_eq!(validate_channel("Webhook").unwrap(), "webhook");
+        assert_eq!(validate_channel("WEBHOOK").unwrap(), "webhook");
     }
 
     #[test]

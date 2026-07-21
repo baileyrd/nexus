@@ -246,6 +246,27 @@ impl EmailChannel {
     }
 }
 
+/// `[channels.webhook]` block (C90 / #443).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebhookChannel {
+    /// Target URL. Empty/missing → transport surfaces
+    /// `NotConfigured` at send time.
+    #[serde(default)]
+    pub url: String,
+    /// Extra HTTP headers sent with the POST (e.g. an auth token for
+    /// ntfy/Gotify). Header name -> value.
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// Optional JSON body template with `{title}` / `{message}`
+    /// placeholders (JSON-escaped on substitution) for services whose
+    /// payload shape isn't the default `{"title", "message"}` — e.g.
+    /// Slack Incoming Webhooks: `{"text": "{title}: {message}"}`.
+    /// Unset ⇒ the default shape.
+    #[serde(default)]
+    pub body_template: Option<String>,
+}
+
 /// All `[channels.*]` blocks rolled up.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -259,6 +280,9 @@ pub struct ChannelsConfig {
     /// SMTP email config.
     #[serde(default)]
     pub email: EmailChannel,
+    /// Generic webhook config (C90 / #443).
+    #[serde(default)]
+    pub webhook: WebhookChannel,
 }
 
 /// `[inbox]` block. Reserved for BL-136 (Notification Center). The
@@ -380,6 +404,7 @@ pub fn channel_from_str(s: &str) -> Option<Channel> {
         "discord" => Some(Channel::Discord),
         "telegram" => Some(Channel::Telegram),
         "email" => Some(Channel::Email),
+        "webhook" => Some(Channel::Webhook),
         _ => None,
     }
 }
@@ -421,6 +446,13 @@ from = "nexus@example.com"
 to = "ops@example.com"
 subject_template = "Nexus: {title}"
 
+[channels.webhook]
+url = "https://hooks.slack.example/services/x"
+body_template = '{"text": "{title}: {message}"}'
+
+[channels.webhook.headers]
+Authorization = "Bearer secret"
+
 [inbox]
 max_rows = 1000
 max_age_days = 30
@@ -436,6 +468,18 @@ max_age_days = 30
             "https://discord.example/webhook"
         );
         assert_eq!(cfg.channels.email.port, 587);
+        assert_eq!(
+            cfg.channels.webhook.url,
+            "https://hooks.slack.example/services/x"
+        );
+        assert_eq!(
+            cfg.channels.webhook.body_template.as_deref(),
+            Some(r#"{"text": "{title}: {message}"}"#)
+        );
+        assert_eq!(
+            cfg.channels.webhook.headers.get("Authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
         assert_eq!(cfg.inbox.max_rows, Some(1000));
     }
 
@@ -531,6 +575,9 @@ quiet_hours = "nope"
         assert_eq!(channel_from_str("discord"), Some(Channel::Discord));
         assert_eq!(channel_from_str("telegram"), Some(Channel::Telegram));
         assert_eq!(channel_from_str("email"), Some(Channel::Email));
+        assert_eq!(channel_from_str("webhook"), Some(Channel::Webhook));
+        // Slack/ntfy/Gotify/Matrix aren't distinct channel names — they're
+        // reached generically through "webhook" (C90 / #443).
         assert_eq!(channel_from_str("slack"), None);
     }
 

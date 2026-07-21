@@ -25,6 +25,14 @@
 //!   TLS. `[notifications.email]` config block supplies host / port /
 //!   credentials / from / to / subject template. Plain-text only; HTML
 //!   bodies are out of scope for v1.
+//! - **`Channel::Webhook`** — generic HTTP POST to a configured URL
+//!   (C90). `[notifications.webhook]` supplies the URL, optional
+//!   custom headers (e.g. an auth token for ntfy/Gotify), and an
+//!   optional `body_template` with `{title}` / `{message}`
+//!   placeholders (JSON-escaped on substitution) for services whose
+//!   payload shape isn't the default `{"title", "message"}` — Slack's
+//!   Incoming Webhooks (`{"text": "..."}`), ntfy, Gotify, Matrix (via
+//!   a bridge), or any arbitrary JSON-POST endpoint.
 //!
 //! Shell-settings UI, workflow `notify` step, and the agent
 //! run-completion auto-notify subscriber are filed as follow-ups
@@ -36,7 +44,7 @@
 //!
 //! ```jsonc
 //! {
-//!   "channel": "desktop" | "discord" | "telegram" | "email",
+//!   "channel": "desktop" | "discord" | "telegram" | "email" | "webhook",
 //!   "message": "string",
 //!   "title": "string?"
 //! }
@@ -73,7 +81,7 @@ pub mod router;
 
 pub use config::{
     ChannelsConfig, ConfigError, DiscordChannel, EmailChannel, InboxConfig, NotificationsConfig,
-    QuietHours, ResolvedSource, Severity, SourceConfig, TelegramChannel,
+    QuietHours, ResolvedSource, Severity, SourceConfig, TelegramChannel, WebhookChannel,
 };
 pub use inbox::{Inbox, InboxEntry, InboxError, InboxStats, NewEntry, StatusFilter};
 pub use router::{Resolution, Router};
@@ -131,6 +139,9 @@ pub enum Channel {
     Telegram,
     /// Email — SMTP submission via [`SmtpTransport`].
     Email,
+    /// Generic webhook — HTTP POST to a configured URL. See
+    /// [`GenericWebhook`] (C90 / #443).
+    Webhook,
 }
 
 impl Channel {
@@ -143,6 +154,7 @@ impl Channel {
             Channel::Discord => "discord",
             Channel::Telegram => "telegram",
             Channel::Email => "email",
+            Channel::Webhook => "webhook",
         }
     }
 }
@@ -314,6 +326,102 @@ impl Transport for DiscordWebhook {
         if !resp.status().is_success() {
             return Err(SendError::Http(format!(
                 "discord webhook returned {}",
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Generic webhook transport (C90 / #443). Unlike [`DiscordWebhook`]
+/// / [`TelegramBot`], the request shape isn't hardcoded to one
+/// service's API — a configurable `body_template` lets it target
+/// Slack Incoming Webhooks, ntfy, Gotify, Matrix (via a bridge), or
+/// any endpoint that accepts a JSON POST.
+pub struct GenericWebhook {
+    url: String,
+    headers: std::collections::BTreeMap<String, String>,
+    body_template: Option<String>,
+    // Lazy — see the same note on `DiscordWebhook::client`.
+    client: std::sync::OnceLock<reqwest::blocking::Client>,
+}
+
+impl GenericWebhook {
+    /// Build a webhook transport bound to `.forge/notifications.toml::[channels.webhook]`.
+    /// An empty `url` surfaces at [`Transport::send`] time as
+    /// [`SendError::NotConfigured`].
+    #[must_use]
+    pub fn new(
+        url: String,
+        headers: std::collections::BTreeMap<String, String>,
+        body_template: Option<String>,
+    ) -> Self {
+        Self {
+            url,
+            headers,
+            body_template,
+            client: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// JSON-encode `s` and strip the surrounding quotes, so a
+    /// `body_template` author can write `"{message}"` and get a
+    /// properly-escaped JSON string fragment rather than raw
+    /// (potentially quote- or newline-breaking) user text spliced
+    /// into their template.
+    fn json_escape_fragment(s: &str) -> String {
+        let quoted = serde_json::to_string(s).unwrap_or_default();
+        // `serde_json::to_string` on a `&str` always emits a quoted
+        // JSON string (no fallible input), so stripping one leading +
+        // one trailing byte is safe; the `unwrap_or_default` above is
+        // defensive only, matching `blocking_webhook_client`'s stance.
+        quoted
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(&quoted)
+            .to_string()
+    }
+
+    /// Render the outgoing JSON body: the configured template with
+    /// `{title}` / `{message}` substituted, or the default
+    /// `{"title", "message"}` shape when no template is set.
+    fn render_body(&self, notif: &Notification) -> Result<serde_json::Value, SendError> {
+        let title = notif.title.as_deref().unwrap_or("Nexus");
+        let Some(template) = &self.body_template else {
+            return Ok(serde_json::json!({ "title": title, "message": notif.message }));
+        };
+        let rendered = template
+            .replace("{title}", &Self::json_escape_fragment(title))
+            .replace("{message}", &Self::json_escape_fragment(&notif.message));
+        serde_json::from_str(&rendered).map_err(|e| {
+            SendError::Http(format!(
+                "webhook body_template did not render valid JSON: {e}"
+            ))
+        })
+    }
+}
+
+impl Transport for GenericWebhook {
+    fn channel(&self) -> Channel {
+        Channel::Webhook
+    }
+    fn send(&self, notif: &Notification) -> Result<(), SendError> {
+        if self.url.is_empty() {
+            return Err(SendError::NotConfigured("webhook"));
+        }
+        let body = self.render_body(notif)?;
+        let mut req = self
+            .client
+            .get_or_init(blocking_webhook_client)
+            .post(&self.url)
+            .json(&body);
+        for (name, value) in &self.headers {
+            req = req.header(name, value);
+        }
+        let resp = req.send().map_err(|e| SendError::Http(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(SendError::Http(format!(
+                "webhook returned {}",
                 resp.status()
             )));
         }
@@ -681,6 +789,87 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, SendError::NotConfigured("discord")));
+    }
+
+    // ── Generic webhook transport (C90 / #443) ──────────────────
+
+    #[test]
+    fn channel_webhook_serde_round_trip() {
+        let s = serde_json::to_value(Channel::Webhook).unwrap();
+        assert_eq!(s, serde_json::Value::String("webhook".into()));
+        let c: Channel = serde_json::from_str("\"webhook\"").unwrap();
+        assert_eq!(c, Channel::Webhook);
+    }
+
+    #[test]
+    fn webhook_transport_empty_url_reports_not_configured() {
+        let t = GenericWebhook::new(String::new(), std::collections::BTreeMap::new(), None);
+        let err = t
+            .send(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, SendError::NotConfigured("webhook")));
+    }
+
+    #[test]
+    fn webhook_default_body_has_title_and_message() {
+        let t = GenericWebhook::new("https://example.test/hook".into(), std::collections::BTreeMap::new(), None);
+        let body = t
+            .render_body(&Notification {
+                message: "hello".into(),
+                title: Some("Greeting".into()),
+            })
+            .unwrap();
+        assert_eq!(body, serde_json::json!({ "title": "Greeting", "message": "hello" }));
+    }
+
+    #[test]
+    fn webhook_default_body_falls_back_to_nexus_title() {
+        let t = GenericWebhook::new("https://example.test/hook".into(), std::collections::BTreeMap::new(), None);
+        let body = t
+            .render_body(&Notification {
+                message: "hello".into(),
+                title: None,
+            })
+            .unwrap();
+        assert_eq!(body["title"], "Nexus");
+    }
+
+    #[test]
+    fn webhook_custom_template_substitutes_and_escapes() {
+        // Slack-shaped template. The message contains a double quote
+        // and a newline — both must come out JSON-escaped so the
+        // rendered template still parses.
+        let t = GenericWebhook::new(
+            "https://hooks.slack.example/x".into(),
+            std::collections::BTreeMap::new(),
+            Some(r#"{"text": "{title}: {message}"}"#.into()),
+        );
+        let body = t
+            .render_body(&Notification {
+                message: "she said \"hi\"\nline two".into(),
+                title: Some("Alert".into()),
+            })
+            .unwrap();
+        assert_eq!(body["text"], "Alert: she said \"hi\"\nline two");
+    }
+
+    #[test]
+    fn webhook_template_rendering_invalid_json_errors() {
+        let t = GenericWebhook::new(
+            "https://example.test/hook".into(),
+            std::collections::BTreeMap::new(),
+            Some("not json at all: {message}".into()),
+        );
+        let err = t
+            .render_body(&Notification {
+                message: "hi".into(),
+                title: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, SendError::Http(_)));
     }
 
     // ── Telegram transport ──────────────────────────────────────
