@@ -220,6 +220,13 @@ export function buildPluginAPI(
           .filter(k => k.startsWith(prefix))
           .forEach(k => localStorage.removeItem(k))
       },
+      list(prefix = '') {
+        const nsPrefix = `plugin:${pluginId}:`
+        return Object.keys(localStorage)
+          .filter(k => k.startsWith(nsPrefix))
+          .map(k => k.slice(nsPrefix.length))
+          .filter(k => k.startsWith(prefix))
+      },
     },
 
     // ─── Status bar ────────────────────────────────────────────────────────

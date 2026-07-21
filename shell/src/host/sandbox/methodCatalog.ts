@@ -218,6 +218,10 @@ export interface SandboxMethodCatalog {
     args: Record<string, never>
     returns: void
   }
+  'storage.list': {
+    args: { prefix?: string }
+    returns: string[]
+  }
 
   // ── Notifications ──────────────────────────────────────────────────────
   'notifications.show': {
@@ -320,6 +324,7 @@ export const SANDBOX_METHOD_NAMES = [
   'storage.set',
   'storage.delete',
   'storage.clear',
+  'storage.list',
   'notifications.show',
   'context.set',
   'context.get',

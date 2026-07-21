@@ -344,6 +344,13 @@ export interface StorageAPI {
   set(key: string, value: string): void
   delete(key: string): void
   clear(): void
+  /**
+   * List this plugin's own keys, optionally filtered to those starting
+   * with `prefix` (default: all keys). Backed by `localStorage`, which
+   * is host-enumerable, so this is a synchronous local scan — not an
+   * IPC round-trip. #377/C24.
+   */
+  list(prefix?: string): string[]
 }
 
 export interface StatusBarItemHandle {

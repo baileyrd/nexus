@@ -85,6 +85,7 @@ async fn kv_requires_capability() {
     let ctx = make_context(dir.path(), &[]);
     assert!(ctx.kv_get("key").await.is_err());
     assert!(ctx.kv_set("key", b"val").await.is_err());
+    assert!(ctx.kv_list("").await.is_err());
 }
 
 #[tokio::test]
@@ -96,6 +97,23 @@ async fn kv_get_set_delete_roundtrip() {
     assert_eq!(val, b"hello");
     ctx.kv_delete("key").await.unwrap();
     assert!(ctx.kv_get("key").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn kv_list_requires_only_read_capability_and_filters_by_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = make_context(dir.path(), &[Capability::KvRead, Capability::KvWrite]);
+    ctx.kv_set("settings.theme", b"a").await.unwrap();
+    ctx.kv_set("settings.font", b"b").await.unwrap();
+    ctx.kv_set("cache.foo", b"c").await.unwrap();
+
+    let mut keys = ctx.kv_list("settings.").await.unwrap();
+    keys.sort();
+    assert_eq!(keys, vec!["settings.font", "settings.theme"]);
+
+    let read_only = make_context(dir.path(), &[Capability::KvRead]);
+    assert!(read_only.kv_list("").await.is_ok());
+    assert!(read_only.kv_set("x", b"y").await.is_err());
 }
 
 #[test]

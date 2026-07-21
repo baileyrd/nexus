@@ -473,6 +473,13 @@ impl KvAccess for KernelPluginContext {
         self.require_capability(Capability::KvWrite)?;
         self.kv.delete(&self.plugin_id, key).map_err(Error::Kv)
     }
+
+    async fn kv_list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.require_capability(Capability::KvRead)?;
+        self.kv
+            .list_keys(&self.plugin_id, prefix)
+            .map_err(Error::Kv)
+    }
 }
 
 impl Events for KernelPluginContext {

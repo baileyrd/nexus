@@ -802,6 +802,10 @@ export class SandboxRouter {
       case 'storage.clear':
         this.api.storage.clear()
         return undefined
+      case 'storage.list':
+        return this.api.storage.list(
+          args.prefix === undefined ? undefined : String(args.prefix),
+        )
 
       // ── Notifications ───────────────────────────────────────────
       case 'notifications.show':

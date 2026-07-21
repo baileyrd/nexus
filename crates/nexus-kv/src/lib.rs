@@ -145,6 +145,54 @@ impl KvStore for SqliteKvStore {
 
         Ok(())
     }
+
+    fn list_keys(&self, namespace: &str, prefix: &str) -> Result<Vec<String>, KvError> {
+        let conn = self.conn.lock().map_err(|e| KvError::BackendError {
+            reason: format!("lock poisoned: {e}"),
+        })?;
+
+        // Namespace stays an exact match (see the substring-collision tests
+        // below) — only the key portion is a prefix search, and the
+        // prefix's own LIKE metacharacters (`%`, `_`) are escaped so a key
+        // prefix like "a_b" can't accidentally match "aXb".
+        let escaped = escape_like_prefix(prefix);
+        let pattern = format!("{escaped}%");
+
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT key FROM kv_store WHERE namespace = ?1 AND key LIKE ?2 ESCAPE '\\' ORDER BY key",
+            )
+            .map_err(|e| KvError::BackendError {
+                reason: format!("prepare failed: {e}"),
+            })?;
+
+        let keys = stmt
+            .query_map(rusqlite::params![namespace, pattern], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| KvError::BackendError {
+                reason: format!("query failed: {e}"),
+            })?
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .map_err(|e| KvError::BackendError {
+                reason: format!("row read failed: {e}"),
+            })?;
+
+        Ok(keys)
+    }
+}
+
+/// Escape `\`, `%`, and `_` so a caller-supplied prefix is matched literally
+/// under `LIKE ... ESCAPE '\'` rather than as a wildcard pattern.
+fn escape_like_prefix(prefix: &str) -> String {
+    let mut escaped = String::with_capacity(prefix.len());
+    for c in prefix.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -263,5 +311,42 @@ mod sqlite_tests {
         store.set("ns", "bin", &binary).unwrap();
         let val = store.get("ns", "bin").unwrap().unwrap();
         assert_eq!(val, binary);
+    }
+
+    #[test]
+    fn list_keys_filters_by_prefix_within_a_namespace() {
+        let store = SqliteKvStore::in_memory().unwrap();
+        store.set("ns", "settings.theme", b"a").unwrap();
+        store.set("ns", "settings.font", b"b").unwrap();
+        store.set("ns", "cache.foo", b"c").unwrap();
+
+        let keys = store.list_keys("ns", "settings.").unwrap();
+        assert_eq!(keys, vec!["settings.font", "settings.theme"]);
+
+        let all = store.list_keys("ns", "").unwrap();
+        assert_eq!(all, vec!["cache.foo", "settings.font", "settings.theme"]);
+    }
+
+    #[test]
+    fn list_keys_does_not_cross_namespaces() {
+        let store = SqliteKvStore::in_memory().unwrap();
+        store.set("plugin.a", "key1", b"a").unwrap();
+        store.set("plugin.b", "key1", b"b").unwrap();
+
+        assert_eq!(store.list_keys("plugin.a", "").unwrap(), vec!["key1"]);
+        assert_eq!(store.list_keys("plugin.c", "").unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn list_keys_escapes_like_metacharacters_in_the_prefix() {
+        // A naive `LIKE prefix || '%'` would treat "a_b" as a wildcard
+        // pattern (`_` matches any single char) and incorrectly match
+        // "aXb". The escaping must make the literal prefix match only.
+        let store = SqliteKvStore::in_memory().unwrap();
+        store.set("ns", "a_b.exact", b"1").unwrap();
+        store.set("ns", "aXb.should_not_match", b"2").unwrap();
+        store.set("ns", "a%wild.should_not_match", b"3").unwrap();
+
+        assert_eq!(store.list_keys("ns", "a_b").unwrap(), vec!["a_b.exact"]);
     }
 }

@@ -98,6 +98,14 @@ pub trait KvAccess: Send + Sync {
     /// # Errors
     /// Returns `CapabilityError::Denied` if the plugin lacks `kv.write`.
     async fn kv_delete(&self, key: &str) -> Result<()>;
+
+    /// List keys in the plugin's KV store whose name starts with `prefix`
+    /// (an empty prefix lists every key the plugin owns). Gated by the
+    /// same capability as `kv_get` — enumeration is a read.
+    ///
+    /// # Errors
+    /// Returns `CapabilityError::Denied` if the plugin lacks `kv.read`.
+    async fn kv_list(&self, prefix: &str) -> Result<Vec<String>>;
 }
 
 // ---- Events ----------------------------------------------------------

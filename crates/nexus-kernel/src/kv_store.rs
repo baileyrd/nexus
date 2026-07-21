@@ -40,6 +40,14 @@ pub trait KvStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     /// Returns `KvError::BackendError` on storage failures.
     fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError>;
+
+    /// List keys within a namespace whose name starts with `prefix` (an
+    /// empty prefix lists every key in the namespace). Order is
+    /// unspecified beyond being deterministic for a given backend.
+    ///
+    /// # Errors
+    /// Returns `KvError::BackendError` on storage failures.
+    fn list_keys(&self, namespace: &str, prefix: &str) -> Result<Vec<String>, KvError>;
 }
 
 /// Convenience constructor for `KvError::BackendError`.
@@ -96,6 +104,19 @@ impl KvStore for InMemoryKvStore {
             .remove(&(namespace.to_string(), key.to_string()));
         Ok(())
     }
+
+    fn list_keys(&self, namespace: &str, prefix: &str) -> Result<Vec<String>, KvError> {
+        let mut keys: Vec<String> = self
+            .inner
+            .lock()
+            .map_err(|e| KvError::backend(format!("lock poisoned: {e}")))?
+            .keys()
+            .filter(|(ns, key)| ns == namespace && key.starts_with(prefix))
+            .map(|(_, key)| key.clone())
+            .collect();
+        keys.sort_unstable();
+        Ok(keys)
+    }
 }
 
 #[cfg(test)]
@@ -112,5 +133,24 @@ mod in_memory_tests {
         store.delete("ns1", "k").unwrap();
         assert!(store.get("ns1", "k").unwrap().is_none());
         assert_eq!(store.get("ns2", "k").unwrap().unwrap(), b"b");
+    }
+
+    #[test]
+    fn list_keys_filters_by_namespace_and_prefix() {
+        let store = InMemoryKvStore::new();
+        store.set("ns1", "settings.theme", b"a").unwrap();
+        store.set("ns1", "settings.font", b"b").unwrap();
+        store.set("ns1", "cache.foo", b"c").unwrap();
+        store.set("ns2", "settings.theme", b"d").unwrap();
+
+        let mut keys = store.list_keys("ns1", "settings.").unwrap();
+        keys.sort();
+        assert_eq!(keys, vec!["settings.font", "settings.theme"]);
+
+        let mut all_ns1 = store.list_keys("ns1", "").unwrap();
+        all_ns1.sort();
+        assert_eq!(all_ns1, vec!["cache.foo", "settings.font", "settings.theme"]);
+
+        assert_eq!(store.list_keys("ns2", "cache.").unwrap(), Vec::<String>::new());
     }
 }

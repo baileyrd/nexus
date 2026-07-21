@@ -342,6 +342,13 @@ export interface NexusPluginContext {
     get(key: string): MaybePromise<string | null>;
     set(key: string, value: string): MaybePromise<void>;
     delete(key: string): MaybePromise<void>;
+    /**
+     * List this plugin's own keys, optionally filtered to those
+     * starting with `prefix` (default: all keys). #377/C24 — added so
+     * plugins can migrate settings, evict caches, or build a "clear all
+     * data" affordance without the host doing it on their behalf.
+     */
+    list(prefix?: string): MaybePromise<string[]>;
   };
 
   /** Toast notifications. */

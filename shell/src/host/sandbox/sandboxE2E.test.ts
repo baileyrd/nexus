@@ -180,6 +180,7 @@ function makeApi(hooks: ApiHooks = {}): PluginAPI {
       set: unused('storage.set'),
       delete: unused('storage.delete'),
       clear: unused('storage.clear'),
+      list: unused('storage.list'),
     },
     statusBar: { createItem: unused('statusBar.createItem') },
     configuration: {

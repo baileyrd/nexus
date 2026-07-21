@@ -284,6 +284,7 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
         get: (key) => request('storage.get', { key }) as Promise<string | null>,
         set: (key, value) => request('storage.set', { key, value }) as Promise<void>,
         delete: (key) => request('storage.delete', { key }) as Promise<void>,
+        list: (prefix) => request('storage.list', { prefix }) as Promise<string[]>,
       },
 
       notifications: {
