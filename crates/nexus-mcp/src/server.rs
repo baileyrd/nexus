@@ -350,6 +350,22 @@ struct SearchInput {
     query: String,
     /// Maximum number of results to return (default: 20).
     limit: Option<usize>,
+    /// #375 — skip this many ranked hits before taking the page of
+    /// `limit`, for paging through results.
+    #[serde(default)]
+    offset: Option<usize>,
+    /// #375 — sort order: `"relevance"` (default), `"mtime_desc"`, or
+    /// `"mtime_asc"`.
+    #[serde(default)]
+    sort: Option<String>,
+    /// #375 — only include blocks whose file mtime is on or after this
+    /// Unix-seconds timestamp.
+    #[serde(default)]
+    mtime_after: Option<i64>,
+    /// #375 — only include blocks whose file mtime is on or before
+    /// this Unix-seconds timestamp.
+    #[serde(default)]
+    mtime_before: Option<i64>,
 }
 
 /// Input for the `nexus_backlinks` tool.
@@ -886,6 +902,8 @@ struct SearchHit {
     block_type: String,
     excerpt: String,
     score: f32,
+    /// #375 — the block's file mtime, Unix seconds.
+    mtime: i64,
 }
 
 /// Output for search.
@@ -2317,6 +2335,8 @@ impl NexusMcpServer {
             block_type: String,
             excerpt: String,
             score: f32,
+            #[serde(default)]
+            mtime: i64,
         }
         if let Err(e) = self
             .storage_call::<serde_json::Value>("rebuild_search_index", serde_json::json!({}))
@@ -2328,7 +2348,14 @@ impl NexusMcpServer {
         match self
             .storage_call::<Vec<Hit>>(
                 "search",
-                serde_json::json!({ "query": &input.query, "limit": limit }),
+                serde_json::json!({
+                    "query": &input.query,
+                    "limit": limit,
+                    "offset": input.offset,
+                    "sort": input.sort,
+                    "mtime_after": input.mtime_after,
+                    "mtime_before": input.mtime_before,
+                }),
             )
             .await
         {
@@ -2340,6 +2367,7 @@ impl NexusMcpServer {
                         block_type: h.block_type,
                         excerpt: h.excerpt,
                         score: h.score,
+                        mtime: h.mtime,
                     })
                     .collect();
                 Json(SearchOutput {

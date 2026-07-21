@@ -107,6 +107,39 @@ pub struct SearchResult {
     pub block_type: String,
     /// BM25 relevance score.
     pub score: f32,
+    /// #375 — the block's file mtime, Unix seconds.
+    #[serde(default)]
+    pub mtime: i64,
+}
+
+/// Sort order for [`search_with_options`]. Mirror of
+/// `nexus_storage::search::SearchSort`. #375.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSort {
+    /// BM25 relevance, descending score (the historical/only behavior).
+    #[default]
+    Relevance,
+    /// Most-recently-modified block first.
+    MtimeDesc,
+    /// Least-recently-modified block first.
+    MtimeAsc,
+}
+
+/// Optional paging/sort/date-range knobs for [`search_with_options`].
+/// Mirror of `nexus_storage::search::SearchOptions`. #375.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SearchOptions {
+    /// Skip this many ranked hits before taking the page of `limit`.
+    pub offset: usize,
+    /// How to order hits.
+    pub sort: SearchSort,
+    /// Only include blocks whose file mtime is on or after this
+    /// Unix-seconds timestamp.
+    pub mtime_after: Option<i64>,
+    /// Only include blocks whose file mtime is on or before this
+    /// Unix-seconds timestamp.
+    pub mtime_before: Option<i64>,
 }
 
 /// Mirror of `nexus_storage::FileMetadata`.
@@ -286,10 +319,28 @@ pub async fn search(
     query: &str,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
+    search_with_options(invoker, query, limit, SearchOptions::default()).await
+}
+
+/// Search with paging/sort/date-range knobs (#375). See
+/// [`SearchOptions`] for their semantics.
+pub async fn search_with_options(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    query: &str,
+    limit: usize,
+    options: SearchOptions,
+) -> Result<Vec<SearchResult>> {
     call(
         invoker,
         "search",
-        serde_json::json!({ "query": query, "limit": limit }),
+        serde_json::json!({
+            "query": query,
+            "limit": limit,
+            "offset": options.offset,
+            "sort": options.sort,
+            "mtime_after": options.mtime_after,
+            "mtime_before": options.mtime_before,
+        }),
     )
     .await
 }

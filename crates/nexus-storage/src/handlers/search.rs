@@ -6,8 +6,10 @@ use std::path::Path;
 use nexus_plugins::PluginError;
 use serde_json::Value;
 
-use crate::ipc::{StorageHybridSearchArgs, StorageQueryTagsArgs, StorageSearchArgs};
-use crate::StorageEngine;
+use crate::ipc::{
+    StorageHybridSearchArgs, StorageQueryTagsArgs, StorageSearchArgs, StorageSearchSort,
+};
+use crate::{SearchOptions, SearchSort, StorageEngine};
 
 use super::shared::{exec_err, parse_args, to_value};
 
@@ -19,14 +21,37 @@ const DEFAULT_SEARCH_LIMIT: usize = 50;
 /// `limit`.
 const DEFAULT_HYBRID_LIMIT: usize = 10;
 
+impl From<StorageSearchSort> for SearchSort {
+    fn from(sort: StorageSearchSort) -> Self {
+        match sort {
+            StorageSearchSort::Relevance => SearchSort::Relevance,
+            StorageSearchSort::MtimeDesc => SearchSort::MtimeDesc,
+            StorageSearchSort::MtimeAsc => SearchSort::MtimeAsc,
+        }
+    }
+}
+
 pub(crate) fn search(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
     // #190 / R7 — strict-parse via existing `StorageSearchArgs`.
-    let StorageSearchArgs { query, limit } = parse_args(args, "search")?;
+    let StorageSearchArgs {
+        query,
+        limit,
+        offset,
+        sort,
+        mtime_after,
+        mtime_before,
+    } = parse_args(args, "search")?;
     let limit = limit
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(DEFAULT_SEARCH_LIMIT);
+    let options = SearchOptions {
+        offset: offset.and_then(|v| usize::try_from(v).ok()).unwrap_or(0),
+        sort: sort.map(SearchSort::from).unwrap_or_default(),
+        mtime_after,
+        mtime_before,
+    };
     let results = engine
-        .search(&query, limit)
+        .search_with_options(&query, limit, options)
         .map_err(|e| exec_err(format!("search: {e}")))?;
     to_value(&results, "search")
 }

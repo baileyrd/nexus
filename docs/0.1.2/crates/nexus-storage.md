@@ -76,7 +76,7 @@ Temp-fsync-rename with parent-dir fsync for durability (issue #84). Up to 3 retr
 Row types `FileRecord`, `FileMetadata`, `BlockRecord`, `LinkRecord`, `TagResult`, `JsxRecord`, `FileFilter` (`prefix` / `file_type` / `include_deleted`), `RebuildStats`. Functions `insert_file`, `query_files`, `query_blocks`, `query_links`, `query_backlinks`, `query_tags`, `delete_file`, `soft_delete_file`, `file_by_path`, `insert_jsx_components`, `query_jsx_components`.
 
 ### `search.rs` — Tantivy FTS
-`SearchIndex` (fields: path/STORED, block_id/u64-STORED, block_type/STORED, content/TEXT|STORED, mtime/STORED|INDEXED-reserved). `open` (50 MB writer buffer), `open_in_memory` (tests), `add_block`, `commit`, `search` (TopDocs BM25), `clear`. `SearchResult { file_path, block_id, block_type, excerpt, score }`.
+`SearchIndex` (fields: path/STORED, block_id/u64-STORED, block_type/STORED, content/TEXT|STORED, mtime/STORED|INDEXED|FAST). `open` (50 MB writer buffer), `open_in_memory` (tests), `add_block` (takes an mtime — Unix seconds, same clock as `files.modified_at`), `commit`, `search` (shorthand for `search_with_options` with defaults: BM25 relevance, no paging/filter), `search_with_options` (#375 — `SearchOptions { offset, sort: SearchSort::{Relevance,MtimeDesc,MtimeAsc}, mtime_after, mtime_before }`; mtime sort uses `TopDocs::order_by_fast_field` on the now-`FAST` mtime field, the date range is a post-rank filter over a widened candidate window), `clear`. `SearchResult { file_path, block_id, block_type, excerpt, score, mtime }`.
 
 ### `search_scope.rs` — scoped queries
 `parse_scoped_query(input) -> (String, Vec<ScopeFilter>)` strips `tag:`/`path:`/`prop:`/`type:` prefixes. `ScopeFilter`, `PropertyOp`, `CmpOp`. `prop:` supports legacy substring (`prop:KEY:VALUE`) and typed comparisons (`prop:priority>3`, `prop:due<2026-01-01`) against the typed columns. `filter_results` post-filters Tantivy hits via SQLite.
@@ -159,7 +159,7 @@ All handlers are dispatched by `StorageCorePlugin::dispatch` keyed on the numeri
 ### Search / symbols
 | command | id | args | returns | description |
 |---|---|---|---|---|
-| `search` | 7 | `{ query, limit }` | `Vec<SearchResult>` | Scoped BM25 search + SQLite post-filter |
+| `search` | 7 | `{ query, limit?, offset?, sort?, mtime_after?, mtime_before? }` (#375) | `Vec<SearchResult>` (now incl. `mtime`) | Scoped BM25 search + SQLite post-filter; `sort` is `relevance`\|`mtime_desc`\|`mtime_asc` |
 | `query_tags` | 16 | `{ name }` | `Vec<TagResult>` | Tags by name joined to file path |
 | `query_blocks` | 21 | `{ path }` | `Vec<BlockRecord>` | All blocks for a file (by path) |
 | `rebuild_index` | 6 | _none_ | `RebuildStats` | Full SQL rebuild + FTS refresh (coupled) |
@@ -288,7 +288,7 @@ Each file event also fans out to the universal `com.nexus.activity.appended` top
 
 - **Atomic writes:** temp file in `.forge/temp/` → `sync_all` → `rename` → parent-dir `fsync` (Unix). Transient-only retry with exponential back-off; permanent errors bail immediately (issue #84). `.forge/temp/` is swept of >1 h-old files on every `open`.
 - **SQLite topology:** one r2d2 pool of read connections + one dedicated write `Connection` behind a `Mutex`, both opened on the same `index.db` with WAL + `synchronous=NORMAL` + 16 MB cache + foreign keys. Writes go through transactions on the write connection; the pool serves concurrent reads. The write path deletes-then-inserts per file (fts_blocks, canvas, code_symbols, files), and the in-memory graph is only mutated post-commit. Migrations are linear v1→v8, each in its own transaction, tracked in `_schema_version`.
-- **Tantivy:** schema = path/block_id/block_type/content(+TEXT) and a reserved indexed `mtime` field with no reader yet. `add_block` then `commit`. `rebuild_search_index` clears all docs and re-adds every non-deleted block joined from SQLite — `rebuild_index` always calls it so search never points at stale block ids.
+- **Tantivy:** schema = path/block_id/block_type/content(+TEXT) and mtime (`STORED | INDEXED | FAST`, #375 — populated by `add_block`, sortable/filterable by `search_with_options`). `add_block` then `commit`. `rebuild_search_index` clears all docs and re-adds every non-deleted block joined from SQLite (now including `f.modified_at`) — `rebuild_index` always calls it so search never points at stale block ids and mtime backfills on any rebuild, no separate migration needed.
 - **Watcher debouncing & recovery:** `notify-debouncer-mini` with `debounce_ms`; bounded `sync_channel` (1024); overflow drops per-file events and latches `ReconcileRequested`; git-batch detection via `.git/index.lock` presence; symlinks/directories skipped (BL-082).
 - **Knowledge graph:** petgraph `StableGraph`; real nodes plus phantom nodes for unresolved link targets (promoted to real when the file appears). Rebuilt from SQLite on `open` of an existing forge. Backlink/outgoing/neighbour/snapshot/stats queries are all O(graph) in-memory.
 - **Code-symbol index (BL-114):** tree-sitter parse per supported language; per-language AST walkers capture symbols + parent chain + doc comments. Persisted to `code_symbols` (path-keyed, not FK'd to `files`, so it needs its own DELETE in the write/rebuild/delete paths). Parser failures are logged-and-swallowed so a broken file never blocks a save. Fully rebuildable from disk.

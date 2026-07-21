@@ -22,8 +22,13 @@
       "description": "Path to the file containing the matching block.",
       "type": "string"
     },
+    "mtime": {
+      "title": "375 — the block's file mtime, Unix seconds.",
+      "type": "integer",
+      "format": "int64"
+    },
     "score": {
-      "description": "BM25 relevance score.",
+      "description": "BM25 relevance score. `0.0` when the request's `sort` was\n`mtime_desc`/`mtime_asc`.",
       "type": "number",
       "format": "float"
     }
@@ -34,6 +39,7 @@
     "block_id",
     "block_type",
     "excerpt",
-    "score"
+    "score",
+    "mtime"
   ]
 }

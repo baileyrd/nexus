@@ -320,13 +320,25 @@ fn main() {
             ContentCommand::Search {
                 query,
                 limit,
+                offset,
+                sort,
+                mtime_after,
+                mtime_before,
                 semantic,
                 hybrid,
             } => {
                 if semantic || hybrid {
                     commands::content::semantic_search(&mut app, &query, limit, hybrid)
                 } else {
-                    commands::content::search(&mut app, &query, limit)
+                    commands::content::search(
+                        &mut app,
+                        &query,
+                        limit,
+                        offset,
+                        &sort,
+                        mtime_after,
+                        mtime_before,
+                    )
                 }
             }
             ContentCommand::Tasks {
@@ -1080,6 +1092,67 @@ mod tests {
             result.is_err(),
             "--semantic and --hybrid should be mutually exclusive"
         );
+    }
+
+    #[test]
+    fn parse_content_search_offset_sort_and_date_filter_default() {
+        let cli = Cli::try_parse_from(["nexus", "content", "search", "q"])
+            .expect("parse content search");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search {
+                    offset,
+                    sort,
+                    mtime_after,
+                    mtime_before,
+                    ..
+                } => {
+                    assert_eq!(offset, 0);
+                    assert_eq!(sort, "relevance");
+                    assert!(mtime_after.is_none());
+                    assert!(mtime_before.is_none());
+                }
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_search_accepts_offset_sort_and_date_filter_flags() {
+        let cli = Cli::try_parse_from([
+            "nexus",
+            "content",
+            "search",
+            "q",
+            "--offset",
+            "10",
+            "--sort",
+            "mtime-desc",
+            "--mtime-after",
+            "1000",
+            "--mtime-before",
+            "2000",
+        ])
+        .expect("parse content search with paging/sort/date flags");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Search {
+                    offset,
+                    sort,
+                    mtime_after,
+                    mtime_before,
+                    ..
+                } => {
+                    assert_eq!(offset, 10);
+                    assert_eq!(sort, "mtime-desc");
+                    assert_eq!(mtime_after, Some(1000));
+                    assert_eq!(mtime_before, Some(2000));
+                }
+                _ => panic!("expected Search"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
     }
 
     #[test]

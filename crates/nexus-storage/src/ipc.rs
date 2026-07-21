@@ -58,6 +58,43 @@ pub struct StorageSearchArgs {
     /// Maximum number of results to return. Omit for the default of 50.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// #375 — skip this many ranked hits before taking the page of
+    /// `limit`, for paging through results. Omit for no offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// #375 — how to order hits. Omit for the default (BM25 relevance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<StorageSearchSort>,
+    /// #375 — only include blocks whose file mtime is on or after this
+    /// Unix-seconds timestamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime_after: Option<i64>,
+    /// #375 — only include blocks whose file mtime is on or before
+    /// this Unix-seconds timestamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime_before: Option<i64>,
+}
+
+/// #375 — sort order for `com.nexus.storage::search`. Mirror of
+/// [`crate::search::SearchSort`].
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageSearchSort {
+    /// BM25 relevance, descending score (the historical/only behavior).
+    #[default]
+    Relevance,
+    /// Most-recently-modified block first.
+    MtimeDesc,
+    /// Least-recently-modified block first.
+    MtimeAsc,
 }
 
 /// One hit in [`StorageSearchResult::results`]. Mirror of
@@ -82,8 +119,11 @@ pub struct StorageSearchHit {
     pub block_type: String,
     /// Excerpt of the matching content (may be empty).
     pub excerpt: String,
-    /// BM25 relevance score.
+    /// BM25 relevance score. `0.0` when the request's `sort` was
+    /// `mtime_desc`/`mtime_asc`.
     pub score: f32,
+    /// #375 — the block's file mtime, Unix seconds.
+    pub mtime: i64,
 }
 
 /// Return type for `com.nexus.storage::search`.
