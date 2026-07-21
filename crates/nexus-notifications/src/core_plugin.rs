@@ -49,8 +49,8 @@ use crate::inbox::{
 };
 use crate::router::{current_min_of_day, Resolution, Router};
 use crate::{
-    Channel, DesktopTransport, DiscordWebhook, Notification, SmtpConfig, SmtpTransport,
-    TelegramBot, Transport, INBOX_APPENDED_TOPIC,
+    Channel, DesktopTransport, DiscordWebhook, GenericWebhook, Notification, SmtpConfig,
+    SmtpTransport, TelegramBot, Transport, INBOX_APPENDED_TOPIC,
 };
 
 /// Reverse-DNS identifier.
@@ -332,6 +332,14 @@ impl NotificationsCorePlugin {
         transports.insert(
             Channel::Email,
             Box::new(SmtpTransport::new(config.channels.email.to_smtp_config())),
+        );
+        transports.insert(
+            Channel::Webhook,
+            Box::new(GenericWebhook::new(
+                config.channels.webhook.url.clone(),
+                config.channels.webhook.headers.clone(),
+                config.channels.webhook.body_template.clone(),
+            )),
         );
         let max_rows = config.inbox.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
         let max_age = config.inbox.max_age_days.unwrap_or(DEFAULT_MAX_AGE_DAYS);

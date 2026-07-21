@@ -5,4 +5,4 @@
  * only order; the wire form (`serde rename_all = "snake_case"`)
  * pins the JSON tag.
  */
-export type Channel = "desktop" | "discord" | "telegram" | "email";
+export type Channel = "desktop" | "discord" | "telegram" | "email" | "webhook";

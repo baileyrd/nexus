@@ -611,10 +611,10 @@ impl ActionDispatcher for KernelActionDispatcher {
             // BL-133 follow-up — `notify` step: route through
             // `com.nexus.notifications::send`. Lets a workflow surface
             // step / run completion through any configured channel
-            // (Desktop / Discord / Telegram) without the author having
-            // to spell out an `ipc` step. Fields:
+            // (Desktop / Discord / Telegram / Email / Webhook) without
+            // the author having to spell out an `ipc` step. Fields:
             //   - `channel` (required): "desktop" | "discord" |
-            //     "telegram"
+            //     "telegram" | "email" | "webhook"
             //   - `message` (required): string
             //   - `title` (optional): string
             // Unknown channel → the notifications plugin's server-side

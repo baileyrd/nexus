@@ -142,6 +142,13 @@ smtp_pass = "${SMTP_PASS}"
 from = "nexus@example.com"
 to = ["alerts@example.com"]
 
+[channels.webhook]                    # C90 / #443 — generic HTTP POST (Slack/ntfy/Gotify/Matrix/any)
+url = "https://hooks.slack.example/services/x"
+body_template = '{"text": "{title}: {message}"}'   # optional — {title}/{message} JSON-escaped on substitution; unset ⇒ {"title","message"}
+
+[channels.webhook.headers]            # optional — extra HTTP headers, e.g. an auth token
+Authorization = "Bearer ${WEBHOOK_TOKEN}"
+
 [inbox]
 max_rows = 1000                       # default — see nexus-notifications/src/inbox.rs:47
 max_age_days = 30                     # default — line 50

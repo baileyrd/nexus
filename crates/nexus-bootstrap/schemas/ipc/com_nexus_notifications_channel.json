@@ -22,6 +22,11 @@
       "description": "Email — SMTP submission via [`SmtpTransport`].",
       "type": "string",
       "const": "email"
+    },
+    {
+      "description": "Generic webhook — HTTP POST to a configured URL. See\n[`GenericWebhook`] (C90 / #443).",
+      "type": "string",
+      "const": "webhook"
     }
   ]
 }
