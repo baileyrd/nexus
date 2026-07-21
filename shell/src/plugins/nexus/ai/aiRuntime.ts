@@ -47,6 +47,11 @@ const HANDLER_SESSION_LIST = 'session_list'
 const HANDLER_SESSION_LOAD = 'session_load'
 const HANDLER_SESSION_SAVE = 'session_save'
 const HANDLER_SESSION_DELETE = 'session_delete'
+// #384 — HANDLER_SESSION_EXPORT = 31 in core_plugin.rs.
+const HANDLER_SESSION_EXPORT = 'session_export'
+
+const STORAGE_PLUGIN_ID = 'com.nexus.storage'
+const EVENT_FILE_OPEN = 'files:open'
 
 const TOPIC_PREFIX = 'com.nexus.ai.stream_'
 const TOPIC_CHUNK = 'com.nexus.ai.stream_chunk'
@@ -843,6 +848,48 @@ export async function deleteSession(api: PluginAPI, id: string): Promise<void> {
     state.newSession()
   }
   await loadSessions(api)
+}
+
+/** Turn a session title (or id fallback) into a safe forge-relative
+ *  filename stem: lowercase, non-alphanumerics collapsed to single
+ *  hyphens, trimmed. Empty after stripping falls back to "session". */
+export function slugForExport(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return slug.length > 0 ? slug : 'session'
+}
+
+/**
+ * Export a persisted session as markdown (#384) and save it as a
+ * first-class forge note under `chat-exports/`. Always writes a fresh
+ * file — a chat export is a one-off snapshot, not something callers
+ * expect to keep appending to — then opens it in the editor via the
+ * same `files:open` event RAG source chips already use.
+ */
+export async function exportSessionAsNote(api: PluginAPI, id: string): Promise<void> {
+  try {
+    const result = await api.kernel.invoke<{ markdown: string }>(
+      AI_PLUGIN_ID,
+      HANDLER_SESSION_EXPORT,
+      { id },
+    )
+    const meta = useAiStore.getState().sessions.find((s) => s.id === id)
+    const slug = slugForExport(meta?.title?.trim() || id)
+    const relpath = `chat-exports/${slug}.md`
+    const bytes = Array.from(new TextEncoder().encode(result.markdown))
+    await api.kernel.invoke(STORAGE_PLUGIN_ID, 'write_file', { path: relpath, bytes })
+    api.events.emit(EVENT_FILE_OPEN, { relpath, name: relpath.split('/').pop() })
+    api.notifications.show({ type: 'success', message: `Exported to ${relpath}` })
+  } catch (err) {
+
+    clientLogger.warn('[nexus.ai] exportSessionAsNote failed', err)
+    api.notifications.show({
+      type: 'error',
+      message: 'Failed to export chat session as a note.',
+    })
+  }
 }
 
 /**

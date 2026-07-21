@@ -15,7 +15,7 @@
 | `com.nexus.storage` | 80 |
 | `com.nexus.git` | 45 |
 | `com.nexus.terminal` | 34 |
-| `com.nexus.ai` | 30 |
+| `com.nexus.ai` | 31 |
 | `com.nexus.agent` | 28 |
 | `com.nexus.memory` | 22 |
 | `com.nexus.dap` | 21 |
@@ -36,7 +36,7 @@
 | `com.nexus.audio` | 3 |
 | `com.nexus.formats` | 3 |
 | `com.nexus.linkpreview` | 1 |
-| **Total** | **395** |
+| **Total** | **396** |
 
 `.v<N>` aliases (per ADR 0021) are not listed separately — the matrix applier auto-mirrors a row's classification onto every alias.
 
@@ -107,7 +107,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.ai (30)
+## com.nexus.ai (31)
 
 ### Generation (gated by `ai.chat`)
 
@@ -122,7 +122,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | Command | Caps | Note |
 |---------|------|------|
 | `index_file` / `index_trigger` | `ai.index` | RAG index daemon |
-| `session_load` / `session_list` | `ai.session.read` | — |
+| `session_load` / `session_list` / `session_export` | `ai.session.read` | `session_export` (#384) renders a session as markdown, no disk write |
 | `session_save` / `session_delete` | `ai.session.write` | — |
 | `set_config` | `ai.config.write` | hot-swap provider creds — same risk surface as `process.spawn` |
 | `activity_clear` | `ai.activity.write` | — |
