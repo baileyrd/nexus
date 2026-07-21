@@ -27,7 +27,7 @@ pub(super) fn register(
                 &with_v1_aliases(nexus_comments::core_plugin::IPC_HANDLERS),
             ),
             forge_root,
-            Box::new(CommentsCorePlugin::new(forge_root)),
+            Box::new(CommentsCorePlugin::new(forge_root, Arc::clone(event_bus))),
         )
         .or_lifecycle_skip(event_bus, "com.nexus.comments")?;
     Ok(())

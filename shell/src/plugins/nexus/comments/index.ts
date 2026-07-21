@@ -42,6 +42,24 @@ function isCommentableRelpath(relpath: string): boolean {
   return lower.endsWith('.md') || lower.endsWith('.markdown')
 }
 
+/** C60 (#413) — decide whether a `com.nexus.comments.*` bus event
+ *  (published by every mutating IPC handler, own-window or from a
+ *  collab peer / popout / other IPC writer) should trigger a reload of
+ *  the currently-displayed thread list. Only true when the event's
+ *  `file_path` matches the active tab — an event for a file open in
+ *  another window shouldn't switch what this pane displays. Exported
+ *  as a pure function so the matching logic is unit-testable without
+ *  a kernel bridge. */
+export function commentsEventTargetsActiveFile(
+  payload: unknown,
+  activeRelpath: string | null,
+): boolean {
+  if (!activeRelpath) return false
+  if (!payload || typeof payload !== 'object') return false
+  const filePath = (payload as { file_path?: unknown }).file_path
+  return typeof filePath === 'string' && filePath === activeRelpath
+}
+
 export const commentsPlugin: Plugin = {
   manifest: {
     id: 'nexus.comments',
@@ -148,6 +166,30 @@ export const commentsPlugin: Plugin = {
       const initial = useEditorStore.getState().activeRelpath
       if (initial) void load(initial)
     })
+
+    // C60 (#413) — nexus-comments now publishes `com.nexus.comments.*`
+    // on every mutation. Subscribe so collab peers, popout windows, and
+    // any other IPC-only writer refresh this pane live instead of only
+    // on the next same-window `nexus.comments:reload` emit or full
+    // reload. PluginRegistry sweeps the `api.kernel.on` disposer on
+    // unload, same as activityTimeline — no manual teardown needed.
+    void (async () => {
+      try {
+        if (!(await api.kernel.available())) return
+        await api.kernel.on<{ file_path?: string }>(
+          'com.nexus.comments.',
+          (_topic, payload) => {
+            const active = useEditorStore.getState().activeRelpath
+            if (commentsEventTargetsActiveFile(payload, active)) {
+              void load(active)
+            }
+          },
+        )
+      } catch {
+        // Best-effort: same-window IPC + the local reload event still
+        // cover the common case if the bus subscribe fails.
+      }
+    })()
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       currentRequestId++

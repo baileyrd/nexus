@@ -21,7 +21,9 @@
 //! Ids are append-only.
 
 use std::path::Path;
+use std::sync::Arc;
 
+use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -67,14 +69,16 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
 /// Stateless wrapper — every dispatch hits the JSON sidecar fresh.
 pub struct CommentsCorePlugin {
     store: CommentStore,
+    event_bus: Arc<EventBus>,
 }
 
 impl CommentsCorePlugin {
     /// Construct a plugin rooted at the given forge directory.
     #[must_use]
-    pub fn new(forge_root: &Path) -> Self {
+    pub fn new(forge_root: &Path, event_bus: Arc<EventBus>) -> Self {
         Self {
             store: CommentStore::new(forge_root),
+            event_bus,
         }
     }
 }
@@ -85,7 +89,7 @@ impl CorePlugin for CommentsCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        match handler_id {
+        let result = match handler_id {
             HANDLER_LIST => dispatch_list(&self.store, args),
             HANDLER_CREATE_THREAD => dispatch_create_thread(&self.store, args),
             HANDLER_ADD_REPLY => dispatch_add_reply(&self.store, args),
@@ -93,8 +97,62 @@ impl CorePlugin for CommentsCorePlugin {
             HANDLER_DELETE_THREAD => dispatch_delete_thread(&self.store, args),
             HANDLER_DELETE_COMMENT => dispatch_delete_comment(&self.store, args),
             HANDLER_EDIT_COMMENT => dispatch_edit_comment(&self.store, args),
-            other => Err(exec_err(format!("unknown handler id {other}"))),
+            other => return Err(exec_err(format!("unknown handler id {other}"))),
+        };
+        // C60 / #413 — publish a bus event on every successful mutation so
+        // collab peers, popout windows, and any other IPC-only writer see
+        // thread changes live instead of only after the next git sync.
+        // The payload is just the request args (already carries file_path
+        // and, for everything but create_thread, thread_id) — cheap and
+        // sufficient for a subscriber to know what to reload.
+        if result.is_ok() {
+            if let Some(topic) = mutation_topic(handler_id) {
+                publish_comments_event(&self.event_bus, topic, args.clone());
+            }
         }
+        result
+    }
+}
+
+/// `com.nexus.comments.*` topic published after `create_thread`.
+pub const TOPIC_THREAD_CREATED: &str = "com.nexus.comments.thread_created";
+/// `com.nexus.comments.*` topic published after `add_reply`.
+pub const TOPIC_REPLY_ADDED: &str = "com.nexus.comments.reply_added";
+/// `com.nexus.comments.*` topic published after `set_resolved`.
+pub const TOPIC_THREAD_RESOLVED: &str = "com.nexus.comments.thread_resolved";
+/// `com.nexus.comments.*` topic published after `delete_thread`.
+pub const TOPIC_THREAD_DELETED: &str = "com.nexus.comments.thread_deleted";
+/// `com.nexus.comments.*` topic published after `delete_comment`.
+pub const TOPIC_COMMENT_DELETED: &str = "com.nexus.comments.comment_deleted";
+/// `com.nexus.comments.*` topic published after `edit_comment`.
+pub const TOPIC_COMMENT_EDITED: &str = "com.nexus.comments.comment_edited";
+
+/// Map a mutating handler id to its bus topic. `None` for `list` (a pure
+/// read) and any unknown id.
+fn mutation_topic(handler_id: u32) -> Option<&'static str> {
+    match handler_id {
+        HANDLER_CREATE_THREAD => Some(TOPIC_THREAD_CREATED),
+        HANDLER_ADD_REPLY => Some(TOPIC_REPLY_ADDED),
+        HANDLER_SET_RESOLVED => Some(TOPIC_THREAD_RESOLVED),
+        HANDLER_DELETE_THREAD => Some(TOPIC_THREAD_DELETED),
+        HANDLER_DELETE_COMMENT => Some(TOPIC_COMMENT_DELETED),
+        HANDLER_EDIT_COMMENT => Some(TOPIC_COMMENT_EDITED),
+        _ => None,
+    }
+}
+
+/// Publish a `com.nexus.comments.*` event, logging at warn if the bus
+/// rejects it. A dropped publish means live cross-window/peer sync
+/// misses this mutation until the next full reload — worth a log line,
+/// not worth failing the IPC call that already committed to disk.
+fn publish_comments_event(bus: &EventBus, type_id: &str, payload: serde_json::Value) {
+    if let Err(err) = bus.publish_plugin(PLUGIN_ID, type_id, payload) {
+        tracing::warn!(
+            plugin_id = PLUGIN_ID,
+            event_type = type_id,
+            %err,
+            "comments event dropped — bus publish failed",
+        );
     }
 }
 
@@ -368,7 +426,7 @@ mod tests {
 
     fn plugin() -> (TempDir, CommentsCorePlugin) {
         let dir = TempDir::new().unwrap();
-        let p = CommentsCorePlugin::new(dir.path());
+        let p = CommentsCorePlugin::new(dir.path(), Arc::new(EventBus::new(16)));
         (dir, p)
     }
 
@@ -519,5 +577,109 @@ mod tests {
             .dispatch(HANDLER_LIST, &json!({"file_path": "/etc/passwd"}))
             .unwrap_err();
         assert!(err.to_string().contains("invalid file path"));
+    }
+
+    // ── C60 / #413 — bus event publication ─────────────────────────────
+
+    fn plugin_with_bus() -> (TempDir, CommentsCorePlugin, Arc<EventBus>) {
+        let dir = TempDir::new().unwrap();
+        let bus = Arc::new(EventBus::new(16));
+        let p = CommentsCorePlugin::new(dir.path(), Arc::clone(&bus));
+        (dir, p, bus)
+    }
+
+    #[tokio::test]
+    async fn create_thread_publishes_bus_event() {
+        let (_d, mut p, bus) = plugin_with_bus();
+        let mut sub = bus.subscribe(nexus_kernel::EventFilter::CustomPrefix(
+            "com.nexus.comments.".to_string(),
+        ));
+
+        p.dispatch(
+            HANDLER_CREATE_THREAD,
+            &json!({"file_path": "foo.md", "block_id": Uuid::new_v4(), "body": "hi"}),
+        )
+        .unwrap();
+
+        let evt = sub.recv().await.unwrap();
+        match &evt.event {
+            nexus_kernel::NexusEvent::Custom { type_id, payload, .. } => {
+                assert_eq!(type_id, TOPIC_THREAD_CREATED);
+                assert_eq!(payload["file_path"].as_str().unwrap(), "foo.md");
+            }
+            other => panic!("expected a Custom event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_does_not_publish_an_event() {
+        let (_d, mut p, bus) = plugin_with_bus();
+        let mut sub = bus.subscribe(nexus_kernel::EventFilter::CustomPrefix(
+            "com.nexus.comments.".to_string(),
+        ));
+
+        p.dispatch(HANDLER_LIST, &json!({"file_path": "foo.md"}))
+            .unwrap();
+        // Publish a sentinel mutation so the subscriber has something
+        // to receive; if `list` had (incorrectly) published first, this
+        // would be the *second* message and the assertion below would
+        // fail on `type_id`.
+        p.dispatch(
+            HANDLER_CREATE_THREAD,
+            &json!({"file_path": "foo.md", "block_id": Uuid::new_v4(), "body": "hi"}),
+        )
+        .unwrap();
+
+        let evt = sub.recv().await.unwrap();
+        match &evt.event {
+            nexus_kernel::NexusEvent::Custom { type_id, .. } => {
+                assert_eq!(type_id, TOPIC_THREAD_CREATED);
+            }
+            other => panic!("expected a Custom event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_mutation_does_not_publish_an_event() {
+        let (_d, mut p, bus) = plugin_with_bus();
+        let mut sub = bus.subscribe(nexus_kernel::EventFilter::CustomPrefix(
+            "com.nexus.comments.".to_string(),
+        ));
+
+        // Nonexistent thread — the store call errors, so no event should
+        // fire despite HANDLER_SET_RESOLVED being a mutation handler.
+        let err = p
+            .dispatch(
+                HANDLER_SET_RESOLVED,
+                &json!({"file_path": "foo.md", "thread_id": Uuid::new_v4(), "resolved": true}),
+            )
+            .unwrap_err();
+        assert!(!err.to_string().is_empty());
+
+        p.dispatch(
+            HANDLER_CREATE_THREAD,
+            &json!({"file_path": "foo.md", "block_id": Uuid::new_v4(), "body": "hi"}),
+        )
+        .unwrap();
+
+        let evt = sub.recv().await.unwrap();
+        match &evt.event {
+            nexus_kernel::NexusEvent::Custom { type_id, .. } => {
+                assert_eq!(type_id, TOPIC_THREAD_CREATED);
+            }
+            other => panic!("expected a Custom event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mutation_topic_covers_every_mutating_handler_and_excludes_list() {
+        assert_eq!(mutation_topic(HANDLER_LIST), None);
+        assert_eq!(mutation_topic(HANDLER_CREATE_THREAD), Some(TOPIC_THREAD_CREATED));
+        assert_eq!(mutation_topic(HANDLER_ADD_REPLY), Some(TOPIC_REPLY_ADDED));
+        assert_eq!(mutation_topic(HANDLER_SET_RESOLVED), Some(TOPIC_THREAD_RESOLVED));
+        assert_eq!(mutation_topic(HANDLER_DELETE_THREAD), Some(TOPIC_THREAD_DELETED));
+        assert_eq!(mutation_topic(HANDLER_DELETE_COMMENT), Some(TOPIC_COMMENT_DELETED));
+        assert_eq!(mutation_topic(HANDLER_EDIT_COMMENT), Some(TOPIC_COMMENT_EDITED));
+        assert_eq!(mutation_topic(99), None);
     }
 }

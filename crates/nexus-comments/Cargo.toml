@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Nexus side-margin comments subsystem (BL-050): persistent threads anchored to stable block ids"
 
 [dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,3 +27,4 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }

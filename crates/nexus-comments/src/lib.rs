@@ -12,10 +12,10 @@
 //! `block_id` (Uuid) values that the editor stamps lazily into the
 //! markdown source via `<!-- ^<uuid> -->` markers.
 //!
-//! This crate is intentionally storage-only — no UI, no event
-//! publication. The shell can subscribe to file-watcher events on
-//! `.forge/comments/` if it wants live cross-window sync; the kernel
-//! IPC surface is enough for the foundation.
+//! This crate is intentionally storage-only — no UI. Mutations do
+//! publish `com.nexus.comments.*` events on the kernel bus (C60 /
+//! #413) so collab peers, popout windows, and any other IPC-only
+//! writer can react to thread changes without polling.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]

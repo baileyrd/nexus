@@ -44,7 +44,7 @@ use std::time::Duration;
 
 use nexus_collab::{
     parse_ws_url, ConnectParams, ReconnectConfig, ReconnectingClient, COLLAB_TOPIC_PREFIX,
-    OPS_TOPIC_PREFIX,
+    COMMENTS_TOPIC_PREFIX, OPS_TOPIC_PREFIX,
 };
 use nexus_kernel::{EventBus, EventFilter};
 use serde::Deserialize;
@@ -204,6 +204,8 @@ pub fn start_if_enabled(forge_root: &Path, bus: Arc<EventBus>) -> Option<JoinHan
             vec![
                 EventFilter::CustomPrefix(OPS_TOPIC_PREFIX.to_string()),
                 EventFilter::CustomPrefix(COLLAB_TOPIC_PREFIX.to_string()),
+                // C60 / #413 — forward comment thread mutations to peers.
+                EventFilter::CustomPrefix(COMMENTS_TOPIC_PREFIX.to_string()),
             ],
             None, // site-based dedup wiring lands when CrdtPublisher::site() is plumbed through
             reconnect_cfg,
