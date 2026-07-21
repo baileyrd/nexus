@@ -67,6 +67,11 @@ pub const COLLAB_BRIDGE_PLUGIN_ID: &str = "com.nexus.collab.bridge";
 /// nexus-crdt dep (which transitively pulls nexus-editor).
 pub const OPS_TOPIC_PREFIX: &str = "com.nexus.editor.ops.";
 
+/// C60 / #413 — prefix matching `com.nexus.comments.*` mutation events
+/// so comment thread changes reach collab peers live, the same as
+/// editor ops and presence already do.
+pub const COMMENTS_TOPIC_PREFIX: &str = "com.nexus.comments.";
+
 /// Maximum WebSocket frame size accepted by client connections. Match
 /// the server-side cap so a bad relay can't OOM the client.
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
