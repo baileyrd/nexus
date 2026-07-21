@@ -197,6 +197,11 @@ pub struct SearchState {
     pub selected: usize,
     /// Cursor position inside `query`.
     pub cursor_pos: usize,
+    /// C78 (#431) — when true, `Enter` runs `com.nexus.ai::semantic_search`
+    /// (embedding-driven, RRF-fused with FTS) instead of lexical search.
+    /// Toggled with `Tab` inside the overlay; not reset by [`Self::clear`]
+    /// so the chosen mode persists across searches in a session.
+    pub semantic: bool,
 }
 
 impl SearchState {
@@ -207,6 +212,7 @@ impl SearchState {
             results: Vec::new(),
             selected: 0,
             cursor_pos: 0,
+            semantic: false,
         }
     }
 
