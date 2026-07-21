@@ -267,6 +267,13 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/quickSwitcher').then(m => m.quickSwitcherPlugin),
   },
   {
+    id: 'nexus.deepLinks', name: 'Deep Links',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    dependsOn: ['com.nexus.storage', 'nexus.search'],
+    description: 'Handles nexus://open, nexus://search, and nexus://new deep links.',
+    load: () => import('./nexus/deepLinks').then(m => m.deepLinksPlugin),
+  },
+  {
     id: 'nexus.confirm', name: 'Confirm',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Generic confirm / prompt modal exposed to plugins via api.ui.confirm.',
