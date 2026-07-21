@@ -19,6 +19,10 @@ export interface CodeMirrorHostProps {
   wordWrap?: boolean
   /** Tab width in columns (CM6 `tabSize` facet). Defaults to `4`. */
   tabSize?: number
+  /** #357: enable the webview's native spellchecker. Defaults to `true`. */
+  spellcheck?: boolean
+  /** BCP-47 language tag hinting the spellchecker's dictionary. Defaults to `en-US`. */
+  spellcheckLanguage?: string
   /**
    * Extra CM extensions appended after the baseline. The Phase 5
    * transaction bridge threads through here — the host stays generic
@@ -88,6 +92,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
       lineNumbers = false,
       wordWrap = true,
       tabSize = 4,
+      spellcheck = true,
+      spellcheckLanguage = 'en-US',
       buildExtensions,
       kernelUndo,
       keybindings,
@@ -141,6 +147,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
               lineNumbers,
               wordWrap,
               tabSize,
+              spellcheck,
+              spellcheckLanguage,
               kernelUndo: kernelUndoRef.current,
               keybindings,
               vim,
@@ -192,6 +200,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
               lineNumbers,
               wordWrap,
               tabSize,
+              spellcheck,
+              spellcheckLanguage,
               kernelUndo: kernelUndoRef.current,
               keybindings,
               vim,
@@ -200,7 +210,7 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
         ),
       })
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [lineNumbers, wordWrap, tabSize])
+    }, [lineNumbers, wordWrap, tabSize, spellcheck, spellcheckLanguage])
 
     useEffect(() => {
       const view = viewRef.current
