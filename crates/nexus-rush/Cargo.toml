@@ -26,3 +26,10 @@ rustyline = { workspace = true }
 # raw libc bindings are the most stable surface for it.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+# rustils' JobControlTerminal::give_terminal (tcsetpgrp) replaces the raw
+# libc call on Linux specifically — rustils has no macOS/BSD backend, so
+# non-Linux Unix targets keep the libc fallback above (see job.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+platform = { workspace = true }
+platform-linux = { workspace = true }
