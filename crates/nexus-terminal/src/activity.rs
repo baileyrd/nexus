@@ -57,6 +57,17 @@ pub(crate) fn build_activity_entry(
             entry.prompt = format!("session {id} killed (OOM): rss={rss_bytes} limit={limit_mb}MB");
             entry.error = Some(format!("memory limit exceeded ({limit_mb}MB)"));
         }
+        // #409 — warning-only: the process keeps running, so this is
+        // `Ok` rather than `Error` (contrast the hard-kill arm above).
+        TerminalEvent::SoftLimitExceeded {
+            id,
+            rss_bytes,
+            limit_mb,
+        } => {
+            entry.outcome = ActivityOutcome::Ok;
+            entry.prompt =
+                format!("session {id} approaching memory limit: rss={rss_bytes} limit={limit_mb}MB");
+        }
         // Streaming / internal variants don't reach the activity log.
         // A rename is a UI-label tweak, not a session-boundary event, so
         // it's intentionally excluded here too — it still flows on the
@@ -71,4 +82,44 @@ pub(crate) fn build_activity_entry(
         | TerminalEvent::CommandFinished { .. } => return None,
     }
     Some(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::activity::ActivityOutcome;
+
+    #[test]
+    fn soft_limit_exceeded_is_ok_outcome_with_no_error_field() {
+        let entry = build_activity_entry(&TerminalEvent::SoftLimitExceeded {
+            id: "s1".to_string(),
+            rss_bytes: 260_000_000,
+            limit_mb: 250,
+        })
+        .expect("SoftLimitExceeded must produce an activity entry");
+        assert_eq!(entry.outcome, ActivityOutcome::Ok);
+        assert!(entry.error.is_none());
+        assert!(entry.prompt.contains("s1"));
+        assert!(entry.prompt.contains("260000000"));
+        assert!(entry.prompt.contains("250"));
+    }
+
+    #[test]
+    fn hard_limit_exceeded_is_error_outcome_with_error_field() {
+        // #409 — regression: this arm previously never ran in
+        // production because the poller published MemoryLimitExceeded
+        // directly on the bus instead of through
+        // `publish_lifecycle_event` (the only caller of this
+        // function). Locking the arm's own behavior in here so a
+        // future refactor can't silently drop it again.
+        let entry = build_activity_entry(&TerminalEvent::MemoryLimitExceeded {
+            id: "s1".to_string(),
+            rss_bytes: 600_000_000,
+            limit_mb: 500,
+        })
+        .expect("MemoryLimitExceeded must produce an activity entry");
+        assert_eq!(entry.outcome, ActivityOutcome::Error);
+        assert!(entry.error.is_some());
+        assert!(entry.prompt.contains("killed (OOM)"));
+    }
 }

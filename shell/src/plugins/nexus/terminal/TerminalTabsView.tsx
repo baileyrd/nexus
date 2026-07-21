@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
-import { useTerminalStore } from './terminalStore'
+import { useTerminalStore, formatBytesForChip } from './terminalStore'
 import { TerminalInstance } from './TerminalInstance'
 import './terminal.css'
 
@@ -37,6 +37,7 @@ export function TerminalTabsView({
   const tabs = useTerminalStore((s) => s.tabs)
   const activeSessionId = useTerminalStore((s) => s.activeSessionId)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
+  const rssBytesBySession = useTerminalStore((s) => s.rssBytesBySession)
 
   // Inline-rename state: the id of the tab being edited (or null) plus
   // the working draft. Double-clicking a tab title enters edit mode;
@@ -111,6 +112,17 @@ export function TerminalTabsView({
               ) : (
                 <span className="nexus-terminal-tab-title">{tab.title}</span>
               )}
+              {/* #409 — memory chip: last known RSS from the periodic
+                  list_sessions poll / a lifecycle event, whichever is
+                  freshest. Absent until the first sample lands. */}
+              {rssBytesBySession[tab.id] !== undefined ? (
+                <span
+                  className="nexus-terminal-tab-rss"
+                  title="Approximate memory usage"
+                >
+                  {formatBytesForChip(rssBytesBySession[tab.id])}
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="nexus-terminal-tab-close"

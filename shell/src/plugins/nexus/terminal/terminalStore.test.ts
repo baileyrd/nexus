@@ -20,6 +20,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   useTerminalStore,
+  formatBytesForChip,
   type OutputStreamPayload,
   type RecoverFn,
 } from './terminalStore.ts'
@@ -375,4 +376,43 @@ test('api.kernel.on prefix forwarder: routes per-session chunks into the store',
   // Unsubscribe is symmetric.
   unsub()
   assert.equal(installed, null)
+})
+
+// ── #409 — RSS memory chip ─────────────────────────────────────────────────
+
+test('formatBytesForChip renders whole MB below 1 GiB', () => {
+  assert.equal(formatBytesForChip(1024 * 1024), '1 MB')
+  assert.equal(formatBytesForChip(260 * 1024 * 1024), '260 MB')
+})
+
+test('formatBytesForChip renders one-decimal GB at and above 1 GiB', () => {
+  assert.equal(formatBytesForChip(1024 * 1024 * 1024), '1.0 GB')
+  assert.equal(formatBytesForChip(1536 * 1024 * 1024), '1.5 GB')
+})
+
+test('setRssBytes records and updates a session\'s RSS', () => {
+  reset()
+  useTerminalStore.getState().setRssBytes('s1', 100)
+  assert.equal(useTerminalStore.getState().rssBytesBySession.s1, 100)
+  useTerminalStore.getState().setRssBytes('s1', 200)
+  assert.equal(useTerminalStore.getState().rssBytesBySession.s1, 200)
+})
+
+test('removeTab clears the removed session\'s RSS entry only', () => {
+  reset()
+  useTerminalStore.getState().addTab({ id: 's1', title: 'one' })
+  useTerminalStore.getState().addTab({ id: 's2', title: 'two' })
+  useTerminalStore.getState().setRssBytes('s1', 100)
+  useTerminalStore.getState().setRssBytes('s2', 200)
+  useTerminalStore.getState().removeTab('s1')
+  const rss = useTerminalStore.getState().rssBytesBySession
+  assert.equal(rss.s1, undefined)
+  assert.equal(rss.s2, 200)
+})
+
+test('resetStreams clears all RSS entries', () => {
+  reset()
+  useTerminalStore.getState().setRssBytes('s1', 100)
+  useTerminalStore.getState().resetStreams()
+  assert.deepEqual(useTerminalStore.getState().rssBytesBySession, {})
 })
