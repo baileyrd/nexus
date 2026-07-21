@@ -8,6 +8,8 @@ import {
   type PluginRow,
 } from './pluginsMgmtStore'
 import { getApi } from './pluginsMgmtRuntime'
+import { useAuditLogStore } from './auditLogStore'
+import { AuditLogModal } from './AuditLogModal'
 import {
   CAPABILITY_INFO,
   bucketByRisk,
@@ -296,6 +298,11 @@ export function PluginsMgmtInline({
           {rescanning ? 'Rescanning…' : 'Rescan'}
         </button>
       </div>
+
+      {/* C84 (#437) — fixed-position overlay, rendered regardless of
+          mode='modal'|'inline' so "Audit log" works from both the
+          Plugins modal and the Settings → Plugins inline page. */}
+      <AuditLogModal />
     </div>
   )
 }
@@ -446,6 +453,7 @@ function BuiltInRow({ row }: BuiltInRowProps) {
             </div>
           )}
         </div>
+        <AuditLogButton pluginId={row.id} />
         <ConfigureButton pluginId={row.id} visible={row.canConfigure} />
         <StateBadge state={live.state} error={live.error} />
         <div
@@ -590,6 +598,7 @@ function CommunityRow({ row }: CommunityRowProps) {
             </div>
           )}
         </div>
+        <AuditLogButton pluginId={row.id} />
         <ConfigureButton pluginId={row.id} visible={row.canConfigure} />
         {showReview && (
           <button
@@ -777,6 +786,30 @@ function ConfigureButton({
       }}
     >
       Configure
+    </button>
+  )
+}
+
+/** C84 (#437) — opens the per-plugin audit/denial timeline overlay. */
+function AuditLogButton({ pluginId }: { pluginId: string }) {
+  const open = useAuditLogStore((s) => s.open)
+  return (
+    <button
+      type="button"
+      onClick={() => open(pluginId)}
+      title="View this plugin's audit log (capability checks, denials, lifecycle events)"
+      style={{
+        padding: '2px 8px',
+        background: 'transparent',
+        color: 'var(--text-faint)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
+        fontFamily: 'var(--font-interface)',
+        fontSize: 11,
+        cursor: 'pointer',
+      }}
+    >
+      Audit log
     </button>
   )
 }
