@@ -350,8 +350,8 @@ fn main() {
             ContentCommand::Links { path } => commands::content::links(&mut app, &path),
             ContentCommand::Backlinks { path } => commands::content::backlinks(&mut app, &path),
             ContentCommand::Daily { date } => commands::content::daily(&mut app, date.as_deref()),
-            ContentCommand::Export { path, output } => {
-                commands::content::export(&mut app, &path, output.as_deref())
+            ContentCommand::Export { path, output, format } => {
+                commands::content::export(&mut app, &path, output.as_deref(), &format)
             }
         },
 
@@ -1050,6 +1050,41 @@ mod tests {
             Commands::Content(args) => match args.command {
                 ContentCommand::List { prefix } => assert_eq!(prefix.as_deref(), Some("notes/")),
                 _ => panic!("expected List"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_export_defaults_format_to_html() {
+        let cli = Cli::try_parse_from(["nexus", "content", "export", "note.md"])
+            .expect("parse content export");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Export { path, output, format } => {
+                    assert_eq!(path, "note.md");
+                    assert!(output.is_none());
+                    assert_eq!(format, "html");
+                }
+                _ => panic!("expected Export"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_export_accepts_format_and_output_flags() {
+        let cli = Cli::try_parse_from([
+            "nexus", "content", "export", "note.md", "--format", "docx", "--output", "note.docx",
+        ])
+        .expect("parse content export --format --output");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Export { output, format, .. } => {
+                    assert_eq!(output.as_deref(), Some("note.docx"));
+                    assert_eq!(format, "docx");
+                }
+                _ => panic!("expected Export"),
             },
             _ => panic!("expected Content subcommand"),
         }

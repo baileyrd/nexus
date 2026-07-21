@@ -12,6 +12,13 @@ use crate::output::{print_list, print_success, OutputFormat};
 /// C78 (#431) — `--semantic`/`--hybrid` reach `com.nexus.ai::semantic_search`
 /// directly; no `nexus_bootstrap::storage` wrapper exists for `com.nexus.ai`.
 const AI_PLUGIN: &str = plugin_ids::AI;
+/// C69 (#422) — `--format docx|odt` reaches `com.nexus.formats::export_pandoc`
+/// directly; no `nexus_bootstrap` wrapper exists for `com.nexus.formats`
+/// (the existing `--format html` path instead calls
+/// `nexus_bootstrap::export_to_html` as a direct library function —
+/// pre-existing, out of scope to change here; pandoc export has no such
+/// pure-library option since it shells out).
+const FORMATS_PLUGIN: &str = plugin_ids::FORMATS;
 
 /// Create a new content node at `path`.
 pub fn create(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> Result<()> {
@@ -490,8 +497,24 @@ pub fn backlinks(app: &mut App, path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Export a note to HTML.
-pub fn export(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
+/// Validate `--format`, returning it back unchanged on success. Pure, so
+/// the invalid-value path is unit-testable without an `App`/runtime.
+fn parse_export_format(format: &str) -> Result<&str> {
+    match format {
+        "html" | "docx" | "odt" => Ok(format),
+        other => anyhow::bail!("unknown --format '{other}' (expected 'html', 'docx', or 'odt')"),
+    }
+}
+
+/// Export a note to HTML, Word (.docx), or OpenDocument Text (.odt).
+pub fn export(app: &mut App, path: &str, output: Option<&str>, format: &str) -> Result<()> {
+    match parse_export_format(format)? {
+        "html" => export_html(app, path, output),
+        docx_or_odt => export_pandoc(app, path, output, docx_or_odt),
+    }
+}
+
+fn export_html(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
     let (invoker, rt) = app.invoker()?;
     let bytes = rt
         .block_on(ipc::read_file(&*invoker, path))
@@ -510,6 +533,30 @@ pub fn export(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
     } else {
         print!("{html}");
     }
+    Ok(())
+}
+
+/// docx/odt are binary formats with no sensible stdout representation,
+/// unlike the HTML path's print-to-stdout fallback — `--output` is
+/// required. Pure, so the missing-output path is unit-testable without
+/// an `App`/runtime.
+fn require_output_for_binary_format<'a>(output: Option<&'a str>, format: &str) -> Result<&'a str> {
+    output.ok_or_else(|| {
+        anyhow::anyhow!("--output is required for --format {format} (binary formats can't print to stdout)")
+    })
+}
+
+/// C69 (#422) — pandoc-backed Word/ODT export, routed through
+/// `com.nexus.formats::export_pandoc` via `ipc_call` (unlike the HTML
+/// path above, this can't be a pure library call since it shells out to
+/// `pandoc`).
+fn export_pandoc(app: &mut App, path: &str, output: Option<&str>, format: &str) -> Result<()> {
+    let out_path = require_output_for_binary_format(output, format)?;
+    let (invoker, rt) = app.invoker()?;
+    let args = serde_json::json!({ "source": path, "format": format, "dest": out_path });
+    rt.block_on(invoker.ipc_call(FORMATS_PLUGIN, "export_pandoc", args, IPC_TIMEOUT_LONG))
+        .with_context(|| format!("export_pandoc ipc call failed for '{path}'"))?;
+    println!("Exported to {out_path}");
     Ok(())
 }
 
@@ -555,6 +602,33 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_export_format_accepts_html_docx_and_odt() {
+        assert_eq!(parse_export_format("html").unwrap(), "html");
+        assert_eq!(parse_export_format("docx").unwrap(), "docx");
+        assert_eq!(parse_export_format("odt").unwrap(), "odt");
+    }
+
+    #[test]
+    fn parse_export_format_rejects_unknown_values() {
+        let err = parse_export_format("pdf").unwrap_err();
+        assert!(format!("{err}").contains("unknown --format"));
+    }
+
+    #[test]
+    fn require_output_for_binary_format_passes_through_when_given() {
+        assert_eq!(
+            require_output_for_binary_format(Some("out.docx"), "docx").unwrap(),
+            "out.docx"
+        );
+    }
+
+    #[test]
+    fn require_output_for_binary_format_errors_when_missing() {
+        let err = require_output_for_binary_format(None, "docx").unwrap_err();
+        assert!(format!("{err}").contains("--output is required"));
+    }
 
     #[test]
     fn truncate_excerpt_passes_short_text_through() {
