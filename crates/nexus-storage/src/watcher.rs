@@ -1,7 +1,11 @@
 //! File watcher for the forge storage directory.
 //!
-//! Wraps `notify-debouncer-mini` to emit [`StorageEvent`]s for changes inside
-//! `notes/` and `attachments/` subdirectories of a forge root.
+//! Wraps `notify-debouncer-mini` to emit [`StorageEvent`]s for changes
+//! anywhere under the forge root (C21 / #374) — every other subsystem
+//! (reconcile's full-root scan, the shell file tree, imported vaults)
+//! already treats the forge as an arbitrary-layout tree with user
+//! markdown allowed at the root, not just inside `notes/` and
+//! `attachments/`.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -164,12 +168,25 @@ pub struct Watcher {
 }
 
 impl Watcher {
-    /// Start watching `notes/` and `attachments/` under `forge_root`.
+    /// Start watching `forge_root` recursively.
+    ///
+    /// C21 (#374): previously this only watched `notes/` and
+    /// `attachments/`, so files anywhere else in the forge — e.g. an
+    /// imported vault's top-level `Projects/` folder, or a markdown
+    /// file at the forge root, both of which the documented forge
+    /// layout and `reconcile`'s full-root scan already treat as
+    /// first-class — got no live events at all. `notify` has no
+    /// built-in way to exclude subtrees from a single recursive watch,
+    /// so this watches everything under `forge_root` (including
+    /// `.forge/`, `.git/`, etc.) and relies on the same
+    /// [`should_ignore`] component filter `process_events` already
+    /// applies per-event — exactly mirroring how `reconcile::scan_directory`
+    /// walks the whole root and prunes with the same filter.
     ///
     /// # Errors
     ///
     /// Returns [`StorageError::Watcher`] if the underlying notify watcher
-    /// cannot be created or a directory cannot be watched.
+    /// cannot be created or the root cannot be watched.
     pub fn start(forge_root: &Path, debounce_ms: u64) -> Result<Self, StorageError> {
         let (storage_tx, storage_rx) = mpsc::sync_channel::<StorageEvent>(WATCHER_CHANNEL_BOUND);
         let (raw_tx, raw_rx) = mpsc::channel::<DebounceEventResult>();
@@ -177,16 +194,9 @@ impl Watcher {
         let duration = Duration::from_millis(debounce_ms);
         let mut debouncer = new_debouncer(duration, raw_tx)?;
 
-        // Watch notes/ and attachments/ if they exist.
-        let dirs = ["notes", "attachments"];
-        for dir in &dirs {
-            let dir_path = forge_root.join(dir);
-            if dir_path.exists() {
-                debouncer
-                    .watcher()
-                    .watch(&dir_path, RecursiveMode::Recursive)?;
-            }
-        }
+        debouncer
+            .watcher()
+            .watch(forge_root, RecursiveMode::Recursive)?;
 
         let forge_root_owned = forge_root.to_path_buf();
 
@@ -751,6 +761,116 @@ mod tests {
                 Ok(_) => {}
                 Err(_) => break,
             }
+        }
+    }
+
+    /// C21 (#374) — regression for the bug this issue reports: a file
+    /// written directly at the forge root (no `notes/` prefix at all)
+    /// must fire an event. Pre-fix, `Watcher::start` only registered
+    /// watches on `notes/` and `attachments/`, so this file would
+    /// never have been seen.
+    #[test]
+    fn watcher_detects_file_created_at_forge_root() {
+        use std::time::Duration;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("temp dir");
+        let forge_root = dir.path();
+
+        let watcher = Watcher::start(forge_root, 50).expect("start watcher");
+        std::thread::sleep(Duration::from_millis(100));
+
+        let note_path = forge_root.join("root-note.md");
+        std::fs::write(&note_path, b"# Root note\n").expect("write note");
+
+        let event = watcher
+            .events()
+            .recv_timeout(Duration::from_secs(5))
+            .expect("expected a StorageEvent within 5 seconds");
+
+        match event {
+            StorageEvent::FileModified { path, .. } => {
+                assert_eq!(path, "root-note.md");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    /// C21 (#374) — an arbitrary top-level directory (e.g. an imported
+    /// Obsidian vault's `Projects/`) that isn't `notes/` or
+    /// `attachments/` must also get live events, since it didn't exist
+    /// under the pre-fix hard-coded two-directory watch list.
+    #[test]
+    fn watcher_detects_file_created_in_arbitrary_top_level_dir() {
+        use std::time::Duration;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("temp dir");
+        let forge_root = dir.path();
+        let projects_dir = forge_root.join("Projects");
+        std::fs::create_dir_all(&projects_dir).expect("create Projects dir");
+
+        let watcher = Watcher::start(forge_root, 50).expect("start watcher");
+        std::thread::sleep(Duration::from_millis(100));
+
+        let note_path = projects_dir.join("plan.md");
+        std::fs::write(&note_path, b"# Plan\n").expect("write note");
+
+        let event = watcher
+            .events()
+            .recv_timeout(Duration::from_secs(5))
+            .expect("expected a StorageEvent within 5 seconds");
+
+        match event {
+            StorageEvent::FileModified { path, .. } => {
+                assert!(
+                    path.contains("plan.md"),
+                    "expected path to contain plan.md, got: {path}"
+                );
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    /// C21 (#374) — the recursive watch now covers `.forge/` too (there's
+    /// no way to exclude a subtree from a single notify watch), but
+    /// `should_ignore` must still filter those writes out before they
+    /// ever reach a consumer. Writes a file under `.forge/` and confirms
+    /// only the sentinel event that follows (in the *real* forge tree)
+    /// is ever observed — never one for the ignored path.
+    #[test]
+    fn watcher_ignores_forge_internal_directory_despite_recursive_watch() {
+        use std::time::Duration;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("temp dir");
+        let forge_root = dir.path();
+        let forge_internal = forge_root.join(".forge");
+        std::fs::create_dir_all(&forge_internal).expect("create .forge dir");
+
+        let watcher = Watcher::start(forge_root, 50).expect("start watcher");
+        std::thread::sleep(Duration::from_millis(100));
+
+        std::fs::write(forge_internal.join("index.db"), b"pretend-sqlite")
+            .expect("write .forge file");
+        std::thread::sleep(Duration::from_millis(200));
+
+        // Sentinel: a real, non-ignored file. Its event arriving proves
+        // the watcher is alive and draining; if the `.forge/` write
+        // above had leaked through, it would have arrived first.
+        std::fs::write(forge_root.join("sentinel.md"), b"# Sentinel\n")
+            .expect("write sentinel note");
+
+        let event = watcher
+            .events()
+            .recv_timeout(Duration::from_secs(5))
+            .expect("expected a StorageEvent within 5 seconds");
+
+        match event {
+            StorageEvent::FileModified { path, .. } => {
+                assert_eq!(path, "sentinel.md", "leaked an ignored .forge/ event");
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
     }
 }
