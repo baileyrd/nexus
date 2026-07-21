@@ -898,6 +898,15 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
   // lineNumbers — the host's baseline compartment reconfigures live.
   const wordWrap = useConfigValue('nexus.editor.wordWrap', true) as boolean
   const tabSize = useConfigValue('nexus.editor.tabSize', 4) as number
+  // #357: the Settings panel's spellcheck toggle previously had no
+  // consumer. These are the same `nexus.settings.editor.*` keys the
+  // panel already persists — threaded to CodeMirrorHost the same way
+  // as wordWrap/tabSize above.
+  const spellcheck = useConfigValue('nexus.settings.editor.spellcheck', true) as boolean
+  const spellcheckLanguage = useConfigValue(
+    'nexus.settings.editor.spellcheckLanguages',
+    'en-US',
+  ) as string
   const centredStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -997,6 +1006,8 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           lineNumbers={showLineNumbers}
           wordWrap={wordWrap}
           tabSize={tabSize}
+          spellcheck={spellcheck}
+          spellcheckLanguage={spellcheckLanguage}
           vim={
             keybindings === 'vim'
               ? {
@@ -1337,6 +1348,8 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
         keybindings={keybindings}
         wordWrap={wordWrap}
         tabSize={tabSize}
+        spellcheck={spellcheck}
+        spellcheckLanguage={spellcheckLanguage}
         vim={
           keybindings === 'vim' && runtime
             ? {

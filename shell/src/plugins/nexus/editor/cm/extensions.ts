@@ -61,6 +61,16 @@ export interface BaselineExtensionsOptions {
    * `keybindings === 'emacs'`; ignored otherwise.
    */
   emacs?: EmacsKeymapOptions
+  /**
+   * #357: light up the webview's native spellchecker via CM6's
+   * `contentAttributes` facet. Defaults to `true` — CM6 ships with no
+   * opinion here, but `@codemirror/view`'s `contentDOM` otherwise
+   * inherits no explicit `spellcheck` attribute, and some webviews
+   * default that to off for editable content.
+   */
+  spellcheck?: boolean
+  /** BCP-47 language tag hinting the spellchecker's dictionary. Defaults to `en-US`. */
+  spellcheckLanguage?: string
 }
 
 /** Binding options for the kernel-backed undo/redo keymap. */
@@ -136,6 +146,10 @@ export function baselineExtensions(
     keymap.of([...searchKeymap, ...keys]),
     EditorState.tabSize.of(opts.tabSize ?? 4),
     nexusSyntaxHighlighting,
+    EditorView.contentAttributes.of({
+      spellcheck: opts.spellcheck === false ? 'false' : 'true',
+      lang: opts.spellcheckLanguage ?? 'en-US',
+    }),
   ]
   // Soft-wrap unless the user turned it off — default `true` preserves
   // the prior always-wrapped behaviour.
