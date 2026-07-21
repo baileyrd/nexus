@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 
-import { lspPositionToCmOffset, revealLineInView } from './revealLine.ts'
+import { lspPositionToCmOffset, revealLineInView, revealOffsetInView } from './revealLine.ts'
 
 // ── lspPositionToCmOffset ───────────────────────────────────────────────────
 
@@ -87,4 +87,31 @@ test('revealLineInView: empty buffer at 0,0 still dispatches without throwing', 
   const view = makeView('')
   revealLineInView(view, 0, 0)
   assert.equal(view.state.selection.main.from, 0)
+})
+
+// ── revealOffsetInView (C64 — jump to peer) ─────────────────────────────────
+
+test('revealOffsetInView: places the cursor at the given offset', () => {
+  const view = makeView('alpha\nbeta\ngamma')
+  revealOffsetInView(view, 7)
+  const sel = view.state.selection.main
+  assert.equal(sel.from, 7)
+  assert.equal(sel.to, 7)
+})
+
+test('revealOffsetInView: clamps an overshooting offset to document end', () => {
+  const view = makeView('alpha')
+  revealOffsetInView(view, 999)
+  assert.equal(view.state.selection.main.from, 5)
+})
+
+test('revealOffsetInView: clamps a negative offset to document start', () => {
+  const view = makeView('alpha')
+  revealOffsetInView(view, -5)
+  assert.equal(view.state.selection.main.from, 0)
+})
+
+test('revealOffsetInView: returns true on success', () => {
+  const view = makeView('alpha')
+  assert.equal(revealOffsetInView(view, 2), true)
 })

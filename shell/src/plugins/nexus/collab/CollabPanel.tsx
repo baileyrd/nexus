@@ -268,6 +268,23 @@ function ShareBar({ relay }: { relay: RelayStatus | null }) {
   )
 }
 
+/**
+ * C64 — jump to where a peer is working: opens their file (if not
+ * already the active tab) and scrolls to their caret offset. No-op
+ * when the peer has no cursor (nothing to jump to).
+ */
+function jumpToPeer(cursor: NonNullable<CollabPeer['cursor']>): void {
+  const api = getCollabApi()
+  const name = cursor.relpath.split(/[\\/]/).filter((s) => s.length > 0).pop() ?? cursor.relpath
+  api.events.emit('files:open', { relpath: cursor.relpath, name })
+  if (cursor.offset !== undefined) {
+    api.events.emit('nexus.editor:reveal-offset', {
+      relpath: cursor.relpath,
+      offset: cursor.offset,
+    })
+  }
+}
+
 function PeerRow({ peer }: { peer: CollabPeer }) {
   const cursor = peer.cursor
   const subtitle = cursor
@@ -276,8 +293,25 @@ function PeerRow({ peer }: { peer: CollabPeer }) {
       : cursor.relpath
     : 'not focused'
   const initial = peer.display_name.slice(0, 1).toUpperCase() || '?'
+  const clickable = cursor !== undefined
   return (
-    <li style={ROW}>
+    <li
+      style={clickable ? { ...ROW, cursor: 'pointer' } : ROW}
+      onClick={clickable ? () => jumpToPeer(cursor) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                jumpToPeer(cursor)
+              }
+            }
+          : undefined
+      }
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={clickable ? `Jump to ${peer.display_name}` : undefined}
+    >
       <div style={AVATAR} aria-hidden>{initial}</div>
       <div style={META}>
         <div style={NAME}>{peer.display_name}</div>

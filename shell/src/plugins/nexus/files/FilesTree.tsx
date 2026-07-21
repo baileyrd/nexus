@@ -7,6 +7,8 @@ import { useEditorStore } from '../editor/editorStore'
 import { createDir, createFile, getKernel, loadChildren, renameEntry } from './kernelClient'
 import { StatusDot } from './status/StatusPill'
 import { useFileStatus } from './status/useFileStatus'
+import { useCollabStore } from '../collab/collabStore'
+import { colorForUserId } from '../collab/remoteCursors'
 import { Icon } from '../../../icons'
 import { getFileIcon } from './fileIcon'
 import { getApi } from './runtime'
@@ -875,7 +877,7 @@ function Row({
       <span className={`tree-item-inner ${contentClass}`}>
         <span className="tree-item-inner-text">{entry.name}</span>
       </span>
-      <RowStatusDot entry={entry} />
+      <RowTrailing entry={entry} />
     </button>
   )
 }
@@ -885,9 +887,53 @@ function Row({
 function RowStatusDot({ entry }: { entry: FilesDirEntry }) {
   const status = useFileStatus(entry.relpath, entry.isDir, entry.name, getKernel())
   if (status == null) return null
+  return <StatusDot status={status} />
+}
+
+/** C64 — colored dot per peer currently focused on this file, so
+ *  discovering where a collaborator is working doesn't require
+ *  opening the collab panel and reading a relpath string. Directories
+ *  don't aggregate peers from their contents — only an exact-relpath
+ *  file row lights up. Capped at 4 dots with a "+N" overflow count so
+ *  a busy file doesn't blow out row height. */
+function PresenceDots({ entry }: { entry: FilesDirEntry }) {
+  const peersMap = useCollabStore((s) => s.peers)
+  if (entry.isDir) return null
+  const here = Object.values(peersMap).filter((p) => p.cursor?.relpath === entry.relpath)
+  if (here.length === 0) return null
+  const MAX_DOTS = 4
+  const shown = here.slice(0, MAX_DOTS)
+  const overflow = here.length - shown.length
   return (
-    <span style={{ marginLeft: 'auto', paddingLeft: 6, display: 'inline-flex' }}>
-      <StatusDot status={status} />
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+      {shown.map((p) => (
+        <span
+          key={p.user_id}
+          aria-hidden
+          title={p.display_name}
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            background: colorForUserId(p.user_id),
+            flexShrink: 0,
+          }}
+        />
+      ))}
+      {overflow > 0 ? (
+        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>+{overflow}</span>
+      ) : null}
+    </span>
+  )
+}
+
+/** Trailing edge of a file-tree row: presence dots then the status
+ *  dot, pushed to the right as one group. */
+function RowTrailing({ entry }: { entry: FilesDirEntry }) {
+  return (
+    <span style={{ marginLeft: 'auto', paddingLeft: 6, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <PresenceDots entry={entry} />
+      <RowStatusDot entry={entry} />
     </span>
   )
 }

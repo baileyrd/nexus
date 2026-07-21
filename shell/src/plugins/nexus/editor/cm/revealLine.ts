@@ -55,3 +55,20 @@ export function revealLineInView(
   })
   return true
 }
+
+/**
+ * Place the cursor at a raw CM document offset and scroll it into
+ * view. Used for jump-to-peer (C64) — collab presence carries a CM
+ * offset directly (`crates/nexus-collab/src/presence.rs`), not an
+ * LSP line/character pair, so no conversion is needed here. Clamps
+ * to `[0, doc.length]` the same way `remoteCursors.ts` clamps stale
+ * presence frames.
+ */
+export function revealOffsetInView(view: EditorView, offset: number): boolean {
+  const clamped = Math.min(Math.max(0, offset), view.state.doc.length)
+  view.dispatch({
+    selection: EditorSelection.cursor(clamped),
+    scrollIntoView: true,
+  })
+  return true
+}

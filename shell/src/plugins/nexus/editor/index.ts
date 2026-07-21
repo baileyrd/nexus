@@ -21,7 +21,7 @@ import { useEditorBlameStore } from './blameStore'
 import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
 import { revealBlockInView } from './cm/blockLinkNav'
-import { revealLineInView } from './cm/revealLine'
+import { revealLineInView, revealOffsetInView } from './cm/revealLine'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
 import { DEFAULT_CODE_EXTENSIONS } from './codeMode'
@@ -1990,6 +1990,35 @@ export const editorPlugin: Plugin = {
       setTimeout(() => tryRevealLine(payload.relpath), 80)
       setTimeout(() => tryRevealLine(payload.relpath), 250)
     })
+
+    // C64 — `nexus.editor:reveal-offset` consumer. The collab panel's
+    // jump-to-peer click emits this after `files:open` raises the
+    // destination tab. Mirrors the reveal-line queue/backoff above,
+    // but takes a raw CM offset directly since collab presence
+    // (`crates/nexus-collab/src/presence.rs`) carries one already —
+    // no LSP line/character conversion needed.
+    const pendingOffsetReveals = new Map<string, number>()
+    const tryRevealOffset = (relpath: string) => {
+      const offset = pendingOffsetReveals.get(relpath)
+      if (offset === undefined) return
+      queueMicrotask(() => {
+        const cm = getActiveCmView()
+        if (!cm) return
+        if (useEditorStore.getState().activeRelpath !== relpath) return
+        revealOffsetInView(cm, offset)
+        pendingOffsetReveals.delete(relpath)
+      })
+    }
+    api.events.on<{ relpath: string; offset: number }>(
+      'nexus.editor:reveal-offset',
+      (payload) => {
+        if (!payload?.relpath || typeof payload.offset !== 'number') return
+        pendingOffsetReveals.set(payload.relpath, payload.offset)
+        tryRevealOffset(payload.relpath)
+        setTimeout(() => tryRevealOffset(payload.relpath), 80)
+        setTimeout(() => tryRevealOffset(payload.relpath), 250)
+      },
+    )
 
     // BL-050 Phase 3 — block-handle "Comment" affordance. The bridge
     // resolves the kernel block_id for the CM-block index, stamps it
