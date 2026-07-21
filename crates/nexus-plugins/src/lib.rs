@@ -1075,6 +1075,24 @@ impl PluginManager {
         self.loader.revoke_capability(plugin_id, cap)
     }
 
+    /// Persist an install-time user consent for a HIGH-risk capability on
+    /// the plugin identified by `plugin_id` (C82 #435, pairing this verb
+    /// with the existing [`Self::revoke_capability`]). Takes effect on the
+    /// plugin's next load or hot-reload; non-HIGH-risk capabilities are
+    /// already auto-granted from the manifest and this is a no-op for them.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not
+    /// loaded, or an io-backed error if `granted_caps.json` cannot be
+    /// written.
+    pub fn grant_capability(
+        &mut self,
+        plugin_id: &str,
+        cap: nexus_kernel::Capability,
+    ) -> Result<(), PluginError> {
+        self.loader.grant_capability(plugin_id, cap)
+    }
+
     /// Inject the kernel event bus so that plugins can receive events.
     ///
     /// Must be called before loading plugins with event subscriptions.
