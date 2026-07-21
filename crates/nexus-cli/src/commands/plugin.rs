@@ -264,6 +264,53 @@ fn log_mcp_wire_outcomes(
     }
 }
 
+/// Grant a HIGH-risk capability to `plugin_id` (C82 #435), pairing this
+/// verb with [`revoke`]. Persists to `granted_caps.json`, effective on
+/// the plugin's next load or hot-reload. Prompts for confirmation
+/// unless `yes` is true — HIGH-risk grants are exactly the kind of
+/// unattended-execution risk the shell's capability-consent UI exists
+/// to surface, so a headless grant should not be silent-by-default.
+pub fn grant(app: &mut App, plugin_id: &str, capability: &str, yes: bool) -> Result<()> {
+    let cap = nexus_kernel::Capability::from_str(capability)
+        .map_err(|e| anyhow!("invalid capability '{capability}': {e}"))?;
+    if !cap.is_high_risk() {
+        anyhow::bail!(
+            "'{capability}' is not a HIGH-risk capability — only HIGH-risk \
+             capabilities require an explicit grant; manifest-declared caps \
+             are already auto-granted."
+        );
+    }
+
+    if !yes {
+        print!(
+            "Grant HIGH-risk capability '{capability}' to '{plugin_id}'? [y/N] "
+        );
+        io::stdout().flush().ok();
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        let trimmed = answer.trim().to_ascii_lowercase();
+        if trimmed != "y" && trimmed != "yes" {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    app.plugins()?.grant_capability(plugin_id, cap)?;
+    let format = app.format();
+    print_success(
+        format,
+        &format!(
+            "Granted '{capability}' to '{plugin_id}'. Takes effect on next load/hot-reload."
+        ),
+        &serde_json::json!({
+            "plugin_id": plugin_id,
+            "capability": capability,
+            "granted": true,
+        }),
+    );
+    Ok(())
+}
+
 /// Revoke a HIGH-risk capability previously granted to `plugin_id`
 /// (BL-096). Live-effective on the running plugin and persisted to
 /// `granted_caps.json` for restart.

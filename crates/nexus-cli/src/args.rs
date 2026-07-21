@@ -1143,6 +1143,24 @@ pub(crate) enum PluginCommand {
         #[arg(long)]
         set: Option<String>,
     },
+    /// Grant a HIGH-risk capability to a plugin (C82 #435), pairing this
+    /// verb with `revoke`. Persists install-time consent to
+    /// `<plugin>/granted_caps.json`, pinned to the plugin's currently
+    /// loaded version; takes effect on the plugin's next load or
+    /// hot-reload. Capability strings use the dotted kernel form (e.g.
+    /// `fs.write.external`, `process.spawn`, `net.http`). Prompts for
+    /// interactive confirmation unless `--yes` is passed — HIGH-risk
+    /// grants are exactly the kind of unattended-execution risk the
+    /// shell's capability-consent UI exists to surface.
+    Grant {
+        /// Plugin identifier (e.g. `com.nexus.agent`).
+        plugin_id: String,
+        /// Capability to grant (dotted form, e.g. `process.spawn`).
+        capability: String,
+        /// Skip the interactive confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Revoke a previously-granted HIGH-risk capability for a plugin
     /// (BL-096). Live-mutates the running plugin's wired context, then
     /// persists to `<plugin>/granted_caps.json`. Capability strings use

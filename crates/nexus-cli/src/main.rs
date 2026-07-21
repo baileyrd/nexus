@@ -407,6 +407,11 @@ fn main() {
             PluginCommand::Settings { plugin_id, set } => {
                 commands::plugin::settings(&mut app, &plugin_id, set.as_deref())
             }
+            PluginCommand::Grant {
+                plugin_id,
+                capability,
+                yes,
+            } => commands::plugin::grant(&mut app, &plugin_id, &capability, yes),
             PluginCommand::Revoke {
                 plugin_id,
                 capability,
@@ -1152,6 +1157,47 @@ mod tests {
                 _ => panic!("expected Search"),
             },
             _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_plugin_grant_defaults_yes_to_false() {
+        let cli = Cli::try_parse_from(["nexus", "plugin", "grant", "com.example.foo", "net.http"])
+            .expect("parse plugin grant");
+        match cli.command {
+            Commands::Plugin(args) => match args.command {
+                PluginCommand::Grant {
+                    plugin_id,
+                    capability,
+                    yes,
+                } => {
+                    assert_eq!(plugin_id, "com.example.foo");
+                    assert_eq!(capability, "net.http");
+                    assert!(!yes);
+                }
+                _ => panic!("expected Grant"),
+            },
+            _ => panic!("expected Plugin subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_plugin_grant_accepts_yes_flag() {
+        let cli = Cli::try_parse_from([
+            "nexus",
+            "plugin",
+            "grant",
+            "com.example.foo",
+            "process.spawn",
+            "--yes",
+        ])
+        .expect("parse plugin grant --yes");
+        match cli.command {
+            Commands::Plugin(args) => match args.command {
+                PluginCommand::Grant { yes, .. } => assert!(yes),
+                _ => panic!("expected Grant"),
+            },
+            _ => panic!("expected Plugin subcommand"),
         }
     }
 
