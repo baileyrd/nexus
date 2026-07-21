@@ -100,6 +100,9 @@ pub const HANDLER_GET_CAPTURE: u32 = 20;
 /// `consolidate` handler id (sync; supersede duplicate memories).
 pub const HANDLER_CONSOLIDATE: u32 = 21;
 
+/// `import` handler id (C40 / #393; bulk upsert-by-id counterpart to `export`).
+pub const HANDLER_IMPORT: u32 = 22;
+
 /// Single source of truth for `(command-name, handler-id)` pairs consumed by
 /// the bootstrap registration. Order matches the handler-id numbering.
 pub const IPC_HANDLERS: &[(&str, u32)] = &[
@@ -124,6 +127,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("auto_capture", HANDLER_AUTO_CAPTURE),
     ("get_capture", HANDLER_GET_CAPTURE),
     ("consolidate", HANDLER_CONSOLIDATE),
+    ("import", HANDLER_IMPORT),
 ];
 
 /// Default number of rows returned by `list` when no limit is given.
@@ -364,6 +368,50 @@ pub struct VitalityReportArgs {
     pub limit: Option<usize>,
 }
 
+/// Args for `com.nexus.memory::import` (handler id `22`) — the bulk
+/// counterpart to `export` (C40 / #393). Each record is applied via the
+/// same last-write-wins upsert the sync hub uses
+/// ([`crate::db::MemoryDb::upsert_lww`]): an incoming record only
+/// overwrites an existing id when its `updated_at` is strictly newer, so
+/// re-importing an old backup into a forge with newer local edits can't
+/// clobber them. `id`/`created_at`/`updated_at` are preserved verbatim —
+/// this is a restore/merge path, not `add`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ImportArgs {
+    /// Records to import — the same shape `export` produces.
+    pub records: Vec<Memory>,
+}
+
+/// Reply for `com.nexus.memory::import`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+pub struct ImportReply {
+    /// Records provided.
+    pub total: usize,
+    /// Records actually written (new id, or an id whose incoming
+    /// `updated_at` was newer than the stored row's).
+    pub imported: usize,
+    /// Records left untouched because a newer or equal-age local copy
+    /// already existed.
+    pub skipped: usize,
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 /// Core plugin wrapping a [`MemoryDb`].
@@ -538,6 +586,25 @@ impl MemoryCorePlugin {
         to_value(&self.db.export_all().map_err(db_err)?, "export")
     }
 
+    fn import(&self, args: &Value) -> Result<Value, PluginError> {
+        let a: ImportArgs = parse_args(args, "import")?;
+        let total = a.records.len();
+        let mut imported = 0usize;
+        for m in &a.records {
+            if self.db.upsert_lww(m).map_err(db_err)? {
+                imported += 1;
+            }
+        }
+        to_value(
+            &ImportReply {
+                total,
+                imported,
+                skipped: total - imported,
+            },
+            "import",
+        )
+    }
+
     fn tags(&self, args: &Value) -> Result<Value, PluginError> {
         let a: TagsArgs = parse_args(args, "tags")?;
         let tags = self
@@ -618,6 +685,7 @@ impl CorePlugin for MemoryCorePlugin {
             HANDLER_VITALITY_REPORT => self.vitality_report(args),
             HANDLER_GET_CAPTURE => self.get_capture(args),
             HANDLER_CONSOLIDATE => self.consolidate(args),
+            HANDLER_IMPORT => self.import(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -920,6 +988,64 @@ mod tests {
         assert!(arr
             .iter()
             .all(|m| m["id"].is_string() && m["content"].is_string()));
+    }
+
+    #[test]
+    fn import_round_trips_an_export_into_a_fresh_store() {
+        // C40 / #393 — export's own test notes "ready for re-import"; this
+        // is that re-import, end to end.
+        let mut src = plugin();
+        src.dispatch(HANDLER_ADD, &json!({ "content": "one", "category": "a" }))
+            .unwrap();
+        src.dispatch(HANDLER_ADD, &json!({ "content": "two", "category": "b" }))
+            .unwrap();
+        let dump = src.dispatch(HANDLER_EXPORT, &json!({})).unwrap();
+
+        let mut dst = plugin();
+        let reply = dst
+            .dispatch(HANDLER_IMPORT, &json!({ "records": dump }))
+            .unwrap();
+        assert_eq!(reply["total"], 2);
+        assert_eq!(reply["imported"], 2);
+        assert_eq!(reply["skipped"], 0);
+
+        let redump = dst.dispatch(HANDLER_EXPORT, &json!({})).unwrap();
+        assert_eq!(redump, dump, "imported store must match the source byte-for-byte");
+    }
+
+    #[test]
+    fn import_skips_a_record_older_than_the_local_copy() {
+        // upsert_lww's WHERE excluded.updated_at > memories.updated_at
+        // means re-importing a stale backup can't clobber a newer local
+        // edit — verified through the IPC layer, not just the db unit.
+        let mut p = plugin();
+        let id = p
+            .dispatch(HANDLER_ADD, &json!({ "content": "original" }))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        p.dispatch(
+            HANDLER_UPDATE,
+            &json!({ "id": id, "content": "edited locally" }),
+        )
+        .unwrap();
+        let current = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
+
+        // Replay an "old backup" carrying the pre-edit content and an
+        // ancient updated_at.
+        let mut stale_record = current.clone();
+        stale_record["content"] = json!("original");
+        stale_record["updated_at"] = json!("2000-01-01T00:00:00+00:00");
+
+        let reply = p
+            .dispatch(HANDLER_IMPORT, &json!({ "records": [stale_record] }))
+            .unwrap();
+        assert_eq!(reply["imported"], 0);
+        assert_eq!(reply["skipped"], 1);
+
+        let after = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
+        assert_eq!(after["content"], "edited locally", "stale import must not overwrite");
     }
 
     #[test]

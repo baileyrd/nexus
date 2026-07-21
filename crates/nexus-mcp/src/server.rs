@@ -1487,6 +1487,13 @@ struct MemoryGetInput {
     id: String,
 }
 
+/// Input for `nexus_memory_import` (C40 / #393).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MemoryImportInput {
+    /// Records to import — the array `nexus_memory_export` returns.
+    records: Vec<serde_json::Value>,
+}
+
 /// Input for `nexus_memory_update` (C35). Only the provided fields change;
 /// omitted fields keep their stored value.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -2138,6 +2145,26 @@ impl NexusMcpServer {
             Ok(memories) => Json(MemoryListOutput { memories }),
             Err(e) => Json(MemoryListOutput {
                 memories: serde_json::json!({ "error": e }),
+            }),
+        }
+    }
+
+    // C40 (#393) — export had no re-import counterpart on any surface, so a
+    // backup could never be restored and memories couldn't be merged into a
+    // non-empty forge.
+    #[tool(
+        name = "nexus_memory_import",
+        description = "Restore or merge memory records previously produced by nexus_memory_export. Last-write-wins per id: an incoming record only overwrites a local one when it's strictly newer, so replaying an old backup can't clobber newer local edits"
+    )]
+    async fn memory_import(
+        &self,
+        Parameters(input): Parameters<MemoryImportInput>,
+    ) -> Json<MemoryResultOutput> {
+        let args = serde_json::json!({ "records": input.records });
+        match self.memory_call::<serde_json::Value>("import", args).await {
+            Ok(result) => Json(MemoryResultOutput { result }),
+            Err(e) => Json(MemoryResultOutput {
+                result: serde_json::json!({ "error": e }),
             }),
         }
     }

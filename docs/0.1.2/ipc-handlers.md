@@ -17,8 +17,8 @@
 | `com.nexus.terminal` | 34 |
 | `com.nexus.ai` | 30 |
 | `com.nexus.agent` | 28 |
+| `com.nexus.memory` | 22 |
 | `com.nexus.dap` | 21 |
-| `com.nexus.memory` | 21 |
 | `com.nexus.editor` | 15 |
 | `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
@@ -319,7 +319,7 @@ All `unrestricted`. `list`, `get`, `render`, `apply` (downstream `fs.write`), `r
 
 ---
 
-## com.nexus.memory (21)
+## com.nexus.memory (22)
 
 Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 search and SPO entity facts. Handlers operate on the plugin's own `.forge/memory/memory.db` and are `unrestricted`, **except** `sync` (gated by `net.http` for outbound hub calls) and `wiki_compile` (gated by `ai.chat` for the synthesis round-trip). The async `recall`/`vector_sync`/`wiki_*` reach AI + storage through the plugin's *own* capability-gated context, not the caller's.
 
@@ -329,12 +329,12 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 | `get` | — | fetch one by id |
 | `list` | — | recent memories, newest first; optional `category`/`memory_type`/`status`/`tag` filters |
 | `search` | — | FTS5 full-text search |
-| `update` | — | patch mutable fields (content/category/tags/status/SPO) |
+| `update` | — | patch mutable fields (content/category/tags/status/memory_type/SPO) |
 | `delete` | — | remove a memory |
 | `stats` | — | store count + category/type/source breakdowns |
 | `facts` | — | recall SPO entity facts; optional `subject`/`predicate`/`object` filters |
 | `entities` | — | distinct entities (fact subjects + objects) with fact counts |
-| `export` | — | full dump of every memory, oldest first (for portability / re-import) |
+| `export` | — | full dump of every memory, oldest first (for portability / re-import via `import`) |
 | `tags` | — | distinct tags with the number of memories carrying each |
 | `vitality_report` | — | active memories ranked by computed ACT-R-style vitality (frequency + recency) |
 | `recall` | — | **async** — hybrid FTS + vector recall fused via Reciprocal Rank Fusion; falls back to FTS-only when no embedder/vectors |
@@ -346,6 +346,7 @@ Native memory engine (`nexus-memory`). SQLite-persisted memories with FTS5 searc
 | `auto_capture` | — | **async** — capture a turn as a memory; optional LLM `decompose` into atomic child facts |
 | `get_capture` | — | a capture's lineage (parent + decomposed children) by `capture_id` |
 | `consolidate` | — | dedupe: supersede exact normalized-content duplicates, keeping the freshest (`dry_run?`, `category?`) |
+| `import` | — | bulk upsert-by-id (`records: Memory[]`, the shape `export` returns); last-write-wins by `updated_at`, so re-importing an old backup can't clobber newer local edits (C40 / #393) |
 
 ---
 
