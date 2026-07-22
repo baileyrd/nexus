@@ -50,6 +50,12 @@ pub struct ReconcileDelta {
 /// # Errors
 ///
 /// Returns [`StorageError`] on I/O or `SQLite` failures.
+// The create/modify/rename/resurrect branches share a lot of local
+// state (delta, index maps, disk_paths, renamed_source_ids) that
+// splitting into a helper would have to thread through as 5+ mutable
+// params -- worse for readability than the line count, so this stays
+// one function past clippy's 100-line default.
+#[allow(clippy::too_many_lines)]
 pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta, StorageError> {
     let mut delta = ReconcileDelta::default();
 
@@ -82,15 +88,25 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
 
     // Build a set of paths currently on disk for the deletion pass.
     let disk_paths: std::collections::HashSet<String> =
-        disk_files.iter().map(|(p, _, _)| p.clone()).collect();
+        disk_files.iter().map(|f| f.rel_path.clone()).collect();
 
     // Track record IDs that were consumed as rename sources (skip soft-delete).
     let mut renamed_source_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     // ── 4. Process each file on disk ─────────────────────────────────────────
-    for (rel_path, hash, size_bytes) in &disk_files {
+    for file in &disk_files {
+        let rel_path = &file.rel_path;
+        let size_bytes = file.size_bytes;
+
+        if index_by_path.get(rel_path).is_some_and(|r| stat_unchanged(r, file)) {
+            continue;
+        }
+
+        let abs_path = forge_root.join(rel_path);
+        let hash = hash_file(&abs_path)?;
+
         if let Some(record) = index_by_path.get(rel_path) {
-            if record.content_hash == *hash {
+            if record.content_hash == hash {
                 if record.is_deleted {
                     // Path resurrected on disk with identical content —
                     // clear the soft-delete flag; child rows are still valid.
@@ -104,7 +120,6 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             }
 
             // Hash differs → modified (or resurrected with new content).
-            let abs_path = forge_root.join(rel_path);
             let Some(content) = read_utf8_or_skip(&abs_path, rel_path) else {
                 continue;
             };
@@ -116,7 +131,7 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             )?;
             delete_file(conn, record.id)?;
             let file_type = infer_file_type(rel_path);
-            insert_file(conn, rel_path, &file_type, *size_bytes, &parsed)?;
+            insert_file(conn, rel_path, &file_type, size_bytes, &parsed)?;
             refresh_code_symbols(conn, rel_path, &content);
             if record.is_deleted {
                 delta.created += 1;
@@ -125,7 +140,7 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             }
         } else {
             // Path not in index — check for rename by hash.
-            let renamed = if let Some(candidates) = index_by_hash.get(hash) {
+            let renamed = if let Some(candidates) = index_by_hash.get(&hash) {
                 // A rename candidate is a record whose path is NOT on disk
                 // and hasn't already been claimed as a rename source.
                 candidates
@@ -158,13 +173,12 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
                 delta.renamed += 1;
             } else {
                 // Brand-new file.
-                let abs_path = forge_root.join(rel_path);
                 let Some(content) = read_utf8_or_skip(&abs_path, rel_path) else {
                     continue;
                 };
                 let parsed = parse_markdown(&content)?;
                 let file_type = infer_file_type(rel_path);
-                insert_file(conn, rel_path, &file_type, *size_bytes, &parsed)?;
+                insert_file(conn, rel_path, &file_type, size_bytes, &parsed)?;
                 refresh_code_symbols(conn, rel_path, &content);
                 delta.created += 1;
             }
@@ -214,13 +228,30 @@ fn refresh_code_symbols(conn: &Connection, rel_path: &str, content: &str) {
     }
 }
 
+/// Cheap per-file metadata collected during the directory walk — a
+/// `stat()`, not a content read. C20 (#373): this is what lets the
+/// fast path in [`reconcile`] decide whether a file needs re-hashing
+/// without paying for `fs::read` + SHA-256 on every file, every pass.
+#[derive(Debug)]
+struct DiskFile {
+    /// Forge-relative, forward-slash-separated path.
+    rel_path: String,
+    size_bytes: u64,
+    /// Unix-seconds mtime from the filesystem. `i64::MAX` when the
+    /// platform/filesystem doesn't report one — fails open to "always
+    /// re-hash" rather than risk silently skipping a real change.
+    mtime_unix: i64,
+}
+
 /// Scan all user-facing directories under `forge_root`.
 ///
 /// Walks the entire forge root, skipping metadata directories (`.forge/`,
-/// `.git/`, etc.) via [`should_ignore`]. Returns a list of
-/// `(relative_path, content_hash, size_bytes)` tuples for every non-ignored
-/// file found.
-fn scan_directory(forge_root: &Path) -> Result<Vec<(String, String, u64)>, StorageError> {
+/// `.git/`, etc.) via [`should_ignore`]. Content is *not* read here (C20 /
+/// #373) — only `stat()`-cheap size/mtime, so this stays proportional to
+/// the file count even for a vault with gigabytes of attachments.
+/// [`reconcile`] hashes lazily, only for files its stat-based fast path
+/// can't skip.
+fn scan_directory(forge_root: &Path) -> Result<Vec<DiskFile>, StorageError> {
     let mut results = Vec::new();
     scan_dir_recursive(forge_root, forge_root, &mut results)?;
     Ok(results)
@@ -230,7 +261,7 @@ fn scan_directory(forge_root: &Path) -> Result<Vec<(String, String, u64)>, Stora
 fn scan_dir_recursive(
     dir: &Path,
     forge_root: &Path,
-    results: &mut Vec<(String, String, u64)>,
+    results: &mut Vec<DiskFile>,
 ) -> Result<(), StorageError> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -260,9 +291,14 @@ fn scan_dir_recursive(
         if file_type.is_dir() {
             scan_dir_recursive(&path, forge_root, results)?;
         } else if file_type.is_file() {
-            let bytes = std::fs::read(&path)?;
-            let hash = sha256_hex(&bytes);
-            let size = entry.metadata()?.len();
+            let metadata = entry.metadata()?;
+            let size_bytes = metadata.len();
+            let mtime_unix = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| i64::try_from(d.as_secs()).ok())
+                .unwrap_or(i64::MAX);
             let rel = path
                 .strip_prefix(forge_root)
                 .map(|p| p.to_string_lossy().into_owned())
@@ -271,11 +307,41 @@ fn scan_dir_recursive(
             // Normalise Windows separators to forward slashes.
             let rel = rel.replace('\\', "/");
 
-            results.push((rel, hash, size));
+            results.push(DiskFile {
+                rel_path: rel,
+                size_bytes,
+                mtime_unix,
+            });
         }
     }
 
     Ok(())
+}
+
+/// Read `abs_path` and compute its SHA-256 hex digest. Only called for
+/// files [`reconcile`]'s stat-based fast path couldn't skip — the one
+/// remaining full content read per changed/new file, same cost as
+/// before C20 (#373) for files that actually need it.
+fn hash_file(abs_path: &Path) -> Result<String, StorageError> {
+    let bytes = std::fs::read(abs_path)?;
+    Ok(sha256_hex(&bytes))
+}
+
+/// C20 (#373) fast path: true when `record` (already known to exist at
+/// `file.rel_path`) can be trusted unchanged from its size + mtime
+/// alone, without a re-read + re-hash.
+///
+/// `record.modified_at` is the wall-clock time [`reconcile`] last
+/// wrote this row, which is always >= the mtime of the content it read
+/// to produce it (the file is written to disk before reconcile
+/// observes and indexes it) — so an on-disk mtime no later than that
+/// recorded time means nothing has touched the file since. Excludes
+/// soft-deleted records (those must always resurrect through the full
+/// hash-and-compare path so `is_deleted` gets cleared) and any size
+/// mismatch. Conservative: every excluded case falls through to the
+/// full hash-and-compare path, identical to pre-#373 behavior.
+fn stat_unchanged(record: &FileRecord, file: &DiskFile) -> bool {
+    !record.is_deleted && record.size_bytes == file.size_bytes && file.mtime_unix <= record.modified_at
 }
 
 /// Read `abs_path` as UTF-8, returning `None` (with a warning) if the file
@@ -503,6 +569,90 @@ mod tests {
         assert_eq!(delta2.deleted, 0);
     }
 
+    // ── 6b. C20 (#373) fast-path tests ─────────────────────────────────────────
+
+    /// Proves the stat-based fast path actually skips re-hashing an
+    /// unchanged file, not just that the end-to-end delta happens to
+    /// come out right. Corrupts the stored hash directly (bypassing
+    /// reconcile) without touching the file on disk — size and mtime
+    /// stay exactly what the prior reconcile observed. If the fast
+    /// path is working, reconcile trusts stat and never re-reads the
+    /// file, so the corrupted hash survives untouched and the file is
+    /// not reported as modified. Without the fast path this test
+    /// fails: a full re-hash would notice the mismatch and "correct"
+    /// it, reporting `modified += 1`.
+    #[test]
+    fn reconcile_fast_path_skips_rehash_when_stat_matches() {
+        let dir = TempDir::new().unwrap();
+        let forge_root = dir.path();
+        std::fs::create_dir_all(forge_root.join("notes")).unwrap();
+        write_file(forge_root, "notes/a.md", "# A\n");
+
+        let conn = setup_db();
+        reconcile(&conn, forge_root).unwrap();
+
+        conn.execute(
+            "UPDATE files SET content_hash = 'deadbeef' WHERE path = 'notes/a.md'",
+            [],
+        )
+        .unwrap();
+
+        let delta = reconcile(&conn, forge_root).unwrap();
+        assert_eq!(
+            delta.modified, 0,
+            "fast path should have skipped re-hashing notes/a.md"
+        );
+
+        let record = crate::index::file_by_path(&conn, "notes/a.md")
+            .unwrap()
+            .expect("row should exist");
+        assert_eq!(
+            record.content_hash, "deadbeef",
+            "hash should remain untouched by the fast path"
+        );
+    }
+
+    /// A real content edit that keeps the same byte length is still
+    /// detected, because the fast path also requires the on-disk
+    /// mtime to be no later than the indexed `modified_at` — an edit
+    /// always advances mtime past that recorded time. The mtime is
+    /// set explicitly (rather than relying on wall-clock elapsing
+    /// between the two writes) so the test is deterministic on
+    /// filesystems with coarse mtime resolution.
+    #[test]
+    fn reconcile_detects_same_size_content_change_via_mtime() {
+        use filetime::{set_file_mtime, FileTime};
+
+        let dir = TempDir::new().unwrap();
+        let forge_root = dir.path();
+        std::fs::create_dir_all(forge_root.join("notes")).unwrap();
+        write_file(forge_root, "notes/b.md", "# AAAA\n");
+
+        let conn = setup_db();
+        reconcile(&conn, forge_root).unwrap();
+
+        // Same length ("# AAAA\n" and "# BBBB\n" are both 8 bytes),
+        // different content, mtime pushed 5s into the future so it's
+        // unambiguously later than whatever `modified_at` the first
+        // reconcile just wrote.
+        write_file(forge_root, "notes/b.md", "# BBBB\n");
+        let future = FileTime::from_system_time(
+            std::time::SystemTime::now() + std::time::Duration::from_secs(5),
+        );
+        set_file_mtime(forge_root.join("notes/b.md"), future).unwrap();
+
+        let delta = reconcile(&conn, forge_root).unwrap();
+        assert_eq!(
+            delta.modified, 1,
+            "same-size content change should still be detected via mtime"
+        );
+
+        let record = crate::index::file_by_path(&conn, "notes/b.md")
+            .unwrap()
+            .expect("row should exist");
+        assert_eq!(record.content_hash, sha256_hex(b"# BBBB\n"));
+    }
+
     // ── 7. reconcile_handles_nested_directories ───────────────────────────────
     #[test]
     fn reconcile_handles_nested_directories() {
@@ -602,9 +752,9 @@ mod tests {
             results.len(),
             1,
             "expected 1 result (visible.md), got {:?}",
-            results.iter().map(|(p, _, _)| p).collect::<Vec<_>>()
+            results.iter().map(|f| &f.rel_path).collect::<Vec<_>>()
         );
-        assert_eq!(results[0].0, "notes/visible.md");
+        assert_eq!(results[0].rel_path, "notes/visible.md");
     }
 
     // ── BL-082: symlinks must be skipped, not followed ───────────────────────
@@ -630,9 +780,9 @@ mod tests {
             results.len(),
             1,
             "expected the alias to be skipped; got {:?}",
-            results.iter().map(|(p, _, _)| p).collect::<Vec<_>>()
+            results.iter().map(|f| &f.rel_path).collect::<Vec<_>>()
         );
-        assert_eq!(results[0].0, "notes/real.md");
+        assert_eq!(results[0].rel_path, "notes/real.md");
     }
 
     /// A symlink whose target is outside the forge root must not
