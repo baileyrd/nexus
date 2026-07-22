@@ -87,6 +87,37 @@ fn find_close(s: &str, from: usize) -> Option<usize> {
     None
 }
 
+/// Collect the trimmed inner text of every well-formed `{{...}}` tag in
+/// `input` (#367 / C14 — used to pre-resolve `{{date...}}` dynamic
+/// variables before the normal lookup-table [`render`] runs). Mirrors
+/// `render`'s own scanning rules — same-line-only tags, `{{!}}` escape
+/// skipped, malformed/nested tags silently skipped rather than erroring
+/// since this is a best-effort pre-pass, not the authoritative parse.
+#[must_use]
+pub(crate) fn tag_names(input: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < input.len() {
+        if i + 1 < input.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
+            if i + 4 <= input.len() && &input[i..i + 5] == "{{!}}" {
+                i += 5;
+                continue;
+            }
+            if let Some(close) = find_close(input, i + 2) {
+                let inner = input[i + 2..close].trim();
+                if !inner.is_empty() && !inner.contains('{') {
+                    names.push(inner.to_string());
+                }
+                i = close + 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

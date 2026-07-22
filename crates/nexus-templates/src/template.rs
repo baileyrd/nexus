@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::substitute::{render, SubstitutionError};
+use crate::date_vars;
+use crate::substitute::{render, tag_names, SubstitutionError};
 
 /// A parsed `.template.md` file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,6 +217,30 @@ impl Template {
         let builtins = builtin_values(forge_root);
 
         let mut values: BTreeMap<String, String> = builtins.clone();
+
+        // #367 (C14) — resolve any `{{date...}}` dynamic variables
+        // (offset/format mini-language, see `crate::date_vars`)
+        // referenced anywhere in this template, same tier as the fixed
+        // built-ins above: a template can still declare a parameter
+        // literally named `date...` to override one (the "layer user
+        // args on top" step below wins over both). Scanned once across
+        // every text that gets rendered — body, target_path, and every
+        // parameter default — so a default that references
+        // `{{date+7d}}` sees it too.
+        let now = chrono::Local::now();
+        for text in std::iter::once(self.body.as_str())
+            .chain(self.meta.target_path.as_deref())
+            .chain(self.meta.parameters.iter().filter_map(|p| p.default.as_deref()))
+        {
+            for name in tag_names(text) {
+                if let std::collections::btree_map::Entry::Vacant(e) = values.entry(name.clone()) {
+                    if let Some(value) = date_vars::resolve(&name, now) {
+                        e.insert(value);
+                    }
+                }
+            }
+        }
+
         // Layer user args on top so users can override built-ins like `today`.
         for (k, v) in user_args {
             values.insert(k.clone(), v.clone());
@@ -310,11 +335,18 @@ impl Template {
 /// Built-in template variables provided to every apply call.
 ///
 /// Currently:
-/// - `today` — `YYYY-MM-DD` (UTC)
-/// - `now`   — RFC-3339 timestamp (UTC)
+/// - `today` — `YYYY-MM-DD` (local time — #367/C14: was UTC, which
+///   dated a daily note created in the evening anywhere west of UTC as
+///   tomorrow)
+/// - `now`   — RFC-3339 timestamp (local time, with its UTC offset —
+///   `to_rfc3339` includes the offset regardless of timezone, so this
+///   round-trips correctly either way)
 /// - `forge_path` — absolute path of the forge root
+///
+/// See [`crate::date_vars`] for the `{{date...}}` family (custom
+/// format + offset), also local-time-based.
 fn builtin_values(forge_root: &Path) -> BTreeMap<String, String> {
-    let now = chrono::Utc::now();
+    let now = chrono::Local::now();
     let mut m = BTreeMap::new();
     m.insert("today".to_string(), now.format("%Y-%m-%d").to_string());
     m.insert("now".to_string(), now.to_rfc3339());
