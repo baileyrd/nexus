@@ -87,6 +87,26 @@ pub struct ProposedToolCall {
     pub tool_call: ToolCall,
 }
 
+/// C27 (#380) — provider-reported token usage for one planning round.
+/// Mirrors `nexus_ai::provider::TokenUsage`'s wire shape; kept as a
+/// local copy since this crate stays kernel-free (ADR 0023) and can't
+/// depend on `nexus-ai`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    /// Tokens the provider billed for the request side.
+    pub input_tokens: u64,
+    /// Tokens the provider billed for the response side.
+    pub output_tokens: u64,
+}
+
+impl TokenUsage {
+    /// Total tokens billed for this round.
+    #[must_use]
+    pub fn total(&self) -> u64 {
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
+}
+
 /// What a [`ChatDriver`] returns from a planning turn.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Proposal {
@@ -96,6 +116,10 @@ pub struct Proposal {
     pub text: String,
     /// Tool calls the model proposed, in order.
     pub tool_calls: Vec<ProposedToolCall>,
+    /// C27 (#380) — token usage for this round, when the provider
+    /// reported it. The session loop accumulates this across rounds
+    /// to enforce [`crate::SessionConfig::max_tokens`].
+    pub usage: Option<TokenUsage>,
 }
 
 /// Phase 5.5 (2c) — one tool call inside an [`AgentChatTurn::Assistant`]
@@ -350,6 +374,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn token_usage_total_sums_input_and_output() {
+        let u = TokenUsage {
+            input_tokens: 30,
+            output_tokens: 12,
+        };
+        assert_eq!(u.total(), 42);
+    }
+
+    #[test]
+    fn token_usage_total_saturates_instead_of_overflowing() {
+        let u = TokenUsage {
+            input_tokens: u64::MAX,
+            output_tokens: 1,
+        };
+        assert_eq!(u.total(), u64::MAX);
+    }
+
     fn read_file_call(path: &str) -> ToolCall {
         ToolCall {
             target_plugin_id: "com.nexus.storage".into(),
@@ -374,6 +416,7 @@ mod tests {
                     tool_call: read_file_call("notes/b.md"),
                 },
             ],
+            usage: None,
         });
         let agent = LlmAgent::new(driver);
         let plan = agent.plan("summarise today's notes").await.unwrap();
@@ -392,6 +435,7 @@ mod tests {
         let driver = CannedDriver::new(Proposal {
             text: "Nothing to do — the goal is informational.".into(),
             tool_calls: vec![],
+            usage: None,
         });
         let agent = LlmAgent::new(driver);
         let plan = agent.plan("say hi").await.unwrap();
@@ -414,6 +458,7 @@ mod tests {
         let driver = CannedDriver::new(Proposal {
             text: "x".into(),
             tool_calls: vec![],
+            usage: None,
         });
         let agent = LlmAgent::new(driver);
         let err = agent.plan("   \n\t  ").await.unwrap_err();

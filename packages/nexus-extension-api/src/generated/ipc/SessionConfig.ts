@@ -72,4 +72,13 @@ tool_retry_backoff_ms: bigint,
  * [`crate::AgentToolRegistry::non_idempotent_tool_names`]. Only
  * consulted when `max_tool_retries > 0`.
  */
-non_idempotent_tools: Array<string>, };
+non_idempotent_tools: Array<string>, 
+/**
+ * C27 (#380) — hard cap on cumulative provider-reported tokens
+ * (input + output, summed across every round) before the loop
+ * stops with [`SessionOutcome::BudgetExceeded`]. `0` (the
+ * default) means unbounded — the pre-#380 behaviour, since a
+ * provider that doesn't report usage can never trip this check
+ * either way.
+ */
+max_tokens: number, };

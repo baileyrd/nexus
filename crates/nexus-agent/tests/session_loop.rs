@@ -37,10 +37,12 @@ impl ChatDriver for OneToolThenDone {
                         args: serde_json::json!({ "query": "hello" }),
                     },
                 }],
+                usage: None,
             }),
             _ => Ok(Proposal {
                 text: "done: found it".to_string(),
                 tool_calls: vec![],
+                usage: None,
             }),
         }
     }
@@ -104,6 +106,7 @@ impl ChatDriver for ImmediateAnswer {
         Ok(Proposal {
             text: "the answer is 42".to_string(),
             tool_calls: vec![],
+            usage: None,
         })
     }
 }

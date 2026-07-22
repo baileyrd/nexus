@@ -484,6 +484,12 @@ pub struct AiProposeReply {
     /// Tool calls the mapper rejected. Empty in the happy path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unmapped_tool_calls: Vec<AiUnmappedToolCall>,
+    /// C27 (#380) — provider-reported token usage for this single
+    /// round. `None` for providers that don't report it. The caller
+    /// (`nexus-agent`'s round loop) accumulates this across rounds to
+    /// enforce a session token ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::provider::TokenUsage>,
 }
 
 // ─── BL-037 — activity timeline IPC ────────────────────────────────────────

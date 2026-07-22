@@ -185,6 +185,7 @@ mod tests {
             Ok(crate::Proposal {
                 text: "ok".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             })
         }
     }
