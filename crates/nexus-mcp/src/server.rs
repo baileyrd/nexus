@@ -16,9 +16,11 @@ use nexus_kernel::{EventFilter, Events as _, Ipc as _, KernelPluginContext, Nexu
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{
-    Annotated, CallToolRequestParams, CallToolResult, ListResourcesResult, ListToolsResult,
-    PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult, Resource,
-    ResourceContents, ResourceUpdatedNotificationParam, ServerCapabilities, ServerInfo,
+    Annotated, CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult,
+    ListPromptsResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt,
+    PromptArgument, PromptMessage, PromptMessageRole, RawResource, ReadResourceRequestParams,
+    ReadResourceResult, Resource, ResourceContents, ResourceUpdatedNotificationParam,
+    ServerCapabilities, ServerInfo,
 };
 use rmcp::schemars;
 use rmcp::service::{Peer, RequestContext};
@@ -3467,15 +3469,23 @@ impl rmcp::ServerHandler for NexusMcpServer {
             // RFC 0003 — clients may subscribe to terminal resources and receive
             // notifications/resources/updated as the VT grid changes.
             .enable_resources_subscribe()
+            // C32 (#385) — forge skills are also exposed as MCP prompts
+            // (see `list_prompts`/`get_prompt` below) so native prompt
+            // pickers (Claude Desktop, Cursor) surface them directly
+            // instead of requiring the nexus_list_skills /
+            // nexus_render_skill tool workaround.
+            .enable_prompts()
             .build();
         info.with_instructions(
             "Nexus MCP server: manage a personal knowledge base of markdown notes. \
              Use nexus_* tools to create, read, update, delete, search, and query notes; \
              list and render authored skill templates from .forge/skills via \
-             nexus_list_skills / nexus_render_skill. Forge notes are also enumerated \
-             as MCP resources under mcp://nexus/notes/. Observe live terminal sessions \
-             with nexus_terminal_get_screen / _scrollback / _cwd / _cursor / _last_exit \
-             (OSC 133), also exposed as resources under mcp://nexus/terminal/<id>/.",
+             nexus_list_skills / nexus_render_skill, or as native prompts (skills are \
+             also exposed 1:1 through prompts/list and prompts/get). Forge notes are \
+             also enumerated as MCP resources under mcp://nexus/notes/. Observe live \
+             terminal sessions with nexus_terminal_get_screen / _scrollback / _cwd / \
+             _cursor / _last_exit (OSC 133), also exposed as resources under \
+             mcp://nexus/terminal/<id>/.",
         )
     }
 
@@ -3561,6 +3571,98 @@ impl rmcp::ServerHandler for NexusMcpServer {
             tools: items,
             ..Default::default()
         }))
+    }
+
+    // ── C32 (#385) — forge skills as MCP prompts ─────────────────────────
+    //
+    // `com.nexus.skills::list`/`::render` already back the
+    // `nexus_list_skills`/`nexus_render_skill` tools above; this just
+    // exposes the same data through the dedicated MCP prompts/list and
+    // prompts/get methods so native prompt pickers see it without the
+    // tool-call workaround. `Prompt::name` is the skill's stable `id`
+    // (used as the lookup key by `get_prompt`, matching `render_skill`'s
+    // `id` field); the human-readable `name` becomes `Prompt::title`.
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, rmcp::ErrorData> {
+        // Mirrors `SkillParameter` (nexus-skills/src/lib.rs) — only the
+        // fields that map onto `PromptArgument` are captured.
+        #[derive(Deserialize)]
+        struct SkillParameterRec {
+            name: String,
+            #[serde(default)]
+            description: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Rec {
+            id: String,
+            name: String,
+            #[serde(default)]
+            description: String,
+            #[serde(default)]
+            parameters: Vec<SkillParameterRec>,
+        }
+        let records: Vec<Rec> = self
+            .skills_call("list", serde_json::json!({}))
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(format!("list_prompts: {e}"), None))?;
+        let prompts = records
+            .into_iter()
+            .map(|r| {
+                let arguments = (!r.parameters.is_empty()).then(|| {
+                    r.parameters
+                        .into_iter()
+                        .map(|p| {
+                            let mut arg = PromptArgument::new(p.name);
+                            if let Some(desc) = p.description {
+                                arg = arg.with_description(desc);
+                            }
+                            // Skills don't declare a `required` flag on
+                            // parameters (only a `default`) — `render`
+                            // treats every parameter as optional
+                            // (falls back to its default), so every
+                            // prompt argument is optional too.
+                            arg
+                        })
+                        .collect()
+                });
+                Prompt::new(r.id, Some(r.description), arguments).with_title(r.name)
+            })
+            .collect();
+        Ok(ListPromptsResult {
+            prompts,
+            ..Default::default()
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, rmcp::ErrorData> {
+        #[derive(Deserialize)]
+        struct Rec {
+            name: String,
+            body: String,
+        }
+        let args = serde_json::json!({
+            "id": &request.name,
+            "values": request.arguments.unwrap_or_default(),
+        });
+        let rec: Rec = self.skills_call("render", args).await.map_err(|e| {
+            rmcp::ErrorData::invalid_params(
+                format!("unknown or unrenderable prompt '{}': {e}", request.name),
+                None,
+            )
+        })?;
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+            PromptMessageRole::User,
+            rec.body,
+        )])
+        .with_description(rec.name))
     }
 
     async fn list_resources(
