@@ -174,6 +174,24 @@ impl EpisodicStore {
         })
     }
 
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. The durable write-through (`persist`, above) always
+    /// happens *before* `inner` is touched, so a poisoned/recovered
+    /// `inner` can only yield a stale in-memory cache — the durable
+    /// store can never observe a torn write (see
+    /// `docs/0.1.2/architecture.md` "Lock-poison policy").
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, VecDeque<EpisodicEntry>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("episodic store mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Record a new entry. Drops the oldest entry if at capacity.
     ///
     /// When a durable log is attached the entry is written through
@@ -185,7 +203,7 @@ impl EpisodicStore {
                 tracing::warn!(error = %e, "episodic write-through failed; entry kept in-memory only");
             }
         }
-        let mut g = self.inner.lock().expect("episodic store poisoned");
+        let mut g = self.lock_inner();
         if g.len() == self.capacity {
             g.pop_front();
         }
@@ -195,9 +213,7 @@ impl EpisodicStore {
     /// All entries for `session_id` in chronological order.
     #[must_use]
     pub fn session_history(&self, session_id: Uuid) -> Vec<EpisodicEntry> {
-        self.inner
-            .lock()
-            .expect("episodic store poisoned")
+        self.lock_inner()
             .iter()
             .filter(|e| e.session_id == Some(session_id))
             .cloned()
@@ -207,7 +223,7 @@ impl EpisodicStore {
     /// Most recent `limit` entries across all sessions, newest last.
     #[must_use]
     pub fn recent(&self, limit: usize) -> Vec<EpisodicEntry> {
-        let g = self.inner.lock().expect("episodic store poisoned");
+        let g = self.lock_inner();
         let skip = g.len().saturating_sub(limit);
         g.iter().skip(skip).cloned().collect()
     }
@@ -215,7 +231,7 @@ impl EpisodicStore {
     /// Total entries currently retained.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("episodic store poisoned").len()
+        self.lock_inner().len()
     }
 
     /// `true` when no entries are stored.

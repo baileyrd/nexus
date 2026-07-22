@@ -619,10 +619,27 @@ impl EventRing {
         }
     }
 
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. `inner` is a bounded in-memory observability buffer (no
+    /// disk/DB/IPC write while held); worst case after recovery is a
+    /// dropped/duplicated event in the stream, not corrupted state
+    /// (see `docs/0.1.2/architecture.md` "Lock-poison policy").
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, RingInner> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("ai-runtime event ring mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Append one event; trim the oldest entry if the cap is hit.
     /// Returns the assigned monotonic sequence number.
     pub(crate) fn push(&self, event: events::AiEvent) -> u64 {
-        let mut g = self.inner.lock().expect("event ring poisoned");
+        let mut g = self.lock_inner();
         g.seq = g.seq.saturating_add(1);
         let seq = g.seq;
         if g.queue.len() == PER_RUN_EVENT_BUFFER_CAP {
@@ -634,7 +651,7 @@ impl EventRing {
 
     /// Snapshot of every retained event in chronological order.
     pub(crate) fn snapshot(&self) -> Vec<events::AiEvent> {
-        let g = self.inner.lock().expect("event ring poisoned");
+        let g = self.lock_inner();
         g.queue.iter().map(|(_, e)| e.clone()).collect()
     }
 
@@ -642,7 +659,7 @@ impl EventRing {
     /// than `after`. Used by the `events` handler when the caller
     /// passes `since_seq`.
     pub(crate) fn snapshot_after(&self, after: u64) -> Vec<events::AiEvent> {
-        let g = self.inner.lock().expect("event ring poisoned");
+        let g = self.lock_inner();
         g.queue
             .iter()
             .filter(|(seq, _)| *seq > after)

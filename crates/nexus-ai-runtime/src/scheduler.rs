@@ -211,6 +211,42 @@ pub(crate) struct Store {
 }
 
 impl Store {
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior worker-thread panic into a
+    /// whole-process abort. `inner` is purely in-memory run-status
+    /// bookkeeping (no disk/DB/IPC write happens while it's held, and
+    /// every mutation is a single bounded map/field op with no
+    /// externally-visible torn intermediate state) — a fresh process
+    /// starts empty, so recovering is fail-safe (see
+    /// `docs/0.1.2/architecture.md` "Lock-poison policy"): worst case
+    /// is a run that `list`/`get`/`wait_for` can't see, a locally
+    /// visible availability bug, not data corruption.
+    fn lock_runs(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, RunRow>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("ai-runtime scheduler store mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    /// Same recovery posture as [`Self::lock_runs`] — see its doc
+    /// comment. `session_to_task` is a reverse-lookup index rebuilt
+    /// entry-by-entry as sessions are submitted/forgotten; staleness
+    /// after a poison just means the bus republisher can't correlate
+    /// one event back to its task, not corrupted state.
+    fn lock_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<String, Uuid>> {
+        match self.session_to_task.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("ai-runtime scheduler session map mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
@@ -236,7 +272,7 @@ impl Store {
     /// `com.nexus.ai.stream_*` / `com.nexus.agent.round_*` events
     /// back to the runtime task.
     pub(crate) fn register_session(&self, session_id: String, task_id: Uuid) {
-        let mut g = self.session_to_task.lock().expect("session map poisoned");
+        let mut g = self.lock_sessions();
         g.insert(session_id, task_id);
     }
 
@@ -246,7 +282,7 @@ impl Store {
     /// submitted through the runtime (e.g. CLI-direct
     /// `nexus agent run` invocations).
     pub(crate) fn task_for_session(&self, session_id: &str) -> Option<Uuid> {
-        let g = self.session_to_task.lock().expect("session map poisoned");
+        let g = self.lock_sessions();
         g.get(session_id).copied()
     }
 
@@ -255,7 +291,7 @@ impl Store {
     /// process. Called from the worker after the terminal `AiEvent`
     /// is emitted.
     pub(crate) fn forget_session(&self, session_id: &str) {
-        let mut g = self.session_to_task.lock().expect("session map poisoned");
+        let mut g = self.lock_sessions();
         g.remove(session_id);
     }
 
@@ -285,7 +321,7 @@ impl Store {
             cancel: Arc::new(CancelGate::new()),
             token: None,
         };
-        let mut g = self.inner.lock().expect("store poisoned");
+        let mut g = self.lock_runs();
         g.insert(task_id, row);
         ring
     }
@@ -295,7 +331,7 @@ impl Store {
     /// for `Session` task kinds. Silently a no-op if the task id is
     /// unknown (defensive; the insert always precedes the token mint).
     pub(crate) fn store_token(&self, task_id: Uuid, token: CapabilityToken) {
-        let mut g = self.inner.lock().expect("store poisoned");
+        let mut g = self.lock_runs();
         if let Some(row) = g.get_mut(&task_id) {
             row.token = Some(token);
         }
@@ -307,7 +343,7 @@ impl Store {
     /// spawned via `attenuate`) may attempt after the cancel signal is
     /// received. Idempotent; no-op when no token is stored.
     pub(crate) fn revoke_token(&self, task_id: Uuid) {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         if let Some(row) = g.get(&task_id) {
             if let Some(token) = &row.token {
                 token.revoke();
@@ -319,14 +355,14 @@ impl Store {
     /// awaits `cancel.cancelled()` in its select arm) and by the
     /// `handle_cancel` IPC handler (which calls `gate.request(...)`).
     pub(crate) fn cancel_gate(&self, task_id: Uuid) -> Option<Arc<CancelGate>> {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         g.get(&task_id).map(|row| Arc::clone(&row.cancel))
     }
 
     /// Grab the terminal-state notifier for a run. Used by the
     /// `wait_for` IPC handler to await completion without busy-polling.
     pub(crate) fn terminal_notify(&self, task_id: Uuid) -> Option<Arc<Notify>> {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         g.get(&task_id).map(|row| Arc::clone(&row.terminal))
     }
 
@@ -334,7 +370,7 @@ impl Store {
     /// `wait_for` short-circuit before the `notified()` await arm in
     /// the (common) case where the caller polls late.
     pub(crate) fn is_terminal(&self, task_id: Uuid) -> Option<bool> {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         g.get(&task_id).map(|row| is_terminal(&row.status))
     }
 
@@ -343,7 +379,7 @@ impl Store {
     /// been evicted (Phase 1 never evicts, but this guard keeps the
     /// API truthful).
     pub(crate) fn ring_for(&self, task_id: Uuid) -> Option<SharedEventRing> {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         g.get(&task_id).map(|row| Arc::clone(&row.events))
     }
 
@@ -355,14 +391,10 @@ impl Store {
     pub(crate) fn observe_status(&self, event: &AiEvent) -> bool {
         let task_id = event.task_id();
         let Some(transition) = event.implied_status() else {
-            return self
-                .inner
-                .lock()
-                .expect("store poisoned")
-                .contains_key(&task_id);
+            return self.lock_runs().contains_key(&task_id);
         };
         let terminal_notifier = {
-            let mut g = self.inner.lock().expect("store poisoned");
+            let mut g = self.lock_runs();
             let Some(row) = g.get_mut(&task_id) else {
                 return false;
             };
@@ -403,7 +435,7 @@ impl Store {
 
     /// Snapshot a single run, including its event-ring contents.
     pub(crate) fn get(&self, task_id: Uuid) -> Option<AgentRun> {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         let row = g.get(&task_id)?;
         let events = row.events.snapshot();
         Some(AgentRun {
@@ -424,7 +456,7 @@ impl Store {
     /// `submitted_at` descending so the most recent runs render at
     /// the top of the observability panel without per-call sorting.
     pub(crate) fn list(&self, args: &AiRuntimeListArgs) -> Vec<AgentRunSummary> {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         let mut rows: Vec<&RunRow> = g
             .values()
             .filter(|r| args.status.as_ref().is_none_or(|want| &r.status == want))
@@ -452,7 +484,7 @@ impl Store {
 
     /// Count runs in the requested status. Used by `pool_stats`.
     pub(crate) fn count_status(&self, status: &RunStatus) -> u32 {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         u32::try_from(g.values().filter(|r| &r.status == status).count()).unwrap_or(u32::MAX)
     }
 
@@ -463,7 +495,7 @@ impl Store {
     /// audit log line). Idempotent: a run that's already cancelled or
     /// terminal is skipped.
     pub(crate) fn cancel_all_active(&self, reason: &str) -> usize {
-        let g = self.inner.lock().expect("store poisoned");
+        let g = self.lock_runs();
         let mut cancelled = 0usize;
         for row in g.values() {
             if is_terminal(&row.status) {

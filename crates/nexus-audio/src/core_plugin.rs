@@ -86,15 +86,30 @@ impl AudioCorePlugin {
     }
 }
 
+impl AudioCorePlugin {
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. `backends` holds in-process STT/TTS handles with no
+    /// disk/DB write while held; every mutation is a whole-`Option`
+    /// replace (`on_init`) so there's no torn intermediate value to
+    /// observe (see `docs/0.1.2/architecture.md` "Lock-poison
+    /// policy").
+    fn lock_backends(&self) -> std::sync::MutexGuard<'_, Option<AudioBackends>> {
+        match self.backends.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("audio backends mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+}
+
 impl CorePlugin for AudioCorePlugin {
     fn on_init(&mut self) -> Result<(), PluginError> {
         // Skip re-init when `with_backends` was used.
-        if self
-            .backends
-            .lock()
-            .expect("audio backends mutex")
-            .is_some()
-        {
+        if self.lock_backends().is_some() {
             return Ok(());
         }
         let cfg = AudioConfig::load(&self.forge_root).map_err(|e| PluginError::LifecycleError {
@@ -103,7 +118,7 @@ impl CorePlugin for AudioCorePlugin {
             reason: format!("load config: {e}"),
         })?;
         let pair = cfg.build_backends(Arc::clone(&self.context));
-        *self.backends.lock().expect("audio backends mutex") = Some(pair);
+        *self.lock_backends() = Some(pair);
         Ok(())
     }
 
@@ -136,7 +151,7 @@ impl AudioCorePlugin {
             .map_err(|e| exec_err(format!("transcribe: invalid args: {e}")))?;
         let bytes = decode_b64(&a.audio_b64).map_err(audio_err)?;
         let format = AudioFormat::parse_or_default(a.format.as_deref());
-        let mut guard = self.backends.lock().expect("audio backends mutex");
+        let mut guard = self.lock_backends();
         let backends = guard.as_mut().ok_or_else(|| {
             exec_err("audio backends not initialised (on_init did not run)".to_string())
         })?;
@@ -164,7 +179,7 @@ impl AudioCorePlugin {
         let a: AudioSynthesizeArgs = serde_json::from_value(args.clone())
             .map_err(|e| exec_err(format!("synthesize: invalid args: {e}")))?;
         let format = AudioFormat::parse_or_default(a.format.as_deref());
-        let mut guard = self.backends.lock().expect("audio backends mutex");
+        let mut guard = self.lock_backends();
         let backends = guard.as_mut().ok_or_else(|| {
             exec_err("audio backends not initialised (on_init did not run)".to_string())
         })?;
@@ -182,7 +197,7 @@ impl AudioCorePlugin {
     }
 
     fn dispatch_status(&self) -> Result<serde_json::Value, PluginError> {
-        let guard = self.backends.lock().expect("audio backends mutex");
+        let guard = self.lock_backends();
         let backends = guard.as_ref().ok_or_else(|| {
             exec_err("audio backends not initialised (on_init did not run)".to_string())
         })?;
