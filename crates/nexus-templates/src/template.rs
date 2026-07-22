@@ -37,7 +37,7 @@ pub struct TemplateMeta {
     pub parameters: Vec<TemplateParameter>,
     /// Future fields are tolerated.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_yml::Value>,
+    pub extra: BTreeMap<String, serde_norway::Value>,
 }
 
 /// One parameter declaration.
@@ -190,7 +190,7 @@ pub fn parse_template_text(input: &str, file: &str) -> Result<Template, Template
     };
 
     let meta: TemplateMeta =
-        serde_yml::from_str(yaml).map_err(|e| TemplateParseError::SchemaError {
+        serde_norway::from_str(yaml).map_err(|e| TemplateParseError::SchemaError {
             file: file.to_string(),
             reason: e.to_string(),
         })?;

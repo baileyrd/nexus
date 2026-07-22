@@ -51,7 +51,7 @@ pub enum SubstitutionError {
 ///   value outside its `values:` list.
 pub fn render<S: std::hash::BuildHasher>(
     skill: &Skill,
-    values: &HashMap<String, serde_yml::Value, S>,
+    values: &HashMap<String, serde_norway::Value, S>,
 ) -> Result<String, SubstitutionError> {
     let resolved = resolve(skill, values)?;
     Ok(replace_tokens(&skill.body, &resolved))
@@ -59,7 +59,7 @@ pub fn render<S: std::hash::BuildHasher>(
 
 fn resolve<S: std::hash::BuildHasher>(
     skill: &Skill,
-    values: &HashMap<String, serde_yml::Value, S>,
+    values: &HashMap<String, serde_norway::Value, S>,
 ) -> Result<HashMap<String, String>, SubstitutionError> {
     let mut out = HashMap::with_capacity(skill.meta.parameters.len());
     for param in &skill.meta.parameters {
@@ -124,17 +124,17 @@ fn find_close(s: &str, from: usize) -> Option<usize> {
     None
 }
 
-fn yaml_eq(a: &serde_yml::Value, b: &serde_yml::Value) -> bool {
+fn yaml_eq(a: &serde_norway::Value, b: &serde_norway::Value) -> bool {
     stringify_yaml(a) == stringify_yaml(b)
 }
 
-fn stringify_yaml(v: &serde_yml::Value) -> String {
+fn stringify_yaml(v: &serde_norway::Value) -> String {
     match v {
-        serde_yml::Value::Null => String::new(),
-        serde_yml::Value::Bool(b) => b.to_string(),
-        serde_yml::Value::Number(n) => n.to_string(),
-        serde_yml::Value::String(s) => s.clone(),
-        other => serde_yml::to_string(other)
+        serde_norway::Value::Null => String::new(),
+        serde_norway::Value::Bool(b) => b.to_string(),
+        serde_norway::Value::Number(n) => n.to_string(),
+        serde_norway::Value::String(s) => s.clone(),
+        other => serde_norway::to_string(other)
             .unwrap_or_default()
             .trim_end()
             .to_string(),
@@ -169,8 +169,8 @@ mod tests {
         }
     }
 
-    fn str_val(s: &str) -> serde_yml::Value {
-        serde_yml::Value::String(s.into())
+    fn str_val(s: &str) -> serde_norway::Value {
+        serde_norway::Value::String(s.into())
     }
 
     #[test]

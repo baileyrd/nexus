@@ -18,10 +18,6 @@ all-features = true
 [advisories]
 yanked = "deny"
 ignore = [
-    # serde_yml is unsound + unmaintained. Used for frontmatter handling in
-    # six crates; the YAML-library migration is tracked in #248. Do not
-    # remove this ignore without landing that migration.
-    { id = "RUSTSEC-2025-0068", reason = "serde_yml replacement tracked in #248" },
     # paste is a build-time proc-macro (transitive via tokenizers); it ships
     # no runtime code and upstream archived it with no successor. Revisit if
     # the direct dependents migrate off it.

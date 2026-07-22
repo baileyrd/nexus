@@ -392,13 +392,13 @@ impl SkillsCorePlugin {
         let skill = reg
             .get(&a.id)
             .ok_or_else(|| exec_err(format!("no skill with id '{}'", a.id)))?;
-        let values: std::collections::HashMap<String, serde_yml::Value> = a
+        let values: std::collections::HashMap<String, serde_norway::Value> = a
             .values
             .into_iter()
             .map(|(k, v)| {
                 // Round-trip JSON → YAML so enum comparisons match the
                 // skill's declared `values:` list shape.
-                let y = serde_yml::to_value(&v).unwrap_or(serde_yml::Value::Null);
+                let y = serde_norway::to_value(&v).unwrap_or(serde_norway::Value::Null);
                 (k, y)
             })
             .collect();

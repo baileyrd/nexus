@@ -10,7 +10,7 @@ description = "Nexus file-format library: markdown, canvas, bases, config parsin
 thiserror  = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
-serde_yml  = { workspace = true }
+serde_norway  = { workspace = true }
 toml       = { workspace = true }
 comrak     = { workspace = true }
 sha2       = { workspace = true }

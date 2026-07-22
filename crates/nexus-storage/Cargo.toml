@@ -19,7 +19,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # C3 (#356) — OS-trash destination for deletes (XDG trash on Linux).
 trash = { workspace = true }
-serde_yml = { workspace = true }
+serde_norway = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 rusqlite = { workspace = true }

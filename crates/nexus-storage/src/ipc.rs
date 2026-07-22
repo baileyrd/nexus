@@ -1656,14 +1656,14 @@ pub fn frontmatter_from_source(content: &str) -> ReadFrontmatterResult {
         return ReadFrontmatterResult::default();
     };
     let yaml_src = &after_open[..close_pos];
-    let Ok(yaml) = serde_yml::from_str::<serde_yml::Value>(yaml_src) else {
+    let Ok(yaml) = serde_norway::from_str::<serde_norway::Value>(yaml_src) else {
         return ReadFrontmatterResult::default();
     };
     let mut out = ReadFrontmatterResult::default();
-    if let serde_yml::Value::Mapping(map) = yaml {
+    if let serde_norway::Value::Mapping(map) = yaml {
         for (k, v) in map {
             let key = match k {
-                serde_yml::Value::String(s) => s,
+                serde_norway::Value::String(s) => s,
                 other => format!("{other:?}"),
             };
             let stringified = stringify_yaml_value(&v);
@@ -1680,18 +1680,18 @@ pub fn frontmatter_from_source(content: &str) -> ReadFrontmatterResult {
     out
 }
 
-fn stringify_yaml_value(v: &serde_yml::Value) -> String {
+fn stringify_yaml_value(v: &serde_norway::Value) -> String {
     match v {
-        serde_yml::Value::Null => String::new(),
-        serde_yml::Value::Bool(b) => b.to_string(),
-        serde_yml::Value::Number(n) => n.to_string(),
-        serde_yml::Value::String(s) => s.clone(),
-        serde_yml::Value::Sequence(seq) => seq
+        serde_norway::Value::Null => String::new(),
+        serde_norway::Value::Bool(b) => b.to_string(),
+        serde_norway::Value::Number(n) => n.to_string(),
+        serde_norway::Value::String(s) => s.clone(),
+        serde_norway::Value::Sequence(seq) => seq
             .iter()
             .map(stringify_yaml_value)
             .collect::<Vec<_>>()
             .join(", "),
-        serde_yml::Value::Mapping(_) | serde_yml::Value::Tagged(_) => format!("{v:?}"),
+        serde_norway::Value::Mapping(_) | serde_norway::Value::Tagged(_) => format!("{v:?}"),
     }
 }
 
