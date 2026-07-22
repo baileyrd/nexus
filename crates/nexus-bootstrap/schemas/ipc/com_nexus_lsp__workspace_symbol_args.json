@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LspWorkspaceSymbolArgs",
+  "description": "Args for `workspace_symbol` (handler `17`, C50 / #403).\n\n`path` is a routing hint, same posture as [`LspExecuteCommandArgs`]:\nit picks the configured server whose workspace to search — the\nquery itself is workspace-wide, not document-scoped.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Filesystem path used to route the call to the right configured\nserver.",
+      "type": "string"
+    },
+    "query": {
+      "description": "Free-text query string (`WorkspaceSymbolParams.query`) — an\nempty string requests every symbol per the LSP spec, though\nmost servers cap or ignore that case.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "query"
+  ]
+}

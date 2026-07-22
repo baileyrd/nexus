@@ -2172,6 +2172,23 @@ plugin = "com.nexus.lsp"
 command = "execute_command"
 unrestricted = "LSP workspace/executeCommand — already gated by LSP server spawn from list_servers"
 
+# C50 (#403) — same read-only-request posture as the completions /
+# hover / definition / references / code_actions block above.
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "document_symbol"
+unrestricted = "read-only documentSymbol request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "signature_help"
+unrestricted = "read-only signatureHelp request"
+
+[[handler]]
+plugin = "com.nexus.lsp"
+command = "workspace_symbol"
+unrestricted = "read-only workspace/symbol request"
+
 # BL-113 Phase 2b — plugin contribution lifecycle. Gated by
 # `protocol.host.contribute` per the DAP block above.
 [[handler]]

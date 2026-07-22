@@ -753,6 +753,15 @@ fn minimal_client_capabilities() -> serde_json::Value {
                 "relatedInformation": false,
                 "versionSupport": true,
             },
+            // C50 (#403) — advertised so servers actually populate
+            // documentSymbol / signatureHelp responses instead of
+            // skipping them for an unadvertised client.
+            "documentSymbol": {
+                "hierarchicalDocumentSymbolSupport": true,
+            },
+            "signatureHelp": {
+                "signatureInformation": { "documentationFormat": ["plaintext", "markdown"] },
+            },
         },
         "workspace": {
             // BL-076 — host now answers `workspace/configuration`
@@ -766,6 +775,8 @@ fn minimal_client_capabilities() -> serde_json::Value {
             // (un)register requests with a null result so servers
             // can finish their startup sequence.
             "didChangeConfiguration": { "dynamicRegistration": true },
+            // C50 (#403) — advertised for `workspace/symbol`.
+            "symbol": {},
         },
         "window": {
             // Host returns null (cancellation) for showMessageRequest
