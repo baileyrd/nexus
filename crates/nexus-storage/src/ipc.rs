@@ -1463,6 +1463,11 @@ pub struct StorageChunkEmbedding {
     pub chunk_text: String,
     /// Dense vector representation of the chunk.
     pub embedding: Vec<f32>,
+    /// C19 (#372) — hash of the source file's content as of this embed
+    /// pass, shared by every chunk from the same file. `None` skips
+    /// the unchanged-file optimisation for this chunk's row.
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 /// Args for `com.nexus.storage::vector_insert`. Replaces all chunks
@@ -1555,6 +1560,47 @@ pub struct StorageVectorCountArgs {
     /// Collection to count (e.g. `notes`, `memory`). Defaults to `notes`.
     #[serde(default = "default_vector_namespace")]
     pub namespace: String,
+}
+
+/// Args for `com.nexus.storage::vector_stored_signature` (C19 / #372).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorStoredSignatureArgs {
+    /// Collection to look in (e.g. `notes`, `memory`). Defaults to `notes`.
+    #[serde(default = "default_vector_namespace")]
+    pub namespace: String,
+    /// Forge-relative path of the file to check.
+    pub file_path: String,
+}
+
+/// Result for `com.nexus.storage::vector_stored_signature` (C19 / #372).
+/// Both fields are `None` together — either nothing is stored for this
+/// file yet, or the stored rows predate this feature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StorageVectorStoredSignatureResult {
+    /// Content hash recorded the last time this file was embedded.
+    pub content_hash: Option<String>,
+    /// Embedding vector length recorded at that time — lets the caller
+    /// detect a provider/model switch (different dimensionality) even
+    /// when the file's own content hash is unchanged.
+    pub embedding_dim: Option<u32>,
 }
 
 /// One match row in a `vector_query` reply. Mirror of

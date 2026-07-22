@@ -21,7 +21,7 @@ use rusqlite::Connection;
 /// `#[allow(dead_code)]` documents the intentional unused-locally
 /// state without leaking the suppression to the rest of the module.
 #[allow(dead_code)]
-pub const CURRENT_VERSION: u32 = 10;
+pub const CURRENT_VERSION: u32 = 11;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -163,6 +163,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_010(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (10, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 11 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_011(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (11, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -314,6 +324,17 @@ fn apply_migration_010(conn: &Connection) -> Result<(), StorageError> {
         ALTER TABLE tasks ADD COLUMN priority TEXT;
         CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date) WHERE due_date IS NOT NULL;",
     )?;
+    Ok(())
+}
+
+/// C19 (#372) — a per-file content hash on `embeddings` lets
+/// `rag::index_file` skip the (expensive, often remote-API) embed step
+/// for a file whose content hasn't changed since it was last embedded.
+/// Nullable: existing rows predate this feature and are treated as
+/// "unknown / always re-embed" by the skip-check, so no backfill is
+/// needed for the migration itself to be safe.
+fn apply_migration_011(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch("ALTER TABLE embeddings ADD COLUMN content_hash TEXT;")?;
     Ok(())
 }
 
@@ -1072,5 +1093,27 @@ mod tests {
             .unwrap();
         assert_eq!(due, "2026-07-04");
         assert_eq!(prio, "high");
+    }
+
+    // ── 25. migrate_v11_adds_embeddings_content_hash_column (C19, #372) ──
+    #[test]
+    fn migrate_v11_adds_embeddings_content_hash_column() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO embeddings (namespace, file_path, block_id, chunk_text, embedding, content_hash, created_at)
+             VALUES ('notes', 'a.md', 1, 'chunk', X'00', 'hash123', 0);",
+            [],
+        )
+        .unwrap();
+        let hash: String = conn
+            .query_row(
+                "SELECT content_hash FROM embeddings WHERE file_path = 'a.md';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hash, "hash123");
+        assert_eq!(migrate(&conn).unwrap(), CURRENT_VERSION);
     }
 }

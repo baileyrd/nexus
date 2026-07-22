@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageVectorStoredSignatureArgs",
+  "description": "Args for `com.nexus.storage::vector_stored_signature` (C19 / #372).",
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "description": "Forge-relative path of the file to check.",
+      "type": "string"
+    },
+    "namespace": {
+      "description": "Collection to look in (e.g. `notes`, `memory`). Defaults to `notes`.",
+      "type": "string",
+      "default": "notes"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path"
+  ]
+}

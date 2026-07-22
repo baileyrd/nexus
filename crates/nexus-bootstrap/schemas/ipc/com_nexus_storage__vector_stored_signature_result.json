@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageVectorStoredSignatureResult",
+  "description": "Result for `com.nexus.storage::vector_stored_signature` (C19 / #372).\nBoth fields are `None` together — either nothing is stored for this\nfile yet, or the stored rows predate this feature.",
+  "type": "object",
+  "properties": {
+    "content_hash": {
+      "description": "Content hash recorded the last time this file was embedded.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "embedding_dim": {
+      "description": "Embedding vector length recorded at that time — lets the caller\ndetect a provider/model switch (different dimensionality) even\nwhen the file's own content hash is unchanged.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

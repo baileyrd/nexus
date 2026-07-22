@@ -14,6 +14,14 @@
       "description": "Textual content of the chunk.",
       "type": "string"
     },
+    "content_hash": {
+      "description": "C19 (#372) — hash of the source file's content as of this embed\npass, shared by every chunk from the same file. `None` skips\nthe unchanged-file optimisation for this chunk's row.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "embedding": {
       "description": "Dense vector representation of the chunk.",
       "type": "array",
