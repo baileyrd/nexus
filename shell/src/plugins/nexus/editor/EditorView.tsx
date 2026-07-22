@@ -1008,6 +1008,11 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           tabSize={tabSize}
           spellcheck={spellcheck}
           spellcheckLanguage={spellcheckLanguage}
+          initialSelection={tab.cursorOffset}
+          initialScrollTop={tab.scrollTop}
+          onPositionChange={(offset, scrollTop) =>
+            useEditorStore.getState().setViewPosition(tab.relpath, offset, scrollTop)
+          }
           vim={
             keybindings === 'vim'
               ? {
@@ -1350,6 +1355,11 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
         tabSize={tabSize}
         spellcheck={spellcheck}
         spellcheckLanguage={spellcheckLanguage}
+        initialSelection={tab.cursorOffset}
+        initialScrollTop={tab.scrollTop}
+        onPositionChange={(offset, scrollTop) =>
+          useEditorStore.getState().setViewPosition(tab.relpath, offset, scrollTop)
+        }
         vim={
           keybindings === 'vim' && runtime
             ? {

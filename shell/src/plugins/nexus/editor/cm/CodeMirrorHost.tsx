@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { Compartment, EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
   baselineExtensions,
@@ -51,6 +51,27 @@ export interface CodeMirrorHostProps {
   emacs?: EmacsKeymapOptions
   className?: string
   style?: React.CSSProperties
+  /**
+   * #405 — character offset to place the cursor at on mount (clamped
+   * to the initial `value`'s length). Read once at mount time, same
+   * as every other construction-only prop here — a later change does
+   * not move the live cursor; callers who want that should remount
+   * via `key`.
+   */
+  initialSelection?: number
+  /** #405 — `scrollDOM.scrollTop` to restore once the view has laid
+   *  out. Applied one frame after mount so the scroll container has
+   *  real dimensions. */
+  initialScrollTop?: number
+  /**
+   * #405 — debounced (300ms) callback firing the current cursor
+   * offset + `scrollDOM.scrollTop` on every selection change or
+   * scroll, so callers can persist position for tabs that stay
+   * mounted-but-hidden (the workspace never unmounts a backgrounded
+   * tab, just toggles `display: none`) rather than only capturing on
+   * unmount.
+   */
+  onPositionChange?: (offset: number, scrollTop: number) => void
 }
 
 /**
@@ -101,6 +122,9 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
       emacs,
       className,
       style,
+      initialSelection,
+      initialScrollTop,
+      onPositionChange,
     },
     ref,
   ) {
@@ -121,6 +145,13 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
     // stale `onChange` and so we don't rebuild the view on re-renders.
     const onChangeRef = useRef(onChange)
     onChangeRef.current = onChange
+    // #405 — read once at mount (construction-only, like every other
+    // prop this component doesn't react to post-mount).
+    const initialSelectionRef = useRef(initialSelection)
+    const initialScrollTopRef = useRef(initialScrollTop)
+    const onPositionChangeRef = useRef(onPositionChange)
+    onPositionChangeRef.current = onPositionChange
+    const positionCaptureTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     useImperativeHandle(
       ref,
@@ -139,8 +170,26 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
       const parent = hostRef.current
       if (!parent) return
       const extra = buildExtensionsRef.current?.() ?? []
+      // #405 — clamp to the initial doc so a stale persisted offset
+      // (content changed on disk since the position was captured)
+      // can't throw constructing the selection.
+      const initialOffset =
+        initialSelectionRef.current != null
+          ? Math.min(Math.max(0, initialSelectionRef.current), value.length)
+          : undefined
+      // #405 — debounced capture shared by the selection-change branch
+      // of the updateListener below and the scroll listener attached
+      // after the view exists.
+      const capturePosition = (view: EditorView) => {
+        if (positionCaptureTimer.current != null) clearTimeout(positionCaptureTimer.current)
+        positionCaptureTimer.current = setTimeout(() => {
+          positionCaptureTimer.current = null
+          onPositionChangeRef.current?.(view.state.selection.main.head, view.scrollDOM.scrollTop)
+        }, 300)
+      }
       const state = EditorState.create({
         doc: value,
+        selection: initialOffset != null ? EditorSelection.cursor(initialOffset) : undefined,
         extensions: [
           baselineCompartment.current.of(
             baselineExtensions({
@@ -161,13 +210,33 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
           ]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString())
+            if (u.docChanged || u.selectionSet) capturePosition(u.view)
           }),
           ...extra,
         ],
       })
       const view = new EditorView({ state, parent })
       viewRef.current = view
+
+      // #405 — restore scroll one frame after mount so `scrollDOM` has
+      // real layout dimensions (setting it synchronously at mount can
+      // no-op if the container hasn't been measured yet).
+      let scrollRestoreFrame = 0
+      if (initialScrollTopRef.current != null) {
+        scrollRestoreFrame = requestAnimationFrame(() => {
+          if (viewRef.current) viewRef.current.scrollDOM.scrollTop = initialScrollTopRef.current!
+        })
+      }
+      const onScroll = () => capturePosition(view)
+      view.scrollDOM.addEventListener('scroll', onScroll, { passive: true })
+
       return () => {
+        cancelAnimationFrame(scrollRestoreFrame)
+        view.scrollDOM.removeEventListener('scroll', onScroll)
+        if (positionCaptureTimer.current != null) clearTimeout(positionCaptureTimer.current)
+        // Final synchronous flush so a tab close / app quit right
+        // after the last edit doesn't lose up to 300ms of position.
+        onPositionChangeRef.current?.(view.state.selection.main.head, view.scrollDOM.scrollTop)
         view.destroy()
         viewRef.current = null
       }
