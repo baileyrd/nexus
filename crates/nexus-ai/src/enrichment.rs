@@ -501,7 +501,9 @@ fn yaml_escape_inline(s: &str) -> String {
 
 /// SHA-256 hex digest. Inlined here to avoid pulling another dep into
 /// nexus-ai — the storage crate has its own copy via nexus-formats.
-fn sha256_hex(bytes: &[u8]) -> String {
+/// `pub(crate)` so `rag::index_file` (C19 / #372) can reuse it for the
+/// unchanged-file skip-check instead of duplicating the digest logic.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(bytes);

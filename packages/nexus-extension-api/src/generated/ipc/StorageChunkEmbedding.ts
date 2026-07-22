@@ -22,4 +22,10 @@ chunk_text: string,
 /**
  * Dense vector representation of the chunk.
  */
-embedding: Array<number>, };
+embedding: Array<number>, 
+/**
+ * C19 (#372) — hash of the source file's content as of this embed
+ * pass, shared by every chunk from the same file. `None` skips
+ * the unchanged-file optimisation for this chunk's row.
+ */
+content_hash: string | null, };

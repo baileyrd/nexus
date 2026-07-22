@@ -10,7 +10,7 @@
 //! Similarity search loads all vectors into memory and ranks them by cosine
 //! similarity — appropriate for personal-knowledge-base sizes.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StorageError;
@@ -28,6 +28,13 @@ pub struct ChunkEmbedding {
     pub chunk_text: String,
     /// Dense vector representation of the chunk.
     pub embedding: Vec<f32>,
+    /// C19 (#372) — hash of the source file's content as of this embed
+    /// pass. Every chunk from one `upsert` call shares the same value.
+    /// `None` for callers that don't opt into the skip-unchanged-files
+    /// optimisation (the row is then always re-embedded, matching
+    /// pre-#372 behaviour).
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 /// A search result returned by [`search`].
@@ -65,8 +72,8 @@ pub fn upsert(
     )?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO embeddings (namespace, file_path, block_id, chunk_text, embedding, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, unixepoch());",
+            "INSERT INTO embeddings (namespace, file_path, block_id, chunk_text, embedding, content_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, unixepoch());",
         )?;
         for chunk in chunks {
             let blob = embedding_to_blob(&chunk.embedding);
@@ -78,11 +85,50 @@ pub fn upsert(
                 block_id,
                 chunk.chunk_text,
                 blob,
+                chunk.content_hash,
             ])?;
         }
     }
     tx.commit()?;
     Ok(())
+}
+
+/// C19 (#372) — the content hash + embedding dimensionality already
+/// stored for `file_path`, read from one arbitrary existing chunk row
+/// (every chunk from the same `upsert` call shares the same
+/// `content_hash`). `None` when nothing is stored yet, or the stored
+/// rows predate this feature (`content_hash IS NULL`) — both cases mean
+/// "always re-embed".
+///
+/// The dimension is derived from the stored blob's byte length rather
+/// than tracked in a separate column, so a provider/model switch that
+/// changes the embedding dimensionality is automatically treated as a
+/// content mismatch by the caller (comparing against the *current*
+/// provider's dimension) even though the file's own content didn't
+/// change.
+///
+/// # Errors
+///
+/// Returns [`StorageError`] if the underlying query fails.
+pub fn stored_signature(
+    conn: &Connection,
+    namespace: &str,
+    file_path: &str,
+) -> Result<Option<(String, usize)>, StorageError> {
+    let result = conn
+        .query_row(
+            "SELECT content_hash, embedding FROM embeddings
+             WHERE namespace = ?1 AND file_path = ?2 AND content_hash IS NOT NULL
+             LIMIT 1;",
+            params![namespace, file_path],
+            |row| {
+                let hash: String = row.get(0)?;
+                let blob: Vec<u8> = row.get(1)?;
+                Ok((hash, blob.len() / 4))
+            },
+        )
+        .optional()?;
+    Ok(result)
 }
 
 /// Delete all embeddings associated with `file_path` within `namespace`.
@@ -301,12 +347,14 @@ mod tests {
                 block_id: 1,
                 chunk_text: "Rust is great".into(),
                 embedding: vec![1.0, 0.0, 0.0],
+                content_hash: None,
             },
             ChunkEmbedding {
                 file_path: "a.md".into(),
                 block_id: 2,
                 chunk_text: "Python is nice".into(),
                 embedding: vec![0.0, 1.0, 0.0],
+                content_hash: None,
             },
         ];
 
@@ -330,6 +378,7 @@ mod tests {
                 block_id: 1,
                 chunk_text: "a note".into(),
                 embedding: vec![1.0, 0.0],
+                content_hash: None,
             }],
         )
         .unwrap();
@@ -342,6 +391,7 @@ mod tests {
                 block_id: 0,
                 chunk_text: "a memory".into(),
                 embedding: vec![1.0, 0.0],
+                content_hash: None,
             }],
         )
         .unwrap();
@@ -371,6 +421,7 @@ mod tests {
             block_id: 1,
             chunk_text: "old".into(),
             embedding: vec![1.0, 0.0],
+            content_hash: None,
         }];
         upsert(&conn, "notes", "b.md", &v1).unwrap();
         assert_eq!(count(&conn, "notes").unwrap(), 1);
@@ -380,6 +431,7 @@ mod tests {
             block_id: 1,
             chunk_text: "new".into(),
             embedding: vec![0.0, 1.0],
+            content_hash: None,
         }];
         upsert(&conn, "notes", "b.md", &v2).unwrap();
         assert_eq!(count(&conn, "notes").unwrap(), 1);
@@ -398,12 +450,14 @@ mod tests {
                     block_id: 1,
                     chunk_text: "one".into(),
                     embedding: vec![1.0, 0.0],
+                    content_hash: None,
                 },
                 ChunkEmbedding {
                     file_path: "a.md".into(),
                     block_id: 2,
                     chunk_text: "two".into(),
                     embedding: vec![0.0, 1.0],
+                    content_hash: None,
                 },
             ],
         )
@@ -417,6 +471,7 @@ mod tests {
                 block_id: 1,
                 chunk_text: "solo".into(),
                 embedding: vec![2.0, 2.0],
+                content_hash: None,
             }],
         )
         .unwrap();
@@ -445,6 +500,7 @@ mod tests {
                 block_id: 1,
                 chunk_text: "first".into(),
                 embedding: vec![1.0, 0.0, 0.0],
+                content_hash: None,
             }],
         )
         .unwrap();
@@ -470,11 +526,84 @@ mod tests {
             block_id: 1,
             chunk_text: "data".into(),
             embedding: vec![1.0],
+            content_hash: None,
         }];
         upsert(&conn, "notes", "c.md", &chunks).unwrap();
         assert_eq!(count(&conn, "notes").unwrap(), 1);
 
         delete_by_file(&conn, "notes", "c.md").unwrap();
         assert_eq!(count(&conn, "notes").unwrap(), 0);
+    }
+
+    // ── C19 (#372) — stored_signature ────────────────────────────────
+
+    #[test]
+    fn stored_signature_returns_none_when_nothing_stored() {
+        let conn = setup_db();
+        assert_eq!(stored_signature(&conn, "notes", "missing.md").unwrap(), None);
+    }
+
+    #[test]
+    fn stored_signature_returns_hash_and_dimension_after_upsert() {
+        let conn = setup_db();
+        upsert(
+            &conn,
+            "notes",
+            "d.md",
+            &[ChunkEmbedding {
+                file_path: "d.md".into(),
+                block_id: 1,
+                chunk_text: "hello".into(),
+                embedding: vec![1.0, 2.0, 3.0],
+                content_hash: Some("abc123".into()),
+            }],
+        )
+        .unwrap();
+
+        let sig = stored_signature(&conn, "notes", "d.md").unwrap();
+        assert_eq!(sig, Some(("abc123".to_string(), 3)));
+    }
+
+    #[test]
+    fn stored_signature_is_none_for_rows_predating_the_feature() {
+        // A row with content_hash left NULL (e.g. from before migration
+        // 011, or a caller that opted out) must read back as "unknown",
+        // not as an empty-string match.
+        let conn = setup_db();
+        upsert(
+            &conn,
+            "notes",
+            "e.md",
+            &[ChunkEmbedding {
+                file_path: "e.md".into(),
+                block_id: 1,
+                chunk_text: "hello".into(),
+                embedding: vec![1.0],
+                content_hash: None,
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(stored_signature(&conn, "notes", "e.md").unwrap(), None);
+    }
+
+    #[test]
+    fn stored_signature_is_scoped_to_namespace() {
+        let conn = setup_db();
+        upsert(
+            &conn,
+            "notes",
+            "f.md",
+            &[ChunkEmbedding {
+                file_path: "f.md".into(),
+                block_id: 1,
+                chunk_text: "hello".into(),
+                embedding: vec![1.0, 2.0],
+                content_hash: Some("notes-hash".into()),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(stored_signature(&conn, "memory", "f.md").unwrap(), None);
     }
 }

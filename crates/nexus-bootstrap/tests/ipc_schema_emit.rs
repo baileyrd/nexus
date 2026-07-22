@@ -59,6 +59,7 @@ use nexus_storage::ipc::{
     StorageTrashRestoreResult, StorageTrashRow,
     StorageSearchHit, StorageSearchResult, StorageSettingsWriteArgs, StorageSymbolRow,
     StorageToggleTaskArgs, StorageVectorInsertArgs, StorageVectorMatch, StorageVectorQueryArgs,
+    StorageVectorStoredSignatureArgs, StorageVectorStoredSignatureResult,
     StorageVectorstoreCountResult, StorageWriteFileArgs, StorageWriteFileResult,
     StorageWriteFrontmatterArgs,
 };
@@ -287,6 +288,14 @@ fn emit_all_schemas_impl() {
     write_schema::<StorageVectorQueryArgs>("com_nexus_storage__vector_query", "args");
     write_schema::<StorageVectorMatch>("com_nexus_storage__vector_query", "match");
     write_schema::<StorageVectorstoreCountResult>("com_nexus_storage__vectorstore_count", "result");
+    write_schema::<StorageVectorStoredSignatureArgs>(
+        "com_nexus_storage__vector_stored_signature",
+        "args",
+    );
+    write_schema::<StorageVectorStoredSignatureResult>(
+        "com_nexus_storage__vector_stored_signature",
+        "result",
+    );
 
     // ── com.nexus.storage::hybrid_search (RRF fusion of FTS + vector) ────
     write_schema::<StorageHybridSearchArgs>("com_nexus_storage__hybrid_search", "args");

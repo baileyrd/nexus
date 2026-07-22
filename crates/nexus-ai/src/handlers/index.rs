@@ -93,10 +93,13 @@ pub(crate) async fn handle_index_file(
         .ok_or_else(|| exec_err("index_file: no AI embedding provider configured".to_string()))?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
-    let count = rag::index_file(ctx, embedder.as_ref(), file_path, &blocks)
+    let outcome = rag::index_file(ctx, embedder.as_ref(), file_path, &blocks)
         .await
         .map_err(|e| exec_err(format!("index_file: {e}")))?;
-    Ok(serde_json::json!({ "indexed_chunks": count }))
+    Ok(serde_json::json!({
+        "indexed_chunks": outcome.chunks,
+        "skipped": outcome.skipped,
+    }))
 }
 
 pub(crate) async fn handle_vectorstore_count(

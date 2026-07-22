@@ -82,5 +82,34 @@ fn chunk_to_impl(c: StorageChunkEmbedding) -> crate::vectorstore::ChunkEmbedding
         block_id: c.block_id,
         chunk_text: c.chunk_text,
         embedding: c.embedding,
+        content_hash: c.content_hash,
     }
+}
+
+/// C19 (#372) — `vector_stored_signature`. Read-only lookup a caller
+/// (`rag::index_file`) uses to decide whether a file's content has
+/// changed since it was last embedded, without paying the cost of a
+/// re-embed when it hasn't.
+pub(crate) fn stored_signature(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let crate::ipc::StorageVectorStoredSignatureArgs {
+        namespace,
+        file_path,
+    } = parse_args(args, "vector_stored_signature")?;
+    let signature = engine
+        .vector_stored_signature(&namespace, &file_path)
+        .map_err(|e| exec_err(format!("vector_stored_signature: {e}")))?;
+    let (content_hash, embedding_dim) = match signature {
+        Some((hash, dim)) => (
+            Some(hash),
+            Some(u32::try_from(dim).unwrap_or(u32::MAX)),
+        ),
+        None => (None, None),
+    };
+    to_value(
+        &crate::ipc::StorageVectorStoredSignatureResult {
+            content_hash,
+            embedding_dim,
+        },
+        "vector_stored_signature",
+    )
 }

@@ -662,7 +662,7 @@ async fn process_batch(
         };
 
         match crate::rag::index_file(ctx, embedder.as_ref(), &path_str, &blocks).await {
-            Ok(_n) => {
+            Ok(_outcome) => {
                 if let Ok(mut g) = status.write() {
                     g.indexed_files = g.indexed_files.saturating_add(1);
                     g.last_error = None;

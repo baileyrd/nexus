@@ -1269,6 +1269,7 @@ fn hybrid_search_fuses_both_arms_and_ranks_dual_hits_first() {
                 block_id: keyword_block,
                 chunk_text: "xylophone-token appears here".to_string(),
                 embedding: vec![0.0, 1.0, 0.0],
+                content_hash: None,
             }],
         )
         .expect("insert keyword embedding");
@@ -1281,6 +1282,7 @@ fn hybrid_search_fuses_both_arms_and_ranks_dual_hits_first() {
                 block_id: semantic_block,
                 chunk_text: "unrelated-prose-marker entirely".to_string(),
                 embedding: vec![1.0, 0.0, 0.0],
+                content_hash: None,
             }],
         )
         .expect("insert semantic embedding");

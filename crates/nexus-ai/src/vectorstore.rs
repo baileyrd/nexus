@@ -36,6 +36,10 @@ pub struct ChunkEmbedding {
     pub chunk_text: String,
     /// Dense vector representation of the chunk.
     pub embedding: Vec<f32>,
+    /// C19 (#372) — hash of the source file's content as of this embed
+    /// pass, shared by every chunk from the same file.
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 /// A search hit from the vector store.
@@ -189,6 +193,37 @@ pub async fn delete_by_file(ctx: &KernelPluginContext, file_path: &str) -> Resul
     .await
     .map_err(|e| AiError::Provider(format!("storage vector_delete_by_file: {e}")))?;
     Ok(())
+}
+
+/// C19 (#372) — the `(content_hash, embedding_dim)` already stored for
+/// `file_path` via storage IPC, or `None` if nothing usable is stored
+/// yet (never embedded, or embedded before this feature shipped).
+///
+/// # Errors
+/// Returns [`AiError::Provider`] on dispatcher failure or malformed response.
+pub async fn stored_signature(
+    ctx: &KernelPluginContext,
+    file_path: &str,
+) -> Result<Option<(String, usize)>, AiError> {
+    let args = serde_json::json!({ "file_path": file_path });
+    let response = ctx
+        .ipc_call(
+            STORAGE_PLUGIN,
+            "vector_stored_signature",
+            args,
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| AiError::Provider(format!("storage vector_stored_signature: {e}")))?;
+    let content_hash = response
+        .get("content_hash")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let embedding_dim = response
+        .get("embedding_dim")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok());
+    Ok(content_hash.zip(embedding_dim))
 }
 
 /// Count all stored embeddings via storage IPC.

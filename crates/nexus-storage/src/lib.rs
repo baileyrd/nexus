@@ -2342,6 +2342,22 @@ impl StorageEngine {
         let conn = self.pool_connection()?;
         vectorstore::mean_embeddings_by_file(&conn, namespace)
     }
+
+    /// C19 (#372) — the `(content_hash, embedding_dim)` already stored
+    /// for `file_path` in `namespace`, or `None` if nothing usable is
+    /// stored yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the underlying query fails.
+    pub fn vector_stored_signature(
+        &self,
+        namespace: &str,
+        file_path: &str,
+    ) -> Result<Option<(String, usize)>, StorageError> {
+        let conn = self.pool_connection()?;
+        vectorstore::stored_signature(&conn, namespace, file_path)
+    }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

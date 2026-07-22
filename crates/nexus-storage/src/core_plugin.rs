@@ -425,6 +425,15 @@ pub const HANDLER_TRASH_EMPTY: u32 = 80;
 /// note-level counterpart to `entity_find_duplicates`.
 pub const HANDLER_NOTE_FIND_DUPLICATES: u32 = 81;
 
+/// C19 (#372) — `vector_stored_signature`. Args:
+/// [`crate::ipc::StorageVectorStoredSignatureArgs`]. Returns
+/// [`crate::ipc::StorageVectorStoredSignatureResult`]. Read-only lookup
+/// of the content hash + embedding dimension already stored for one
+/// file, so a caller (`nexus-ai::rag::index_file`) can skip re-embedding
+/// unchanged content instead of unconditionally re-paying the embedding
+/// API on every reindex.
+pub const HANDLER_VECTOR_STORED_SIGNATURE: u32 = 82;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -524,6 +533,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("obsidian_base_query", HANDLER_OBSIDIAN_BASE_QUERY),
     ("hybrid_search", HANDLER_HYBRID_SEARCH),
     ("note_find_duplicates", HANDLER_NOTE_FIND_DUPLICATES),
+    ("vector_stored_signature", HANDLER_VECTOR_STORED_SIGNATURE),
 ];
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
@@ -877,6 +887,9 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_VECTOR_QUERY => crate::handlers::vector::query(engine, args),
             HANDLER_VECTOR_DELETE_BY_FILE => crate::handlers::vector::delete_by_file(engine, args),
             HANDLER_VECTORSTORE_COUNT => crate::handlers::vector::count(engine, args),
+            HANDLER_VECTOR_STORED_SIGNATURE => {
+                crate::handlers::vector::stored_signature(engine, args)
+            }
             HANDLER_QUERY_BLOCKS => crate::handlers::tasks::query_blocks(engine, args),
             HANDLER_BASE_INDEX => crate::handlers::bases::index(engine, &self.forge_root, args),
             HANDLER_BASE_LOAD => crate::handlers::bases::load(&self.forge_root, args),
