@@ -18,7 +18,7 @@ use nexus_formats::MarkdownError;
 fn frontmatter_rejects_oversize_yaml() {
     // Frontmatter block one byte over the cap. Content is benign
     // (a single string field) — the cap fires on size alone, before
-    // serde_yml ever sees it.
+    // serde_norway ever sees it.
     let inner = "title: ".to_string() + &"a".repeat(MAX_FRONTMATTER_BYTES + 1);
     let doc = format!("---\n{inner}\n---\nbody");
     let err = extract(&doc).expect_err("must reject oversize frontmatter");

@@ -17,7 +17,7 @@ pub enum SkillParseError {
     MissingCloseDelimiter,
     /// Frontmatter YAML failed to decode.
     #[error("frontmatter YAML decode failed: {0}")]
-    InvalidYaml(#[from] serde_yml::Error),
+    InvalidYaml(#[from] serde_norway::Error),
     /// File could not be read from disk.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -32,7 +32,7 @@ pub enum SkillParseError {
 /// decode fails.
 pub fn parse_skill_text(source: &str) -> Result<Skill, SkillParseError> {
     let (frontmatter, body) = split_frontmatter(source)?;
-    let meta: SkillMeta = serde_yml::from_str(frontmatter)?;
+    let meta: SkillMeta = serde_norway::from_str(frontmatter)?;
     Ok(Skill {
         meta,
         body: body.to_string(),

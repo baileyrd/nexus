@@ -9,7 +9,7 @@ description = "Nexus editor engine: block tree, annotations, transactions (PRD 0
 [dependencies]
 serde         = { workspace = true }
 serde_json    = { workspace = true }
-serde_yml     = { workspace = true }
+serde_norway     = { workspace = true }
 uuid          = { workspace = true }
 thiserror     = { workspace = true }
 chrono        = { workspace = true }

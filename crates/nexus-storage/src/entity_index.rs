@@ -795,7 +795,7 @@ pub fn parse_entity(stem: &str, relpath: &str, content: &str) -> Result<EntityRe
     let (yaml_src, body) = split_frontmatter(content);
     let yaml_src = yaml_src.ok_or_else(|| "no YAML frontmatter".to_string())?;
     let raw: RawEntityFrontmatter =
-        serde_yml::from_str(yaml_src).map_err(|e| format!("frontmatter YAML decode: {e}"))?;
+        serde_norway::from_str(yaml_src).map_err(|e| format!("frontmatter YAML decode: {e}"))?;
     let entity_type = raw
         .entity_type
         .map(|s| s.trim().to_string())
@@ -1085,7 +1085,7 @@ pub fn decay_file_content(content: &str, params: &DecayParams) -> Option<Decayed
     }
     let (yaml_src, body) = split_frontmatter(content);
     let yaml_src = yaml_src?;
-    let raw: RawEntityFrontmatter = serde_yml::from_str(yaml_src).ok()?;
+    let raw: RawEntityFrontmatter = serde_norway::from_str(yaml_src).ok()?;
     let entity_type = raw
         .entity_type
         .map(|s| s.trim().to_string())

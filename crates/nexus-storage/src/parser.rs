@@ -278,8 +278,8 @@ fn extract_frontmatter(
     };
 
     // Parse YAML.
-    let yaml: serde_yml::Value =
-        serde_yml::from_str(yaml_src).map_err(|e| StorageError::ParseError {
+    let yaml: serde_norway::Value =
+        serde_norway::from_str(yaml_src).map_err(|e| StorageError::ParseError {
             file: "<frontmatter>".to_string(),
             error: e.to_string(),
         })?;
@@ -287,18 +287,18 @@ fn extract_frontmatter(
     let mut properties = Vec::new();
     let mut tags: Vec<ParsedTag> = Vec::new();
 
-    if let serde_yml::Value::Mapping(map) = &yaml {
+    if let serde_norway::Value::Mapping(map) = &yaml {
         for (k, v) in map {
             let key = match k {
-                serde_yml::Value::String(s) => s.clone(),
+                serde_norway::Value::String(s) => s.clone(),
                 other => format!("{other:?}"),
             };
 
             // Extract tags from the `tags` key.
             if key == "tags" {
-                if let serde_yml::Value::Sequence(seq) = v {
+                if let serde_norway::Value::Sequence(seq) = v {
                     for item in seq {
-                        if let serde_yml::Value::String(tag) = item {
+                        if let serde_norway::Value::String(tag) = item {
                             tags.push(ParsedTag {
                                 name: tag.clone(),
                                 source: "frontmatter".to_string(),
@@ -320,17 +320,17 @@ fn extract_frontmatter(
     Ok((properties, tags, body))
 }
 
-/// Convert a `serde_yml::Value` to a JSON string and a type hint.
-fn yaml_to_json_and_type(value: &serde_yml::Value) -> (String, String) {
+/// Convert a `serde_norway::Value` to a JSON string and a type hint.
+fn yaml_to_json_and_type(value: &serde_norway::Value) -> (String, String) {
     let json = yaml_value_to_json(value);
     let type_hint = match value {
-        serde_yml::Value::Number(_) => "number",
-        serde_yml::Value::Sequence(_) => "list",
-        serde_yml::Value::Mapping(_) => "object",
-        serde_yml::Value::String(_)
-        | serde_yml::Value::Bool(_)
-        | serde_yml::Value::Null
-        | serde_yml::Value::Tagged(_) => "string",
+        serde_norway::Value::Number(_) => "number",
+        serde_norway::Value::Sequence(_) => "list",
+        serde_norway::Value::Mapping(_) => "object",
+        serde_norway::Value::String(_)
+        | serde_norway::Value::Bool(_)
+        | serde_norway::Value::Null
+        | serde_norway::Value::Tagged(_) => "string",
     };
     (
         serde_json::to_string(&json).unwrap_or_else(|_| "null".to_string()),
@@ -338,12 +338,12 @@ fn yaml_to_json_and_type(value: &serde_yml::Value) -> (String, String) {
     )
 }
 
-/// Convert a `serde_yml::Value` to a `serde_json::Value`.
-fn yaml_value_to_json(value: &serde_yml::Value) -> serde_json::Value {
+/// Convert a `serde_norway::Value` to a `serde_json::Value`.
+fn yaml_value_to_json(value: &serde_norway::Value) -> serde_json::Value {
     match value {
-        serde_yml::Value::Null => serde_json::Value::Null,
-        serde_yml::Value::Bool(b) => serde_json::Value::Bool(*b),
-        serde_yml::Value::Number(n) => {
+        serde_norway::Value::Null => serde_json::Value::Null,
+        serde_norway::Value::Bool(b) => serde_json::Value::Bool(*b),
+        serde_norway::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 serde_json::Value::Number(i.into())
             } else if let Some(f) = n.as_f64() {
@@ -353,16 +353,16 @@ fn yaml_value_to_json(value: &serde_yml::Value) -> serde_json::Value {
                 serde_json::Value::Null
             }
         }
-        serde_yml::Value::String(s) => serde_json::Value::String(s.clone()),
-        serde_yml::Value::Sequence(seq) => {
+        serde_norway::Value::String(s) => serde_json::Value::String(s.clone()),
+        serde_norway::Value::Sequence(seq) => {
             serde_json::Value::Array(seq.iter().map(yaml_value_to_json).collect())
         }
-        serde_yml::Value::Mapping(map) => {
+        serde_norway::Value::Mapping(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map
                 .iter()
                 .map(|(k, v)| {
                     let key = match k {
-                        serde_yml::Value::String(s) => s.clone(),
+                        serde_norway::Value::String(s) => s.clone(),
                         other => format!("{other:?}"),
                     };
                     (key, yaml_value_to_json(v))
@@ -370,7 +370,7 @@ fn yaml_value_to_json(value: &serde_yml::Value) -> serde_json::Value {
                 .collect();
             serde_json::Value::Object(obj)
         }
-        serde_yml::Value::Tagged(t) => yaml_value_to_json(&t.value),
+        serde_norway::Value::Tagged(t) => yaml_value_to_json(&t.value),
     }
 }
 

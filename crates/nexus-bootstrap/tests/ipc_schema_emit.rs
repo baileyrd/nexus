@@ -142,7 +142,7 @@ use nexus_theme::core_plugin::{
 use nexus_theme::snippet::{SnippetMode, SnippetScope};
 use nexus_theme::ThemeMode;
 // nexus-skills exposes only its Args types — the return Skill/SkillMeta
-// uses `#[serde(flatten)] extra: BTreeMap<String, serde_yml::Value>`
+// uses `#[serde(flatten)] extra: BTreeMap<String, serde_norway::Value>`
 // for forward-compat YAML, which is fundamentally incompatible with
 // `deny_unknown_fields`. Shell-side consumers treat Skill as opaque.
 use nexus_skills::core_plugin::{

@@ -271,7 +271,7 @@ fn detect_conflicts(registry: &SkillRegistry, order: &[String]) -> Vec<ComposeCo
                 let default_str = p
                     .default
                     .as_ref()
-                    .map(|v| serde_yml::to_string(v).unwrap_or_default());
+                    .map(|v| serde_norway::to_string(v).unwrap_or_default());
                 by_param.entry(p.name.clone()).or_default().push((
                     id.clone(),
                     p.param_type.clone(),
@@ -475,7 +475,7 @@ mod tests {
             description: None,
             values: Vec::new(),
             items: None,
-            default: Some(serde_yml::Value::String("formal".into())),
+            default: Some(serde_norway::Value::String("formal".into())),
         });
         let mut b = skill("b", &["a"], "B");
         b.meta.parameters.push(SkillParameter {
@@ -484,7 +484,7 @@ mod tests {
             description: None,
             values: Vec::new(),
             items: None,
-            default: Some(serde_yml::Value::String("casual".into())),
+            default: Some(serde_norway::Value::String("casual".into())),
         });
         let reg = registry_with(vec![a, b]);
         let out = compose(&reg, "b").unwrap();

@@ -10,7 +10,7 @@ description = "Page-template subsystem: .template.md files with parameterized bo
 thiserror  = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
-serde_yml  = { workspace = true }
+serde_norway  = { workspace = true }
 chrono     = { workspace = true }
 tracing    = { workspace = true }
 nexus-plugins = { path = "../nexus-plugins" }

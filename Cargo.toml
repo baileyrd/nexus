@@ -167,8 +167,10 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "r
 base64 = "0.22"
 dirs = "5"
 
-# YAML frontmatter (serde_yml is the maintained fork of archived serde_yaml)
-serde_yml = "0.0.12"
+# YAML frontmatter (serde_norway is the maintained fork of archived
+# serde_yaml; serde_yml, the prior fork, is unsound + unmaintained —
+# RUSTSEC-2025-0068, migrated in #248)
+serde_norway = "0.9"
 
 # System interfaces
 libc = "0.2"
