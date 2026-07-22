@@ -14,17 +14,28 @@ import type { ReactElement } from 'react'
 import type { Leaf, ViewCreator } from '../../../workspace'
 import { ViewBase } from '../../../workspace'
 import type { SessionManager } from './sessionManager.ts'
+import { useEditorStore, type EditorTabMode } from './editorStore.ts'
 
 type RenderFn = (relpath: string | undefined, leafId: string) => ReactElement
 
 /**
- * Per-leaf state for a future per-tab model — today the editor store
- * owns everything, so this is just a placeholder that round-trips the
- * relpath so `workspaceStore.serialize()` carries it forward.
+ * Per-leaf state that round-trips through `workspaceStore.serialize()`
+ * into `.forge/workspace.json`. `relpath` identifies the tab; `mode` /
+ * `cursorOffset` / `scrollTop` are #405's restore-on-reopen fields —
+ * `getState()` reads them live off the editor store's tab record
+ * (kept fresh by `CodeMirrorHost`'s position listener) once the tab
+ * exists, and `setState()` parses them out of the persisted layout so
+ * `index.ts`'s restore path can seed a freshly-created tab with them
+ * before the store has any record for this relpath.
  */
 interface MarkdownViewState {
   relpath?: string
+  mode?: EditorTabMode
+  cursorOffset?: number
+  scrollTop?: number
 }
+
+const EDITOR_TAB_MODES: readonly EditorTabMode[] = ['live', 'source', 'preview']
 
 export class MarkdownView extends ViewBase {
   readonly viewType = 'markdown'
@@ -47,7 +58,24 @@ export class MarkdownView extends ViewBase {
   }
 
   getState(): MarkdownViewState {
-    return this.state
+    const relpath = this.state.relpath
+    if (!relpath) return this.state
+    // #405 — once the editor store has a tab for this relpath, it is
+    // the freshest source of mode / cursor / scroll (CodeMirrorHost's
+    // listener keeps it updated live, including for backgrounded
+    // tabs — every open tab stays mounted, just `display: none`).
+    // Before that (e.g. serialize() racing the initial `loadFile`
+    // during restore), fall back to whatever `setState` last parsed
+    // out of the persisted layout so a save mid-restore doesn't
+    // regress to a blank ephemeral state.
+    const tab = useEditorStore.getState().tabs.find((t) => t.relpath === relpath)
+    if (!tab) return this.state
+    return {
+      relpath,
+      mode: tab.mode,
+      cursorOffset: tab.cursorOffset,
+      scrollTop: tab.scrollTop,
+    }
   }
 
   /** Tab label for the workspace header — shows the file's basename
@@ -64,8 +92,14 @@ export class MarkdownView extends ViewBase {
     // The shape is validated shallowly — anything else gets dropped
     // so a malformed persisted layout doesn't crash hydrate.
     if (state && typeof state === 'object' && 'relpath' in state) {
-      const relpath = (state as Record<string, unknown>).relpath
-      this.state = { relpath: typeof relpath === 'string' ? relpath : undefined }
+      const s = state as Record<string, unknown>
+      const relpath = typeof s.relpath === 'string' ? s.relpath : undefined
+      const mode = EDITOR_TAB_MODES.includes(s.mode as EditorTabMode)
+        ? (s.mode as EditorTabMode)
+        : undefined
+      const cursorOffset = typeof s.cursorOffset === 'number' ? s.cursorOffset : undefined
+      const scrollTop = typeof s.scrollTop === 'number' ? s.scrollTop : undefined
+      this.state = { relpath, mode, cursorOffset, scrollTop }
     } else {
       this.state = {}
     }

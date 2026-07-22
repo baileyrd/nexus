@@ -10,7 +10,7 @@ import { EditorView } from './EditorView'
 import { startMultibufferSync } from './multibuffer/sync'
 import { markdownViewCreator } from './MarkdownView'
 import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
-import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
+import { useEditorStore, isDirty, type EditorTabMode, type EditorTabRestoreState } from './editorStore'
 // R10 / #193 — register this plugin's editor surface with the host seam so
 // `api.editor` delegates to it instead of the host statically importing the
 // editor store + fenced-code registry.
@@ -443,9 +443,28 @@ export const editorPlugin: Plugin = {
       workspace.revealLeaf(target)
     }
 
-    const loadFile = async (payload: FileOpenPayload) => {
+    /**
+     * #405 — pull `mode` / `cursorOffset` / `scrollTop` out of a
+     * `MarkdownView`-shaped state value (either `Leaf.getViewState().state`
+     * or `leaf.view?.getState()` — both resolve to the same
+     * `MarkdownViewState` today). Used by the two restore-path seeders
+     * below to thread persisted position through `loadFile`. Shallow
+     * + defensive, matching `MarkdownView.setState`'s own validation —
+     * a malformed persisted layout just yields `undefined` fields.
+     */
+    const parseRestoreState = (state: unknown): EditorTabRestoreState | undefined => {
+      if (!state || typeof state !== 'object') return undefined
+      const s = state as Record<string, unknown>
+      const mode = s.mode === 'live' || s.mode === 'source' || s.mode === 'preview' ? s.mode : undefined
+      const cursorOffset = typeof s.cursorOffset === 'number' ? s.cursorOffset : undefined
+      const scrollTop = typeof s.scrollTop === 'number' ? s.scrollTop : undefined
+      if (mode === undefined && cursorOffset === undefined && scrollTop === undefined) return undefined
+      return { mode, cursorOffset, scrollTop }
+    }
+
+    const loadFile = async (payload: FileOpenPayload, restore?: EditorTabRestoreState) => {
       const store = useEditorStore.getState()
-      const isNew = store.openTab(payload.relpath, payload.name)
+      const isNew = store.openTab(payload.relpath, payload.name, restore)
 
       // Mount / reveal the main-pane leaf for this file. Without this
       // step the editor store holds the tab but the main dock still
@@ -458,11 +477,14 @@ export const editorPlugin: Plugin = {
       // Already-open file: openTab raised it active; no refetch.
       if (!isNew) return
 
-      // openTab seeds new tabs in 'live' mode; honour the user's
-      // default-mode preference if they've flipped it.
-      const defaultMode = api.configuration.getValue<string>(CONFIG_DEFAULT_MODE, 'live')
-      if (defaultMode === 'source' || defaultMode === 'preview') {
-        useEditorStore.getState().setMode(payload.relpath, defaultMode)
+      // #405 — a restored tab's mode is already seeded by openTab
+      // above; only fall back to the global default-mode preference
+      // when this is a genuinely new open with no persisted mode.
+      if (!restore?.mode) {
+        const defaultMode = api.configuration.getValue<string>(CONFIG_DEFAULT_MODE, 'live')
+        if (defaultMode === 'source' || defaultMode === 'preview') {
+          useEditorStore.getState().setMode(payload.relpath, defaultMode)
+        }
       }
 
       if (isMarkdownPath(payload.name) || isMarkdownPath(payload.relpath)) {
@@ -2461,7 +2483,11 @@ export const editorPlugin: Plugin = {
         // content via the kernel (markdown) or storage (other) path.
         const sepIdx = Math.max(relpath.lastIndexOf('/'), relpath.lastIndexOf('\\'))
         const name = sepIdx >= 0 ? relpath.slice(sepIdx + 1) : relpath
-        void loadFile({ relpath, name })
+        // #405 — carry the persisted mode/cursor/scroll (still sitting
+        // in `vs.state` — the leaf's MarkdownView hasn't been able to
+        // read them off a tab that doesn't exist yet) through to the
+        // new tab.
+        void loadFile({ relpath, name }, parseRestoreState(vs.state))
         return
       }
       useEditorStore.getState().setActive(relpath)
@@ -2484,14 +2510,18 @@ export const editorPlugin: Plugin = {
     const seedFromLayout = () => {
       const leaves = workspace.getLeavesOfType('markdown')
       for (const leaf of leaves) {
-        const st = leaf.view?.getState() as { relpath?: unknown } | undefined
-        const relpath = typeof st?.relpath === 'string' ? st.relpath : null
+        const st = leaf.view?.getState()
+        const relpath =
+          st && typeof st === 'object' && typeof (st as Record<string, unknown>).relpath === 'string'
+            ? ((st as Record<string, unknown>).relpath as string)
+            : null
         if (!relpath) continue
         const hasTab = useEditorStore.getState().tabs.some((t) => t.relpath === relpath)
         if (hasTab) continue
         const sepIdx = Math.max(relpath.lastIndexOf('/'), relpath.lastIndexOf('\\'))
         const name = sepIdx >= 0 ? relpath.slice(sepIdx + 1) : relpath
-        void loadFile({ relpath, name })
+        // #405 — restore the persisted mode/cursor/scroll for this leaf.
+        void loadFile({ relpath, name }, parseRestoreState(st))
       }
     }
     workspace.on('layout-ready', seedFromLayout)

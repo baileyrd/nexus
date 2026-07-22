@@ -35,6 +35,31 @@ export interface EditorTab {
   mode: EditorTabMode
   loading: boolean
   error: string | null
+  /**
+   * #405 — last-observed CodeMirror cursor position (character offset
+   * into `content`) and scroll-container `scrollTop`, kept fresh by a
+   * debounced listener in `CodeMirrorHost` while the tab's view is
+   * mounted (every open tab stays mounted — the workspace only toggles
+   * `display: none` on inactive tabs — so this tracks position even
+   * for a backgrounded tab, not just the active one). Read by
+   * `MarkdownView.getState()` so the position round-trips through
+   * `.forge/workspace.json` on session restore. `undefined` until the
+   * first capture (e.g. brand-new tabs, or tabs whose view never
+   * mounted).
+   */
+  cursorOffset?: number
+  scrollTop?: number
+}
+
+/** Optional persisted view state applied when a tab is first created —
+ *  threaded from `MarkdownView.setState()` (session restore) through
+ *  `loadFile` to `openTab` so a restored tab reopens at its last mode
+ *  / cursor / scroll instead of always starting at `live` mode, top
+ *  of document. #405. */
+export interface EditorTabRestoreState {
+  mode?: EditorTabMode
+  cursorOffset?: number
+  scrollTop?: number
 }
 
 interface EditorState {
@@ -124,9 +149,12 @@ interface EditorState {
    * Add (or raise) a tab for `relpath`. When the tab already exists
    * it simply becomes active — no refetch. Returns `true` if a new
    * tab was created so the caller knows whether to kick off the
-   * read. Newly-created tabs start in `loading: true` + `mode: 'live'`.
+   * read. Newly-created tabs start in `loading: true` + `mode: 'live'`
+   * unless `restore` overrides the mode / cursor / scroll — #405's
+   * session-restore path passes the persisted `MarkdownViewState`
+   * here so the tab reopens where the user left it.
    */
-  openTab: (relpath: string, name: string) => boolean
+  openTab: (relpath: string, name: string, restore?: EditorTabRestoreState) => boolean
   /**
    * Resolve a successful load — clears loading + error for the tab
    * and seeds BOTH `content` and `savedContent` so a freshly-loaded
@@ -159,6 +187,14 @@ interface EditorState {
   markSaved: (relpath: string) => void
   /** Flip per-tab view mode. */
   setMode: (relpath: string, mode: EditorTabMode) => void
+  /**
+   * #405 — record the live cursor offset + scroll position for
+   * `relpath`. Called (debounced) by `CodeMirrorHost`'s selection /
+   * scroll listeners while the tab's view is mounted. No-ops if the
+   * tab no longer exists (e.g. closed between the debounce firing and
+   * the listener's own cleanup).
+   */
+  setViewPosition: (relpath: string, cursorOffset: number, scrollTop: number) => void
   /**
    * Remove a tab. If it was active, picks a new active tab:
    *   right neighbour → left neighbour → null.
@@ -335,7 +371,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return true
   },
 
-  openTab: (relpath, name) => {
+  openTab: (relpath, name, restore) => {
     const existing = get().tabs.find((t) => t.relpath === relpath)
     if (existing) {
       if (get().activeRelpath !== relpath) set({ activeRelpath: relpath })
@@ -346,9 +382,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       name,
       content: '',
       savedContent: '',
-      mode: 'live',
+      mode: restore?.mode ?? 'live',
       loading: true,
       error: null,
+      cursorOffset: restore?.cursorOffset,
+      scrollTop: restore?.scrollTop,
     }
     set((s) => ({ tabs: [...s.tabs, tab], activeRelpath: relpath }))
     return true
@@ -401,6 +439,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) =>
         t.relpath === relpath ? { ...t, mode } : t,
+      ),
+    })),
+
+  setViewPosition: (relpath, cursorOffset, scrollTop) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.relpath === relpath ? { ...t, cursorOffset, scrollTop } : t,
       ),
     })),
 

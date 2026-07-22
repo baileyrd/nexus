@@ -190,3 +190,64 @@ test('clear() wipes all tabs and both revision maps', () => {
   assert.equal(st.sessionRevision.size, 0)
   assert.equal(st.savedRevision.size, 0)
 })
+
+// ── #405: per-tab cursor / scroll / mode restore ────────────────────────────
+
+test('openTab with no restore arg defaults to live mode, no position', () => {
+  resetStore()
+  useEditorStore.getState().openTab('notes/a.md', 'a.md')
+  const tab = tabFor('notes/a.md')
+  assert.equal(tab.mode, 'live')
+  assert.equal(tab.cursorOffset, undefined)
+  assert.equal(tab.scrollTop, undefined)
+})
+
+test('openTab seeds mode/cursorOffset/scrollTop from a restore object', () => {
+  resetStore()
+  useEditorStore
+    .getState()
+    .openTab('notes/a.md', 'a.md', { mode: 'source', cursorOffset: 42, scrollTop: 120 })
+  const tab = tabFor('notes/a.md')
+  assert.equal(tab.mode, 'source')
+  assert.equal(tab.cursorOffset, 42)
+  assert.equal(tab.scrollTop, 120)
+})
+
+test('openTab on an already-open tab ignores the restore arg (no refetch/reset)', () => {
+  resetStore()
+  const s = useEditorStore.getState()
+  s.openTab('notes/a.md', 'a.md')
+  s.setMode('notes/a.md', 'preview')
+  s.setViewPosition('notes/a.md', 7, 30)
+
+  const isNew = useEditorStore
+    .getState()
+    .openTab('notes/a.md', 'a.md', { mode: 'source', cursorOffset: 0, scrollTop: 0 })
+
+  assert.equal(isNew, false)
+  const tab = tabFor('notes/a.md')
+  assert.equal(tab.mode, 'preview')
+  assert.equal(tab.cursorOffset, 7)
+  assert.equal(tab.scrollTop, 30)
+})
+
+test('setViewPosition updates cursorOffset/scrollTop for the matching tab only', () => {
+  resetStore()
+  const s = useEditorStore.getState()
+  s.openTab('notes/a.md', 'a.md')
+  s.openTab('notes/b.md', 'b.md')
+
+  useEditorStore.getState().setViewPosition('notes/a.md', 15, 200)
+
+  assert.equal(tabFor('notes/a.md').cursorOffset, 15)
+  assert.equal(tabFor('notes/a.md').scrollTop, 200)
+  assert.equal(tabFor('notes/b.md').cursorOffset, undefined)
+  assert.equal(tabFor('notes/b.md').scrollTop, undefined)
+})
+
+test('setViewPosition on an unknown relpath is a silent no-op', () => {
+  resetStore()
+  useEditorStore.getState().openTab('notes/a.md', 'a.md')
+  useEditorStore.getState().setViewPosition('notes/missing.md', 1, 1)
+  assert.equal(useEditorStore.getState().tabs.length, 1)
+})
