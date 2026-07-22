@@ -305,6 +305,26 @@ pub struct TriggerRegistry {
 }
 
 impl TriggerRegistry {
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. Purely in-memory trigger registration for ambient-event
+    /// matching (no disk/DB/IPC write while held); every mutation is a
+    /// single bounded `insert`/`remove`. Worst case after recovery is
+    /// a stale trigger list (one that should fire doesn't, or a
+    /// removed one still matches once) — a functional miss, not
+    /// corrupted state (see `docs/0.1.2/architecture.md` "Lock-poison
+    /// policy").
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, HashMap<TriggerId, AmbientTrigger>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("ai-runtime trigger registry mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Create an empty registry.
     #[must_use]
     pub fn new() -> Self {
@@ -314,33 +334,26 @@ impl TriggerRegistry {
     /// Register a trigger. Returns the trigger's id.
     pub fn register(&self, trigger: AmbientTrigger) -> TriggerId {
         let id = trigger.id.clone();
-        self.inner
-            .lock()
-            .expect("trigger registry poisoned")
-            .insert(id.clone(), trigger);
+        self.lock_inner().insert(id.clone(), trigger);
         id
     }
 
     /// Remove a trigger by id. Returns `true` if it was present.
     pub fn unregister(&self, id: &TriggerId) -> bool {
-        self.inner
-            .lock()
-            .expect("trigger registry poisoned")
-            .remove(id)
-            .is_some()
+        self.lock_inner().remove(id).is_some()
     }
 
     /// Return all enabled triggers whose filter matches `event`.
     #[must_use]
     pub fn matching(&self, event: &NexusEvent) -> Vec<AmbientTrigger> {
-        let g = self.inner.lock().expect("trigger registry poisoned");
+        let g = self.lock_inner();
         g.values().filter(|t| t.matches(event)).cloned().collect()
     }
 
     /// Return all triggers (enabled and disabled), sorted by name.
     #[must_use]
     pub fn list(&self) -> Vec<AmbientTrigger> {
-        let g = self.inner.lock().expect("trigger registry poisoned");
+        let g = self.lock_inner();
         let mut v: Vec<_> = g.values().cloned().collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         v
@@ -349,7 +362,7 @@ impl TriggerRegistry {
     /// Number of registered triggers.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("trigger registry poisoned").len()
+        self.lock_inner().len()
     }
 
     /// `true` if no triggers are registered.

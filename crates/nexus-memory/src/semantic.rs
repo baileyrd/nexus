@@ -144,6 +144,24 @@ impl SemanticStore {
         })
     }
 
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. The durable write-through (`persist`, above) always
+    /// happens *before* `inner` is touched, so a poisoned/recovered
+    /// `inner` can only yield a stale in-memory cache — the durable
+    /// store can never observe a torn write (see
+    /// `docs/0.1.2/architecture.md` "Lock-poison policy").
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, HashMap<SemanticId, SemanticEntry>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("semantic store mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Store a fact. Replaces any existing entry with the same `key`
     /// (last writer wins; keyed de-duplication avoids stale facts).
     ///
@@ -156,7 +174,7 @@ impl SemanticStore {
                 tracing::warn!(error = %e, "semantic write-through failed; fact kept in-memory only");
             }
         }
-        let mut g = self.inner.lock().expect("semantic store poisoned");
+        let mut g = self.lock_inner();
         // Remove any entry with the same key before inserting the new one
         // so the store stays de-duplicated by key (not by id).
         g.retain(|_, e| e.key != entry.key);
@@ -172,7 +190,7 @@ impl SemanticStore {
     #[must_use]
     pub fn search(&self, query: &str, limit: usize) -> Vec<SemanticEntry> {
         let q = query.to_lowercase();
-        let g = self.inner.lock().expect("semantic store poisoned");
+        let g = self.lock_inner();
         let mut results: Vec<&SemanticEntry> = g
             .values()
             .filter(|e| e.key.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q))
@@ -184,22 +202,13 @@ impl SemanticStore {
     /// Retrieve a specific entry by id.
     #[must_use]
     pub fn get(&self, id: SemanticId) -> Option<SemanticEntry> {
-        self.inner
-            .lock()
-            .expect("semantic store poisoned")
-            .get(&id)
-            .cloned()
+        self.lock_inner().get(&id).cloned()
     }
 
     /// Retrieve by key (exact match, case-sensitive).
     #[must_use]
     pub fn get_by_key(&self, key: &str) -> Option<SemanticEntry> {
-        self.inner
-            .lock()
-            .expect("semantic store poisoned")
-            .values()
-            .find(|e| e.key == key)
-            .cloned()
+        self.lock_inner().values().find(|e| e.key == key).cloned()
     }
 
     /// Remove an entry. Returns `true` if it was present.
@@ -212,20 +221,14 @@ impl SemanticStore {
                 tracing::warn!(error = %e, "semantic delete write-through failed");
             }
         }
-        self.inner
-            .lock()
-            .expect("semantic store poisoned")
-            .remove(&id)
-            .is_some()
+        self.lock_inner().remove(&id).is_some()
     }
 
     /// All entries matching any of `tags`. Entries that match multiple
     /// tags appear once.
     #[must_use]
     pub fn by_tag(&self, tags: &[&str]) -> Vec<SemanticEntry> {
-        self.inner
-            .lock()
-            .expect("semantic store poisoned")
+        self.lock_inner()
             .values()
             .filter(|e| tags.iter().any(|t| e.tags.iter().any(|et| et == t)))
             .cloned()
@@ -235,7 +238,7 @@ impl SemanticStore {
     /// Total entries in the store.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("semantic store poisoned").len()
+        self.lock_inner().len()
     }
 
     /// `true` when no entries are stored.

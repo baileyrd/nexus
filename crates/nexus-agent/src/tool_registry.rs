@@ -280,39 +280,54 @@ impl AgentToolRegistry {
         Arc::clone(GLOBAL.get_or_init(|| Arc::new(Self::default())))
     }
 
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. `tools` is in-memory-only (rebuilt fresh at process
+    /// start via `seed_default_tools`) and every mutation is a single
+    /// whole-value `insert`, so there's no torn intermediate spec to
+    /// observe. Capability enforcement (`check_capabilities`) always
+    /// operates on an already-cloned-out `AgentToolSpec` from
+    /// [`Self::lookup`], never the live locked map, so a
+    /// stale-but-valid clone after recovery is the worst case — the
+    /// existing capability-check and "unknown tool" error paths
+    /// already handle that (see `docs/0.1.2/architecture.md`
+    /// "Lock-poison policy").
+    fn lock_tools(&self) -> std::sync::MutexGuard<'_, HashMap<String, AgentToolSpec>> {
+        match self.tools.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("agent tool registry mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Register a tool spec. Re-registering an existing name
     /// overwrites the previous entry — same posture as the AI
     /// registry, so a `seed_default_tools` re-run is idempotent.
     pub fn register(&self, spec: AgentToolSpec) {
-        let mut tools = self.tools.lock().expect("agent tool registry mutex");
+        let mut tools = self.lock_tools();
         tools.insert(spec.name.clone(), spec);
     }
 
     /// Number of registered tools.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.tools.lock().expect("agent tool registry mutex").len()
+        self.lock_tools().len()
     }
 
     /// Whether the registry has no tools.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.tools
-            .lock()
-            .expect("agent tool registry mutex")
-            .is_empty()
+        self.lock_tools().is_empty()
     }
 
     /// Snapshot every spec. Order is unspecified; callers that need
     /// stable rendering should sort by `name`.
     #[must_use]
     pub fn list_all(&self) -> Vec<AgentToolSpec> {
-        self.tools
-            .lock()
-            .expect("agent tool registry mutex")
-            .values()
-            .cloned()
-            .collect()
+        self.lock_tools().values().cloned().collect()
     }
 
     /// Subset of [`AgentToolRegistry::list_all`] filtered to tools the
@@ -338,9 +353,7 @@ impl AgentToolRegistry {
     /// re-dispatched. Order is unspecified (registry is a map).
     #[must_use]
     pub fn non_idempotent_tool_names(&self) -> Vec<String> {
-        self.tools
-            .lock()
-            .expect("agent tool registry mutex")
+        self.lock_tools()
             .values()
             .filter(|spec| !spec.idempotent)
             .map(|spec| spec.name.clone())
@@ -358,9 +371,7 @@ impl AgentToolRegistry {
         target_plugin_id: &str,
         command_id: &str,
     ) -> Option<Duration> {
-        self.tools
-            .lock()
-            .expect("agent tool registry mutex")
+        self.lock_tools()
             .values()
             .find(|spec| spec.target_plugin_id == target_plugin_id && spec.command_id == command_id)
             .map(|spec| Duration::from_millis(spec.dispatch_timeout_ms))
@@ -369,11 +380,7 @@ impl AgentToolRegistry {
     /// Look up a tool by name. `None` if not registered.
     #[must_use]
     pub fn lookup(&self, name: &str) -> Option<AgentToolSpec> {
-        self.tools
-            .lock()
-            .expect("agent tool registry mutex")
-            .get(name)
-            .cloned()
+        self.lock_tools().get(name).cloned()
     }
 
     /// Cheap structural validation of params against the spec's
@@ -454,6 +461,23 @@ impl AgentToolRegistry {
         Ok(())
     }
 
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking (see [`Self::lock_tools`] for the general
+    /// rationale). `access_log` is explicitly documented as a
+    /// best-effort in-memory audit trail — "deeper history lives in
+    /// the per-session transcript on disk" — so losing/staling it on
+    /// poison only degrades a debugging aid that's already
+    /// non-authoritative.
+    fn lock_access_log(&self) -> std::sync::MutexGuard<'_, Vec<AgentToolAccessRecord>> {
+        match self.access_log.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("agent tool access log mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Record a dispatch outcome in the in-memory access log.
     /// `nexus-bootstrap` will eventually want to fan these into the
     /// universal-activity bus (BL-052) but the in-memory log alone
@@ -470,7 +494,7 @@ impl AgentToolRegistry {
         let completed_at_ms = completed_at
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-        let mut log = self.access_log.lock().expect("agent tool access log mutex");
+        let mut log = self.lock_access_log();
         log.push(AgentToolAccessRecord {
             completed_at_ms,
             agent_id: agent_id.to_string(),
@@ -491,10 +515,7 @@ impl AgentToolRegistry {
     /// Snapshot of the access log, newest-last (insertion order).
     #[must_use]
     pub fn access_log(&self) -> Vec<AgentToolAccessRecord> {
-        self.access_log
-            .lock()
-            .expect("agent tool access log mutex")
-            .clone()
+        self.lock_access_log().clone()
     }
 }
 

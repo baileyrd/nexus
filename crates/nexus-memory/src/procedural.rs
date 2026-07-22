@@ -149,6 +149,24 @@ impl ProceduralStore {
         })
     }
 
+    /// #199 / R16 — recover from a poisoned lock rather than
+    /// `.expect()`-panicking. With `panic = "abort"` in the release
+    /// profile, that would convert a prior panic into a whole-process
+    /// abort. The durable write-through (`persist`, above) always
+    /// happens *before* `inner` is touched, so a poisoned/recovered
+    /// `inner` can only yield a stale in-memory cache — the durable
+    /// store can never observe a torn write (see
+    /// `docs/0.1.2/architecture.md` "Lock-poison policy").
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, HashMap<ProceduralId, ProceduralEntry>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("procedural store mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Register a skill. Silently replaces any skill with the same `name`
     /// (re-registration updates the template; last writer wins).
     ///
@@ -161,7 +179,7 @@ impl ProceduralStore {
                 tracing::warn!(error = %e, "procedural write-through failed; skill kept in-memory only");
             }
         }
-        let mut g = self.inner.lock().expect("procedural store poisoned");
+        let mut g = self.lock_inner();
         g.retain(|_, e| e.name != entry.name);
         g.insert(entry.id, entry);
     }
@@ -173,7 +191,7 @@ impl ProceduralStore {
     #[must_use]
     pub fn lookup(&self, trigger: &str) -> Vec<ProceduralEntry> {
         let t = trigger.to_lowercase();
-        let g = self.inner.lock().expect("procedural store poisoned");
+        let g = self.lock_inner();
         let mut results: Vec<&ProceduralEntry> = g
             .values()
             .filter(|e| {
@@ -189,22 +207,13 @@ impl ProceduralStore {
     /// Fetch a skill by id.
     #[must_use]
     pub fn get(&self, id: ProceduralId) -> Option<ProceduralEntry> {
-        self.inner
-            .lock()
-            .expect("procedural store poisoned")
-            .get(&id)
-            .cloned()
+        self.lock_inner().get(&id).cloned()
     }
 
     /// Fetch a skill by name (exact match, case-sensitive).
     #[must_use]
     pub fn get_by_name(&self, name: &str) -> Option<ProceduralEntry> {
-        self.inner
-            .lock()
-            .expect("procedural store poisoned")
-            .values()
-            .find(|e| e.name == name)
-            .cloned()
+        self.lock_inner().values().find(|e| e.name == name).cloned()
     }
 
     /// Increment the `use_count` for a skill. Called by the context
@@ -219,7 +228,7 @@ impl ProceduralStore {
                 tracing::warn!(error = %e, "procedural use-count write-through failed");
             }
         }
-        let mut g = self.inner.lock().expect("procedural store poisoned");
+        let mut g = self.lock_inner();
         if let Some(entry) = g.get_mut(&id) {
             entry.use_count = entry.use_count.saturating_add(1);
         }
@@ -235,17 +244,13 @@ impl ProceduralStore {
                 tracing::warn!(error = %e, "procedural delete write-through failed");
             }
         }
-        self.inner
-            .lock()
-            .expect("procedural store poisoned")
-            .remove(&id)
-            .is_some()
+        self.lock_inner().remove(&id).is_some()
     }
 
     /// Total skills registered.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("procedural store poisoned").len()
+        self.lock_inner().len()
     }
 
     /// `true` when no skills are registered.
