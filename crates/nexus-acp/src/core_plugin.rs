@@ -108,7 +108,35 @@ impl AcpCorePlugin {
 }
 
 fn snapshot_config(cell: &Arc<RwLock<AcpHostConfig>>) -> Arc<AcpHostConfig> {
-    Arc::new(cell.read().expect("AcpHostConfig RwLock poisoned").clone())
+    Arc::new(read_config(cell).clone())
+}
+
+/// #199 / R16 — recover from a poisoned `AcpHostConfig` lock rather
+/// than `.expect()`-panicking. With `panic = "abort"` in the release
+/// profile, that would convert a prior writer-side panic into a
+/// whole-process abort. The lock is only ever mutated via
+/// `AcpHostConfig` methods that don't leave torn state on panic, so
+/// reading the inner value on poison is safe (same posture as
+/// `nexus-dap`'s `read_config`/`write_config`, #199).
+fn read_config(config: &RwLock<AcpHostConfig>) -> std::sync::RwLockReadGuard<'_, AcpHostConfig> {
+    match config.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("AcpHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Write-lock counterpart of [`read_config`]; see its doc comment.
+fn write_config(config: &RwLock<AcpHostConfig>) -> std::sync::RwLockWriteGuard<'_, AcpHostConfig> {
+    match config.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("AcpHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
 }
 
 /// BL-113 Phase 4 — sync handler for `register_server`. Same
@@ -160,7 +188,7 @@ fn handle_register_server(
         env: typed.env,
         metadata: typed.metadata,
     };
-    let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.register_contributed(spec, typed.plugin_id) {
         Ok(()) => AcpRegisterServerReply {
             ok: true,
@@ -207,7 +235,7 @@ fn handle_unregister_server(
             reason: "unregister_server: missing or empty required field `plugin_id`".to_string(),
         });
     }
-    let mut cfg = config.write().expect("AcpHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
         Ok(_removed) => AcpUnregisterServerReply {
             ok: true,
@@ -244,12 +272,7 @@ impl CorePlugin for AcpCorePlugin {
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let agent_count = self
-            .config
-            .read()
-            .expect("AcpHostConfig RwLock poisoned")
-            .adapters
-            .len();
+        let agent_count = read_config(&self.config).adapters.len();
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
                 PLUGIN_ID,
@@ -308,7 +331,7 @@ impl CorePlugin for AcpCorePlugin {
                 // await `pool.connected_agents()`, so `connected`
                 // is always `false`; an async list variant can land
                 // when a real use case needs the merged view.
-                let cfg = self.config.read().expect("AcpHostConfig RwLock poisoned");
+                let cfg = read_config(&self.config);
                 let entries: Vec<AcpAgentEntry> = cfg
                     .adapters
                     .values()

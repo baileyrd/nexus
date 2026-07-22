@@ -490,10 +490,17 @@ impl NotificationsCorePlugin {
         };
         let new_config = NotificationsConfig::load_from(path)?;
         self.router.swap_config(&new_config)?;
-        let mut guard = self
-            .config
-            .write()
-            .expect("notifications config lock poisoned");
+        // #199 / R16 — recover from a poisoned lock rather than
+        // `.expect()`-panicking; see `Router::swap_config` for the
+        // rationale (single whole-value replacement, no torn-write
+        // state to observe).
+        let mut guard = match self.config.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("notifications config lock poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        };
         *guard = new_config;
         Ok(())
     }

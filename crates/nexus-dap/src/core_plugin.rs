@@ -169,7 +169,35 @@ impl DapCorePlugin {
 /// `Arc<DapHostConfig>` so async dispatch keeps its existing
 /// pass-by-Arc helper signatures unchanged.
 fn snapshot_config(cell: &Arc<RwLock<DapHostConfig>>) -> Arc<DapHostConfig> {
-    Arc::new(cell.read().expect("DapHostConfig RwLock poisoned").clone())
+    Arc::new(read_config(cell).clone())
+}
+
+/// #199 / R16 — recover from a poisoned `DapHostConfig` lock rather
+/// than `.expect()`-panicking. With `panic = "abort"` in the release
+/// profile, that would convert a prior writer-side panic into a
+/// whole-process abort. The lock is only ever mutated by whole-value
+/// replacement (`reload`) or via `DapHostConfig` methods that don't
+/// leave torn state on panic, so reading the inner value on poison is
+/// safe.
+fn read_config(config: &RwLock<DapHostConfig>) -> std::sync::RwLockReadGuard<'_, DapHostConfig> {
+    match config.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("DapHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Write-lock counterpart of [`read_config`]; see its doc comment.
+fn write_config(config: &RwLock<DapHostConfig>) -> std::sync::RwLockWriteGuard<'_, DapHostConfig> {
+    match config.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("DapHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
 }
 
 /// BL-113 Phase 1b — sync IPC handler for `register_adapter`.
@@ -236,7 +264,7 @@ fn handle_register_adapter(
         env: typed.env,
         metadata: typed.metadata,
     };
-    let mut cfg = config.write().expect("DapHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.register_contributed(spec, typed.plugin_id) {
         Ok(()) => DapRegisterAdapterReply {
             ok: true,
@@ -292,7 +320,7 @@ fn handle_unregister_adapter(
             reason: "unregister_adapter: missing or empty required field `plugin_id`".to_string(),
         });
     }
-    let mut cfg = config.write().expect("DapHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
         Ok(_removed) => DapUnregisterAdapterReply {
             ok: true,
@@ -357,17 +385,12 @@ impl CorePlugin for DapCorePlugin {
                 DapHostConfig::default()
             }
         };
-        *self.config.write().expect("DapHostConfig RwLock poisoned") = loaded;
+        *write_config(&self.config) = loaded;
         Ok(())
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let adapter_count = self
-            .config
-            .read()
-            .expect("DapHostConfig RwLock poisoned")
-            .adapters
-            .len();
+        let adapter_count = read_config(&self.config).adapters.len();
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
                 PLUGIN_ID,
@@ -424,7 +447,7 @@ impl CorePlugin for DapCorePlugin {
                 // async handler (we route both ids through
                 // `dispatch_async` below; this sync arm is the
                 // fallback for the rare invoker that bypasses async).
-                let cfg = self.config.read().expect("DapHostConfig RwLock poisoned");
+                let cfg = read_config(&self.config);
                 let entries: Vec<DapAdapterEntry> = cfg
                     .adapters
                     .values()

@@ -120,6 +120,25 @@ fn build_schema() -> (Schema, Field, Field, Field, Field, Field) {
 }
 
 impl SearchIndex {
+    /// Lock the writer mutex, recovering from poison instead of
+    /// panicking (#199 / R16). With `panic = "abort"` in the release
+    /// profile, a bare `.expect()` here would convert any prior
+    /// writer-side panic into a whole-process abort. The Tantivy
+    /// index is a derived/rebuildable store (file-as-truth invariant
+    /// — see `docs/0.1.2/architecture.md`), never the source of
+    /// record, so continuing to use the writer after a poison is an
+    /// acceptable fail-open: worst case is a stale or partially
+    /// applied search index, recoverable by a reindex.
+    fn writer_lock(&self) -> std::sync::MutexGuard<'_, IndexWriter> {
+        match self.writer.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("search index writer mutex poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// Open or create an on-disk search index at `dir`.
     ///
     /// Creates the directory and index if it does not exist; opens the
@@ -200,10 +219,6 @@ impl SearchIndex {
     /// # Errors
     ///
     /// Returns [`StorageError::Search`] if Tantivy rejects the document.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal writer mutex is poisoned.
     pub fn add_block(
         &self,
         file_path: &str,
@@ -212,7 +227,7 @@ impl SearchIndex {
         content: &str,
         mtime: i64,
     ) -> Result<(), StorageError> {
-        let writer = self.writer.lock().expect("writer mutex poisoned");
+        let writer = self.writer_lock();
         writer.add_document(doc!(
             self.path_field => file_path,
             self.block_id_field => block_id,
@@ -228,12 +243,8 @@ impl SearchIndex {
     /// # Errors
     ///
     /// Returns [`StorageError::Search`] if Tantivy fails to flush the segment.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal writer mutex is poisoned.
     pub fn commit(&self) -> Result<(), StorageError> {
-        let mut writer = self.writer.lock().expect("writer mutex poisoned");
+        let mut writer = self.writer_lock();
         writer.commit()?;
         // #192 — reload the cached reader so subsequent `search()`
         // calls see the new segments without rebuilding the reader on
@@ -391,12 +402,8 @@ impl SearchIndex {
     /// # Errors
     ///
     /// Returns [`StorageError::Search`] if Tantivy fails to delete or commit.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal writer mutex is poisoned.
     pub fn clear(&self) -> Result<(), StorageError> {
-        let mut writer = self.writer.lock().expect("writer mutex poisoned");
+        let mut writer = self.writer_lock();
         writer.delete_all_documents()?;
         writer.commit()?;
         // #192 — reload so subsequent searches see the empty segment
