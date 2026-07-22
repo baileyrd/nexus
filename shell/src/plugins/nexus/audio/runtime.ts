@@ -168,6 +168,37 @@ async function ipcTranscribe(
   api: PluginAPI,
   opts: TranscribeOptions,
 ): Promise<TranscribeResult> {
+  const { text, backend, language } = await ipcTranscribeWithAudio(api, opts)
+  return { text, backend, language }
+}
+
+/** Result of [`recordVoiceMemo`] — the transcript plus the raw recorded
+ *  bytes, so a caller can save the audio (e.g. as a forge attachment)
+ *  alongside the transcript. */
+export interface VoiceMemoResult extends TranscribeResult {
+  bytes: Uint8Array
+  format: 'webm' | 'wav'
+}
+
+/**
+ * C11 (#364) — capture one utterance AND keep the raw audio bytes,
+ * unlike [`transcribe`] which discards them after the IPC round-trip.
+ * Always uses the kernel `com.nexus.audio::transcribe` path (never
+ * Web Speech) since only the MediaRecorder capture produces bytes a
+ * caller can persist as an attachment.
+ */
+export async function recordVoiceMemo(
+  api: PluginAPI,
+  opts: TranscribeOptions = {},
+): Promise<VoiceMemoResult> {
+  const { text, backend, language, bytes, format } = await ipcTranscribeWithAudio(api, opts)
+  return { text, backend, language, bytes, format }
+}
+
+async function ipcTranscribeWithAudio(
+  api: PluginAPI,
+  opts: TranscribeOptions,
+): Promise<TranscribeResult & { bytes: Uint8Array; format: 'webm' | 'wav' }> {
   const { bytes, format } = await captureAudio()
   const audio_b64 = bytesToBase64(bytes)
   const reply = await api.kernel.invoke<{
@@ -179,7 +210,13 @@ async function ipcTranscribe(
     format,
     language: opts.lang ?? null,
   })
-  return { text: reply.text, backend: reply.backend, language: reply.language }
+  return {
+    text: reply.text,
+    backend: reply.backend,
+    language: reply.language,
+    bytes,
+    format,
+  }
 }
 
 /**

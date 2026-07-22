@@ -16,9 +16,12 @@
 // don't carry typed args today.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { writeAttachment } from '../editor/attachments'
+import { appendInbox } from '../memory/kernelClient'
 import {
   getUseWebSpeech,
   probeSpeechSupport,
+  recordVoiceMemo,
   setUseWebSpeech,
   synthesize,
   transcribe,
@@ -27,11 +30,24 @@ import {
 const COMMAND_TRANSCRIBE = 'nexus.audio.transcribe'
 const COMMAND_SYNTHESIZE = 'nexus.audio.synthesize'
 const COMMAND_STATUS = 'nexus.audio.status'
+const COMMAND_RECORD_VOICE_MEMO = 'nexus.audio.recordVoiceMemo'
 
 const CONFIG_USE_WEB_SPEECH = 'nexus.audio.useWebSpeech'
 const CONFIG_DEFAULT_LANG = 'nexus.audio.defaultLanguage'
 const CONFIG_DEFAULT_VOICE = 'nexus.audio.defaultVoice'
 const CONFIG_DEFAULT_RATE = 'nexus.audio.defaultRate'
+
+// C11 (#364) — same BL-043 quick-capture inbox the memory plugin's text
+// capture writes to (`memory/index.ts`), read the same cross-plugin way
+// `enrich`/`recall` already do, so a voice memo lands in the same file.
+const CONFIG_INBOX_PATH = 'memory.inboxPath'
+const DEFAULT_INBOX_PATH = 'Inbox.md'
+/** Forge-relative folder voice recordings are saved under. Matches the
+ *  extension-based `attachment` classification `infer_file_type` already
+ *  applies to `.webm`/`.wav` regardless of directory, so any folder would
+ *  index correctly — `attachments/` is used for consistency with the
+ *  editor's paste/drop attachment pipeline. */
+const VOICE_MEMO_DIR = 'attachments'
 
 export const audioPlugin: Plugin = {
   manifest: {
@@ -99,6 +115,11 @@ export const audioPlugin: Plugin = {
         {
           id: COMMAND_STATUS,
           title: 'Audio: Show backend status',
+          category: 'Audio',
+        },
+        {
+          id: COMMAND_RECORD_VOICE_MEMO,
+          title: 'Audio: Record voice memo',
           category: 'Audio',
         },
       ],
@@ -170,7 +191,59 @@ export const audioPlugin: Plugin = {
         message: `Audio backends — STT: ${stt} · TTS: ${tts}`,
       })
     })
+
+    // C11 (#364) — record, transcribe, append the transcript to the
+    // quick-capture inbox, and save the recording as a forge attachment.
+    // Always uses the kernel MediaRecorder + com.nexus.audio::transcribe
+    // path (via recordVoiceMemo) since the browser-only Web Speech API
+    // never yields bytes to persist.
+    api.commands.register(COMMAND_RECORD_VOICE_MEMO, async () => {
+      const ready = await api.kernel.available()
+      if (!ready) {
+        api.notifications.show({
+          type: 'warning',
+          message: 'Open a forge before recording — voice capture needs an active workspace.',
+        })
+        return
+      }
+      try {
+        api.notifications.show({ type: 'info', message: 'Recording voice memo (5s)…' })
+        const lang = api.configuration.getValue<string>(CONFIG_DEFAULT_LANG, '')
+        const memo = await recordVoiceMemo(api, lang ? { lang } : {})
+        const relpath = await writeAttachment(
+          api.kernel,
+          VOICE_MEMO_DIR,
+          voiceMemoName(memo.format, new Date()),
+          memo.bytes,
+        )
+        const inboxPath = api.configuration.getValue<string>(CONFIG_INBOX_PATH, DEFAULT_INBOX_PATH)
+        const stamp = new Date().toISOString()
+        const transcript = memo.text.trim() || '_(no speech detected)_'
+        const snippet = `## Voice memo — ${stamp}\n\n${transcript}\n\n![[${relpath}]]`
+        await appendInbox(api.kernel, inboxPath, snippet)
+        api.notifications.show({
+          type: 'success',
+          message: `Voice memo captured to ${inboxPath} (audio saved to ${relpath})`,
+        })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Voice memo failed: ${(err as Error).message}`,
+        })
+      }
+    })
   },
+}
+
+/** Name for a recorded voice memo — mirrors `pastedImageName`'s
+ *  timestamp-collision-avoidance shape (`writeAttachment`'s probe loop
+ *  covers same-second repeats). */
+function voiceMemoName(format: 'webm' | 'wav', now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `voice-memo-${stamp}.${format}`
 }
 
 async function speakWithDefaults(api: PluginAPI, text: string): Promise<void> {
