@@ -1064,6 +1064,7 @@ mod tests {
             compactions,
             parent_id: None,
             branch_point: None,
+            tokens_used: 0,
         }
     }
 

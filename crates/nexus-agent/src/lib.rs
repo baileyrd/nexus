@@ -81,7 +81,7 @@ pub use custom_agent::{
 };
 pub use llm::{
     flatten_turns_to_prompt, AgentChatTurn, AgentTurnToolCall, ChatDriver, LlmAgent, Proposal,
-    ProposedToolCall, DEFAULT_SYSTEM_PROMPT,
+    ProposedToolCall, TokenUsage, DEFAULT_SYSTEM_PROMPT,
 };
 pub use session::{
     is_retryable_tool_error, run_session, run_session_resumed, run_session_with_config,

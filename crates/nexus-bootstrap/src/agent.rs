@@ -125,6 +125,9 @@ struct ProposeWire {
     text: String,
     #[serde(default)]
     tool_calls: Vec<ProposedWire>,
+    // C27 (#380) — provider-reported token usage for this round.
+    #[serde(default)]
+    usage: Option<UsageWire>,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +137,12 @@ struct ProposedWire {
     target_plugin_id: String,
     command_id: String,
     args: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct UsageWire {
+    input_tokens: u64,
+    output_tokens: u64,
 }
 
 #[async_trait]
@@ -165,6 +174,10 @@ impl ChatDriver for AiChatDriver {
         Ok(Proposal {
             text: parsed.text,
             tool_calls,
+            usage: parsed.usage.map(|u| nexus_agent::TokenUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+            }),
         })
     }
 }

@@ -142,6 +142,15 @@ pub struct SessionConfig {
     /// consulted when `max_tool_retries > 0`.
     #[serde(default)]
     pub non_idempotent_tools: Vec<String>,
+
+    /// C27 (#380) — hard cap on cumulative provider-reported tokens
+    /// (input + output, summed across every round) before the loop
+    /// stops with [`SessionOutcome::BudgetExceeded`]. `0` (the
+    /// default) means unbounded — the pre-#380 behaviour, since a
+    /// provider that doesn't report usage can never trip this check
+    /// either way.
+    #[serde(default)]
+    pub max_tokens: u32,
 }
 
 fn default_max_iterations() -> u32 {
@@ -166,6 +175,7 @@ impl Default for SessionConfig {
             max_tool_retries: 0,
             tool_retry_backoff_ms: DEFAULT_TOOL_RETRY_BACKOFF_MS,
             non_idempotent_tools: Vec::new(),
+            max_tokens: 0,
         }
     }
 }
@@ -196,6 +206,7 @@ impl SessionConfig {
             max_tool_retries: self.max_tool_retries,
             tool_retry_backoff_ms: self.tool_retry_backoff_ms,
             non_idempotent_tools: self.non_idempotent_tools.clone(),
+            max_tokens: self.max_tokens,
         }
     }
 }
@@ -229,6 +240,11 @@ pub enum SessionOutcome {
     /// configured timeout. Phase 2b — emitted by `BusBridgePolicy`
     /// when no `round_decide` IPC arrives before the deadline.
     ApprovalTimeout,
+    /// C27 (#380) — cumulative provider-reported token usage reached
+    /// [`SessionConfig::max_tokens`]. The round that tripped the
+    /// ceiling is recorded with its narration but its tool calls are
+    /// never dispatched.
+    BudgetExceeded,
 }
 
 /// One model turn the policy is asked to approve.
@@ -459,6 +475,14 @@ pub struct AgentSession {
     /// length of the inherited prefix); `None` for a root session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_point: Option<u32>,
+    /// C27 (#380) — cumulative provider-reported tokens (input +
+    /// output) across every round, for providers that report usage.
+    /// `0` for a session where nothing reported usage — not
+    /// distinguishable from "genuinely zero tokens", which is fine
+    /// since `SessionConfig::max_tokens` only ever compares against
+    /// this and both cases correctly never trip the ceiling.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub tokens_used: u64,
 }
 
 /// RFC 0008 (Phase 5.4) — a named pointer at a `(session_id, round)` location.
@@ -669,6 +693,7 @@ where
         // `parent_id` / `branch_point` on the returned session (RFC 0008).
         parent_id: None,
         branch_point: None,
+        tokens_used: 0,
     };
 
     if goal.trim().is_empty() {
@@ -749,6 +774,13 @@ where
                 break;
             }
         };
+
+        // C27 (#380) — accumulate this round's provider-reported usage
+        // (when reported) into the session tally, ahead of any
+        // budget-ceiling check below.
+        if let Some(usage) = proposal.usage {
+            session.tokens_used = session.tokens_used.saturating_add(usage.total());
+        }
 
         // BL-119 — guard against runaway rounds. Truncate excess
         // tool calls so the dispatcher's downstream work stays
@@ -893,6 +925,16 @@ where
                     None,
                 );
             }
+        }
+
+        // C27 (#380) — a round that already completed above (Complete
+        // via the terminal-text-only path, or Aborted/Errored/
+        // ApprovalTimeout via an earlier `break`) never reaches here,
+        // so this only stops a session that would otherwise pay for
+        // another round.
+        if config.max_tokens > 0 && session.tokens_used >= u64::from(config.max_tokens) {
+            session.outcome = SessionOutcome::BudgetExceeded;
+            break;
         }
 
         if iter == config.max_iterations {
@@ -1511,10 +1553,12 @@ mod tests {
             Proposal {
                 text: "fetch".into(),
                 tool_calls: vec![read_tool("u1", "a.md")],
+                usage: None,
             },
             Proposal {
                 text: "done".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ]
     }
@@ -1781,10 +1825,12 @@ mod tests {
             Proposal {
                 text: "fetching".into(),
                 tool_calls: vec![read_tool("u1", "a.md")],
+                usage: None,
             },
             Proposal {
                 text: "summary: hello".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ]);
         let dispatcher = CountingDispatcher::new();
@@ -1829,10 +1875,12 @@ mod tests {
             Proposal {
                 text: "resuming".into(),
                 tool_calls: vec![read_tool("u1", "x.md")],
+                usage: None,
             },
             Proposal {
                 text: "done".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ]);
         let dispatcher = CountingDispatcher::new();
@@ -1880,6 +1928,7 @@ mod tests {
                 vec![Proposal {
                     text: "ok".into(),
                     tool_calls: Vec::new(),
+                    usage: None,
                 }]
                 .into(),
             ),
@@ -1950,10 +1999,12 @@ mod tests {
                     Proposal {
                         text: "fetching".into(),
                         tool_calls: vec![read_tool("u1", "a.md")],
+                        usage: None,
                     },
                     Proposal {
                         text: "done".into(),
                         tool_calls: Vec::new(),
+                        usage: None,
                     },
                 ]
                 .into(),
@@ -2014,6 +2065,7 @@ mod tests {
         let driver = ScriptedDriver::new(vec![Proposal {
             text: "done".into(),
             tool_calls: Vec::new(),
+            usage: None,
         }]);
         let dispatcher = CountingDispatcher::new();
         let session = run_session_resumed(
@@ -2063,6 +2115,7 @@ mod tests {
         let driver = ScriptedDriver::new(vec![Proposal {
             text: String::new(),
             tool_calls: vec![read_tool("u1", "a.md")],
+            usage: None,
         }]);
         let dispatcher = CountingDispatcher::new();
         let session = run_session(
@@ -2109,10 +2162,12 @@ mod tests {
             Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool("u1", "a.md"), read_tool("u2", "b.md")],
+                usage: None,
             },
             Proposal {
                 text: "done".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ]);
         let dispatcher = CountingDispatcher::new();
@@ -2146,6 +2201,7 @@ mod tests {
             replies.push(Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool(&format!("u{i}"), "x.md")],
+                usage: None,
             });
         }
         let driver = ScriptedDriver::new(replies);
@@ -2168,6 +2224,122 @@ mod tests {
         assert_eq!(session.rounds.len() as u32, LEGACY_MAX_AGENT_ROUNDS);
     }
 
+    // ── C27 (#380) — token budget ceiling ────────────────────────────
+
+    #[tokio::test]
+    async fn budget_ceiling_stops_session_before_max_rounds() {
+        // Every round reports 40 tokens of usage; a 100-token ceiling
+        // should stop the loop after the 3rd round (120 >= 100),
+        // well short of the 32-round default cap.
+        let mut replies = Vec::new();
+        for i in 0..32 {
+            replies.push(Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool(&format!("u{i}"), "x.md")],
+                usage: Some(crate::llm::TokenUsage {
+                    input_tokens: 30,
+                    output_tokens: 10,
+                }),
+            });
+        }
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let config = SessionConfig {
+            max_tokens: 100,
+            ..SessionConfig::default()
+        };
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "loop forever",
+            "system",
+            None,
+            "budget-cap".to_string(),
+            config,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::BudgetExceeded);
+        assert_eq!(session.rounds.len(), 3);
+        assert_eq!(session.tokens_used, 120);
+    }
+
+    #[tokio::test]
+    async fn budget_ceiling_zero_means_unbounded() {
+        // max_tokens defaults to 0 — a session reporting heavy usage
+        // must run to its normal MaxRounds cap, matching pre-#380
+        // behaviour, since nothing enforces a ceiling.
+        let mut replies = Vec::new();
+        for i in 0..8 {
+            replies.push(Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool(&format!("u{i}"), "x.md")],
+                usage: Some(crate::llm::TokenUsage {
+                    input_tokens: 1_000_000,
+                    output_tokens: 1_000_000,
+                }),
+            });
+        }
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "loop forever",
+            "system",
+            None,
+            "unbounded".to_string(),
+            SessionConfig::legacy_phase2a(),
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::MaxRounds);
+        assert_eq!(
+            u32::try_from(session.rounds.len()).unwrap(),
+            LEGACY_MAX_AGENT_ROUNDS
+        );
+        assert_eq!(session.tokens_used, 2_000_000 * u64::from(LEGACY_MAX_AGENT_ROUNDS));
+    }
+
+    #[tokio::test]
+    async fn budget_ceiling_ignores_rounds_with_no_reported_usage() {
+        // A provider that never reports usage (usage: None every
+        // round) must never trip a configured ceiling — 0 tokens
+        // tallied can't reach any positive max_tokens.
+        let mut replies = Vec::new();
+        for i in 0..5 {
+            replies.push(Proposal {
+                text: String::new(),
+                tool_calls: vec![read_tool(&format!("u{i}"), "x.md")],
+                usage: None,
+            });
+        }
+        replies.push(Proposal {
+            text: "done".into(),
+            tool_calls: Vec::new(),
+            usage: None,
+        });
+        let driver = ScriptedDriver::new(replies);
+        let dispatcher = CountingDispatcher::new();
+        let config = SessionConfig {
+            max_tokens: 1,
+            ..SessionConfig::default()
+        };
+        let session = run_session_with_config(
+            &driver,
+            &dispatcher,
+            &AutoApproveAll,
+            "goal",
+            "system",
+            None,
+            "no-usage".to_string(),
+            config,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::Complete);
+        assert_eq!(session.tokens_used, 0);
+    }
+
     /// Phase 2b smoke test: a policy that returns
     /// [`RoundDecision::Timeout`] flips the session outcome to
     /// `ApprovalTimeout` and records a synthetic stop-reason round.
@@ -2183,6 +2355,7 @@ mod tests {
         let driver = ScriptedDriver::new(vec![Proposal {
             text: String::new(),
             tool_calls: vec![read_tool("u1", "x.md")],
+            usage: None,
         }]);
         let dispatcher = CountingDispatcher::new();
         let session = run_session(
@@ -2240,11 +2413,13 @@ mod tests {
             replies.push(Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool(&format!("u{i}"), &format!("decision_{i}.md"))],
+                usage: None,
             });
         }
         replies.push(Proposal {
             text: "all decisions recorded".into(),
             tool_calls: Vec::new(),
+            usage: None,
         });
         let driver = ScriptedDriver::new(replies);
         let dispatcher = CountingDispatcher::new();
@@ -2315,10 +2490,12 @@ mod tests {
             Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool("u1", "x.md")],
+                usage: None,
             },
             Proposal {
                 text: "done".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ];
         let driver = ScriptedDriver::new(replies);
@@ -2346,14 +2523,17 @@ mod tests {
             Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool("a", "x.md")],
+                usage: None,
             },
             Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool("b", "y.md")],
+                usage: None,
             },
             Proposal {
                 text: "done".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ];
         let driver = ScriptedDriver::new(replies);
@@ -2440,11 +2620,13 @@ mod tests {
             replies.push(Proposal {
                 text: String::new(),
                 tool_calls: vec![read_tool(&format!("r{i}"), "x.md")],
+                usage: None,
             });
         }
         replies.push(Proposal {
             text: "all done".into(),
             tool_calls: Vec::new(),
+            usage: None,
         });
         let driver = ScriptedDriver::new(replies);
         let dispatcher = CountingDispatcher::new();
@@ -2475,10 +2657,12 @@ mod tests {
             Proposal {
                 text: "round 1".into(),
                 tool_calls: many,
+                usage: None,
             },
             Proposal {
                 text: "done".into(),
                 tool_calls: Vec::new(),
+                usage: None,
             },
         ]);
         let dispatcher = CountingDispatcher::new();

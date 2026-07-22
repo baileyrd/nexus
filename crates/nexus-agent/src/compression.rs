@@ -291,6 +291,7 @@ mod tests {
             Ok(Proposal {
                 text: self.reply.clone(),
                 tool_calls: Vec::new(),
+                usage: None,
             })
         }
     }

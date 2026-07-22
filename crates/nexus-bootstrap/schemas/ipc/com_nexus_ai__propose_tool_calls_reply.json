@@ -21,6 +21,17 @@
       "items": {
         "$ref": "#/$defs/AiUnmappedToolCall"
       }
+    },
+    "usage": {
+      "description": "C27 (#380) — provider-reported token usage for this single\nround. `None` for providers that don't report it. The caller\n(`nexus-agent`'s round loop) accumulates this across rounds to\nenforce a session token ceiling.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TokenUsage"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "additionalProperties": false,
@@ -88,6 +99,29 @@
         "name",
         "input",
         "error"
+      ]
+    },
+    "TokenUsage": {
+      "description": "C27 (#380) — provider-reported token usage, accumulated across the\ncalls made through one provider instance. Providers are built\nper-request by `build_ai_provider`, so an instance's tally spans\nexactly one logical operation — including every round of a\nmulti-turn tool loop.",
+      "type": "object",
+      "properties": {
+        "input_tokens": {
+          "description": "Tokens the provider billed for the request side (prompt /\ninput, provider-reported — not estimated).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "description": "Tokens the provider billed for the response side.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "output_tokens"
       ]
     }
   }

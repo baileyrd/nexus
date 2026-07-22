@@ -57,4 +57,13 @@ parent_id?: string | null,
  * RFC 0008 — the parent round index this node forked at (the inclusive
  * length of the inherited prefix); `None` for a root session.
  */
-branch_point?: number | null, };
+branch_point?: number | null, 
+/**
+ * C27 (#380) — cumulative provider-reported tokens (input +
+ * output) across every round, for providers that report usage.
+ * `0` for a session where nothing reported usage — not
+ * distinguishable from "genuinely zero tokens", which is fine
+ * since `SessionConfig::max_tokens` only ever compares against
+ * this and both cases correctly never trip the ceiling.
+ */
+tokens_used?: bigint, };

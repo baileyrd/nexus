@@ -3,6 +3,11 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::error::AiError;
 use crate::tools::ToolSchema;
 
@@ -115,6 +120,15 @@ pub struct ChatTurnOutput {
 /// exactly one logical operation — including every round of a
 /// multi-turn tool loop.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct TokenUsage {
     /// Tokens the provider billed for the request side (prompt /
     /// input, provider-reported — not estimated).

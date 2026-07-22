@@ -71,6 +71,10 @@ pub(crate) async fn handle_propose_tool_calls(
         .chat_turn_with_tools(&turns, parsed.system.as_deref(), &schemas, &on_chunk)
         .await
         .map_err(|e| exec_err(format!("propose_tool_calls: provider: {e}")))?;
+    // C27 (#380) — drain after the call completes, mirroring stream_chat's
+    // pattern; `nexus-agent`'s round loop accumulates this to enforce a
+    // per-session token ceiling.
+    let usage = ai.take_usage();
 
     let mut mapped: Vec<AiProposedToolCall> = Vec::new();
     let mut unmapped: Vec<AiUnmappedToolCall> = Vec::new();
@@ -96,6 +100,7 @@ pub(crate) async fn handle_propose_tool_calls(
         text: output.text,
         tool_calls: mapped,
         unmapped_tool_calls: unmapped,
+        usage,
     };
     serde_json::to_value(&reply)
         .map_err(|e| exec_err(format!("propose_tool_calls: encode reply: {e}")))
