@@ -8,9 +8,10 @@ use crate::core_plugin::TerminalCorePlugin;
 use crate::ipc::{
     CreateSessionArgs, CreateSessionResponse, RenameSessionArgs, ResizeArgs, SessionIdArgs,
 };
-use crate::server::{ServerSpawnConfig, TerminalServer};
+use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalServer};
 use crate::session::SessionId;
 use crate::shell::ShellSpec;
+use crate::SessionMetadata;
 use nexus_plugins::PluginError;
 
 use super::shared::{crate_err, exec_err, parse_args, poisoned, to_value};
@@ -56,11 +57,14 @@ impl TerminalCorePlugin {
     ) -> Result<serde_json::Value, PluginError> {
         let a: SessionIdArgs = parse_args(args, "close_session")?;
         let id = SessionId::from_string(a.id);
-        self.server
-            .lock()
-            .map_err(poisoned)?
-            .close_session(&id)
-            .map_err(crate_err)?;
+        let mut server = self.server.lock().map_err(poisoned)?;
+        // C53 (#406) — snapshot scrollback + metadata before shutdown;
+        // `close_session` doesn't remove the manager entry, but doing
+        // this first keeps the snapshot unambiguously "as of close"
+        // regardless of that implementation detail.
+        self.persist_session_before_close(&server, &id);
+        server.close_session(&id).map_err(crate_err)?;
+        drop(server);
         // Drop the per-session emitter state so the map doesn't grow
         // unboundedly across long-running plugin instances. The drainer's
         // next round won't see this id from `list_sessions`, so the
@@ -69,6 +73,75 @@ impl TerminalCorePlugin {
             em.remove(&id);
         }
         Ok(serde_json::Value::Null)
+    }
+
+    /// C53 (#406) — best-effort persistence of a session's scrollback +
+    /// metadata before `close_session` discards it. `close_session` is
+    /// the only place ordinary session teardown flows through (a
+    /// single-tab close AND the shell's workspace-teardown
+    /// `destroyAllSessions` both call it), so persisting here — rather
+    /// than only on LRU eviction (BL-062) — is what makes
+    /// `cross_session_search` actually search something under normal
+    /// usage.
+    ///
+    /// Failures are logged, never propagated: a full disk or a locked
+    /// db must not block the user from closing a terminal tab.
+    fn persist_session_before_close(&self, server: &InMemoryTerminalServer, id: &SessionId) {
+        let Some(store) = self.session_store.as_ref() else {
+            return; // runtime built without a forge path — nothing to persist to
+        };
+        let manager = server.manager();
+        let Some(snapshot) = manager.buffer_snapshot(id) else {
+            return; // unknown id — nothing to persist
+        };
+        let name = manager
+            .name(id)
+            .map_or_else(|| id.as_str().to_string(), str::to_string);
+        let slug = crate::slugify(&name, id.as_str());
+        let shell = manager.shell(id).unwrap_or_default().to_string();
+        let working_dir = manager.working_dir(id).map(|p| p.display().to_string());
+        let created_at = i64::try_from(manager.created_at(id).unwrap_or(0)).unwrap_or(0);
+        let last_accessed_at = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
+        let buffer_size_bytes =
+            u64::try_from(manager.buffer_capacity(id).unwrap_or(0)).unwrap_or(u64::MAX);
+        let meta = SessionMetadata {
+            id: id.as_str().to_string(),
+            name,
+            slug,
+            shell,
+            working_dir,
+            created_at,
+            last_accessed_at,
+            is_active: false,
+            buffer_size_bytes,
+        };
+        let Ok(store) = store.lock() else {
+            tracing::warn!(
+                session_id = id.as_str(),
+                "C53: session store mutex poisoned; skipping persistence on close",
+            );
+            return;
+        };
+        if let Err(err) = store.save_metadata(&meta) {
+            tracing::warn!(
+                session_id = id.as_str(),
+                %err,
+                "C53: save_metadata failed on close_session",
+            );
+        }
+        if let Err(err) = store.save_scrollback(id.as_str(), &snapshot) {
+            tracing::warn!(
+                session_id = id.as_str(),
+                %err,
+                "C53: save_scrollback failed on close_session",
+            );
+        }
     }
 
     pub(crate) fn dispatch_resize(

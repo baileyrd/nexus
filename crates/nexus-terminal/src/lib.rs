@@ -113,11 +113,11 @@ pub use error::TerminalError;
 pub use external_terminal::{parse_kind as parse_terminal_kind, TerminalKind, DEFAULT_PRIORITY};
 pub use ipc::{
     AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CreateSessionArgs, CreateSessionResponse,
-    CrossSessionSearchArgs, OutputStreamPayload, PumpArgs, PumpResponse, ReadOutputArgs,
-    ReadRawSinceArgs, ReadRawSinceResponse, RenameSessionArgs, ReplEvalArgs, ReplInfo,
-    ReplStartArgs, ReplStartResponse, ResizeArgs, RunSavedArgs, SearchOutputArgs, SendInputArgs,
-    SendRawInputArgs, SessionIdArgs, SuggestArgs, SuggestResponse, WaitForPatternArgs,
-    WaitForPatternResponse,
+    CrossSessionSearchArgs, LoadTranscriptResult, OutputStreamPayload, PumpArgs, PumpResponse,
+    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, RenameSessionArgs, ReplEvalArgs,
+    ReplInfo, ReplStartArgs, ReplStartResponse, ResizeArgs, RunSavedArgs, SearchOutputArgs,
+    SendInputArgs, SendRawInputArgs, SessionIdArgs, SuggestArgs, SuggestResponse,
+    WaitForPatternArgs, WaitForPatternResponse,
 };
 pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};

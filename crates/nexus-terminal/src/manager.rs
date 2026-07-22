@@ -30,6 +30,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::buffer::OutputBuffer;
@@ -62,6 +63,11 @@ struct Entry {
     /// Unix-seconds creation timestamp. Stable across the session's
     /// lifetime — `last_accessed` moves independently.
     created_at: u64,
+    /// CWD the shell was spawned in, if the caller supplied one. C53
+    /// (#406) — cached here (rather than on [`Session`], which only
+    /// uses it transiently at spawn to set the child's cwd) so
+    /// `close_session` can persist it into [`crate::persist::SessionMetadata`].
+    working_dir: Option<PathBuf>,
     /// Server-side VT grid fed the same raw PTY bytes as the buffers above
     /// (RFC 0003). Models the screen + scrollback + OSC 133 command/exit-code
     /// boundaries for headless (agent/CLI/TUI) introspection, parallel to the
@@ -150,6 +156,9 @@ impl SessionManager {
             Some(s) => (s.cols as usize, s.rows as usize),
             None => (80, 24),
         };
+        // C53 (#406) — read before `config` moves into `Session::spawn`, so
+        // `close_session` can later persist it via `working_dir()`.
+        let working_dir = config.working_dir.clone();
         let session = Session::spawn(config)?;
         let id = session.id().clone();
         let now = SystemTime::now()
@@ -165,6 +174,7 @@ impl SessionManager {
                 last_accessed: Cell::new(Instant::now()),
                 name: None,
                 created_at: now,
+                working_dir,
                 vt: nexus_vt::Vt::new(cols, rows),
             },
         );
@@ -208,6 +218,32 @@ impl SessionManager {
     #[must_use]
     pub fn created_at(&self, id: &SessionId) -> Option<u64> {
         self.sessions.get(id).map(|e| e.created_at)
+    }
+
+    /// The absolute path of the shell the session is running, or
+    /// `None` if the id is unknown. C53 (#406) — previously only
+    /// cached on [`Session`] for error messages; exposed here so
+    /// `session_info` and `close_session`'s persistence path can both
+    /// read it without threading a new field through the server layer.
+    #[must_use]
+    pub fn shell(&self, id: &SessionId) -> Option<&str> {
+        self.sessions.get(id).map(|e| e.session.shell_display())
+    }
+
+    /// CWD the session's shell was spawned in, or `None` if the id is
+    /// unknown or no explicit working directory was supplied at spawn
+    /// time. C53 (#406).
+    #[must_use]
+    pub fn working_dir(&self, id: &SessionId) -> Option<&Path> {
+        self.sessions.get(id).and_then(|e| e.working_dir.as_deref())
+    }
+
+    /// The session's ring-buffer capacity in bytes, or `None` if the
+    /// id is unknown. C53 (#406) — feeds
+    /// [`crate::persist::SessionMetadata::buffer_size_bytes`].
+    #[must_use]
+    pub fn buffer_capacity(&self, id: &SessionId) -> Option<usize> {
+        self.sessions.get(id).map(|e| e.buffer.capacity())
     }
 
     /// Number of structured lines currently held for `id`.
@@ -710,6 +746,62 @@ mod tests {
         assert!(matches!(err, TerminalError::NotRunning(_)), "got {err:?}");
         let err = m.drain(&ghost, Duration::from_millis(10)).unwrap_err();
         assert!(matches!(err, TerminalError::NotRunning(_)), "got {err:?}");
+    }
+
+    // ── C53 (#406) — shell / working_dir / buffer_capacity accessors ────
+
+    #[test]
+    fn shell_working_dir_and_buffer_capacity_unknown_id_return_none() {
+        let m = SessionManager::new();
+        let ghost = SessionId::from_string("ghost-id");
+        assert_eq!(m.shell(&ghost), None);
+        assert_eq!(m.working_dir(&ghost), None);
+        assert_eq!(m.buffer_capacity(&ghost), None);
+    }
+
+    #[test]
+    fn shell_reflects_the_resolved_shell_program() {
+        if !unix_only("shell_reflects_the_resolved_shell_program") {
+            return;
+        }
+        let mut m = SessionManager::new();
+        let id = m.spawn(sh_printf("x")).expect("spawn");
+        assert_eq!(m.shell(&id), Some("/bin/sh"));
+    }
+
+    #[test]
+    fn working_dir_is_none_when_not_supplied_at_spawn() {
+        if !unix_only("working_dir_is_none_when_not_supplied_at_spawn") {
+            return;
+        }
+        let mut m = SessionManager::new();
+        let id = m.spawn(sh_printf("x")).expect("spawn");
+        assert_eq!(m.working_dir(&id), None);
+    }
+
+    #[test]
+    fn working_dir_reflects_the_supplied_cwd() {
+        if !unix_only("working_dir_reflects_the_supplied_cwd") {
+            return;
+        }
+        let mut m = SessionManager::new();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg = SessionConfig {
+            working_dir: Some(dir.path().to_path_buf()),
+            ..sh_printf("x")
+        };
+        let id = m.spawn(cfg).expect("spawn");
+        assert_eq!(m.working_dir(&id), Some(dir.path()));
+    }
+
+    #[test]
+    fn buffer_capacity_matches_the_manager_default() {
+        if !unix_only("buffer_capacity_matches_the_manager_default") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(4, 65_536);
+        let id = m.spawn(sh_printf("x")).expect("spawn");
+        assert_eq!(m.buffer_capacity(&id), Some(65_536));
     }
 
     #[test]

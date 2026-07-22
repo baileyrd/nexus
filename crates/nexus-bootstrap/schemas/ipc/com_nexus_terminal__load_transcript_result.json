@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LoadTranscriptResult",
+  "description": "C53 (#406) — result of `load_transcript`.",
+  "type": "object",
+  "properties": {
+    "text": {
+      "description": "ANSI-stripped scrollback text persisted for the session, or\n`None` if nothing was ever persisted for that id (session\nnever closed, or was created before this feature shipped).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

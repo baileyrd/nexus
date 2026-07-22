@@ -536,14 +536,20 @@ impl InMemoryTerminalServer {
             .manager
             .name(id)
             .map_or_else(|| id.as_str().to_string(), std::string::ToString::to_string);
-        // `SessionManager` doesn't expose the shell string for an
-        // existing session yet — future work; pass through an empty
-        // string so the field stays honest rather than being guessed.
+        // C53 (#406) — `shell`/`working_dir` used to be hardcoded empty/
+        // `None` here ("SessionManager doesn't expose the shell string
+        // for an existing session yet"); the manager now caches both at
+        // spawn time.
+        let shell = self.manager.shell(id).unwrap_or_default().to_string();
+        let working_dir = self
+            .manager
+            .working_dir(id)
+            .map(|p| p.display().to_string());
         Ok(SessionInfo {
             id: id.as_str().to_string(),
             name,
-            shell: String::new(),
-            working_dir: None,
+            shell,
+            working_dir,
             line_count,
             created_at,
             rss_bytes: None,
@@ -879,6 +885,32 @@ mod tests {
         }
         let info = s.get_session_info(&id).expect("info");
         assert_eq!(info.name, "test");
+    }
+
+    #[test]
+    fn get_session_info_reports_shell_and_working_dir() {
+        // C53 (#406) — these were previously hardcoded to `String::new()`
+        // / `None` regardless of what the session was actually spawned
+        // with; the manager now caches both at spawn time.
+        if !unix_only("get_session_info_reports_shell_and_working_dir") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let id = s
+            .create_session(ServerSpawnConfig {
+                name: Some("cwd-test".into()),
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "sleep 1".into()],
+                }),
+                working_dir: Some(dir.path().to_path_buf()),
+                ..Default::default()
+            })
+            .expect("create");
+        let info = s.get_session_info(&id).expect("info");
+        assert_eq!(info.shell, "/bin/sh");
+        assert_eq!(info.working_dir.as_deref(), Some(dir.path().display().to_string().as_str()));
     }
 
     #[test]
