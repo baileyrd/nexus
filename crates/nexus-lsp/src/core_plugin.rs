@@ -148,7 +148,36 @@ impl LspCorePlugin {
 /// `Arc<LspHostConfig>` so async dispatch keeps its existing
 /// pass-by-Arc helper signatures unchanged.
 fn snapshot_config(cell: &Arc<RwLock<LspHostConfig>>) -> Arc<LspHostConfig> {
-    Arc::new(cell.read().expect("LspHostConfig RwLock poisoned").clone())
+    Arc::new(read_config(cell).clone())
+}
+
+/// #199 / R16 — recover from a poisoned `LspHostConfig` lock rather
+/// than `.expect()`-panicking. With `panic = "abort"` in the release
+/// profile, that would convert a prior writer-side panic into a
+/// whole-process abort. The lock is only ever mutated by whole-value
+/// replacement (`reload`) or via `LspHostConfig` methods that don't
+/// leave torn state on panic, so reading the inner value on poison is
+/// safe (same posture as `nexus-dap`'s `read_config`/`write_config`,
+/// #199).
+fn read_config(config: &RwLock<LspHostConfig>) -> std::sync::RwLockReadGuard<'_, LspHostConfig> {
+    match config.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("LspHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Write-lock counterpart of [`read_config`]; see its doc comment.
+fn write_config(config: &RwLock<LspHostConfig>) -> std::sync::RwLockWriteGuard<'_, LspHostConfig> {
+    match config.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("LspHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
 }
 
 /// BL-113 Phase 2b — sync IPC handler for `register_server`. Parses
@@ -210,7 +239,7 @@ fn handle_register_server(
         disabled: typed.disabled,
         env: typed.env,
     };
-    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.register_contributed(spec, typed.plugin_id) {
         Ok(()) => LspRegisterServerReply {
             ok: true,
@@ -266,7 +295,7 @@ fn handle_unregister_server(
             reason: "unregister_server: missing or empty required field `plugin_id`".to_string(),
         });
     }
-    let mut cfg = config.write().expect("LspHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
         Ok(_removed) => LspUnregisterServerReply {
             ok: true,
@@ -330,17 +359,12 @@ impl CorePlugin for LspCorePlugin {
                 LspHostConfig::default()
             }
         };
-        *self.config.write().expect("LspHostConfig RwLock poisoned") = loaded;
+        *write_config(&self.config) = loaded;
         Ok(())
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let server_count = self
-            .config
-            .read()
-            .expect("LspHostConfig RwLock poisoned")
-            .servers
-            .len();
+        let server_count = read_config(&self.config).servers.len();
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
                 PLUGIN_ID,
@@ -397,7 +421,7 @@ impl CorePlugin for LspCorePlugin {
                 // #190 / R7 — materialize into typed `Vec<LspServerEntry>`
                 // so the schemars schema generator sees the same fields
                 // the runtime emits.
-                let cfg = self.config.read().expect("LspHostConfig RwLock poisoned");
+                let cfg = read_config(&self.config);
                 let arr: Vec<LspServerEntry> = cfg
                     .servers
                     .values()

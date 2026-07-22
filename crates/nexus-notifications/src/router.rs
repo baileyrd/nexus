@@ -83,10 +83,19 @@ impl Router {
         config: &NotificationsConfig,
     ) -> Result<(), crate::config::ConfigError> {
         let sources = config.resolve_sources()?;
-        let mut state = self
-            .inner
-            .write()
-            .expect("notifications router state lock poisoned");
+        // #199 / R16 — recover from a poisoned lock instead of
+        // `.expect()`-panicking. With `panic = "abort"` in the release
+        // profile, that would convert a prior writer-side panic into a
+        // whole-process abort. `state.sources = sources` is a single
+        // field replacement (no partial-write state to observe), so
+        // reading/writing the inner value on poison is safe.
+        let mut state = match self.inner.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("notifications router state lock poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        };
         state.sources = sources;
         Ok(())
     }
@@ -97,10 +106,15 @@ impl Router {
     /// event, and [`Resolution::Routed`] otherwise.
     #[must_use]
     pub fn resolve(&self, source: &str, severity: Severity, min_of_day: u16) -> Resolution {
-        let state = self
-            .inner
-            .read()
-            .expect("notifications router state lock poisoned");
+        // #199 / R16 — recover from a poisoned lock rather than
+        // propagating the panic (see `swap_config` above).
+        let state = match self.inner.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("notifications router state lock poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        };
         let Some(rule) = state.sources.get(source) else {
             return Resolution::UnknownSource;
         };
@@ -122,10 +136,15 @@ impl Router {
     /// observability/MCP surface and unit tests.
     #[must_use]
     pub fn source_names(&self) -> Vec<String> {
-        let state = self
-            .inner
-            .read()
-            .expect("notifications router state lock poisoned");
+        // #199 / R16 — recover from a poisoned lock rather than
+        // propagating the panic (see `swap_config` above).
+        let state = match self.inner.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("notifications router state lock poisoned — recovering (see #199)");
+                poisoned.into_inner()
+            }
+        };
         state.sources.keys().cloned().collect()
     }
 }

@@ -130,7 +130,36 @@ impl McpHostPlugin {
 /// `Arc<McpHostConfig>` so async dispatch keeps its existing
 /// pass-by-Arc helper signatures unchanged.
 fn snapshot_config(cell: &Arc<RwLock<McpHostConfig>>) -> Arc<McpHostConfig> {
-    Arc::new(cell.read().expect("McpHostConfig RwLock poisoned").clone())
+    Arc::new(read_config(cell).clone())
+}
+
+/// #199 / R16 — recover from a poisoned `McpHostConfig` lock rather
+/// than `.expect()`-panicking. With `panic = "abort"` in the release
+/// profile, that would convert a prior writer-side panic into a
+/// whole-process abort. The lock is only ever mutated by whole-value
+/// replacement (`reload`) or via `McpHostConfig` methods that don't
+/// leave torn state on panic, so reading the inner value on poison is
+/// safe (same posture as `nexus-dap`'s `read_config`/`write_config`,
+/// #199).
+fn read_config(config: &RwLock<McpHostConfig>) -> std::sync::RwLockReadGuard<'_, McpHostConfig> {
+    match config.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("McpHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Write-lock counterpart of [`read_config`]; see its doc comment.
+fn write_config(config: &RwLock<McpHostConfig>) -> std::sync::RwLockWriteGuard<'_, McpHostConfig> {
+    match config.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("McpHostConfig RwLock poisoned — recovering (see #199)");
+            poisoned.into_inner()
+        }
+    }
 }
 
 fn parse_transport(raw: &str) -> McpTransport {
@@ -203,7 +232,7 @@ fn handle_register_server(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let (name, spec, plugin_id) = parse_register_server(args)?;
-    let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     // #190 / R7 — reply migrates from ad-hoc `json!({"ok": …, "status":
     // …})` to the typed `McpRegisterServerReply` (`deny_unknown_fields`).
     let reply = match cfg.register_contributed(name, spec, plugin_id) {
@@ -258,7 +287,7 @@ fn handle_unregister_server(
             reason: "unregister_server: missing or empty required field `plugin_id`".to_string(),
         });
     }
-    let mut cfg = config.write().expect("McpHostConfig RwLock poisoned");
+    let mut cfg = write_config(config);
     let reply = match cfg.unregister_contributed(&typed.name, &typed.plugin_id) {
         Ok(_removed) => McpUnregisterServerReply {
             ok: true,
@@ -311,17 +340,12 @@ impl CorePlugin for McpHostPlugin {
                 McpHostConfig::default()
             }
         };
-        *self.config.write().expect("McpHostConfig RwLock poisoned") = loaded;
+        *write_config(&self.config) = loaded;
         Ok(())
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let server_count = self
-            .config
-            .read()
-            .expect("McpHostConfig RwLock poisoned")
-            .servers
-            .len();
+        let server_count = read_config(&self.config).servers.len();
 
         if let Some(bus) = &self.event_bus {
             if let Err(err) = bus.publish_plugin(
@@ -392,7 +416,7 @@ impl CorePlugin for McpHostPlugin {
                 // #190 / R7 — materialize into the typed wire shape so the
                 // schemars schema generator sees the same fields the runtime
                 // emits. `McpServerEntry` already carries `deny_unknown_fields`.
-                let cfg = self.config.read().expect("McpHostConfig RwLock poisoned");
+                let cfg = read_config(&self.config);
                 let arr: Vec<McpServerEntry> = cfg
                     .servers
                     .iter()
