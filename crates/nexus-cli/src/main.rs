@@ -353,6 +353,9 @@ fn main() {
             ContentCommand::Export { path, output, format } => {
                 commands::content::export(&mut app, &path, output.as_deref(), &format)
             }
+            ContentCommand::Duplicates { near_threshold } => {
+                commands::content::duplicates(&mut app, near_threshold)
+            }
         },
 
         Commands::Trash(args) => match args.command {
@@ -1070,6 +1073,37 @@ mod tests {
                     assert_eq!(format, "html");
                 }
                 _ => panic!("expected Export"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_duplicates_defaults_near_threshold() {
+        let cli = Cli::try_parse_from(["nexus", "content", "duplicates"])
+            .expect("parse content duplicates");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Duplicates { near_threshold } => {
+                    assert!((near_threshold - 0.97).abs() < f32::EPSILON);
+                }
+                _ => panic!("expected Duplicates"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_duplicates_accepts_near_threshold_flag() {
+        let cli =
+            Cli::try_parse_from(["nexus", "content", "duplicates", "--near-threshold", "0.8"])
+                .expect("parse content duplicates --near-threshold");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Duplicates { near_threshold } => {
+                    assert!((near_threshold - 0.8).abs() < f32::EPSILON);
+                }
+                _ => panic!("expected Duplicates"),
             },
             _ => panic!("expected Content subcommand"),
         }

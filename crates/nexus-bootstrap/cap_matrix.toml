@@ -1388,6 +1388,11 @@ unrestricted = "read-only duplicate detection over the entity index"
 
 [[handler]]
 plugin = "com.nexus.storage"
+command = "note_find_duplicates"
+unrestricted = "read-only duplicate detection over indexed notes (C23 #376)"
+
+[[handler]]
+plugin = "com.nexus.storage"
 command = "list_draft_relations"
 unrestricted = "read-only enumeration of low-confidence entity relations (Dream Cycle inbox)"
 

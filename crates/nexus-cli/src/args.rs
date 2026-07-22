@@ -233,6 +233,15 @@ pub(crate) enum ContentCommand {
         #[arg(long, default_value = "html")]
         format: String,
     },
+    /// Find exact and near-duplicate notes (C23 #376). Exact duplicates
+    /// share a `content_hash`; near-duplicates score cosine similarity
+    /// over mean-pooled note embeddings.
+    Duplicates {
+        /// Minimum cosine similarity in `[0.0, 1.0]` for a near-duplicate
+        /// pair to be reported. Defaults to 0.97.
+        #[arg(long, default_value_t = 0.97)]
+        near_threshold: f32,
+    },
 }
 
 // ---------------------------------------------------------------------------

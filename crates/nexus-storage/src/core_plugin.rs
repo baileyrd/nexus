@@ -416,6 +416,15 @@ pub const HANDLER_TRASH_RESTORE: u32 = 79;
 /// u64? }`; Returns: `{ "removed": usize }`. Permanent.
 pub const HANDLER_TRASH_EMPTY: u32 = 80;
 
+/// C23 (#376) — `note_find_duplicates`. Args:
+/// [`crate::ipc::NoteFindDuplicatesArgs`]. Returns
+/// [`crate::ipc::NoteFindDuplicatesResult`]. Exact duplicates are a
+/// `content_hash` collision over indexed markdown files; near-duplicates
+/// score cosine similarity over mean-pooled per-file vectors from the
+/// `notes` embedding namespace. Read-only query over derived state — the
+/// note-level counterpart to `entity_find_duplicates`.
+pub const HANDLER_NOTE_FIND_DUPLICATES: u32 = 81;
+
 /// BL-129 thin slice — `entity_decay_relations`. Args:
 /// [`crate::ipc::EntityDecayRelationsArgs`]. Returns
 /// [`crate::ipc::EntityDecayRelationsResult`]. Walks `entities/*.md`,
@@ -514,6 +523,7 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("base_record_restore", HANDLER_BASE_RECORD_RESTORE),
     ("obsidian_base_query", HANDLER_OBSIDIAN_BASE_QUERY),
     ("hybrid_search", HANDLER_HYBRID_SEARCH),
+    ("note_find_duplicates", HANDLER_NOTE_FIND_DUPLICATES),
 ];
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
@@ -896,6 +906,7 @@ impl CorePlugin for StorageCorePlugin {
             HANDLER_WRITE_FRONTMATTER => {
                 crate::handlers::notes::write_frontmatter(engine, &self.forge_root, args)
             }
+            HANDLER_NOTE_FIND_DUPLICATES => crate::handlers::notes::find_duplicates(engine, args),
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
     }

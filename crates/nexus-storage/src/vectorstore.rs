@@ -168,6 +168,60 @@ pub fn count(conn: &Connection, namespace: &str) -> Result<usize, StorageError> 
     })
 }
 
+/// Mean-pool every chunk embedding for each file in `namespace` into a
+/// single per-file vector — one row per file, suitable for whole-note
+/// similarity comparisons (C23 / #376 near-duplicate note detection).
+///
+/// Chunks whose dimensionality doesn't match the running mean for their
+/// file (e.g. leftover rows from a prior embedding model) are skipped
+/// rather than erroring, so a stale row can't poison a whole file's
+/// vector. Files with zero eligible chunks are omitted from the result.
+///
+/// # Errors
+///
+/// Returns [`StorageError`] if the underlying query fails.
+pub fn mean_embeddings_by_file(
+    conn: &Connection,
+    namespace: &str,
+) -> Result<Vec<(String, Vec<f32>)>, StorageError> {
+    let mut stmt =
+        conn.prepare("SELECT file_path, embedding FROM embeddings WHERE namespace = ?1;")?;
+    let rows: Vec<(String, Vec<f32>)> = stmt
+        .query_map(params![namespace], |row| {
+            let file_path: String = row.get(0)?;
+            let blob: Vec<u8> = row.get(1)?;
+            Ok((file_path, blob_to_embedding(&blob)))
+        })?
+        .filter_map(std::result::Result::ok)
+        .collect();
+
+    let mut by_file: std::collections::BTreeMap<String, (Vec<f32>, usize)> =
+        std::collections::BTreeMap::new();
+    for (file_path, emb) in rows {
+        let entry = by_file
+            .entry(file_path)
+            .or_insert_with(|| (vec![0.0; emb.len()], 0));
+        if entry.0.len() != emb.len() {
+            continue;
+        }
+        for (acc, v) in entry.0.iter_mut().zip(emb.iter()) {
+            *acc += v;
+        }
+        entry.1 += 1;
+    }
+
+    Ok(by_file
+        .into_iter()
+        .filter(|(_, (_, count))| *count > 0)
+        .map(|(path, (sum, count))| {
+            #[allow(clippy::cast_precision_loss)]
+            let divisor = count as f32;
+            let mean: Vec<f32> = sum.iter().map(|v| v / divisor).collect();
+            (path, mean)
+        })
+        .collect())
+}
+
 // ─── Serialization helpers ───────────────────────────────────────────────────
 
 /// Serialize an embedding vector to a flat little-endian byte blob.
@@ -188,7 +242,7 @@ fn blob_to_embedding(blob: &[u8]) -> Vec<f32> {
 /// Cosine similarity between two vectors, clamped to `[-1.0, 1.0]`.
 ///
 /// Returns `0.0` when either vector has zero magnitude.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -329,6 +383,82 @@ mod tests {
         }];
         upsert(&conn, "notes", "b.md", &v2).unwrap();
         assert_eq!(count(&conn, "notes").unwrap(), 1);
+    }
+
+    #[test]
+    fn mean_embeddings_by_file_pools_chunks_per_file() {
+        let conn = setup_db();
+        upsert(
+            &conn,
+            "notes",
+            "a.md",
+            &[
+                ChunkEmbedding {
+                    file_path: "a.md".into(),
+                    block_id: 1,
+                    chunk_text: "one".into(),
+                    embedding: vec![1.0, 0.0],
+                },
+                ChunkEmbedding {
+                    file_path: "a.md".into(),
+                    block_id: 2,
+                    chunk_text: "two".into(),
+                    embedding: vec![0.0, 1.0],
+                },
+            ],
+        )
+        .unwrap();
+        upsert(
+            &conn,
+            "notes",
+            "b.md",
+            &[ChunkEmbedding {
+                file_path: "b.md".into(),
+                block_id: 1,
+                chunk_text: "solo".into(),
+                embedding: vec![2.0, 2.0],
+            }],
+        )
+        .unwrap();
+
+        let means = mean_embeddings_by_file(&conn, "notes").unwrap();
+        assert_eq!(means.len(), 2);
+        let a = means.iter().find(|(p, _)| p == "a.md").unwrap();
+        assert!((a.1[0] - 0.5).abs() < 1e-6);
+        assert!((a.1[1] - 0.5).abs() < 1e-6);
+        let b = means.iter().find(|(p, _)| p == "b.md").unwrap();
+        assert!((b.1[0] - 2.0).abs() < 1e-6);
+        assert!((b.1[1] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mean_embeddings_by_file_skips_dimension_mismatch_chunks() {
+        let conn = setup_db();
+        // Simulate a stale row from a different embedding model by
+        // inserting directly with a mismatched dimensionality.
+        upsert(
+            &conn,
+            "notes",
+            "c.md",
+            &[ChunkEmbedding {
+                file_path: "c.md".into(),
+                block_id: 1,
+                chunk_text: "first".into(),
+                embedding: vec![1.0, 0.0, 0.0],
+            }],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO embeddings (namespace, file_path, block_id, chunk_text, embedding, created_at)
+             VALUES ('notes', 'c.md', 2, 'mismatched', ?1, unixepoch());",
+            params![embedding_to_blob(&[1.0, 0.0])],
+        )
+        .unwrap();
+
+        let means = mean_embeddings_by_file(&conn, "notes").unwrap();
+        assert_eq!(means.len(), 1);
+        assert_eq!(means[0].0, "c.md");
+        assert_eq!(means[0].1, vec![1.0, 0.0, 0.0]);
     }
 
     #[test]

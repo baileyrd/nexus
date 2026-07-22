@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NoteExactDuplicateGroup",
+  "description": "One group of exact duplicates in [`NoteFindDuplicatesResult::exact`] —\ntwo or more markdown files sharing the same `content_hash`.",
+  "type": "object",
+  "properties": {
+    "content_hash": {
+      "description": "SHA-256 hex digest shared by every path in the group.",
+      "type": "string"
+    },
+    "paths": {
+      "description": "Forge-relative paths sharing that hash, ascending.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "content_hash",
+    "paths"
+  ]
+}

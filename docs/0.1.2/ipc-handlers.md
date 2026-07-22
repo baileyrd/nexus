@@ -12,7 +12,7 @@
 
 | Plugin | Handlers |
 |--------|---------:|
-| `com.nexus.storage` | 80 |
+| `com.nexus.storage` | 81 |
 | `com.nexus.git` | 45 |
 | `com.nexus.terminal` | 34 |
 | `com.nexus.ai` | 31 |
@@ -44,7 +44,7 @@
 
 ---
 
-## com.nexus.storage (80)
+## com.nexus.storage (81)
 
 ### Read
 
@@ -66,6 +66,7 @@
 | `query_tags` / `query_tasks` / `query_blocks` / `query_symbol` | — | index queries |
 | `entity_get` / `entity_search` / `entity_relations` / `entity_find_duplicates` | — | entity graph |
 | `list_draft_relations` | — | low-confidence entity relations (Dream Cycle inbox) |
+| `note_find_duplicates` | — | exact (`content_hash`) + near (embedding cosine similarity) note duplicate detection |
 | `vector_query` / `vectorstore_count` | — | RAG vector store reads |
 | `config_read` / `settings_read` | — | forge config + settings |
 | `canvas_read` / `canvas_nodes` / `canvas_edges` | — | canvas parse |

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NoteFindDuplicatesResult",
+  "description": "Return type for `com.nexus.storage::note_find_duplicates`.",
+  "type": "object",
+  "properties": {
+    "exact": {
+      "description": "Exact-duplicate groups (`content_hash` collisions), each with 2+\npaths, ordered by ascending first path.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NoteExactDuplicateGroup"
+      }
+    },
+    "near": {
+      "description": "Near-duplicate pairs at or above `near_threshold`, ordered by\ndescending similarity then ascending `(a, b)`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NoteNearDuplicatePair"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "exact",
+    "near"
+  ],
+  "$defs": {
+    "NoteExactDuplicateGroup": {
+      "description": "One group of exact duplicates in [`NoteFindDuplicatesResult::exact`] —\ntwo or more markdown files sharing the same `content_hash`.",
+      "type": "object",
+      "properties": {
+        "content_hash": {
+          "description": "SHA-256 hex digest shared by every path in the group.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "Forge-relative paths sharing that hash, ascending.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "content_hash",
+        "paths"
+      ]
+    },
+    "NoteNearDuplicatePair": {
+      "description": "One pair in [`NoteFindDuplicatesResult::near`].",
+      "type": "object",
+      "properties": {
+        "a": {
+          "description": "Lexicographically-smaller forge-relative path.",
+          "type": "string"
+        },
+        "b": {
+          "description": "Lexicographically-greater forge-relative path.",
+          "type": "string"
+        },
+        "similarity": {
+          "description": "Cosine similarity in `[0.0, 1.0]` between the two files' mean-\npooled embedding vectors.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "a",
+        "b",
+        "similarity"
+      ]
+    }
+  }
+}

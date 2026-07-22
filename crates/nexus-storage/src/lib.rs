@@ -2295,6 +2295,18 @@ impl StorageEngine {
         let conn = self.pool_connection()?;
         vectorstore::count(&conn, namespace)
     }
+
+    /// Mean-pool every chunk embedding for each file in `namespace` into
+    /// a single per-file vector (C23 / #376 near-duplicate note
+    /// detection).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the underlying query fails.
+    pub fn vector_mean_by_file(&self, namespace: &str) -> Result<Vec<(String, Vec<f32>)>, StorageError> {
+        let conn = self.pool_connection()?;
+        vectorstore::mean_embeddings_by_file(&conn, namespace)
+    }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
