@@ -465,6 +465,9 @@ fn main() {
                 EntityCommand::Duplicates { threshold } => {
                     commands::graph::entity_duplicates(&mut app, threshold)
                 }
+                EntityCommand::Merge { keep, drop } => {
+                    commands::graph::entity_merge(&mut app, &keep, &drop)
+                }
             },
             GraphCommand::DreamCycle { command } => match command {
                 DreamCycleCommand::Run {

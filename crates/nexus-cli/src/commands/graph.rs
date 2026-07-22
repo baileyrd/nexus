@@ -613,3 +613,35 @@ pub fn entity_duplicates(app: &mut App, threshold: f32) -> Result<()> {
     }
     Ok(())
 }
+
+/// `nexus graph entity merge <keep> <drop>` — C45 (#398). Acts on a
+/// `duplicates`/Dream-Cycle-review pair: unions `drop`'s aliases +
+/// relations onto `keep` and deletes `drop`'s file.
+pub fn entity_merge(app: &mut App, keep: &str, drop: &str) -> Result<()> {
+    let format = app.format();
+    let (invoker, rt) = app.invoker()?;
+    let outcome = rt
+        .block_on(ipc::entity_merge(&*invoker, keep, drop))
+        .map_err(|e| anyhow::anyhow!("entity_merge failed: {e}"))?;
+
+    match format {
+        OutputFormat::Json | OutputFormat::Jsonl => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "kept": outcome.kept,
+                    "dropped": outcome.dropped,
+                    "aliases_added": outcome.aliases_added,
+                    "relations_added": outcome.relations_added,
+                })
+            );
+        }
+        _ => {
+            println!(
+                "Merged '{}' into '{}' ({} alias(es), {} relation(s) added).",
+                outcome.dropped, outcome.kept, outcome.aliases_added, outcome.relations_added
+            );
+        }
+    }
+    Ok(())
+}

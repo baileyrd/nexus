@@ -352,6 +352,18 @@ pub(crate) enum EntityCommand {
         #[arg(long, default_value_t = 0.92)]
         threshold: f32,
     },
+    /// Merge `drop` into `keep`: unions aliases + relations onto `keep`
+    /// (adding `drop`'s id as a new alias) and deletes `drop`'s file.
+    /// C45 (#398) — the CLI-side verb for acting on a `duplicates` /
+    /// Dream-Cycle-review pair; wraps the same `entity_merge` handler
+    /// Dream Cycle's automatic dedup tier already calls.
+    Merge {
+        /// Canonical id of the entity that survives the merge.
+        keep: String,
+        /// Canonical id of the entity that is merged into `keep` and
+        /// then deleted. Must differ from `keep`.
+        drop: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
