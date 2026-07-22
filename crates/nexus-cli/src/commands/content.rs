@@ -599,6 +599,67 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `nexus content duplicates` — C23 (#376). Exact duplicates (shared
+/// `content_hash`) and near-duplicates (cosine similarity over mean-
+/// pooled note embeddings) across indexed markdown files.
+pub fn duplicates(app: &mut App, near_threshold: f32) -> Result<()> {
+    let format = app.format();
+    let (invoker, rt) = app.invoker()?;
+    let result = rt
+        .block_on(ipc::note_find_duplicates(&*invoker, Some(near_threshold)))
+        .map_err(|e| anyhow::anyhow!("note_find_duplicates failed: {e}"))?;
+
+    match format {
+        OutputFormat::Json | OutputFormat::Jsonl => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "exact": result.exact.iter().map(|g| serde_json::json!({
+                        "content_hash": g.content_hash,
+                        "paths": g.paths,
+                    })).collect::<Vec<_>>(),
+                    "near": result.near.iter().map(|p| serde_json::json!({
+                        "a": p.a,
+                        "b": p.b,
+                        "similarity": p.similarity,
+                    })).collect::<Vec<_>>(),
+                })
+            );
+        }
+        _ => {
+            if result.exact.is_empty() {
+                println!("No exact duplicates found.");
+            } else {
+                println!("Exact duplicates ({} group(s)):", result.exact.len());
+                let headers = &["Content hash", "Paths"];
+                let rows: Vec<Vec<String>> = result
+                    .exact
+                    .iter()
+                    .map(|g| vec![g.content_hash.clone(), g.paths.join(", ")])
+                    .collect();
+                print_list(format, headers, &rows);
+            }
+
+            if result.near.is_empty() {
+                println!("No near-duplicates found above threshold {near_threshold:.2}.");
+            } else {
+                println!(
+                    "\nNear-duplicates above threshold {near_threshold:.2} ({} pair(s)):",
+                    result.near.len()
+                );
+                let headers = &["Similarity", "A", "B"];
+                let rows: Vec<Vec<String>> = result
+                    .near
+                    .iter()
+                    .map(|p| vec![format!("{:.3}", p.similarity), p.a.clone(), p.b.clone()])
+                    .collect();
+                print_list(format, headers, &rows);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

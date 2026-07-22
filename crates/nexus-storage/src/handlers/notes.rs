@@ -1,5 +1,5 @@
 //! Note + frontmatter handlers: `note_append`, `read_frontmatter`,
-//! `write_frontmatter`.
+//! `write_frontmatter`, `note_find_duplicates`.
 
 use std::path::Path;
 
@@ -7,9 +7,11 @@ use nexus_plugins::PluginError;
 use serde_json::Value;
 
 use crate::ipc::{
-    StorageNoteAppendArgs, StorageOk, StorageReadFrontmatterArgs, StorageWriteFrontmatterArgs,
+    NoteExactDuplicateGroup, NoteFindDuplicatesArgs, NoteFindDuplicatesResult,
+    NoteNearDuplicatePair, StorageNoteAppendArgs, StorageOk, StorageReadFrontmatterArgs,
+    StorageWriteFrontmatterArgs,
 };
-use crate::StorageEngine;
+use crate::{FileFilter, StorageEngine};
 
 use super::shared::{exec_err, parse_args, to_value};
 
@@ -105,4 +107,74 @@ pub(crate) fn write_frontmatter(
         .write_file(&path, next.as_bytes())
         .map_err(|e| exec_err(format!("write_frontmatter '{path}' key='{key}' write: {e}")))?;
     to_value(&StorageOk { ok: true }, "write_frontmatter")
+}
+
+/// C23 (#376) — the note-level counterpart to `entity_find_duplicates`.
+/// Exact duplicates come from a `content_hash` collision over indexed
+/// markdown files (cheap — the index already carries `idx_files_hash`);
+/// near-duplicates score cosine similarity over mean-pooled per-file
+/// vectors from the `notes` embedding namespace, mirroring the O(n²)
+/// pairwise-compare shape `EntityIndex::find_duplicates` already uses —
+/// appropriate for personal-knowledge-base sizes.
+pub(crate) fn find_duplicates(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
+    let parsed: NoteFindDuplicatesArgs = parse_args(args, "note_find_duplicates")?;
+    let near_threshold = parsed.near_threshold.unwrap_or(0.97).clamp(0.0, 1.0);
+
+    let filter = FileFilter {
+        prefix: None,
+        file_type: Some("markdown".to_string()),
+        include_deleted: false,
+    };
+    let files = engine
+        .query_files(&filter)
+        .map_err(|e| exec_err(format!("note_find_duplicates: {e}")))?;
+    let mut by_hash: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for f in &files {
+        by_hash
+            .entry(f.content_hash.clone())
+            .or_default()
+            .push(f.path.clone());
+    }
+    let mut exact: Vec<NoteExactDuplicateGroup> = by_hash
+        .into_iter()
+        .filter(|(_, paths)| paths.len() > 1)
+        .map(|(content_hash, mut paths)| {
+            paths.sort();
+            NoteExactDuplicateGroup { content_hash, paths }
+        })
+        .collect();
+    exact.sort_by(|a, b| a.paths.first().cmp(&b.paths.first()));
+
+    let vectors = engine
+        .vector_mean_by_file("notes")
+        .map_err(|e| exec_err(format!("note_find_duplicates: {e}")))?;
+    let mut near = Vec::new();
+    for i in 0..vectors.len() {
+        for j in (i + 1)..vectors.len() {
+            let (path_a, emb_a) = &vectors[i];
+            let (path_b, emb_b) = &vectors[j];
+            let sim = crate::vectorstore::cosine_similarity(emb_a, emb_b);
+            if sim >= near_threshold {
+                let (a, b) = if path_a <= path_b {
+                    (path_a.clone(), path_b.clone())
+                } else {
+                    (path_b.clone(), path_a.clone())
+                };
+                near.push(NoteNearDuplicatePair { a, b, similarity: sim });
+            }
+        }
+    }
+    near.sort_by(|x, y| {
+        y.similarity
+            .partial_cmp(&x.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| x.a.cmp(&y.a))
+            .then_with(|| x.b.cmp(&y.b))
+    });
+
+    to_value(
+        &NoteFindDuplicatesResult { exact, near },
+        "note_find_duplicates",
+    )
 }

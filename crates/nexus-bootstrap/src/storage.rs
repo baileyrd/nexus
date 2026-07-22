@@ -939,3 +939,52 @@ pub async fn entity_decay_relations(
     }
     call(invoker, "entity_decay_relations", args).await
 }
+
+// ── C23 (#376) — note duplicate detection ─────────────────────────────────────
+
+/// One exact-duplicate group returned by [`note_find_duplicates`] — two or
+/// more markdown files sharing the same `content_hash`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NoteExactDuplicateGroup {
+    /// SHA-256 hex digest shared by every path in the group.
+    pub content_hash: String,
+    /// Forge-relative paths sharing that hash, ascending.
+    pub paths: Vec<String>,
+}
+
+/// One near-duplicate pair returned by [`note_find_duplicates`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct NoteNearDuplicatePair {
+    /// Lexicographically-smaller forge-relative path.
+    pub a: String,
+    /// Lexicographically-greater forge-relative path.
+    pub b: String,
+    /// Cosine similarity in `[0.0, 1.0]` between the two files' mean-
+    /// pooled embedding vectors.
+    pub similarity: f32,
+}
+
+/// Result of [`note_find_duplicates`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct NoteFindDuplicatesResult {
+    /// Exact-duplicate groups (`content_hash` collisions).
+    pub exact: Vec<NoteExactDuplicateGroup>,
+    /// Near-duplicate pairs at or above the near-duplicate threshold.
+    pub near: Vec<NoteNearDuplicatePair>,
+}
+
+/// Find exact and near-duplicate notes. Exact duplicates come from a
+/// `content_hash` collision over indexed markdown files; near-duplicates
+/// score cosine similarity over mean-pooled per-file vectors from the
+/// `notes` embedding namespace at or above `near_threshold` (defaults to
+/// `0.97` server-side when `None`). Read-only; never mutates files.
+pub async fn note_find_duplicates(
+    invoker: &(dyn IpcInvoker + Send + Sync),
+    near_threshold: Option<f32>,
+) -> Result<NoteFindDuplicatesResult> {
+    let mut args = serde_json::json!({});
+    if let Some(t) = near_threshold {
+        args["near_threshold"] = serde_json::Value::from(t);
+    }
+    call(invoker, "note_find_duplicates", args).await
+}

@@ -498,6 +498,93 @@ pub struct StorageNoteAppendResult {
     pub content_hash: String,
 }
 
+// ── com.nexus.storage::note_find_duplicates ──────────────────────────────────
+
+/// Args for `com.nexus.storage::note_find_duplicates` (handler id `81`).
+///
+/// C23 (#376) — the note-level counterpart to `entity_find_duplicates`.
+/// Exact duplicates come free from the existing `files.content_hash`
+/// index (a `GROUP BY`); near-duplicates score cosine similarity over
+/// mean-pooled per-file vectors from the `notes` embedding namespace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct NoteFindDuplicatesArgs {
+    /// Minimum cosine similarity in `[0.0, 1.0]` for a near-duplicate
+    /// pair to be reported. Defaults to `0.97` — near-duplicates are a
+    /// stricter bar than the entity Jaccard default (`0.92`) since whole
+    /// notes have far more surface area for legitimate divergence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near_threshold: Option<f32>,
+}
+
+/// One group of exact duplicates in [`NoteFindDuplicatesResult::exact`] —
+/// two or more markdown files sharing the same `content_hash`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct NoteExactDuplicateGroup {
+    /// SHA-256 hex digest shared by every path in the group.
+    pub content_hash: String,
+    /// Forge-relative paths sharing that hash, ascending.
+    pub paths: Vec<String>,
+}
+
+/// One pair in [`NoteFindDuplicatesResult::near`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct NoteNearDuplicatePair {
+    /// Lexicographically-smaller forge-relative path.
+    pub a: String,
+    /// Lexicographically-greater forge-relative path.
+    pub b: String,
+    /// Cosine similarity in `[0.0, 1.0]` between the two files' mean-
+    /// pooled embedding vectors.
+    pub similarity: f32,
+}
+
+/// Return type for `com.nexus.storage::note_find_duplicates`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct NoteFindDuplicatesResult {
+    /// Exact-duplicate groups (`content_hash` collisions), each with 2+
+    /// paths, ordered by ascending first path.
+    pub exact: Vec<NoteExactDuplicateGroup>,
+    /// Near-duplicate pairs at or above `near_threshold`, ordered by
+    /// descending similarity then ascending `(a, b)`.
+    pub near: Vec<NoteNearDuplicatePair>,
+}
+
 // ── com.nexus.storage::list_dir ──────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::list_dir` (handler id `27`).

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NoteFindDuplicatesArgs",
+  "description": "Args for `com.nexus.storage::note_find_duplicates` (handler id `81`).\n\nC23 (#376) — the note-level counterpart to `entity_find_duplicates`.\nExact duplicates come free from the existing `files.content_hash`\nindex (a `GROUP BY`); near-duplicates score cosine similarity over\nmean-pooled per-file vectors from the `notes` embedding namespace.",
+  "type": "object",
+  "properties": {
+    "near_threshold": {
+      "description": "Minimum cosine similarity in `[0.0, 1.0]` for a near-duplicate\npair to be reported. Defaults to `0.97` — near-duplicates are a\nstricter bar than the entity Jaccard default (`0.92`) since whole\nnotes have far more surface area for legitimate divergence.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    }
+  },
+  "additionalProperties": false
+}

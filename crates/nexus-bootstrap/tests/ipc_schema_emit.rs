@@ -37,7 +37,9 @@ use nexus_storage::ipc::{
     EntityMergeArgs, EntityMergeResult, EntityRecordRow, EntityRelationRow, EntityRelationsArgs,
     EntityRelationsResult, EntityRelationsResultRow, EntitySearchArgs, EntitySearchHitRow,
     EntitySearchResult, EntityUpsertArgs, EntityUpsertRelationRow, EntityUpsertResult,
-    ListDraftRelationsArgs, ListDraftRelationsResult, ReadFrontmatterResult, StorageAstQueryArgs,
+    ListDraftRelationsArgs, ListDraftRelationsResult, NoteExactDuplicateGroup,
+    NoteFindDuplicatesArgs, NoteFindDuplicatesResult, NoteNearDuplicatePair, ReadFrontmatterResult,
+    StorageAstQueryArgs,
     StorageAstQueryMatch, StorageAstQueryResult, StorageBacklinksToBlockArgs,
     StorageBaseCreateArgs, StorageBaseIndexResult, StorageBaseNamedArgs,
     StorageBasePropertyCreateArgs, StorageBasePropertyRenameArgs, StorageBasePropertyUpdateArgs,
@@ -379,6 +381,10 @@ fn emit_all_schemas_impl() {
         "com_nexus_storage__entity_find_duplicates",
         "result",
     );
+    write_schema::<NoteFindDuplicatesArgs>("com_nexus_storage__note_find_duplicates", "args");
+    write_schema::<NoteExactDuplicateGroup>("com_nexus_storage__note_find_duplicates", "exact");
+    write_schema::<NoteNearDuplicatePair>("com_nexus_storage__note_find_duplicates", "near");
+    write_schema::<NoteFindDuplicatesResult>("com_nexus_storage__note_find_duplicates", "result");
     write_schema::<EntityDecayRelationsArgs>("com_nexus_storage__entity_decay_relations", "args");
     write_schema::<EntityDecayRelationsResult>(
         "com_nexus_storage__entity_decay_relations",
