@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getUseWebSpeech, setUseWebSpeech, synthesize, transcribe } from './runtime.ts'
+import { getUseWebSpeech, recordVoiceMemo, setUseWebSpeech, synthesize, transcribe } from './runtime.ts'
 
 interface InvokeCall {
   plugin: string
@@ -191,6 +191,74 @@ test('synthesize prefers Web Speech API when supported and not forceIpc', async 
   } finally {
     if (prevSynth === undefined) delete w.window!.speechSynthesis
     else w.window!.speechSynthesis = prevSynth
+  }
+})
+
+test('recordVoiceMemo (C11 #364) captures audio bytes alongside the transcript', async () => {
+  const { api, calls } = makeApi({
+    'com.nexus.audio::transcribe': {
+      text: 'voice memo transcript',
+      language: 'en',
+      backend: 'provider',
+    },
+  })
+
+  // happy-dom's `navigator` is a getter-only accessor — a plain
+  // `globalThis.navigator = {...}` assignment silently no-ops (see
+  // `editor/richTextClipboard.test.ts`), so stub via `defineProperty`.
+  const g = globalThis as unknown as { navigator?: unknown; MediaRecorder?: unknown }
+  const prevNavDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const prevRec = g.MediaRecorder
+  let stopCalled = false
+  Object.defineProperty(globalThis, 'navigator', {
+    value: {
+      mediaDevices: {
+        async getUserMedia() {
+          return { getTracks: () => [{ stop: () => {} }] }
+        },
+      },
+    },
+    configurable: true,
+    writable: true,
+  })
+  g.MediaRecorder = class FakeRecorder {
+    static isTypeSupported() {
+      return true
+    }
+    mimeType = 'audio/webm'
+    ondataavailable: ((e: { data: Blob }) => void) | null = null
+    onstop: (() => void) | null = null
+    start() {
+      setTimeout(() => {
+        this.ondataavailable?.({ data: new Blob([new Uint8Array([9, 8, 7])]) })
+      }, 0)
+    }
+    stop() {
+      if (stopCalled) return
+      stopCalled = true
+      setTimeout(() => this.onstop?.(), 0)
+    }
+  } as unknown as typeof MediaRecorder
+
+  // captureAudio's capture window is a real fixed 5s `setTimeout` (not
+  // driven by any injectable clock) — mock-timer tick/microtask
+  // interleaving around the cascading `stop()` → `onstop` → `blob.
+  // arrayBuffer()` chain proved unreliable, so this just pays the
+  // real 5s wait (well within the test runner's default timeout).
+  try {
+    const result = await recordVoiceMemo(api)
+
+    assert.equal(result.text, 'voice memo transcript')
+    assert.equal(result.backend, 'provider')
+    assert.equal(result.format, 'webm')
+    assert.deepEqual(Array.from(result.bytes), [9, 8, 7])
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]!.command, 'transcribe')
+    const args = calls[0]!.args as { audio_b64: string; format: string }
+    assert.equal(args.format, 'webm')
+  } finally {
+    if (prevNavDescriptor) Object.defineProperty(globalThis, 'navigator', prevNavDescriptor)
+    g.MediaRecorder = prevRec
   }
 })
 

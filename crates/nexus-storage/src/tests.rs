@@ -1353,3 +1353,83 @@ fn hybrid_search_handler_wire_shape() {
         serde_json::from_value(reply).expect("mirror decode");
     assert_eq!(typed.results.len(), 1);
 }
+
+// ── C11 (#364) — binary attachment writes ─────────────────────────────────
+
+#[test]
+fn write_file_accepts_binary_content_at_attachment_path() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+
+    // Non-UTF-8 bytes (invalid continuation byte) — a stand-in for a real
+    // WebM/PNG payload.
+    let binary = vec![0x89u8, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01];
+    let meta = engine
+        .write_file("attachments/voice-memo.webm", &binary)
+        .expect("binary attachment write should succeed, not error as corrupt");
+
+    assert_eq!(meta.size_bytes, binary.len() as u64);
+    assert!(engine
+        .file_exists("attachments/voice-memo.webm")
+        .expect("file_exists"));
+
+    let read_back = engine
+        .read_file("attachments/voice-memo.webm")
+        .expect("read back binary content");
+    assert_eq!(read_back, binary);
+}
+
+#[test]
+fn write_file_rejects_binary_content_at_non_attachment_path() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+
+    let binary = vec![0xff_u8, 0xfe, 0x00, 0x01];
+    let err = engine
+        .write_file("notes/not-really-markdown.md", &binary)
+        .expect_err("non-attachment binary content should still be rejected");
+    assert!(matches!(err, StorageError::CorruptFile { .. }));
+}
+
+#[test]
+fn write_file_binary_attachment_is_queryable_by_content_hash() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+
+    let binary = vec![0x00_u8, 0xff, 0x10, 0x20, 0xfe];
+    let meta = engine
+        .write_file("attachments/clip.wav", &binary)
+        .expect("write");
+
+    let filter = FileFilter {
+        prefix: Some("attachments/".to_string()),
+        file_type: Some("attachment".to_string()),
+        include_deleted: false,
+    };
+    let files = engine.query_files(&filter).expect("query_files");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "attachments/clip.wav");
+    assert_eq!(files[0].content_hash, meta.content_hash);
+}
+
+#[test]
+fn write_file_overwriting_binary_attachment_replaces_prior_row() {
+    let dir = tmp();
+    let engine = StorageEngine::init(dir.path()).expect("init");
+
+    engine
+        .write_file("attachments/dup.webm", &[0xff, 0x00])
+        .expect("first write");
+    let second = engine
+        .write_file("attachments/dup.webm", &[0xff, 0x00, 0x01, 0x02])
+        .expect("second write");
+
+    assert_eq!(second.size_bytes, 4);
+    let filter = FileFilter {
+        prefix: Some("attachments/".to_string()),
+        file_type: None,
+        include_deleted: false,
+    };
+    let files = engine.query_files(&filter).expect("query_files");
+    assert_eq!(files.len(), 1, "overwrite must replace, not duplicate, the row");
+}

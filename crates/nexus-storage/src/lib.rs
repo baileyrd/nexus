@@ -253,26 +253,22 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`] on database failure or non-UTF-8 content.
+    /// Returns [`StorageError`] on database failure, or on non-UTF-8
+    /// content at a path that doesn't classify as `attachment` (C11
+    /// / #364 — attachment paths accept binary content; see below).
     ///
     /// # Panics
     ///
     /// Panics if the internal write-connection mutex is poisoned.
     fn index_file_content(&self, path: &str, content: &[u8]) -> Result<FileMetadata, StorageError> {
-        // 2. Decode content as UTF-8.
-        let text = std::str::from_utf8(content).map_err(|e| StorageError::CorruptFile {
-            path: path.to_string(),
-            reason: e.to_string(),
-        })?;
-
-        // 3. Lock write_conn and open a transaction. All SQLite mutations below
+        // 2. Lock write_conn and open a transaction. All SQLite mutations below
         //    go through `&tx`; the in-memory knowledge graph is only touched
         //    AFTER `tx.commit()` succeeds, so a mid-sequence DB failure cannot
         //    leave the graph holding state that doesn't exist on disk.
         let mut conn = self.write_conn.lock().expect("write_conn mutex poisoned");
         let tx = conn.transaction()?;
 
-        // 4. Delete existing index entry if the path is already indexed.
+        // 3. Delete existing index entry if the path is already indexed.
         if let Some(existing) = file_by_path(&tx, path)? {
             tx.execute(
                 "DELETE FROM fts_blocks WHERE file_path = ?1",
@@ -287,6 +283,45 @@ impl StorageEngine {
 
         let size_bytes = content.len() as u64;
         let file_type = infer_file_type(path);
+
+        // 4. Decode content as UTF-8. C11 (#364): an `attachment`-classified
+        //    path (image, audio, PDF, …) is allowed to carry genuinely
+        //    binary, non-UTF-8 bytes — e.g. `writeAttachment()` in
+        //    `shell/src/plugins/nexus/editor/attachments.ts` already writes
+        //    pasted images through this same `write_file` path. Rather than
+        //    erroring, insert a metadata-only row (content_hash / size /
+        //    file_exists all work; no FTS/link/task parsing, matching how
+        //    `reconcile::read_utf8_or_skip` already treats binary
+        //    attachments found on disk). Non-attachment paths keep the
+        //    strict pre-existing behaviour: non-UTF-8 content is corrupt.
+        let text = match std::str::from_utf8(content) {
+            Ok(text) => text,
+            Err(e) => {
+                if file_type != "attachment" {
+                    return Err(StorageError::CorruptFile {
+                        path: path.to_string(),
+                        reason: e.to_string(),
+                    });
+                }
+                let content_hash = nexus_formats::sha256_hex(content);
+                let empty_parsed = ParsedFile {
+                    content_hash: content_hash.clone(),
+                    blocks: Vec::new(),
+                    links: Vec::new(),
+                    tags: Vec::new(),
+                    frontmatter: Vec::new(),
+                    tasks: Vec::new(),
+                };
+                insert_file(&tx, path, &file_type, size_bytes, &empty_parsed)?;
+                tx.commit()?;
+                return Ok(FileMetadata {
+                    path: path.to_string(),
+                    size_bytes,
+                    modified_at: unix_now(),
+                    content_hash,
+                });
+            }
+        };
 
         // 5. Branch by file type. Each branch finishes the DB work, commits the
         //    transaction, then applies the corresponding graph mutations.
