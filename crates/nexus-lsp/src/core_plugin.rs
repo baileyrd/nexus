@@ -20,11 +20,15 @@
 //! | 10 | `code_actions` | `{path, range}` |
 //! | 11 | `format` | `{path}` |
 //! | 12 | `execute_command` | `{path, command, arguments?}` |
+//! | 15 | `document_symbol` | `{path}` |
+//! | 16 | `signature_help` | `{path, line, character}` |
+//! | 17 | `workspace_symbol` | `{path, query}` |
 //!
-//! Handlers 2..=12 require the file path to map to a configured server
-//! via [`LspHostConfig::server_for_path`]; calls for an unrouted path
-//! return JSON `null`. The path is the *routing* hint — `execute_command`
-//! itself targets the server-side command registry, not a document.
+//! Handlers 2..=12 and 15..=17 require the file path to map to a
+//! configured server via [`LspHostConfig::server_for_path`]; calls for
+//! an unrouted path return JSON `null`. The path is the *routing*
+//! hint — `execute_command` and `workspace_symbol` target the
+//! server-side command registry / workspace search, not a document.
 //!
 //! # Bus events
 //!
@@ -50,7 +54,7 @@ use crate::ipc::{
     LspChangeFileArgs, LspCodeActionsArgs, LspExecuteCommandArgs, LspOk, LspOpenFileArgs,
     LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRegisterServerArgs,
     LspRegisterServerReply, LspRenameArgs, LspServerEntry, LspUnregisterServerArgs,
-    LspUnregisterServerReply,
+    LspUnregisterServerReply, LspWorkspaceSymbolArgs,
 };
 use crate::pool::{ConnectionPool, PoolConfig};
 use crate::{LspConfigError, LspHostConfig};
@@ -90,6 +94,18 @@ pub const HANDLER_EXECUTE_COMMAND: u32 = 12;
 pub const HANDLER_REGISTER_SERVER: u32 = 13;
 /// BL-113 Phase 2b plugin-contributed server remove.
 pub const HANDLER_UNREGISTER_SERVER: u32 = 14;
+/// C50 (#403) — async, `textDocument/documentSymbol`. Powers a
+/// server-backed Outline for code files (vs. the markdown
+/// heading-regex parser).
+pub const HANDLER_DOCUMENT_SYMBOL: u32 = 15;
+/// C50 (#403) — async, `textDocument/signatureHelp`. Same wire shape
+/// as completions/hover/definition — routed through
+/// [`proxy_position_request`].
+pub const HANDLER_SIGNATURE_HELP: u32 = 16;
+/// C50 (#403) — async, `workspace/symbol`. `path` is a routing hint
+/// only (see [`crate::ipc::LspWorkspaceSymbolArgs`]) — the query
+/// itself is workspace-wide.
+pub const HANDLER_WORKSPACE_SYMBOL: u32 = 17;
 
 /// SD-06 — single source of truth for `(command-name, handler-id)`
 /// pairs consumed by `nexus_bootstrap::plugins::lsp::register`. Order
@@ -109,6 +125,9 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("execute_command", HANDLER_EXECUTE_COMMAND),
     ("register_server", HANDLER_REGISTER_SERVER),
     ("unregister_server", HANDLER_UNREGISTER_SERVER),
+    ("document_symbol", HANDLER_DOCUMENT_SYMBOL),
+    ("signature_help", HANDLER_SIGNATURE_HELP),
+    ("workspace_symbol", HANDLER_WORKSPACE_SYMBOL),
 ];
 
 /// Core plugin that manages connections to LSP servers.
@@ -450,7 +469,10 @@ impl CorePlugin for LspCorePlugin {
             | HANDLER_RENAME
             | HANDLER_CODE_ACTIONS
             | HANDLER_FORMAT
-            | HANDLER_EXECUTE_COMMAND => Err(PluginError::ExecutionFailed {
+            | HANDLER_EXECUTE_COMMAND
+            | HANDLER_DOCUMENT_SYMBOL
+            | HANDLER_SIGNATURE_HELP
+            | HANDLER_WORKSPACE_SYMBOL => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("handler_id {handler_id} requires dispatch_async"),
             }),
@@ -789,6 +811,70 @@ impl CorePlugin for LspCorePlugin {
                         &server_name,
                         bus,
                         "workspace/executeCommand",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
+                }))
+            }
+            HANDLER_DOCUMENT_SYMBOL => {
+                // #190 / R7 — strict-parse via typed `LspPathArgs`
+                // (same `{ path }` shape as `format`).
+                let parsed: Result<LspPathArgs, _> = serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let LspPathArgs { path } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("document_symbol: invalid args: {e}"),
+                        })?;
+                    let cfg = config_or_err(config.as_ref())?;
+                    let Some(server) = cfg.server_for_path(&path) else {
+                        return Ok(Value::Null);
+                    };
+                    let server_name = server.name.clone();
+                    let uri = file_uri_from_path(&path);
+                    let payload = json!({
+                        "textDocument": { "uri": uri },
+                    });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "textDocument/documentSymbol",
+                        payload,
+                    )
+                    .await
+                    .map_err(map_client_err)
+                }))
+            }
+            // signatureHelp has the identical `{ textDocument, position }`
+            // wire shape as completions/hover/definition.
+            HANDLER_SIGNATURE_HELP => {
+                proxy_position_request(args, config, pool, bus, "textDocument/signatureHelp")
+            }
+            HANDLER_WORKSPACE_SYMBOL => {
+                // #190 / R7 — strict-parse via typed `LspWorkspaceSymbolArgs`.
+                let parsed: Result<LspWorkspaceSymbolArgs, _> =
+                    serde_json::from_value(args.clone());
+                Some(Box::pin(async move {
+                    let LspWorkspaceSymbolArgs { path, query } =
+                        parsed.map_err(|e| PluginError::ExecutionFailed {
+                            plugin_id: PLUGIN_ID.to_string(),
+                            reason: format!("workspace_symbol: invalid args: {e}"),
+                        })?;
+                    let cfg = config_or_err(config.as_ref())?;
+                    let Some(server) = cfg.server_for_path(&path) else {
+                        return Ok(Value::Null);
+                    };
+                    let server_name = server.name.clone();
+                    let payload = json!({ "query": query });
+                    proxy_request(
+                        &pool,
+                        &cfg,
+                        &server_name,
+                        bus,
+                        "workspace/symbol",
                         payload,
                     )
                     .await

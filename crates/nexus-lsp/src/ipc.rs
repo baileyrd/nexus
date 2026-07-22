@@ -209,6 +209,31 @@ pub struct LspExecuteCommandArgs {
     pub arguments: Vec<serde_json::Value>,
 }
 
+/// Args for `workspace_symbol` (handler `17`, C50 / #403).
+///
+/// `path` is a routing hint, same posture as [`LspExecuteCommandArgs`]:
+/// it picks the configured server whose workspace to search — the
+/// query itself is workspace-wide, not document-scoped.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LspWorkspaceSymbolArgs {
+    /// Filesystem path used to route the call to the right configured
+    /// server.
+    pub path: String,
+    /// Free-text query string (`WorkspaceSymbolParams.query`) — an
+    /// empty string requests every symbol per the LSP spec, though
+    /// most servers cap or ignore that case.
+    pub query: String,
+}
+
 // ── Replies ──────────────────────────────────────────────────────────────────
 
 /// One entry in the `list_servers` response array.

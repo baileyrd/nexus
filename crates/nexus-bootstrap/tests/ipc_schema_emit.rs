@@ -109,7 +109,7 @@ use nexus_lsp::ipc::{
     LspChangeFileArgs, LspCodeActionsArgs, LspExecuteCommandArgs, LspOk, LspOpenFileArgs,
     LspOpenFileReply, LspPathArgs, LspPositionArgs, LspReferencesArgs, LspRegisterServerArgs,
     LspRegisterServerReply, LspRenameArgs, LspServerEntry, LspUnregisterServerArgs,
-    LspUnregisterServerReply,
+    LspUnregisterServerReply, LspWorkspaceSymbolArgs,
 };
 // nexus-dap (BL-081) — wire-mirror types; handlers emit ad-hoc
 // `serde_json::json!` like nexus-lsp.
@@ -579,6 +579,9 @@ fn emit_all_schemas_impl() {
     write_schema::<LspRegisterServerReply>("com_nexus_lsp__register_server", "reply");
     write_schema::<LspUnregisterServerArgs>("com_nexus_lsp__unregister_server", "args");
     write_schema::<LspUnregisterServerReply>("com_nexus_lsp__unregister_server", "reply");
+    // C50 (#403) — document_symbol / signature_help reuse LspPathArgs /
+    // LspPositionArgs above; only workspace_symbol has a new args shape.
+    write_schema::<LspWorkspaceSymbolArgs>("com_nexus_lsp__workspace_symbol", "args");
 
     // ── com.nexus.dap (BL-081) ───────────────────────────────────────────
     // Wire-mirror types — the impl emits ad-hoc `serde_json::json!`.

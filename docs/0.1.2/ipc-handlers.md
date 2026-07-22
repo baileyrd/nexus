@@ -19,8 +19,8 @@
 | `com.nexus.agent` | 28 |
 | `com.nexus.memory` | 22 |
 | `com.nexus.dap` | 21 |
+| `com.nexus.lsp` | 17 |
 | `com.nexus.editor` | 15 |
-| `com.nexus.lsp` | 14 |
 | `com.nexus.workflow` | 12 |
 | `com.nexus.mcp.host` | 12 |
 | `com.nexus.ai.runtime` | 12 |
@@ -190,14 +190,14 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.lsp (14)
+## com.nexus.lsp (17)
 
 | Command | Caps | Note |
 |---------|------|------|
 | `register_server` / `unregister_server` | `protocol.host.contribute` | invoker-only contribution lifecycle |
 | `list_servers` | — | read-only |
 | `open_file` / `close_file` / `change_file` | — | text document tracking |
-| `completions` / `hover` / `definition` / `references` / `code_actions` / `format` / `rename` / `execute_command` | — | LSP protocol verbs |
+| `completions` / `hover` / `definition` / `references` / `code_actions` / `format` / `rename` / `execute_command` / `document_symbol` / `signature_help` / `workspace_symbol` | — | LSP protocol verbs |
 
 ---
 
