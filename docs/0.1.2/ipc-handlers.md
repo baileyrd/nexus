@@ -14,7 +14,7 @@
 |--------|---------:|
 | `com.nexus.storage` | 81 |
 | `com.nexus.git` | 45 |
-| `com.nexus.terminal` | 34 |
+| `com.nexus.terminal` | 36 |
 | `com.nexus.ai` | 31 |
 | `com.nexus.agent` | 28 |
 | `com.nexus.memory` | 22 |
@@ -133,7 +133,7 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 
 ---
 
-## com.nexus.terminal (34)
+## com.nexus.terminal (36)
 
 | Command | Caps | Note |
 |---------|------|------|
@@ -141,11 +141,12 @@ All write handlers are classified `unrestricted` in the matrix — the downstrea
 | `send_input` / `send_raw_input` | — | **AUDIT** — writes into already-spawned PTY; candidate for `process.spawn` |
 | `run_saved` / `adhoc_promote` / `repl_eval` | — | **AUDIT** — same posture |
 | `repl_stop` / `repl_list` | — | session lifecycle (already-spawned) |
-| `list_sessions` / `get_session_info` / `rename_session` / `close_session` / `pump` / `read_output` / `read_raw_since` / `search_output` / `cross_session_search` / `wait_for_pattern` / `suggest` | — | read / session control |
+| `list_sessions` / `get_session_info` / `rename_session` / `close_session` / `pump` / `read_output` / `read_raw_since` / `search_output` / `cross_session_search` / `wait_for_pattern` / `suggest` | — | read / session control — `close_session` now also persists scrollback + metadata (C53 #406) |
 | `saved_list` / `saved_create` / `saved_update` / `saved_delete` / `saved_reorder` | — | saved-command CRUD (KV) |
 | `adhoc_list` / `adhoc_get` / `adhoc_delete` | — | ad-hoc history (KV) |
 | `open_in_terminal` | — | host-level invocation |
 | `get_screen` / `get_scrollback` / `get_cwd` / `get_cursor` / `get_last_exit` | — | RFC 0003 Track A — read-only VT grid introspection (screen / scrollback / cwd / cursor / OSC 133 last-exit) |
+| `list_persisted_sessions` / `load_transcript` | — | C53 (#406) — read the sessions/transcripts `close_session` persists; previously-dead `SqliteSessionStore` read-back finally has callers |
 
 ---
 

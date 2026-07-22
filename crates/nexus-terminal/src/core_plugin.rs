@@ -301,6 +301,17 @@ pub const HANDLER_GET_CURSOR: u32 = 34;
 /// finished command's exit code (OSC 133;D) and captured output.
 pub const HANDLER_GET_LAST_EXIT: u32 = 35;
 
+/// C53 (#406) — `list_persisted_sessions` handler id. Args: `{}`.
+/// Returns `Vec<`[`crate::persist::SessionMetadata`]`>`, newest-accessed
+/// first — every session `close_session` has persisted. Requires the
+/// session store to be wired, same as `cross_session_search`.
+pub const HANDLER_LIST_PERSISTED_SESSIONS: u32 = 36;
+/// C53 (#406) — `load_transcript` handler id. Args: [`SessionIdArgs`].
+/// Returns [`crate::ipc::LoadTranscriptResult`] — the ANSI-stripped
+/// scrollback text `close_session` persisted for that session id, or
+/// `None` if nothing was ever persisted.
+pub const HANDLER_LOAD_TRANSCRIPT: u32 = 37;
+
 /// Plugin ids this plugin calls at handler-dispatch time. Soft —
 /// `stream_chat` is only used by the inline-suggest path, which
 /// gracefully degrades when `com.nexus.ai` is absent — but
@@ -346,6 +357,8 @@ pub const IPC_HANDLERS: &[(&str, u32)] = &[
     ("get_cwd", HANDLER_GET_CWD),
     ("get_cursor", HANDLER_GET_CURSOR),
     ("get_last_exit", HANDLER_GET_LAST_EXIT),
+    ("list_persisted_sessions", HANDLER_LIST_PERSISTED_SESSIONS),
+    ("load_transcript", HANDLER_LOAD_TRANSCRIPT),
 ];
 
 // ── DTOs ───────────────────────────────────────────────────────────────────
@@ -1336,6 +1349,8 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_GET_CWD => self.dispatch_get_cwd(args),
             HANDLER_GET_CURSOR => self.dispatch_get_cursor(args),
             HANDLER_GET_LAST_EXIT => self.dispatch_get_last_exit(args),
+            HANDLER_LIST_PERSISTED_SESSIONS => self.dispatch_list_persisted_sessions(),
+            HANDLER_LOAD_TRANSCRIPT => self.dispatch_load_transcript(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -3107,6 +3122,177 @@ mod tests {
             .expect("search");
         let hits: Vec<crate::ScrollbackHit> = serde_json::from_value(resp).expect("decode");
         assert_eq!(hits.len(), 100, "default limit should cap at 100");
+    }
+
+    // ── C53 (#406) — close_session persistence + read-back dispatch tests ──
+
+    #[test]
+    fn close_session_persists_scrollback_and_metadata_when_store_attached() {
+        if !unix_only("close_session_persists_scrollback_and_metadata_when_store_attached") {
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(Arc::clone(&store));
+
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(
+                HANDLER_CREATE_SESSION,
+                &create_args("printf 'persist-me\\n'"),
+            )
+            .expect("create"),
+        )
+        .expect("decode");
+
+        // Pump until the marker lands in the buffer (or 3s elapse) so the
+        // snapshot close_session persists isn't empty.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let _ = p
+                .dispatch(
+                    HANDLER_PUMP,
+                    &serde_json::json!({ "id": id, "timeout_ms": 100 }),
+                )
+                .expect("pump");
+            if p.server
+                .lock()
+                .expect("lock")
+                .manager()
+                .buffer_snapshot(&SessionId::from_string(id.clone()))
+                .is_some_and(|b| b.windows(10).any(|w| w == b"persist-me"))
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "never saw marker in buffer");
+        }
+
+        p.dispatch(HANDLER_CLOSE_SESSION, &serde_json::json!({ "id": id }))
+            .expect("close");
+
+        let store = store.lock().expect("lock");
+        let meta = store
+            .load_metadata(&id)
+            .expect("load_metadata")
+            .expect("metadata row should exist after close_session");
+        assert_eq!(meta.id, id);
+        assert_eq!(meta.name, "plugin-test");
+        assert!(!meta.is_active);
+        let scrollback = store
+            .load_scrollback(&id)
+            .expect("load_scrollback")
+            .expect("scrollback should exist after close_session");
+        assert!(String::from_utf8_lossy(&scrollback).contains("persist-me"));
+    }
+
+    #[test]
+    fn close_session_without_attached_store_does_not_error() {
+        // No `.with_session_store(...)` — `persist_session_before_close`
+        // must no-op silently rather than fail `close_session` itself.
+        if !unix_only("close_session_without_attached_store_does_not_error") {
+            return;
+        }
+        let mut p = TerminalCorePlugin::new();
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+                .expect("create"),
+        )
+        .expect("decode");
+        p.dispatch(HANDLER_CLOSE_SESSION, &serde_json::json!({ "id": id }))
+            .expect("close should succeed without a session store attached");
+    }
+
+    #[test]
+    fn list_persisted_sessions_without_attached_store_surfaces_clear_error() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(HANDLER_LIST_PERSISTED_SESSIONS, &serde_json::json!({}))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("session store not attached"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_persisted_sessions_returns_saved_metadata_rows() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        store
+            .save_metadata(&crate::SessionMetadata {
+                id: "alpha".into(),
+                name: "Alpha".into(),
+                slug: "alpha".into(),
+                shell: "/bin/bash".into(),
+                working_dir: Some("/tmp".into()),
+                created_at: 1,
+                last_accessed_at: 2,
+                is_active: false,
+                buffer_size_bytes: 1024,
+            })
+            .expect("save_metadata");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(store);
+
+        let resp = p
+            .dispatch(HANDLER_LIST_PERSISTED_SESSIONS, &serde_json::json!({}))
+            .expect("list");
+        let rows: Vec<crate::SessionMetadata> = serde_json::from_value(resp).expect("decode");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "alpha");
+        assert_eq!(rows[0].shell, "/bin/bash");
+    }
+
+    #[test]
+    fn load_transcript_without_attached_store_surfaces_clear_error() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(HANDLER_LOAD_TRANSCRIPT, &serde_json::json!({ "id": "x" }))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("session store not attached"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_transcript_returns_ansi_stripped_text() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        store
+            .save_scrollback("alpha", b"\x1b[31mred error\x1b[0m\n")
+            .expect("save_scrollback");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(store);
+
+        let resp = p
+            .dispatch(HANDLER_LOAD_TRANSCRIPT, &serde_json::json!({ "id": "alpha" }))
+            .expect("load");
+        let result: crate::LoadTranscriptResult = serde_json::from_value(resp).expect("decode");
+        let text = result.text.expect("text should be Some");
+        assert!(text.contains("red error"));
+        assert!(!text.contains('\x1b'), "ANSI codes should be stripped");
+    }
+
+    #[test]
+    fn load_transcript_unknown_id_returns_none_text() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(store);
+
+        let resp = p
+            .dispatch(
+                HANDLER_LOAD_TRANSCRIPT,
+                &serde_json::json!({ "id": "never-existed" }),
+            )
+            .expect("load");
+        let result: crate::LoadTranscriptResult = serde_json::from_value(resp).expect("decode");
+        assert!(result.text.is_none());
     }
 
     #[test]

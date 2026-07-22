@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionMetadata",
+  "description": "Persisted session metadata — the PRD-09 §2.2 \"session state\nserialization\" shape, plus enough bookkeeping for LRU eviction.\n\nC53 (#406) — `#[cfg_attr(ts-export, ...)]` added so `list_persisted_sessions`\ncan return this typed shape over IPC (previously only used internally,\nwith zero production callers).",
+  "type": "object",
+  "properties": {
+    "buffer_size_bytes": {
+      "description": "Ring buffer capacity at save time (bytes).",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "created_at": {
+      "description": "Unix seconds at session creation.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "id": {
+      "description": "Stable id matching [`SessionId`].",
+      "type": "string"
+    },
+    "is_active": {
+      "description": "True if the PTY is currently alive. Persisted so restart can\nskip re-spawning detached sessions.",
+      "type": "boolean"
+    },
+    "last_accessed_at": {
+      "description": "Unix seconds of the last read/write/resize.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "name": {
+      "description": "User-friendly label.",
+      "type": "string"
+    },
+    "shell": {
+      "description": "Absolute path of the spawned shell.",
+      "type": "string"
+    },
+    "slug": {
+      "description": "URL-safe slug.",
+      "type": "string"
+    },
+    "working_dir": {
+      "description": "CWD the shell was spawned in.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "slug",
+    "shell",
+    "created_at",
+    "last_accessed_at",
+    "is_active",
+    "buffer_size_bytes"
+  ]
+}

@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use crate::core_plugin::TerminalCorePlugin;
 use crate::ipc::{
-    CrossSessionSearchArgs, PumpArgs, PumpResponse, ReadOutputArgs, ReadRawSinceArgs,
-    ReadRawSinceResponse, SearchOutputArgs, SendInputArgs, SendRawInputArgs, WaitForPatternArgs,
-    WaitForPatternResponse,
+    CrossSessionSearchArgs, LoadTranscriptResult, PumpArgs, PumpResponse, ReadOutputArgs,
+    ReadRawSinceArgs, ReadRawSinceResponse, SearchOutputArgs, SendInputArgs, SendRawInputArgs,
+    SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
 };
 use crate::server::TerminalServer;
 use crate::session::SessionId;
@@ -155,5 +155,38 @@ impl TerminalCorePlugin {
             .cross_session_search(&a.query, a.is_regex, session_ids_slice, a.since_ts, limit)
             .map_err(crate_err)?;
         to_value(&hits, "cross_session_search")
+    }
+
+    /// C53 (#406) — wires up `SqliteSessionStore::list_metadata`, which
+    /// previously had zero production callers. Every closed session
+    /// with persisted scrollback (see `close_session`) shows up here,
+    /// newest-accessed first.
+    pub(crate) fn dispatch_list_persisted_sessions(
+        &self,
+    ) -> Result<serde_json::Value, PluginError> {
+        let store = self.session_store.as_ref().ok_or_else(|| {
+            exec_err("session store not attached (runtime built without a forge path)".into())
+        })?;
+        let store = store.lock().map_err(poisoned)?;
+        let sessions = store.list_metadata().map_err(crate_err)?;
+        to_value(&sessions, "list_persisted_sessions")
+    }
+
+    /// C53 (#406) — wires up `SqliteSessionStore::load_scrollback`,
+    /// which previously had zero production callers. ANSI-strips the
+    /// stored bytes the same way `save_scrollback`'s FTS indexing
+    /// does, so the transcript reads as plain text.
+    pub(crate) fn dispatch_load_transcript(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: SessionIdArgs = parse_args(args, "load_transcript")?;
+        let store = self.session_store.as_ref().ok_or_else(|| {
+            exec_err("session store not attached (runtime built without a forge path)".into())
+        })?;
+        let store = store.lock().map_err(poisoned)?;
+        let bytes = store.load_scrollback(&a.id).map_err(crate_err)?;
+        let text = bytes.map(|b| crate::ansi::strip_ansi(&b));
+        to_value(&LoadTranscriptResult { text }, "load_transcript")
     }
 }

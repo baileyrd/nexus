@@ -44,7 +44,20 @@ use crate::session::SessionId;
 
 /// Persisted session metadata — the PRD-09 §2.2 "session state
 /// serialization" shape, plus enough bookkeeping for LRU eviction.
+///
+/// C53 (#406) — `#[cfg_attr(ts-export, ...)]` added so `list_persisted_sessions`
+/// can return this typed shape over IPC (previously only used internally,
+/// with zero production callers).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct SessionMetadata {
     /// Stable id matching [`SessionId`].
     pub id: String,

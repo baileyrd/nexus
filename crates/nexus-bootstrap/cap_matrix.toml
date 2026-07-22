@@ -1869,6 +1869,16 @@ plugin = "com.nexus.terminal"
 command = "get_last_exit"
 unrestricted = "read-only last-command exit code + output (OSC 133)"
 
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "list_persisted_sessions"
+unrestricted = "read-only enumeration of persisted terminal session metadata (C53 #406)"
+
+[[handler]]
+plugin = "com.nexus.terminal"
+command = "load_transcript"
+unrestricted = "read-only fetch of a persisted session's scrollback transcript (C53 #406)"
+
 # ─── com.nexus.theme — forge-local theme config ──────────────────────
 
 [[handler]]

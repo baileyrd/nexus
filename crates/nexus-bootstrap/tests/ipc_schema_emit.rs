@@ -156,10 +156,10 @@ use nexus_skills::core_plugin::{
 // toml::Value>` for forward-compat, which is incompatible with
 // `deny_unknown_fields` (the P0-2 gate's invariant).
 use nexus_terminal::{
-    CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
-    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ReplEvalArgs, ReplInfo, ReplStartArgs,
-    ReplStartResponse, ResizeArgs, SearchOutputArgs, SendInputArgs, SendRawInputArgs,
-    SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
+    CreateSessionArgs, CreateSessionResponse, LoadTranscriptResult, OutputStreamPayload, PumpArgs,
+    PumpResponse, ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ReplEvalArgs, ReplInfo,
+    ReplStartArgs, ReplStartResponse, ResizeArgs, SearchOutputArgs, SendInputArgs,
+    SendRawInputArgs, SessionIdArgs, SessionMetadata, WaitForPatternArgs, WaitForPatternResponse,
 };
 use nexus_workflow::core_plugin::{
     GetTemplateArgs, GetWorkflowArgs, InitTemplateArgs, NextFireArgs, RunHistoryArgs,
@@ -717,6 +717,9 @@ fn emit_all_schemas_impl() {
     write_schema::<ReplStartResponse>("com_nexus_terminal__repl_start", "response");
     write_schema::<ReplEvalArgs>("com_nexus_terminal__repl_eval", "args");
     write_schema::<ReplInfo>("com_nexus_terminal__repl_list", "info");
+    // C53 (#406) — persisted-session read-back.
+    write_schema::<SessionMetadata>("com_nexus_terminal__list_persisted_sessions", "session");
+    write_schema::<LoadTranscriptResult>("com_nexus_terminal__load_transcript", "result");
 
     // ── com.nexus.database (P1-3 #113) ───────────────────────────────────
     // Only the 4 types that don't reference BaseRecord (which uses

@@ -553,6 +553,24 @@ pub struct CrossSessionSearchArgs {
     pub limit: Option<u32>,
 }
 
+/// C53 (#406) — result of `load_transcript`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct LoadTranscriptResult {
+    /// ANSI-stripped scrollback text persisted for the session, or
+    /// `None` if nothing was ever persisted for that id (session
+    /// never closed, or was created before this feature shipped).
+    pub text: Option<String>,
+}
+
 /// BL-142 Phase 1 — arguments for `repl_start`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
