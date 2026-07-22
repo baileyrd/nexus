@@ -10,21 +10,18 @@
 //! ---
 //! name: meeting-notes
 //! description: A meeting-notes scaffold with attendees and action items.
-//! target_path: meetings/{{date}} - {{title}}.md
+//! target_path: meetings/{{date+7d}} - {{title}}.md
 //! parameters:
 //!   - name: title
 //!     type: string
 //!     required: true
-//!   - name: date
-//!     type: string
-//!     default: "{{today}}"
 //!   - name: attendees
 //!     type: string
 //!     default: ""
 //! ---
 //! # {{title}}
 //!
-//! - **Date**: {{date}}
+//! - **Date**: {{date:MM/DD/YYYY}}
 //! - **Attendees**: {{attendees}}
 //!
 //! ## Notes
@@ -37,9 +34,11 @@
 //! Application:
 //!
 //! 1. Caller supplies key/value arguments.
-//! 2. Defaults fill in missing optional parameters; required ones with no
+//! 2. Built-in variables (`today`, `now`, `forge_path`, local-time-based) and
+//!    any `{{date...}}` dynamic variables referenced in the template (custom
+//!    format / offset — see [`date_vars`]) are added.
+//! 3. Defaults fill in missing optional parameters; required ones with no
 //!    default produce an error.
-//! 3. Built-in variables (`today`, `now`, `forge_path`) are added.
 //! 4. Substitution runs on the body and the `target_path`.
 //! 5. The rendered body is written to the resolved target path.
 
@@ -49,6 +48,7 @@
 
 pub mod builtins;
 pub mod core_plugin;
+pub mod date_vars;
 pub mod registry;
 pub mod substitute;
 pub mod template;
