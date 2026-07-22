@@ -388,6 +388,40 @@ struct OutgoingLinksInput {
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct GraphStatusInput {}
 
+/// Input for `nexus_entity_get` (C48 / #401).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct EntityGetInput {
+    /// Canonical entity id or one of its aliases.
+    id: String,
+}
+
+/// Input for `nexus_entity_search` (C48 / #401).
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct EntitySearchInput {
+    /// Substring query against entity id / aliases / description.
+    /// Empty string returns the lexicographically-first `limit`
+    /// entities.
+    #[serde(default)]
+    query: String,
+    /// Optional case-insensitive filter on `entity_type`.
+    #[serde(default)]
+    entity_type: Option<String>,
+    /// Maximum hits to return. Defaults to 10 when omitted.
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Input for `nexus_entity_relations` (C48 / #401).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct EntityRelationsInput {
+    /// Canonical entity id or alias.
+    id: String,
+    /// One of `"outgoing"` / `"incoming"` / `"both"`. Defaults to
+    /// `"both"` when omitted.
+    #[serde(default)]
+    direction: Option<String>,
+}
+
 /// Input for `nexus_list_tags`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ListTagsInput {
@@ -952,6 +986,73 @@ struct GraphStatusOutput {
     node_count: usize,
     edge_count: usize,
     unresolved_count: usize,
+}
+
+/// One outgoing relation declared on an entity (C48 / #401). Mirrors
+/// `nexus_storage::ipc::EntityRelationRow`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntityRelationEntry {
+    /// Target entity id or alias as declared on disk.
+    target: String,
+    /// Free-form relation kind.
+    #[serde(rename = "type")]
+    kind: String,
+    /// Confidence in `[0.0, 1.0]`.
+    confidence: f32,
+}
+
+/// Full entity payload for `nexus_entity_get`. Mirrors
+/// `nexus_storage::ipc::EntityRecordRow`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntityRecord {
+    id: String,
+    entity_type: String,
+    aliases: Vec<String>,
+    description: String,
+    relations: Vec<EntityRelationEntry>,
+    relpath: String,
+}
+
+/// Output for `nexus_entity_get`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntityGetOutput {
+    /// `None` when no id / alias matched.
+    entity: Option<EntityRecord>,
+}
+
+/// One hit in `nexus_entity_search`'s results.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntitySearchHit {
+    id: String,
+    entity_type: String,
+    description: String,
+    relpath: String,
+    score: i32,
+}
+
+/// Output for `nexus_entity_search`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntitySearchOutput {
+    count: usize,
+    results: Vec<EntitySearchHit>,
+}
+
+/// One row in `nexus_entity_relations`'s results. Aliased targets are
+/// resolved to their canonical id.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntityRelationsRow {
+    from: String,
+    to: String,
+    #[serde(rename = "type")]
+    kind: String,
+    confidence: f32,
+}
+
+/// Output for `nexus_entity_relations`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntityRelationsOutput {
+    count: usize,
+    relations: Vec<EntityRelationsRow>,
 }
 
 /// A single tag entry.
@@ -2509,6 +2610,177 @@ impl NexusMcpServer {
         }
     }
 
+    // ── C48 (#401) — forge entity graph, read-only ────────────────────
+    //
+    // Thin wrappers over `com.nexus.storage::entity_get` /
+    // `::entity_search` / `::entity_relations` — already classified
+    // `unrestricted` read-only in cap_matrix.toml, same posture as
+    // backlinks/outgoing_links above. This is the typed, confidence-
+    // weighted entity graph the in-process agent already consumes
+    // (`entity_recall`); external MCP clients previously had no way to
+    // reach it, only the wikilink-only backlinks/outgoing_links pair.
+
+    #[tool(
+        name = "nexus_entity_get",
+        description = "Fetch a forge entity by canonical id or alias: type, aliases, description, and outgoing relations"
+    )]
+    async fn entity_get(&self, Parameters(input): Parameters<EntityGetInput>) -> Json<EntityGetOutput> {
+        #[derive(Deserialize)]
+        struct Rel {
+            target: String,
+            #[serde(rename = "type")]
+            kind: String,
+            confidence: f32,
+        }
+        #[derive(Deserialize)]
+        struct Rec {
+            id: String,
+            entity_type: String,
+            aliases: Vec<String>,
+            description: String,
+            relations: Vec<Rel>,
+            relpath: String,
+        }
+        #[derive(Deserialize)]
+        struct GetReply {
+            entity: Option<Rec>,
+        }
+        match self
+            .storage_call::<GetReply>("entity_get", serde_json::json!({ "id": &input.id }))
+            .await
+        {
+            Ok(reply) => Json(EntityGetOutput {
+                entity: reply.entity.map(|r| EntityRecord {
+                    id: r.id,
+                    entity_type: r.entity_type,
+                    aliases: r.aliases,
+                    description: r.description,
+                    relations: r
+                        .relations
+                        .into_iter()
+                        .map(|rel| EntityRelationEntry {
+                            target: rel.target,
+                            kind: rel.kind,
+                            confidence: rel.confidence,
+                        })
+                        .collect(),
+                    relpath: r.relpath,
+                }),
+            }),
+            Err(e) => {
+                tracing::error!("entity_get failed: {e}");
+                Json(EntityGetOutput { entity: None })
+            }
+        }
+    }
+
+    #[tool(
+        name = "nexus_entity_search",
+        description = "Search forge entities by substring against id / aliases / description, optionally filtered by entity_type"
+    )]
+    async fn entity_search(
+        &self,
+        Parameters(input): Parameters<EntitySearchInput>,
+    ) -> Json<EntitySearchOutput> {
+        #[derive(Deserialize)]
+        struct Hit {
+            id: String,
+            entity_type: String,
+            description: String,
+            relpath: String,
+            score: i32,
+        }
+        #[derive(Deserialize)]
+        struct SearchReply {
+            results: Vec<Hit>,
+        }
+        let args = serde_json::json!({
+            "query": input.query,
+            "entity_type": input.entity_type,
+            "limit": input.limit,
+        });
+        match self.storage_call::<SearchReply>("entity_search", args).await {
+            Ok(reply) => {
+                let results: Vec<EntitySearchHit> = reply
+                    .results
+                    .into_iter()
+                    .map(|h| EntitySearchHit {
+                        id: h.id,
+                        entity_type: h.entity_type,
+                        description: h.description,
+                        relpath: h.relpath,
+                        score: h.score,
+                    })
+                    .collect();
+                Json(EntitySearchOutput {
+                    count: results.len(),
+                    results,
+                })
+            }
+            Err(e) => {
+                tracing::error!("entity_search failed: {e}");
+                Json(EntitySearchOutput {
+                    count: 0,
+                    results: Vec::new(),
+                })
+            }
+        }
+    }
+
+    #[tool(
+        name = "nexus_entity_relations",
+        description = "List an entity's relations (outgoing / incoming / both), alias-resolved to canonical ids"
+    )]
+    async fn entity_relations(
+        &self,
+        Parameters(input): Parameters<EntityRelationsInput>,
+    ) -> Json<EntityRelationsOutput> {
+        #[derive(Deserialize)]
+        struct Row {
+            from: String,
+            to: String,
+            #[serde(rename = "type")]
+            kind: String,
+            confidence: f32,
+        }
+        #[derive(Deserialize)]
+        struct RelationsReply {
+            relations: Vec<Row>,
+        }
+        let args = serde_json::json!({
+            "id": &input.id,
+            "direction": input.direction,
+        });
+        match self
+            .storage_call::<RelationsReply>("entity_relations", args)
+            .await
+        {
+            Ok(reply) => {
+                let relations: Vec<EntityRelationsRow> = reply
+                    .relations
+                    .into_iter()
+                    .map(|r| EntityRelationsRow {
+                        from: r.from,
+                        to: r.to,
+                        kind: r.kind,
+                        confidence: r.confidence,
+                    })
+                    .collect();
+                Json(EntityRelationsOutput {
+                    count: relations.len(),
+                    relations,
+                })
+            }
+            Err(e) => {
+                tracing::error!("entity_relations failed: {e}");
+                Json(EntityRelationsOutput {
+                    count: 0,
+                    relations: Vec::new(),
+                })
+            }
+        }
+    }
+
     #[tool(
         name = "nexus_list_tags",
         description = "List all occurrences of a tag by name across the forge"
@@ -3481,11 +3753,13 @@ impl rmcp::ServerHandler for NexusMcpServer {
              Use nexus_* tools to create, read, update, delete, search, and query notes; \
              list and render authored skill templates from .forge/skills via \
              nexus_list_skills / nexus_render_skill, or as native prompts (skills are \
-             also exposed 1:1 through prompts/list and prompts/get). Forge notes are \
-             also enumerated as MCP resources under mcp://nexus/notes/. Observe live \
-             terminal sessions with nexus_terminal_get_screen / _scrollback / _cwd / \
-             _cursor / _last_exit (OSC 133), also exposed as resources under \
-             mcp://nexus/terminal/<id>/.",
+             also exposed 1:1 through prompts/list and prompts/get). Query the typed \
+             forge entity graph (distinct from the wikilink-only backlinks / \
+             outgoing_links pair) via nexus_entity_get / nexus_entity_search / \
+             nexus_entity_relations. Forge notes are also enumerated as MCP resources \
+             under mcp://nexus/notes/. Observe live terminal sessions with \
+             nexus_terminal_get_screen / _scrollback / _cwd / _cursor / _last_exit \
+             (OSC 133), also exposed as resources under mcp://nexus/terminal/<id>/.",
         )
     }
 
