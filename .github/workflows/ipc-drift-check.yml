@@ -23,6 +23,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Manual runs from the Actions tab (or the API) against any ref.
+  workflow_dispatch:
 
 jobs:
   drift:
