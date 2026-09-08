@@ -1,5 +1,17 @@
 # Nexus
 
+> **Archived — merged into [Rusty-Mill/rusty_mill](https://github.com/Rusty-Mill/rusty_mill).**
+> This repository's code and history now live at
+> [`crates/nexus/`](https://github.com/Rusty-Mill/rusty_mill/tree/main/crates/nexus)
+> in the `rusty_mill` monorepo, merged via `git subtree` with this repo's
+> full commit history preserved (see
+> [Rusty-Mill/rusty_mill#159](https://github.com/Rusty-Mill/rusty_mill/pull/159)
+> and that repo's `docs/adr/0001-consolidate-crates-into-workspace.md`).
+> Active development, issues, and pull requests should go to the monorepo
+> from here on. This repo is kept in place, read-only, for historical
+> reference — the content below describes nexus as it stood before the
+> merge and is not maintained here any further.
+
 A personal, plugin-extensible knowledge environment built in Rust. Nexus combines file-based note management with full-text search, a knowledge graph, AI-powered RAG, and a plugin system — accessible via CLI, terminal UI, desktop shell, or MCP server.
 
 The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/) (crate `nexus-shell`) is the single desktop target per [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy tri-pane shell was removed in 2026-04 — see [`docs/architecture/legacy-shell-retirement.md`](docs/architecture/legacy-shell-retirement.md) for the migration story, or recover the code via the `v0.1.0-legacy-shell` git tag.
