@@ -47,7 +47,9 @@ fn parse_offset(rest: &str) -> Option<(Duration, &str)> {
     let Some(sign_rest) = rest.strip_prefix('+').or_else(|| rest.strip_prefix('-')) else {
         return Some((Duration::zero(), rest));
     };
-    let digits_end = sign_rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(sign_rest.len());
+    let digits_end = sign_rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(sign_rest.len());
     if digits_end == 0 {
         return None; // `+`/`-` with no digits — not a valid offset
     }
@@ -108,7 +110,10 @@ mod tests {
 
     #[test]
     fn bare_date_defaults_to_yyyy_mm_dd() {
-        assert_eq!(resolve("date", at(2026, 3, 5, 10, 0, 0)).unwrap(), "2026-03-05");
+        assert_eq!(
+            resolve("date", at(2026, 3, 5, 10, 0, 0)).unwrap(),
+            "2026-03-05"
+        );
     }
 
     #[test]
@@ -121,17 +126,26 @@ mod tests {
 
     #[test]
     fn positive_day_offset() {
-        assert_eq!(resolve("date+7d", at(2026, 3, 5, 0, 0, 0)).unwrap(), "2026-03-12");
+        assert_eq!(
+            resolve("date+7d", at(2026, 3, 5, 0, 0, 0)).unwrap(),
+            "2026-03-12"
+        );
     }
 
     #[test]
     fn negative_day_offset() {
-        assert_eq!(resolve("date-1d", at(2026, 3, 5, 0, 0, 0)).unwrap(), "2026-03-04");
+        assert_eq!(
+            resolve("date-1d", at(2026, 3, 5, 0, 0, 0)).unwrap(),
+            "2026-03-04"
+        );
     }
 
     #[test]
     fn week_offset() {
-        assert_eq!(resolve("date+1w", at(2026, 3, 5, 0, 0, 0)).unwrap(), "2026-03-12");
+        assert_eq!(
+            resolve("date+1w", at(2026, 3, 5, 0, 0, 0)).unwrap(),
+            "2026-03-12"
+        );
     }
 
     #[test]
@@ -152,7 +166,10 @@ mod tests {
 
     #[test]
     fn month_crossing_offset() {
-        assert_eq!(resolve("date+30d", at(2026, 1, 15, 0, 0, 0)).unwrap(), "2026-02-14");
+        assert_eq!(
+            resolve("date+30d", at(2026, 1, 15, 0, 0, 0)).unwrap(),
+            "2026-02-14"
+        );
     }
 
     #[test]

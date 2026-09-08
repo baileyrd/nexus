@@ -815,19 +815,30 @@ mod tests {
 
     #[test]
     fn webhook_default_body_has_title_and_message() {
-        let t = GenericWebhook::new("https://example.test/hook".into(), std::collections::BTreeMap::new(), None);
+        let t = GenericWebhook::new(
+            "https://example.test/hook".into(),
+            std::collections::BTreeMap::new(),
+            None,
+        );
         let body = t
             .render_body(&Notification {
                 message: "hello".into(),
                 title: Some("Greeting".into()),
             })
             .unwrap();
-        assert_eq!(body, serde_json::json!({ "title": "Greeting", "message": "hello" }));
+        assert_eq!(
+            body,
+            serde_json::json!({ "title": "Greeting", "message": "hello" })
+        );
     }
 
     #[test]
     fn webhook_default_body_falls_back_to_nexus_title() {
-        let t = GenericWebhook::new("https://example.test/hook".into(), std::collections::BTreeMap::new(), None);
+        let t = GenericWebhook::new(
+            "https://example.test/hook".into(),
+            std::collections::BTreeMap::new(),
+            None,
+        );
         let body = t
             .render_body(&Notification {
                 message: "hello".into(),

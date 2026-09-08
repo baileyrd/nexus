@@ -2298,7 +2298,10 @@ mod tests {
             u32::try_from(session.rounds.len()).unwrap(),
             LEGACY_MAX_AGENT_ROUNDS
         );
-        assert_eq!(session.tokens_used, 2_000_000 * u64::from(LEGACY_MAX_AGENT_ROUNDS));
+        assert_eq!(
+            session.tokens_used,
+            2_000_000 * u64::from(LEGACY_MAX_AGENT_ROUNDS)
+        );
     }
 
     #[tokio::test]

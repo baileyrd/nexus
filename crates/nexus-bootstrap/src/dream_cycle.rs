@@ -549,8 +549,8 @@ mod tests {
     fn excludes_files_outside_the_lookback_window() {
         let now = 100_000;
         let files = [
-            file("notes/recent.md", now - 3600),      // 1h ago — in window
-            file("notes/stale.md", now - 30 * 3600),   // 30h ago — outside a 24h window
+            file("notes/recent.md", now - 3600),     // 1h ago — in window
+            file("notes/stale.md", now - 30 * 3600), // 30h ago — outside a 24h window
         ];
         let got = select_extract_candidates(&files, now, 24, 10);
         assert_eq!(got, vec!["notes/recent.md".to_string()]);
@@ -594,7 +594,10 @@ mod tests {
         let got = select_extract_candidates(&files, now, 24, 2);
         assert_eq!(got.len(), 2);
         // The two most recent (smallest `i`, since modified_at = now - i).
-        assert_eq!(got, vec!["notes/0.md".to_string(), "notes/1.md".to_string()]);
+        assert_eq!(
+            got,
+            vec!["notes/0.md".to_string(), "notes/1.md".to_string()]
+        );
     }
 
     #[test]

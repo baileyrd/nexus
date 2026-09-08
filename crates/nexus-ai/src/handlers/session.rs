@@ -266,7 +266,10 @@ mod render_tests {
         }));
         let user_pos = md.find("**User:** What's the weather?").expect("user line");
         let asst_pos = md.find("**Assistant:** Sunny.").expect("assistant line");
-        assert!(user_pos < asst_pos, "user turn should render before assistant turn");
+        assert!(
+            user_pos < asst_pos,
+            "user turn should render before assistant turn"
+        );
     }
 
     #[test]

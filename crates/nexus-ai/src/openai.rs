@@ -58,7 +58,10 @@ impl OpenAiProvider {
         self.cancel
             .lock()
             .ok()
-            .and_then(|g| g.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)))
+            .and_then(|g| {
+                g.as_ref()
+                    .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            })
             .unwrap_or(false)
     }
 

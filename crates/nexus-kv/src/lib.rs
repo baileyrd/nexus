@@ -334,7 +334,10 @@ mod sqlite_tests {
         store.set("plugin.b", "key1", b"b").unwrap();
 
         assert_eq!(store.list_keys("plugin.a", "").unwrap(), vec!["key1"]);
-        assert_eq!(store.list_keys("plugin.c", "").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            store.list_keys("plugin.c", "").unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

@@ -602,8 +602,14 @@ mod tests {
     #[test]
     fn add_block_populates_mtime_on_search_results() {
         let idx = SearchIndex::open_in_memory().unwrap();
-        idx.add_block("notes/a.md", 1, "paragraph", "unique_term_alpha", 1_650_000_000)
-            .unwrap();
+        idx.add_block(
+            "notes/a.md",
+            1,
+            "paragraph",
+            "unique_term_alpha",
+            1_650_000_000,
+        )
+        .unwrap();
         idx.commit().unwrap();
 
         let results = idx.search("unique_term_alpha", 10).unwrap();
@@ -672,7 +678,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            results.iter().map(|r| r.file_path.clone()).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|r| r.file_path.clone())
+                .collect::<Vec<_>>(),
             vec!["notes/new.md", "notes/mid.md", "notes/old.md"],
         );
     }
@@ -697,7 +706,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            results.iter().map(|r| r.file_path.clone()).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|r| r.file_path.clone())
+                .collect::<Vec<_>>(),
             vec!["notes/old.md", "notes/new.md"],
         );
     }
@@ -705,8 +717,14 @@ mod tests {
     #[test]
     fn search_with_options_filters_by_mtime_range() {
         let idx = SearchIndex::open_in_memory().unwrap();
-        idx.add_block("notes/early.md", 1, "paragraph", "range_term_epsilon", 1_000)
-            .unwrap();
+        idx.add_block(
+            "notes/early.md",
+            1,
+            "paragraph",
+            "range_term_epsilon",
+            1_000,
+        )
+        .unwrap();
         idx.add_block("notes/mid.md", 2, "paragraph", "range_term_epsilon", 2_000)
             .unwrap();
         idx.add_block("notes/late.md", 3, "paragraph", "range_term_epsilon", 3_000)
@@ -745,6 +763,10 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(results.len(), 1, "mtime_after should be inclusive of an exact match");
+        assert_eq!(
+            results.len(),
+            1,
+            "mtime_after should be inclusive of an exact match"
+        );
     }
 }

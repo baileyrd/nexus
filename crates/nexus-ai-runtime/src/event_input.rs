@@ -319,7 +319,9 @@ impl TriggerRegistry {
         match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                tracing::error!("ai-runtime trigger registry mutex poisoned — recovering (see #199)");
+                tracing::error!(
+                    "ai-runtime trigger registry mutex poisoned — recovering (see #199)"
+                );
                 poisoned.into_inner()
             }
         }

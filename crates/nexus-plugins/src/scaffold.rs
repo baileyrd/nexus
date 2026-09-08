@@ -722,9 +722,7 @@ mod tests {
             serde_json::from_str(&raw).expect("tsconfig.test.json must parse as JSON");
         assert_eq!(cfg["extends"], "./tsconfig.json");
         assert_eq!(cfg["compilerOptions"]["types"][0], "node");
-        let includes = cfg["include"]
-            .as_array()
-            .expect("include must be an array");
+        let includes = cfg["include"].as_array().expect("include must be an array");
         assert!(includes.iter().any(|v| v == "*.test.ts"));
     }
 

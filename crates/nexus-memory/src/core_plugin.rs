@@ -818,7 +818,10 @@ mod tests {
         assert_eq!(before["memory_type"], "unclassified");
 
         let upd = p
-            .dispatch(HANDLER_UPDATE, &json!({ "id": id, "memory_type": "semantic" }))
+            .dispatch(
+                HANDLER_UPDATE,
+                &json!({ "id": id, "memory_type": "semantic" }),
+            )
             .unwrap();
         assert_eq!(upd["updated"], true);
 
@@ -1010,7 +1013,10 @@ mod tests {
         assert_eq!(reply["skipped"], 0);
 
         let redump = dst.dispatch(HANDLER_EXPORT, &json!({})).unwrap();
-        assert_eq!(redump, dump, "imported store must match the source byte-for-byte");
+        assert_eq!(
+            redump, dump,
+            "imported store must match the source byte-for-byte"
+        );
     }
 
     #[test]
@@ -1045,7 +1051,10 @@ mod tests {
         assert_eq!(reply["skipped"], 1);
 
         let after = p.dispatch(HANDLER_GET, &json!({ "id": id })).unwrap();
-        assert_eq!(after["content"], "edited locally", "stale import must not overwrite");
+        assert_eq!(
+            after["content"], "edited locally",
+            "stale import must not overwrite"
+        );
     }
 
     #[test]

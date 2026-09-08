@@ -20,9 +20,9 @@ mod config;
 pub mod core_plugin;
 mod embedding;
 // C28 (#381) — .aiignore + frontmatter AI exclusion.
-pub mod exclusion;
 pub mod enrichment;
 mod error;
+pub mod exclusion;
 /// BL-116 — `com.nexus.ai::generate_docs` implementation. Lives in
 /// its own module so the prompt-building + doc-comment-wrapping
 /// logic stays unit-testable without firing a real provider.

@@ -540,7 +540,10 @@ mod tests {
     #[test]
     fn stored_signature_returns_none_when_nothing_stored() {
         let conn = setup_db();
-        assert_eq!(stored_signature(&conn, "notes", "missing.md").unwrap(), None);
+        assert_eq!(
+            stored_signature(&conn, "notes", "missing.md").unwrap(),
+            None
+        );
     }
 
     #[test]

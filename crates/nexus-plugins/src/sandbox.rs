@@ -679,7 +679,9 @@ mod tests {
             allowed_hosts: vec!["api.example.com".to_string()],
             ..Default::default()
         };
-        let err = p.validate("CONNECT", "https://api.example.com/x").unwrap_err();
+        let err = p
+            .validate("CONNECT", "https://api.example.com/x")
+            .unwrap_err();
         assert!(err.contains("unsupported method"), "got: {err}");
     }
 
@@ -838,11 +840,16 @@ mod tests {
     fn sandbox_records_fuel_consumed_after_dispatch() {
         let bytes = test_wasm_bytes();
         let mut sandbox = WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
-        sandbox.dispatch(100, &serde_json::json!({"hello": "world"})).unwrap();
+        sandbox
+            .dispatch(100, &serde_json::json!({"hello": "world"}))
+            .unwrap();
         let consumed = sandbox
             .fuel_consumed_last_call()
             .expect("fuel metering is enabled in test_config()");
-        assert!(consumed > 0, "expected some fuel spent running the echo handler");
+        assert!(
+            consumed > 0,
+            "expected some fuel spent running the echo handler"
+        );
         assert!(
             consumed <= test_config().fuel,
             "consumed ({consumed}) must not exceed the per-call budget"
@@ -874,7 +881,9 @@ mod tests {
         let before = sandbox.memory_size_bytes().expect("module exports memory");
         assert!(before > 0);
 
-        sandbox.dispatch(100, &serde_json::json!({"hello": "world"})).unwrap();
+        sandbox
+            .dispatch(100, &serde_json::json!({"hello": "world"}))
+            .unwrap();
         let after = sandbox.memory_size_bytes().expect("module exports memory");
         assert!(after > 0);
     }

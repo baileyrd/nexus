@@ -240,15 +240,11 @@ async fn read_bytes(ctx: &KernelPluginContext, path: &str) -> Option<Vec<u8>> {
             IPC_TIMEOUT,
         )
         .await;
-    reply
-        .ok()?
-        .get("bytes")?
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
-                .collect()
-        })
+    reply.ok()?.get("bytes")?.as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
+            .collect()
+    })
 }
 
 /// Pre-dispatch: capture prior bytes for every path the call will

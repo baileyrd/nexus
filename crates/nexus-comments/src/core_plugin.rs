@@ -603,7 +603,9 @@ mod tests {
 
         let evt = sub.recv().await.unwrap();
         match &evt.event {
-            nexus_kernel::NexusEvent::Custom { type_id, payload, .. } => {
+            nexus_kernel::NexusEvent::Custom {
+                type_id, payload, ..
+            } => {
                 assert_eq!(type_id, TOPIC_THREAD_CREATED);
                 assert_eq!(payload["file_path"].as_str().unwrap(), "foo.md");
             }
@@ -674,12 +676,27 @@ mod tests {
     #[test]
     fn mutation_topic_covers_every_mutating_handler_and_excludes_list() {
         assert_eq!(mutation_topic(HANDLER_LIST), None);
-        assert_eq!(mutation_topic(HANDLER_CREATE_THREAD), Some(TOPIC_THREAD_CREATED));
+        assert_eq!(
+            mutation_topic(HANDLER_CREATE_THREAD),
+            Some(TOPIC_THREAD_CREATED)
+        );
         assert_eq!(mutation_topic(HANDLER_ADD_REPLY), Some(TOPIC_REPLY_ADDED));
-        assert_eq!(mutation_topic(HANDLER_SET_RESOLVED), Some(TOPIC_THREAD_RESOLVED));
-        assert_eq!(mutation_topic(HANDLER_DELETE_THREAD), Some(TOPIC_THREAD_DELETED));
-        assert_eq!(mutation_topic(HANDLER_DELETE_COMMENT), Some(TOPIC_COMMENT_DELETED));
-        assert_eq!(mutation_topic(HANDLER_EDIT_COMMENT), Some(TOPIC_COMMENT_EDITED));
+        assert_eq!(
+            mutation_topic(HANDLER_SET_RESOLVED),
+            Some(TOPIC_THREAD_RESOLVED)
+        );
+        assert_eq!(
+            mutation_topic(HANDLER_DELETE_THREAD),
+            Some(TOPIC_THREAD_DELETED)
+        );
+        assert_eq!(
+            mutation_topic(HANDLER_DELETE_COMMENT),
+            Some(TOPIC_COMMENT_DELETED)
+        );
+        assert_eq!(
+            mutation_topic(HANDLER_EDIT_COMMENT),
+            Some(TOPIC_COMMENT_EDITED)
+        );
         assert_eq!(mutation_topic(99), None);
     }
 }

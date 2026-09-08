@@ -282,9 +282,7 @@ pub fn grant(app: &mut App, plugin_id: &str, capability: &str, yes: bool) -> Res
     }
 
     if !yes {
-        print!(
-            "Grant HIGH-risk capability '{capability}' to '{plugin_id}'? [y/N] "
-        );
+        print!("Grant HIGH-risk capability '{capability}' to '{plugin_id}'? [y/N] ");
         io::stdout().flush().ok();
         let mut answer = String::new();
         io::stdin().read_line(&mut answer)?;
@@ -299,9 +297,7 @@ pub fn grant(app: &mut App, plugin_id: &str, capability: &str, yes: bool) -> Res
     let format = app.format();
     print_success(
         format,
-        &format!(
-            "Granted '{capability}' to '{plugin_id}'. Takes effect on next load/hot-reload."
-        ),
+        &format!("Granted '{capability}' to '{plugin_id}'. Takes effect on next load/hot-reload."),
         &serde_json::json!({
             "plugin_id": plugin_id,
             "capability": capability,
@@ -1011,7 +1007,10 @@ on_stop = false
         let (mut manager, loaded) = start_dev_manager(tmp.path()).unwrap();
         assert_eq!(loaded.len(), 1);
 
-        let wasm_path = tmp.path().join("com.test.dev_reload_probe").join("test.wasm");
+        let wasm_path = tmp
+            .path()
+            .join("com.test.dev_reload_probe")
+            .join("test.wasm");
         // Debounced watcher needs the mtime to actually move and a beat
         // to notice — matches the debounce window `PluginManagerConfig::
         // default().debounce_ms` (500ms) already exercises in

@@ -149,8 +149,14 @@ mod in_memory_tests {
 
         let mut all_ns1 = store.list_keys("ns1", "").unwrap();
         all_ns1.sort();
-        assert_eq!(all_ns1, vec!["cache.foo", "settings.font", "settings.theme"]);
+        assert_eq!(
+            all_ns1,
+            vec!["cache.foo", "settings.font", "settings.theme"]
+        );
 
-        assert_eq!(store.list_keys("ns2", "cache.").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            store.list_keys("ns2", "cache.").unwrap(),
+            Vec::<String>::new()
+        );
     }
 }

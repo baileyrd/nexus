@@ -35,16 +35,16 @@ mod index;
 pub mod lfs;
 mod link_rewrite;
 pub mod mdx;
+pub mod note_composer;
 pub mod obsidian_base;
 mod parser;
+pub mod properties;
 mod reconcile;
 pub mod schema;
 mod search;
 mod search_scope;
 mod tasks;
 mod trash;
-pub mod note_composer;
-pub mod properties;
 pub mod unique_note;
 pub mod vectorstore;
 mod watcher;
@@ -2378,7 +2378,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the underlying query fails.
-    pub fn vector_mean_by_file(&self, namespace: &str) -> Result<Vec<(String, Vec<f32>)>, StorageError> {
+    pub fn vector_mean_by_file(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<(String, Vec<f32>)>, StorageError> {
         let conn = self.pool_connection()?;
         vectorstore::mean_embeddings_by_file(&conn, namespace)
     }

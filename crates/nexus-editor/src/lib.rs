@@ -13,9 +13,9 @@
 mod annotation;
 mod block;
 pub mod core_plugin;
-pub mod journal;
 pub mod database_view;
 mod error;
+pub mod journal;
 // #202 / R19 — `excerpt_map` is the Step-1 primitive layer of an
 // in-progress excerpt-mapping feature; Step 2 (the `apply_transaction`
 // wire-up) hasn't landed yet so every item in the module is currently

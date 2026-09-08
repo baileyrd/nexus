@@ -61,7 +61,9 @@ pub fn tail(app: &mut App, filter: &str) -> Result<()> {
 }
 
 fn print_event(metadata: &nexus_kernel::EventMetadata, event: &NexusEvent) {
-    let ts = metadata.timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let ts = metadata
+        .timestamp
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let body = serde_json::to_string(event).unwrap_or_else(|_| "<unserializable>".to_string());
     println!("{ts}  {}  {body}", metadata.source_plugin_id);
 }

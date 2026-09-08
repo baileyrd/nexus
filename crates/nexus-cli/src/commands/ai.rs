@@ -207,11 +207,7 @@ pub fn config(app: &mut App) -> Result<()> {
 /// `out` when given — same `std::fs::write` pattern as the REPL's
 /// `/save` slash command.
 pub fn export(app: &mut App, id: Option<&str>, out: Option<&str>) -> Result<()> {
-    let response = call(
-        app,
-        "session_export",
-        serde_json::json!({ "id": id }),
-    )?;
+    let response = call(app, "session_export", serde_json::json!({ "id": id }))?;
     let markdown = response
         .get("markdown")
         .and_then(Value::as_str)

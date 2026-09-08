@@ -138,7 +138,10 @@ async fn a_deletes_and_the_tombstone_propagates_to_b_through_the_hub() {
         "A must treat its own tombstone as gone"
     );
     let a2 = run_sync(&mut a, &hub, "node-a").await;
-    assert_eq!(a2["pushed"], 1, "the tombstone must be pushed like any edit");
+    assert_eq!(
+        a2["pushed"], 1,
+        "the tombstone must be pushed like any edit"
+    );
 
     // B pulls again: the tombstone applies via LWW and the memory disappears
     // from B's normal read paths too — it must not resurrect.
@@ -163,7 +166,10 @@ async fn a_deletes_and_the_tombstone_propagates_to_b_through_the_hub() {
     // failure mode the finding calls out.
     let mut c = MemoryCorePlugin::with_db(MemoryDb::open_in_memory().unwrap());
     let c1 = run_sync(&mut c, &hub, "node-c").await;
-    assert!(c1["pulled"].as_u64().unwrap() >= 1, "hub still has records to pull");
+    assert!(
+        c1["pulled"].as_u64().unwrap() >= 1,
+        "hub still has records to pull"
+    );
     assert!(
         c.dispatch(HANDLER_GET, &json!({ "id": id })).is_err(),
         "a fresh node must not resurrect a tombstoned memory"

@@ -477,7 +477,11 @@ max_age_days = 30
             Some(r#"{"text": "{title}: {message}"}"#)
         );
         assert_eq!(
-            cfg.channels.webhook.headers.get("Authorization").map(String::as_str),
+            cfg.channels
+                .webhook
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
             Some("Bearer secret")
         );
         assert_eq!(cfg.inbox.max_rows, Some(1000));

@@ -177,7 +177,12 @@ impl Runtime {
 // be a cross-crate API break without changing the implementation.
 #[allow(clippy::needless_pass_by_value)]
 pub fn build_cli_runtime(forge_root: PathBuf) -> Result<Runtime> {
-    build(&forge_root, CLI_PLUGIN_ID, "Nexus CLI", &BootOptions::default())
+    build(
+        &forge_root,
+        CLI_PLUGIN_ID,
+        "Nexus CLI",
+        &BootOptions::default(),
+    )
 }
 
 /// C18 (#370) — per-frontend boot tuning threaded down to plugin

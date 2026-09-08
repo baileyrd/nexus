@@ -146,12 +146,7 @@ pub fn edit_comment(
 /// `nexus comments delete-comment <path> <thread-id> <comment-id>` —
 /// deleting a thread's only comment leaves an empty thread; use
 /// `delete-thread` to remove the whole thread instead.
-pub fn delete_comment(
-    app: &mut App,
-    path: &str,
-    thread_id: &str,
-    comment_id: &str,
-) -> Result<()> {
+pub fn delete_comment(app: &mut App, path: &str, thread_id: &str, comment_id: &str) -> Result<()> {
     let args = serde_json::json!({
         "file_path": path,
         "thread_id": thread_id,
@@ -236,15 +231,16 @@ fn print_thread_list(v: &Value) {
 fn print_thread(t: &Value) {
     let id = t.get("id").and_then(Value::as_str).unwrap_or("?");
     let block_id = t.get("block_id").and_then(Value::as_str).unwrap_or("?");
-    let resolved = t
-        .get("resolved")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let resolved = t.get("resolved").and_then(Value::as_bool).unwrap_or(false);
     println!(
         "Thread {id}  [{}]  block {block_id}",
         if resolved { "resolved" } else { "open" }
     );
-    let comments = t.get("comments").and_then(Value::as_array).cloned().unwrap_or_default();
+    let comments = t
+        .get("comments")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     for c in &comments {
         print_comment_line(c);
     }
@@ -256,7 +252,10 @@ fn print_comment(c: &Value) {
 
 fn print_comment_line(c: &Value) {
     let id = c.get("id").and_then(Value::as_str).unwrap_or("?");
-    let author = c.get("author").and_then(Value::as_str).unwrap_or("(anonymous)");
+    let author = c
+        .get("author")
+        .and_then(Value::as_str)
+        .unwrap_or("(anonymous)");
     let body = c.get("body").and_then(Value::as_str).unwrap_or("");
     println!("  [{id}] {author}: {body}");
 }

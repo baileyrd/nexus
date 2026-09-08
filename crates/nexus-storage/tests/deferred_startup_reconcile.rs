@@ -54,8 +54,7 @@ fn blocking_open_still_reconciles_by_default() {
     }
     std::fs::write(dir.path().join("notes/offline.md"), "# Offline\n").unwrap();
 
-    let engine =
-        StorageEngine::open(dir.path(), &StorageConfig::default()).expect("blocking open");
+    let engine = StorageEngine::open(dir.path(), &StorageConfig::default()).expect("blocking open");
     assert!(
         indexed(&engine, "notes/offline.md"),
         "default open must keep the pre-C18 synchronous reconcile"

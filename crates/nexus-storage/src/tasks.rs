@@ -517,13 +517,22 @@ mod tests {
 
         let all = query_tasks(&conn, &TaskFilter::default()).unwrap();
         assert_eq!(all.len(), 3);
-        let ship = all.iter().find(|t| t.content == "Ship the release").unwrap();
+        let ship = all
+            .iter()
+            .find(|t| t.content == "Ship the release")
+            .unwrap();
         assert_eq!(ship.due_date.as_deref(), Some("2026-07-04"));
         assert_eq!(ship.priority.as_deref(), Some("high"));
-        let plants = all.iter().find(|t| t.content == "Water the plants").unwrap();
+        let plants = all
+            .iter()
+            .find(|t| t.content == "Water the plants")
+            .unwrap();
         assert_eq!(plants.due_date, None);
         assert_eq!(plants.priority.as_deref(), Some("low"));
-        let untouched = all.iter().find(|t| t.content == "No tokens at all").unwrap();
+        let untouched = all
+            .iter()
+            .find(|t| t.content == "No tokens at all")
+            .unwrap();
         assert_eq!(untouched.due_date, None);
         assert_eq!(untouched.priority, None);
 

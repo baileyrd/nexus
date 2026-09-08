@@ -256,15 +256,22 @@ impl FormatsCorePlugin {
         }))
     }
 
-    fn dispatch_export_html(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    fn dispatch_export_html(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
         let a: ExportHtmlArgs = parse_args(args, "export_html")?;
         let source_abs = if a.source.is_absolute() {
             a.source.clone()
         } else {
             self.forge_root.join(&a.source)
         };
-        let content = std::fs::read_to_string(&source_abs)
-            .map_err(|e| exec_err(format!("export_html: failed to read {}: {e}", source_abs.display())))?;
+        let content = std::fs::read_to_string(&source_abs).map_err(|e| {
+            exec_err(format!(
+                "export_html: failed to read {}: {e}",
+                source_abs.display()
+            ))
+        })?;
         let title = a.title.clone().unwrap_or_else(|| {
             a.source
                 .file_stem()
@@ -283,11 +290,17 @@ impl FormatsCorePlugin {
                 };
                 if let Some(parent) = dest_abs.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| {
-                        exec_err(format!("export_html: failed to create {}: {e}", parent.display()))
+                        exec_err(format!(
+                            "export_html: failed to create {}: {e}",
+                            parent.display()
+                        ))
                     })?;
                 }
                 std::fs::write(&dest_abs, &html).map_err(|e| {
-                    exec_err(format!("export_html: failed to write {}: {e}", dest_abs.display()))
+                    exec_err(format!(
+                        "export_html: failed to write {}: {e}",
+                        dest_abs.display()
+                    ))
                 })?;
                 Ok(serde_json::json!({
                     "written": true,
@@ -385,9 +398,11 @@ fn run_pandoc(
             .stdin
             .take()
             .expect("stdin was configured as piped above");
-        stdin
-            .write_all(content.as_bytes())
-            .map_err(|e| exec_err(format!("export_pandoc: failed to write to pandoc stdin: {e}")))?;
+        stdin.write_all(content.as_bytes()).map_err(|e| {
+            exec_err(format!(
+                "export_pandoc: failed to write to pandoc stdin: {e}"
+            ))
+        })?;
     }
 
     let output = child
@@ -496,7 +511,10 @@ mod tests {
 
         let mut plugin = FormatsCorePlugin::open(dir.path().to_path_buf());
         let result = plugin
-            .dispatch(HANDLER_EXPORT_HTML, &serde_json::json!({ "source": "Hello.md" }))
+            .dispatch(
+                HANDLER_EXPORT_HTML,
+                &serde_json::json!({ "source": "Hello.md" }),
+            )
             .unwrap();
         let html = result["html"].as_str().unwrap();
         assert!(html.contains("<h1>Hello</h1>"), "{html}");
@@ -527,7 +545,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut plugin = FormatsCorePlugin::open(dir.path().to_path_buf());
         let err = plugin
-            .dispatch(HANDLER_EXPORT_HTML, &serde_json::json!({ "source": "nope.md" }))
+            .dispatch(
+                HANDLER_EXPORT_HTML,
+                &serde_json::json!({ "source": "nope.md" }),
+            )
             .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("failed to read"), "{msg}");
@@ -624,9 +645,13 @@ mod tests {
     fn run_pandoc_surfaces_a_clear_error_when_the_binary_is_missing() {
         let dir = tempdir().unwrap();
         let dest = dir.path().join("out.docx");
-        let err =
-            run_pandoc("nexus-test-nonexistent-pandoc-binary", "# Note\n", "docx", &dest)
-                .unwrap_err();
+        let err = run_pandoc(
+            "nexus-test-nonexistent-pandoc-binary",
+            "# Note\n",
+            "docx",
+            &dest,
+        )
+        .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("not found on PATH"), "{msg}");
         assert!(msg.contains("pandoc.org/installing"), "{msg}");

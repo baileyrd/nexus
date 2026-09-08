@@ -910,7 +910,10 @@ mod tests {
             .expect("create");
         let info = s.get_session_info(&id).expect("info");
         assert_eq!(info.shell, "/bin/sh");
-        assert_eq!(info.working_dir.as_deref(), Some(dir.path().display().to_string().as_str()));
+        assert_eq!(
+            info.working_dir.as_deref(),
+            Some(dir.path().display().to_string().as_str())
+        );
     }
 
     #[test]

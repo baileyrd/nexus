@@ -542,7 +542,9 @@ fn export_html(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
 /// an `App`/runtime.
 fn require_output_for_binary_format<'a>(output: Option<&'a str>, format: &str) -> Result<&'a str> {
     output.ok_or_else(|| {
-        anyhow::anyhow!("--output is required for --format {format} (binary formats can't print to stdout)")
+        anyhow::anyhow!(
+            "--output is required for --format {format} (binary formats can't print to stdout)"
+        )
     })
 }
 
@@ -724,15 +726,30 @@ mod tests {
 
     #[test]
     fn parse_sort_flag_accepts_relevance() {
-        assert_eq!(parse_sort_flag("relevance").unwrap(), ipc::SearchSort::Relevance);
+        assert_eq!(
+            parse_sort_flag("relevance").unwrap(),
+            ipc::SearchSort::Relevance
+        );
     }
 
     #[test]
     fn parse_sort_flag_accepts_hyphenated_and_underscored_mtime_variants() {
-        assert_eq!(parse_sort_flag("mtime-desc").unwrap(), ipc::SearchSort::MtimeDesc);
-        assert_eq!(parse_sort_flag("mtime_desc").unwrap(), ipc::SearchSort::MtimeDesc);
-        assert_eq!(parse_sort_flag("mtime-asc").unwrap(), ipc::SearchSort::MtimeAsc);
-        assert_eq!(parse_sort_flag("mtime_asc").unwrap(), ipc::SearchSort::MtimeAsc);
+        assert_eq!(
+            parse_sort_flag("mtime-desc").unwrap(),
+            ipc::SearchSort::MtimeDesc
+        );
+        assert_eq!(
+            parse_sort_flag("mtime_desc").unwrap(),
+            ipc::SearchSort::MtimeDesc
+        );
+        assert_eq!(
+            parse_sort_flag("mtime-asc").unwrap(),
+            ipc::SearchSort::MtimeAsc
+        );
+        assert_eq!(
+            parse_sort_flag("mtime_asc").unwrap(),
+            ipc::SearchSort::MtimeAsc
+        );
     }
 
     #[test]

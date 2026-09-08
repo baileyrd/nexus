@@ -633,7 +633,9 @@ pub(crate) async fn handle_extract_entities(
          organizations, tools, products, or concepts) from a note. Skip generic or \
          passing mentions — only entities the note actually says something about.\n\n",
     );
-    prompt.push_str(&format!("Note path: {path}\nNote content:\n{truncated}\n\n"));
+    prompt.push_str(&format!(
+        "Note path: {path}\nNote content:\n{truncated}\n\n"
+    ));
     prompt.push_str(&format!(
         "Reply with a JSON array of at most {max_entities} entities. Each item: \
          {{\"id\": <lowercase-hyphenated-slug, 2-4 words>, \"entity_type\": <one of: \
@@ -699,7 +701,11 @@ pub(crate) async fn handle_extract_entities(
             )
             .await
             .ok()
-            .is_some_and(|r| r.get("entity").and_then(serde_json::Value::as_object).is_some());
+            .is_some_and(|r| {
+                r.get("entity")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some()
+            });
         if already_exists {
             continue;
         }

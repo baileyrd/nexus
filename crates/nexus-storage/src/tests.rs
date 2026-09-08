@@ -1433,5 +1433,9 @@ fn write_file_overwriting_binary_attachment_replaces_prior_row() {
         include_deleted: false,
     };
     let files = engine.query_files(&filter).expect("query_files");
-    assert_eq!(files.len(), 1, "overwrite must replace, not duplicate, the row");
+    assert_eq!(
+        files.len(),
+        1,
+        "overwrite must replace, not duplicate, the row"
+    );
 }

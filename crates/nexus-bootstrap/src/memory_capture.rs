@@ -261,7 +261,10 @@ event_retention_max_rows = 500
         assert!(!cfg.capture_enabled);
         assert_eq!(
             cfg.capture_exclude_plugins,
-            vec!["com.nexus.terminal".to_string(), "com.nexus.audio".to_string()]
+            vec![
+                "com.nexus.terminal".to_string(),
+                "com.nexus.audio".to_string()
+            ]
         );
         assert_eq!(cfg.event_retention_max_rows, Some(500));
     }
@@ -273,7 +276,10 @@ event_retention_max_rows = 500
         std::fs::create_dir_all(&forge).unwrap();
         std::fs::write(forge.join("config.toml"), "not valid [ toml").unwrap();
         let cfg = load_config(dir.path());
-        assert!(cfg.capture_enabled, "parse failure must fail open to the safe default");
+        assert!(
+            cfg.capture_enabled,
+            "parse failure must fail open to the safe default"
+        );
     }
 
     #[test]
@@ -342,7 +348,11 @@ event_retention_max_rows = 500
             count, 1,
             "only the non-excluded plugin's event should be captured"
         );
-        assert_eq!(store.search("rm", 10).unwrap().len(), 0, "excluded plugin's event must not be captured");
+        assert_eq!(
+            store.search("rm", 10).unwrap().len(),
+            0,
+            "excluded plugin's event must not be captured"
+        );
         assert_eq!(store.search("editor", 10).unwrap().len(), 1);
     }
 
@@ -377,7 +387,10 @@ event_retention_max_rows = 500
         let mut count = 0u64;
         for _ in 0..200 {
             count = store.count().unwrap();
-            assert!(count <= 2, "retention cap must never be exceeded, got {count}");
+            assert!(
+                count <= 2,
+                "retention cap must never be exceeded, got {count}"
+            );
             if count == 2 {
                 break;
             }

@@ -89,7 +89,10 @@ pub(crate) fn trash_entry(engine: &StorageEngine, args: &Value) -> Result<Value,
     let trash_id = engine
         .delete_entry_to(&relpath, dest)
         .map_err(|e| exec_err(format!("trash_entry: {e}")))?;
-    to_value(&StorageTrashEntryResult { ok: true, trash_id }, "trash_entry")
+    to_value(
+        &StorageTrashEntryResult { ok: true, trash_id },
+        "trash_entry",
+    )
 }
 
 pub(crate) fn trash_list(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
@@ -115,7 +118,10 @@ pub(crate) fn trash_restore(engine: &StorageEngine, args: &Value) -> Result<Valu
     let restored_path = engine
         .trash_restore(&trash_id)
         .map_err(|e| exec_err(format!("trash_restore: {e}")))?;
-    to_value(&StorageTrashRestoreResult { restored_path }, "trash_restore")
+    to_value(
+        &StorageTrashRestoreResult { restored_path },
+        "trash_restore",
+    )
 }
 
 pub(crate) fn trash_empty(engine: &StorageEngine, args: &Value) -> Result<Value, PluginError> {
